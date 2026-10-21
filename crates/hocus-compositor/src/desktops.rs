@@ -2,12 +2,14 @@
 //! shows and which one has focus; this module makes the space and the seat
 //! follow it.
 
+use std::collections::BTreeMap;
+
 use hocus_api::Event;
 use hocus_core::{DesktopId, ModelError, OutputName, Rect, WindowId};
 use smithay::{
     desktop::Window,
     output::Output,
-    utils::{Logical, Point, Rectangle, Serial},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         compositor::with_states, foreign_toplevel_list::ForeignToplevelHandle,
         shell::xdg::XdgToplevelSurfaceData,
@@ -15,6 +17,9 @@ use smithay::{
 };
 
 use crate::{State, api};
+
+/// Window places per layout of outputs (see [`State::remember_places`]).
+pub type Places = BTreeMap<String, BTreeMap<WindowId, Point<i32, Logical>>>;
 
 /// A window the compositor manages: its smithay window, and where it goes
 /// when its desktop is shown again.
@@ -46,6 +51,8 @@ pub fn rect(r: Rectangle<i32, Logical>) -> Rect {
 impl State {
     /// Adds an output to the model, with `desktops` desktops the first time
     /// it is seen.
+    ///
+    /// Call [`State::remember_places`] before mapping it in the space.
     pub fn plug_output(&mut self, output: &Output, desktops: usize) {
         let geometry = self.space.output_geometry(output).unwrap_or_default();
         if let Err(err) = self
@@ -54,7 +61,103 @@ impl State {
         {
             tracing::warn!(output = output.name(), %err, "could not add the output");
         }
+        self.restore_places();
         self.sync_desktops();
+        self.apply_focus(SERIAL_COUNTER.next_serial());
+    }
+
+    /// Removes an output: the windows it showed go to the primary output,
+    /// at the same offset from its corner, and come back when it does.
+    pub fn unplug_output(&mut self, output: &Output) {
+        self.remember_places();
+        let name = OutputName(output.name());
+        let area = self.space.output_geometry(output).unwrap_or_default();
+        let leaving: Vec<(WindowId, Point<i32, Logical>)> = self
+            .model
+            .visible_windows(&name)
+            .iter()
+            .filter_map(|id| {
+                let managed = self.windows.get(id)?;
+                let at = self
+                    .space
+                    .element_location(&managed.window)
+                    .unwrap_or(managed.location);
+                Some((*id, at - area.loc))
+            })
+            .collect();
+        if let Err(err) = self.model.unplug(&name) {
+            tracing::warn!(output = output.name(), %err, "could not remove the output");
+        }
+        self.space.unmap_output(output);
+        if let Some(host) = self
+            .model
+            .primary()
+            .and_then(|o| self.find_output(&o.name.0))
+            .and_then(|o| self.space.output_geometry(&o))
+        {
+            for (id, offset) in leaving {
+                if let Some(managed) = self.windows.get_mut(&id) {
+                    self.space.unmap_elem(&managed.window);
+                    managed.location =
+                        clamp_into(host.loc + offset, managed.window.geometry().size, host);
+                }
+            }
+        }
+        self.restore_places();
+        self.sync_desktops();
+        self.apply_focus(SERIAL_COUNTER.next_serial());
+        self.emit(|_| Event::OutputRemoved {
+            name: name.0.clone(),
+        });
+    }
+
+    /// Notes where every window is, for the current set of outputs and their
+    /// layout: when that layout comes back, so do the windows.
+    pub fn remember_places(&mut self) {
+        let key = self.layout_key();
+        let places: BTreeMap<WindowId, Point<i32, Logical>> = self
+            .windows
+            .iter()
+            .map(|(id, m)| {
+                let at = self.space.element_location(&m.window).unwrap_or(m.location);
+                (*id, at)
+            })
+            .collect();
+        self.places.insert(key, places);
+    }
+
+    /// Puts windows back where they were in this layout, if it was seen.
+    fn restore_places(&mut self) {
+        let Some(places) = self.places.get(&self.layout_key()) else {
+            return;
+        };
+        for (id, at) in places {
+            if let Some(managed) = self.windows.get_mut(id) {
+                self.space.unmap_elem(&managed.window);
+                managed.location = *at;
+            }
+        }
+    }
+
+    /// The outputs in the space and where they are, as one key.
+    fn layout_key(&self) -> String {
+        let mut outputs: Vec<String> = self
+            .space
+            .outputs()
+            .filter_map(|o| {
+                let g = self.space.output_geometry(o)?;
+                Some(format!(
+                    "{}@{},{}:{}x{}",
+                    o.name(),
+                    g.loc.x,
+                    g.loc.y,
+                    g.size.w,
+                    g.size.h
+                ))
+            })
+            .collect();
+        outputs.sort();
+        outputs.join(" ")
     }
 
     pub fn output_moved(&mut self, output: &Output) {
@@ -239,7 +342,21 @@ impl State {
             }
         }
         for id in &shown {
-            if let Some(managed) = self.windows.get(id) {
+            // A window never shows off its output: one that would is brought
+            // inside it.
+            let area = self
+                .model
+                .output_showing(*id)
+                .and_then(|o| self.find_output(&o.name.0))
+                .and_then(|o| self.space.output_geometry(&o));
+            if let Some(managed) = self.windows.get_mut(id) {
+                if let Some(area) = area {
+                    let size = managed.window.geometry().size;
+                    let inside = Rectangle::new(managed.location, size).overlaps(area);
+                    if !inside {
+                        managed.location = clamp_into(managed.location, size, area);
+                    }
+                }
                 self.space
                     .map_element(managed.window.clone(), managed.location, false);
             }

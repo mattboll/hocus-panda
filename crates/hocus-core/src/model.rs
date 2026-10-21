@@ -105,6 +105,12 @@ pub struct Model {
     /// visible.
     recent: Vec<WindowId>,
     focused: Option<WindowId>,
+    /// Where unplugged outputs' desktops go first; the first output when
+    /// unset or unplugged.
+    primary: Option<OutputName>,
+    /// Windows shown on an output when it was unplugged, moved to another
+    /// output's desktop: the desktop they go back to on replug.
+    returning: BTreeMap<WindowId, DesktopId>,
     next_desktop: u32,
     next_window: u64,
 }
@@ -205,12 +211,43 @@ impl Model {
             desktops: hosted,
             shown: home.shown,
         });
+        // Windows it showed when it was unplugged come back, in their order.
+        let coming_back: Vec<(WindowId, DesktopId)> = self
+            .returning
+            .iter()
+            .filter(|(_, origin)| home.desktops.contains(origin))
+            .map(|(w, d)| (*w, *d))
+            .collect();
+        for (window, origin) in self.in_stacking_order(coming_back) {
+            self.returning.remove(&window);
+            self.move_window(window, origin);
+        }
         self.refocus();
         Ok(())
     }
 
-    /// Unplugs an output: every desktop it hosts joins the first remaining
-    /// output, and keeps its home to go back to.
+    /// The output unplugged outputs' desktops and windows go to.
+    pub fn primary(&self) -> Option<&Output> {
+        self.primary
+            .as_ref()
+            .and_then(|name| self.output(name))
+            .or_else(|| self.outputs.first())
+    }
+
+    pub fn set_primary(&mut self, name: &OutputName) -> Result<(), ModelError> {
+        self.output(name).ok_or(ModelError::UnknownOutput)?;
+        self.primary = Some(name.clone());
+        Ok(())
+    }
+
+    /// Windows that left an unplugged output and wait to go back to it.
+    pub fn is_returning(&self, window: WindowId) -> bool {
+        self.returning.contains_key(&window)
+    }
+
+    /// Unplugs an output. The windows it showed move to the shown desktop of
+    /// the primary output, so that nothing in sight disappears; every desktop
+    /// it hosted joins that output. All go back when it is plugged again.
     pub fn unplug(&mut self, name: &OutputName) -> Result<(), ModelError> {
         let index = self
             .outputs
@@ -224,8 +261,24 @@ impl Model {
                 home.shown = output.shown;
             }
         }
-        if let Some(host) = self.outputs.first_mut() {
+        let Some(host) = self.primary().map(|o| o.name.clone()) else {
+            // No output left: everything waits for the next one.
+            self.refocus();
+            return Ok(());
+        };
+        let shown_windows = self
+            .desktops
+            .get(&output.shown)
+            .map(|d| d.windows.clone())
+            .unwrap_or_default();
+        if let Some(host) = self.outputs.iter_mut().find(|o| o.name == host) {
             host.desktops.extend(output.desktops);
+            let target = host.shown;
+            for window in shown_windows {
+                // A window that already moved keeps its first home.
+                self.returning.entry(window).or_insert(output.shown);
+                self.move_window(window, target);
+            }
         }
         self.refocus();
         Ok(())
@@ -318,6 +371,7 @@ impl Model {
             .windows
             .remove(&window)
             .ok_or(ModelError::UnknownWindow)?;
+        self.returning.remove(&window);
         if let Some(d) = self.desktops.get_mut(&desktop) {
             d.windows.retain(|w| *w != window);
         }
@@ -372,7 +426,8 @@ impl Model {
     }
 
     /// Moves a window to a desktop, on top. A focused window keeps focus
-    /// while it stays visible.
+    /// while it stays visible. A window placed by hand stays where it is put,
+    /// even when the output it left is plugged again.
     pub fn send_to_desktop(
         &mut self,
         window: WindowId,
@@ -381,22 +436,42 @@ impl Model {
         if !self.desktops.contains_key(&desktop) {
             return Err(ModelError::UnknownDesktop);
         }
-        let from = self
-            .windows
-            .get_mut(&window)
-            .ok_or(ModelError::UnknownWindow)?;
-        let old = std::mem::replace(from, desktop);
+        if !self.windows.contains_key(&window) {
+            return Err(ModelError::UnknownWindow);
+        }
+        self.returning.remove(&window);
+        self.move_window(window, desktop);
+        if self.focused == Some(window) && !self.is_visible(window) {
+            self.focused = None;
+        }
+        self.refocus();
+        Ok(())
+    }
+
+    /// Moves a known window onto a known desktop, on top.
+    fn move_window(&mut self, window: WindowId, desktop: DesktopId) {
+        let Some(old) = self.windows.insert(window, desktop) else {
+            return;
+        };
         if let Some(d) = self.desktops.get_mut(&old) {
             d.windows.retain(|w| *w != window);
         }
         if let Some(d) = self.desktops.get_mut(&desktop) {
             d.windows.push(window);
         }
-        if self.focused == Some(window) && !self.is_visible(window) {
-            self.focused = None;
-        }
-        self.refocus();
-        Ok(())
+    }
+
+    /// `windows` sorted bottom to top as they stack on their desktops.
+    fn in_stacking_order<T: Copy>(&self, mut windows: Vec<(WindowId, T)>) -> Vec<(WindowId, T)> {
+        let rank = |w: WindowId| {
+            self.windows
+                .get(&w)
+                .and_then(|d| self.desktops.get(d))
+                .and_then(|d| d.windows.iter().position(|x| *x == w))
+                .unwrap_or_default()
+        };
+        windows.sort_by_key(|(w, _)| rank(*w));
+        windows
     }
 
     fn new_desktop(&mut self, name: String, home: &OutputName) -> DesktopId {
@@ -551,6 +626,67 @@ mod tests {
         assert_eq!(desktops(&model, &laptop()).len(), 1);
         assert_eq!(shown(&model, &external()), external_desktops[2]);
         assert_eq!(model.visible_windows(&external()), [window]);
+        Ok(())
+    }
+
+    #[test]
+    fn windows_in_sight_stay_in_sight_when_their_output_goes() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let chat = model.open_window(&laptop())?;
+        let a = model.open_window(&external())?;
+        let b = model.open_window(&external())?;
+        model.show_nth(&external(), 1)?;
+        let hidden = model.open_window(&external())?;
+        model.show_nth(&external(), 0)?;
+        model.focus(a)?;
+
+        model.unplug(&external())?;
+
+        // On the laptop's shown desktop, above its own window, in their order.
+        assert_eq!(model.visible_windows(&laptop()), [chat, b, a]);
+        assert_eq!(model.focused(), Some(a));
+        assert!(!model.is_visible(hidden));
+        assert!(model.is_returning(a));
+
+        model.plug(external(), EXTERNAL, 4)?;
+
+        assert_eq!(model.visible_windows(&laptop()), [chat]);
+        assert_eq!(model.visible_windows(&external()), [b, a]);
+        assert!(!model.is_returning(a));
+        model.show_nth(&external(), 1)?;
+        assert_eq!(model.visible_windows(&external()), [hidden]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_window_moved_by_hand_meanwhile_stays_where_it_was_put() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let window = model.open_window(&external())?;
+        model.unplug(&external())?;
+        let laptop_desktop = shown(&model, &laptop());
+        model.send_to_desktop(window, laptop_desktop)?;
+
+        model.plug(external(), EXTERNAL, 4)?;
+
+        assert_eq!(model.visible_windows(&laptop()), [window]);
+        Ok(())
+    }
+
+    #[test]
+    fn the_primary_output_takes_what_an_unplugged_one_had() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        model.plug("projector".into(), LAPTOP, 1)?;
+        model.set_primary(&external())?;
+        let shown_on_projector = model.open_window(&"projector".into())?;
+
+        model.unplug(&"projector".into())?;
+
+        assert_eq!(model.visible_windows(&external()), [shown_on_projector]);
+        assert_eq!(model.primary().map(|o| o.name.clone()), Some(external()));
+        assert_eq!(
+            model.set_primary(&"projector".into()),
+            Err(ModelError::UnknownOutput)
+        );
         Ok(())
     }
 

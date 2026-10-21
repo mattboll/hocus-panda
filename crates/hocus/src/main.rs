@@ -64,6 +64,17 @@ enum Message {
     Close { window: u64 },
     /// Each output's desktops, their windows, and the one shown.
     Desktops,
+    /// Plug a headless output, WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS].
+    Plug {
+        spec: String,
+        /// Bring back an output unplugged before.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Unplug an output.
+    Unplug { output: String },
+    /// Make an output the one that takes what unplugged outputs showed.
+    Primary { output: String },
     /// Show an output's desktop, from 1.
     ShowDesktop { output: String, desktop: usize },
     /// Send a window to an output: its shown desktop, or `--desktop N`
@@ -83,6 +94,9 @@ enum Message {
         /// Where to write the PNG.
         #[arg(short = 'o', long = "to", value_name = "FILE")]
         file: PathBuf,
+        /// Draw the cursor too.
+        #[arg(long)]
+        cursor: bool,
     },
 }
 
@@ -169,6 +183,18 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             Ok(())
         }
         Message::Desktops => print(client.request(Request::Desktops)?),
+        Message::Plug { spec, name } => {
+            client.request(Request::PlugOutput { spec, name })?;
+            Ok(())
+        }
+        Message::Unplug { output } => {
+            client.request(Request::UnplugOutput { output })?;
+            Ok(())
+        }
+        Message::Primary { output } => {
+            client.request(Request::SetPrimaryOutput { output })?;
+            Ok(())
+        }
         Message::ShowDesktop { output, desktop } => {
             client.request(Request::ShowDesktop {
                 output,
@@ -196,13 +222,15 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             output,
             window,
             file,
+            cursor,
         } => {
             let target = match (output, window) {
                 (Some(name), _) => Target::Output(name),
                 (None, Some(id)) => Target::Window(id),
                 (None, None) => anyhow::bail!("say which: --output NAME or --window ID"),
             };
-            let Reply::Screenshot(shot) = client.request(Request::Screenshot { target })? else {
+            let Reply::Screenshot(shot) = client.request(Request::Screenshot { target, cursor })?
+            else {
                 anyhow::bail!("the compositor did not send a screenshot");
             };
             std::fs::write(&file, shot.png()?)

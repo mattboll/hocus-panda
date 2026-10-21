@@ -12,12 +12,9 @@ use smithay::{
         allocator::Fourcc,
         egl::{EGLContext, EGLDevice, EGLDisplay},
         renderer::{
-            Bind, ImportAll, Offscreen, Renderer, Texture,
+            Bind, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             damage::OutputDamageTracker,
-            element::{
-                RenderElementStates, default_primary_scanout_output_compare,
-                surface::WaylandSurfaceRenderElement,
-            },
+            element::{RenderElementStates, default_primary_scanout_output_compare},
             gles::{GlesRenderer, GlesTexture},
             pixman::PixmanRenderer,
         },
@@ -34,15 +31,18 @@ use smithay::{
             timer::{TimeoutAction, Timer},
         },
         pixman,
+        wayland_server::backend::GlobalId,
     },
     utils::Transform,
 };
 
 use hocus_api::Event;
+use hocus_core::OutputName;
 
 use crate::{
     App, BACKGROUND, State,
     capture::{self, Pixels},
+    cursor::CursorElement,
     output_spec::{self, OutputSpec},
 };
 
@@ -112,11 +112,13 @@ enum Renderers {
 /// A renderer and the buffers it draws the outputs into.
 struct Canvas<R, T> {
     renderer: R,
+    format: Fourcc,
     outputs: Vec<CanvasOutput<T>>,
 }
 
 struct CanvasOutput<T> {
     output: Output,
+    global: GlobalId,
     spec: OutputSpec,
     position: (i32, i32),
     target: T,
@@ -203,41 +205,67 @@ fn egl_available() -> bool {
 
 impl<R, T> Canvas<R, T>
 where
-    R: Renderer + ImportAll + Offscreen<T>,
-    R::TextureId: Clone + Texture + 'static,
+    R: Renderer + ImportAll + ImportMem + Offscreen<T>,
+    R::TextureId: Send + Clone + Texture + 'static,
     R::Error: Send + Sync + 'static,
 {
     fn new(
-        mut renderer: R,
+        renderer: R,
         format: Fourcc,
         specs: &[OutputSpec],
         state: &mut State,
     ) -> anyhow::Result<Self> {
-        let positions = output_spec::layout(specs);
-        let mut outputs = Vec::with_capacity(specs.len());
-        for (i, (spec, position)) in specs.iter().zip(positions).enumerate() {
-            let target = renderer
-                .create_buffer(format, (spec.width, spec.height).into())
-                .with_context(|| {
-                    format!("could not create a {}x{} buffer", spec.width, spec.height)
-                })?;
-            let output = create_output(&format!("HEADLESS-{}", i + 1), spec, position, state);
-            outputs.push(CanvasOutput {
-                damage_tracker: OutputDamageTracker::from_output(&output),
-                output,
-                spec: *spec,
-                position,
-                target,
-                frames: 0,
-            });
+        let mut canvas = Self {
+            renderer,
+            format,
+            outputs: Vec::with_capacity(specs.len()),
+        };
+        for (i, (spec, position)) in specs.iter().zip(output_spec::layout(specs)).enumerate() {
+            canvas.add_output(&format!("HEADLESS-{}", i + 1), spec, position, state)?;
         }
-        Ok(Self { renderer, outputs })
+        Ok(canvas)
+    }
+
+    fn add_output(
+        &mut self,
+        name: &str,
+        spec: &OutputSpec,
+        position: (i32, i32),
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        let target = self
+            .renderer
+            .create_buffer(self.format, (spec.width, spec.height).into())
+            .with_context(|| format!("could not create a {}x{} buffer", spec.width, spec.height))?;
+        let (output, global) = create_output(name, spec, position, state);
+        self.outputs.push(CanvasOutput {
+            damage_tracker: OutputDamageTracker::from_output(&output),
+            output,
+            global,
+            spec: *spec,
+            position,
+            target,
+            frames: 0,
+        });
+        Ok(())
+    }
+
+    fn remove_output(&mut self, name: &str, state: &mut State) -> bool {
+        let Some(index) = self.outputs.iter().position(|o| o.output.name() == name) else {
+            return false;
+        };
+        let out = self.outputs.remove(index);
+        state.unplug_output(&out.output);
+        state.display_handle.remove_global::<State>(out.global);
+        true
     }
 
     /// Draws every output that has damage and sends frame callbacks.
     fn render(&mut self, state: &mut State) {
         let now = state.clock.now();
-        let Self { renderer, outputs } = self;
+        let Self {
+            renderer, outputs, ..
+        } = self;
         for out in outputs {
             let start = Instant::now();
             let Some((states, drawn)) = render_one(renderer, out, state) else {
@@ -275,23 +303,24 @@ fn render_one<R, T>(
     state: &State,
 ) -> Option<(RenderElementStates, bool)>
 where
-    R: Renderer + ImportAll + Bind<T>,
-    R::TextureId: Clone + Texture + 'static,
+    R: Renderer + ImportAll + ImportMem + Bind<T>,
+    R::TextureId: Send + Clone + Texture + 'static,
 {
+    let cursor = state.cursor_elements(renderer, &out.output);
     let mut framebuffer = renderer
         .bind(&mut out.target)
         .inspect_err(|err| tracing::warn!(output = out.output.name(), %err, "could not bind"))
         .ok()?;
     // The buffer keeps its pixels between frames: an age of 1 redraws only
     // what changed.
-    let result = render_output::<_, WaylandSurfaceRenderElement<R>, _, _>(
+    let result = render_output::<_, CursorElement<R>, _, _>(
         &out.output,
         renderer,
         &mut framebuffer,
         1.0,
         1,
         [&state.space],
-        &[],
+        &cursor,
         &mut out.damage_tracker,
         BACKGROUND,
     )
@@ -304,7 +333,12 @@ where
     Some((result.states, drawn))
 }
 
-fn create_output(name: &str, spec: &OutputSpec, position: (i32, i32), state: &mut State) -> Output {
+fn create_output(
+    name: &str,
+    spec: &OutputSpec,
+    position: (i32, i32),
+    state: &mut State,
+) -> (Output, GlobalId) {
     let output = Output::new(
         name.to_string(),
         PhysicalProperties {
@@ -314,7 +348,7 @@ fn create_output(name: &str, spec: &OutputSpec, position: (i32, i32), state: &mu
             model: "Headless".into(),
         },
     );
-    let _global = output.create_global::<State>(&state.display_handle);
+    let global = output.create_global::<State>(&state.display_handle);
     let mode = Mode {
         size: (spec.width, spec.height).into(),
         refresh: REFRESH_MHZ,
@@ -331,12 +365,13 @@ fn create_output(name: &str, spec: &OutputSpec, position: (i32, i32), state: &mu
         Some(position.into()),
     );
     output.set_preferred(mode);
+    state.remember_places();
     state.space.map_output(&output, position);
     state.plug_output(&output, spec.desktops);
     state.emit(|s| Event::OutputAdded {
         output: s.output_info(&output),
     });
-    output
+    (output, global)
 }
 
 impl HeadlessBackend {
@@ -345,6 +380,54 @@ impl HeadlessBackend {
             Renderers::Gles(_) => RendererKind::Gles,
             Renderers::Pixman(_) => RendererKind::Pixman,
         }
+    }
+
+    /// Plugs an output: named `name`, which brings back an output unplugged
+    /// before, or the next free `HEADLESS-N`; placed where its spec says, or
+    /// to the right of the others.
+    pub fn plug(
+        &mut self,
+        spec: &OutputSpec,
+        name: Option<String>,
+        state: &mut State,
+    ) -> anyhow::Result<String> {
+        let taken: Vec<String> = self.outputs().into_iter().map(|o| o.name).collect();
+        let name = match name {
+            Some(name) if taken.contains(&name) => anyhow::bail!("{name} is already plugged"),
+            Some(name) => name,
+            None => (1..)
+                .map(|n| format!("HEADLESS-{n}"))
+                .find(|n| {
+                    !taken.contains(n) && state.model.output(&OutputName(n.clone())).is_none()
+                })
+                .unwrap_or_default(),
+        };
+        let position = spec.position.unwrap_or_else(|| {
+            let right = state
+                .space
+                .outputs()
+                .filter_map(|o| state.space.output_geometry(o))
+                .map(|g| g.loc.x + g.size.w)
+                .max()
+                .unwrap_or(0);
+            (right, 0)
+        });
+        match &mut self.renderers {
+            Renderers::Gles(canvas) => canvas.add_output(&name, spec, position, state)?,
+            Renderers::Pixman(canvas) => canvas.add_output(&name, spec, position, state)?,
+        }
+        tracing::info!(output = name, ?position, "output plugged");
+        Ok(name)
+    }
+
+    pub fn unplug(&mut self, name: &str, state: &mut State) -> anyhow::Result<()> {
+        let removed = match &mut self.renderers {
+            Renderers::Gles(canvas) => canvas.remove_output(name, state),
+            Renderers::Pixman(canvas) => canvas.remove_output(name, state),
+        };
+        anyhow::ensure!(removed, "no output named {name}");
+        tracing::info!(output = name, "output unplugged");
+        Ok(())
     }
 
     pub fn outputs(&self) -> Vec<OutputInfo> {
@@ -366,15 +449,21 @@ impl HeadlessBackend {
         }
     }
 
-    pub fn capture_output(&mut self, output: &Output, state: &State) -> anyhow::Result<Pixels> {
+    pub fn capture_output(
+        &mut self,
+        output: &Output,
+        state: &State,
+        cursor: bool,
+    ) -> anyhow::Result<Pixels> {
         match &mut self.renderers {
             Renderers::Gles(canvas) => {
-                capture::output::<_, GlesTexture>(&mut canvas.renderer, output, state)
+                capture::output::<_, GlesTexture>(&mut canvas.renderer, output, state, cursor)
             }
             Renderers::Pixman(canvas) => capture::output::<_, pixman::Image<'static, 'static>>(
                 &mut canvas.renderer,
                 output,
                 state,
+                cursor,
             ),
         }
     }

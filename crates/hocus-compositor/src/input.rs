@@ -139,6 +139,8 @@ impl State {
             },
         );
         pointer.frame(self);
+        // The cursor moved.
+        self.needs_redraw = true;
     }
 
     fn on_pointer_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
