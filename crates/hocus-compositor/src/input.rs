@@ -12,7 +12,10 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::State;
+use crate::{
+    State,
+    grabs::{BTN_LEFT, BTN_RIGHT, FrameHit},
+};
 
 /// Evdev codes of the digit row, 1 to 9: by position, so that the same keys
 /// work whatever the layout (on AZERTY, `&` to `ç`).
@@ -178,13 +181,34 @@ impl State {
         };
         let serial = SERIAL_COUNTER.next_serial();
 
-        // Click to focus, and raise.
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
-            let clicked = self
-                .space
-                .element_under(pointer.current_location())
-                .map(|(w, _)| w.clone());
+            let at = pointer.current_location();
+            let alt = self
+                .seat
+                .get_keyboard()
+                .is_some_and(|k| k.modifier_state().alt);
+            let under = self.space.element_under(at).map(|(w, _)| w.clone());
+            // Alt+drag anywhere on a window, or its frame band: the
+            // compositor's, and the client sees no button.
+            let grab = match (&under, alt, button) {
+                (Some(window), true, BTN_LEFT) => Some((window.clone(), FrameHit::Move)),
+                (Some(window), true, BTN_RIGHT) => Some((
+                    window.clone(),
+                    FrameHit::Resize(self.quarter_edges(window, at)),
+                )),
+                _ if button == BTN_LEFT => self.frame_hit(at),
+                _ => None,
+            };
+            // Click to focus, and raise.
+            let clicked = grab.as_ref().map(|(w, _)| w.clone()).or(under);
             self.focus(clicked.as_ref(), serial);
+            match grab {
+                Some((window, FrameHit::Move)) => self.start_move(&window, button, None, serial),
+                Some((window, FrameHit::Resize(edges))) => {
+                    self.start_resize(&window, edges, button, None, serial)
+                }
+                None => {}
+            }
         }
 
         pointer.button(

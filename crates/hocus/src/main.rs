@@ -58,6 +58,13 @@ enum Message {
         #[arg(value_enum, default_value_t = ButtonArg::Left)]
         button: ButtonArg,
     },
+    /// Press or release a pointer button, for drags.
+    Button {
+        #[arg(value_enum)]
+        button: ButtonArg,
+        #[arg(value_enum)]
+        action: PressArg,
+    },
     /// Press and release a key, by evdev code (KEY_A is 30).
     Key { code: u32 },
     /// Ask a window to close, by id.
@@ -104,6 +111,12 @@ enum Message {
         #[arg(long)]
         cursor: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PressArg {
+    Press,
+    Release,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -188,6 +201,13 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
                     pressed,
                 })?;
             }
+            Ok(())
+        }
+        Message::Button { button, action } => {
+            client.request(Request::PointerButton {
+                button: button.into(),
+                pressed: matches!(action, PressArg::Press),
+            })?;
             Ok(())
         }
         Message::Key { code } => {

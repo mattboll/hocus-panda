@@ -10,7 +10,7 @@ use smithay::{
     desktop::Window,
     output::Output,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
     wayland::{
         compositor::with_states, foreign_toplevel_list::ForeignToplevelHandle,
         shell::xdg::XdgToplevelSurfaceData,
@@ -200,10 +200,7 @@ impl State {
         window
             .user_data()
             .insert_if_missing_threadsafe(|| ModelId(id));
-        let area = self.space.output_geometry(output).unwrap_or_default();
-        let size = window.geometry().size;
-        let location =
-            area.loc + Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2));
+        let location = self.place(output, window.geometry().size);
         let (title, app_id) = title_and_app_id(&window);
         let foreign = self
             .foreign_toplevels
@@ -231,6 +228,39 @@ impl State {
                 self.set_maximized(id, true, serial);
             }
         }
+    }
+
+    /// Where a new window of `size` goes on `output`: centred in its work
+    /// area, then one step down and right for each window already there, so
+    /// that none hides another; back to the top when it would leave the
+    /// area.
+    fn place(&self, output: &Output, size: Size<i32, Logical>) -> Point<i32, Logical> {
+        const STEP: i32 = 32;
+        let area = self.work_area(output);
+        let centred =
+            area.loc + Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2));
+        let taken: Vec<Point<i32, Logical>> = self
+            .model
+            .visible_windows(&OutputName(output.name()))
+            .iter()
+            .filter_map(|id| self.windows.get(id))
+            .filter_map(|m| self.space.element_location(&m.window))
+            .collect();
+        let mut at = centred;
+        for _ in 0..taken.len() {
+            if !taken
+                .iter()
+                .any(|p| (p.x - at.x).abs() < 4 && (p.y - at.y).abs() < 4)
+            {
+                break;
+            }
+            at += Point::from((STEP, STEP));
+            if at.x + size.w > area.loc.x + area.size.w || at.y + size.h > area.loc.y + area.size.h
+            {
+                at = area.loc + Point::from((STEP, STEP));
+            }
+        }
+        clamp_into(at, size, area)
     }
 
     /// Stops managing a window that is gone.

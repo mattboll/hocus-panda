@@ -1,0 +1,78 @@
+description = "Without a title bar, the top edge moves a window and the other edges resize it"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+# The band just above the top edge moves.
+[[step]]
+pointer_move = [640, 246]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [690, 296]
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [490, 300, 400, 300] }
+
+# The band right of the right edge resizes.
+[[step]]
+pointer_move = [894, 450]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [994, 450]
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [490, 300, 500, 300] }
+
+# The bottom-left corner resizes both ways, the right edge staying put.
+[[step]]
+pointer_move = [486, 604]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [436, 654]
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [440, 300, 550, 350] }
+
+# Alt+right drag resizes from the quarter under the pointer (bottom right).
+[[step]]
+pointer_move = [900, 600]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "right"
+
+[[step]]
+pointer_move = [940, 620]
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [440, 300, 590, 370] }
+
+[[step]]
+expect_not_received = { app_id = "doc", event = "button 273 pressed" }

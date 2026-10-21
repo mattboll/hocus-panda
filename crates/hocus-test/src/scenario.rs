@@ -65,6 +65,12 @@ pub enum Step {
     PointerMove([f64; 2]),
     /// Presses and releases a button.
     Click(ButtonName),
+    /// Presses a button and holds it (for drags).
+    Press(ButtonName),
+    Release(ButtonName),
+    /// Holds a key down, by name or evdev code (for Alt+drag).
+    KeyDown(String),
+    KeyUp(String),
     /// Presses and releases a key, by evdev code.
     Key(u32),
     /// Presses keys in order and releases them in reverse, e.g.
@@ -94,6 +100,8 @@ pub enum Step {
     ExpectStack(Vec<String>),
     /// The client got this event, e.g. `"key 30 pressed"`.
     ExpectReceived(ExpectReceived),
+    /// The client never got this event.
+    ExpectNotReceived(ExpectReceived),
     ExpectScreenshot(ExpectScreenshot),
 }
 
@@ -144,6 +152,16 @@ pub enum ButtonName {
     Middle,
 }
 
+impl ButtonName {
+    fn api(self) -> Button {
+        match self {
+            Self::Left => Button::Left,
+            Self::Right => Button::Right,
+            Self::Middle => Button::Middle,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectWindow {
@@ -189,6 +207,13 @@ impl fmt::Display for Step {
             Self::Close(app_id) => write!(f, "close {app_id}"),
             Self::PointerMove([x, y]) => write!(f, "pointer_move {x},{y}"),
             Self::Click(button) => write!(f, "click {button:?}"),
+            Self::Press(button) => write!(f, "press {button:?}"),
+            Self::Release(button) => write!(f, "release {button:?}"),
+            Self::KeyDown(key) => write!(f, "key_down {key}"),
+            Self::KeyUp(key) => write!(f, "key_up {key}"),
+            Self::ExpectNotReceived(e) => {
+                write!(f, "expect_not_received {} `{}`", e.app_id, e.event)
+            }
             Self::Key(code) => write!(f, "key {code}"),
             Self::Keys(keys) => write!(f, "keys {keys}"),
             Self::Plug(plug) => write!(f, "plug {}", plug.spec),
@@ -289,14 +314,45 @@ impl Run<'_> {
                 Ok(())
             }
             Step::Click(button) => {
-                let button = match button {
-                    ButtonName::Left => Button::Left,
-                    ButtonName::Right => Button::Right,
-                    ButtonName::Middle => Button::Middle,
-                };
                 for pressed in [true, false] {
-                    self.request(Request::PointerButton { button, pressed })?;
+                    self.request(Request::PointerButton {
+                        button: button.api(),
+                        pressed,
+                    })?;
                 }
+                Ok(())
+            }
+            Step::Press(button) | Step::Release(button) => {
+                self.request(Request::PointerButton {
+                    button: button.api(),
+                    pressed: matches!(step, Step::Press(_)),
+                })?;
+                Ok(())
+            }
+            Step::KeyDown(key) | Step::KeyUp(key) => {
+                for code in parse_keys(key)? {
+                    self.request(Request::Key {
+                        code,
+                        pressed: matches!(step, Step::KeyDown(_)),
+                    })?;
+                }
+                Ok(())
+            }
+            Step::ExpectNotReceived(expected) => {
+                let client = self
+                    .clients
+                    .iter()
+                    .find(|c| c.spec.app_id == expected.app_id)
+                    .with_context(|| format!("no client {}", expected.app_id))?;
+                // What was sent has had time to arrive: earlier steps waited.
+                let got: Vec<String> = client.events().iter().map(ToString::to_string).collect();
+                anyhow::ensure!(
+                    !got.contains(&expected.event),
+                    "{} received `{}`; it received: {}",
+                    expected.app_id,
+                    expected.event,
+                    got.join(", ")
+                );
                 Ok(())
             }
             Step::Key(code) => {

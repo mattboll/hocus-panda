@@ -28,6 +28,8 @@ Steps, one per `[[step]]` table:
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
 | `click = "left"` | presses and releases a button (`left`, `right`, `middle`) |
+| `press = "left"`, `release = "left"` | holds and lets go a button, for drags |
+| `key_down = "alt"`, `key_up = "alt"` | holds and lets go a key, for Alt+drag |
 | `key = 30` | presses and releases a key, by evdev code (`KEY_A` is 30) |
 | `keys = "super+shift+2"` | presses keys in order, releases them in reverse: `super`, `shift`, `ctrl`, `alt`, digits, letters (by position on a US keyboard), `enter`, `escape`, `tab`, `space`, `backspace`, arrows, or evdev codes |
 | `send = { app_id, output, desktop? }` | sends a window to an output: its desktop `desktop` (from 1), or the shown one |
@@ -42,6 +44,7 @@ Steps, one per `[[step]]` table:
 | `expect_stack = ["below", "above"]` | checks the shown windows, bottom to top |
 | `expect_shown = { output, desktop }` | checks which desktop an output shows, from 1 |
 | `expect_received = { app_id, event = "key 30 pressed" }` | checks the client got an event: `configure WxH`, `pointer_enter`, `pointer_leave`, `button CODE pressed`, `keyboard_enter`, `keyboard_leave`, `key CODE pressed`, `close` (and `released`) |
+| `expect_not_received = { app_id, event }` | checks the client never got an event |
 | `expect_screenshot = { output, reference = "file.png", channel_tolerance? = 2, pixel_tolerance? = 0.0, cursor? = false }` | compares the output with a reference image next to the scenario; `cursor` draws the pointer's cursor too |
 
 Reference images are recorded with `HOCUS_BLESS=1 cargo nextest run -p

@@ -1,0 +1,20 @@
+description = "A window minimized on an output that is then unplugged is restored on a visible output"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+pointer_move = [1800, 500]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+set_state = { app_id = "doc", state = "minimized" }
+
+[[step]]
+unplug = "HEADLESS-2"
+
+[[step]]
+set_state = { app_id = "doc", state = "normal" }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-1", visible = true, state = "normal" }
