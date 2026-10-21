@@ -69,7 +69,9 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Keyboard-navigable overview
 - Alt+Tab with live previews, icon, title, recent order
 - Alt+Tab and overview scoped to the screen under the pointer or to all screens (default: Alt+Tab = active screen, Super+Tab = all)
-- Configurable hot corners (overview, launcher, desktop)
+- Configurable hot corners (overview, launcher, desktop), set in settings
+- Super pressed and released alone opens the overview
+- Super + drag draws on the screen; the line fades when Super is released
 - Touchpad gestures: 3 fingers for desktops and overview, 4 fingers for the launcher
 - Gestures passed to applications: pinch (browser zoom), hold
 - Use the touchpad better: pinch in or out for the overview or the radial menu, and find other useful gestures. Must coexist with two-finger pinch in applications (browser zoom): 3 or 4 fingers, a modifier, or pinch on the desktop background
@@ -202,7 +204,7 @@ The column on the right of the screen is the chosen form (see
 - Calculator, unit conversion, large text, QR code, URL, web search
 - "Ask the AI"
 - Keywords: volume, brightness, emoji
-- Command palette: every action by category
+- Action palette (Super+P): every action by category with its shortcut and scope, searchable by name or by pressing keys; Enter runs it
 - Desktop windows (settings, etc.) always open in front
 
 ## 13. Notifications
@@ -292,6 +294,7 @@ The column on the right of the screen is the chosen form (see
 - Lock, screen-off and suspend delays; curtain before
 - Held by applications (D-Bus, Wayland) and by fullscreen; countdown resumes when the hold ends
 - System action authentication (polkit) `[linux]`
+- Session menu: lock, log out, suspend, hibernate, restart, shut down; applications can delay with a reason, a countdown can be cancelled
 
 ## 21. Themes, languages, accessibility
 
