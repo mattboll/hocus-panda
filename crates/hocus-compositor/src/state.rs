@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Instant};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use smithay::{
@@ -22,10 +22,12 @@ use smithay::{
     },
 };
 
+use crate::Clock;
+
 /// Everything the compositor knows, owned by the event loop.
 #[derive(Debug)]
 pub struct State {
-    pub start_time: Instant,
+    pub clock: Clock,
     pub display_handle: DisplayHandle,
     pub socket_path: PathBuf,
     pub loop_signal: LoopSignal,
@@ -51,6 +53,7 @@ impl State {
         dh: &DisplayHandle,
         loop_signal: LoopSignal,
         socket_path: PathBuf,
+        clock: Clock,
     ) -> anyhow::Result<Self> {
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(dh, "seat0");
@@ -60,7 +63,7 @@ impl State {
         seat.add_pointer();
 
         Ok(Self {
-            start_time: Instant::now(),
+            clock,
             display_handle: dh.clone(),
             socket_path,
             loop_signal,

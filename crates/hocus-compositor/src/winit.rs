@@ -17,10 +17,8 @@ use smithay::{
     utils::Transform,
 };
 
-use crate::{App, State};
+use crate::{App, BACKGROUND, BackendState, State};
 
-/// The dark theme's base colour, until themes exist.
-const BACKGROUND: [f32; 4] = [0.055, 0.059, 0.071, 1.0];
 /// winit does not report the refresh rate; a nominal 60 Hz.
 const REFRESH_MHZ: i32 = 60_000;
 
@@ -73,7 +71,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
     handle
         .insert_source(winit_loop, |event, _, app| match event {
             WinitEvent::Resized { size, .. } => {
-                if let Some(winit) = &app.winit {
+                if let BackendState::Winit(winit) = &app.backend {
                     winit.output.change_current_state(
                         Some(Mode {
                             size,
@@ -88,7 +86,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
             }
             WinitEvent::Input(event) => app.state.process_input_event(event),
             WinitEvent::Redraw => {
-                if let Some(winit) = &mut app.winit {
+                if let BackendState::Winit(winit) = &mut app.backend {
                     winit.render(&mut app.state);
                 }
             }
@@ -149,7 +147,7 @@ impl WinitBackend {
             tracing::warn!(%err, "could not present the frame");
         }
 
-        let elapsed = state.start_time.elapsed();
+        let elapsed = state.clock.now();
         for window in state.space.elements() {
             window.send_frame(&self.output, elapsed, Some(Duration::ZERO), |_, _| {
                 Some(self.output.clone())

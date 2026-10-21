@@ -23,6 +23,9 @@ yanked = "deny"
 ignore = [
     # cgmath is unmaintained; smithay 0.7 depends on it. Revisit on the next smithay release.
     { id = "RUSTSEC-2026-0196", reason = "transitive through smithay 0.7" },
+    # paste is unmaintained; a compile-time macro of pixman, which smithay's
+    # software renderer uses. Revisit on the next pixman release.
+    { id = "RUSTSEC-2024-0436", reason = "proc-macro, transitive through pixman" },
 ]
 
 [bans]
