@@ -20,6 +20,10 @@ unused-allowed-license = "allow"
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # cgmath is unmaintained; smithay 0.7 depends on it. Revisit on the next smithay release.
+    { id = "RUSTSEC-2026-0196", reason = "transitive through smithay 0.7" },
+]
 
 [bans]
 multiple-versions = "warn"
