@@ -100,13 +100,15 @@ impl Write for Captured {
 
 #[test]
 fn a_slow_handler_is_named_with_its_duration() -> anyhow::Result<()> {
+    // A global subscriber: with `cargo test`, tests share the process, and a
+    // thread-local one misses events whose callsite another test cached.
     let captured = Captured::default();
     let writer = captured.clone();
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_writer(move || writer.clone())
         .finish();
-    let _logging = tracing::subscriber::set_default(subscriber);
+    tracing::subscriber::set_global_default(subscriber)?;
     let dumps = tempfile::tempdir()?;
     let mut compositor = compositor(dumps.path(), Duration::from_secs(10))?;
 
@@ -119,7 +121,7 @@ fn a_slow_handler_is_named_with_its_duration() -> anyhow::Result<()> {
         .into_owned();
     let line = log
         .lines()
-        .find(|l| l.contains("loop handler over budget"))
+        .find(|l| l.contains("loop handler over budget") && l.contains("test sleeper"))
         .unwrap_or_default();
     assert!(line.contains("WARN"), "{log}");
     assert!(line.contains(r#"handler="test sleeper""#), "{log}");
