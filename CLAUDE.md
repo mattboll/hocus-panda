@@ -24,7 +24,20 @@ cargo fmt --check                             # formatting
 cargo deny check                              # licenses and advisories
 ```
 
-Update this section as commands land (nested run, scenarios, VM scripts).
+Running the compositor, always with a fresh, short runtime directory next to
+a live session:
+
+```sh
+# nested, in a window of the current session
+target/debug/hocuspanda --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
+# headless: offscreen outputs, a private runtime directory by default
+target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 3440x1440
+```
+
+Tests drive a headless compositor in-process on a virtual clock
+(`hocus_compositor::Headless`, see `crates/hocus-test/tests/`).
+
+Update this section as commands land (scenarios, VM scripts).
 
 ## Hard rules
 

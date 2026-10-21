@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use hocus_compositor::{Backend, Options};
+use hocus_compositor::{Backend, HeadlessConfig, Options, OutputSpec, RendererChoice};
 use tracing_subscriber::EnvFilter;
 
 /// The Hocuspanda desktop.
@@ -14,20 +14,40 @@ struct Args {
     #[arg(long, value_enum, default_value_t = BackendArg::Winit)]
     backend: BackendArg,
 
-    /// Directory of the Wayland socket, instead of $XDG_RUNTIME_DIR. Use a
-    /// fresh one to run next to a live session without touching it.
+    /// Directory of the Wayland socket. Default: $XDG_RUNTIME_DIR for the
+    /// nested backend, a fresh private directory for the headless one.
     #[arg(long, value_name = "DIR")]
     runtime_dir: Option<PathBuf>,
 
     /// Command to start once the compositor is ready (repeatable).
     #[arg(long, value_name = "COMMAND")]
     spawn: Vec<String>,
+
+    /// Headless output, WIDTHxHEIGHT[@SCALE][+X+Y] (repeatable). Without a
+    /// position, it goes to the right of the previous one.
+    #[arg(long = "output", value_name = "SPEC")]
+    outputs: Vec<OutputSpec>,
+
+    /// Headless renderer.
+    #[arg(long, value_enum, default_value_t = RendererArg::Auto)]
+    renderer: RendererArg,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum BackendArg {
     /// In a window of the current session.
     Winit,
+    /// Without a screen, into offscreen buffers.
+    Headless,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum RendererArg {
+    /// GLES on a render node when there is one, pixman otherwise.
+    Auto,
+    Gles,
+    /// Software rendering.
+    Pixman,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -41,6 +61,14 @@ fn main() -> anyhow::Result<()> {
     hocus_compositor::run(Options {
         backend: match args.backend {
             BackendArg::Winit => Backend::Winit,
+            BackendArg::Headless => Backend::Headless(HeadlessConfig {
+                outputs: args.outputs,
+                renderer: match args.renderer {
+                    RendererArg::Auto => RendererChoice::Auto,
+                    RendererArg::Gles => RendererChoice::Gles,
+                    RendererArg::Pixman => RendererChoice::Pixman,
+                },
+            }),
         },
         runtime_dir: args.runtime_dir,
         spawn: args.spawn,

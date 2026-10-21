@@ -31,6 +31,8 @@ Rules:
   is logged with its name.
 - **Monotonic time everywhere.** Animations, timeouts, idle, caches. Wall
   clock only for what the user reads (the clock, the calendar).
+  Compositor time is read from one clock, which tests replace with a
+  virtual one that moves only when they advance it.
 - **The shell is part of the scene.** Its surfaces are known by identity,
   output and layer; no title matching, no positioning over IPC.
 
