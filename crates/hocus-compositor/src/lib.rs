@@ -3,6 +3,7 @@
 //! The calloop event loop owns every piece of state ([`State`]); nothing else
 //! holds a reference to it (see docs/architecture.md).
 
+mod actions;
 mod api;
 mod capture;
 mod clock;

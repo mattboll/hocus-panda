@@ -769,6 +769,7 @@ dependencies = [
  "libtest-mimic",
  "png",
  "serde",
+ "serde_json",
  "smithay-client-toolkit",
  "tempfile",
  "toml",

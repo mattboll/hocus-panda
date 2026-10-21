@@ -271,6 +271,7 @@ impl App {
             Request::Config => Reply::Config(ConfigInfo {
                 toml: state.config.to_toml(),
                 error: state.config_error.clone(),
+                warnings: state.config_warnings.clone(),
                 generation: state.config_generation,
             }),
             Request::PlugOutput { spec, name } => {

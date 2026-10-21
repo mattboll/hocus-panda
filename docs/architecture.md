@@ -112,7 +112,8 @@ what the user changed. A thread looks at the file every half second, reads
 and checks it, and hands the loop a configuration ready to apply; a file that
 does not read is reported with its line and key (log, `config_error` event,
 `hocus msg config`) and the previous configuration stays. Tests use a
-configuration file of their own. Themes in their own files.
+configuration file of their own. Every key and the shortcut actions are in
+[configuration](configuration.md). Themes in their own files.
 
 ## Plugins
 

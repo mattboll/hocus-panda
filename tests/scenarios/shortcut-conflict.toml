@@ -1,0 +1,24 @@
+description = "Two shortcuts on the same keys are reported, and the first one wins"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[shortcuts]
+"Super+M" = "toggle-maximized"
+"super+m" = "minimize"
+"""
+
+[[step]]
+expect_config_error = ""
+
+[[step]]
+expect_config_warning = "the first one wins"
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+keys = "super+m"
+
+[[step]]
+expect_window = { app_id = "doc", state = "maximized" }
