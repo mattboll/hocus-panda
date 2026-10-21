@@ -27,8 +27,18 @@ Rules:
   it. Worker threads receive owned requests and send owned results back
   through calloop channels. The type system enforces it.
 - **Nothing slow on the loop.** No blocking I/O, no D-Bus calls, no process
-  spawning that waits. A frame budget is measured; any handler over budget
-  is logged with its name.
+  spawning that waits. Every loop handler is timed against a frame (16 ms);
+  one over budget is logged with its name and duration, and kept in the
+  `stats` of the control API with the frame-time histogram of each output.
+- **A watchdog that does not bite a quiet screen.** A thread wakes the loop
+  every second and checks it answered; after 10 s without an answer it
+  writes every thread's state and backtrace (gdb when installed) to
+  `$XDG_STATE_HOME/hocuspanda/stall-*.txt`, then logs the stall. It does not
+  kill the session (yet): what to do with a stuck loop on a real seat is
+  decided with the DRM backend.
+- **Logs** go to the terminal and, for a session, to
+  `$XDG_STATE_HOME/hocuspanda/hocuspanda.log` (the previous one kept as
+  `.old`), written by a worker thread through a bounded queue.
 - **Monotonic time everywhere.** Animations, timeouts, idle, caches. Wall
   clock only for what the user reads (the clock, the calendar).
   Compositor time is read from one clock, which tests replace with a
@@ -137,8 +147,9 @@ still stubs.
 - **Test clients**: a small in-repo client that draws known colours and
   reports what it receives, plus real ones (foot, Firefox) for smoke tests.
 - **Reference screenshots** reviewed in pull requests.
-- **Performance**: frame-time histograms per output exposed over the API;
-  scenarios can assert budgets.
+- **Performance**: frame-time histograms per output and slow handlers,
+  exposed as `stats` over the API (`hocus msg stats`); scenarios can assert
+  budgets.
 - **VMs**: QEMU scripts for the DRM session, suspend/resume, several outputs,
   and FreeBSD.
 

@@ -70,7 +70,9 @@ pub fn insert(
                 // only borrowed for the duration of this dispatch.
                 #[allow(unsafe_code)]
                 let display = unsafe { display.get_mut() };
-                display.dispatch_clients(&mut app.state)?;
+                app.timed("wayland clients", |app| {
+                    display.dispatch_clients(&mut app.state)
+                })?;
                 Ok(PostAction::Continue)
             },
         )

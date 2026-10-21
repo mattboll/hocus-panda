@@ -96,6 +96,8 @@ pub enum Request {
     Screenshot {
         target: Target,
     },
+    /// Frame times, slow loop handlers and loop stalls.
+    Stats,
     /// Asks a window to close, as its close button would.
     CloseWindow {
         window: u64,
@@ -109,6 +111,7 @@ impl Request {
             | Self::Outputs
             | Self::Windows
             | Self::Subscribe
+            | Self::Stats
             | Self::Screenshot { .. } => Permission::Observe,
             Self::Scene
             | Self::PointerMove { .. }
@@ -173,8 +176,51 @@ pub enum Reply {
     Windows(Vec<WindowInfo>),
     Scene(Scene),
     Screenshot(Screenshot),
+    Stats(Stats),
     /// The request was carried out.
     Done,
+}
+
+/// How well the compositor keeps up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Stats {
+    pub outputs: Vec<OutputStats>,
+    /// The latest loop handlers that went over their budget, oldest first.
+    pub slow_handlers: Vec<SlowHandler>,
+    /// Times the loop did not answer the watchdog in time, oldest first.
+    pub stalls: Vec<Stall>,
+}
+
+/// Time spent drawing the frames an output presented.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutputStats {
+    pub name: String,
+    pub frames: u64,
+    pub histogram: Vec<Bucket>,
+    pub max_ms: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Bucket {
+    /// Upper bound; `None` for the last bucket.
+    pub up_to_ms: Option<f64>,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlowHandler {
+    pub name: String,
+    pub ms: f64,
+    /// When it ended, in milliseconds of compositor time.
+    pub at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Stall {
+    /// How long the loop had not answered when the watchdog fired.
+    pub seconds: f64,
+    /// The file with every thread's backtrace, if it could be written.
+    pub dump: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

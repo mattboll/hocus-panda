@@ -27,6 +27,8 @@ use hocus_api::Event;
 use crate::{
     Clock,
     api::{self, EncodedScreenshot},
+    stats::Measures,
+    watchdog::Watchdog,
 };
 
 /// Everything the compositor knows, owned by the event loop.
@@ -41,6 +43,9 @@ pub struct State {
     pub screenshots: Sender<EncodedScreenshot>,
     /// The last window id given.
     pub next_window_id: u64,
+    pub measures: Measures,
+    /// Stops with the state.
+    pub watchdog: Option<Watchdog>,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
@@ -82,6 +87,8 @@ impl State {
             api,
             screenshots,
             next_window_id: 0,
+            measures: Measures::default(),
+            watchdog: None,
             space: Space::default(),
             popups: PopupManager::default(),
             unplaced: Vec::new(),

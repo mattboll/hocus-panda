@@ -1,6 +1,6 @@
 //! The nested backend: the compositor runs in a window of the current session.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use smithay::{
@@ -78,32 +78,8 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
     let damage_tracker = OutputDamageTracker::from_output(&output);
 
     handle
-        .insert_source(winit_loop, |event, _, app| match event {
-            WinitEvent::Resized { size, .. } => {
-                if let BackendState::Winit(winit) = &app.backend {
-                    winit.output.change_current_state(
-                        Some(Mode {
-                            size,
-                            refresh: REFRESH_MHZ,
-                        }),
-                        None,
-                        None,
-                        None,
-                    );
-                }
-                app.state.needs_redraw = true;
-            }
-            WinitEvent::Input(event) => app.state.process_input_event(event),
-            WinitEvent::Redraw => {
-                if let BackendState::Winit(winit) = &mut app.backend {
-                    winit.render(&mut app.state);
-                }
-            }
-            WinitEvent::CloseRequested => {
-                tracing::info!("window closed");
-                app.state.loop_signal.stop();
-            }
-            WinitEvent::Focus(_) => {}
+        .insert_source(winit_loop, |event, _, app| {
+            app.timed("window events", |app| on_event(app, event));
         })
         .map_err(|err| err.error)
         .context("could not watch the window's events")?;
@@ -113,6 +89,36 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         output,
         damage_tracker,
     })
+}
+
+fn on_event(app: &mut App, event: WinitEvent) {
+    match event {
+        WinitEvent::Resized { size, .. } => {
+            if let BackendState::Winit(winit) = &app.backend {
+                winit.output.change_current_state(
+                    Some(Mode {
+                        size,
+                        refresh: REFRESH_MHZ,
+                    }),
+                    None,
+                    None,
+                    None,
+                );
+            }
+            app.state.needs_redraw = true;
+        }
+        WinitEvent::Input(event) => app.state.process_input_event(event),
+        WinitEvent::Redraw => {
+            if let BackendState::Winit(winit) = &mut app.backend {
+                winit.render(&mut app.state);
+            }
+        }
+        WinitEvent::CloseRequested => {
+            tracing::info!("window closed");
+            app.state.loop_signal.stop();
+        }
+        WinitEvent::Focus(_) => {}
+    }
 }
 
 impl WinitBackend {
@@ -132,6 +138,7 @@ impl WinitBackend {
     }
 
     fn render(&mut self, state: &mut State) {
+        let start = Instant::now();
         let damage = {
             let (renderer, mut framebuffer) = match self.backend.bind() {
                 Ok(bound) => bound,
@@ -158,10 +165,11 @@ impl WinitBackend {
                 }
             }
         };
-        if let Some(damage) = damage
-            && let Err(err) = self.backend.submit(Some(&damage))
-        {
-            tracing::warn!(%err, "could not present the frame");
+        if let Some(damage) = damage {
+            match self.backend.submit(Some(&damage)) {
+                Ok(()) => state.measures.frame(&self.output.name(), start.elapsed()),
+                Err(err) => tracing::warn!(%err, "could not present the frame"),
+            }
         }
 
         let elapsed = state.clock.now();
