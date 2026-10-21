@@ -224,6 +224,21 @@ impl Handler for App {
                 );
                 Reply::Done
             }
+            Request::CloseWindow { window: wanted } => {
+                let toplevel = state
+                    .space
+                    .elements()
+                    .find(|w| window_id(w) == wanted)
+                    .and_then(|w| w.toplevel().cloned());
+                let Some(toplevel) = toplevel else {
+                    return Some(Err(ApiError::new(
+                        ErrorCode::NotFound,
+                        format!("no window with id {wanted}"),
+                    )));
+                };
+                toplevel.send_close();
+                Reply::Done
+            }
             Request::Screenshot { target } => {
                 return match self.capture(&target) {
                     Ok(pixels) => {

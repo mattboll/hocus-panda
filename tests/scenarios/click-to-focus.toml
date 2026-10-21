@@ -1,0 +1,35 @@
+description = "A click on a window behind another focuses it and raises it"
+
+[[step]]
+open = { app_id = "back", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "front", size = [200, 100], color = "#ff6600" }
+
+[[step]]
+expect_focus = "front"
+
+[[step]]
+expect_stack = ["back", "front"]
+
+# Inside the back window, outside the front one.
+[[step]]
+pointer_move = [450, 260]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_focus = "back"
+
+[[step]]
+expect_stack = ["front", "back"]
+
+[[step]]
+expect_received = { app_id = "back", event = "button 272 pressed" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "click-to-focus.png" }

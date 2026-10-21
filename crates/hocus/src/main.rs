@@ -1,6 +1,6 @@
 //! Command-line tool to control and test Hocuspanda.
 
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -26,6 +26,15 @@ enum Command {
         #[command(subcommand)]
         message: Message,
     },
+    /// Run scenario files on headless compositors: `hocus scenario run FILE…`.
+    ///
+    /// Done by `hocus-scenario`, next to this program or in PATH, which keeps
+    /// this tool free of the compositor.
+    #[command(disable_help_flag = true)]
+    Scenario {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<OsString>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -49,6 +58,8 @@ enum Message {
     },
     /// Press and release a key, by evdev code (KEY_A is 30).
     Key { code: u32 },
+    /// Ask a window to close, by id.
+    Close { window: u64 },
     /// Save a PNG of an output or a window.
     Screenshot {
         #[arg(long, value_name = "NAME", conflicts_with = "window")]
@@ -78,8 +89,35 @@ impl From<ButtonArg> for Button {
     }
 }
 
-fn main() -> anyhow::Result<()> {
-    let Command::Msg { socket, message } = Args::parse().command;
+fn main() -> anyhow::Result<ExitCode> {
+    match Args::parse().command {
+        Command::Msg { socket, message } => msg(socket, message).map(|()| ExitCode::SUCCESS),
+        Command::Scenario { args } => scenario(&args),
+    }
+}
+
+fn scenario(args: &[OsString]) -> anyhow::Result<ExitCode> {
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("hocus-scenario")))
+        .filter(|path| path.exists());
+    let program = sibling.unwrap_or_else(|| PathBuf::from("hocus-scenario"));
+    let status = std::process::Command::new(&program)
+        .args(args)
+        .status()
+        .with_context(|| {
+            format!(
+                "could not run {}; build it with `cargo build -p hocus-test`",
+                program.display()
+            )
+        })?;
+    Ok(match status.code() {
+        Some(0) => ExitCode::SUCCESS,
+        _ => ExitCode::FAILURE,
+    })
+}
+
+fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
     let socket = socket
         .or_else(hocus_api::default_socket)
         .context("no control socket: set HOCUS_SOCKET or WAYLAND_DISPLAY, or pass --socket")?;
@@ -113,6 +151,10 @@ fn main() -> anyhow::Result<()> {
             for pressed in [true, false] {
                 client.request(Request::Key { code, pressed })?;
             }
+            Ok(())
+        }
+        Message::Close { window } => {
+            client.request(Request::CloseWindow { window })?;
             Ok(())
         }
         Message::Screenshot {

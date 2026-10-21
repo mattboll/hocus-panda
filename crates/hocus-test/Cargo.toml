@@ -11,10 +11,19 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-smithay-client-toolkit = { version = "0.19.2", default-features = false }
-wayland-client = "0.31.15"
-
-[dev-dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
 hocus-api = { version = "0.1.0", path = "../hocus-api" }
 hocus-compositor = { version = "0.1.0", path = "../hocus-compositor" }
 png = "0.18.1"
+serde = { version = "1.0.229", features = ["derive"] }
+smithay-client-toolkit = { version = "0.19.2", default-features = false }
+toml = "1.1.8"
+wayland-client = "0.31.15"
+
+[dev-dependencies]
+libtest-mimic = "0.8.2"
+tempfile = "3.27.0"
+
+[[test]]
+name = "scenarios"
+harness = false

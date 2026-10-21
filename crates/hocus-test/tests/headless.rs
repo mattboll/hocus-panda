@@ -87,7 +87,7 @@ fn a_committed_buffer_draws_one_frame_on_its_output() -> anyhow::Result<()> {
     let start = compositor.now();
 
     let window = SolidWindow {
-        app_id: "hocus-test.solid",
+        app_id: "hocus-test.solid".into(),
         width: 400,
         height: 300,
         argb: 0xff_33_99_ff,
@@ -117,7 +117,7 @@ fn a_committed_buffer_draws_one_frame_on_its_output() -> anyhow::Result<()> {
 fn the_automatic_renderer_draws() -> anyhow::Result<()> {
     let mut compositor = Headless::start(HeadlessConfig::default())?;
     let window = SolidWindow {
-        app_id: "hocus-test.solid",
+        app_id: "hocus-test.solid".into(),
         width: 200,
         height: 100,
         argb: 0xff_ff_66_00,

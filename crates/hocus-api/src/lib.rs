@@ -96,6 +96,10 @@ pub enum Request {
     Screenshot {
         target: Target,
     },
+    /// Asks a window to close, as its close button would.
+    CloseWindow {
+        window: u64,
+    },
 }
 
 impl Request {
@@ -109,7 +113,8 @@ impl Request {
             Self::Scene
             | Self::PointerMove { .. }
             | Self::PointerButton { .. }
-            | Self::Key { .. } => Permission::Test,
+            | Self::Key { .. }
+            | Self::CloseWindow { .. } => Permission::Test,
         }
     }
 }
@@ -356,6 +361,18 @@ mod tests {
                 },
             },
             r#"{"id":3,"request":"screenshot","target":{"output":"HEADLESS-1"}}"#,
+        );
+    }
+
+    #[test]
+    fn request_fields_never_shadow_the_line_id() {
+        // `id` belongs to the line: a request naming a window says `window`.
+        round_trip(
+            &RequestLine {
+                id: 4,
+                request: Request::CloseWindow { window: 9 },
+            },
+            r#"{"id":4,"request":"close_window","window":9}"#,
         );
     }
 
