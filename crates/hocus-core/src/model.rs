@@ -4,7 +4,10 @@
 //! happened (an output was plugged, a window opened, a key asked for desktop
 //! 2) and reads back what to show and what has focus.
 
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 /// An output, by a name that stays the same when it is plugged again (the
 /// connector, or make, model and serial).
@@ -111,6 +114,7 @@ pub struct Model {
     /// Windows shown on an output when it was unplugged, moved to another
     /// output's desktop: the desktop they go back to on replug.
     returning: BTreeMap<WindowId, DesktopId>,
+    minimized: BTreeSet<WindowId>,
     next_desktop: u32,
     next_window: u64,
 }
@@ -153,15 +157,39 @@ impl Model {
     }
 
     pub fn is_visible(&self, window: WindowId) -> bool {
-        self.output_showing(window).is_some()
+        !self.minimized.contains(&window) && self.output_showing(window).is_some()
     }
 
-    /// Windows shown on an output, bottom to top.
-    pub fn visible_windows(&self, output: &OutputName) -> &[WindowId] {
+    pub fn is_minimized(&self, window: WindowId) -> bool {
+        self.minimized.contains(&window)
+    }
+
+    /// Windows shown on an output, bottom to top; minimized ones are not.
+    pub fn visible_windows(&self, output: &OutputName) -> Vec<WindowId> {
         self.output(output)
             .and_then(|o| self.desktops.get(&o.shown))
-            .map(|d| d.windows.as_slice())
+            .map(|d| {
+                d.windows
+                    .iter()
+                    .copied()
+                    .filter(|w| !self.minimized.contains(w))
+                    .collect()
+            })
             .unwrap_or_default()
+    }
+
+    /// Hides a window on its desktop; focus moves on. [`Model::focus`]
+    /// restores it.
+    pub fn minimize(&mut self, window: WindowId) -> Result<(), ModelError> {
+        if !self.windows.contains_key(&window) {
+            return Err(ModelError::UnknownWindow);
+        }
+        self.minimized.insert(window);
+        if self.focused == Some(window) {
+            self.focused = None;
+        }
+        self.refocus();
+        Ok(())
     }
 
     /// Plugs an output. One seen before gets its own desktops back, with
@@ -372,6 +400,7 @@ impl Model {
             .remove(&window)
             .ok_or(ModelError::UnknownWindow)?;
         self.returning.remove(&window);
+        self.minimized.remove(&window);
         if let Some(d) = self.desktops.get_mut(&desktop) {
             d.windows.retain(|w| *w != window);
         }
@@ -392,6 +421,7 @@ impl Model {
     /// Focuses and raises a window. A hidden window's desktop is shown first.
     pub fn focus(&mut self, window: WindowId) -> Result<(), ModelError> {
         let desktop = self.desktop_of(window).ok_or(ModelError::UnknownWindow)?;
+        self.minimized.remove(&window);
         if !self.is_visible(window)
             && let Some(host) = self.host_of(desktop).map(|o| o.name.clone())
         {
@@ -807,6 +837,25 @@ mod tests {
             model.desktop(ids[1]).map(|d| d.name.as_str()),
             Some("Project")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_minimized_window_is_hidden_and_restored_by_focus() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let a = model.open_window(&laptop())?;
+        let b = model.open_window(&laptop())?;
+
+        model.minimize(b)?;
+
+        assert_eq!(model.visible_windows(&laptop()), [a]);
+        assert_eq!(model.focused(), Some(a));
+        assert!(model.is_minimized(b));
+
+        model.focus(b)?;
+
+        assert_eq!(model.visible_windows(&laptop()), [a, b]);
+        assert_eq!(model.focused(), Some(b));
         Ok(())
     }
 

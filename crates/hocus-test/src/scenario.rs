@@ -22,7 +22,7 @@ use std::{
 };
 
 use anyhow::Context;
-use hocus_api::{Button, Reply, Request, Target, WindowInfo};
+use hocus_api::{Button, Reply, Request, Target, WindowInfo, WindowState};
 use hocus_compositor::{FRAME, Headless, HeadlessConfig, OutputSpec, RendererChoice};
 use serde::Deserialize;
 
@@ -33,6 +33,9 @@ use crate::{
 
 /// How long a step may wait for a client, in real time.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long an expectation waits for a client to catch up (a resize takes
+/// milliseconds), before it fails.
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,6 +77,9 @@ pub enum Step {
     Plug(PlugOutput),
     /// Unplugs an output by name.
     Unplug(String),
+    /// Maximizes, makes fullscreen, minimizes or restores (`normal`) a
+    /// window: `{ app_id, state }`.
+    SetState(SetState),
     /// Moves the virtual clock forward.
     AdvanceMs(u64),
     /// Moves the virtual clock forward by whole frames.
@@ -98,6 +104,13 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetState {
+    pub app_id: String,
+    pub state: WindowState,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -139,8 +152,10 @@ pub struct ExpectWindow {
     /// `[x, y, width, height]`, logical.
     pub geometry: Option<[i32; 4]>,
     pub focused: Option<bool>,
-    /// Whether its desktop is shown.
+    /// Whether its desktop is shown and it is not minimized.
     pub visible: Option<bool>,
+    /// `normal`, `maximized`, `fullscreen` or `minimized`.
+    pub state: Option<WindowState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -178,6 +193,7 @@ impl fmt::Display for Step {
             Self::Keys(keys) => write!(f, "keys {keys}"),
             Self::Plug(plug) => write!(f, "plug {}", plug.spec),
             Self::Unplug(name) => write!(f, "unplug {name}"),
+            Self::SetState(s) => write!(f, "set_state {} {:?}", s.app_id, s.state),
             Self::Send(send) => write!(f, "send {} to {}", send.app_id, send.output),
             Self::ExpectShown(e) => write!(f, "expect_shown {} {}", e.output, e.desktop),
             Self::AdvanceMs(ms) => write!(f, "advance {ms} ms"),
@@ -348,6 +364,16 @@ impl Run<'_> {
                 })?;
                 Ok(())
             }
+            Step::SetState(set) => {
+                let window = self
+                    .find(&set.app_id)?
+                    .with_context(|| format!("no window {}", set.app_id))?;
+                self.request(Request::SetWindowState {
+                    window: window.id,
+                    state: set.state,
+                })?;
+                Ok(())
+            }
             Step::Unplug(name) => {
                 self.request(Request::UnplugOutput {
                     output: name.clone(),
@@ -438,7 +464,23 @@ impl Run<'_> {
             .context("the window did not go away")
     }
 
+    /// Clients resize in their own threads: the window gets a moment to
+    /// match before the step fails.
     fn expect_window(&mut self, expected: &ExpectWindow) -> anyhow::Result<()> {
+        let deadline = Instant::now() + SETTLE_TIMEOUT;
+        loop {
+            let wrong = self.window_differences(expected)?;
+            if wrong.is_empty() {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                anyhow::bail!("{}", wrong.join("; "));
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    fn window_differences(&mut self, expected: &ExpectWindow) -> anyhow::Result<Vec<String>> {
         let window = self
             .find(&expected.app_id)?
             .with_context(|| format!("no window {}", expected.app_id))?;
@@ -474,8 +516,12 @@ impl Run<'_> {
                 window.visible
             ));
         }
-        anyhow::ensure!(wrong.is_empty(), "{}", wrong.join("; "));
-        Ok(())
+        if let Some(state) = expected.state
+            && window.state != state
+        {
+            wrong.push(format!("state: expected {state:?}, got {:?}", window.state));
+        }
+        Ok(wrong)
     }
 
     fn expect_received(&mut self, expected: &ExpectReceived) -> anyhow::Result<()> {

@@ -1,0 +1,23 @@
+description = "A minimized window disappears, focus moves on, and it comes back where it was"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "below", size = [500, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "doc", size = [300, 200], color = "#33cc66" }
+
+[[step]]
+keys = "super+down"
+
+[[step]]
+expect_window = { app_id = "doc", state = "minimized", visible = false }
+
+[[step]]
+expect_focus = "below"
+
+[[step]]
+set_state = { app_id = "doc", state = "normal" }
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [490, 300, 300, 200], state = "normal", visible = true, focused = true }

@@ -148,7 +148,7 @@ impl SolidWindow {
             pool,
             window,
             events,
-            drawn: false,
+            drawn: None,
             closed: false,
         };
         while !client.closed {
@@ -166,7 +166,8 @@ struct Client {
     pool: SlotPool,
     window: Window,
     events: Arc<Mutex<Vec<ClientEvent>>>,
-    drawn: bool,
+    /// The size of the last buffer, if one was attached.
+    drawn: Option<(u32, u32)>,
     closed: bool,
 }
 
@@ -177,8 +178,8 @@ impl Client {
         }
     }
 
-    fn draw(&mut self) -> anyhow::Result<()> {
-        let (width, height, argb) = (self.spec.width, self.spec.height, self.spec.argb);
+    fn draw(&mut self, (width, height): (u32, u32)) -> anyhow::Result<()> {
+        let argb = self.spec.argb;
         let (buffer, canvas) = self.pool.create_buffer(
             width as i32,
             height as i32,
@@ -211,14 +212,17 @@ impl WindowHandler for Client {
         _: u32,
     ) {
         let (width, height) = configure.new_size;
-        self.record(ClientEvent::Configure {
-            width: width.map_or(0, |w| w.get()),
-            height: height.map_or(0, |h| h.get()),
-        });
-        // The size stays what the test asked for: one buffer is enough.
-        if !self.drawn {
-            self.drawn = true;
-            if let Err(err) = self.draw() {
+        let (width, height) = (width.map_or(0, |w| w.get()), height.map_or(0, |h| h.get()));
+        self.record(ClientEvent::Configure { width, height });
+        // The size the compositor asks for, or the window's own.
+        let size = if width > 0 && height > 0 {
+            (width, height)
+        } else {
+            (self.spec.width, self.spec.height)
+        };
+        if self.drawn != Some(size) {
+            self.drawn = Some(size);
+            if let Err(err) = self.draw(size) {
                 eprintln!("test client could not draw: {err:#}");
                 self.closed = true;
             }

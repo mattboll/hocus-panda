@@ -4,7 +4,7 @@ use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
-use hocus_api::{Button, Client, Reply, Request, Target};
+use hocus_api::{Button, Client, Reply, Request, Target, WindowState};
 
 /// Control and test Hocuspanda.
 #[derive(Debug, Parser)]
@@ -62,6 +62,12 @@ enum Message {
     Key { code: u32 },
     /// Ask a window to close, by id.
     Close { window: u64 },
+    /// Maximize, make fullscreen, minimize or restore a window.
+    State {
+        window: u64,
+        #[arg(value_enum)]
+        state: StateArg,
+    },
     /// Each output's desktops, their windows, and the one shown.
     Desktops,
     /// Plug a headless output, WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS].
@@ -98,6 +104,14 @@ enum Message {
         #[arg(long)]
         cursor: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum StateArg {
+    Normal,
+    Maximized,
+    Fullscreen,
+    Minimized,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -212,6 +226,16 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
                 output,
                 desktop: desktop.map(|n| n.saturating_sub(1)),
             })?;
+            Ok(())
+        }
+        Message::State { window, state } => {
+            let state = match state {
+                StateArg::Normal => WindowState::Normal,
+                StateArg::Maximized => WindowState::Maximized,
+                StateArg::Fullscreen => WindowState::Fullscreen,
+                StateArg::Minimized => WindowState::Minimized,
+            };
+            client.request(Request::SetWindowState { window, state })?;
             Ok(())
         }
         Message::Close { window } => {

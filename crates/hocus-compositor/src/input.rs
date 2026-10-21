@@ -30,7 +30,14 @@ enum Action {
     /// Super+Shift+digit: send the focused window to that desktop of the
     /// output under the pointer.
     SendToDesktop(usize),
+    /// Super+Up: maximize or restore the focused window.
+    ToggleMaximized,
+    /// Super+Down: minimize the focused window.
+    Minimize,
 }
+
+const KEY_UP: u32 = 103;
+const KEY_DOWN: u32 = 108;
 
 /// The desktop index of a digit-row key, from 0.
 fn digit(code: Keycode) -> Option<usize> {
@@ -78,9 +85,16 @@ impl State {
                 if modifiers.ctrl && modifiers.alt && keysym.modified_sym() == Keysym::BackSpace {
                     return FilterResult::Intercept(Action::Quit);
                 }
+                let evdev = keysym.raw_code().raw().saturating_sub(XKB_OFFSET);
                 match (modifiers.logo, modifiers.shift, digit(keysym.raw_code())) {
                     (true, false, Some(n)) => FilterResult::Intercept(Action::ShowDesktop(n)),
                     (true, true, Some(n)) => FilterResult::Intercept(Action::SendToDesktop(n)),
+                    (true, false, None) if evdev == KEY_UP => {
+                        FilterResult::Intercept(Action::ToggleMaximized)
+                    }
+                    (true, false, None) if evdev == KEY_DOWN => {
+                        FilterResult::Intercept(Action::Minimize)
+                    }
                     _ => FilterResult::Forward,
                 }
             },
@@ -101,6 +115,16 @@ impl State {
                     (self.output_under_pointer(), self.model.focused())
                 {
                     let _ = self.send_window(window, &output, Some(n), serial);
+                }
+            }
+            Some(Action::ToggleMaximized) => {
+                if let Some(window) = self.model.focused() {
+                    self.toggle_maximized(window, serial);
+                }
+            }
+            Some(Action::Minimize) => {
+                if let Some(window) = self.model.focused() {
+                    self.minimize(window, serial);
                 }
             }
             None => {}
