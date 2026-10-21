@@ -1,0 +1,29 @@
+description = "A window sent to the other output appears on its shown desktop"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+pointer_move = [1800, 500]
+
+[[step]]
+keys = "super+3"
+
+[[step]]
+pointer_move = [600, 400]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+send = { app_id = "doc", output = "HEADLESS-2" }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-2", visible = true, focused = true, geometry = [1720, 250, 400, 300] }
+
+[[step]]
+expect_shown = { output = "HEADLESS-2", desktop = 3 }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "send-window-to-other-output.external.png" }

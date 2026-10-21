@@ -1,0 +1,17 @@
+description = "An output with a single desktop never switches"
+outputs = ["1280x800/1", "1920x1080"]
+
+[[step]]
+open = { app_id = "chat", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_window = { app_id = "chat", visible = true, focused = true }
+
+[[step]]
+expect_received = { app_id = "chat", event = "keyboard_enter" }

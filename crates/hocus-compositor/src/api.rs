@@ -3,8 +3,9 @@
 
 use base64::Engine;
 use hocus_api::{
-    ApiError, ConnectionId, ErrorCode, Event, Handler, Layer, OutputInfo, Point, Rect, Reply,
-    Request, Scene, SceneOutput, Screenshot, Server, Target, VersionInfo, WindowInfo,
+    ApiError, ConnectionId, DesktopInfo, ErrorCode, Event, Handler, Layer, OutputDesktops,
+    OutputInfo, Point, Rect, Reply, Request, Scene, SceneOutput, Screenshot, Server, Target,
+    VersionInfo, WindowInfo,
 };
 use smithay::{
     backend::input::{ButtonState, KeyState},
@@ -12,11 +13,14 @@ use smithay::{
     input::keyboard::Keycode,
     output::Output,
     reexports::calloop::channel::Sender,
-    utils::{Logical, Rectangle},
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
+    utils::{Logical, Rectangle, SERIAL_COUNTER},
 };
 
-use crate::{App, BackendState, State, capture::Pixels};
+use crate::{
+    App, BackendState, State,
+    capture::Pixels,
+    desktops::{model_id, title_and_app_id},
+};
 
 /// Evdev codes are offset by 8 in XKB.
 const XKB_OFFSET: u32 = 8;
@@ -24,20 +28,7 @@ const XKB_OFFSET: u32 = 8;
 /// A screenshot encoded by a worker, on its way back to the loop.
 pub type EncodedScreenshot = (ConnectionId, u64, Result<Screenshot, ApiError>);
 
-/// A window's id for the API, given when its toplevel is created.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WindowId(u64);
-
 impl State {
-    /// Gives `window` the next id.
-    pub fn assign_window_id(&mut self, window: &Window) {
-        self.next_window_id += 1;
-        let id = self.next_window_id;
-        window
-            .user_data()
-            .insert_if_missing_threadsafe(|| WindowId(id));
-    }
-
     /// Sends `event` to subscribers; it is built only when there are some.
     pub fn emit(&mut self, event: impl FnOnce(&State) -> Event) {
         if self.api.has_subscribers() {
@@ -60,19 +51,7 @@ impl State {
 
     pub fn window_info(&self, window: &Window) -> WindowInfo {
         let geometry = self.space.element_geometry(window).unwrap_or_default();
-        let (app_id, title) = window
-            .toplevel()
-            .map(|toplevel| {
-                with_states(toplevel.wl_surface(), |states| {
-                    states
-                        .data_map
-                        .get::<XdgToplevelSurfaceData>()
-                        .and_then(|data| data.lock().ok())
-                        .map(|data| (data.app_id.clone(), data.title.clone()))
-                        .unwrap_or_default()
-                })
-            })
-            .unwrap_or_default();
+        let (title, app_id) = title_and_app_id(window);
         WindowInfo {
             id: window_id(window),
             app_id,
@@ -80,11 +59,16 @@ impl State {
             output: self.output_of(window).map(|o| o.name()),
             geometry: rect(geometry),
             focused: self.focused_window().as_ref() == Some(window),
+            desktop: model_id(window)
+                .and_then(|id| self.model.desktop_of(id))
+                .map(|d| d.0)
+                .unwrap_or_default(),
+            visible: self.space.element_location(window).is_some(),
         }
     }
 
     /// The output showing most of `window`.
-    fn output_of(&self, window: &Window) -> Option<&Output> {
+    pub fn output_of(&self, window: &Window) -> Option<&Output> {
         let geometry = self.space.element_geometry(window)?;
         self.space
             .outputs()
@@ -94,6 +78,32 @@ impl State {
             })
             .max_by_key(|(area, _)| *area)
             .map(|(_, o)| o)
+    }
+
+    pub fn find_output(&self, name: &str) -> Option<Output> {
+        self.space.outputs().find(|o| o.name() == name).cloned()
+    }
+
+    fn desktops_info(&self) -> Vec<OutputDesktops> {
+        self.model
+            .outputs()
+            .iter()
+            .map(|output| OutputDesktops {
+                output: output.name.0.clone(),
+                desktops: output
+                    .desktops
+                    .iter()
+                    .filter_map(|id| self.model.desktop(*id))
+                    .map(|d| DesktopInfo {
+                        id: d.id.0,
+                        name: d.name.clone(),
+                        home: d.home.0.clone(),
+                        windows: d.windows.iter().map(|w| w.0).collect(),
+                    })
+                    .collect(),
+                shown: output.shown.0,
+            })
+            .collect()
     }
 
     pub fn focused_window(&self) -> Option<Window> {
@@ -147,12 +157,25 @@ impl State {
     }
 }
 
+/// The window's id for the API: the model's.
 pub fn window_id(window: &Window) -> u64 {
-    window
-        .user_data()
-        .get::<WindowId>()
-        .map(|id| id.0)
-        .unwrap_or_default()
+    model_id(window).map(|id| id.0).unwrap_or_default()
+}
+
+fn no_output(name: &str) -> ApiError {
+    ApiError::new(ErrorCode::NotFound, format!("no output named {name}"))
+}
+
+fn model_error(err: hocus_core::ModelError) -> ApiError {
+    let code = match err {
+        hocus_core::ModelError::UnknownOutput
+        | hocus_core::ModelError::UnknownDesktop
+        | hocus_core::ModelError::UnknownWindow => ErrorCode::NotFound,
+        hocus_core::ModelError::NotOnOutput | hocus_core::ModelError::AlreadyPlugged => {
+            ErrorCode::BadRequest
+        }
+    };
+    ApiError::new(code, err.to_string())
 }
 
 fn rect(r: Rectangle<i32, Logical>) -> Rect {
@@ -199,13 +222,49 @@ impl App {
                     .map(|o| state.output_info(o))
                     .collect(),
             ),
+            // Shown ones bottom to top, then hidden ones.
             Request::Windows => Reply::Windows(
                 state
                     .space
                     .elements()
+                    .chain(
+                        state
+                            .windows
+                            .values()
+                            .map(|m| &m.window)
+                            .filter(|w| state.space.element_location(w).is_none()),
+                    )
                     .map(|w| state.window_info(w))
                     .collect(),
             ),
+            Request::Desktops => Reply::Desktops(state.desktops_info()),
+            Request::ShowDesktop { output, index } => {
+                let output = state.find_output(&output).ok_or_else(|| no_output(&output));
+                let result = output.and_then(|output| {
+                    state
+                        .show_desktop(&output, index, SERIAL_COUNTER.next_serial())
+                        .map_err(model_error)
+                });
+                return Some(result.map(|()| Reply::Done));
+            }
+            Request::SendWindow {
+                window,
+                output,
+                desktop,
+            } => {
+                let output = state.find_output(&output).ok_or_else(|| no_output(&output));
+                let result = output.and_then(|output| {
+                    state
+                        .send_window(
+                            hocus_core::WindowId(window),
+                            &output,
+                            desktop,
+                            SERIAL_COUNTER.next_serial(),
+                        )
+                        .map_err(model_error)
+                });
+                return Some(result.map(|()| Reply::Done));
+            }
             Request::Scene => Reply::Scene(state.scene()),
             Request::Stats => {
                 let names: Vec<String> = state.space.outputs().map(|o| o.name()).collect();

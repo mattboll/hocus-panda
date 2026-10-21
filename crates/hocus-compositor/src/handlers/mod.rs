@@ -1,13 +1,17 @@
 //! smithay protocol handlers.
 
 mod compositor;
+mod workspace;
 mod xdg_shell;
 
+pub use workspace::WorkspaceState;
+
 use smithay::{
-    delegate_data_device, delegate_output, delegate_seat,
+    delegate_data_device, delegate_foreign_toplevel_list, delegate_output, delegate_seat,
     input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     wayland::{
+        foreign_toplevel_list::{ForeignToplevelListHandler, ForeignToplevelListState},
         output::OutputHandler,
         selection::{
             SelectionHandler,
@@ -55,3 +59,10 @@ delegate_data_device!(State);
 
 impl OutputHandler for State {}
 delegate_output!(State);
+
+impl ForeignToplevelListHandler for State {
+    fn foreign_toplevel_list_state(&mut self) -> &mut ForeignToplevelListState {
+        &mut self.foreign_toplevels
+    }
+}
+delegate_foreign_toplevel_list!(State);

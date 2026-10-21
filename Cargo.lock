@@ -732,6 +732,7 @@ dependencies = [
  "anyhow",
  "base64",
  "hocus-api",
+ "hocus-core",
  "libloading",
  "png",
  "rustix 1.1.5",
@@ -770,6 +771,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

@@ -1,4 +1,5 @@
-//! Outputs described by hand, for the headless backend: `WxH[@SCALE][+X+Y]`.
+//! Outputs described by hand, for the headless backend:
+//! `WxH[@SCALE][+X+Y][/DESKTOPS]`.
 
 use std::{fmt, str::FromStr};
 
@@ -10,7 +11,14 @@ pub struct OutputSpec {
     pub scale: f64,
     /// Logical position; `None` puts it to the right of the previous output.
     pub position: Option<(i32, i32)>,
+    /// How many desktops it has when first plugged.
+    pub desktops: usize,
 }
+
+/// Desktops of an output, until the configuration says otherwise.
+pub const DEFAULT_DESKTOPS: usize = 4;
+/// The most desktops an output can have.
+pub const MAX_DESKTOPS: usize = 8;
 
 impl OutputSpec {
     pub fn new(width: i32, height: i32) -> Self {
@@ -19,7 +27,12 @@ impl OutputSpec {
             height,
             scale: 1.0,
             position: None,
+            desktops: DEFAULT_DESKTOPS,
         }
+    }
+
+    pub fn desktops(self, desktops: usize) -> Self {
+        Self { desktops, ..self }
     }
 
     pub fn scale(self, scale: f64) -> Self {
@@ -66,7 +79,8 @@ impl fmt::Display for ParseOutputSpecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}: expected WIDTHxHEIGHT[@SCALE][+X+Y], e.g. 2560x1600@2 or 1920x1080+0+0",
+            "{}: expected WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS], e.g. 2560x1600@2 or \
+             1920x1080+0+0/1",
             self.0
         )
     }
@@ -79,6 +93,13 @@ impl FromStr for OutputSpec {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let err = || ParseOutputSpecError(s.to_string());
+        let (s, desktops) = match s.split_once('/') {
+            Some((rest, n)) => (rest, n.parse().map_err(|_| err())?),
+            None => (s, DEFAULT_DESKTOPS),
+        };
+        if !(1..=MAX_DESKTOPS).contains(&desktops) {
+            return Err(err());
+        }
         let (rest, position) = match s.split_once('+') {
             Some((rest, pos)) => {
                 let (x, y) = pos.split_once('+').ok_or_else(err)?;
@@ -103,6 +124,7 @@ impl FromStr for OutputSpec {
             height,
             scale,
             position,
+            desktops,
         })
     }
 }
@@ -122,12 +144,16 @@ mod tests {
             "3440x1440@1.25+1280+0".parse(),
             Ok(OutputSpec::new(3440, 1440).scale(1.25).at(1280, 0))
         );
+        assert_eq!(
+            "1280x800/1".parse(),
+            Ok(OutputSpec::new(1280, 800).desktops(1))
+        );
     }
 
     #[test]
     fn rejects_malformed_specs() {
         for bad in [
-            "", "1920", "1920x", "x1080", "0x10", "10x10@0", "10x10+5", "axb",
+            "", "1920", "1920x", "x1080", "0x10", "10x10@0", "10x10+5", "axb", "10x10/0", "10x10/9",
         ] {
             assert!(bad.parse::<OutputSpec>().is_err(), "{bad} was accepted");
         }

@@ -332,6 +332,7 @@ fn create_output(name: &str, spec: &OutputSpec, position: (i32, i32), state: &mu
     );
     output.set_preferred(mode);
     state.space.map_output(&output, position);
+    state.plug_output(&output, spec.desktops);
     state.emit(|s| Event::OutputAdded {
         output: s.output_info(&output),
     });

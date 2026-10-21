@@ -14,10 +14,30 @@ use smithay::{
 
 use crate::State;
 
+/// Evdev codes of the digit row, 1 to 9: by position, so that the same keys
+/// work whatever the layout (on AZERTY, `&` to `ç`).
+const KEY_1: u32 = 2;
+const KEY_9: u32 = 10;
+/// Evdev codes are offset by 8 in XKB.
+const XKB_OFFSET: u32 = 8;
+
 /// What a key press means to the compositor itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Quit,
+    /// Super+digit: show that desktop on the output under the pointer.
+    ShowDesktop(usize),
+    /// Super+Shift+digit: send the focused window to that desktop of the
+    /// output under the pointer.
+    SendToDesktop(usize),
+}
+
+/// The desktop index of a digit-row key, from 0.
+fn digit(code: Keycode) -> Option<usize> {
+    let evdev = code.raw().checked_sub(XKB_OFFSET)?;
+    (KEY_1..=KEY_9)
+        .contains(&evdev)
+        .then(|| (evdev - KEY_1) as usize)
 }
 
 impl State {
@@ -51,21 +71,39 @@ impl State {
             serial,
             time_msec,
             |_, modifiers, keysym| {
-                // Ctrl+Alt+Backspace quits, until shortcuts are configurable.
-                if pressed
-                    && modifiers.ctrl
-                    && modifiers.alt
-                    && keysym.modified_sym() == Keysym::BackSpace
-                {
-                    FilterResult::Intercept(Action::Quit)
-                } else {
-                    FilterResult::Forward
+                // Built in until shortcuts are configurable (#17).
+                if !pressed {
+                    return FilterResult::Forward;
+                }
+                if modifiers.ctrl && modifiers.alt && keysym.modified_sym() == Keysym::BackSpace {
+                    return FilterResult::Intercept(Action::Quit);
+                }
+                match (modifiers.logo, modifiers.shift, digit(keysym.raw_code())) {
+                    (true, false, Some(n)) => FilterResult::Intercept(Action::ShowDesktop(n)),
+                    (true, true, Some(n)) => FilterResult::Intercept(Action::SendToDesktop(n)),
+                    _ => FilterResult::Forward,
                 }
             },
         );
-        if action == Some(Action::Quit) {
-            tracing::info!("quit requested");
-            self.loop_signal.stop();
+        match action {
+            Some(Action::Quit) => {
+                tracing::info!("quit requested");
+                self.loop_signal.stop();
+            }
+            Some(Action::ShowDesktop(n)) => {
+                if let Some(output) = self.output_under_pointer() {
+                    // An output with fewer desktops, or one, does not switch.
+                    let _ = self.show_desktop(&output, n, serial);
+                }
+            }
+            Some(Action::SendToDesktop(n)) => {
+                if let (Some(output), Some(window)) =
+                    (self.output_under_pointer(), self.model.focused())
+                {
+                    let _ = self.send_window(window, &output, Some(n), serial);
+                }
+            }
+            None => {}
         }
     }
 
