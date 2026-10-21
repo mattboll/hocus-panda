@@ -24,7 +24,8 @@ under the pointer; move and resize; decorations without title bars (rounded
 corners, shadow, focus accent); snapping with preview, magnetic edges, gaps,
 keyboard snapping; maximize, fullscreen, minimize; several outputs with hot
 plug; per-screen desktops; free shortcuts with scopes; keyboard layouts;
-configuration file applied live; XWayland.
+configuration file applied live; XWayland; window rules (opacity, pinned,
+always on top); tiling per desktop.
 
 ## M2 — UI toolkit and the column
 
@@ -34,7 +35,9 @@ Rendering stack decision with measurements; `hocus-ui` (layout, text, theme
 tokens, springs, hit testing, damage) runnable alone; themes and bundled
 fonts; the widget column on the right (clock, meeting, active window
 controls, desktops line, status row); notification server and toasts; the
-launcher and command field v0; quick settings (Super+A).
+launcher and command field v0 with its providers; the action palette
+(Super+P); quick settings (Super+A); the settings app; wallpaper; the
+drop-down terminal.
 
 ## M3 — Real session
 
@@ -45,7 +48,10 @@ DRM, libinput and libseat backend, tested in QEMU first; output management
 (fullscreen keeps awake); Linux platform services (power, battery, backlight,
 network, audio, power profiles); session save and restore, autostart;
 protocol batch (layer-shell, screencopy and portal, xdg-activation,
-foreign-toplevel, idle-notify…).
+foreign-toplevel, idle-notify…); the session menu, polkit agent and system
+tray; screenshots, recording, clipboard history and emoji; calendar
+accounts; notes; focus mode, night light and magnifier; the remaining
+settings pages; system updates; the phone.
 
 ## M4 — Motion and effects
 
@@ -53,7 +59,8 @@ foreign-toplevel, idle-notify…).
 
 Animation framework on the frame clock; open, close, genie minimize and
 restore, wobbly windows, maximize morph, desktop slide and swipe; blur and
-shadows; discreet dock; Alt+Tab and Super+Tab; overview; radial menu.
+shadows; discreet dock; Alt+Tab and Super+Tab; overview; radial menu; hot
+corners, gestures and drawing on screen.
 
 ## M5 — Agents and AI
 
@@ -69,7 +76,8 @@ circle to ask.
 *Hocuspanda looks like itself.*
 
 The pandas and their states; boot, curtain and lock moments; themes per
-desktop; the complete Matrix theme; French translation reviewed.
+desktop; the complete Matrix theme; first run, welcome and About; French
+translation reviewed.
 
 ## M7 — FreeBSD and packages
 
