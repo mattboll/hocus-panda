@@ -103,6 +103,27 @@ pub enum Step {
     /// The client never got this event.
     ExpectNotReceived(ExpectReceived),
     ExpectScreenshot(ExpectScreenshot),
+    /// One pixel of an output's screenshot, in its pixels.
+    ExpectPixel(ExpectPixel),
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectPixel {
+    pub output: String,
+    /// `[x, y]` in the output's pixels.
+    pub at: [u32; 2],
+    /// `#rrggbb`.
+    pub color: String,
+    /// Largest difference on a channel; 24 by default.
+    pub tolerance: Option<u8>,
+    /// Whether the colour must be there or must not.
+    #[serde(default = "yes")]
+    pub is: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -228,6 +249,14 @@ impl fmt::Display for Step {
             Self::ExpectFocus(app_id) => write!(f, "expect_focus {app_id}"),
             Self::ExpectStack(_) => write!(f, "expect_stack"),
             Self::ExpectReceived(e) => write!(f, "expect_received {} `{}`", e.app_id, e.event),
+            Self::ExpectPixel(e) => write!(
+                f,
+                "expect_pixel {} {:?} {} {}",
+                e.output,
+                e.at,
+                if e.is { "is" } else { "is not" },
+                e.color
+            ),
             Self::ExpectScreenshot(e) => {
                 write!(
                     f,
@@ -468,6 +497,7 @@ impl Run<'_> {
             }
             Step::ExpectReceived(expected) => self.expect_received(expected),
             Step::ExpectScreenshot(expected) => self.expect_screenshot(expected),
+            Step::ExpectPixel(expected) => self.expect_pixel(expected),
         }
     }
 
@@ -604,6 +634,34 @@ impl Run<'_> {
             }
             self.compositor.dispatch(Duration::from_millis(10))?;
         }
+    }
+
+    fn expect_pixel(&mut self, expected: &ExpectPixel) -> anyhow::Result<()> {
+        let reply = self.request(Request::Screenshot {
+            target: Target::Output(expected.output.clone()),
+            cursor: false,
+        })?;
+        let Reply::Screenshot(shot) = reply else {
+            anyhow::bail!("expected a screenshot, got {reply:?}");
+        };
+        let image = Image::from_png(&shot.png()?)?;
+        let [x, y] = expected.at;
+        let got = image
+            .pixel(x, y)
+            .with_context(|| format!("{x},{y} is outside {}x{}", image.width, image.height))?;
+        let want = parse_color(&expected.color)?.to_be_bytes();
+        let tolerance = expected.tolerance.unwrap_or(24);
+        let close = (0..3).all(|i| got[i].abs_diff(want[i + 1]) <= tolerance);
+        anyhow::ensure!(
+            close == expected.is,
+            "pixel {x},{y} is #{:02x}{:02x}{:02x}, expected {}{}",
+            got[0],
+            got[1],
+            got[2],
+            if expected.is { "" } else { "anything but " },
+            expected.color
+        );
+        Ok(())
     }
 
     fn expect_screenshot(&mut self, expected: &ExpectScreenshot) -> anyhow::Result<()> {

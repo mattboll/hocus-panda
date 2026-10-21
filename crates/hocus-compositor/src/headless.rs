@@ -21,7 +21,6 @@ use smithay::{
     },
     desktop::{
         Window,
-        space::render_output,
         utils::{surface_primary_scanout_output, update_surface_primary_scanout_output},
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
@@ -42,7 +41,6 @@ use hocus_core::OutputName;
 use crate::{
     App, BACKGROUND, State,
     capture::{self, Pixels},
-    cursor::CursorElement,
     output_spec::{self, OutputSpec},
 };
 
@@ -306,26 +304,18 @@ where
     R: Renderer + ImportAll + ImportMem + Bind<T>,
     R::TextureId: Send + Clone + Texture + 'static,
 {
-    let cursor = state.cursor_elements(renderer, &out.output);
+    let elements = state.scene_elements(renderer, &out.output, true);
     let mut framebuffer = renderer
         .bind(&mut out.target)
         .inspect_err(|err| tracing::warn!(output = out.output.name(), %err, "could not bind"))
         .ok()?;
     // The buffer keeps its pixels between frames: an age of 1 redraws only
     // what changed.
-    let result = render_output::<_, CursorElement<R>, _, _>(
-        &out.output,
-        renderer,
-        &mut framebuffer,
-        1.0,
-        1,
-        [&state.space],
-        &cursor,
-        &mut out.damage_tracker,
-        BACKGROUND,
-    )
-    .inspect_err(|err| tracing::warn!(output = out.output.name(), ?err, "rendering failed"))
-    .ok()?;
+    let result = out
+        .damage_tracker
+        .render_output(renderer, &mut framebuffer, 1, &elements, BACKGROUND)
+        .inspect_err(|err| tracing::warn!(output = out.output.name(), ?err, "rendering failed"))
+        .ok()?;
     let drawn = result.damage.is_some_and(|damage| !damage.is_empty());
     if drawn {
         out.frames += 1;

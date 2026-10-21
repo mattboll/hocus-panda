@@ -1,5 +1,5 @@
 use smithay::{
-    delegate_xdg_shell,
+    delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{PopupKind, Window, find_popup_root_surface, get_popup_toplevel_coords},
     input::{Seat, pointer::GrabStartData},
     reexports::{
@@ -19,7 +19,11 @@ use smithay::{
     },
 };
 
-use smithay::output::Output;
+use smithay::{
+    output::Output,
+    reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
+    wayland::shell::xdg::decoration::XdgDecorationHandler,
+};
 
 use crate::{State, desktops::model_id, grabs::edges_of};
 
@@ -163,6 +167,31 @@ impl XdgShellHandler for State {
     }
 }
 delegate_xdg_shell!(State);
+
+/// Server-side by default: no title bar, but corners, shadow and ring. A
+/// client that asks to draw its own keeps them.
+impl XdgDecorationHandler for State {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(DecorationMode::ServerSide);
+        });
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        self.new_decoration(toplevel);
+    }
+}
+delegate_xdg_decoration!(State);
 
 /// The pointer grab that a client's move request can take over, if the
 /// request comes from the button press that started it.

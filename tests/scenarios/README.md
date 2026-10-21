@@ -45,6 +45,7 @@ Steps, one per `[[step]]` table:
 | `expect_shown = { output, desktop }` | checks which desktop an output shows, from 1 |
 | `expect_received = { app_id, event = "key 30 pressed" }` | checks the client got an event: `configure WxH`, `pointer_enter`, `pointer_leave`, `button CODE pressed`, `keyboard_enter`, `keyboard_leave`, `key CODE pressed`, `close` (and `released`) |
 | `expect_not_received = { app_id, event }` | checks the client never got an event |
+| `expect_pixel = { output, at = [x, y], color = "#rrggbb", tolerance? = 24, is? = true }` | checks one pixel of an output, in its pixels; `is = false` checks it is not that colour |
 | `expect_screenshot = { output, reference = "file.png", channel_tolerance? = 2, pixel_tolerance? = 0.0, cursor? = false }` | compares the output with a reference image next to the scenario; `cursor` draws the pointer's cursor too |
 
 Reference images are recorded with `HOCUS_BLESS=1 cargo nextest run -p
