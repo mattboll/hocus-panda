@@ -23,6 +23,7 @@ use hocus_api::Event;
 use crate::{
     App, BACKGROUND, BackendState, State,
     capture::{self, Pixels},
+    output_spec::DEFAULT_DESKTOPS,
 };
 
 /// winit does not report the refresh rate; a nominal 60 Hz.
@@ -71,6 +72,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
     );
     output.set_preferred(mode);
     state.space.map_output(&output, (0, 0));
+    state.plug_output(&output, DEFAULT_DESKTOPS);
     state.emit(|s| Event::OutputAdded {
         output: s.output_info(&output),
     });
@@ -104,6 +106,8 @@ fn on_event(app: &mut App, event: WinitEvent) {
                     None,
                     None,
                 );
+                let output = winit.output.clone();
+                app.state.output_moved(&output);
             }
             app.state.needs_redraw = true;
         }

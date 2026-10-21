@@ -6,6 +6,7 @@
 mod api;
 mod capture;
 mod clock;
+mod desktops;
 mod grabs;
 mod handlers;
 mod harness;

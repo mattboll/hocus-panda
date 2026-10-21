@@ -64,6 +64,12 @@ pub enum Step {
     Click(ButtonName),
     /// Presses and releases a key, by evdev code.
     Key(u32),
+    /// Presses keys in order and releases them in reverse, e.g.
+    /// `"super+shift+2"`: names or evdev codes.
+    Keys(String),
+    /// Sends a window to an output: its `desktop`th desktop (from 1), or the
+    /// one it shows.
+    Send(SendWindow),
     /// Moves the virtual clock forward.
     AdvanceMs(u64),
     /// Moves the virtual clock forward by whole frames.
@@ -72,6 +78,8 @@ pub enum Step {
     ExpectNoWindow(String),
     /// The app id of the focused window.
     ExpectFocus(String),
+    /// The desktop an output shows, from 1.
+    ExpectShown(ExpectShown),
     /// App ids of all windows, bottom to top.
     ExpectStack(Vec<String>),
     /// The client got this event, e.g. `"key 30 pressed"`.
@@ -86,6 +94,21 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SendWindow {
+    pub app_id: String,
+    pub output: String,
+    pub desktop: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectShown {
+    pub output: String,
+    pub desktop: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -104,6 +127,8 @@ pub struct ExpectWindow {
     /// `[x, y, width, height]`, logical.
     pub geometry: Option<[i32; 4]>,
     pub focused: Option<bool>,
+    /// Whether its desktop is shown.
+    pub visible: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -135,6 +160,9 @@ impl fmt::Display for Step {
             Self::PointerMove([x, y]) => write!(f, "pointer_move {x},{y}"),
             Self::Click(button) => write!(f, "click {button:?}"),
             Self::Key(code) => write!(f, "key {code}"),
+            Self::Keys(keys) => write!(f, "keys {keys}"),
+            Self::Send(send) => write!(f, "send {} to {}", send.app_id, send.output),
+            Self::ExpectShown(e) => write!(f, "expect_shown {} {}", e.output, e.desktop),
             Self::AdvanceMs(ms) => write!(f, "advance {ms} ms"),
             Self::Frames(n) => write!(f, "frames {n}"),
             Self::ExpectWindow(e) => write!(f, "expect_window {}", e.app_id),
@@ -247,6 +275,55 @@ impl Run<'_> {
                 }
                 Ok(())
             }
+            Step::Keys(keys) => {
+                let codes = parse_keys(keys)?;
+                for code in &codes {
+                    self.request(Request::Key {
+                        code: *code,
+                        pressed: true,
+                    })?;
+                }
+                for code in codes.iter().rev() {
+                    self.request(Request::Key {
+                        code: *code,
+                        pressed: false,
+                    })?;
+                }
+                Ok(())
+            }
+            Step::Send(send) => {
+                let window = self
+                    .find(&send.app_id)?
+                    .with_context(|| format!("no window {}", send.app_id))?;
+                self.request(Request::SendWindow {
+                    window: window.id,
+                    output: send.output.clone(),
+                    desktop: send.desktop.map(|n| n.saturating_sub(1)),
+                })?;
+                Ok(())
+            }
+            Step::ExpectShown(expected) => {
+                let Reply::Desktops(outputs) = self.request(Request::Desktops)? else {
+                    anyhow::bail!("expected desktops");
+                };
+                let output = outputs
+                    .iter()
+                    .find(|o| o.output == expected.output)
+                    .with_context(|| format!("no output {}", expected.output))?;
+                let shown = output
+                    .desktops
+                    .iter()
+                    .position(|d| d.id == output.shown)
+                    .map(|i| i + 1)
+                    .unwrap_or_default();
+                anyhow::ensure!(
+                    shown == expected.desktop,
+                    "{} shows desktop {shown}, expected {}",
+                    expected.output,
+                    expected.desktop
+                );
+                Ok(())
+            }
             Step::AdvanceMs(ms) => self.compositor.advance(Duration::from_millis(*ms)),
             Step::Frames(n) => self.compositor.advance(FRAME * *n),
             Step::ExpectWindow(expected) => self.expect_window(expected),
@@ -268,6 +345,7 @@ impl Run<'_> {
                 let stack: Vec<String> = self
                     .windows()?
                     .into_iter()
+                    .filter(|w| w.visible)
                     .map(|w| w.app_id.unwrap_or_default())
                     .collect();
                 anyhow::ensure!(
@@ -358,6 +436,14 @@ impl Run<'_> {
                 window.focused
             ));
         }
+        if let Some(visible) = expected.visible
+            && window.visible != visible
+        {
+            wrong.push(format!(
+                "visible: expected {visible}, got {}",
+                window.visible
+            ));
+        }
         anyhow::ensure!(wrong.is_empty(), "{}", wrong.join("; "));
         Ok(())
     }
@@ -443,6 +529,58 @@ impl Run<'_> {
     }
 }
 
+/// `"super+shift+2"` to evdev codes.
+fn parse_keys(keys: &str) -> anyhow::Result<Vec<u32>> {
+    keys.split('+')
+        .map(|name| {
+            let name = name.trim().to_ascii_lowercase();
+            if let Ok(code) = name.parse::<u32>()
+                && name.len() > 1
+            {
+                return Ok(code);
+            }
+            key_code(&name).with_context(|| format!("unknown key {name} in {keys}"))
+        })
+        .collect()
+}
+
+/// Evdev codes of the keys scenarios name.
+fn key_code(name: &str) -> Option<u32> {
+    const DIGITS: [u32; 10] = [11, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const LETTERS: &str = "qwertyuiopasdfghjklzxcvbnm";
+    const LETTER_CODES: [u32; 26] = [
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 30, 31, 32, 33, 34, 35, 36, 37, 38, 44, 45, 46, 47,
+        48, 49, 50,
+    ];
+    let code = match name {
+        "super" | "logo" => 125,
+        "shift" => 42,
+        "ctrl" => 29,
+        "alt" => 56,
+        "enter" => 28,
+        "escape" | "esc" => 1,
+        "tab" => 15,
+        "space" => 57,
+        "backspace" => 14,
+        "left" => 105,
+        "right" => 106,
+        "up" => 103,
+        "down" => 108,
+        _ => {
+            let mut chars = name.chars();
+            let (Some(c), None) = (chars.next(), chars.next()) else {
+                return None;
+            };
+            return match c {
+                '0'..='9' => DIGITS.get(c.to_digit(10)? as usize).copied(),
+                'a'..='z' => LETTERS.find(c).and_then(|i| LETTER_CODES.get(i).copied()),
+                _ => None,
+            };
+        }
+    };
+    Some(code)
+}
+
 /// `#rrggbb` to opaque ARGB.
 fn parse_color(color: &str) -> anyhow::Result<u32> {
     let hex = color
@@ -488,6 +626,15 @@ mod tests {
             "#,
         );
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn keys_are_named_or_coded() -> anyhow::Result<()> {
+        assert_eq!(parse_keys("super+2")?, [125, 3]);
+        assert_eq!(parse_keys("Super+Shift+a")?, [125, 42, 30]);
+        assert_eq!(parse_keys("ctrl+30")?, [29, 30]);
+        assert!(parse_keys("super+nope").is_err());
+        Ok(())
     }
 
     #[test]

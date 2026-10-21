@@ -22,9 +22,7 @@ use smithay::{
     },
 };
 
-use hocus_api::Event;
-
-use crate::{State, api::window_id, grabs::MoveGrab};
+use crate::{State, grabs::MoveGrab};
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -33,9 +31,7 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // Mapped once its first buffer tells us its size.
-        let window = Window::new_wayland_window(surface);
-        self.assign_window_id(&window);
-        self.unplaced.push(window);
+        self.unplaced.push(Window::new_wayland_window(surface));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -43,10 +39,19 @@ impl XdgShellHandler for State {
         self.unplaced
             .retain(|w| w.toplevel().is_none_or(|t| t.wl_surface() != wl_surface));
         if let Some(window) = self.window_for(wl_surface) {
-            self.space.unmap_elem(&window);
-            let id = window_id(&window);
-            self.emit(|_| Event::WindowClosed { id });
-            self.focus_top(SERIAL_COUNTER.next_serial());
+            self.unmanage(&window, SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    fn title_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.window_renamed(&window);
+        }
+    }
+
+    fn app_id_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.window_renamed(&window);
         }
     }
 

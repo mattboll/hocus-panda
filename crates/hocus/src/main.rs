@@ -62,6 +62,18 @@ enum Message {
     Key { code: u32 },
     /// Ask a window to close, by id.
     Close { window: u64 },
+    /// Each output's desktops, their windows, and the one shown.
+    Desktops,
+    /// Show an output's desktop, from 1.
+    ShowDesktop { output: String, desktop: usize },
+    /// Send a window to an output: its shown desktop, or `--desktop N`
+    /// (from 1).
+    Send {
+        window: u64,
+        output: String,
+        #[arg(long, value_name = "N")]
+        desktop: Option<usize>,
+    },
     /// Save a PNG of an output or a window.
     Screenshot {
         #[arg(long, value_name = "NAME", conflicts_with = "window")]
@@ -154,6 +166,26 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             for pressed in [true, false] {
                 client.request(Request::Key { code, pressed })?;
             }
+            Ok(())
+        }
+        Message::Desktops => print(client.request(Request::Desktops)?),
+        Message::ShowDesktop { output, desktop } => {
+            client.request(Request::ShowDesktop {
+                output,
+                index: desktop.saturating_sub(1),
+            })?;
+            Ok(())
+        }
+        Message::Send {
+            window,
+            output,
+            desktop,
+        } => {
+            client.request(Request::SendWindow {
+                window,
+                output,
+                desktop: desktop.map(|n| n.saturating_sub(1)),
+            })?;
             Ok(())
         }
         Message::Close { window } => {

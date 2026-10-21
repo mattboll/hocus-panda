@@ -98,6 +98,20 @@ pub enum Request {
     },
     /// Frame times, slow loop handlers and loop stalls.
     Stats,
+    /// Each output's desktops, with their windows, and the one it shows.
+    Desktops,
+    /// Shows the `index`th desktop (from 0) of an output.
+    ShowDesktop {
+        output: String,
+        index: usize,
+    },
+    /// Sends a window to an output: its `desktop`th desktop (from 0), or the
+    /// one it shows.
+    SendWindow {
+        window: u64,
+        output: String,
+        desktop: Option<usize>,
+    },
     /// Asks a window to close, as its close button would.
     CloseWindow {
         window: u64,
@@ -112,12 +126,15 @@ impl Request {
             | Self::Windows
             | Self::Subscribe
             | Self::Stats
+            | Self::Desktops
             | Self::Screenshot { .. } => Permission::Observe,
             Self::Scene
             | Self::PointerMove { .. }
             | Self::PointerButton { .. }
             | Self::Key { .. }
-            | Self::CloseWindow { .. } => Permission::Test,
+            | Self::CloseWindow { .. }
+            | Self::ShowDesktop { .. }
+            | Self::SendWindow { .. } => Permission::Test,
         }
     }
 }
@@ -177,8 +194,28 @@ pub enum Reply {
     Scene(Scene),
     Screenshot(Screenshot),
     Stats(Stats),
+    Desktops(Vec<OutputDesktops>),
     /// The request was carried out.
     Done,
+}
+
+/// An output's desktops: its own first, then guests from unplugged outputs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutputDesktops {
+    pub output: String,
+    pub desktops: Vec<DesktopInfo>,
+    /// Id of the desktop it shows.
+    pub shown: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopInfo {
+    pub id: u32,
+    pub name: String,
+    /// The output it belongs to and goes back to.
+    pub home: String,
+    /// Window ids, bottom to top.
+    pub windows: Vec<u64>,
 }
 
 /// How well the compositor keeps up.
@@ -266,6 +303,10 @@ pub struct WindowInfo {
     pub output: Option<String>,
     pub geometry: Rect,
     pub focused: bool,
+    /// Id of its desktop.
+    pub desktop: u32,
+    /// Whether its desktop is shown.
+    pub visible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -325,6 +366,11 @@ pub enum Event {
     },
     OutputAdded {
         output: OutputInfo,
+    },
+    /// An output shows another of its desktops.
+    DesktopShown {
+        output: String,
+        desktop: u32,
     },
     OutputRemoved {
         name: String,

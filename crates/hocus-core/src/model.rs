@@ -241,7 +241,9 @@ impl Model {
         Ok(())
     }
 
-    /// Shows a desktop of an output; the other outputs do not change.
+    /// Shows a desktop of an output; the other outputs do not change. Focus
+    /// goes to that desktop: its most recently focused window, or none when
+    /// it is empty, so that typing never lands on another output by surprise.
     pub fn show(&mut self, output: &OutputName, desktop: DesktopId) -> Result<(), ModelError> {
         let out = self
             .outputs
@@ -251,8 +253,23 @@ impl Model {
         if !out.desktops.contains(&desktop) {
             return Err(ModelError::NotOnOutput);
         }
+        if out.shown == desktop {
+            return Ok(());
+        }
         out.shown = desktop;
-        self.refocus();
+        self.focused = self
+            .recent
+            .iter()
+            .rev()
+            .copied()
+            .find(|w| self.windows.get(w) == Some(&desktop));
+        if self.focused.is_none() {
+            // Windows never focused yet: the top one.
+            self.focused = self
+                .desktops
+                .get(&desktop)
+                .and_then(|d| d.windows.last().copied());
+        }
         Ok(())
     }
 
@@ -310,6 +327,12 @@ impl Model {
         }
         self.refocus();
         Ok(())
+    }
+
+    /// Leaves no window focused, as a click on the background does. The next
+    /// change that needs a focused window picks the most recent visible one.
+    pub fn clear_focus(&mut self) {
+        self.focused = None;
     }
 
     /// Focuses and raises a window. A hidden window's desktop is shown first.
@@ -592,6 +615,29 @@ mod tests {
         // Switching back shows a; focus follows the shown windows.
         model.show_nth(&external(), 0)?;
         assert_eq!(model.focused(), Some(a));
+        Ok(())
+    }
+
+    #[test]
+    fn switching_a_desktop_moves_focus_there() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let chat = model.open_window(&laptop())?;
+        let editor = model.open_window(&external())?;
+
+        model.show_nth(&external(), 1)?;
+        // An empty desktop: no window gets the keys meant for it.
+        assert_eq!(model.focused(), None);
+
+        model.show_nth(&external(), 0)?;
+        assert_eq!(model.focused(), Some(editor));
+
+        model.focus(chat)?;
+        model.show_nth(&external(), 0)?;
+        assert_eq!(
+            model.focused(),
+            Some(chat),
+            "showing the shown desktop changes nothing"
+        );
         Ok(())
     }
 

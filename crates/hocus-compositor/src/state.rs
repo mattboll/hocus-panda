@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use anyhow::Context;
 use smithay::{
@@ -15,6 +15,7 @@ use smithay::{
     utils::{Logical, Point, Serial},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
+        foreign_toplevel_list::ForeignToplevelListState,
         output::OutputManagerState,
         selection::data_device::DataDeviceState,
         shell::xdg::XdgShellState,
@@ -22,12 +23,10 @@ use smithay::{
     },
 };
 
-use hocus_api::Event;
+use hocus_core::{Model, WindowId};
 
 use crate::{
-    Clock,
-    api::{self, EncodedScreenshot},
-    stats::Measures,
+    Clock, api::EncodedScreenshot, desktops::Managed, handlers::WorkspaceState, stats::Measures,
     watchdog::Watchdog,
 };
 
@@ -41,8 +40,15 @@ pub struct State {
     pub api: hocus_api::Server,
     /// Where screenshot workers send their PNG.
     pub screenshots: Sender<EncodedScreenshot>,
-    /// The last window id given.
-    pub next_window_id: u64,
+    /// Outputs, their desktops, their windows, and focus.
+    pub model: Model,
+    /// The windows of the model; those on hidden desktops are not in the
+    /// space.
+    pub windows: BTreeMap<WindowId, Managed>,
+    /// ext-foreign-toplevel-list: windows for taskbars and switchers.
+    pub foreign_toplevels: ForeignToplevelListState,
+    /// ext-workspace: outputs as groups, desktops as workspaces.
+    pub workspaces: WorkspaceState,
     pub measures: Measures,
     /// Stops with the state.
     pub watchdog: Option<Watchdog>,
@@ -86,7 +92,10 @@ impl State {
             loop_signal,
             api,
             screenshots,
-            next_window_id: 0,
+            model: Model::new(),
+            windows: BTreeMap::new(),
+            foreign_toplevels: ForeignToplevelListState::new::<Self>(dh),
+            workspaces: WorkspaceState::new(dh),
             measures: Measures::default(),
             watchdog: None,
             space: Space::default(),
@@ -103,10 +112,12 @@ impl State {
         })
     }
 
-    /// The window whose toplevel surface is `surface`, placed or not.
+    /// The window whose toplevel surface is `surface`: managed, shown or
+    /// not, or waiting for its first buffer.
     pub fn window_for(&self, surface: &WlSurface) -> Option<Window> {
-        self.space
-            .elements()
+        self.windows
+            .values()
+            .map(|m| &m.window)
             .chain(self.unplaced.iter())
             .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .cloned()
@@ -126,15 +137,10 @@ impl State {
             })
     }
 
-    /// Places the windows that just got their first buffer, centred on the
-    /// first output, and gives them focus.
+    /// Manages the windows that just got their first buffer, on the output
+    /// under the pointer.
     pub fn place_new_windows(&mut self, serial: Serial) {
-        let Some(area) = self
-            .space
-            .outputs()
-            .next()
-            .and_then(|o| self.space.output_geometry(o))
-        else {
+        let Some(output) = self.output_under_pointer() else {
             return;
         };
         let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.unplaced)
@@ -142,47 +148,8 @@ impl State {
             .partition(|w| !w.geometry().size.is_empty());
         self.unplaced = waiting;
         for window in ready {
-            let size = window.geometry().size;
-            let loc =
-                area.loc + Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2));
-            self.space.map_element(window.clone(), loc, true);
-            self.emit(|s| Event::WindowOpened {
-                window: s.window_info(&window),
-            });
-            self.focus(Some(&window), serial);
+            self.manage(window, &output, serial);
         }
-    }
-
-    /// Raises `window` and gives it keyboard focus; `None` clears the focus.
-    pub fn focus(&mut self, window: Option<&Window>, serial: Serial) {
-        let before = self.focused_window();
-        if let Some(window) = window {
-            self.space.raise_element(window, true);
-        }
-        for w in self.space.elements() {
-            w.set_activated(Some(w) == window);
-            if let Some(toplevel) = w.toplevel() {
-                toplevel.send_pending_configure();
-            }
-        }
-        let surface = window
-            .and_then(|w| w.toplevel())
-            .map(|t| t.wl_surface().clone());
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, surface, serial);
-        }
-        if before.as_ref() != window {
-            self.emit(|_| Event::WindowFocused {
-                id: window.map(api::window_id),
-            });
-        }
-        self.needs_redraw = true;
-    }
-
-    /// Gives focus to the topmost window, if any.
-    pub fn focus_top(&mut self, serial: Serial) {
-        let top = self.space.elements().last().cloned();
-        self.focus(top.as_ref(), serial);
     }
 }
 

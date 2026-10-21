@@ -1,0 +1,45 @@
+description = "Super+2 switches only the output under the pointer"
+outputs = ["1280x800/1", "1920x1080"]
+
+[[step]]
+open = { app_id = "chat", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+pointer_move = [1800, 500]
+
+[[step]]
+open = { app_id = "editor", size = [800, 600], color = "#ff6600" }
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-2", visible = true }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_shown = { output = "HEADLESS-2", desktop = 2 }
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_window = { app_id = "editor", visible = false }
+
+[[step]]
+# Focus went to the empty desktop: the laptop's window does not get the keys.
+expect_window = { app_id = "chat", output = "HEADLESS-1", visible = true, focused = false }
+
+[[step]]
+keys = "super+1"
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-2", visible = true, focused = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "switch-desktop-on-pointer-output.laptop.png" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "switch-desktop-on-pointer-output.external.png" }
