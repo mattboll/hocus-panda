@@ -2,3 +2,8 @@
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# Ports and packages install their libraries in /usr/local/lib, which the
+# linker does not search by default.
+[target.x86_64-unknown-freebsd]
+rustflags = ["-L", "native=/usr/local/lib"]
