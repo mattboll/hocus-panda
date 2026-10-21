@@ -1,0 +1,68 @@
+description = "Windows have rounded corners and a shadow; only the focused one has the accent ring"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "left", size = [400, 300], color = "#3399ff" }
+
+# Moved to the left with Alt+drag, to make room.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [220, 400]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+open = { app_id = "right", size = [400, 300], color = "#f2a65a" }
+
+[[step]]
+expect_window = { app_id = "left", geometry = [20, 250, 400, 300] }
+
+[[step]]
+expect_window = { app_id = "right", geometry = [440, 250, 400, 300], focused = true }
+
+[[step]]
+frames = 1
+
+# The ring hugs the focused window, just outside its left edge.
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [439, 400], color = "#7bc47f" }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [420, 400], color = "#7bc47f", is = false }
+
+# The very corner pixel shows what is behind, not the window.
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [440, 250], color = "#f2a65a", is = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "decorations-follow-focus.right.png" }
+
+[[step]]
+pointer_move = [200, 400]
+
+[[step]]
+click = "left"
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [420, 400], color = "#7bc47f" }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [439, 400], color = "#7bc47f", is = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "decorations-follow-focus.left.png" }

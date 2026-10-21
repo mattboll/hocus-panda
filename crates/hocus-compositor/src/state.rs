@@ -18,7 +18,7 @@ use smithay::{
         foreign_toplevel_list::ForeignToplevelListState,
         output::OutputManagerState,
         selection::data_device::DataDeviceState,
-        shell::xdg::XdgShellState,
+        shell::xdg::{XdgShellState, decoration::XdgDecorationState},
         shm::ShmState,
     },
 };
@@ -29,6 +29,7 @@ use crate::{
     Clock,
     api::EncodedScreenshot,
     cursor::Arrows,
+    decoration::{Style, Textures},
     desktops::{Managed, Places},
     handlers::WorkspaceState,
     stats::Measures,
@@ -50,6 +51,10 @@ pub struct State {
     /// The windows of the model; those on hidden desktops are not in the
     /// space.
     pub windows: BTreeMap<WindowId, Managed>,
+    /// How windows are decorated, and the textures that draws with.
+    pub style: Style,
+    pub textures: Textures,
+    pub xdg_decoration_state: XdgDecorationState,
     /// What the pointer looks like, as clients set it.
     pub cursor: CursorImageStatus,
     pub arrows: Arrows,
@@ -105,6 +110,9 @@ impl State {
             model: Model::new(),
             windows: BTreeMap::new(),
             places: Places::new(),
+            style: Style::default(),
+            textures: Textures::default(),
+            xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
             cursor: CursorImageStatus::default_named(),
             arrows: Arrows::default(),
             foreign_toplevels: ForeignToplevelListState::new::<Self>(dh),

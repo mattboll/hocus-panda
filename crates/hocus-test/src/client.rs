@@ -134,7 +134,9 @@ impl SolidWindow {
         let _seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).context("no wl_seat")?;
 
         let surface = compositor.create_surface(&qh);
-        let window = xdg_shell.create_window(surface, WindowDecorations::None, &qh);
+        // Server-side decorations: the compositor draws corners, shadow and
+        // ring.
+        let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
         window.set_app_id(self.app_id.clone());
         window.set_min_size(Some((self.width, self.height)));
         window.commit();

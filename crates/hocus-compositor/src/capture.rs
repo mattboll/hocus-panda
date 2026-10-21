@@ -8,24 +8,15 @@ use smithay::{
         renderer::{
             Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             damage::OutputDamageTracker,
-            element::{AsRenderElements, render_elements, surface::WaylandSurfaceRenderElement},
+            element::{AsRenderElements, surface::WaylandSurfaceRenderElement},
         },
     },
-    desktop::{
-        Window,
-        space::{SpaceRenderElements, space_render_elements},
-    },
+    desktop::Window,
     output::Output,
     utils::{Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
-use crate::{BACKGROUND, State, cursor::CursorElement};
-
-render_elements! {
-    CaptureElement<R, E> where R: ImportAll + ImportMem;
-    Cursor=CursorElement<R>,
-    Space=SpaceRenderElements<R, E>,
-}
+use crate::{BACKGROUND, State};
 
 /// Pixels read back from a renderer: rows of RGBA bytes, top to bottom.
 #[derive(Debug)]
@@ -66,22 +57,7 @@ where
         .context("the output has no mode")?
         .size;
     let scale = output.current_scale().fractional_scale();
-    let mut elements: Vec<CaptureElement<R, WaylandSurfaceRenderElement<R>>> = Vec::new();
-    // Front first: the cursor above the windows.
-    if cursor {
-        elements.extend(
-            state
-                .cursor_elements(renderer, output)
-                .into_iter()
-                .map(CaptureElement::Cursor),
-        );
-    }
-    elements.extend(
-        space_render_elements::<_, Window, _>(renderer, [&state.space], output, 1.0)
-            .context("the output has no mode")?
-            .into_iter()
-            .map(CaptureElement::Space),
-    );
+    let elements = state.scene_elements(renderer, output, cursor);
     draw(renderer, size, scale, &elements, BACKGROUND)
 }
 

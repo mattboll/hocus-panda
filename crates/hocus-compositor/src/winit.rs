@@ -7,12 +7,11 @@ use smithay::{
     backend::{
         renderer::{
             damage::OutputDamageTracker,
-            element::surface::WaylandSurfaceRenderElement,
             gles::{GlesRenderer, GlesTexture},
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    desktop::{Window, space::render_output},
+    desktop::Window,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::LoopHandle,
     utils::Transform,
@@ -149,6 +148,8 @@ impl WinitBackend {
     fn render(&mut self, state: &mut State) {
         let start = Instant::now();
         let damage = {
+            // The host draws the cursor of the nested window.
+            let elements = state.scene_elements(self.backend.renderer(), &self.output, false);
             let (renderer, mut framebuffer) = match self.backend.bind() {
                 Ok(bound) => bound,
                 Err(err) => {
@@ -156,15 +157,11 @@ impl WinitBackend {
                     return;
                 }
             };
-            match render_output::<_, WaylandSurfaceRenderElement<GlesRenderer>, _, _>(
-                &self.output,
+            match self.damage_tracker.render_output(
                 renderer,
                 &mut framebuffer,
-                1.0,
                 0,
-                [&state.space],
-                &[],
-                &mut self.damage_tracker,
+                &elements,
                 BACKGROUND,
             ) {
                 Ok(result) => result.damage.cloned(),
