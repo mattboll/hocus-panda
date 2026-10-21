@@ -1,0 +1,32 @@
+description = "A fullscreen window on the external output stays when the laptop switches desktop"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+pointer_move = [1800, 500]
+
+[[step]]
+open = { app_id = "video", size = [640, 360], color = "#ff6600" }
+
+[[step]]
+set_state = { app_id = "video", state = "fullscreen" }
+
+[[step]]
+expect_window = { app_id = "video", output = "HEADLESS-2", geometry = [1280, 0, 1920, 1080], state = "fullscreen" }
+
+[[step]]
+pointer_move = [600, 400]
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+expect_window = { app_id = "video", geometry = [1280, 0, 1920, 1080], state = "fullscreen", visible = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "fullscreen-stays-on-its-output.png" }

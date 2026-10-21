@@ -129,6 +129,11 @@ pub enum Request {
     SetPrimaryOutput {
         output: String,
     },
+    /// Maximizes, makes fullscreen, minimizes or restores a window.
+    SetWindowState {
+        window: u64,
+        state: WindowState,
+    },
     /// Asks a window to close, as its close button would.
     CloseWindow {
         window: u64,
@@ -150,6 +155,7 @@ impl Request {
             | Self::PointerButton { .. }
             | Self::Key { .. }
             | Self::CloseWindow { .. }
+            | Self::SetWindowState { .. }
             | Self::ShowDesktop { .. }
             | Self::SendWindow { .. }
             | Self::PlugOutput { .. }
@@ -325,8 +331,19 @@ pub struct WindowInfo {
     pub focused: bool,
     /// Id of its desktop.
     pub desktop: u32,
-    /// Whether its desktop is shown.
+    /// Whether its desktop is shown and it is not minimized.
     pub visible: bool,
+    pub state: WindowState,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowState {
+    #[default]
+    Normal,
+    Maximized,
+    Fullscreen,
+    Minimized,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -9,6 +9,7 @@ use hocus_core::{DesktopId, ModelError, OutputName, Rect, WindowId};
 use smithay::{
     desktop::Window,
     output::Output,
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         compositor::with_states, foreign_toplevel_list::ForeignToplevelHandle,
@@ -16,7 +17,7 @@ use smithay::{
     },
 };
 
-use crate::{State, api};
+use crate::{State, api, window_mode::WindowMode};
 
 /// Window places per layout of outputs (see [`State::remember_places`]).
 pub type Places = BTreeMap<String, BTreeMap<WindowId, Point<i32, Logical>>>;
@@ -29,6 +30,7 @@ pub struct Managed {
     pub location: Point<i32, Logical>,
     /// Its ext-foreign-toplevel-list handle.
     pub foreign: ForeignToplevelHandle,
+    pub mode: WindowMode,
 }
 
 /// The model's id of a window, kept in its user data.
@@ -212,6 +214,7 @@ impl State {
                 window: window.clone(),
                 location,
                 foreign,
+                mode: WindowMode::Normal,
             },
         );
         self.sync_desktops();
@@ -219,6 +222,15 @@ impl State {
             window: s.window_info(&window),
         });
         self.apply_focus(serial);
+        // Asked before its first buffer.
+        if let Some(toplevel) = window.toplevel() {
+            let wanted = toplevel.with_pending_state(|p| p.states.clone());
+            if wanted.contains(xdg_toplevel::State::Fullscreen) {
+                self.set_fullscreen(id, true, None, serial);
+            } else if wanted.contains(xdg_toplevel::State::Maximized) {
+                self.set_maximized(id, true, serial);
+            }
+        }
     }
 
     /// Stops managing a window that is gone.
@@ -334,7 +346,7 @@ impl State {
             .model
             .outputs()
             .iter()
-            .flat_map(|o| self.model.visible_windows(&o.name).iter().copied())
+            .flat_map(|o| self.model.visible_windows(&o.name))
             .collect();
         for (id, managed) in &self.windows {
             if !shown.contains(id) {

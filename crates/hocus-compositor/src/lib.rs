@@ -18,6 +18,7 @@ mod socket;
 mod state;
 mod stats;
 mod watchdog;
+mod window_mode;
 mod winit;
 
 use std::{

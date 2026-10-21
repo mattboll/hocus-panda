@@ -1,0 +1,36 @@
+description = "A maximized window fills its output's work area, and comes back to its place"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+set_state = { app_id = "doc", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-1", geometry = [0, 0, 1280, 800], state = "maximized", focused = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "maximize-fills-work-area.png" }
+
+[[step]]
+set_state = { app_id = "doc", state = "normal" }
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [440, 250, 400, 300], state = "normal" }
+
+# The same with Super+Up, on the focused window.
+[[step]]
+keys = "super+up"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [0, 0, 1280, 800], state = "maximized" }
+
+[[step]]
+keys = "super+up"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [440, 250, 400, 300], state = "normal" }

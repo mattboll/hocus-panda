@@ -33,9 +33,10 @@ Steps, one per `[[step]]` table:
 | `send = { app_id, output, desktop? }` | sends a window to an output: its desktop `desktop` (from 1), or the shown one |
 | `plug = { spec = "1920x1080+1280+0", name? }` | plugs an output; `name` brings back one unplugged before |
 | `unplug = "HEADLESS-2"` | unplugs an output |
+| `set_state = { app_id, state = "maximized" }` | maximizes, makes fullscreen, minimizes or restores (`normal`) a window |
 | `advance_ms = 500` | moves the virtual clock forward |
 | `frames = 1` | moves the virtual clock forward by whole frames |
-| `expect_window = { app_id, output?, geometry? = [x, y, w, h], focused?, visible? }` | checks a window; `visible` is whether its desktop is shown |
+| `expect_window = { app_id, output?, geometry? = [x, y, w, h], focused?, visible?, state? }` | checks a window, waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized |
 | `expect_no_window = "app_id"` | checks a window is gone |
 | `expect_focus = "app_id"` | checks which window has keyboard focus |
 | `expect_stack = ["below", "above"]` | checks the shown windows, bottom to top |

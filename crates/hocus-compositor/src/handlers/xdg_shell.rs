@@ -9,7 +9,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             Resource,
-            protocol::{wl_seat, wl_surface::WlSurface},
+            protocol::{wl_output, wl_seat, wl_surface::WlSurface},
         },
     },
     utils::{SERIAL_COUNTER, Serial},
@@ -22,7 +22,16 @@ use smithay::{
     },
 };
 
-use crate::{State, grabs::MoveGrab};
+use smithay::output::Output;
+
+use crate::{State, desktops::model_id, grabs::MoveGrab};
+
+impl State {
+    /// The model's id of the managed window of `surface`.
+    fn managed_id(&self, surface: &WlSurface) -> Option<hocus_core::WindowId> {
+        self.window_for(surface).as_ref().and_then(model_id)
+    }
+}
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -52,6 +61,48 @@ impl XdgShellHandler for State {
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
             self.window_renamed(&window);
+        }
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        match self.managed_id(surface.wl_surface()) {
+            Some(id) => self.set_maximized(id, true, SERIAL_COUNTER.next_serial()),
+            // Applied when it is managed, on its first buffer.
+            None => surface.with_pending_state(|p| {
+                p.states.set(xdg_toplevel::State::Maximized);
+            }),
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self.managed_id(surface.wl_surface()) {
+            self.set_maximized(id, false, SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    fn fullscreen_request(
+        &mut self,
+        surface: ToplevelSurface,
+        output: Option<wl_output::WlOutput>,
+    ) {
+        let output = output.as_ref().and_then(Output::from_resource);
+        match self.managed_id(surface.wl_surface()) {
+            Some(id) => self.set_fullscreen(id, true, output, SERIAL_COUNTER.next_serial()),
+            None => surface.with_pending_state(|p| {
+                p.states.set(xdg_toplevel::State::Fullscreen);
+            }),
+        }
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self.managed_id(surface.wl_surface()) {
+            self.set_fullscreen(id, false, None, SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self.managed_id(surface.wl_surface()) {
+            self.minimize(id, SERIAL_COUNTER.next_serial());
         }
     }
 

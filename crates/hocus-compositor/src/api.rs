@@ -5,7 +5,7 @@ use base64::Engine;
 use hocus_api::{
     ApiError, ConnectionId, DesktopInfo, ErrorCode, Event, Handler, Layer, OutputDesktops,
     OutputInfo, Point, Rect, Reply, Request, Scene, SceneOutput, Screenshot, Server, Target,
-    VersionInfo, WindowInfo,
+    VersionInfo, WindowInfo, WindowState,
 };
 use smithay::{
     backend::input::{ButtonState, KeyState},
@@ -20,6 +20,7 @@ use crate::{
     App, BackendState, OutputSpec, State,
     capture::Pixels,
     desktops::{model_id, title_and_app_id},
+    window_mode::WindowMode,
 };
 
 /// Evdev codes are offset by 8 in XKB.
@@ -50,7 +51,14 @@ impl State {
     }
 
     pub fn window_info(&self, window: &Window) -> WindowInfo {
-        let geometry = self.space.element_geometry(window).unwrap_or_default();
+        // A hidden window is where it will show again.
+        let geometry = self.space.element_geometry(window).unwrap_or_else(|| {
+            let location = model_id(window)
+                .and_then(|id| self.windows.get(&id))
+                .map(|m| m.location)
+                .unwrap_or_default();
+            Rectangle::new(location, window.geometry().size)
+        });
         let (title, app_id) = title_and_app_id(window);
         WindowInfo {
             id: window_id(window),
@@ -64,6 +72,7 @@ impl State {
                 .map(|d| d.0)
                 .unwrap_or_default(),
             visible: self.space.element_location(window).is_some(),
+            state: self.window_state(window),
         }
     }
 
@@ -78,6 +87,20 @@ impl State {
             })
             .max_by_key(|(area, _)| *area)
             .map(|(_, o)| o)
+    }
+
+    fn window_state(&self, window: &Window) -> WindowState {
+        let Some(id) = model_id(window) else {
+            return WindowState::Normal;
+        };
+        if self.model.is_minimized(id) {
+            return WindowState::Minimized;
+        }
+        match self.windows.get(&id).map(|m| m.mode) {
+            Some(WindowMode::Maximized { .. }) => WindowState::Maximized,
+            Some(WindowMode::Fullscreen { .. }) => WindowState::Fullscreen,
+            _ => WindowState::Normal,
+        }
     }
 
     pub fn find_output(&self, name: &str) -> Option<Output> {
@@ -342,6 +365,36 @@ impl App {
                     key_state,
                     state.time_msec(),
                 );
+                Reply::Done
+            }
+            Request::SetWindowState {
+                window,
+                state: wanted,
+            } => {
+                let id = hocus_core::WindowId(window);
+                if !state.windows.contains_key(&id) {
+                    return Some(Err(ApiError::new(
+                        ErrorCode::NotFound,
+                        format!("no window with id {window}"),
+                    )));
+                }
+                let serial = SERIAL_COUNTER.next_serial();
+                // From whatever it is now to what is asked.
+                if state.model.is_minimized(id) {
+                    state.restore(id, serial);
+                }
+                match wanted {
+                    WindowState::Normal => {
+                        state.set_fullscreen(id, false, None, serial);
+                        state.set_maximized(id, false, serial);
+                    }
+                    WindowState::Maximized => {
+                        state.set_fullscreen(id, false, None, serial);
+                        state.set_maximized(id, true, serial);
+                    }
+                    WindowState::Fullscreen => state.set_fullscreen(id, true, None, serial),
+                    WindowState::Minimized => state.minimize(id, serial),
+                }
                 Reply::Done
             }
             Request::CloseWindow { window: wanted } => {
