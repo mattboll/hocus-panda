@@ -173,6 +173,7 @@ fn gles_offscreen(
     specs: &[OutputSpec],
     state: &mut State,
 ) -> anyhow::Result<Canvas<GlesRenderer, GlesTexture>> {
+    anyhow::ensure!(egl_available(), "libEGL.so.1 is not installed");
     let device = EGLDevice::enumerate()
         .context("could not list EGL devices")?
         .find(|device| {
@@ -188,6 +189,16 @@ fn gles_offscreen(
     #[allow(unsafe_code)]
     let renderer = unsafe { GlesRenderer::new(context) }.context("could not start GLES")?;
     Canvas::new(renderer, Fourcc::Abgr8888, specs, state)
+}
+
+/// smithay panics when it cannot load libEGL: ask the loader first.
+fn egl_available() -> bool {
+    // SAFETY: loading libEGL runs its initialisers, the same ones smithay
+    // runs when it loads the library right after; nothing else loads
+    // libraries concurrently while the compositor starts.
+    #[allow(unsafe_code)]
+    let library = unsafe { libloading::Library::new("libEGL.so.1") };
+    library.is_ok()
 }
 
 impl<R, T> Canvas<R, T>

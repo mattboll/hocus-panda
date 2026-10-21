@@ -732,6 +732,7 @@ dependencies = [
  "anyhow",
  "base64",
  "hocus-api",
+ "libloading",
  "png",
  "rustix 1.1.5",
  "serde_json",
