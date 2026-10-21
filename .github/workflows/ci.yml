@@ -52,3 +52,24 @@ jobs:
           name: test-artifacts
           path: target/test-artifacts/
           if-no-files-found: ignore
+
+  freebsd:
+    # A build that breaks on FreeBSD shows on the pull request that breaks it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and test on FreeBSD 14
+        uses: vmactions/freebsd-vm@v1
+        with:
+          # The newest 14.x release.
+          release: "14"
+          usesh: true
+          prepare: |
+            pkg install -y curl pkgconf wayland libxkbcommon pixman mesa-libs libdrm
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain none
+          run: |
+            . "$HOME/.cargo/env"
+            cargo build --workspace --all-targets
+            cargo test --workspace
