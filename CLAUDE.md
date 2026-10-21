@@ -39,9 +39,16 @@ target/debug/hocus msg --socket <control socket> windows   # also: outputs, scen
 ```
 
 Tests drive a headless compositor in-process on a virtual clock
-(`hocus_compositor::Headless`, see `crates/hocus-test/tests/`).
+(`hocus_compositor::Headless`, see `crates/hocus-test/tests/`). Acceptance
+scenarios are TOML files in `tests/scenarios/` (format in its README):
 
-Update this section as commands land (scenarios, VM scripts).
+```sh
+cargo nextest run -p hocus-test --test scenarios         # all scenarios
+HOCUS_BLESS=1 cargo nextest run -p hocus-test --test scenarios  # record references
+target/debug/hocus scenario run tests/scenarios/click-to-focus.toml
+```
+
+Update this section as commands land (VM scripts).
 
 ## Hard rules
 

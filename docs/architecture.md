@@ -132,6 +132,8 @@ still stubs.
   pointer, press keys, plug an output, advance virtual time) and
   expectations (scene state, focus, positions, screenshot within tolerance).
   They run headless on a virtual clock, so animations are deterministic.
+  Each runs on its own compositor in-process, through the control API;
+  the format is described in `tests/scenarios/README.md`.
 - **Test clients**: a small in-repo client that draws known colours and
   reports what it receives, plus real ones (foot, Firefox) for smoke tests.
 - **Reference screenshots** reviewed in pull requests.

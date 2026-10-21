@@ -1,0 +1,34 @@
+description = "Closing the focused window gives focus to the one below"
+
+[[step]]
+open = { app_id = "below", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "above", size = [200, 100], color = "#ff6600" }
+
+[[step]]
+key = 30
+
+[[step]]
+expect_received = { app_id = "above", event = "key 30 pressed" }
+
+[[step]]
+close = "above"
+
+[[step]]
+expect_no_window = "above"
+
+[[step]]
+expect_focus = "below"
+
+[[step]]
+key = 48
+
+[[step]]
+expect_received = { app_id = "below", event = "key 48 pressed" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "close-window.png" }

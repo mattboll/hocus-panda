@@ -1,0 +1,17 @@
+description = "A new window opens centred on the first output, with keyboard focus"
+outputs = ["2560x1600@2", "1920x1080"]
+
+[[step]]
+open = { app_id = "first", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_window = { app_id = "first", output = "HEADLESS-1", geometry = [440, 250, 400, 300], focused = true }
+
+[[step]]
+expect_received = { app_id = "first", event = "keyboard_enter" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "open-window.png" }

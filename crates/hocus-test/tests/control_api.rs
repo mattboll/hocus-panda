@@ -19,18 +19,23 @@ use hocus_test::client::SolidWindow;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-const BACK: SolidWindow = SolidWindow {
-    app_id: "test.back",
-    width: 400,
-    height: 300,
-    argb: 0xff_33_99_ff,
-};
-const FRONT: SolidWindow = SolidWindow {
-    app_id: "test.front",
-    width: 200,
-    height: 100,
-    argb: 0xff_ff_66_00,
-};
+fn back() -> SolidWindow {
+    SolidWindow {
+        app_id: "test.back".into(),
+        width: 400,
+        height: 300,
+        argb: 0xff_33_99_ff,
+    }
+}
+
+fn front() -> SolidWindow {
+    SolidWindow {
+        app_id: "test.front".into(),
+        width: 200,
+        height: 100,
+        argb: 0xff_ff_66_00,
+    }
+}
 
 fn compositor(permission: Permission) -> anyhow::Result<Headless> {
     Headless::start_with(
@@ -48,7 +53,7 @@ fn compositor(permission: Permission) -> anyhow::Result<Headless> {
 /// Opens `windows` one after the other, so that the last one is on top.
 fn open(compositor: &mut Headless, windows: &[SolidWindow]) -> anyhow::Result<()> {
     for (n, window) in windows.iter().enumerate() {
-        let _client = window.spawn(compositor.socket_path())?;
+        let _client = window.clone().spawn(compositor.socket_path())?;
         compositor.dispatch_until(TIMEOUT, |c| c.window_count() == n + 1)?;
     }
     Ok(())
@@ -83,7 +88,7 @@ fn windows(client: &mut Client) -> Result<Vec<WindowInfo>, ClientError> {
 #[test]
 fn lists_a_window_with_its_app_id_output_and_geometry() -> anyhow::Result<()> {
     let mut compositor = compositor(Permission::Observe)?;
-    open(&mut compositor, &[BACK])?;
+    open(&mut compositor, &[back()])?;
 
     let windows = with_client(&mut compositor, windows)?;
 
@@ -109,7 +114,7 @@ fn lists_a_window_with_its_app_id_output_and_geometry() -> anyhow::Result<()> {
 #[test]
 fn a_click_on_the_back_window_focuses_it() -> anyhow::Result<()> {
     let mut compositor = compositor(Permission::Test)?;
-    open(&mut compositor, &[BACK, FRONT])?;
+    open(&mut compositor, &[back(), front()])?;
 
     let (back, events, scene) = with_client(&mut compositor, |client| {
         let windows = windows(client)?;
@@ -173,7 +178,7 @@ fn input_injection_is_refused_without_the_test_permission() -> anyhow::Result<()
 #[test]
 fn a_screenshot_of_an_output_is_a_png_of_its_pixel_size() -> anyhow::Result<()> {
     let mut compositor = compositor(Permission::Observe)?;
-    open(&mut compositor, &[BACK])?;
+    open(&mut compositor, &[back()])?;
 
     let reply = with_client(&mut compositor, |client| {
         client.request(Request::Screenshot {
@@ -195,7 +200,7 @@ fn a_screenshot_of_an_output_is_a_png_of_its_pixel_size() -> anyhow::Result<()> 
 #[test]
 fn a_screenshot_of_a_window_has_its_size_on_its_output() -> anyhow::Result<()> {
     let mut compositor = compositor(Permission::Observe)?;
-    open(&mut compositor, &[BACK])?;
+    open(&mut compositor, &[back()])?;
 
     let reply = with_client(&mut compositor, |client| {
         let id = windows(client)?.first().map(|w| w.id).unwrap_or_default();
