@@ -14,6 +14,8 @@ mod input;
 mod output_spec;
 mod socket;
 mod state;
+mod stats;
+mod watchdog;
 mod winit;
 
 use std::{
@@ -29,10 +31,11 @@ use smithay::reexports::{
 };
 
 pub use clock::Clock;
-pub use harness::Headless;
+pub use harness::{HarnessOptions, Headless};
 pub use headless::{FRAME, HeadlessConfig, OutputInfo, RendererChoice, RendererKind};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use state::State;
+pub use watchdog::WatchdogConfig;
 
 /// The dark theme's base colour, until themes exist.
 const BACKGROUND: [f32; 4] = [0.055, 0.059, 0.071, 1.0];
@@ -59,6 +62,8 @@ pub struct Options {
     pub spawn: Vec<String>,
     /// What clients of the control socket may do.
     pub api_permission: Permission,
+    /// `None` runs without a watchdog.
+    pub watchdog: Option<WatchdogConfig>,
 }
 
 /// What the event loop owns: the compositor state and its backend.
@@ -136,9 +141,11 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         .handle()
         .insert_source(encoded, |event, _, app: &mut App| {
             if let channel::Event::Msg((connection, id, result)) = event {
-                app.state
-                    .api
-                    .reply(connection, id, result.map(Reply::Screenshot));
+                app.timed("screenshot reply", |app| {
+                    app.state
+                        .api
+                        .reply(connection, id, result.map(Reply::Screenshot));
+                });
             }
         })
         .map_err(|err| err.error)
@@ -153,6 +160,9 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         screenshots,
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
+    if let Some(config) = &options.watchdog {
+        state.watchdog = Some(watchdog::start(&event_loop.handle(), config.clone())?);
+    }
 
     let backend = match &options.backend {
         Backend::Winit => {

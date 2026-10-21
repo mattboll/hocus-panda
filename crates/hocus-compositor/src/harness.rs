@@ -14,9 +14,20 @@ use hocus_api::{ClientError, Event, Permission, Reply, Request, RequestLine, Ser
 use smithay::reexports::calloop::EventLoop;
 
 use crate::{
-    App, Backend, BackendState, Clock, HeadlessConfig, Options, RuntimeDir, Started,
+    App, Backend, BackendState, Clock, HeadlessConfig, Options, RuntimeDir, Started, State,
+    WatchdogConfig,
     headless::{FRAME, HeadlessBackend, OutputInfo, RendererKind},
 };
+
+/// How to start a [`Headless`] compositor.
+#[derive(Debug, Clone)]
+pub struct HarnessOptions {
+    pub headless: HeadlessConfig,
+    pub api_permission: Permission,
+    /// The watchdog runs on real time: the harness must keep dispatching
+    /// while it is on, or it takes the waits between steps for stalls.
+    pub watchdog: Option<WatchdogConfig>,
+}
 
 /// A headless compositor in a private runtime directory, on a virtual clock.
 #[derive(Debug)]
@@ -81,11 +92,20 @@ impl Headless {
     }
 
     pub fn start_with(config: HeadlessConfig, api_permission: Permission) -> anyhow::Result<Self> {
+        Self::start_options(HarnessOptions {
+            headless: config,
+            api_permission,
+            watchdog: None,
+        })
+    }
+
+    pub fn start_options(harness: HarnessOptions) -> anyhow::Result<Self> {
         let options = Options {
-            backend: Backend::Headless(config),
+            backend: Backend::Headless(harness.headless),
             runtime_dir: None,
             spawn: Vec::new(),
-            api_permission,
+            api_permission: harness.api_permission,
+            watchdog: harness.watchdog,
         };
         let Started {
             event_loop,
@@ -235,6 +255,14 @@ impl Headless {
             self.dispatch(Duration::from_millis(5))
                 .map_err(|err| ClientError::Io(io::Error::other(format!("{err:#}"))))?;
         }
+    }
+
+    /// Runs `handler` on the loop at the next dispatch, timed like the
+    /// compositor's own handlers.
+    pub fn on_loop(&mut self, name: &'static str, handler: impl FnOnce(&mut State) + 'static) {
+        self.event_loop.handle().insert_idle(move |app| {
+            app.timed(name, |app| handler(&mut app.state));
+        });
     }
 
     fn backend(&self) -> Option<&HeadlessBackend> {

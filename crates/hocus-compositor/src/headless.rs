@@ -1,7 +1,10 @@
 //! The headless backend: no screen, outputs are offscreen buffers. Every
 //! scenario test runs on it.
 
-use std::{fmt, time::Duration};
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
 
 use anyhow::Context;
 use smithay::{
@@ -225,9 +228,13 @@ where
         let now = state.clock.now();
         let Self { renderer, outputs } = self;
         for out in outputs {
-            let Some(states) = render_one(renderer, out, state) else {
+            let start = Instant::now();
+            let Some((states, drawn)) = render_one(renderer, out, state) else {
                 continue;
             };
+            if drawn {
+                state.measures.frame(&out.output.name(), start.elapsed());
+            }
             for window in state.space.elements() {
                 window.with_surfaces(|surface, data| {
                     update_surface_primary_scanout_output(
@@ -249,12 +256,13 @@ where
     }
 }
 
-/// Draws one output; `None` when rendering failed.
+/// Draws one output, and says whether anything was drawn; `None` when
+/// rendering failed.
 fn render_one<R, T>(
     renderer: &mut R,
     out: &mut CanvasOutput<T>,
     state: &State,
-) -> Option<RenderElementStates>
+) -> Option<(RenderElementStates, bool)>
 where
     R: Renderer + ImportAll + Bind<T>,
     R::TextureId: Clone + Texture + 'static,
@@ -278,10 +286,11 @@ where
     )
     .inspect_err(|err| tracing::warn!(output = out.output.name(), ?err, "rendering failed"))
     .ok()?;
-    if result.damage.is_some_and(|damage| !damage.is_empty()) {
+    let drawn = result.damage.is_some_and(|damage| !damage.is_empty());
+    if drawn {
         out.frames += 1;
     }
-    Some(result.states)
+    Some((result.states, drawn))
 }
 
 fn create_output(name: &str, spec: &OutputSpec, position: (i32, i32), state: &mut State) -> Output {
@@ -392,10 +401,12 @@ impl HeadlessBackend {
             return;
         }
         let timer = handle.insert_source(Timer::from_duration(FRAME), |_, _, app| {
-            if let crate::BackendState::Headless(headless) = &mut app.backend {
-                headless.frame_timer = None;
-                headless.frame(&mut app.state);
-            }
+            app.timed("headless frame", |app| {
+                if let crate::BackendState::Headless(headless) = &mut app.backend {
+                    headless.frame_timer = None;
+                    headless.frame(&mut app.state);
+                }
+            });
             TimeoutAction::Drop
         });
         match timer {

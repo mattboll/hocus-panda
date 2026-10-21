@@ -175,6 +175,17 @@ impl Handler for App {
         id: u64,
         request: Request,
     ) -> Option<Result<Reply, ApiError>> {
+        self.timed("control request", |app| app.answer(connection, id, request))
+    }
+}
+
+impl App {
+    fn answer(
+        &mut self,
+        connection: ConnectionId,
+        id: u64,
+        request: Request,
+    ) -> Option<Result<Reply, ApiError>> {
         let state = &mut self.state;
         let reply = match request {
             Request::Version => Reply::Version(VersionInfo {
@@ -196,6 +207,10 @@ impl Handler for App {
                     .collect(),
             ),
             Request::Scene => Reply::Scene(state.scene()),
+            Request::Stats => {
+                let names: Vec<String> = state.space.outputs().map(|o| o.name()).collect();
+                Reply::Stats(state.measures.report(names.iter().map(String::as_str)))
+            }
             // The server answers subscriptions itself.
             Request::Subscribe => Reply::Done,
             Request::PointerMove { x, y } => {
