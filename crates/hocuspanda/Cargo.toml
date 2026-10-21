@@ -8,3 +8,10 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+hocus-compositor = { version = "0.1.0", path = "../hocus-compositor" }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
