@@ -1,10 +1,7 @@
 use smithay::{
     delegate_xdg_shell,
     desktop::{PopupKind, Window, find_popup_root_surface, get_popup_toplevel_coords},
-    input::{
-        Seat,
-        pointer::{Focus, GrabStartData},
-    },
+    input::{Seat, pointer::GrabStartData},
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
@@ -24,7 +21,7 @@ use smithay::{
 
 use smithay::output::Output;
 
-use crate::{State, desktops::model_id, grabs::MoveGrab};
+use crate::{State, desktops::model_id, grabs::edges_of};
 
 impl State {
     /// The model's id of the managed window of `surface`.
@@ -135,30 +132,30 @@ impl XdgShellHandler for State {
         let Some(start_data) = check_grab(&seat, wl_surface, serial) else {
             return;
         };
-        let Some(window) = self.window_for(wl_surface) else {
-            return;
-        };
-        let Some(initial_location) = self.space.element_location(&window) else {
-            return;
-        };
-        if let Some(pointer) = seat.get_pointer() {
-            let grab = MoveGrab {
-                start_data,
-                window,
-                initial_location,
-            };
-            pointer.set_grab(self, grab, serial, Focus::Clear);
+        if let Some(window) = self.window_for(wl_surface) {
+            let button = start_data.button;
+            self.start_move(&window, button, Some(start_data), serial);
         }
     }
 
     fn resize_request(
         &mut self,
-        _surface: ToplevelSurface,
-        _seat: wl_seat::WlSeat,
-        _serial: Serial,
-        _edges: xdg_toplevel::ResizeEdge,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
     ) {
-        // Interactive resize comes with the window model (milestone M1).
+        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+            return;
+        };
+        let wl_surface = surface.wl_surface();
+        let Some(start_data) = check_grab(&seat, wl_surface, serial) else {
+            return;
+        };
+        if let Some(window) = self.window_for(wl_surface) {
+            let button = start_data.button;
+            self.start_resize(&window, edges_of(edges), button, Some(start_data), serial);
+        }
     }
 
     fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {

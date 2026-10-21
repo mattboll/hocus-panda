@@ -1,0 +1,24 @@
+description = "New windows open on the output under the pointer, in cascade inside its work area"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+pointer_move = [1800, 500]
+
+[[step]]
+open = { app_id = "first", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+expect_window = { app_id = "first", output = "HEADLESS-2", geometry = [1940, 340, 600, 400] }
+
+[[step]]
+open = { app_id = "second", size = [600, 400], color = "#33cc66" }
+
+# Not on top of the first: one step down and right.
+[[step]]
+expect_window = { app_id = "second", output = "HEADLESS-2", geometry = [1972, 372, 600, 400], focused = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "place-under-pointer.png" }
