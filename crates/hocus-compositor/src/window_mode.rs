@@ -5,7 +5,7 @@ use smithay::{
     desktop::Window,
     output::Output,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
-    utils::{Logical, Rectangle, Serial},
+    utils::{Logical, Point, Rectangle, Serial},
 };
 
 use crate::State;
@@ -27,10 +27,37 @@ pub enum WindowMode {
 }
 
 impl State {
-    /// Where windows go when maximized: the output minus what the shell
-    /// reserves (nothing yet; the column will).
+    /// Where windows go when maximized or placed: the output minus what the
+    /// shell reserves (nothing yet; the column will) and the outer gap.
     pub fn work_area(&self, output: &Output) -> Rectangle<i32, Logical> {
-        self.space.output_geometry(output).unwrap_or_default()
+        let area = self.space.output_geometry(output).unwrap_or_default();
+        let gap = i32::try_from(self.config.windows.gaps.outer).unwrap_or(0);
+        let inner = Rectangle::new(
+            area.loc + Point::from((gap, gap)),
+            (area.size.w - 2 * gap, area.size.h - 2 * gap).into(),
+        );
+        if inner.size.w > 0 && inner.size.h > 0 {
+            inner
+        } else {
+            area
+        }
+    }
+
+    /// Lays maximized windows out again: the work area changed.
+    pub fn relayout(&mut self) {
+        let maximized: Vec<WindowId> = self
+            .windows
+            .iter()
+            .filter(|(_, m)| matches!(m.mode, WindowMode::Maximized { .. }))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in maximized {
+            if let Some(output) = self.output_for(id) {
+                let area = self.work_area(&output);
+                self.configure(id, area, Some(xdg_toplevel::State::Maximized));
+            }
+        }
+        self.sync_desktops();
     }
 
     /// The window's current place and size.

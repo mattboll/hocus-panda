@@ -86,6 +86,11 @@ pub enum Step {
     /// Maximizes, makes fullscreen, minimizes or restores (`normal`) a
     /// window: `{ app_id, state }`.
     SetState(SetState),
+    /// Writes the configuration file, and waits until it is read.
+    Config(String),
+    /// The last configuration file was refused with a message containing
+    /// this; `""` checks it was applied.
+    ExpectConfigError(String),
     /// Moves the virtual clock forward.
     AdvanceMs(u64),
     /// Moves the virtual clock forward by whole frames.
@@ -239,6 +244,8 @@ impl fmt::Display for Step {
             Self::Keys(keys) => write!(f, "keys {keys}"),
             Self::Plug(plug) => write!(f, "plug {}", plug.spec),
             Self::Unplug(name) => write!(f, "unplug {name}"),
+            Self::Config(_) => write!(f, "config"),
+            Self::ExpectConfigError(e) => write!(f, "expect_config_error {e:?}"),
             Self::SetState(s) => write!(f, "set_state {} {:?}", s.app_id, s.state),
             Self::Send(send) => write!(f, "send {} to {}", send.app_id, send.output),
             Self::ExpectShown(e) => write!(f, "expect_shown {} {}", e.output, e.desktop),
@@ -458,6 +465,28 @@ impl Run<'_> {
                     state: set.state,
                 })?;
                 Ok(())
+            }
+            Step::Config(text) => {
+                self.compositor.write_config(text)?;
+                Ok(())
+            }
+            Step::ExpectConfigError(expected) => {
+                let Reply::Config(info) = self.request(Request::Config)? else {
+                    anyhow::bail!("expected the configuration");
+                };
+                match (&info.error, expected.is_empty()) {
+                    (None, true) => Ok(()),
+                    (Some(error), false) if error.contains(expected.as_str()) => Ok(()),
+                    (error, _) => anyhow::bail!(
+                        "configuration error: expected {}, got {}",
+                        if expected.is_empty() {
+                            "none".into()
+                        } else {
+                            format!("{expected:?}")
+                        },
+                        error.as_deref().map_or("none".into(), |e| format!("{e:?}"))
+                    ),
+                }
             }
             Step::Unplug(name) => {
                 self.request(Request::UnplugOutput {

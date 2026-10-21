@@ -23,11 +23,12 @@ use smithay::{
     },
 };
 
-use hocus_core::{Model, WindowId};
+use hocus_core::{Config, Model, WindowId};
 
 use crate::{
     Clock,
     api::EncodedScreenshot,
+    config_watch::ConfigWatch,
     cursor::Arrows,
     decoration::{Style, Textures},
     desktops::{Managed, Places},
@@ -51,6 +52,12 @@ pub struct State {
     /// The windows of the model; those on hidden desktops are not in the
     /// space.
     pub windows: BTreeMap<WindowId, Managed>,
+    /// The configuration in effect, and why the last file read was refused.
+    pub config: Config,
+    pub config_error: Option<String>,
+    /// Counts configuration reads, applied or refused.
+    pub config_generation: u64,
+    pub config_watch: Option<ConfigWatch>,
     /// How windows are decorated, and the textures that draws with.
     pub style: Style,
     pub textures: Textures,
@@ -110,6 +117,10 @@ impl State {
             model: Model::new(),
             windows: BTreeMap::new(),
             places: Places::new(),
+            config: Config::default(),
+            config_error: None,
+            config_generation: 0,
+            config_watch: None,
             style: Style::default(),
             textures: Textures::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),

@@ -745,6 +745,10 @@ dependencies = [
 [[package]]
 name = "hocus-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
+]
 
 [[package]]
 name = "hocus-platform"

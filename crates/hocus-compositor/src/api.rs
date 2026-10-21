@@ -3,9 +3,9 @@
 
 use base64::Engine;
 use hocus_api::{
-    ApiError, ConnectionId, DesktopInfo, ErrorCode, Event, Handler, Layer, OutputDesktops,
-    OutputInfo, Point, Rect, Reply, Request, Scene, SceneOutput, Screenshot, Server, Target,
-    VersionInfo, WindowInfo, WindowState,
+    ApiError, ConfigInfo, ConnectionId, DesktopInfo, ErrorCode, Event, Handler, Layer,
+    OutputDesktops, OutputInfo, Point, Rect, Reply, Request, Scene, SceneOutput, Screenshot,
+    Server, Target, VersionInfo, WindowInfo, WindowState,
 };
 use smithay::{
     backend::input::{ButtonState, KeyState},
@@ -268,6 +268,11 @@ impl App {
                     .collect(),
             ),
             Request::Desktops => Reply::Desktops(state.desktops_info()),
+            Request::Config => Reply::Config(ConfigInfo {
+                toml: state.config.to_toml(),
+                error: state.config_error.clone(),
+                generation: state.config_generation,
+            }),
             Request::PlugOutput { spec, name } => {
                 let spec: OutputSpec = match spec.parse() {
                     Ok(spec) => spec,

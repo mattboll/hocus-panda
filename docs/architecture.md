@@ -106,8 +106,13 @@ fast to compile and test, and lets the UI be developed in a plain window.
 
 ## Configuration
 
-`~/.config/hocuspanda/config.toml`, applied live on change. Defaults live in
-code; the file only holds what the user changed. Themes in their own files.
+`~/.config/hocuspanda/config.toml` (or `--config FILE`), applied live on
+change. Defaults live in code (`hocus_core::Config`); the file only holds
+what the user changed. A thread looks at the file every half second, reads
+and checks it, and hands the loop a configuration ready to apply; a file that
+does not read is reported with its line and key (log, `config_error` event,
+`hocus msg config`) and the previous configuration stays. Tests use a
+configuration file of their own. Themes in their own files.
 
 ## Plugins
 

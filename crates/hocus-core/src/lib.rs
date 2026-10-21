@@ -3,6 +3,8 @@
 //! No smithay here: the model is fast to build and to test, and the
 //! compositor only translates between it and Wayland.
 
+pub mod config;
 pub mod model;
 
+pub use config::{Config, ConfigError};
 pub use model::{Desktop, DesktopId, Model, ModelError, Output, OutputName, Rect, WindowId};

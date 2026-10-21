@@ -49,6 +49,8 @@ enum Message {
     Scene,
     /// Frame times per output, slow loop handlers, loop stalls.
     Stats,
+    /// The configuration in effect, and the last error reading the file.
+    Config,
     /// Print events as they happen, one JSON object per line.
     Events,
     /// Move the pointer to a point of the global logical space.
@@ -184,6 +186,7 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
         Message::Windows => print(client.request(Request::Windows)?),
         Message::Scene => print(client.request(Request::Scene)?),
         Message::Stats => print(client.request(Request::Stats)?),
+        Message::Config => print(client.request(Request::Config)?),
         Message::Events => {
             client.request(Request::Subscribe)?;
             loop {
