@@ -14,6 +14,8 @@ pub struct Config {
     pub desktops: Desktops,
     pub keyboard: Keyboard,
     pub decorations: Decorations,
+    /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
+    pub shortcuts: toml::Table,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -144,6 +146,25 @@ impl Config {
             return out_of_range("decorations.accent", a, "a colour like \"#7bc47f\"");
         }
         Ok(())
+    }
+
+    /// The shortcuts in effect: the defaults with the file's over them.
+    pub fn shortcuts(&self) -> crate::Shortcuts {
+        let mut not_text = Vec::new();
+        let pairs: Vec<(&str, &str)> = self
+            .shortcuts
+            .iter()
+            .filter_map(|(combo, action)| match action.as_str() {
+                Some(action) => Some((combo.as_str(), action)),
+                None => {
+                    not_text.push(format!("shortcuts.{combo:?}: expected an action as text"));
+                    None
+                }
+            })
+            .collect();
+        let mut shortcuts = crate::Shortcuts::resolve(pairs);
+        shortcuts.warnings.extend(not_text);
+        shortcuts
     }
 
     /// The accent as RGB.

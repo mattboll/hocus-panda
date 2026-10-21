@@ -254,6 +254,9 @@ pub struct ConfigInfo {
     pub toml: String,
     /// Why the last file read was not applied, if it was not.
     pub error: Option<String>,
+    /// What the configuration in effect left out (unknown actions,
+    /// conflicting shortcuts), and why.
+    pub warnings: Vec<String>,
     /// Counts reads of the file, applied or not.
     pub generation: u64,
 }
@@ -419,6 +422,10 @@ pub enum Event {
         output: OutputInfo,
     },
     ConfigApplied,
+    /// The keyboard switched to another layout.
+    KeyboardLayout {
+        layout: String,
+    },
     /// The file was not applied; the previous configuration stays.
     ConfigError {
         message: String,

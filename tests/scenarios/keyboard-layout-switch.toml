@@ -1,0 +1,28 @@
+description = "With two layouts, the switch shortcut makes the next one active and says so"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us", "fr"]
+
+[shortcuts]
+"Super+Ctrl+Space" = "switch-layout"
+"""
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+keys = "super+ctrl+space"
+
+[[step]]
+expect_event = { type = "keyboard_layout", has = "French" }
+
+# The key in the place of US "Q" now gives an "a": the client gets the same
+# key code, its keymap says which letter.
+[[step]]
+key = 16
+
+[[step]]
+expect_received = { app_id = "doc", event = "key 16 pressed" }

@@ -91,6 +91,11 @@ pub enum Step {
     /// The last configuration file was refused with a message containing
     /// this; `""` checks it was applied.
     ExpectConfigError(String),
+    /// What the configuration in effect left out contains this.
+    ExpectConfigWarning(String),
+    /// The compositor said this in its event stream since the start:
+    /// `{ type = "keyboard_layout", has = "French" }`.
+    ExpectEvent(ExpectEvent),
     /// Moves the virtual clock forward.
     AdvanceMs(u64),
     /// Moves the virtual clock forward by whole frames.
@@ -138,6 +143,15 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectEvent {
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Text the event holds, in its JSON form.
+    pub has: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -246,6 +260,8 @@ impl fmt::Display for Step {
             Self::Unplug(name) => write!(f, "unplug {name}"),
             Self::Config(_) => write!(f, "config"),
             Self::ExpectConfigError(e) => write!(f, "expect_config_error {e:?}"),
+            Self::ExpectConfigWarning(e) => write!(f, "expect_config_warning {e:?}"),
+            Self::ExpectEvent(e) => write!(f, "expect_event {}", e.kind),
             Self::SetState(s) => write!(f, "set_state {} {:?}", s.app_id, s.state),
             Self::Send(send) => write!(f, "send {} to {}", send.app_id, send.output),
             Self::ExpectShown(e) => write!(f, "expect_shown {} {}", e.output, e.desktop),
@@ -324,7 +340,9 @@ impl Scenario {
             options,
             compositor,
             clients: Vec::new(),
+            events: Vec::new(),
         };
+        run.request(Request::Subscribe)?;
         for (n, step) in self.steps.iter().enumerate() {
             run.step(step)
                 .with_context(|| format!("step {} ({step})", n + 1))?;
@@ -338,6 +356,8 @@ struct Run<'a> {
     options: &'a RunOptions,
     compositor: Headless,
     clients: Vec<TestClient>,
+    /// Every event since the start.
+    events: Vec<hocus_api::Event>,
 }
 
 impl Run<'_> {
@@ -487,6 +507,43 @@ impl Run<'_> {
                         error.as_deref().map_or("none".into(), |e| format!("{e:?}"))
                     ),
                 }
+            }
+            Step::ExpectConfigWarning(expected) => {
+                let Reply::Config(info) = self.request(Request::Config)? else {
+                    anyhow::bail!("expected the configuration");
+                };
+                anyhow::ensure!(
+                    info.warnings.iter().any(|w| w.contains(expected.as_str())),
+                    "no configuration warning with {expected:?}; warnings: {:?}",
+                    info.warnings
+                );
+                Ok(())
+            }
+            Step::ExpectEvent(expected) => {
+                // Events arrive with replies: one request brings the latest.
+                self.request(Request::Version)?;
+                self.events.extend(self.compositor.take_events());
+                let wanted_type = format!("\"type\":\"{}\"", expected.kind);
+                let found = self.events.iter().any(|e| {
+                    let json = serde_json::to_string(e).unwrap_or_default();
+                    json.contains(&wanted_type)
+                        && expected
+                            .has
+                            .as_ref()
+                            .is_none_or(|h| json.contains(h.as_str()))
+                });
+                anyhow::ensure!(
+                    found,
+                    "no {} event{}; events: {:?}",
+                    expected.kind,
+                    expected
+                        .has
+                        .as_ref()
+                        .map(|h| format!(" with {h:?}"))
+                        .unwrap_or_default(),
+                    self.events
+                );
+                Ok(())
             }
             Step::Unplug(name) => {
                 self.request(Request::UnplugOutput {

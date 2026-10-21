@@ -129,7 +129,18 @@ impl State {
         }
         // Drawn again with the new style.
         self.textures.clear();
+        let shortcuts = config.shortcuts();
+        self.config_warnings = shortcuts.warnings.clone();
+        for warning in &self.config_warnings {
+            tracing::warn!("configuration: {warning}");
+        }
+        self.shortcuts = shortcuts;
+        let first = self.config_generation <= 1;
+        let keyboard_changed = first || self.config.keyboard != config.keyboard;
         self.config = config;
+        if keyboard_changed {
+            self.apply_keyboard_config(first);
+        }
         self.relayout();
         self.needs_redraw = true;
     }

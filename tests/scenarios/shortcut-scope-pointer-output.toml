@@ -1,0 +1,34 @@
+description = "A shortcut acting on the output under the pointer switches only that output"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+config = """
+[shortcuts]
+"Ctrl+Alt+Right" = "next-desktop"
+"Ctrl+Alt+Shift+Right" = "next-desktop all"
+"""
+
+[[step]]
+expect_config_error = ""
+
+[[step]]
+pointer_move = [600, 400]
+
+[[step]]
+keys = "ctrl+alt+right"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+expect_shown = { output = "HEADLESS-2", desktop = 1 }
+
+# The same action over every output.
+[[step]]
+keys = "ctrl+alt+shift+right"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 3 }
+
+[[step]]
+expect_shown = { output = "HEADLESS-2", desktop = 2 }

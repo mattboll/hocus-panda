@@ -23,7 +23,7 @@ use smithay::{
     },
 };
 
-use hocus_core::{Config, Model, WindowId};
+use hocus_core::{Config, Model, Shortcuts, WindowId};
 
 use crate::{
     Clock,
@@ -55,6 +55,9 @@ pub struct State {
     /// The configuration in effect, and why the last file read was refused.
     pub config: Config,
     pub config_error: Option<String>,
+    /// What the last configuration applied left out, and why.
+    pub config_warnings: Vec<String>,
+    pub shortcuts: Shortcuts,
     /// Counts configuration reads, applied or refused.
     pub config_generation: u64,
     pub config_watch: Option<ConfigWatch>,
@@ -119,6 +122,8 @@ impl State {
             places: Places::new(),
             config: Config::default(),
             config_error: None,
+            config_warnings: Vec::new(),
+            shortcuts: Config::default().shortcuts(),
             config_generation: 0,
             config_watch: None,
             style: Style::default(),

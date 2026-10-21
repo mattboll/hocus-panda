@@ -6,49 +6,19 @@ use smithay::{
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     },
     input::{
-        keyboard::{FilterResult, Keycode, Keysym},
+        keyboard::{FilterResult, Keycode},
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
+use hocus_core::Action;
+
 use crate::{
     State,
+    actions::combo_of,
     grabs::{BTN_LEFT, BTN_RIGHT, FrameHit},
 };
-
-/// Evdev codes of the digit row, 1 to 9: by position, so that the same keys
-/// work whatever the layout (on AZERTY, `&` to `ç`).
-const KEY_1: u32 = 2;
-const KEY_9: u32 = 10;
-/// Evdev codes are offset by 8 in XKB.
-const XKB_OFFSET: u32 = 8;
-
-/// What a key press means to the compositor itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Action {
-    Quit,
-    /// Super+digit: show that desktop on the output under the pointer.
-    ShowDesktop(usize),
-    /// Super+Shift+digit: send the focused window to that desktop of the
-    /// output under the pointer.
-    SendToDesktop(usize),
-    /// Super+Up: maximize or restore the focused window.
-    ToggleMaximized,
-    /// Super+Down: minimize the focused window.
-    Minimize,
-}
-
-const KEY_UP: u32 = 103;
-const KEY_DOWN: u32 = 108;
-
-/// The desktop index of a digit-row key, from 0.
-fn digit(code: Keycode) -> Option<usize> {
-    let evdev = code.raw().checked_sub(XKB_OFFSET)?;
-    (KEY_1..=KEY_9)
-        .contains(&evdev)
-        .then(|| (evdev - KEY_1) as usize)
-}
 
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -80,57 +50,19 @@ impl State {
             state,
             serial,
             time_msec,
-            |_, modifiers, keysym| {
-                // Built in until shortcuts are configurable (#17).
+            |state, modifiers, keysym| {
+                // Shortcuts act on press; the client never sees the press,
+                // nor the release that follows it.
                 if !pressed {
                     return FilterResult::Forward;
                 }
-                if modifiers.ctrl && modifiers.alt && keysym.modified_sym() == Keysym::BackSpace {
-                    return FilterResult::Intercept(Action::Quit);
-                }
-                let evdev = keysym.raw_code().raw().saturating_sub(XKB_OFFSET);
-                match (modifiers.logo, modifiers.shift, digit(keysym.raw_code())) {
-                    (true, false, Some(n)) => FilterResult::Intercept(Action::ShowDesktop(n)),
-                    (true, true, Some(n)) => FilterResult::Intercept(Action::SendToDesktop(n)),
-                    (true, false, None) if evdev == KEY_UP => {
-                        FilterResult::Intercept(Action::ToggleMaximized)
-                    }
-                    (true, false, None) if evdev == KEY_DOWN => {
-                        FilterResult::Intercept(Action::Minimize)
-                    }
-                    _ => FilterResult::Forward,
-                }
+                combo_of(modifiers, &keysym)
+                    .and_then(|combo| state.shortcuts.action(&combo).cloned())
+                    .map_or(FilterResult::Forward, FilterResult::Intercept)
             },
         );
-        match action {
-            Some(Action::Quit) => {
-                tracing::info!("quit requested");
-                self.loop_signal.stop();
-            }
-            Some(Action::ShowDesktop(n)) => {
-                if let Some(output) = self.output_under_pointer() {
-                    // An output with fewer desktops, or one, does not switch.
-                    let _ = self.show_desktop(&output, n, serial);
-                }
-            }
-            Some(Action::SendToDesktop(n)) => {
-                if let (Some(output), Some(window)) =
-                    (self.output_under_pointer(), self.model.focused())
-                {
-                    let _ = self.send_window(window, &output, Some(n), serial);
-                }
-            }
-            Some(Action::ToggleMaximized) => {
-                if let Some(window) = self.model.focused() {
-                    self.toggle_maximized(window, serial);
-                }
-            }
-            Some(Action::Minimize) => {
-                if let Some(window) = self.model.focused() {
-                    self.minimize(window, serial);
-                }
-            }
-            None => {}
+        if let Some(action) = action {
+            self.run_action(&action, serial);
         }
     }
 

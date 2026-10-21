@@ -38,6 +38,8 @@ Steps, one per `[[step]]` table:
 | `set_state = { app_id, state = "maximized" }` | maximizes, makes fullscreen, minimizes or restores (`normal`) a window |
 | `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it |
 | `expect_config_error = "line 2"` | checks the last file was refused with that in the message; `""` checks it was applied |
+| `expect_config_warning = "first one wins"` | checks what the configuration in effect left out |
+| `expect_event = { type = "keyboard_layout", has? = "French" }` | checks the compositor said it in its event stream since the start |
 | `advance_ms = 500` | moves the virtual clock forward |
 | `frames = 1` | moves the virtual clock forward by whole frames |
 | `expect_window = { app_id, output?, geometry? = [x, y, w, h], focused?, visible?, state? }` | checks a window, waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized |
