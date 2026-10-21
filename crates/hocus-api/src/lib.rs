@@ -95,6 +95,9 @@ pub enum Request {
     },
     Screenshot {
         target: Target,
+        /// Draw the pointer's cursor too (outputs only).
+        #[serde(default)]
+        cursor: bool,
     },
     /// Frame times, slow loop handlers and loop stalls.
     Stats,
@@ -111,6 +114,20 @@ pub enum Request {
         window: u64,
         output: String,
         desktop: Option<usize>,
+    },
+    /// Plugs a headless output, `WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS]`;
+    /// `name` brings back one unplugged before.
+    PlugOutput {
+        spec: String,
+        name: Option<String>,
+    },
+    /// Unplugs an output, as pulling its cable would.
+    UnplugOutput {
+        output: String,
+    },
+    /// The output that takes what an unplugged one showed.
+    SetPrimaryOutput {
+        output: String,
     },
     /// Asks a window to close, as its close button would.
     CloseWindow {
@@ -134,7 +151,10 @@ impl Request {
             | Self::Key { .. }
             | Self::CloseWindow { .. }
             | Self::ShowDesktop { .. }
-            | Self::SendWindow { .. } => Permission::Test,
+            | Self::SendWindow { .. }
+            | Self::PlugOutput { .. }
+            | Self::UnplugOutput { .. }
+            | Self::SetPrimaryOutput { .. } => Permission::Test,
         }
     }
 }
@@ -450,9 +470,10 @@ mod tests {
                 id: 3,
                 request: Request::Screenshot {
                     target: Target::Output("HEADLESS-1".into()),
+                    cursor: false,
                 },
             },
-            r#"{"id":3,"request":"screenshot","target":{"output":"HEADLESS-1"}}"#,
+            r#"{"id":3,"request":"screenshot","target":{"output":"HEADLESS-1"},"cursor":false}"#,
         );
     }
 

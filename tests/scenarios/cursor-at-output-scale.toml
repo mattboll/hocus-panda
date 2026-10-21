@@ -1,0 +1,24 @@
+description = "The cursor is drawn at the scale of the output it is on"
+outputs = ["1280x800@2", "800x600"]
+
+[[step]]
+pointer_move = [300, 200]
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "cursor-at-output-scale.scale-2.png", cursor = true }
+
+[[step]]
+pointer_move = [1000, 300]
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "cursor-at-output-scale.scale-1.png", cursor = true }
+
+# The laptop no longer shows it.
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "cursor-at-output-scale.gone.png", cursor = true }

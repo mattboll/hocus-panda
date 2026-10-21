@@ -183,6 +183,7 @@ fn a_screenshot_of_an_output_is_a_png_of_its_pixel_size() -> anyhow::Result<()> 
     let reply = with_client(&mut compositor, |client| {
         client.request(Request::Screenshot {
             target: Target::Output("HEADLESS-1".into()),
+            cursor: false,
         })
     })?;
 
@@ -206,6 +207,7 @@ fn a_screenshot_of_a_window_has_its_size_on_its_output() -> anyhow::Result<()> {
         let id = windows(client)?.first().map(|w| w.id).unwrap_or_default();
         client.request(Request::Screenshot {
             target: Target::Window(id),
+            cursor: false,
         })
     })?;
 
@@ -226,6 +228,7 @@ fn unknown_outputs_and_unknown_requests_get_clear_errors() -> anyhow::Result<()>
     let missing = with_client(&mut compositor, |client| {
         Ok(client.request(Request::Screenshot {
             target: Target::Output("NOPE".into()),
+            cursor: false,
         }))
     })?;
 

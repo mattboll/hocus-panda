@@ -70,6 +70,10 @@ pub enum Step {
     /// Sends a window to an output: its `desktop`th desktop (from 1), or the
     /// one it shows.
     Send(SendWindow),
+    /// Plugs an output; `name` brings back one unplugged before.
+    Plug(PlugOutput),
+    /// Unplugs an output by name.
+    Unplug(String),
     /// Moves the virtual clock forward.
     AdvanceMs(u64),
     /// Moves the virtual clock forward by whole frames.
@@ -94,6 +98,14 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlugOutput {
+    /// `WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS]`.
+    pub spec: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -150,6 +162,9 @@ pub struct ExpectScreenshot {
     /// Share of pixels, 0 to 1, that may differ.
     #[serde(default)]
     pub pixel_tolerance: Option<f64>,
+    /// Draw the cursor too.
+    #[serde(default)]
+    pub cursor: bool,
 }
 
 impl fmt::Display for Step {
@@ -161,6 +176,8 @@ impl fmt::Display for Step {
             Self::Click(button) => write!(f, "click {button:?}"),
             Self::Key(code) => write!(f, "key {code}"),
             Self::Keys(keys) => write!(f, "keys {keys}"),
+            Self::Plug(plug) => write!(f, "plug {}", plug.spec),
+            Self::Unplug(name) => write!(f, "unplug {name}"),
             Self::Send(send) => write!(f, "send {} to {}", send.app_id, send.output),
             Self::ExpectShown(e) => write!(f, "expect_shown {} {}", e.output, e.desktop),
             Self::AdvanceMs(ms) => write!(f, "advance {ms} ms"),
@@ -324,6 +341,19 @@ impl Run<'_> {
                 );
                 Ok(())
             }
+            Step::Plug(plug) => {
+                self.request(Request::PlugOutput {
+                    spec: plug.spec.clone(),
+                    name: plug.name.clone(),
+                })?;
+                Ok(())
+            }
+            Step::Unplug(name) => {
+                self.request(Request::UnplugOutput {
+                    output: name.clone(),
+                })?;
+                Ok(())
+            }
             Step::AdvanceMs(ms) => self.compositor.advance(Duration::from_millis(*ms)),
             Step::Frames(n) => self.compositor.advance(FRAME * *n),
             Step::ExpectWindow(expected) => self.expect_window(expected),
@@ -477,6 +507,7 @@ impl Run<'_> {
     fn expect_screenshot(&mut self, expected: &ExpectScreenshot) -> anyhow::Result<()> {
         let reply = self.request(Request::Screenshot {
             target: Target::Output(expected.output.clone()),
+            cursor: expected.cursor,
         })?;
         let Reply::Screenshot(shot) = reply else {
             anyhow::bail!("expected a screenshot, got {reply:?}");

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 use anyhow::Context;
 use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
-    input::{Seat, SeatState},
+    input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
         calloop::{LoopSignal, channel::Sender},
         wayland_server::{
@@ -26,7 +26,12 @@ use smithay::{
 use hocus_core::{Model, WindowId};
 
 use crate::{
-    Clock, api::EncodedScreenshot, desktops::Managed, handlers::WorkspaceState, stats::Measures,
+    Clock,
+    api::EncodedScreenshot,
+    cursor::Arrows,
+    desktops::{Managed, Places},
+    handlers::WorkspaceState,
+    stats::Measures,
     watchdog::Watchdog,
 };
 
@@ -45,6 +50,11 @@ pub struct State {
     /// The windows of the model; those on hidden desktops are not in the
     /// space.
     pub windows: BTreeMap<WindowId, Managed>,
+    /// What the pointer looks like, as clients set it.
+    pub cursor: CursorImageStatus,
+    pub arrows: Arrows,
+    /// Where windows were, per layout of outputs.
+    pub places: Places,
     /// ext-foreign-toplevel-list: windows for taskbars and switchers.
     pub foreign_toplevels: ForeignToplevelListState,
     /// ext-workspace: outputs as groups, desktops as workspaces.
@@ -94,6 +104,9 @@ impl State {
             screenshots,
             model: Model::new(),
             windows: BTreeMap::new(),
+            places: Places::new(),
+            cursor: CursorImageStatus::default_named(),
+            arrows: Arrows::default(),
             foreign_toplevels: ForeignToplevelListState::new::<Self>(dh),
             workspaces: WorkspaceState::new(dh),
             measures: Measures::default(),

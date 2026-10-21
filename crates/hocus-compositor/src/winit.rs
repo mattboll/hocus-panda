@@ -133,8 +133,13 @@ impl WinitBackend {
         }
     }
 
-    pub fn capture_output(&mut self, output: &Output, state: &State) -> anyhow::Result<Pixels> {
-        capture::output::<_, GlesTexture>(self.backend.renderer(), output, state)
+    pub fn capture_output(
+        &mut self,
+        output: &Output,
+        state: &State,
+        cursor: bool,
+    ) -> anyhow::Result<Pixels> {
+        capture::output::<_, GlesTexture>(self.backend.renderer(), output, state, cursor)
     }
 
     pub fn capture_window(&mut self, window: &Window, scale: f64) -> anyhow::Result<Pixels> {

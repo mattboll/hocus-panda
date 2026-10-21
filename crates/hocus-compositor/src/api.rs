@@ -17,7 +17,7 @@ use smithay::{
 };
 
 use crate::{
-    App, BackendState, State,
+    App, BackendState, OutputSpec, State,
     capture::Pixels,
     desktops::{model_id, title_and_app_id},
 };
@@ -162,6 +162,13 @@ pub fn window_id(window: &Window) -> u64 {
     model_id(window).map(|id| id.0).unwrap_or_default()
 }
 
+fn not_headless() -> ApiError {
+    ApiError::new(
+        ErrorCode::BadRequest,
+        "only headless outputs are plugged and unplugged by request",
+    )
+}
+
 fn no_output(name: &str) -> ApiError {
     ApiError::new(ErrorCode::NotFound, format!("no output named {name}"))
 }
@@ -238,6 +245,45 @@ impl App {
                     .collect(),
             ),
             Request::Desktops => Reply::Desktops(state.desktops_info()),
+            Request::PlugOutput { spec, name } => {
+                let spec: OutputSpec = match spec.parse() {
+                    Ok(spec) => spec,
+                    Err(err) => {
+                        return Some(Err(ApiError::new(ErrorCode::BadRequest, format!("{err}"))));
+                    }
+                };
+                let App { state, backend } = self;
+                let BackendState::Headless(headless) = backend else {
+                    return Some(Err(not_headless()));
+                };
+                return Some(
+                    headless
+                        .plug(&spec, name, state)
+                        .map(|_| Reply::Done)
+                        .map_err(|err| ApiError::new(ErrorCode::Failed, format!("{err:#}"))),
+                );
+            }
+            Request::UnplugOutput { output } => {
+                let App { state, backend } = self;
+                let BackendState::Headless(headless) = backend else {
+                    return Some(Err(not_headless()));
+                };
+                return Some(
+                    headless
+                        .unplug(&output, state)
+                        .map(|()| Reply::Done)
+                        .map_err(|err| ApiError::new(ErrorCode::NotFound, format!("{err:#}"))),
+                );
+            }
+            Request::SetPrimaryOutput { output } => {
+                return Some(
+                    state
+                        .model
+                        .set_primary(&hocus_core::OutputName(output))
+                        .map(|()| Reply::Done)
+                        .map_err(model_error),
+                );
+            }
             Request::ShowDesktop { output, index } => {
                 let output = state.find_output(&output).ok_or_else(|| no_output(&output));
                 let result = output.and_then(|output| {
@@ -313,8 +359,8 @@ impl App {
                 toplevel.send_close();
                 Reply::Done
             }
-            Request::Screenshot { target } => {
-                return match self.capture(&target) {
+            Request::Screenshot { target, cursor } => {
+                return match self.capture(&target, cursor) {
                     Ok(pixels) => {
                         encode_in_worker(self.state.screenshots.clone(), connection, id, pixels)
                             .err()
@@ -329,7 +375,7 @@ impl App {
 }
 
 impl App {
-    fn capture(&mut self, target: &Target) -> Result<Pixels, ApiError> {
+    fn capture(&mut self, target: &Target, cursor: bool) -> Result<Pixels, ApiError> {
         let state = &self.state;
         let result = match target {
             Target::Output(name) => {
@@ -342,8 +388,10 @@ impl App {
                         ApiError::new(ErrorCode::NotFound, format!("no output named {name}"))
                     })?;
                 match &mut self.backend {
-                    BackendState::Winit(winit) => winit.capture_output(&output, state),
-                    BackendState::Headless(headless) => headless.capture_output(&output, state),
+                    BackendState::Winit(winit) => winit.capture_output(&output, state, cursor),
+                    BackendState::Headless(headless) => {
+                        headless.capture_output(&output, state, cursor)
+                    }
                 }
             }
             Target::Window(id) => {

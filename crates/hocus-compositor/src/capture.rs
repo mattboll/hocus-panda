@@ -6,17 +6,26 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            Bind, ExportMem, ImportAll, Offscreen, Renderer, Texture,
+            Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             damage::OutputDamageTracker,
-            element::{AsRenderElements, surface::WaylandSurfaceRenderElement},
+            element::{AsRenderElements, render_elements, surface::WaylandSurfaceRenderElement},
         },
     },
-    desktop::{Window, space::space_render_elements},
+    desktop::{
+        Window,
+        space::{SpaceRenderElements, space_render_elements},
+    },
     output::Output,
     utils::{Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
-use crate::{BACKGROUND, State};
+use crate::{BACKGROUND, State, cursor::CursorElement};
+
+render_elements! {
+    CaptureElement<R, E> where R: ImportAll + ImportMem;
+    Cursor=CursorElement<R>,
+    Space=SpaceRenderElements<R, E>,
+}
 
 /// Pixels read back from a renderer: rows of RGBA bytes, top to bottom.
 #[derive(Debug)]
@@ -41,10 +50,15 @@ impl Pixels {
 }
 
 /// Draws everything `output` shows, at its pixel size.
-pub fn output<R, T>(renderer: &mut R, output: &Output, state: &State) -> anyhow::Result<Pixels>
+pub fn output<R, T>(
+    renderer: &mut R,
+    output: &Output,
+    state: &State,
+    cursor: bool,
+) -> anyhow::Result<Pixels>
 where
-    R: Renderer + ImportAll + Offscreen<T> + Bind<T> + ExportMem,
-    R::TextureId: Clone + Texture + 'static,
+    R: Renderer + ImportAll + ImportMem + Offscreen<T> + Bind<T> + ExportMem,
+    R::TextureId: Send + Clone + Texture + 'static,
     R::Error: Send + Sync + 'static,
 {
     let size = output
@@ -52,8 +66,22 @@ where
         .context("the output has no mode")?
         .size;
     let scale = output.current_scale().fractional_scale();
-    let elements = space_render_elements::<_, Window, _>(renderer, [&state.space], output, 1.0)
-        .context("the output has no mode")?;
+    let mut elements: Vec<CaptureElement<R, WaylandSurfaceRenderElement<R>>> = Vec::new();
+    // Front first: the cursor above the windows.
+    if cursor {
+        elements.extend(
+            state
+                .cursor_elements(renderer, output)
+                .into_iter()
+                .map(CaptureElement::Cursor),
+        );
+    }
+    elements.extend(
+        space_render_elements::<_, Window, _>(renderer, [&state.space], output, 1.0)
+            .context("the output has no mode")?
+            .into_iter()
+            .map(CaptureElement::Space),
+    );
     draw(renderer, size, scale, &elements, BACKGROUND)
 }
 
