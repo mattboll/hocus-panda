@@ -1,0 +1,10 @@
+[package]
+name = "hocus-shell"
+description = "The desktop's own interface: widget column, dock, launcher, notifications, quick settings."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true

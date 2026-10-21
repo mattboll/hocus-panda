@@ -1,0 +1,10 @@
+[package]
+name = "hocus-api"
+description = "Control protocol types, socket server and event stream."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true

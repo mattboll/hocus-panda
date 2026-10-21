@@ -1,0 +1,10 @@
+[package]
+name = "hocus-core"
+description = "Pure model of the desktop: outputs, per-screen desktops, windows, focus, layout."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
