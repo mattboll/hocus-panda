@@ -20,6 +20,7 @@ use smithay::{
         },
     },
     desktop::{
+        Window,
         space::render_output,
         utils::{surface_primary_scanout_output, update_surface_primary_scanout_output},
     },
@@ -34,8 +35,11 @@ use smithay::{
     utils::Transform,
 };
 
+use hocus_api::Event;
+
 use crate::{
     App, BACKGROUND, State,
+    capture::{self, Pixels},
     output_spec::{self, OutputSpec},
 };
 
@@ -308,6 +312,9 @@ fn create_output(name: &str, spec: &OutputSpec, position: (i32, i32), state: &mu
     );
     output.set_preferred(mode);
     state.space.map_output(&output, position);
+    state.emit(|s| Event::OutputAdded {
+        output: s.output_info(&output),
+    });
     output
 }
 
@@ -335,6 +342,32 @@ impl HeadlessBackend {
         match &self.renderers {
             Renderers::Gles(canvas) => infos(canvas),
             Renderers::Pixman(canvas) => infos(canvas),
+        }
+    }
+
+    pub fn capture_output(&mut self, output: &Output, state: &State) -> anyhow::Result<Pixels> {
+        match &mut self.renderers {
+            Renderers::Gles(canvas) => {
+                capture::output::<_, GlesTexture>(&mut canvas.renderer, output, state)
+            }
+            Renderers::Pixman(canvas) => capture::output::<_, pixman::Image<'static, 'static>>(
+                &mut canvas.renderer,
+                output,
+                state,
+            ),
+        }
+    }
+
+    pub fn capture_window(&mut self, window: &Window, scale: f64) -> anyhow::Result<Pixels> {
+        match &mut self.renderers {
+            Renderers::Gles(canvas) => {
+                capture::window::<_, GlesTexture>(&mut canvas.renderer, window, scale)
+            }
+            Renderers::Pixman(canvas) => capture::window::<_, pixman::Image<'static, 'static>>(
+                &mut canvas.renderer,
+                window,
+                scale,
+            ),
         }
     }
 

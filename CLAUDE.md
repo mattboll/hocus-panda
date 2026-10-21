@@ -31,7 +31,11 @@ a live session:
 # nested, in a window of the current session
 target/debug/hocuspanda --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
 # headless: offscreen outputs, a private runtime directory by default
-target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 3440x1440
+target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 3440x1440 \
+    --api-permission test --spawn foot
+# talk to it: the socket is logged at start ("control=…")
+target/debug/hocus msg --socket <control socket> windows   # also: outputs, scene,
+    # events, pointer-move X Y, click, key CODE, screenshot --output NAME -o FILE
 ```
 
 Tests drive a headless compositor in-process on a virtual clock

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
+use hocus_api::Permission;
 use hocus_compositor::{Backend, HeadlessConfig, Options, OutputSpec, RendererChoice};
 use tracing_subscriber::EnvFilter;
 
@@ -31,6 +32,11 @@ struct Args {
     /// Headless renderer.
     #[arg(long, value_enum, default_value_t = RendererArg::Auto)]
     renderer: RendererArg,
+
+    /// What clients of the control socket may do. `test` lets them drive
+    /// input and read the whole scene: only for test sessions.
+    #[arg(long, value_enum, default_value_t = PermissionArg::Observe)]
+    api_permission: PermissionArg,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -39,6 +45,14 @@ enum BackendArg {
     Winit,
     /// Without a screen, into offscreen buffers.
     Headless,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PermissionArg {
+    /// List outputs and windows, follow events, take screenshots.
+    Observe,
+    /// Also inject input and dump the scene.
+    Test,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -72,5 +86,9 @@ fn main() -> anyhow::Result<()> {
         },
         runtime_dir: args.runtime_dir,
         spawn: args.spawn,
+        api_permission: match args.api_permission {
+            PermissionArg::Observe => Permission::Observe,
+            PermissionArg::Test => Permission::Test,
+        },
     })
 }

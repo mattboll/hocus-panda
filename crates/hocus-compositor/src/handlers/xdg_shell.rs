@@ -22,7 +22,9 @@ use smithay::{
     },
 };
 
-use crate::{State, grabs::MoveGrab};
+use hocus_api::Event;
+
+use crate::{State, api::window_id, grabs::MoveGrab};
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -31,7 +33,9 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // Mapped once its first buffer tells us its size.
-        self.unplaced.push(Window::new_wayland_window(surface));
+        let window = Window::new_wayland_window(surface);
+        self.assign_window_id(&window);
+        self.unplaced.push(window);
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -40,6 +44,8 @@ impl XdgShellHandler for State {
             .retain(|w| w.toplevel().is_none_or(|t| t.wl_surface() != wl_surface));
         if let Some(window) = self.window_for(wl_surface) {
             self.space.unmap_elem(&window);
+            let id = window_id(&window);
+            self.emit(|_| Event::WindowClosed { id });
             self.focus_top(SERIAL_COUNTER.next_serial());
         }
     }
