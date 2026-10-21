@@ -6,6 +6,7 @@
 mod api;
 mod capture;
 mod clock;
+mod config_watch;
 mod cursor;
 mod decoration;
 mod desktops;
@@ -26,6 +27,7 @@ mod winit;
 use std::{
     path::{Path, PathBuf},
     process::{Child, Command},
+    time::Duration,
 };
 
 use anyhow::Context;
@@ -69,7 +71,14 @@ pub struct Options {
     pub api_permission: Permission,
     /// `None` runs without a watchdog.
     pub watchdog: Option<WatchdogConfig>,
+    /// The configuration file, watched; `None` keeps the defaults.
+    pub config: Option<PathBuf>,
+    /// How often the configuration file is looked at.
+    pub config_poll: Duration,
 }
+
+/// How often the configuration file is looked at by default.
+pub const CONFIG_POLL: Duration = Duration::from_millis(500);
 
 /// What the event loop owns: the compositor state and its backend.
 #[derive(Debug)]
@@ -167,6 +176,13 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     socket::insert(&event_loop.handle(), socket, display)?;
     if let Some(config) = &options.watchdog {
         state.watchdog = Some(watchdog::start(&event_loop.handle(), config.clone())?);
+    }
+    if let Some(path) = &options.config {
+        state.config_watch = Some(config_watch::start(
+            &event_loop.handle(),
+            path.clone(),
+            options.config_poll,
+        )?);
     }
 
     let backend = match &options.backend {

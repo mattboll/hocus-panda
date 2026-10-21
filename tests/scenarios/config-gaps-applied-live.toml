@@ -1,0 +1,26 @@
+description = "Gaps changed in the configuration file re-lay windows out within a frame"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+set_state = { app_id = "doc", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [0, 0, 1280, 800], state = "maximized" }
+
+[[step]]
+config = """
+[windows.gaps]
+outer = 16
+"""
+
+[[step]]
+expect_config_error = ""
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [16, 16, 1248, 768], state = "maximized" }

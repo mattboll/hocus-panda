@@ -101,6 +101,8 @@ pub enum Request {
     },
     /// Frame times, slow loop handlers and loop stalls.
     Stats,
+    /// The configuration in effect, and the last error reading the file.
+    Config,
     /// Each output's desktops, with their windows, and the one it shows.
     Desktops,
     /// Shows the `index`th desktop (from 0) of an output.
@@ -148,6 +150,7 @@ impl Request {
             | Self::Windows
             | Self::Subscribe
             | Self::Stats
+            | Self::Config
             | Self::Desktops
             | Self::Screenshot { .. } => Permission::Observe,
             Self::Scene
@@ -221,6 +224,7 @@ pub enum Reply {
     Screenshot(Screenshot),
     Stats(Stats),
     Desktops(Vec<OutputDesktops>),
+    Config(ConfigInfo),
     /// The request was carried out.
     Done,
 }
@@ -242,6 +246,16 @@ pub struct DesktopInfo {
     pub home: String,
     /// Window ids, bottom to top.
     pub windows: Vec<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigInfo {
+    /// The whole configuration in effect, defaults included.
+    pub toml: String,
+    /// Why the last file read was not applied, if it was not.
+    pub error: Option<String>,
+    /// Counts reads of the file, applied or not.
+    pub generation: u64,
 }
 
 /// How well the compositor keeps up.
@@ -403,6 +417,11 @@ pub enum Event {
     },
     OutputAdded {
         output: OutputInfo,
+    },
+    ConfigApplied,
+    /// The file was not applied; the previous configuration stays.
+    ConfigError {
+        message: String,
     },
     /// An output shows another of its desktops.
     DesktopShown {

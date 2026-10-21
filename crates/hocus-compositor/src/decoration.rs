@@ -215,6 +215,13 @@ enum Piece {
 pub struct Textures(Mutex<BTreeMap<(Piece, u32), (MemoryRenderBuffer, i32)>>);
 
 impl Textures {
+    /// Forgets every texture: the style changed.
+    pub fn clear(&self) {
+        if let Ok(mut cache) = self.0.lock() {
+            cache.clear();
+        }
+    }
+
     /// The texture and its corner size in pixels.
     fn get(&self, piece: Piece, style: &Style, scale: f64) -> (MemoryRenderBuffer, i32) {
         let key = (piece, (scale * 1000.0).round() as u32);

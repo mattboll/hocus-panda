@@ -63,6 +63,11 @@ struct Args {
     /// Do not watch the event loop.
     #[arg(long)]
     no_watchdog: bool,
+
+    /// Configuration file, watched and applied on change. Default:
+    /// $XDG_CONFIG_HOME/hocuspanda/config.toml.
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -106,8 +111,17 @@ fn main() -> anyhow::Result<()> {
         // Dumps are rare and wanted after the session is gone.
         WatchdogConfig::new(state_dir.unwrap_or_else(std::env::temp_dir))
     });
+    let config = args.config.clone().or_else(|| {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".config")))?;
+        Some(base.join("hocuspanda/config.toml"))
+    });
     hocus_compositor::run(Options {
         watchdog,
+        config,
+        config_poll: hocus_compositor::CONFIG_POLL,
         backend: match args.backend {
             BackendArg::Winit => Backend::Winit,
             BackendArg::Headless => Backend::Headless(HeadlessConfig {

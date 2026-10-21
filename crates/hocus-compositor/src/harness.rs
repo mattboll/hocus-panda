@@ -37,6 +37,9 @@ pub struct Headless {
     runtime_dir: RuntimeDir,
     /// The harness's own control connection, opened on first use.
     control: Option<Control>,
+    /// The compositor's configuration file, in a directory of its own.
+    config: std::path::PathBuf,
+    _config_dir: tempfile::TempDir,
 }
 
 /// A control connection read without blocking, so that the harness can run
@@ -100,12 +103,19 @@ impl Headless {
     }
 
     pub fn start_options(harness: HarnessOptions) -> anyhow::Result<Self> {
+        // The configuration lives in the private runtime directory, which
+        // exists once the compositor started: watched from the start, read
+        // when a test writes it.
+        let config_dir = tempfile::Builder::new().prefix("hocus-config-").tempdir()?;
+        let config = config_dir.path().join("config.toml");
         let options = Options {
             backend: Backend::Headless(harness.headless),
             runtime_dir: None,
             spawn: Vec::new(),
             api_permission: harness.api_permission,
             watchdog: harness.watchdog,
+            config: Some(config.clone()),
+            config_poll: Duration::from_millis(20),
         };
         let Started {
             event_loop,
@@ -117,12 +127,17 @@ impl Headless {
                 now: Duration::ZERO,
             },
         )?;
-        Ok(Self {
+        let mut headless = Self {
             event_loop,
             app,
             runtime_dir,
             control: None,
-        })
+            config,
+            _config_dir: config_dir,
+        };
+        // The defaults are read before the first test step.
+        headless.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.config_generation > 0)?;
+        Ok(headless)
     }
 
     /// The Wayland socket, to connect clients with `WAYLAND_DISPLAY`.
@@ -255,6 +270,15 @@ impl Headless {
             self.dispatch(Duration::from_millis(5))
                 .map_err(|err| ClientError::Io(io::Error::other(format!("{err:#}"))))?;
         }
+    }
+
+    /// Writes the configuration file and runs the compositor until it has
+    /// read it; returns the error if it was refused.
+    pub fn write_config(&mut self, text: &str) -> anyhow::Result<Option<String>> {
+        let before = self.app.state.config_generation;
+        std::fs::write(&self.config, text)?;
+        self.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.config_generation > before)?;
+        Ok(self.app.state.config_error.clone())
     }
 
     /// Runs `handler` on the loop at the next dispatch, timed like the
