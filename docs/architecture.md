@@ -80,12 +80,17 @@ fast to compile and test, and lets the UI be developed in a plain window.
 
 ## Control API
 
-- UNIX socket in `$XDG_RUNTIME_DIR`, JSON lines, versioned, typed in
-  `hocus-api`. Requests (windows, desktops, outputs, focus, input injection,
-  screenshots, scene dump) and an event stream (subscriptions).
+- UNIX socket next to the Wayland one (`hocus-0.api` beside `hocus-0`),
+  JSON lines, versioned, typed in `hocus-api`. Requests (windows, desktops,
+  outputs, focus, input injection, screenshots, scene dump) and an event
+  stream (subscriptions). Commands the compositor starts get its path in
+  `HOCUS_SOCKET`.
+- Served on the loop with non-blocking sockets; a client that stops reading
+  is dropped past a bound. Slow work (PNG encoding) runs on a worker thread
+  and the reply follows when it is done.
 - The same API serves the `hocus` tool, the MCP bridge for AI agents, and the
   test harness. Input injection and scene dumps require an explicit test or
-  agent permission.
+  agent permission (`--api-permission test`; agents come with their seat).
 - Agents get their own seat (pointer and keyboard) through the API: see the
   agent seat idea in [ideas](ideas.md).
 

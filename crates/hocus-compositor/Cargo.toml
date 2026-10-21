@@ -11,6 +11,9 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
+base64 = "0.22.1"
+hocus-api = { version = "0.1.0", path = "../hocus-api" }
+png = "0.18.1"
 smithay = { version = "0.7", default-features = false, features = ["backend_winit", "backend_drm", "renderer_pixman", "wayland_frontend", "desktop"] }
 tempfile = "3.27.0"
 tracing = "0.1.44"

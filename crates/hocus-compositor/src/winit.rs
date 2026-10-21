@@ -6,18 +6,24 @@ use anyhow::Context;
 use smithay::{
     backend::{
         renderer::{
-            damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
-            gles::GlesRenderer,
+            damage::OutputDamageTracker,
+            element::surface::WaylandSurfaceRenderElement,
+            gles::{GlesRenderer, GlesTexture},
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    desktop::space::render_output,
+    desktop::{Window, space::render_output},
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::LoopHandle,
     utils::Transform,
 };
 
-use crate::{App, BACKGROUND, BackendState, State};
+use hocus_api::Event;
+
+use crate::{
+    App, BACKGROUND, BackendState, State,
+    capture::{self, Pixels},
+};
 
 /// winit does not report the refresh rate; a nominal 60 Hz.
 const REFRESH_MHZ: i32 = 60_000;
@@ -65,6 +71,9 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
     );
     output.set_preferred(mode);
     state.space.map_output(&output, (0, 0));
+    state.emit(|s| Event::OutputAdded {
+        output: s.output_info(&output),
+    });
 
     let damage_tracker = OutputDamageTracker::from_output(&output);
 
@@ -112,6 +121,14 @@ impl WinitBackend {
         if state.needs_redraw {
             self.backend.window().request_redraw();
         }
+    }
+
+    pub fn capture_output(&mut self, output: &Output, state: &State) -> anyhow::Result<Pixels> {
+        capture::output::<_, GlesTexture>(self.backend.renderer(), output, state)
+    }
+
+    pub fn capture_window(&mut self, window: &Window, scale: f64) -> anyhow::Result<Pixels> {
+        capture::window::<_, GlesTexture>(self.backend.renderer(), window, scale)
     }
 
     fn render(&mut self, state: &mut State) {

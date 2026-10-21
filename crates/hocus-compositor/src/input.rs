@@ -6,10 +6,10 @@ use smithay::{
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     },
     input::{
-        keyboard::{FilterResult, Keysym},
+        keyboard::{FilterResult, Keycode, Keysym},
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
-    utils::SERIAL_COUNTER,
+    utils::{Logical, Point, SERIAL_COUNTER},
 };
 
 use crate::State;
@@ -34,17 +34,22 @@ impl State {
     }
 
     fn on_key<I: InputBackend>(&mut self, event: I::KeyboardKeyEvent) {
+        self.key(event.key_code(), event.state(), Event::time_msec(&event));
+    }
+
+    /// A key, from a device or injected through the control API.
+    pub fn key(&mut self, code: Keycode, state: KeyState, time_msec: u32) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let pressed = event.state() == KeyState::Pressed;
+        let pressed = state == KeyState::Pressed;
         let action = keyboard.input::<Action, _>(
             self,
-            event.key_code(),
-            event.state(),
+            code,
+            state,
             serial,
-            Event::time_msec(&event),
+            time_msec,
             |_, modifiers, keysym| {
                 // Ctrl+Alt+Backspace quits, until shortcuts are configurable.
                 if pressed
@@ -76,10 +81,15 @@ impl State {
         else {
             return;
         };
+        let location = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+        self.pointer_motion(location, event.time_msec());
+    }
+
+    /// Moves the pointer to `location` in the global logical space.
+    pub fn pointer_motion(&mut self, location: Point<f64, Logical>, time_msec: u32) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let location = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
         let under = self.surface_under(location);
         pointer.motion(
             self,
@@ -87,18 +97,22 @@ impl State {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: time_msec,
             },
         );
         pointer.frame(self);
     }
 
     fn on_pointer_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
+        self.pointer_button(event.button_code(), event.state(), event.time_msec());
+    }
+
+    /// A pointer button by its evdev code.
+    pub fn pointer_button(&mut self, button: u32, state: ButtonState, time_msec: u32) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let state = event.state();
 
         // Click to focus, and raise.
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
@@ -112,10 +126,10 @@ impl State {
         pointer.button(
             self,
             &ButtonEvent {
-                button: event.button_code(),
+                button,
                 state,
                 serial,
-                time: event.time_msec(),
+                time: time_msec,
             },
         );
         pointer.frame(self);

@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_api::Permission;
 use smithay::reexports::calloop::EventLoop;
 
 use crate::{
@@ -23,11 +24,17 @@ pub struct Headless {
 }
 
 impl Headless {
+    /// Starts with the test permission on the control socket.
     pub fn start(config: HeadlessConfig) -> anyhow::Result<Self> {
+        Self::start_with(config, Permission::Test)
+    }
+
+    pub fn start_with(config: HeadlessConfig, api_permission: Permission) -> anyhow::Result<Self> {
         let options = Options {
             backend: Backend::Headless(config),
             runtime_dir: None,
             spawn: Vec::new(),
+            api_permission,
         };
         let Started {
             event_loop,
@@ -49,6 +56,11 @@ impl Headless {
     /// The Wayland socket, to connect clients with `WAYLAND_DISPLAY`.
     pub fn socket_path(&self) -> &Path {
         &self.app.state.socket_path
+    }
+
+    /// The control socket.
+    pub fn api_socket(&self) -> &Path {
+        self.app.state.api.path()
     }
 
     pub fn runtime_dir(&self) -> &Path {

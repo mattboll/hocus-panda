@@ -15,4 +15,6 @@ smithay-client-toolkit = { version = "0.19.2", default-features = false }
 wayland-client = "0.31.15"
 
 [dev-dependencies]
+hocus-api = { version = "0.1.0", path = "../hocus-api" }
 hocus-compositor = { version = "0.1.0", path = "../hocus-compositor" }
+png = "0.18.1"

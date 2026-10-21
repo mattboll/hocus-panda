@@ -3,6 +3,8 @@
 //! The calloop event loop owns every piece of state ([`State`]); nothing else
 //! holds a reference to it (see docs/architecture.md).
 
+mod api;
+mod capture;
 mod clock;
 mod grabs;
 mod handlers;
@@ -20,7 +22,11 @@ use std::{
 };
 
 use anyhow::Context;
-use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
+use hocus_api::{Permission, Reply};
+use smithay::reexports::{
+    calloop::{EventLoop, channel},
+    wayland_server::Display,
+};
 
 pub use clock::Clock;
 pub use harness::Headless;
@@ -48,8 +54,11 @@ pub struct Options {
     /// the nested backend, and a fresh private directory for the headless
     /// one, so that it never meets the session's clients.
     pub runtime_dir: Option<PathBuf>,
-    /// Commands started once the socket is ready, with `WAYLAND_DISPLAY` set.
+    /// Commands started once the socket is ready, with `WAYLAND_DISPLAY` and
+    /// `HOCUS_SOCKET` set.
     pub spawn: Vec<String>,
+    /// What clients of the control socket may do.
+    pub api_permission: Permission,
 }
 
 /// What the event loop owns: the compositor state and its backend.
@@ -116,12 +125,32 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     let event_loop: EventLoop<App> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
     let socket = socket::bind(runtime_dir.path())?;
+    let api = hocus_api::Server::bind(
+        &hocus_api::socket_for(&socket.path),
+        options.api_permission,
+        &event_loop.handle(),
+    )
+    .context("could not open the control socket")?;
+    let (screenshots, encoded) = channel::channel::<api::EncodedScreenshot>();
+    event_loop
+        .handle()
+        .insert_source(encoded, |event, _, app: &mut App| {
+            if let channel::Event::Msg((connection, id, result)) = event {
+                app.state
+                    .api
+                    .reply(connection, id, result.map(Reply::Screenshot));
+            }
+        })
+        .map_err(|err| err.error)
+        .context("could not watch screenshot workers")?;
 
     let mut state = State::new(
         &display.handle(),
         event_loop.get_signal(),
         socket.path.clone(),
         clock,
+        api,
+        screenshots,
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
 
@@ -131,7 +160,12 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         }
         Backend::Headless(config) => BackendState::Headless(headless::init(config, &mut state)?),
     };
-    tracing::info!(socket = %state.socket_path.display(), "compositor ready");
+    tracing::info!(
+        socket = %state.socket_path.display(),
+        control = %state.api.path().display(),
+        permission = ?state.api.permission(),
+        "compositor ready"
+    );
     Ok(Started {
         event_loop,
         app: App { state, backend },
@@ -146,7 +180,12 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         mut app,
         runtime_dir,
     } = start(&options, Clock::monotonic())?;
-    let mut children = spawn(&options.spawn, runtime_dir.path(), &app.state.socket_path);
+    let mut children = spawn(
+        &options.spawn,
+        runtime_dir.path(),
+        &app.state.socket_path,
+        app.state.api.path(),
+    );
 
     let handle = event_loop.handle();
     event_loop.run(None, &mut app, |app| {
@@ -165,7 +204,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
 }
 
 /// Starts each command through the shell, connected to this compositor only.
-fn spawn(commands: &[String], runtime_dir: &Path, socket: &Path) -> Vec<Child> {
+fn spawn(commands: &[String], runtime_dir: &Path, socket: &Path, api: &Path) -> Vec<Child> {
     commands
         .iter()
         .filter_map(|command| {
@@ -174,6 +213,7 @@ fn spawn(commands: &[String], runtime_dir: &Path, socket: &Path) -> Vec<Child> {
                 .arg(command)
                 .env("XDG_RUNTIME_DIR", runtime_dir)
                 .env("WAYLAND_DISPLAY", socket)
+                .env(hocus_api::SOCKET_ENV, api)
                 .env_remove("DISPLAY")
                 .spawn()
                 .inspect_err(|err| tracing::warn!(%err, command, "could not start"))

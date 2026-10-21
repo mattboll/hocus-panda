@@ -28,6 +28,7 @@ use wayland_client::{
 /// A window of `width`×`height` pixels filled with `argb`.
 #[derive(Debug, Clone, Copy)]
 pub struct SolidWindow {
+    pub app_id: &'static str,
     pub width: u32,
     pub height: u32,
     pub argb: u32,
@@ -52,7 +53,7 @@ impl SolidWindow {
 
         let surface = compositor.create_surface(&qh);
         let window = xdg_shell.create_window(surface, WindowDecorations::None, &qh);
-        window.set_app_id("hocus-test.solid");
+        window.set_app_id(self.app_id);
         window.set_min_size(Some((self.width, self.height)));
         window.commit();
 
@@ -91,6 +92,7 @@ impl Client {
             width,
             height,
             argb,
+            ..
         } = self.spec;
         let (buffer, canvas) = self.pool.create_buffer(
             width as i32,

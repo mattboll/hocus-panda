@@ -5,7 +5,7 @@ use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{Seat, SeatState},
     reexports::{
-        calloop::LoopSignal,
+        calloop::{LoopSignal, channel::Sender},
         wayland_server::{
             DisplayHandle,
             backend::{ClientData, ClientId, DisconnectReason},
@@ -22,7 +22,12 @@ use smithay::{
     },
 };
 
-use crate::Clock;
+use hocus_api::Event;
+
+use crate::{
+    Clock,
+    api::{self, EncodedScreenshot},
+};
 
 /// Everything the compositor knows, owned by the event loop.
 #[derive(Debug)]
@@ -31,6 +36,11 @@ pub struct State {
     pub display_handle: DisplayHandle,
     pub socket_path: PathBuf,
     pub loop_signal: LoopSignal,
+    pub api: hocus_api::Server,
+    /// Where screenshot workers send their PNG.
+    pub screenshots: Sender<EncodedScreenshot>,
+    /// The last window id given.
+    pub next_window_id: u64,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
@@ -54,6 +64,8 @@ impl State {
         loop_signal: LoopSignal,
         socket_path: PathBuf,
         clock: Clock,
+        api: hocus_api::Server,
+        screenshots: Sender<EncodedScreenshot>,
     ) -> anyhow::Result<Self> {
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(dh, "seat0");
@@ -67,6 +79,9 @@ impl State {
             display_handle: dh.clone(),
             socket_path,
             loop_signal,
+            api,
+            screenshots,
+            next_window_id: 0,
             space: Space::default(),
             popups: PopupManager::default(),
             unplaced: Vec::new(),
@@ -124,12 +139,16 @@ impl State {
             let loc =
                 area.loc + Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2));
             self.space.map_element(window.clone(), loc, true);
+            self.emit(|s| Event::WindowOpened {
+                window: s.window_info(&window),
+            });
             self.focus(Some(&window), serial);
         }
     }
 
     /// Raises `window` and gives it keyboard focus; `None` clears the focus.
     pub fn focus(&mut self, window: Option<&Window>, serial: Serial) {
+        let before = self.focused_window();
         if let Some(window) = window {
             self.space.raise_element(window, true);
         }
@@ -144,6 +163,11 @@ impl State {
             .map(|t| t.wl_surface().clone());
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, surface, serial);
+        }
+        if before.as_ref() != window {
+            self.emit(|_| Event::WindowFocused {
+                id: window.map(api::window_id),
+            });
         }
         self.needs_redraw = true;
     }
