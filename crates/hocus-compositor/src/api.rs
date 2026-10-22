@@ -73,6 +73,10 @@ impl State {
                 .unwrap_or_default(),
             visible: self.space.element_location(window).is_some(),
             state: self.window_state(window),
+            opacity: model_id(window)
+                .and_then(|id| self.windows.get(&id))
+                .map_or(1.0, |m| f64::from(m.opacity)),
+            pinned: model_id(window).is_some_and(|id| self.model.is_pinned(id)),
         }
     }
 
@@ -359,6 +363,10 @@ impl App {
                     ButtonState::Released
                 };
                 state.pointer_button(button.code(), button_state, state.time_msec());
+                Reply::Done
+            }
+            Request::PointerScroll { dy } => {
+                state.scroll(dy, state.time_msec());
                 Reply::Done
             }
             Request::Key { code, pressed } => {

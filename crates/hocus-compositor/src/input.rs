@@ -162,6 +162,9 @@ impl State {
                 .amount(axis)
                 .unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0)
         };
+        if self.opacity_wheel(amount(Axis::Vertical)) {
+            return;
+        }
         let mut frame = AxisFrame::new(event.time_msec()).source(source);
         for axis in [Axis::Horizontal, Axis::Vertical] {
             let value = amount(axis);
@@ -179,5 +182,60 @@ impl State {
             pointer.axis(self, frame);
             pointer.frame(self);
         }
+    }
+
+    /// A wheel scroll, `dy` in logical pixels (15 per notch, down positive),
+    /// from a device or injected through the control API.
+    pub fn scroll(&mut self, dy: f64, time_msec: u32) {
+        if self.opacity_wheel(dy) {
+            return;
+        }
+        let frame = AxisFrame::new(time_msec)
+            .source(AxisSource::Wheel)
+            .value(Axis::Vertical, dy)
+            .v120(Axis::Vertical, (dy / 15.0 * 120.0) as i32);
+        if let Some(pointer) = self.seat.get_pointer() {
+            pointer.axis(self, frame);
+            pointer.frame(self);
+        }
+    }
+
+    /// Super+wheel over a window changes its opacity, remembered for its
+    /// app; the client sees no scroll.
+    fn opacity_wheel(&mut self, dy: f64) -> bool {
+        let logo = self
+            .seat
+            .get_keyboard()
+            .is_some_and(|k| k.modifier_state().logo);
+        if !logo || dy == 0.0 {
+            return false;
+        }
+        let Some(pointer) = self.seat.get_pointer() else {
+            return false;
+        };
+        let Some(window) = self
+            .space
+            .element_under(pointer.current_location())
+            .map(|(w, _)| w.clone())
+        else {
+            return false;
+        };
+        let Some(id) = crate::desktops::model_id(&window) else {
+            return false;
+        };
+        let step = if dy > 0.0 { -0.05 } else { 0.05 };
+        let Some(managed) = self.windows.get_mut(&id) else {
+            return false;
+        };
+        managed.opacity = ((managed.opacity + step) * 100.0)
+            .round()
+            .clamp(10.0, 100.0)
+            / 100.0;
+        let opacity = managed.opacity;
+        if let Some(app_id) = crate::desktops::title_and_app_id(&window).1 {
+            self.app_opacity.insert(app_id, opacity);
+        }
+        self.needs_redraw = true;
+        true
     }
 }

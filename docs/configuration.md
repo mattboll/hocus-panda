@@ -27,11 +27,28 @@ shadow = true
 ring_width = 2     # focus ring
 accent = "#7bc47f"
 
+[[rules]]                  # windows matching app_id and title (globs: * and ?)
+app_id = "chat*"
+output = "eDP-1"           # opens there, when plugged
+desktop = 1                # on that desktop (1 to 8)
+size = [900, 700]
+maximized = false
+opacity = 0.95             # 0.1 to 1
+pinned = true              # on every desktop of its output
+on_top = false             # above the other windows
+
 [shortcuts]
 "Super+Return" = "spawn foot"
 "Ctrl+Alt+Right" = "next-desktop all"
 "Alt+F4" = "none"            # removes a default
 ```
+
+## Window rules
+
+Each `[[rules]]` applies to the windows whose `app_id` and `title` match its
+patterns (both optional); when several match, later rules override earlier
+ones, field by field. Super+wheel over a window changes its opacity, and the
+new opacity is remembered for that application.
 
 ## Shortcuts
 

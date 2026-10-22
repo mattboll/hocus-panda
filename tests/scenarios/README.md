@@ -29,6 +29,7 @@ Steps, one per `[[step]]` table:
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
 | `click = "left"` | presses and releases a button (`left`, `right`, `middle`) |
 | `press = "left"`, `release = "left"` | holds and lets go a button, for drags |
+| `scroll = 15` | scrolls the wheel, logical pixels (15 per notch, down positive) |
 | `key_down = "alt"`, `key_up = "alt"` | holds and lets go a key, for Alt+drag |
 | `key = 30` | presses and releases a key, by evdev code (`KEY_A` is 30) |
 | `keys = "super+shift+2"` | presses keys in order, releases them in reverse: `super`, `shift`, `ctrl`, `alt`, digits, letters (by position on a US keyboard), `enter`, `escape`, `tab`, `space`, `backspace`, arrows, or evdev codes |
@@ -42,7 +43,7 @@ Steps, one per `[[step]]` table:
 | `expect_event = { type = "keyboard_layout", has? = "French" }` | checks the compositor said it in its event stream since the start |
 | `advance_ms = 500` | moves the virtual clock forward |
 | `frames = 1` | moves the virtual clock forward by whole frames |
-| `expect_window = { app_id, output?, geometry? = [x, y, w, h], focused?, visible?, state? }` | checks a window, waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized |
+| `expect_window = { app_id, output?, geometry? = [x, y, w, h], focused?, visible?, state?, opacity?, pinned? }` | checks a window, waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized |
 | `expect_no_window = "app_id"` | checks a window is gone |
 | `expect_focus = "app_id"` | checks which window has keyboard focus |
 | `expect_stack = ["below", "above"]` | checks the shown windows, bottom to top |

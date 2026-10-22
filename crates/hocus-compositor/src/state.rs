@@ -72,6 +72,8 @@ pub struct State {
     /// What the pointer looks like, as clients set it.
     pub cursor: CursorImageStatus,
     pub arrows: Arrows,
+    /// Opacity set with Super+wheel, per app id.
+    pub app_opacity: std::collections::HashMap<String, f32>,
     /// Where windows were, per layout of outputs.
     pub places: Places,
     /// ext-foreign-toplevel-list: windows for taskbars and switchers.
@@ -124,6 +126,7 @@ impl State {
             model: Model::new(),
             windows: BTreeMap::new(),
             places: Places::new(),
+            app_opacity: Default::default(),
             config: Config::default(),
             config_error: None,
             config_warnings: Vec::new(),
