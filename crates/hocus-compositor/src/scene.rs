@@ -102,6 +102,8 @@ impl State {
         );
         // Choosing what a screenshot takes, and its flash.
         elements.extend(self.screenshot_elements(renderer, output));
+        // What is recorded, and the recording's bar.
+        elements.extend(self.recording_elements(renderer, output));
         // Each screen's name, while identifying.
         elements.extend(
             self.identify_elements(renderer, output)

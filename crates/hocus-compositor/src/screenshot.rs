@@ -138,6 +138,12 @@ impl State {
     }
 
     fn start_picking(&mut self, mode: PickMode) {
+        self.start_picking_for(mode);
+    }
+
+    /// Dims the screens to choose a region or a window, for a screenshot or
+    /// a recording.
+    pub fn start_picking_for(&mut self, mode: PickMode) {
         let theme = self.theme();
         let lang = self.shell_lang();
         let panels = self
@@ -208,6 +214,45 @@ impl State {
                 }
             }
             (PickMode::Window, Some(false)) => {}
+            // Recording: a region drawn; a click alone takes the window
+            // under it, or the screen.
+            (PickMode::Record, Some(true)) => {
+                let output = self.space.output_under(at).next().map(Output::name);
+                if let (Some(output), Some(picking)) = (output, &mut self.shots.picking) {
+                    picking.from = Some((at, output));
+                }
+            }
+            (PickMode::Record, Some(false)) => {
+                let from = self.shots.picking.as_ref().and_then(|p| p.from.clone());
+                self.shots.picking = None;
+                let Some((from, output)) = from else {
+                    return true;
+                };
+                let rect = self.region(&output, from, at);
+                let target = match rect {
+                    Some(rect) if rect.size.w > 4 && rect.size.h > 4 => {
+                        crate::recording::Target::Output {
+                            name: output,
+                            rect: Some(rect),
+                        }
+                    }
+                    _ => match self.space.element_under(at).and_then(|(w, _)| model_id(w)) {
+                        Some(id) => crate::recording::Target::Window(id),
+                        None => crate::recording::Target::Output {
+                            name: output,
+                            rect: None,
+                        },
+                    },
+                };
+                self.record(target);
+            }
+            (PickMode::Record, None) => {
+                let from = self.shots.picking.as_ref().and_then(|p| p.from.clone());
+                if let Some((from, output)) = from {
+                    let rect = self.region(&output, from, at);
+                    self.show_chosen(&output, rect);
+                }
+            }
             (PickMode::Window, None) => {
                 let hovered = self.space.element_under(at).and_then(|(w, loc)| {
                     let output = self.space.output_under(at).next()?.clone();
@@ -283,6 +328,21 @@ impl State {
         if sym == smithay::input::keyboard::Keysym::Escape {
             self.shots.picking = None;
             self.needs_redraw = true;
+        }
+        // Recording: Enter takes the screen under the pointer.
+        let recording = self
+            .shots
+            .picking
+            .as_ref()
+            .is_some_and(|p| p.mode == PickMode::Record);
+        if recording && sym == smithay::input::keyboard::Keysym::Return {
+            self.shots.picking = None;
+            if let Some(output) = self.output_under_pointer() {
+                self.record(crate::recording::Target::Output {
+                    name: output.name(),
+                    rect: None,
+                });
+            }
         }
         true
     }
@@ -415,6 +475,11 @@ impl State {
             }
             Done::Text(None) => self.shell_toast(lang.no_text_found(), ""),
         }
+    }
+
+    /// A toast about a file: its Open and Delete act on it.
+    pub fn screenshot_toast_file(&mut self, id: u32, path: PathBuf) {
+        self.shots.toasts.insert(id, path);
     }
 
     /// A screenshot toast's action: open, delete, copy its text.
@@ -594,7 +659,7 @@ impl App {
 }
 
 /// A part of `whole`, kept within it.
-fn crop(whole: &Pixels, x: u32, y: u32, w: u32, h: u32) -> Pixels {
+pub fn crop(whole: &Pixels, x: u32, y: u32, w: u32, h: u32) -> Pixels {
     let x = x.min(whole.width);
     let y = y.min(whole.height);
     let w = w.min(whole.width - x);

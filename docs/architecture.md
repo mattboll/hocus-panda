@@ -106,6 +106,13 @@ through text-input-v3, once it has the keyboard back; without an input
 method, the compositor sends the text itself, which the protocol has the
 client apply.
 
+Screen recording (#70) takes a frame after the turn of the loop, at most
+`fps` a second and only when the screen drew something new (or a click's
+ring is growing), with the red frame and the bar left out; the frame goes,
+owned, to a worker thread that feeds an encoder process (ffmpeg, VA-API when
+the card has it) at a steady rate and paints click rings into it. A frame
+the worker has no room for is dropped; the loop never waits for it.
+
 ## Rendering
 
 - Compositing: smithay's GLES renderer with damage tracking.

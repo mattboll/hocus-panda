@@ -113,6 +113,7 @@ pub struct State {
     pub tray: crate::tray::TrayState,
     /// The screenshot tool (#69).
     pub shots: crate::screenshot::Screenshots,
+    pub recorder: crate::recording::Recorder,
     /// polkit's password requests and their dialog (#83).
     pub authorizer: crate::authorize::Authorizer,
     /// Leaving the session: its card, what the machine can do (#72).
@@ -234,6 +235,7 @@ impl State {
             leaver: Default::default(),
             authorizer: Default::default(),
             shots: Default::default(),
+            recorder: Default::default(),
             clipboard: Default::default(),
             tray: Default::default(),
             output_management: crate::handlers::output_management::OutputManagement::new(dh),

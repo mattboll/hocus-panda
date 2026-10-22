@@ -271,7 +271,8 @@ impl State {
         }
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.picker_pointer(location, None)
+            && (self.recording_pointer(location, None)
+                || self.picker_pointer(location, None)
                 || self.auth_pointer(location, None)
                 || self.leave_pointer(location, None)
                 || self.card_pointer(location, None)
@@ -329,9 +330,11 @@ impl State {
             }
             return;
         }
+        self.recording_click(at, pressed);
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && (self.picker_pointer(at, Some(pressed))
+            && (self.recording_pointer(at, Some(pressed))
+                || self.picker_pointer(at, Some(pressed))
                 || self.auth_pointer(at, Some(pressed))
                 || self.leave_pointer(at, Some(pressed))
                 || self.card_pointer(at, Some(pressed))

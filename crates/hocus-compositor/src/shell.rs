@@ -250,6 +250,7 @@ impl State {
         self.refresh_leaving();
         self.refresh_authorize();
         self.refresh_screenshots();
+        self.refresh_recording();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -505,6 +506,7 @@ impl State {
         self.leave_ui(&mut out);
         self.auth_ui(&mut out);
         self.picker_ui(&mut out);
+        self.recording_ui(&mut out);
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;

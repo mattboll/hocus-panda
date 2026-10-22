@@ -167,6 +167,11 @@ impl State {
         *self.screen_capture.frames.entry(output.name()).or_default() += 1;
     }
 
+    /// Frames `output` has drawn so far.
+    pub fn output_frame_count(&self, output: &Output) -> u64 {
+        self.output_frame(output)
+    }
+
     fn output_frame(&self, output: &Output) -> u64 {
         self.screen_capture
             .frames

@@ -82,7 +82,7 @@ Steps, one per `[[step]]` table:
 | `stall_output = "HEADLESS-1"` | the output stops presenting its frames, as a stuck screen would, until the compositor recovers it |
 | `set_state = { app_id, state = "maximized" }` | maximizes, makes fullscreen, minimizes or restores (`normal`) a window |
 | `expect_accent = { hue = [15, 45] }` | the shell's accent in effect has a hue in that range (degrees) |
-| `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it; `{scenario_dir}` is the scenario's directory, for fixtures, and `{test_client}` a test client program (`--app-id`, `--size`, `--color`) for what the compositor starts itself |
+| `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it; `{scenario_dir}` is the scenario's directory, for fixtures, `{runtime_dir}` the compositor's temporary directory, for files it writes, and `{test_client}` a test client program (`--app-id`, `--size`, `--color`) for what the compositor starts itself |
 | `expect_config_error = "line 2"` | checks the last file was refused with that in the message; `""` checks it was applied |
 | `expect_config_warning = "first one wins"` | checks what the configuration in effect left out |
 | `expect_event = { type = "keyboard_layout", has? = "French" }` | checks the compositor said it in its event stream since the start |
