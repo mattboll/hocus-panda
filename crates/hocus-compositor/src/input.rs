@@ -194,7 +194,17 @@ impl State {
             return;
         }
 
-        if state == ButtonState::Pressed && !pointer.is_grabbed() {
+        // Over a third-party bar or overlay, a click is the surface's: no
+        // window is focused or grabbed.
+        let on_layer = state == ButtonState::Pressed
+            && !pointer.is_grabbed()
+            && self
+                .layer_surface_under(at, &crate::handlers::layer_shell::ABOVE)
+                .is_some();
+        if on_layer {
+            self.layer_click(at);
+        } else if state == ButtonState::Pressed && !pointer.is_grabbed() {
+            self.layer_release_keyboard();
             let at = pointer.current_location();
             let alt = self
                 .seat

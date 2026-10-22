@@ -3,5 +3,6 @@
 pub mod bus;
 pub mod client;
 pub mod image;
+pub mod layer;
 pub mod scenario;
 pub mod x11;

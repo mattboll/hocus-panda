@@ -39,6 +39,8 @@ Steps, one per `[[step]]` table:
 | Step | Does |
 |---|---|
 | `open = { app_id, size = [w, h], color = "#rrggbb", inhibit_shortcuts? }` | starts a test client with a solid window, waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard |
+| `open_layer = { namespace, layer, anchor?, size = [w, h], exclusive_zone?, keyboard?, color }` | starts a layer-shell client (`background`, `bottom`, `top`, `overlay`; anchors among `top`, `bottom`, `left`, `right`; 0 for a length anchored at both ends; keyboard `none`, `exclusive`, `on_demand`), waits until it is shown; `expect_received` reads it by its namespace |
+| `close_layer = "namespace"` | closes that layer client |
 | `activate = "app_id"` | the client of that app id asks for its window to come forward, with an activation token of its own (xdg-activation) |
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |

@@ -43,7 +43,8 @@ const BATCH: [&str; 18] = [
 ];
 
 /// What a sandboxed client must not see.
-const SENSITIVE: [&str; 4] = [
+const SENSITIVE: [&str; 5] = [
+    "zwlr_layer_shell_v1",
     "zwp_virtual_keyboard_manager_v1",
     "ext_data_control_manager_v1",
     "ext_foreign_toplevel_list_v1",
