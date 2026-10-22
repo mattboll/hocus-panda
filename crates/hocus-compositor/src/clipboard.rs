@@ -46,6 +46,9 @@ pub struct Clipboard {
     made: u64,
     /// The number of each copy read, to place one read late.
     read: Vec<(u64, String)>,
+    /// Clipboard selections seen: a read asked for one is dropped when a
+    /// newer one came meanwhile, since it would read that one.
+    selections: u64,
     news: Option<channel::Sender<News>>,
     /// Where it is kept, for the session itself.
     store: Option<PathBuf>,
@@ -129,6 +132,17 @@ impl State {
         }
     }
 
+    /// A new clipboard selection: its number.
+    pub fn selection_changed(&mut self) -> u64 {
+        self.clipboard.selections += 1;
+        self.clipboard.selections
+    }
+
+    /// Whether selection `n` is still the clipboard's.
+    pub fn selection_is(&self, n: u64) -> bool {
+        self.clipboard.selections == n
+    }
+
     /// A client offered the clipboard: where to ask for its text, read off
     /// the loop; `None` when it is marked secret or is not text.
     pub fn clipboard_reader(&mut self, mimes: &[String]) -> Option<(&'static str, OwnedFd)> {
@@ -145,6 +159,7 @@ impl State {
             let mut text = String::new();
             // Past the limit, it is not kept: reading a byte more says so.
             if reader.take(limit + 1).read_to_string(&mut text).is_ok()
+                && !text.is_empty()
                 && text.len() as u64 <= limit
             {
                 let _ = news.send(News::Copied(n, text));

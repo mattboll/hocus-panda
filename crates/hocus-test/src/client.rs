@@ -67,6 +67,8 @@ enum Command {
     Copy(String),
     /// A copy a password manager makes: marked secret.
     CopySecret(String),
+    /// A copy, then at once a secret one, sent together.
+    CopyThenSecret(String, String),
     /// Asks the compositor to bring its window forward (xdg-activation).
     Activate,
 }
@@ -158,6 +160,14 @@ impl TestClient {
     pub fn copy_secret(&self, text: &str) -> anyhow::Result<()> {
         self.commands
             .send(Command::CopySecret(text.to_owned()))
+            .context("the test client is gone")
+    }
+
+    /// Takes the clipboard with `text`, then at once with `secret` marked
+    /// secret: the compositor gets both in one go.
+    pub fn copy_then_secret(&self, text: &str, secret: &str) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::CopyThenSecret(text.to_owned(), secret.to_owned()))
             .context("the test client is gone")
     }
 
@@ -282,6 +292,10 @@ impl SolidWindow {
                 match command {
                     Command::Copy(text) => client.copy(text, false, &qh),
                     Command::CopySecret(text) => client.copy(text, true, &qh),
+                    Command::CopyThenSecret(text, secret) => {
+                        client.copy(text, false, &qh);
+                        client.copy(secret, true, &qh);
+                    }
                     Command::Activate => client.ask_activation(&qh),
                 }
             }
