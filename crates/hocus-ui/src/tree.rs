@@ -248,6 +248,13 @@ pub enum Kind {
         label: Option<String>,
     },
     TextField(Box<TextField>),
+    /// A value from 0 to 1, set by dragging along it or with the arrows.
+    Slider {
+        value: f32,
+        /// What the arrows add or take.
+        step: f32,
+        name: String,
+    },
 }
 
 impl fmt::Debug for Kind {
@@ -260,6 +267,11 @@ impl fmt::Debug for Kind {
             Self::Icon { label, .. } => f.debug_struct("Icon").field("label", label).finish(),
             Self::Custom { label, .. } => f.debug_struct("Custom").field("label", label).finish(),
             Self::TextField(field) => field.fmt(f),
+            Self::Slider { value, name, .. } => f
+                .debug_struct("Slider")
+                .field("name", name)
+                .field("value", value)
+                .finish(),
         }
     }
 }
@@ -307,7 +319,8 @@ impl Kind {
     }
 
     fn focusable(&self) -> bool {
-        matches!(self, Self::Button(b) if b.enabled) || matches!(self, Self::TextField(_))
+        matches!(self, Self::Button(b) if b.enabled)
+            || matches!(self, Self::TextField(_) | Self::Slider { .. })
     }
 }
 
@@ -483,6 +496,8 @@ pub struct Tree {
     /// The ring shows once the keyboard is used, not after a click.
     focus_visible: bool,
     pointer: Option<Point>,
+    /// The slider the pointer drags.
+    dragging: Option<NodeId>,
 }
 
 impl fmt::Debug for Tree {
@@ -521,6 +536,7 @@ impl Tree {
             focused: None,
             focus_visible: false,
             pointer: None,
+            dragging: None,
         };
         let look = Look {
             background: Some(Paint::Background),
@@ -730,6 +746,17 @@ impl Tree {
                 Kind::Icon { icon, .. } => *icon = new,
                 _ => return,
             }
+            node.changed = true;
+        }
+    }
+
+    /// Changes the colour of an icon.
+    pub fn set_icon_paint(&mut self, id: NodeId, paint: Paint) {
+        if let Some(node) = self.node_mut(id)
+            && let Kind::Icon { color, .. } = &mut node.kind
+            && *color != paint
+        {
+            *color = paint;
             node.changed = true;
         }
     }
@@ -986,6 +1013,7 @@ impl Tree {
                 let p = field.placeholder.measure(fonts, None, scale);
                 Some(Size::new(v.w.max(p.w), v.h.max(p.h)))
             }
+            Kind::Slider { .. } => Some(Size::new(120.0, 24.0)),
         }
     }
 
@@ -1330,6 +1358,9 @@ impl Tree {
         match input {
             Input::PointerMove(p) => {
                 self.pointer = Some(p);
+                if let Some(id) = self.dragging {
+                    events.extend(self.slide_to(id, p));
+                }
                 let hovered = self.hit(p, true);
                 if hovered != self.hovered {
                     let old = self.hovered;
@@ -1353,8 +1384,16 @@ impl Tree {
                     self.focus(pressed);
                     self.set_focus_visible(false);
                 }
+                // A slider follows the pointer from the press on.
+                if let (Some(id), Some(p)) = (pressed, self.pointer)
+                    && matches!(self.node(id).map(|n| &n.kind), Some(Kind::Slider { .. }))
+                {
+                    self.dragging = Some(id);
+                    events.extend(self.slide_to(id, p));
+                }
             }
             Input::PointerButton { pressed: false } => {
+                self.dragging = None;
                 let pressed = self.pressed.take();
                 self.set_flag(pressed, None, Some(false));
                 if pressed.is_some() && pressed == self.hovered {
@@ -1388,6 +1427,23 @@ impl Tree {
                     events.extend(self.focused.map(Event::Activated));
                 }
             }
+            Input::Key(key @ (Key::Left | Key::Right | Key::Home | Key::End))
+                if self.focused_slider().is_some() =>
+            {
+                if let Some(id) = self.focused_slider()
+                    && let Some(Kind::Slider { value, step, .. }) = self.node(id).map(|n| &n.kind)
+                {
+                    let to = match key {
+                        Key::Left => value - step,
+                        Key::Right => value + step,
+                        Key::Home => 0.0,
+                        _ => 1.0,
+                    };
+                    if self.set_slider(id, to) {
+                        events.push(Event::Changed(id));
+                    }
+                }
+            }
             Input::Key(key) => {
                 if let Some(id) = self.focused_field() {
                     let mut edited = (false, false);
@@ -1405,6 +1461,46 @@ impl Tree {
             }
         }
         events
+    }
+
+    fn focused_slider(&self) -> Option<NodeId> {
+        let id = self.focused?;
+        matches!(self.node(id)?.kind, Kind::Slider { .. }).then_some(id)
+    }
+
+    /// Moves a slider to the pointer at `p`.
+    fn slide_to(&mut self, id: NodeId, p: Point) -> Option<Event> {
+        let rect = self.node(id)?.rect;
+        let to = (p.x - rect.x) / rect.w.max(1.0);
+        self.set_slider(id, to).then_some(Event::Changed(id))
+    }
+
+    /// Whether the value changed.
+    fn set_slider(&mut self, id: NodeId, to: f32) -> bool {
+        let to = to.clamp(0.0, 1.0);
+        match self.node_mut(id).map(|n| &mut n.kind) {
+            Some(Kind::Slider { value, .. }) if (*value - to).abs() > f32::EPSILON => {
+                *value = to;
+                self.mark(id);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A slider's value, from 0 to 1.
+    pub fn slider_value(&self, id: NodeId) -> Option<f32> {
+        match self.node(id)?.kind {
+            Kind::Slider { value, .. } => Some(value),
+            _ => None,
+        }
+    }
+
+    /// Sets a slider from outside (the system changed the volume).
+    pub fn set_slider_value(&mut self, id: NodeId, value: f32) {
+        if self.dragging != Some(id) {
+            self.set_slider(id, value);
+        }
     }
 
     fn focused_field(&self) -> Option<NodeId> {
@@ -1477,6 +1573,10 @@ impl Tree {
             Kind::Icon { label, .. } => (Role::Icon, label.clone()),
             Kind::Custom { label, .. } => (Role::Custom, label.clone()),
             Kind::TextField(field) => (Role::Field, Some(field.name.clone())),
+            Kind::Slider { name, value, .. } => (
+                Role::Slider,
+                Some(format!("{name} {}%", (value * 100.0).round())),
+            ),
         };
         Some(AccessNode {
             role,
@@ -1618,6 +1718,16 @@ fn draw_kind(
             icon.draw(canvas, at, theme.color(*color));
         }
         Kind::Custom { draw, .. } => draw.draw(canvas, rect, theme, now),
+        Kind::Slider { value, .. } => {
+            let c = &theme.colors;
+            let y = rect.y + rect.h / 2.0;
+            let track = Rect::new(rect.x, y - 2.0, rect.w, 4.0);
+            canvas.fill_rect(track, 2.0, c.muted.with_alpha(0x55));
+            let x = rect.x + rect.w * *value;
+            canvas.fill_rect(Rect::new(rect.x, y - 2.0, x - rect.x, 4.0), 2.0, c.accent);
+            let r = if hovered || pressed { 9.0 } else { 8.0 };
+            canvas.fill_rect(Rect::new(x - r, y - r, 2.0 * r, 2.0 * r), r, c.text);
+        }
         Kind::TextField(field) => {
             let empty = field.value.text().is_empty();
             let shown = if empty {

@@ -19,6 +19,7 @@ mod input;
 mod launcher;
 mod notify;
 mod output_spec;
+mod quick;
 mod scene;
 mod shell;
 mod socket;

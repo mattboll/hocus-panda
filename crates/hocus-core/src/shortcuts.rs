@@ -49,6 +49,8 @@ pub enum Action {
     SwitchLayout,
     /// Opens the launcher, or closes it.
     Launcher,
+    /// Opens quick settings on the screen under the pointer, or closes them.
+    QuickSettings,
     /// Window switcher (#39): the windows of the output under the pointer,
     /// or of every output.
     SwitchWindows(Scope),
@@ -81,6 +83,7 @@ impl fmt::Display for Action {
             Self::Close => write!(f, "close"),
             Self::SwitchLayout => write!(f, "switch-layout"),
             Self::Launcher => write!(f, "launcher"),
+            Self::QuickSettings => write!(f, "quick-settings"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
             Self::Spawn(command) => write!(f, "spawn {command}"),
         }
@@ -139,6 +142,7 @@ impl FromStr for Action {
             "close" => bare(Self::Close),
             "switch-layout" => bare(Self::SwitchLayout),
             "launcher" => bare(Self::Launcher),
+            "quick-settings" => bare(Self::QuickSettings),
             "switch-windows" => scope().map(Self::SwitchWindows),
             "spawn" if !rest.is_empty() => Ok(Self::Spawn(rest.to_string())),
             "spawn" => Err("spawn: which command?".into()),
@@ -260,6 +264,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Alt+F4", Action::Close),
         ("Super+Ctrl+Space", Action::SwitchLayout),
         ("Super+Space", Action::Launcher),
+        ("Super+A", Action::QuickSettings),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),
         ("Super+Tab", Action::SwitchWindows(Scope::AllOutputs)),
     ]

@@ -95,13 +95,17 @@ impl State {
                 Kind::Unspecified,
             )));
         }
-        // The launcher over everything; toasts, then the column, above
-        // windows; the column under a fullscreen one.
+        // The launcher over everything; quick settings over the screen
+        // they dim; toasts, then the column, above windows; the column
+        // under a fullscreen one.
         elements.extend(
             self.launcher_elements(renderer, output)
                 .into_iter()
                 .map(SceneElement::Frame),
         );
+        let (sheet, dim) = self.quick_elements(renderer, output);
+        elements.extend(sheet.into_iter().map(SceneElement::Frame));
+        elements.extend(dim.map(SceneElement::Solid));
         elements.extend(
             self.toast_elements(renderer, output)
                 .into_iter()

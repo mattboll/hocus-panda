@@ -270,6 +270,20 @@ impl Toasts {
         events
     }
 
+    /// Keeps a notification in the history without showing it (do not
+    /// disturb).
+    pub fn remember(&mut self, toast: &Toast) {
+        self.history.push_front(Past {
+            app: toast.app.clone(),
+            summary: toast.summary.clone(),
+        });
+        self.history.truncate(HISTORY);
+    }
+
+    pub fn clear_history(&mut self) {
+        self.history.clear();
+    }
+
     /// Closes a toast, as its client asked: no event.
     pub fn close(&mut self, id: u32) -> bool {
         match self.cards.iter().position(|c| c.toast.id == id) {

@@ -18,6 +18,8 @@ pub enum Role {
     Custom,
     /// A text field.
     Field,
+    /// A value along a track; its label ends with the value in percent.
+    Slider,
 }
 
 impl Role {
@@ -30,6 +32,7 @@ impl Role {
             Self::Icon => "icon",
             Self::Custom => "custom",
             Self::Field => "field",
+            Self::Slider => "slider",
         }
     }
 }

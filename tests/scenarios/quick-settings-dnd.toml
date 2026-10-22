@@ -1,0 +1,35 @@
+description = "Do not disturb, turned on in quick settings, holds toasts back; the column's history keeps them"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+a"
+
+[[step]]
+click_ui = "Do not disturb"
+
+[[step]]
+expect_ui = { label = "Do not disturb", selected = true }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+notify = { app = "Chat", summary = "Lunch at noon?" }
+
+[[step]]
+expect_ui = { label = "Chat · Lunch at noon?" }
+
+[[step]]
+expect_ui = { label = "Lunch at noon?", shown = false }
+
+# A critical one still shows.
+[[step]]
+notify = { app = "Build", summary = "Disk full", urgency = "critical" }
+
+[[step]]
+expect_ui = { label = "Disk full" }

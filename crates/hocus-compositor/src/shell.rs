@@ -92,6 +92,7 @@ pub fn start(
     state.shell = Some(Shell::new(Theme::default(), lang, wall));
     crate::notify::start(handle, state, session_bus, lang);
     crate::launcher::start(handle, state, lang, data_dirs);
+    crate::quick::start(handle, state, lang);
     if system {
         // Wakes the loop when the minute turns; the column reads the time
         // after each dispatch.
@@ -247,6 +248,7 @@ impl State {
     pub fn refresh_shell(&mut self) {
         self.refresh_toasts();
         self.refresh_launcher();
+        self.refresh_quick();
         if self.shell.is_none() {
             return;
         }
@@ -464,6 +466,7 @@ impl State {
         flatten(&shell.column.access(), origin, 0, &mut out);
         self.toasts_ui(&mut out);
         self.launcher_ui(&mut out);
+        self.quick_ui(&mut out);
         out
     }
 }

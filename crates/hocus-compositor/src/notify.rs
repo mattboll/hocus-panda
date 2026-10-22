@@ -109,6 +109,7 @@ fn toast_of(n: hocus_platform::notifications::Notification) -> Toast {
 impl State {
     fn on_notification(&mut self, incoming: Incoming) {
         let now = self.clock.now();
+        let dnd = self.dnd();
         // A first toast goes where the user works; the others join it.
         let place = self
             .toasts
@@ -136,9 +137,17 @@ impl State {
                     }
                     panel.on = Some(place);
                 }
-                let events = panel.toasts.show(toast_of(n), now);
-                self.emit(|_| shown);
-                events
+                let toast = toast_of(n);
+                // Do not disturb holds all but critical ones: the column's
+                // history keeps them.
+                if dnd && !toast.critical {
+                    panel.toasts.remember(&toast);
+                    Vec::new()
+                } else {
+                    let events = panel.toasts.show(toast, now);
+                    self.emit(|_| shown);
+                    events
+                }
             }
             Incoming::Close(id) => {
                 if panel.toasts.close(id)
@@ -175,6 +184,20 @@ impl State {
                 }
             }
         }
+    }
+
+    /// How many notifications the history holds.
+    pub fn notification_count(&self) -> usize {
+        self.toasts
+            .as_ref()
+            .map_or(0, |p| p.toasts.history().count())
+    }
+
+    pub fn clear_notifications(&mut self) {
+        if let Some(panel) = self.toasts.as_mut() {
+            panel.toasts.clear_history();
+        }
+        self.needs_redraw = true;
     }
 
     /// The newest notifications, for the column.
