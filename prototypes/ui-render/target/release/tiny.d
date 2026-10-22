@@ -1,0 +1,1 @@
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/tiny: /home/mbollot/github/hocus-panda/prototypes/ui-render/src/bin/tiny.rs /home/mbollot/github/hocus-panda/prototypes/ui-render/src/lib.rs

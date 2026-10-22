@@ -1,0 +1,11 @@
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/deps/naga_types-cdab7c57aee56833.d: /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/lib.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/glsl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/hlsl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/msl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/spv.rs
+
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/deps/libnaga_types-cdab7c57aee56833.rlib: /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/lib.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/glsl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/hlsl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/msl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/spv.rs
+
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/deps/libnaga_types-cdab7c57aee56833.rmeta: /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/lib.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/glsl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/hlsl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/msl.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/spv.rs
+
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/lib.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/glsl.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/hlsl.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/msl.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/naga-types-30.0.1/src/spv.rs:
