@@ -14,6 +14,13 @@ outer = 8          # around them, at the edges of the work area (0 to 64)
 [desktops]
 per_output = 4     # desktops of an output seen for the first time (1 to 8)
 
+[[desktops.looks]]  # a desktop's own theme and wallpaper, to know where you are; the column crossfades
+desktop = 2         # from 1
+output = "eDP-1"    # only this screen's desktop 2; every screen's when left out
+theme = "paper"     # as [appearance] theme; accent too
+kind = "colour"     # as [wallpaper]: kind, image, folder, mode, colour
+colour = "#efe7d6"
+
 [keyboard]
 layouts = ["fr", "us"]   # XKB layouts, the first active at start
 options = "caps:escape"  # XKB options
