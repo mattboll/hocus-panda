@@ -15,6 +15,7 @@ use hocus_ui::{
 };
 
 use crate::{
+    arrange,
     catalogue::{self, Context, Family, Hit, Page, Setting},
     edit::Change,
     words::{self, ShortcutGroup},
@@ -32,6 +33,8 @@ pub enum Screen {
 pub enum Outcome {
     Change(Box<Change>),
     Close,
+    /// Each screen shows its name.
+    Identify,
 }
 
 /// What a node does when clicked.
@@ -42,8 +45,57 @@ enum Target {
     Hit(usize),
     Close,
     Set(Change),
+    /// Several keys at once (the primary screen: on for one, off for the
+    /// others).
+    SetAll(Vec<Change>),
     Group(Option<ShortcutGroup>),
+    ChooseScreen(String),
+    List(ModeList),
+    /// The layout of these screens is renamed.
+    Rename(Vec<String>),
+    Identify,
 }
+
+/// Which of a screen's choices are open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModeList {
+    Resolution,
+    Rate,
+}
+
+/// The Screens page between builds.
+#[derive(Debug, Default)]
+struct ScreensPage {
+    /// The screen whose settings show.
+    chosen: Option<String>,
+    /// The arrangement's node, and how screens map onto it.
+    area: Option<(NodeId, arrange::Mapping)>,
+    /// Each screen's tile in the arrangement.
+    tiles: Vec<(String, NodeId)>,
+    drag: Option<Drag>,
+    list: Option<ModeList>,
+    /// The layout being renamed, by its screens, and its field.
+    renaming: Option<(Vec<String>, Option<NodeId>)>,
+}
+
+/// A screen being dragged in the arrangement.
+#[derive(Debug, Clone)]
+struct Drag {
+    name: String,
+    /// Where the pointer took it, from its corner.
+    grab: Point,
+    /// Its corner in the area.
+    at: Point,
+    /// The arrangement as it was when the drag began.
+    mapping: arrange::Mapping,
+    moved: bool,
+}
+
+/// The arrangement's height, logical pixels.
+const AREA_HEIGHT: f32 = 300.0;
+
+/// A pencil, for renaming.
+const PENCIL: &str = "M4 20h4L19 9l-4-4L4 16zM14 6l4 4";
 
 /// A switch, drawn: a pill with its knob, the accent when on.
 struct Switch(bool);
@@ -151,6 +203,7 @@ pub struct SettingsView {
     /// The text size slider, and the size it last asked for.
     text_size: Option<(NodeId, u32)>,
     pointer: Option<Point>,
+    screens: ScreensPage,
     dirty: bool,
     now: Duration,
 }
@@ -213,6 +266,7 @@ impl SettingsView {
             scroll: 0.0,
             text_size: None,
             pointer: None,
+            screens: ScreensPage::default(),
             dirty: true,
             now: Duration::ZERO,
         }
@@ -291,6 +345,20 @@ impl SettingsView {
 
     pub fn pointer_move(&mut self, at: Point) {
         self.pointer = Some(at);
+        if let Some(drag) = &mut self.screens.drag {
+            let area = self
+                .screens
+                .area
+                .and_then(|(id, _)| self.tree.rect(id))
+                .unwrap_or_default();
+            let to = Point::new(at.x - area.x - drag.grab.x, at.y - area.y - drag.grab.y);
+            if (to.x - drag.at.x).abs() + (to.y - drag.at.y).abs() > 3.0 || drag.moved {
+                drag.moved = true;
+                drag.at = to;
+                self.dirty = true;
+            }
+            return;
+        }
         self.tree.input(Input::PointerMove(at));
     }
 
@@ -300,6 +368,22 @@ impl SettingsView {
     }
 
     pub fn pointer_button(&mut self, pressed: bool) -> Vec<Outcome> {
+        // Screens are dragged in the arrangement, or chosen by a click.
+        if self.screen == Screen::Page(Page::Screens) {
+            if pressed && let Some(drag) = self.drag_start() {
+                self.screens.drag = Some(drag);
+                return Vec::new();
+            }
+            if !pressed && let Some(drag) = self.screens.drag.take() {
+                self.dirty = true;
+                if drag.moved {
+                    return self.drop_screen(&drag).into_iter().collect();
+                }
+                self.screens.chosen = Some(drag.name);
+                self.screens.list = None;
+                return Vec::new();
+            }
+        }
         let events = self.tree.input(Input::PointerButton { pressed });
         self.typing = self.tree.focused() == self.field && self.field.is_some();
         self.handle(events)
@@ -323,6 +407,34 @@ impl SettingsView {
 
     pub fn key(&mut self, key: Key) -> Vec<Outcome> {
         let results = self.screen == Screen::Home && !self.hits.is_empty();
+        if let Some((outputs, Some(field))) = self.screens.renaming.clone() {
+            match key {
+                Key::Escape => {
+                    self.screens.renaming = None;
+                    self.dirty = true;
+                    return Vec::new();
+                }
+                Key::Enter => {
+                    self.screens.renaming = None;
+                    self.dirty = true;
+                    let name = self
+                        .tree
+                        .field_value(field)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_owned();
+                    if name.is_empty() {
+                        return Vec::new();
+                    }
+                    return vec![Outcome::Change(Box::new(Change::layout(
+                        &outputs,
+                        "name",
+                        name.as_str(),
+                    )))];
+                }
+                _ => {}
+            }
+        }
         match key {
             Key::Escape if !self.query.is_empty() => {
                 self.query.clear();
@@ -359,7 +471,10 @@ impl SettingsView {
 
     /// Typed text goes to the search field.
     pub fn text(&mut self, text: &str) -> Vec<Outcome> {
-        if self.tree.focused().is_none_or(|f| Some(f) != self.field) {
+        let renaming = self.screens.renaming.as_ref().and_then(|(_, f)| *f);
+        if renaming.is_some() && self.tree.focused() != renaming {
+            self.tree.set_focus(renaming);
+        } else if renaming.is_none() && self.tree.focused().is_none_or(|f| Some(f) != self.field) {
             self.tree.set_focus(self.field);
         }
         let events = self.tree.text_input(text);
@@ -407,6 +522,24 @@ impl SettingsView {
                     Some(Target::Hit(i)) => self.open_hit(i),
                     Some(Target::Close) => out.push(Outcome::Close),
                     Some(Target::Set(change)) => out.push(Outcome::Change(Box::new(change))),
+                    Some(Target::SetAll(changes)) => {
+                        out.extend(changes.into_iter().map(|c| Outcome::Change(Box::new(c))));
+                    }
+                    Some(Target::ChooseScreen(name)) => {
+                        self.screens.chosen = Some(name);
+                        self.screens.list = None;
+                        self.dirty = true;
+                    }
+                    Some(Target::List(list)) => {
+                        self.screens.list = (self.screens.list != Some(list)).then_some(list);
+                        self.dirty = true;
+                    }
+                    Some(Target::Rename(outputs)) => {
+                        self.screens.renaming = Some((outputs, None));
+                        self.typing = false;
+                        self.dirty = true;
+                    }
+                    Some(Target::Identify) => out.push(Outcome::Identify),
                     Some(Target::Group(group)) => {
                         self.group = group;
                         self.dirty = true;
@@ -496,7 +629,9 @@ impl SettingsView {
         }
         // What had the keyboard keeps it; what the pointer was over is
         // hovered again.
-        if self.typing {
+        if let Some((_, Some(field))) = &self.screens.renaming {
+            self.tree.set_focus(Some(*field));
+        } else if self.typing {
             self.tree.set_focus(self.field);
         }
         if let Some(at) = self.pointer {
@@ -935,15 +1070,17 @@ impl SettingsView {
             theme.text.headline.with_weight(700),
         );
         let sub = match page {
-            Page::Keyboard => words::SHORTCUTS_NOTE,
-            Page::Screens => words::SCREENS_NOTE,
-            _ => words::LIVE,
+            Page::Keyboard => words::SHORTCUTS_NOTE.get(lang).to_owned(),
+            Page::Screens => {
+                let names: Vec<&str> = self.ctx.screens.iter().map(|s| s.name.as_str()).collect();
+                match self.ctx.config.layout_for(&names) {
+                    Some(layout) => words::layout_recognised(&layout.name, lang),
+                    None => words::SCREENS_NOTE.get(lang).to_owned(),
+                }
+            }
+            _ => words::LIVE.get(lang).to_owned(),
         };
-        self.line(
-            titles,
-            sub.get(lang),
-            theme.text.body.with_color(Paint::Muted),
-        );
+        self.line(titles, &sub, theme.text.body.with_color(Paint::Muted));
         self.close_button(theme, head);
         let body = self.scrolled(main);
         match page {
@@ -1451,79 +1588,642 @@ impl SettingsView {
         }
     }
 
+    /// A drag begins on the screen under the pointer, if any.
+    fn drag_start(&self) -> Option<Drag> {
+        let at = self.pointer?;
+        let (area_id, mapping) = self.screens.area?;
+        let area = self.tree.rect(area_id)?;
+        let (name, rect) = self
+            .screens
+            .tiles
+            .iter()
+            .filter_map(|(n, id)| Some((n, self.tree.rect(*id)?)))
+            .find(|(_, r)| r.contains(at))?;
+        Some(Drag {
+            name: name.clone(),
+            grab: Point::new(at.x - rect.x, at.y - rect.y),
+            at: Point::new(rect.x - area.x, rect.y - area.y),
+            mapping,
+            moved: false,
+        })
+    }
+
+    /// Where a dragged screen lands, written as the layout of the screens
+    /// connected.
+    fn drop_screen(&self, drag: &Drag) -> Option<Outcome> {
+        let screens = &self.ctx.screens;
+        let moving = screens.iter().find(|s| s.name == drag.name)?;
+        let (x, y) = drag.mapping.logical(drag.at);
+        let others: Vec<arrange::Placed> = screens
+            .iter()
+            .filter(|s| s.name != drag.name)
+            .map(placed)
+            .collect();
+        let landed = arrange::snap(
+            arrange::Placed {
+                x,
+                y,
+                ..placed(moving)
+            },
+            &others,
+        );
+        let mut positions: Vec<(String, (i32, i32))> = screens
+            .iter()
+            .map(|s| {
+                let at = if s.name == drag.name {
+                    landed
+                } else {
+                    (s.geometry.x, s.geometry.y)
+                };
+                (s.name.clone(), at)
+            })
+            .collect();
+        arrange::normalized(&mut positions);
+        let mut table = toml_edit::InlineTable::new();
+        for (name, (x, y)) in &positions {
+            table.insert(
+                name,
+                toml_edit::Value::from_iter([i64::from(*x), i64::from(*y)]),
+            );
+        }
+        let names: Vec<String> = screens.iter().map(|s| s.name.clone()).collect();
+        Some(Outcome::Change(Box::new(Change::layout(
+            &names,
+            "positions",
+            table,
+        ))))
+    }
+
     fn screens(&mut self, theme: &Theme, body: NodeId) {
         let lang = self.lang;
         self.tree.set_style(body, fill_width(column(22.0)));
-        let cards = self.add(body, fill_width(row(14.0)), Kind::Box(Look::default()));
-        for (i, output) in self.ctx.outputs.clone().iter().enumerate() {
-            let look = Look {
-                background: Some(Paint::SurfaceHover),
-                radius: 16.0,
-                border: Some(Paint::Border),
-                ..Look::default()
-            };
-            let card = self.add(
-                cards,
-                Style {
-                    padding: Insets::symmetric(14.0, 18.0),
-                    ..column(4.0)
-                },
-                Kind::Box(look),
-            );
-            let name_row = self.add(card, row(10.0), Kind::Box(Look::default()));
-            self.line(name_row, &output.name, theme.text.title.with_weight(700));
-            if i == 0 {
-                self.line(
-                    name_row,
-                    words::PRIMARY.get(lang),
-                    theme.text.caption.with_color(Paint::Accent),
-                );
-            }
-            let detail = format!(
-                "{} × {} · {} {}",
-                output.pixel_width,
-                output.pixel_height,
-                words::SCALE.get(lang).to_lowercase(),
-                words::percent((output.scale * 100.0).round() as u32, lang)
-            );
-            self.line(
-                card,
-                &detail,
-                theme.text.label.with_weight(500).with_color(Paint::Muted),
-            );
-            self.highlighted(card, &Setting::Screen(output.name.clone()), look);
+        let screens = self.ctx.screens.clone();
+        if self
+            .screens
+            .chosen
+            .as_ref()
+            .is_none_or(|c| !screens.iter().any(|s| &s.name == c))
+        {
+            self.screens.chosen = screens
+                .iter()
+                .find(|s| s.primary)
+                .or_else(|| screens.first())
+                .map(|s| s.name.clone());
         }
 
-        // Desktops on a new screen.
-        let line = self.add(body, fill_width(row(12.0)), Kind::Box(Look::default()));
-        self.line(
-            line,
-            words::DESKTOPS_PER_SCREEN.get(lang),
-            theme.text.body.with_weight(600),
+        // The arrangement: each screen where it is, to drag into place.
+        let area = self.add(
+            body,
+            Style {
+                width: Length::Fill,
+                height: Length::Px(AREA_HEIGHT),
+                clip: true,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Background),
+                radius: 18.0,
+                border: Some(Paint::Border),
+                ..Look::default()
+            }),
         );
-        let n = self.ctx.config.desktops.per_output;
-        for (label, name, to) in [
-            ("−", "−1", n.saturating_sub(1).max(1)),
-            ("+", "+1", (n + 1).min(8)),
+        self.tree.layout();
+        let size = self
+            .tree
+            .rect(area)
+            .map_or(Size::new(800.0, AREA_HEIGHT), |r| Size::new(r.w, r.h));
+        let placed: Vec<arrange::Placed> = screens.iter().map(placed).collect();
+        let mapping = match &self.screens.drag {
+            Some(drag) => drag.mapping,
+            None => arrange::Mapping::fit(&placed, size, 24.0, 56.0),
+        };
+        self.screens.area = Some((area, mapping));
+        self.screens.tiles.clear();
+        for (s, p) in screens.iter().zip(&placed) {
+            let mut r = mapping.rect(*p);
+            if let Some(drag) = self.screens.drag.as_ref().filter(|d| d.name == s.name) {
+                r.x = drag.at.x;
+                r.y = drag.at.y;
+            }
+            let chosen = self.screens.chosen.as_ref() == Some(&s.name);
+            let tile = self.add(
+                area,
+                Style {
+                    at: Some(Point::new(r.x, r.y)),
+                    width: Length::Px(r.w.max(24.0)),
+                    height: Length::Px(r.h.max(24.0)),
+                    padding: Insets::symmetric(8.0, 10.0),
+                    justify: Justify::SpaceBetween,
+                    clip: true,
+                    ..column(2.0)
+                },
+                Kind::Box(Look {
+                    background: s.enabled.then_some(Paint::SurfaceHover),
+                    radius: 10.0,
+                    border: Some(if chosen { Paint::Accent } else { Paint::Border }),
+                    ..Look::default()
+                }),
+            );
+            let title = screen_title(s, lang);
+            self.tree.set_clickable(tile, &title);
+            self.tree.set_selected_box(tile, chosen);
+            self.targets
+                .insert(tile, Target::ChooseScreen(s.name.clone()));
+            self.screens.tiles.push((s.name.clone(), tile));
+            let ink = if s.enabled { Paint::Text } else { Paint::Muted };
+            let name_row = self.add(tile, row(8.0), Kind::Box(Look::default()));
+            self.line(
+                name_row,
+                &title,
+                theme.text.label.with_weight(700).with_color(ink),
+            );
+            if s.primary {
+                let pill = self.add(
+                    name_row,
+                    Style {
+                        padding: Insets::symmetric(2.0, 8.0),
+                        ..Style::default()
+                    },
+                    Kind::Box(Look {
+                        background: Some(Paint::Rgba(theme.colors.accent.with_alpha(46))),
+                        radius: 11.0,
+                        ..Look::default()
+                    }),
+                );
+                self.line(
+                    pill,
+                    words::PRIMARY.get(lang),
+                    theme
+                        .text
+                        .caption
+                        .with_weight(700)
+                        .with_color(Paint::Accent),
+                );
+            }
+            let detail = if s.enabled {
+                format!(
+                    "{} × {} · ×{} · {}",
+                    pixels(s).0,
+                    pixels(s).1,
+                    trim(s.scale),
+                    words::desktops(s.desktops, lang)
+                )
+            } else {
+                words::OFF.get(lang).to_owned()
+            };
+            self.line(tile, &detail, theme.text.caption.with_color(Paint::Muted));
+            self.highlighted(tile, &Setting::Screen(s.name.clone()), Look::default());
+        }
+        // Under the screens: how to place them, and what else to do.
+        let bar = self.add(
+            area,
+            Style {
+                at: Some(Point::new(0.0, size.h - 56.0)),
+                width: Length::Px(size.w),
+                height: Length::Px(56.0),
+                padding: Insets::symmetric(8.0, 16.0),
+                justify: Justify::SpaceBetween,
+                ..row(8.0)
+            },
+            Kind::Box(Look::default()),
+        );
+        self.line(
+            bar,
+            words::DRAG_HINT.get(lang),
+            theme.text.label.with_color(Paint::Muted),
+        );
+        let buttons = self.add(bar, row(8.0), Kind::Box(Look::default()));
+        let identify = self.add(
+            buttons,
+            Style {
+                height: Length::Px(40.0),
+                ..Style::default()
+            },
+            Kind::Button(Button::new(
+                words::IDENTIFY.get(lang),
+                ButtonKind::Plain,
+                theme,
+            )),
+        );
+        self.targets.insert(identify, Target::Identify);
+        // Mirroring comes with #125.
+        let mut mirror = Button::new(words::MIRROR.get(lang), ButtonKind::Plain, theme);
+        mirror.enabled = false;
+        self.add(
+            buttons,
+            Style {
+                height: Length::Px(40.0),
+                ..Style::default()
+            },
+            Kind::Button(mirror),
+        );
+
+        let wide = self.tree.size().w >= 1180.0;
+        let pair = self.add(
+            body,
+            Style {
+                align: Align::Start,
+                direction: if wide {
+                    Direction::Row
+                } else {
+                    Direction::Column
+                },
+                gap: if wide { 36.0 } else { 26.0 },
+                ..fill_width(Style::default())
+            },
+            Kind::Box(Look::default()),
+        );
+        if let Some(s) = screens
+            .iter()
+            .find(|s| self.screens.chosen.as_ref() == Some(&s.name))
+        {
+            self.screen_settings(theme, pair, s, wide);
+        }
+        self.layouts(theme, pair, &screens);
+    }
+
+    /// The chosen screen's mode, scale, desktops and switches.
+    fn screen_settings(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        s: &hocus_api::ScreenInfo,
+        wide: bool,
+    ) {
+        let lang = self.lang;
+        let section = self.add(
+            parent,
+            Style {
+                grow: 1.5,
+                ..fill_width(column(14.0))
+            },
+            Kind::Box(Look::default()),
+        );
+        let title = screen_title(s, lang).to_uppercase();
+        self.line(section, &title, theme.text.caption);
+        let current = s.current_mode.and_then(|i| s.modes.get(i)).copied();
+
+        // Resolution and refresh rate, each opening its choices.
+        let modes = self.add(section, fill_width(row(10.0)), Kind::Box(Look::default()));
+        let (w, h) = pixels(s);
+        let hz = current.map_or(0.0, |m| f64::from(m.refresh) / 1000.0);
+        for (list, label) in [
+            (
+                ModeList::Resolution,
+                labelled(words::RESOLUTION, &format!("{w} × {h}"), lang),
+            ),
+            (
+                ModeList::Rate,
+                labelled(words::REFRESH, &format!("{} Hz", trim(hz)), lang),
+            ),
         ] {
-            let b = Button::new(label, ButtonKind::Plain, theme).with_name(name);
+            let mut b = Button::new(label, ButtonKind::Plain, theme);
+            b.start = true;
+            b.selected = self.screens.list == Some(list);
+            b.enabled = s.enabled;
             let id = self.add(
-                line,
+                modes,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(48.0),
+                    ..Style::default()
+                },
+                Kind::Button(b),
+            );
+            self.targets.insert(id, Target::List(list));
+        }
+        if let (Some(list), Some(current)) = (self.screens.list, current) {
+            let choices: Vec<(String, String)> = match list {
+                ModeList::Resolution => {
+                    let mut sizes: Vec<(i32, i32)> =
+                        s.modes.iter().map(|m| (m.width, m.height)).collect();
+                    sizes.sort_by_key(|(w, h)| std::cmp::Reverse(i64::from(*w) * i64::from(*h)));
+                    sizes.dedup();
+                    sizes
+                        .into_iter()
+                        .map(|(w, h)| (format!("{w} × {h}"), format!("{w}x{h}")))
+                        .collect()
+                }
+                ModeList::Rate => {
+                    let mut rates: Vec<i32> = s
+                        .modes
+                        .iter()
+                        .filter(|m| m.width == current.width && m.height == current.height)
+                        .map(|m| m.refresh)
+                        .collect();
+                    rates.sort_unstable_by(|a, b| b.cmp(a));
+                    rates.dedup();
+                    rates
+                        .into_iter()
+                        .map(|r| {
+                            let hz = f64::from(r) / 1000.0;
+                            (
+                                format!("{} Hz", trim(hz)),
+                                format!("{}x{}@{hz}", current.width, current.height),
+                            )
+                        })
+                        .collect()
+                }
+            };
+            let grid = self.add(section, fill_width(column(6.0)), Kind::Box(Look::default()));
+            for chunk in choices.chunks(4) {
+                let line = self.add(grid, fill_width(row(6.0)), Kind::Box(Look::default()));
+                for (label, mode) in chunk {
+                    let mut b = Button::new(label.as_str(), ButtonKind::Plain, theme);
+                    b.selected = match list {
+                        ModeList::Resolution => *label == format!("{w} × {h}"),
+                        ModeList::Rate => *label == format!("{} Hz", trim(hz)),
+                    };
+                    let id = self.add(
+                        line,
+                        Style {
+                            width: Length::Fill,
+                            height: Length::Px(40.0),
+                            ..Style::default()
+                        },
+                        Kind::Button(b),
+                    );
+                    self.targets.insert(
+                        id,
+                        Target::Set(Change::output(&s.name, "mode", mode.as_str())),
+                    );
+                }
+            }
+        }
+
+        // Scale, as segments.
+        let scale_row = self.add(section, fill_width(row(14.0)), Kind::Box(Look::default()));
+        self.add(
+            scale_row,
+            Style {
+                width: Length::Px(90.0),
+                ..Style::default()
+            },
+            Kind::text_line(words::SCALE.get(lang), theme.text.body),
+        );
+        let segments = self.add(
+            scale_row,
+            Style {
+                padding: Insets::all(4.0),
+                ..fill_width(row(4.0))
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 14.0,
+                ..Look::default()
+            }),
+        );
+        for percent in [100u32, 125, 150, 175, 200] {
+            let value = f64::from(percent) / 100.0;
+            let on = (s.scale - value).abs() < 0.01;
+            let mut b = Button::new(
+                words::percent(percent, lang),
+                if on {
+                    ButtonKind::Primary
+                } else {
+                    ButtonKind::Plain
+                },
+                theme,
+            );
+            b.selected = on;
+            b.enabled = s.enabled;
+            let id = self.add(
+                segments,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(40.0),
+                    ..Style::default()
+                },
+                Kind::Button(b),
+            );
+            self.targets
+                .insert(id, Target::Set(Change::output(&s.name, "scale", value)));
+        }
+
+        // Its own desktops.
+        let desk_row = self.add(section, fill_width(row(14.0)), Kind::Box(Look::default()));
+        self.add(
+            desk_row,
+            Style {
+                width: Length::Px(90.0),
+                ..Style::default()
+            },
+            Kind::text_line(words::DESKTOPS.get(lang), theme.text.body),
+        );
+        let stepper = self.add(
+            desk_row,
+            Style {
+                padding: Insets::all(4.0),
+                ..row(4.0)
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 14.0,
+                ..Look::default()
+            }),
+        );
+        let n = s.desktops.max(1);
+        for (label, name, to) in [
+            ("−", words::FEWER_DESKTOPS, n.saturating_sub(1).max(1)),
+            ("+", words::MORE_DESKTOPS, (n + 1).min(8)),
+        ] {
+            let b = Button::new(label, ButtonKind::Plain, theme).with_name(name.get(lang));
+            let id = self.add(
+                stepper,
                 Style {
                     width: Length::Px(44.0),
-                    height: Length::Px(44.0),
+                    height: Length::Px(40.0),
                     ..Style::default()
                 },
                 Kind::Button(b),
             );
             self.targets.insert(
                 id,
-                Target::Set(Change::new("desktops", "per_output", i64::from(to))),
+                Target::Set(Change::output(&s.name, "desktops", i64::from(to))),
             );
             if label == "−" {
-                self.line(line, &n.to_string(), theme.text.title.with_weight(700));
+                self.add(
+                    stepper,
+                    Style {
+                        width: Length::Px(36.0),
+                        align: Align::Center,
+                        ..Style::default()
+                    },
+                    Kind::text_line(n.to_string(), theme.text.title.with_weight(700)),
+                );
             }
         }
+        if wide {
+            self.line(
+                desk_row,
+                words::ONE_DESKTOP_NOTE.get(lang),
+                theme.text.label.with_color(Paint::Muted),
+            );
+        }
+
+        // On, primary, variable refresh rate.
+        let switches = self.add(section, fill_width(row(10.0)), Kind::Box(Look::default()));
+        let others_primary: Vec<Change> = self
+            .ctx
+            .config
+            .outputs
+            .iter()
+            .filter(|o| o.name != s.name && o.primary == Some(true))
+            .map(|o| Change::output(&o.name, "primary", false))
+            .collect();
+        for (label, on, works, changes) in [
+            (
+                words::SCREEN_ON,
+                s.enabled,
+                true,
+                vec![Change::output(&s.name, "enabled", !s.enabled)],
+            ),
+            (
+                words::PRIMARY,
+                s.primary,
+                s.enabled && !s.primary,
+                std::iter::once(Change::output(&s.name, "primary", true))
+                    .chain(others_primary.clone())
+                    .collect(),
+            ),
+            (
+                words::VRR,
+                s.vrr,
+                s.enabled && s.vrr_capable,
+                vec![Change::output(&s.name, "vrr", !s.vrr)],
+            ),
+        ] {
+            let card = self.add(
+                switches,
+                Style {
+                    height: Length::Px(56.0),
+                    padding: Insets::symmetric(8.0, 14.0),
+                    ..fill_width(row(12.0))
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    radius: 14.0,
+                    ..Look::default()
+                }),
+            );
+            let ink = if works { Paint::Text } else { Paint::Muted };
+            if works {
+                self.tree.set_clickable(card, label.get(lang));
+                self.tree.set_selected_box(card, on);
+                self.targets.insert(card, Target::SetAll(changes));
+            }
+            self.add(
+                card,
+                fill_width(Style::default()),
+                Kind::text_line(
+                    label.get(lang),
+                    theme.text.label.with_weight(600).with_color(ink),
+                ),
+            );
+            self.add(
+                card,
+                Style {
+                    width: Length::Px(40.0),
+                    height: Length::Px(24.0),
+                    ..Style::default()
+                },
+                Kind::Custom {
+                    draw: Box::new(Switch(on)),
+                    label: None,
+                },
+            );
+        }
+    }
+
+    /// The layouts the file keeps, the current set's first.
+    fn layouts(&mut self, theme: &Theme, parent: NodeId, screens: &[hocus_api::ScreenInfo]) {
+        let lang = self.lang;
+        let section = self.add(parent, fill_width(column(12.0)), Kind::Box(Look::default()));
+        self.caption(theme, section, words::LAYOUTS_KEPT);
+        let connected: Vec<String> = screens.iter().map(|s| s.name.clone()).collect();
+        let names: Vec<&str> = connected.iter().map(String::as_str).collect();
+        let mut rows: Vec<(String, Vec<String>, bool)> = Vec::new();
+        let current = self.ctx.config.layout_for(&names);
+        rows.push((
+            current.map_or_else(|| default_layout_name(&connected), |l| l.name.clone()),
+            connected.clone(),
+            true,
+        ));
+        for layout in &self.ctx.config.layouts {
+            if !layout.is_for(&names) {
+                rows.push((layout.name.clone(), layout.outputs.clone(), false));
+            }
+        }
+        for (name, outputs, is_current) in rows {
+            let row_box = self.add(
+                section,
+                Style {
+                    padding: Insets::symmetric(12.0, 14.0),
+                    ..fill_width(row(12.0))
+                },
+                Kind::Box(Look {
+                    background: Some(if is_current {
+                        Paint::Rgba(theme.colors.accent.with_alpha(26))
+                    } else {
+                        Paint::SurfaceHover
+                    }),
+                    radius: 14.0,
+                    ..Look::default()
+                }),
+            );
+            let words_box = self.add(row_box, fill_width(column(1.0)), Kind::Box(Look::default()));
+            let renaming = self
+                .screens
+                .renaming
+                .as_ref()
+                .is_some_and(|(o, _)| *o == outputs);
+            if renaming {
+                let field = TextField::new(words::LAYOUT_NAME.get(lang), &name, theme.text.title);
+                let id = self.add(
+                    words_box,
+                    Style {
+                        width: Length::Fill,
+                        height: Length::Px(28.0),
+                        ..Style::default()
+                    },
+                    Kind::TextField(Box::new(field)),
+                );
+                self.tree.set_field_value(id, &name);
+                if let Some((_, node)) = &mut self.screens.renaming {
+                    *node = Some(id);
+                }
+            } else {
+                self.line(words_box, &name, theme.text.title.with_weight(700));
+            }
+            let mut sub = outputs.join(" + ");
+            if is_current {
+                sub = format!("{sub} · {}", words::CURRENT.get(lang));
+            }
+            self.line(words_box, &sub, theme.text.caption.with_color(Paint::Muted));
+            let id = self.add(
+                row_box,
+                Style {
+                    width: Length::Px(40.0),
+                    height: Length::Px(40.0),
+                    ..Style::default()
+                },
+                Kind::icon_button(
+                    stroked(PENCIL, 16.0),
+                    &format!("{} {name}", words::RENAME.get(lang)),
+                    ButtonKind::Plain,
+                    theme,
+                ),
+            );
+            self.targets.insert(id, Target::Rename(outputs));
+        }
+        self.add(
+            section,
+            Style::default(),
+            Kind::text(
+                words::LAYOUTS_NOTE.get(lang),
+                theme.text.label.with_color(Paint::Muted),
+            ),
+        );
     }
 }
 
@@ -1532,6 +2232,57 @@ fn setting_name(setting: &Setting) -> String {
     match setting {
         Setting::Shortcut(combo) | Setting::Screen(combo) => combo.clone(),
         other => format!("{other:?}"),
+    }
+}
+
+/// A screen's place and logical size.
+fn placed(s: &hocus_api::ScreenInfo) -> arrange::Placed {
+    arrange::Placed {
+        x: s.geometry.x,
+        y: s.geometry.y,
+        w: s.geometry.width.max(1),
+        h: s.geometry.height.max(1),
+    }
+}
+
+/// A screen's size in pixels, in its current mode.
+fn pixels(s: &hocus_api::ScreenInfo) -> (i32, i32) {
+    s.current_mode
+        .and_then(|i| s.modes.get(i))
+        .map_or((s.geometry.width, s.geometry.height), |m| {
+            (m.width, m.height)
+        })
+}
+
+/// 2 for 2.0, 1.25 for 1.25, 59.95 for 59.951.
+fn trim(v: f64) -> String {
+    let s = format!("{:.2}", v);
+    s.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// How a screen is called: the laptop's panel, else its model or name.
+fn screen_title(s: &hocus_api::ScreenInfo, lang: Lang) -> String {
+    if s.name.starts_with("eDP") || s.name.starts_with("LVDS") {
+        return words::LAPTOP.get(lang).to_owned();
+    }
+    if !s.model.is_empty() && s.model != "Unknown" && s.model != "Headless" {
+        return s.model.clone();
+    }
+    s.name.clone()
+}
+
+/// A layout's name until renamed: its screens.
+fn default_layout_name(screens: &[String]) -> String {
+    let mut s = screens.to_vec();
+    s.sort();
+    s.join(" + ")
+}
+
+/// "Resolution: 2560 × 1600", "Définition : 2560 × 1600".
+fn labelled(label: words::Words, value: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{}: {value}", label.get(lang)),
+        Lang::Fr => format!("{} : {value}", label.get(lang)),
     }
 }
 
@@ -1596,7 +2347,10 @@ mod tests {
         let [Outcome::Change(change)] = out.as_slice() else {
             panic!("{out:?}");
         };
-        assert_eq!((change.section, change.key), ("appearance", "accent"));
+        assert_eq!(
+            (&change.place, change.key),
+            (&crate::edit::Place::Section("appearance"), "accent")
+        );
         assert_eq!(change.value.as_str(), Some("amber"));
         let out = click(&mut v, "High contrast");
         assert!(

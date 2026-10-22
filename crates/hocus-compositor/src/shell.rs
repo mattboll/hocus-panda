@@ -458,6 +458,7 @@ impl State {
             return out;
         }
         self.card_ui(&mut out);
+        self.identify_ui(&mut out);
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;
@@ -510,6 +511,12 @@ pub trait Pixels {
 }
 
 impl Pixels for hocus_shell::lock::Curtain {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+impl Pixels for hocus_shell::identify::Identify {
     fn pixels(&self) -> View<'_> {
         self.view()
     }

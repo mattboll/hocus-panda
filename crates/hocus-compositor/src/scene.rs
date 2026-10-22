@@ -88,6 +88,12 @@ impl State {
             elements.extend(ours.into_iter().map(SceneElement::Frame));
             return elements;
         }
+        // Each screen's name, while identifying.
+        elements.extend(
+            self.identify_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         // The card asking what to put back.
         elements.extend(
             self.card_elements(renderer, output)

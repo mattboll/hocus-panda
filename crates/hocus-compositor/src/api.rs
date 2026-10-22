@@ -251,6 +251,11 @@ impl App {
                 protocol: hocus_api::PROTOCOL_VERSION,
                 compositor: env!("CARGO_PKG_VERSION").into(),
             }),
+            Request::Screens => return Some(Ok(Reply::Screens(self.screens()))),
+            Request::IdentifyOutputs => {
+                state.identify_outputs();
+                Reply::Done
+            }
             Request::Outputs => Reply::Outputs(
                 state
                     .space

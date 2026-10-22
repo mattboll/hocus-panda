@@ -140,6 +140,9 @@ pub enum Step {
     ExpectSettings(ExpectSettings),
     /// Clicks the element of the settings window with this label.
     ClickSettings(String),
+    /// Presses on the settings window's element with this label, moves by
+    /// `by`, and lets go: a drag.
+    DragSettings(DragSettings),
     /// The configuration file holds these strings, or lacks them.
     ExpectConfigFile(ExpectConfigFile),
     /// Asks the window of this app id to close, and waits until it is gone.
@@ -357,6 +360,14 @@ pub struct SendWindow {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct DragSettings {
+    pub label: String,
+    /// Logical pixels.
+    pub by: [f64; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectShown {
     pub output: String,
     pub desktop: usize,
@@ -452,6 +463,7 @@ impl fmt::Display for Step {
             Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
             Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
+            Self::DragSettings(d) => write!(f, "drag_settings {}", d.label),
             Self::ExpectConfigFile(_) => write!(f, "expect_config_file"),
             Self::Type(text) => write!(f, "type {text:?}"),
             Self::ExpectAccent(e) => write!(f, "expect_accent {:?}", e.hue),
@@ -766,6 +778,7 @@ impl Run<'_> {
                 .activate(),
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
+            Step::DragSettings(drag) => self.drag_settings(drag),
             Step::ExpectConfigFile(expected) => self.expect_config_file(expected),
             Step::Type(text) => self.type_text(text),
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
@@ -875,42 +888,16 @@ impl Run<'_> {
                 );
                 Ok(())
             }
+            // The file is read in its time: the output gets a moment.
             Step::ExpectOutput(expected) => {
-                let Reply::Outputs(outputs) = self.request(Request::Outputs)? else {
-                    anyhow::bail!("expected outputs");
-                };
-                let found = outputs.iter().find(|o| o.name == expected.name);
-                let Some(output) = found else {
-                    anyhow::ensure!(!expected.shown, "no output {}", expected.name);
-                    return Ok(());
-                };
-                anyhow::ensure!(expected.shown, "{} is on", expected.name);
-                let g = &output.geometry;
-                if let Some(want) = expected.geometry {
-                    let got = [g.x, g.y, g.width, g.height];
-                    anyhow::ensure!(
-                        got == want,
-                        "{} is at {got:?}, expected {want:?}",
-                        expected.name
-                    );
+                let deadline = Instant::now() + Duration::from_secs(3);
+                loop {
+                    match self.check_output(expected) {
+                        Ok(()) => return Ok(()),
+                        Err(err) if Instant::now() > deadline => return Err(err),
+                        Err(_) => self.compositor.dispatch(Duration::from_millis(10))?,
+                    }
                 }
-                if let Some(want) = expected.pixels {
-                    let got = [output.pixel_width, output.pixel_height];
-                    anyhow::ensure!(
-                        got == want,
-                        "{} has {got:?} pixels, expected {want:?}",
-                        expected.name
-                    );
-                }
-                if let Some(want) = expected.scale {
-                    anyhow::ensure!(
-                        (output.scale - want).abs() < 1e-6,
-                        "{} is at scale {}, expected {want}",
-                        expected.name,
-                        output.scale
-                    );
-                }
-                Ok(())
             }
             Step::ExpectShown(expected) => {
                 let Reply::Desktops(outputs) = self.request(Request::Desktops)? else {
@@ -1412,6 +1399,87 @@ impl Run<'_> {
             })?;
         }
         // The app gets the click.
+        let until = Instant::now() + Duration::from_millis(100);
+        while Instant::now() < until {
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        Ok(())
+    }
+
+    fn check_output(&mut self, expected: &ExpectOutput) -> anyhow::Result<()> {
+        let Reply::Outputs(outputs) = self.request(Request::Outputs)? else {
+            anyhow::bail!("expected outputs");
+        };
+        let found = outputs.iter().find(|o| o.name == expected.name);
+        let Some(output) = found else {
+            anyhow::ensure!(!expected.shown, "no output {}", expected.name);
+            return Ok(());
+        };
+        anyhow::ensure!(expected.shown, "{} is on", expected.name);
+        let g = &output.geometry;
+        if let Some(want) = expected.geometry {
+            let got = [g.x, g.y, g.width, g.height];
+            anyhow::ensure!(
+                got == want,
+                "{} is at {got:?}, expected {want:?}",
+                expected.name
+            );
+        }
+        if let Some(want) = expected.pixels {
+            let got = [output.pixel_width, output.pixel_height];
+            anyhow::ensure!(
+                got == want,
+                "{} has {got:?} pixels, expected {want:?}",
+                expected.name
+            );
+        }
+        if let Some(want) = expected.scale {
+            anyhow::ensure!(
+                (output.scale - want).abs() < 1e-6,
+                "{} is at scale {}, expected {want}",
+                expected.name,
+                output.scale
+            );
+        }
+        Ok(())
+    }
+
+    fn drag_settings(&mut self, drag: &DragSettings) -> anyhow::Result<()> {
+        let (node, all) = self.settings_node(&drag.label)?;
+        let node = node
+            .with_context(|| format!("no {:?}; the window shows:\n{}", drag.label, all.dump()))?;
+        let window = self.find("hocus-settings")?.context("no settings window")?;
+        let g = window.geometry;
+        let (x, y) = (
+            f64::from(g.x) + f64::from(node.rect.x + node.rect.w / 2.0),
+            f64::from(g.y) + f64::from(node.rect.y + node.rect.h / 2.0),
+        );
+        let pause = |s: &mut Self| -> anyhow::Result<()> {
+            let until = Instant::now() + Duration::from_millis(30);
+            while Instant::now() < until {
+                s.compositor.dispatch(Duration::from_millis(5))?;
+            }
+            Ok(())
+        };
+        self.request(Request::PointerMove { x, y })?;
+        self.request(Request::PointerButton {
+            button: Button::Left,
+            pressed: true,
+        })?;
+        pause(self)?;
+        // In steps, as a hand moves.
+        for i in 1..=8 {
+            let f = f64::from(i) / 8.0;
+            self.request(Request::PointerMove {
+                x: x + drag.by[0] * f,
+                y: y + drag.by[1] * f,
+            })?;
+            pause(self)?;
+        }
+        self.request(Request::PointerButton {
+            button: Button::Left,
+            pressed: false,
+        })?;
         let until = Instant::now() + Duration::from_millis(100);
         while Instant::now() < until {
             self.compositor.dispatch(Duration::from_millis(5))?;

@@ -74,6 +74,11 @@ pub struct RequestLine {
 pub enum Request {
     Version,
     Outputs,
+    /// Every connected screen, on or off, with what it can do: for the
+    /// settings' Screens page.
+    Screens,
+    /// Each screen shows its name on it for a few seconds.
+    IdentifyOutputs,
     Windows,
     /// The whole scene: outputs, their layers and windows, focus, pointer.
     Scene,
@@ -175,6 +180,8 @@ impl Request {
         match self {
             Self::Version
             | Self::Outputs
+            | Self::Screens
+            | Self::IdentifyOutputs
             | Self::Windows
             | Self::Subscribe
             | Self::Stats
@@ -255,6 +262,7 @@ pub enum ServerLine {
 pub enum Reply {
     Version(VersionInfo),
     Outputs(Vec<OutputInfo>),
+    Screens(Vec<ScreenInfo>),
     Windows(Vec<WindowInfo>),
     Scene(Scene),
     Screenshot(Screenshot),
@@ -397,6 +405,39 @@ pub struct OutputInfo {
     pub pixel_width: i32,
     pub pixel_height: i32,
     pub scale: f64,
+}
+
+/// A connected screen, on or off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScreenInfo {
+    pub name: String,
+    pub make: String,
+    pub model: String,
+    pub enabled: bool,
+    pub modes: Vec<ModeInfo>,
+    pub current_mode: Option<usize>,
+    pub preferred_mode: Option<usize>,
+    pub scale: f64,
+    /// `normal`, `90`, `180`, `270`, `flipped`, `flipped-90`…
+    pub transform: String,
+    /// Logical; for a screen off, where it was.
+    pub geometry: Rect,
+    pub vrr: bool,
+    pub vrr_capable: bool,
+    /// Where unplugged screens' desktops go.
+    pub primary: bool,
+    /// Desktops of its own.
+    pub desktops: u32,
+    /// The `[[layouts]]` entry in effect for the screens connected.
+    pub layout: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ModeInfo {
+    pub width: i32,
+    pub height: i32,
+    /// mHz.
+    pub refresh: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

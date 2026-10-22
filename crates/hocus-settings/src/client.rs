@@ -120,9 +120,16 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
             let Reply::Outputs(outputs) = requests.request(Request::Outputs)? else {
                 anyhow::bail!("no outputs");
             };
+            let Reply::Screens(screens) = requests.request(Request::Screens)? else {
+                anyhow::bail!("no screens");
+            };
             let config = hocus_core::Config::parse(&info.toml)
                 .map_err(|e| anyhow::anyhow!("the configuration in effect: {e}"))?;
-            let ctx = Context { config, outputs };
+            let ctx = Context {
+                config,
+                outputs,
+                screens,
+            };
             let path = info.path.map(PathBuf::from);
             let sent = to_window.send(FromApi::Context(Box::new((ctx, info.accent, path))));
             sent.map_err(|_| anyhow::anyhow!("the window is gone"))
@@ -130,7 +137,10 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
         fetch(&mut requests)?;
         loop {
             match events.next_event()? {
-                Event::ConfigApplied | Event::OutputAdded { .. } | Event::OutputRemoved { .. } => {
+                Event::ConfigApplied
+                | Event::OutputAdded { .. }
+                | Event::OutputRemoved { .. }
+                | Event::OutputChanged { .. } => {
                     fetch(&mut requests)?;
                 }
                 Event::OpenSettings { page } => {
@@ -233,6 +243,7 @@ pub fn run(options: Options, access: Option<Arc<Mutex<Option<AccessNode>>>>) -> 
         started: Instant::now(),
         access,
         from_api,
+        api: options.api.clone(),
     };
     while !app.closed {
         app.take_api_news();
@@ -286,6 +297,8 @@ struct App {
     started: Instant,
     access: Option<Arc<Mutex<Option<AccessNode>>>>,
     from_api: Receiver<FromApi>,
+    /// The compositor's control socket, for one-off requests.
+    api: PathBuf,
 }
 
 impl App {
@@ -315,6 +328,23 @@ impl App {
         for outcome in outcomes {
             match outcome {
                 Outcome::Close => self.closed = true,
+                // Off the window's thread: the compositor answers in its time.
+                Outcome::Identify => {
+                    let api = self.api.clone();
+                    let spawned =
+                        std::thread::Builder::new()
+                            .name("identify".into())
+                            .spawn(move || {
+                                if let Err(err) = Api::connect(&api)
+                                    .and_then(|mut c| c.request(Request::IdentifyOutputs).map(drop))
+                                {
+                                    tracing::warn!(%err, "could not identify the screens");
+                                }
+                            });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not identify the screens");
+                    }
+                }
                 Outcome::Change(change) => {
                     let Some(file) = &self.file else {
                         tracing::warn!("no configuration file to change");

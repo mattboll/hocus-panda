@@ -75,6 +75,10 @@ pub struct Style {
     pub grow: f32,
     /// Children are cut to this box (scrolling, rounded cards).
     pub clip: bool,
+    /// Placed at this offset from its parent's padded corner, out of the
+    /// flow: its siblings are laid out as if it were not there (a screen in
+    /// an arrangement, an overlay).
+    pub at: Option<Point>,
 }
 
 impl Default for Style {
@@ -89,6 +93,7 @@ impl Default for Style {
             justify: Justify::Start,
             grow: 1.0,
             clip: false,
+            at: None,
         }
     }
 }
@@ -959,6 +964,13 @@ impl Tree {
                     inner_w.max(0.0),
                     (fh.unwrap_or(avail.h) - pad.vertical()).max(0.0),
                 );
+                let flowing =
+                    |t: &Self, c: &NodeId| t.node(*c).is_none_or(|n| n.style.at.is_none());
+                let children: Vec<NodeId> = children
+                    .iter()
+                    .filter(|c| flowing(self, c))
+                    .copied()
+                    .collect();
                 main += style.gap * children.len().saturating_sub(1) as f32;
                 let mut fills = Vec::new();
                 for child in &children {
@@ -1053,6 +1065,24 @@ impl Tree {
             return;
         }
         let inner = rect.inset(style.padding);
+        // Placed children first, at their offset and their own size.
+        let (placed, children): (Vec<NodeId>, Vec<NodeId>) = children
+            .into_iter()
+            .partition(|c| self.node(*c).is_some_and(|n| n.style.at.is_some()));
+        for child in placed {
+            let at = self
+                .node(child)
+                .and_then(|n| n.style.at)
+                .unwrap_or_default();
+            let size = self.measure(child, Size::new(inner.w, inner.h));
+            self.arrange(
+                child,
+                Rect::new(inner.x + at.x, inner.y + at.y, size.w, size.h),
+            );
+        }
+        if children.is_empty() {
+            return;
+        }
         let column = style.direction == Direction::Column;
         let (main_len, cross_len) = if column {
             (inner.h, inner.w)
@@ -1902,6 +1932,39 @@ impl Surface {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_placed_child_is_out_of_the_flow() {
+        let mut tree = Tree::new(Theme::default(), Size::new(400.0, 300.0), 1.0);
+        let root = tree.root();
+        tree.set_style(
+            root,
+            Style {
+                padding: Insets::all(10.0),
+                gap: 5.0,
+                ..Style::default()
+            },
+        );
+        let boxed = |w: f32, h: f32, at: Option<Point>| Style {
+            width: Length::Px(w),
+            height: Length::Px(h),
+            at,
+            ..Style::default()
+        };
+        let first = tree.add(root, boxed(50.0, 20.0, None), Kind::Box(Look::default()));
+        let placed = tree.add(
+            root,
+            boxed(80.0, 40.0, Some(Point::new(200.0, 100.0))),
+            Kind::Box(Look::default()),
+        );
+        let second = tree.add(root, boxed(50.0, 20.0, None), Kind::Box(Look::default()));
+        tree.layout();
+        let rect = |id: Option<NodeId>| id.and_then(|id| tree.rect(id));
+        assert_eq!(rect(placed), Some(Rect::new(210.0, 110.0, 80.0, 40.0)));
+        assert_eq!(rect(first).map(|r| r.y), Some(10.0));
+        // As if the placed one were not there.
+        assert_eq!(rect(second).map(|r| r.y), Some(35.0));
+    }
 
     #[test]
     fn overlapping_regions_merge() {

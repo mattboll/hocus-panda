@@ -1,0 +1,76 @@
+# The Screens page (#111, board R4): the external screen dragged above the
+# laptop lands there edge to edge; the layout is kept for this set of
+# screens and comes back, with the windows' places, when it is plugged
+# again.
+description = "On the Screens page, a screen dragged above the laptop moves there, and the layout comes back with the screens"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+open = { app_id = "kept", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+open_settings = { page = "screens" }
+
+[[step]]
+expect_settings = { label = "HEADLESS-2" }
+
+[[step]]
+drag_settings = { label = "HEADLESS-2", by = [-250, -120] }
+
+[[step]]
+expect_config_file = { contains = ["[[layouts]]", "name = \"HEADLESS-1 + HEADLESS-2\"", "HEADLESS-1 = [0, 1080]", "HEADLESS-2 = [0, 0]"] }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", geometry = [0, 0, 1920, 1080] }
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 1080, 1280, 800] }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-screens.png" }
+
+[[step]]
+expect_window = { app_id = "kept", output = "HEADLESS-1" }
+
+# Unplugged: the laptop alone goes back to the corner.
+[[step]]
+unplug = "HEADLESS-2"
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 1280, 800] }
+
+# Plugged again: this set's layout, and the windows where they were.
+[[step]]
+plug = { spec = "1920x1080", name = "HEADLESS-2" }
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 1080, 1280, 800] }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", geometry = [0, 0, 1920, 1080] }
+
+# The laptop's scale, from its settings.
+[[step]]
+click_settings = "125%"
+
+[[step]]
+expect_config_file = { contains = ["[[outputs]]\nname = \"HEADLESS-1\"\nscale = 1.25"] }
+
+[[step]]
+expect_output = { name = "HEADLESS-1", scale = 1.25 }
+
+# Each screen shows its name.
+[[step]]
+click_settings = "Identify"
+
+[[step]]
+expect_ui = { label = "HEADLESS-2" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "settings-screens-identify.png" }
