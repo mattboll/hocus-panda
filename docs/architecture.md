@@ -223,7 +223,11 @@ their property changes, and PipeWire through `wpctl` and the backlight
 through sysfs every two seconds; changes go back the same ways (the
 backlight through logind). logind asks to lock and unlock, and a delay
 inhibitor holds sleep until the lock shows. The ScreenSaver service lets
-applications keep the screen awake and ask to lock. Each source runs on a
+applications keep the screen awake and ask to lock. Leaving the session
+(#72) asks logind what the machine can do (hibernating is offered only
+where it works) and which applications block shutting down: their reasons
+stop the ten-second countdown until the user decides; the session is then
+saved, windows are asked to close, and logind restarts or powers off. Each source runs on a
 thread of its own; a missing one leaves its part of the state as it was.
 Only the session itself uses the machine's services: nested or headless,
 quick settings show a stub and change nothing on the machine, and tests give

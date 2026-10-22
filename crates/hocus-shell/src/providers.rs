@@ -83,6 +83,7 @@ pub fn providers(enabled: &Enabled) -> Vec<Box<dyn Provider>> {
         out.push(Box::new(Urls));
     }
     out.push(Box::new(Settings));
+    out.push(Box::new(SessionActions));
     out.push(Box::new(Apps));
     if enabled.web_search {
         out.push(Box::new(WebSearch {
@@ -290,6 +291,56 @@ impl Provider for Settings {
     }
 }
 
+/// `shut down`, `éteindre`, `lock`…: locking, sleeping, leaving.
+struct SessionActions;
+
+impl Provider for SessionActions {
+    fn name(&self) -> &'static str {
+        "session"
+    }
+
+    fn hits(&self, query: &str, cx: &Context<'_>, out: &mut Vec<Hit>) {
+        use crate::launcher::SessionAction as S;
+        let actions: [(S, &[&str], &str); 5] = [
+            (S::Lock, &["lock", "verrouiller"], cx.lang.lock()),
+            (
+                S::Suspend,
+                &["suspend", "sleep", "veille", "mettre en veille"],
+                cx.lang.suspend(),
+            ),
+            (
+                S::LogOut,
+                &["log out", "logout", "se déconnecter", "déconnexion"],
+                cx.lang.log_out(),
+            ),
+            (
+                S::Restart,
+                &["restart", "reboot", "redémarrer"],
+                cx.lang.restart(),
+            ),
+            (
+                S::ShutDown,
+                &["shut down", "shutdown", "power off", "éteindre"],
+                cx.lang.shut_down(),
+            ),
+        ];
+        for (action, names, title) in actions {
+            // What is typed starts one of its names.
+            if names
+                .iter()
+                .any(|n| fuzzy::score(query, n).is_some_and(|s| s >= 9_000))
+            {
+                out.push(Hit {
+                    title: title.into(),
+                    kind: "Hocuspanda".into(),
+                    color: None,
+                    choice: Choice::Session(action),
+                });
+            }
+        }
+    }
+}
+
 struct WebSearch {
     engine: String,
 }
@@ -338,6 +389,22 @@ mod tests {
             p.hits(query, &cx, &mut out);
         }
         out
+    }
+
+    #[test]
+    fn leaving_and_locking_are_found_in_both_languages() {
+        let first = |q: &str| {
+            hits(q, &Enabled::default())
+                .into_iter()
+                .find(|h| matches!(h.choice, Choice::Session(_)))
+                .map(|h| h.choice)
+        };
+        use crate::launcher::SessionAction as S;
+        assert_eq!(first("shut down"), Some(Choice::Session(S::ShutDown)));
+        assert_eq!(first("éteindre"), Some(Choice::Session(S::ShutDown)));
+        assert_eq!(first("redémarrer"), Some(Choice::Session(S::Restart)));
+        assert_eq!(first("verrouiller"), Some(Choice::Session(S::Lock)));
+        assert_eq!(first("hello"), None);
     }
 
     #[test]

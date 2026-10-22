@@ -159,10 +159,12 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `quick-settings` | opens quick settings on the screen under the pointer, or closes them |
 | `settings` | opens the settings app, or brings its window forward |
 | `lock` | locks the session now |
+| `log-out`, `restart`, `shut-down` | after a ten-second countdown (Escape cancels), or once the applications holding it back are dealt with: saves the session, asks windows to close, then leaves |
+| `suspend`, `hibernate` | sleeps now, locked first; hibernating only where the machine can |
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `spawn COMMAND` | runs a command through the shell |
-| `quit` | ends the session |
+| `quit` | ends the session at once, without asking windows to close |
 | `none` | removes a default shortcut |
 
 Defaults:

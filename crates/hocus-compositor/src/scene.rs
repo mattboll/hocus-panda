@@ -88,6 +88,12 @@ impl State {
             elements.extend(ours.into_iter().map(SceneElement::Frame));
             return elements;
         }
+        // Leaving: the countdown, over everything but the cursor.
+        elements.extend(
+            self.leave_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         // Each screen's name, while identifying.
         elements.extend(
             self.identify_elements(renderer, output)

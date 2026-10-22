@@ -66,6 +66,8 @@ pub struct ColumnState {
     pub layout: String,
     pub layout_name: String,
     pub user: String,
+    /// The account menu offers hibernating only where it works.
+    pub can_hibernate: bool,
     /// The latest notifications, newest first: application and summary.
     pub notifications: Vec<(String, String)>,
     pub status: Status,
@@ -96,7 +98,13 @@ pub enum Action {
         output: String,
         desktop: usize,
     },
+    Lock,
+    Settings,
+    Suspend,
+    Hibernate,
     LogOut,
+    Restart,
+    ShutDown,
     /// The command field was clicked: the launcher opens.
     OpenLauncher,
 }
@@ -452,7 +460,13 @@ impl Column {
             PopoverKind::Desktops => {
                 desktops_popover(&theme, self.lang, &self.state.screens, scale)
             }
-            PopoverKind::Account => account_popover(&theme, self.lang, &self.state.user, scale),
+            PopoverKind::Account => account_popover(
+                &theme,
+                self.lang,
+                &self.state.user,
+                self.state.can_hibernate,
+                scale,
+            ),
         };
         let first = tree.update(self.now);
         let size = tree.size();
@@ -1197,15 +1211,22 @@ fn account_popover(
     theme: &Theme,
     lang: Lang,
     user: &str,
+    can_hibernate: bool,
     scale: f32,
 ) -> (Tree, Vec<(NodeId, Action)>) {
-    let items = [
-        (icons::LOCK, lang.lock(), None),
-        (icons::SETTINGS, lang.settings(), None),
-        (icons::LOG_OUT, lang.log_out(), Some(Action::LogOut)),
-        (icons::RESTART, lang.restart(), None),
-        (icons::POWER, lang.shut_down(), None),
+    let mut items = vec![
+        (icons::LOCK, lang.lock(), Action::Lock),
+        (icons::MOON, lang.suspend(), Action::Suspend),
     ];
+    if can_hibernate {
+        items.push((icons::MOON, lang.hibernate(), Action::Hibernate));
+    }
+    items.extend([
+        (icons::SETTINGS, lang.settings(), Action::Settings),
+        (icons::LOG_OUT, lang.log_out(), Action::LogOut),
+        (icons::RESTART, lang.restart(), Action::Restart),
+        (icons::POWER, lang.shut_down(), Action::ShutDown),
+    ]);
     let height = 16.0 * 2.0 + 24.0 + 12.0 + items.len() as f32 * 44.0 + 12.0;
     let (mut tree, card) = popover_tree(theme, 260.0, height, scale);
     let missing = || unreachable!("adding to a node of this tree");
@@ -1233,13 +1254,16 @@ fn account_popover(
     .unwrap_or_else(missing);
     let mut targets = Vec::new();
     for (path, label, action) in items {
-        let mut button = Button::new(label, ButtonKind::Ghost, theme)
+        // Shutting down in the error colour, as the design has it.
+        let ink = if action == Action::ShutDown {
+            theme.text.body.with_color(Paint::Error)
+        } else {
+            theme.text.body
+        };
+        let button = Button::new(label, ButtonKind::Ghost, theme)
             .with_icon(stroked(path, 18.0))
-            .with_style(theme.text.body)
+            .with_style(ink)
             .at_start();
-        // Locking, settings and power come with their own work (#29, #66,
-        // #72).
-        button.enabled = action.is_some();
         let id = tree
             .add(
                 card,
@@ -1250,9 +1274,7 @@ fn account_popover(
                 Kind::Button(button),
             )
             .unwrap_or_else(missing);
-        if let Some(action) = action {
-            targets.push((id, action));
-        }
+        targets.push((id, action));
     }
     (tree, targets)
 }
@@ -1279,6 +1301,7 @@ mod tests {
             icons::LOG_OUT,
             icons::RESTART,
             icons::POWER,
+            icons::MOON,
         ] {
             assert!(Icon::stroked(path, 16.0, 2.0).is_some(), "{path}");
         }

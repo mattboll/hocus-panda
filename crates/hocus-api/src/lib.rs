@@ -555,6 +555,13 @@ pub enum Event {
     OutputRemoved {
         name: String,
     },
+    /// Leaving the session (#72): `action` is `log-out`, `restart`,
+    /// `shut-down`, `suspend` or `hibernate`; `stage` is `countdown`,
+    /// `closing`, `cancelled` or `now`.
+    Leaving {
+        action: String,
+        stage: String,
+    },
     /// An output's mode, scale, rotation or place changed.
     OutputChanged {
         output: OutputInfo,

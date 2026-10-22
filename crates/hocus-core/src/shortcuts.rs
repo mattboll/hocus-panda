@@ -58,6 +58,14 @@ pub enum Action {
     Settings,
     /// Locks the session now.
     Lock,
+    /// Leaving the session (#72): asked, then counted down, unless an
+    /// application holds it back.
+    LogOut,
+    Restart,
+    ShutDown,
+    /// Sleep at once, locked first.
+    Suspend,
+    Hibernate,
     /// Window switcher (#39): the windows of the output under the pointer,
     /// or of every output.
     SwitchWindows(Scope),
@@ -94,6 +102,11 @@ impl fmt::Display for Action {
             Self::Dropdown => write!(f, "dropdown"),
             Self::Settings => write!(f, "settings"),
             Self::Lock => write!(f, "lock"),
+            Self::LogOut => write!(f, "log-out"),
+            Self::Restart => write!(f, "restart"),
+            Self::ShutDown => write!(f, "shut-down"),
+            Self::Suspend => write!(f, "suspend"),
+            Self::Hibernate => write!(f, "hibernate"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
             Self::Spawn(command) => write!(f, "spawn {command}"),
         }
@@ -156,6 +169,11 @@ impl FromStr for Action {
             "dropdown" => bare(Self::Dropdown),
             "settings" => bare(Self::Settings),
             "lock" => bare(Self::Lock),
+            "log-out" => bare(Self::LogOut),
+            "restart" => bare(Self::Restart),
+            "shut-down" => bare(Self::ShutDown),
+            "suspend" => bare(Self::Suspend),
+            "hibernate" => bare(Self::Hibernate),
             "switch-windows" => scope().map(Self::SwitchWindows),
             "spawn" if !rest.is_empty() => Ok(Self::Spawn(rest.to_string())),
             "spawn" => Err("spawn: which command?".into()),

@@ -22,6 +22,7 @@ mod headless;
 mod idle_notify;
 mod input;
 mod launcher;
+mod leave;
 mod lock;
 mod notify;
 mod output_spec;
@@ -231,6 +232,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     state.system_bus = options.system_bus.clone();
     state.is_session = options.session_services || matches!(options.backend, Backend::Tty);
     lock::start(&event_loop.handle(), &mut state);
+    leave::start(&event_loop.handle(), &mut state);
     lock::start_session(
         &event_loop.handle(),
         &mut state,
