@@ -120,6 +120,10 @@ pub enum Step {
     Notify(NotifyStep),
     /// Clicks the shell's button with this label (or accessible name).
     ClickUi(String),
+    /// Calls a tool of the MCP server (`hocus mcp`, #42) in a session of
+    /// its own, as an agent of `[[agents.mcp]]`, and checks the result:
+    /// `{ agent?, tool, window?, arguments?, contains?, error? }`.
+    Mcp(McpCall),
     /// The same with the secondary button.
     RightClickUi(String),
     /// A tray application registers on the private bus: `{ title, color,
@@ -374,6 +378,27 @@ pub struct OpenWindow {
     /// Keeps the session awake while shown, as a video player does.
     #[serde(default)]
     pub inhibit_idle: bool,
+    /// Its title; none by default.
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpCall {
+    /// The agent the server names itself; none: a plain client.
+    pub agent: Option<String>,
+    pub tool: String,
+    /// The window of this app id, as the `window` argument (its id).
+    pub window: Option<String>,
+    #[serde(default)]
+    pub arguments: toml::Table,
+    /// The result's text holds these strings.
+    #[serde(default)]
+    pub contains: Vec<String>,
+    /// The tool failed, with this in its message; otherwise it must
+    /// succeed.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -767,6 +792,7 @@ impl fmt::Display for Step {
             Self::Open(open) => write!(f, "open {}", open.app_id),
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
+            Self::Mcp(call) => write!(f, "mcp {}", call.tool),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
             Self::Share(_) => write!(f, "share"),
@@ -1063,6 +1089,7 @@ impl Run<'_> {
             Step::Copy(copy) => self.copy(copy),
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label, Button::Left),
+            Step::Mcp(call) => self.mcp(call),
             Step::RightClickUi(label) => self.click_ui(label, Button::Right),
             Step::TrayApp(t) => {
                 let [_, r, g, b] = parse_color(&t.color)?.to_be_bytes();
@@ -1934,6 +1961,7 @@ impl Run<'_> {
             crate::client::ClientOptions {
                 inhibit_shortcuts: open.inhibit_shortcuts,
                 inhibit_idle: open.inhibit_idle,
+                title: open.title.clone(),
             },
         )?);
         self.compositor
@@ -1985,6 +2013,71 @@ impl Run<'_> {
             }
             self.compositor.dispatch(Duration::from_millis(10))?;
         }
+    }
+
+    /// One MCP session: initialized, one tool called, from a thread of its
+    /// own while the compositor serves it.
+    fn mcp(&mut self, call: &McpCall) -> anyhow::Result<()> {
+        use serde_json::{Value, json};
+        let mut arguments = serde_json::to_value(&call.arguments)?;
+        if let Some(app_id) = &call.window {
+            let window = self
+                .find(app_id)?
+                .with_context(|| format!("no window of {app_id}"))?;
+            arguments["window"] = window.id.into();
+        }
+        let socket = self.compositor.api_socket().to_path_buf();
+        let agent = call.agent.clone();
+        let tool = call.tool.clone();
+        let session = std::thread::spawn(move || {
+            let mut bridge = hocus_api::mcp::Bridge::new(socket, agent);
+            bridge.handle(json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": hocus_api::mcp::PROTOCOL_VERSIONS[0],
+                    "capabilities": {},
+                    "clientInfo": { "name": "scenario", "version": "0" },
+                },
+            }));
+            bridge.handle(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+            bridge.handle(json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": { "name": tool, "arguments": arguments },
+            }))
+        });
+        // As long as the longest wait a scenario asks for, and some.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !session.is_finished() {
+            anyhow::ensure!(Instant::now() < deadline, "the MCP server never answered");
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        let answer = session
+            .join()
+            .map_err(|_| anyhow::anyhow!("the MCP session panicked"))?
+            .context("no answer")?;
+        let result = answer
+            .get("result")
+            .with_context(|| format!("not a result: {answer}"))?;
+        let failed = result["isError"] == Value::Bool(true);
+        let text: Vec<&str> = result["content"]
+            .as_array()
+            .map(|c| c.iter().filter_map(|c| c["text"].as_str()).collect())
+            .unwrap_or_default();
+        let text = text.join("\n");
+        match &call.error {
+            Some(expected) => anyhow::ensure!(
+                failed && text.contains(expected.as_str()),
+                "expected the tool to fail with {expected:?}, got {answer}"
+            ),
+            None => anyhow::ensure!(!failed, "the tool failed: {text}"),
+        }
+        for expected in &call.contains {
+            anyhow::ensure!(
+                text.contains(expected.as_str()),
+                "the result lacks {expected:?}: {text}"
+            );
+        }
+        Ok(())
     }
 
     fn type_text(&mut self, text: &str) -> anyhow::Result<()> {

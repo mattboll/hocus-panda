@@ -54,6 +54,19 @@ struct Connection {
     input: Vec<u8>,
     output: Vec<u8>,
     subscribed: bool,
+    role: Role,
+}
+
+/// Who a connection says it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Role {
+    /// The `hocus` tool, the settings, tests: the server's permission.
+    Client,
+    /// An MCP agent of the configuration, by name (#42): only what agents
+    /// may make, whatever the server's permission; the compositor checks
+    /// its rights against the configuration in effect at each action, so
+    /// that taking them away there applies at once.
+    Agent(String),
 }
 
 impl Server {
@@ -118,6 +131,21 @@ impl Server {
 
     pub fn permission(&self) -> Permission {
         self.permission
+    }
+
+    /// The agent `connection` named itself, if it did.
+    pub fn agent(&self, connection: ConnectionId) -> Option<&str> {
+        match &self.connections.get(&connection)?.role {
+            Role::Agent(name) => Some(name),
+            Role::Client => None,
+        }
+    }
+
+    /// `connection` is agent `name` from now on; once named, it stays so.
+    pub fn set_agent(&mut self, connection: ConnectionId, name: String) {
+        if let Some(c) = self.connections.get_mut(&connection) {
+            c.role = Role::Agent(name);
+        }
     }
 
     /// Whether anyone listens to events: building them can be skipped.
@@ -327,6 +355,7 @@ fn accept<D: Handler>(handle: &LoopHandle<'static, D>, data: &mut D, stream: Uni
             input: Vec::new(),
             output: Vec::new(),
             subscribed: false,
+            role: Role::Client,
         },
     );
 }
@@ -347,12 +376,23 @@ fn handle_line<D: Handler>(data: &mut D, conn: ConnectionId, line: &[u8]) {
         }
     };
     let server = data.server();
-    if request.permission() > server.permission {
-        let error = ApiError::new(
-            ErrorCode::PermissionDenied,
+    let role = server.connections.get(&conn).map(|c| c.role.clone());
+    let refusal = match role {
+        Some(Role::Agent(name)) if !request.agents_may() => Some(format!(
+            "agent {name:?} may not make this request: agents read windows, outputs, the \
+             shell's interface and captures, and act through `act`"
+        )),
+        Some(Role::Agent(_)) => None,
+        _ if request.permission() > server.permission => Some(
             "this request drives input or reads the whole scene: it needs the test \
-             permission (start the compositor with --api-permission test)",
-        );
+             permission (start the compositor with --api-permission test), or, for \
+             `act`, an agent of [[agents.mcp]] with access = \"act\""
+                .to_owned(),
+        ),
+        _ => None,
+    };
+    if let Some(message) = refusal {
+        let error = ApiError::new(ErrorCode::PermissionDenied, message);
         server.reply(conn, id, Err(error));
         return;
     }

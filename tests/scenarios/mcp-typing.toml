@@ -1,0 +1,83 @@
+description = "An agent types into its app's window with the layout in effect, and the keys it presses never reach the desktop's shortcuts"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "other", size = [200, 100], color = "#ff6600" }
+
+# The editor gets the keyboard first; H is Shift and h.
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "Hi!" } }
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 42 pressed" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 35 pressed" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 23 pressed" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 2 pressed" }
+
+[[step]]
+mcp = { agent = "helper", tool = "press_keys", window = "editor", arguments = { keys = "Ctrl+A" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 29 pressed" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 30 pressed" }
+
+# Super+Down minimizes, as a shortcut; from an agent it is the window's.
+[[step]]
+mcp = { agent = "helper", tool = "press_keys", window = "editor", arguments = { keys = "Super+Down" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 108 pressed" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal", visible = true }
+
+[[step]]
+mcp = { agent = "helper", tool = "press_keys", window = "editor", arguments = { keys = "Ctrl+Nonsense" }, error = "no key is named" }
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "other", arguments = { text = "x" }, error = "may not act on windows of \"other\"" }
+
+[[step]]
+expect_not_received = { app_id = "other", event = "key 45 pressed" }
+
+# The layout in effect: on a French keyboard, a is where Q is.
+[[step]]
+config = """
+[keyboard]
+layouts = ["fr"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "a" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 16 pressed" }

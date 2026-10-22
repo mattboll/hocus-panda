@@ -1,0 +1,44 @@
+description = "An agent clicks the shell's elements by label only when the configuration lets it use the shell"
+shell = true
+
+[[step]]
+config = """
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["*"]
+
+[[agents.mcp]]
+name = "assistant"
+access = "act"
+apps = ["*"]
+shell = true
+"""
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+mcp = { agent = "helper", tool = "accessibility_tree", contains = ['"label": "Minimize"', '"role": "button"'] }
+
+[[step]]
+mcp = { agent = "helper", tool = "click", arguments = { element = "Minimize" }, error = "may not use the shell's interface" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal" }
+
+[[step]]
+mcp = { agent = "assistant", tool = "click", arguments = { element = "Minimize" } }
+
+[[step]]
+expect_window = { app_id = "editor", state = "minimized" }
+
+[[step]]
+mcp = { agent = "assistant", tool = "click", arguments = { element = "No such thing" }, error = "no element labelled" }
+
+# Acting on a minimized window brings it back first.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "editor" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal", focused = true }

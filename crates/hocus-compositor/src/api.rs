@@ -181,7 +181,7 @@ impl State {
         }
     }
 
-    fn time_msec(&self) -> u32 {
+    pub(crate) fn time_msec(&self) -> u32 {
         // Wraps after 49 days, like input devices' timestamps.
         self.clock.now().as_millis() as u32
     }
@@ -547,6 +547,10 @@ impl App {
                 };
                 crate::surface::close(&window);
                 Reply::Done
+            }
+            Request::Agent { name } => return Some(state.name_agent(connection, name)),
+            Request::Act { target, action } => {
+                return Some(state.act(connection, target, action));
             }
             Request::Screenshot { target, cursor } => {
                 return match self.capture(&target, cursor) {

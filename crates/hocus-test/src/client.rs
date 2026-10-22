@@ -78,8 +78,10 @@ enum Command {
 }
 
 /// What a test client does besides showing its window.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ClientOptions {
+    /// Its window's title; none by default.
+    pub title: Option<String>,
     /// Holds the compositor's shortcuts back while it has the keyboard.
     pub inhibit_shortcuts: bool,
     /// Keeps the session awake while it is shown, as a video player does.
@@ -256,6 +258,9 @@ impl SolidWindow {
         // ring.
         let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
         window.set_app_id(self.app_id.clone());
+        if let Some(title) = &options.title {
+            window.set_title(title.clone());
+        }
         window.set_min_size(Some((self.width, self.height)));
         window.commit();
         if options.inhibit_shortcuts {

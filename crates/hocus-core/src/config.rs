@@ -593,6 +593,10 @@ pub struct Agents {
     /// (`$XDG_CONFIG_HOME/herdr/herdr.sock`), which only the session
     /// looks for.
     pub herdr_socket: String,
+    /// Agents that use the desktop through `hocus mcp --agent NAME` (#42):
+    /// `[[agents.mcp]]`. None by default: an agent the configuration does
+    /// not name may not act.
+    pub mcp: Vec<McpAgent>,
 }
 
 impl Default for Agents {
@@ -600,8 +604,49 @@ impl Default for Agents {
         Self {
             enabled: true,
             herdr_socket: String::new(),
+            mcp: Vec::new(),
         }
     }
+}
+
+impl Agents {
+    /// The MCP agent of this name; the first wins.
+    pub fn mcp_agent(&self, name: &str) -> Option<&McpAgent> {
+        self.mcp.iter().find(|a| a.name == name)
+    }
+}
+
+/// An MCP agent and its rights (#42). The name scopes what an agent does;
+/// it is no secret: a program of the user's could as well edit this file.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpAgent {
+    pub name: String,
+    pub access: AgentAccess,
+    /// App ids it may act on, globs (`*` any run of characters): `["foot",
+    /// "org.mozilla.*"]`; `["*"]` for every application.
+    pub apps: Vec<String>,
+    /// It may click the shell's own interface (the column, the dock, the
+    /// launcher), never the lock screen nor a password dialog.
+    pub shell: bool,
+}
+
+impl McpAgent {
+    /// Whether it may act on a window of `app_id`.
+    pub fn may_act_on(&self, app_id: &str) -> bool {
+        self.access == AgentAccess::Act && self.apps.iter().any(|p| glob(p, app_id))
+    }
+}
+
+/// What an MCP agent may do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentAccess {
+    /// Windows, the shell's interface and captures.
+    #[default]
+    Read,
+    /// Reading, and clicks, typing and scrolls aimed at its apps' windows.
+    Act,
 }
 
 /// The discreet dock (#38): hidden while working, shown on an empty
@@ -1406,6 +1451,27 @@ mod tests {
         );
         let bad = Config::parse("[wallpaper]\nmode = \"tile\"\n");
         assert!(bad.is_err_and(|e| e.0.contains("wallpaper.mode")));
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_agents_read_only_unless_said_and_only_on_their_apps() -> Result<(), ConfigError> {
+        let c = Config::parse(
+            "[[agents.mcp]]\nname = \"reader\"\n\
+             [[agents.mcp]]\nname = \"helper\"\naccess = \"act\"\napps = [\"foot\", \"org.mozilla.*\"]\n",
+        )?;
+        let reader = c.agents.mcp_agent("reader").expect("reader");
+        assert_eq!(reader.access, AgentAccess::Read);
+        assert!(!reader.may_act_on("foot"));
+        let helper = c.agents.mcp_agent("helper").expect("helper");
+        assert!(helper.may_act_on("foot"));
+        assert!(helper.may_act_on("org.mozilla.firefox"));
+        assert!(!helper.may_act_on("org.keepassxc.KeePassXC"));
+        assert!(!helper.shell);
+        assert!(c.agents.mcp_agent("stranger").is_none());
+        // What is in effect reads back.
+        assert_eq!(Config::parse(&c.to_toml())?, c);
+        assert!(Config::parse("[[agents.mcp]]\nname = \"x\"\naccess = \"all\"\n").is_err());
         Ok(())
     }
 
