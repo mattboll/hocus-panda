@@ -39,9 +39,13 @@ use smithay_client_toolkit::{
     shm::{Shm, ShmHandler, slot::SlotPool},
 };
 use wayland_client::{
-    Connection, QueueHandle,
+    Connection, Dispatch, QueueHandle,
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+};
+use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::{
+    zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1 as InhibitManager,
+    zwp_keyboard_shortcuts_inhibitor_v1::{self, ZwpKeyboardShortcutsInhibitorV1 as Inhibitor},
 };
 
 use crate::{
@@ -211,6 +215,8 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     let xdg_shell = XdgShell::bind(&globals, &qh).context("no xdg_wm_base")?;
     let shm = Shm::bind(&globals, &qh).context("no wl_shm")?;
 
+    // To record a shortcut, the compositor's own are held back.
+    let inhibit = globals.bind::<InhibitManager, _, _>(&qh, 1..=1, ()).ok();
     let surface = compositor.create_surface(&qh);
     // The compositor draws the corners, the shadow and the ring.
     let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
@@ -264,6 +270,10 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         needs_draw: true,
         keyboard: None,
         pointer: None,
+        seat_handle: None,
+        modifiers: Modifiers::default(),
+        inhibit,
+        inhibitor: None,
         closed: false,
         started: Instant::now(),
         shown,
@@ -318,6 +328,11 @@ struct App {
     needs_draw: bool,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
+    seat_handle: Option<wl_seat::WlSeat>,
+    modifiers: Modifiers,
+    inhibit: Option<InhibitManager>,
+    /// Held while keys are recorded.
+    inhibitor: Option<Inhibitor>,
     closed: bool,
     started: Instant,
     shown: Option<Arc<Mutex<Option<Shown>>>>,
@@ -349,10 +364,23 @@ impl App {
         }
     }
 
-    fn outcomes(&mut self, outcomes: Vec<Outcome>) {
+    fn outcomes(&mut self, qh: &QueueHandle<Self>, outcomes: Vec<Outcome>) {
         for outcome in outcomes {
             match outcome {
                 Outcome::Close => self.closed = true,
+                Outcome::Inhibit(true) => {
+                    if self.inhibitor.is_none()
+                        && let (Some(manager), Some(seat)) = (&self.inhibit, &self.seat_handle)
+                    {
+                        self.inhibitor =
+                            Some(manager.inhibit_shortcuts(self.window.wl_surface(), seat, qh, ()));
+                    }
+                }
+                Outcome::Inhibit(false) => {
+                    if let Some(inhibitor) = self.inhibitor.take() {
+                        inhibitor.destroy();
+                    }
+                }
                 // Off the window's thread: the compositor answers in its time.
                 Outcome::Identify => {
                     let api = self.api.clone();
@@ -376,7 +404,7 @@ impl App {
                         continue;
                     };
                     if let Err(err) = edit::write(file, &change) {
-                        tracing::warn!(%err, key = change.key, "could not change the setting");
+                        tracing::warn!(%err, key = change.key.as_str(), "could not change the setting");
                     }
                 }
             }
@@ -430,6 +458,85 @@ impl App {
             });
         }
         Ok(())
+    }
+}
+
+/// A key pressed with modifiers, as shortcuts name it: digits of the top
+/// row by place, other keys by their unshifted name; `None` for a modifier
+/// alone.
+fn combo_of(event: &KeyEvent, modifiers: &Modifiers) -> Option<hocus_core::shortcuts::Combo> {
+    use hocus_core::shortcuts::{Combo, Key as K, Modifiers as M};
+    const KEY_1: u32 = 2;
+    const KEY_0: u32 = 11;
+    const KEY_GRAVE: u32 = 41;
+    let code = event.raw_code;
+    let key = if (KEY_1..=KEY_0).contains(&code) {
+        K::Digit(((code - KEY_1 + 1) % 10) as u8)
+    } else if code == KEY_GRAVE {
+        K::Named("grave".into())
+    } else {
+        let name = event
+            .keysym
+            .name()?
+            .trim_start_matches("XK_")
+            .to_ascii_lowercase();
+        let modifier = [
+            "shift",
+            "control",
+            "alt",
+            "super",
+            "meta",
+            "hyper",
+            "iso_level3",
+            "caps_lock",
+        ]
+        .iter()
+        .any(|m| name.starts_with(m));
+        if modifier {
+            return None;
+        }
+        K::Named(name)
+    };
+    Some(Combo {
+        modifiers: M {
+            logo: modifiers.logo,
+            ctrl: modifiers.ctrl,
+            alt: modifiers.alt,
+            shift: modifiers.shift,
+        },
+        key,
+    })
+}
+
+impl App {
+    fn any_modifier(&self) -> bool {
+        let m = &self.modifiers;
+        m.logo || m.ctrl || m.alt || m.shift
+    }
+}
+
+impl Dispatch<InhibitManager, ()> for App {
+    fn event(
+        _: &mut Self,
+        _: &InhibitManager,
+        _: <InhibitManager as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<Inhibitor, ()> for App {
+    fn event(
+        _: &mut Self,
+        _: &Inhibitor,
+        event: zwp_keyboard_shortcuts_inhibitor_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        tracing::debug!(?event, "shortcuts held back");
     }
 }
 
@@ -545,6 +652,7 @@ impl SeatHandler for App {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        self.seat_handle = Some(seat.clone());
         if capability == Capability::Keyboard && self.keyboard.is_none() {
             match self.seat.get_keyboard(qh, &seat, None) {
                 Ok(k) => self.keyboard = Some(k),
@@ -585,7 +693,7 @@ impl PointerHandler for App {
     fn pointer_frame(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
@@ -602,11 +710,11 @@ impl PointerHandler for App {
                 PointerEventKind::Press { button, .. } if button == BTN_LEFT => {
                     self.view.pointer_move(at);
                     let out = self.view.pointer_button(true);
-                    self.outcomes(out);
+                    self.outcomes(qh, out);
                 }
                 PointerEventKind::Release { button, .. } if button == BTN_LEFT => {
                     let out = self.view.pointer_button(false);
-                    self.outcomes(out);
+                    self.outcomes(qh, out);
                 }
                 PointerEventKind::Axis { vertical, .. } => {
                     self.view.scroll(vertical.absolute as f32);
@@ -644,11 +752,19 @@ impl KeyboardHandler for App {
     fn press_key(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
         event: KeyEvent,
     ) {
+        // Recording a shortcut: keys are a combination, Escape alone cancels.
+        if self.view.recording() && !(event.keysym == Keysym::Escape && !self.any_modifier()) {
+            if let Some(combo) = combo_of(&event, &self.modifiers) {
+                let out = self.view.record(combo);
+                self.outcomes(qh, out);
+            }
+            return;
+        }
         let out = match key_of(event.keysym) {
             Some(key) => self.view.key(key),
             None => match event.utf8.as_deref() {
@@ -656,7 +772,7 @@ impl KeyboardHandler for App {
                 _ => Vec::new(),
             },
         };
-        self.outcomes(out);
+        self.outcomes(qh, out);
     }
 
     fn release_key(
@@ -675,9 +791,10 @@ impl KeyboardHandler for App {
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: Modifiers,
+        modifiers: Modifiers,
         _: u32,
     ) {
+        self.modifiers = modifiers;
     }
 }
 

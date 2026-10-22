@@ -6,12 +6,14 @@ use std::{io, path::Path};
 
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value};
 
-/// One key of one table set to a value.
+/// One key of one table set to a value, or taken out.
 #[derive(Debug, Clone)]
 pub struct Change {
     pub place: Place,
-    pub key: &'static str,
-    pub value: Value,
+    /// Empty, with no value: the whole table goes.
+    pub key: String,
+    /// `None` takes the key out.
+    pub value: Option<Value>,
 }
 
 /// Which table a change goes to.
@@ -27,27 +29,36 @@ pub enum Place {
 }
 
 impl Change {
-    pub fn new(section: &'static str, key: &'static str, value: impl Into<Value>) -> Self {
+    pub fn new(section: &'static str, key: impl Into<String>, value: impl Into<Value>) -> Self {
         Self {
             place: Place::Section(section),
-            key,
-            value: value.into(),
+            key: key.into(),
+            value: Some(value.into()),
         }
     }
 
     pub fn output(name: &str, key: &'static str, value: impl Into<Value>) -> Self {
         Self {
             place: Place::Output(name.to_string()),
-            key,
-            value: value.into(),
+            key: key.into(),
+            value: Some(value.into()),
         }
     }
 
     pub fn layout(screens: &[String], key: &'static str, value: impl Into<Value>) -> Self {
         Self {
             place: Place::Layout(screens.to_vec()),
-            key,
-            value: value.into(),
+            key: key.into(),
+            value: Some(value.into()),
+        }
+    }
+
+    /// The whole `[section]` goes: back to what it was before any.
+    pub fn forget(section: &'static str) -> Self {
+        Self {
+            place: Place::Section(section),
+            key: String::new(),
+            value: None,
         }
     }
 }
@@ -117,6 +128,13 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
     let mut doc: DocumentMut = text
         .parse()
         .map_err(|e: toml_edit::TomlError| EditError::Unreadable(e.to_string()))?;
+    if let (Place::Section(section), "", None) = (&change.place, change.key.as_str(), &change.value)
+    {
+        doc.remove(section);
+        let out = doc.to_string();
+        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        return Ok(out);
+    }
     let table: &mut dyn toml_edit::TableLike = match &change.place {
         Place::Section(section) => {
             let item = doc
@@ -155,15 +173,21 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             )?
         }
     };
-    match table.get_mut(change.key).and_then(Item::as_value_mut) {
+    match (
+        table.get_mut(&change.key).and_then(Item::as_value_mut),
+        &change.value,
+    ) {
         // Keeps the comment after the value.
-        Some(old) => {
+        (Some(old), Some(value)) => {
             let decor = old.decor().clone();
-            *old = change.value.clone();
+            *old = value.clone();
             *old.decor_mut() = decor;
         }
-        None => {
-            table.insert(change.key, Item::Value(change.value.clone()));
+        (None, Some(value)) => {
+            table.insert(&change.key, Item::Value(value.clone()));
+        }
+        (_, None) => {
+            table.remove(&change.key);
         }
     }
     let out = doc.to_string();
@@ -191,6 +215,21 @@ pub fn write(path: &Path, change: &Change) -> Result<(), EditError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortcuts_are_written_quoted_taken_out_and_forgotten() {
+        let text = "[shortcuts]\n\"Super+M\" = \"toggle-maximized\"\n";
+        let out = apply(text, &Change::new("shortcuts", "Super+Up", "none")).expect("applied");
+        assert!(out.contains("\"Super+Up\" = \"none\""), "{out}");
+        let gone = Change {
+            value: None,
+            ..Change::new("shortcuts", "Super+M", "")
+        };
+        let out = apply(&out, &gone).expect("applied");
+        assert!(!out.contains("Super+M"), "{out}");
+        let out = apply(&out, &Change::forget("shortcuts")).expect("applied");
+        assert!(!out.contains("shortcuts"), "{out}");
+    }
 
     #[test]
     fn a_change_keeps_the_rest_of_the_file() {

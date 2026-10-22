@@ -35,6 +35,9 @@ pub enum Outcome {
     Close,
     /// Each screen shows its name.
     Identify,
+    /// The compositor holds its own shortcuts back while keys are
+    /// recorded (keyboard-shortcuts-inhibit), or no longer.
+    Inhibit(bool),
 }
 
 /// What a node does when clicked.
@@ -54,6 +57,22 @@ enum Target {
     /// The layout of these screens is renamed.
     Rename(Vec<String>),
     Identify,
+    /// Records new keys for `action`.
+    Edit {
+        action: Action,
+        old: Option<hocus_core::shortcuts::Combo>,
+        place: EditPlace,
+    },
+    ConfirmEdit,
+    CancelEdit,
+    /// Shows or hides the layouts offered.
+    AddLayout,
+    /// Shows or hides the new shortcut's form.
+    NewShortcut,
+    /// The new shortcut's keys are recorded.
+    ListenNew,
+    /// Asks, or stops asking, to go back to the original shortcuts.
+    Reset,
 }
 
 /// Which of a screen's choices are open.
@@ -89,6 +108,63 @@ struct Drag {
     /// The arrangement as it was when the drag began.
     mapping: arrange::Mapping,
     moved: bool,
+}
+
+/// The keyboard page between builds.
+#[derive(Debug, Default)]
+struct KeyboardPage {
+    /// A shortcut being changed or made.
+    editing: Option<Editing>,
+    /// The layouts offered to add show.
+    adding_layout: bool,
+    /// Going back to the original shortcuts is asked.
+    resetting: bool,
+    /// The new shortcut's form shows, with what it runs.
+    new_open: bool,
+    new_text: String,
+    new_field: Option<NodeId>,
+}
+
+/// Where a shortcut being changed shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EditPlace {
+    /// Its row, by the keys it has.
+    Row(hocus_core::shortcuts::Combo),
+    /// Beside the layouts: the switch combination.
+    Layouts,
+    /// The new shortcut's form.
+    New,
+}
+
+#[derive(Debug, Clone)]
+struct Editing {
+    /// What the keys will run.
+    action: Action,
+    /// The keys it has now, when it has some.
+    old: Option<hocus_core::shortcuts::Combo>,
+    place: EditPlace,
+    state: Recording,
+}
+
+/// A shortcut being changed: nothing is written until it is confirmed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Recording {
+    /// Waiting for keys; `refused` when the last had no Super, Ctrl or Alt.
+    Listening { refused: bool },
+    /// Keys pressed, free or already bound to `owner`.
+    Got {
+        combo: hocus_core::shortcuts::Combo,
+        owner: Option<Action>,
+    },
+}
+
+const LEFT: &str = "M15 6l-6 6 6 6";
+const PLUS: &str = "M12 5v14M5 12h14";
+
+/// `[keyboard] layouts` as `layouts`.
+fn layouts_change(layouts: &[String]) -> Change {
+    let list: toml_edit::Array = layouts.iter().map(String::as_str).collect();
+    Change::new("keyboard", "layouts", list)
 }
 
 /// The arrangement's height, logical pixels.
@@ -204,6 +280,7 @@ pub struct SettingsView {
     text_size: Option<(NodeId, u32)>,
     pointer: Option<Point>,
     screens: ScreensPage,
+    keys: KeyboardPage,
     dirty: bool,
     now: Duration,
 }
@@ -267,6 +344,7 @@ impl SettingsView {
             text_size: None,
             pointer: None,
             screens: ScreensPage::default(),
+            keys: KeyboardPage::default(),
             dirty: true,
             now: Duration::ZERO,
         }
@@ -406,6 +484,24 @@ impl SettingsView {
     }
 
     pub fn key(&mut self, key: Key) -> Vec<Outcome> {
+        if key == Key::Escape && self.keys.editing.is_some() {
+            return self.cancel_edit();
+        }
+        if key == Key::Escape
+            && (self.keys.adding_layout || self.keys.resetting || self.keys.new_open)
+        {
+            self.keys.adding_layout = false;
+            self.keys.resetting = false;
+            self.keys.new_open = false;
+            self.dirty = true;
+            return Vec::new();
+        }
+        if key == Key::Enter
+            && self.keys.new_field.is_some()
+            && self.tree.focused() == self.keys.new_field
+        {
+            return self.listen_new();
+        }
         let results = self.screen == Screen::Home && !self.hits.is_empty();
         if let Some((outputs, Some(field))) = self.screens.renaming.clone() {
             match key {
@@ -472,6 +568,16 @@ impl SettingsView {
     /// Typed text goes to the search field.
     pub fn text(&mut self, text: &str) -> Vec<Outcome> {
         let renaming = self.screens.renaming.as_ref().and_then(|(_, f)| *f);
+        if let Some(field) = self.keys.new_field
+            && self.keys.editing.is_none()
+        {
+            if self.tree.focused() != Some(field) {
+                self.tree.set_focus(Some(field));
+            }
+            let events = self.tree.text_input(text);
+            self.keys.new_text = self.tree.field_value(field).unwrap_or_default().to_owned();
+            return self.handle(events);
+        }
         if renaming.is_some() && self.tree.focused() != renaming {
             self.tree.set_focus(renaming);
         } else if renaming.is_none() && self.tree.focused().is_none_or(|f| Some(f) != self.field) {
@@ -521,7 +627,46 @@ impl SettingsView {
                     }
                     Some(Target::Hit(i)) => self.open_hit(i),
                     Some(Target::Close) => out.push(Outcome::Close),
-                    Some(Target::Set(change)) => out.push(Outcome::Change(Box::new(change))),
+                    Some(Target::Set(change)) => {
+                        self.keys.adding_layout = false;
+                        self.keys.resetting = false;
+                        out.push(Outcome::Change(Box::new(change)));
+                    }
+                    Some(Target::Edit { action, old, place }) => {
+                        out.extend(self.cancel_edit());
+                        self.keys.editing = Some(Editing {
+                            action,
+                            old,
+                            place,
+                            state: Recording::Listening { refused: false },
+                        });
+                        self.dirty = true;
+                        out.push(Outcome::Inhibit(true));
+                    }
+                    Some(Target::ConfirmEdit) => out.extend(self.confirm_edit()),
+                    Some(Target::CancelEdit) => out.extend(self.cancel_edit()),
+                    Some(Target::AddLayout) => {
+                        self.keys.adding_layout = !self.keys.adding_layout;
+                        self.dirty = true;
+                    }
+                    Some(Target::NewShortcut) => {
+                        if self
+                            .keys
+                            .editing
+                            .as_ref()
+                            .is_some_and(|e| e.place == EditPlace::New)
+                        {
+                            out.extend(self.cancel_edit());
+                        }
+                        self.keys.new_open = !self.keys.new_open;
+                        self.keys.new_text.clear();
+                        self.dirty = true;
+                    }
+                    Some(Target::ListenNew) => out.extend(self.listen_new()),
+                    Some(Target::Reset) => {
+                        self.keys.resetting = !self.keys.resetting;
+                        self.dirty = true;
+                    }
                     Some(Target::SetAll(changes)) => {
                         out.extend(changes.into_iter().map(|c| Outcome::Change(Box::new(c))));
                     }
@@ -552,6 +697,116 @@ impl SettingsView {
                 Event::Changed(_) => {}
             }
         }
+        out
+    }
+
+    /// Keys are being recorded: the window gives them as combinations.
+    pub fn recording(&self) -> bool {
+        matches!(
+            self.keys.editing,
+            Some(Editing {
+                state: Recording::Listening { .. },
+                ..
+            })
+        )
+    }
+
+    /// Keys pressed while recording: free, or bound to another action;
+    /// nothing is written until confirmed.
+    pub fn record(&mut self, combo: hocus_core::shortcuts::Combo) -> Vec<Outcome> {
+        use hocus_core::shortcuts::Key as K;
+        let shortcuts = self.ctx.config.shortcuts();
+        let Some(editing) = &mut self.keys.editing else {
+            return Vec::new();
+        };
+        if !matches!(editing.state, Recording::Listening { .. }) {
+            return Vec::new();
+        }
+        self.dirty = true;
+        let m = combo.modifiers;
+        // Alone, only keys no one types with: F1…F24, Print, media keys.
+        let alone = matches!(&combo.key, K::Named(n)
+            if n == "print"
+                || n.starts_with("xf86")
+                || (n.len() > 1 && n.starts_with('f') && n[1..].parse::<u8>().is_ok()));
+        if !(m.logo || m.ctrl || m.alt || alone) {
+            editing.state = Recording::Listening { refused: true };
+            return Vec::new();
+        }
+        if editing.old.as_ref() == Some(&combo) {
+            self.keys.editing = None;
+            return vec![Outcome::Inhibit(false)];
+        }
+        let owner = shortcuts
+            .action(&combo)
+            .filter(|a| **a != editing.action)
+            .cloned();
+        editing.state = Recording::Got { combo, owner };
+        vec![Outcome::Inhibit(false)]
+    }
+
+    fn cancel_edit(&mut self) -> Vec<Outcome> {
+        let was = self.recording();
+        if self.keys.editing.take().is_some() {
+            self.dirty = true;
+        }
+        if was {
+            vec![Outcome::Inhibit(false)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The new keys written: bound to the action, the old ones freed.
+    fn confirm_edit(&mut self) -> Vec<Outcome> {
+        let Some(editing) = self.keys.editing.take() else {
+            return Vec::new();
+        };
+        let Recording::Got { combo, .. } = &editing.state else {
+            self.keys.editing = Some(editing);
+            return Vec::new();
+        };
+        self.dirty = true;
+        let mut out = vec![Outcome::Change(Box::new(Change::new(
+            "shortcuts",
+            combo.to_string(),
+            editing.action.to_string(),
+        )))];
+        if let Some(old) = &editing.old
+            && old != combo
+        {
+            out.push(Outcome::Change(Box::new(Change::new(
+                "shortcuts",
+                old.to_string(),
+                "none",
+            ))));
+        }
+        if editing.place == EditPlace::New {
+            self.keys.new_open = false;
+            self.keys.new_text.clear();
+        }
+        out
+    }
+
+    /// The new shortcut runs what its field says: an action by its name,
+    /// or else a command.
+    fn listen_new(&mut self) -> Vec<Outcome> {
+        let text = self.keys.new_text.trim().to_owned();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        let action = text
+            .parse::<Action>()
+            .unwrap_or_else(|_| Action::Spawn(text.clone()));
+        let mut out = self.cancel_edit();
+        self.keys.editing = Some(Editing {
+            action,
+            old: None,
+            place: EditPlace::New,
+            state: Recording::Listening { refused: false },
+        });
+        self.dirty = true;
+        out.push(Outcome::Inhibit(true));
         out
     }
 
@@ -1422,47 +1677,151 @@ impl SettingsView {
         self.tree.set_style(body, fill_width(column(22.0)));
         let config = self.ctx.config.clone();
         let shortcuts = config.shortcuts();
+        let editing = self.keys.editing.clone();
 
-        // Layouts.
-        let layouts = self.add(body, fill_width(row(12.0)), Kind::Box(Look::default()));
+        // Layouts, in order: the first is the one at start; each can go, or
+        // come before the one ahead of it.
+        let layouts = self.add(body, fill_width(row(10.0)), Kind::Box(Look::default()));
         self.caption(theme, layouts, words::LAYOUTS);
         let names: Vec<String> = if config.keyboard.layouts.is_empty() {
             vec!["us".into()]
         } else {
             config.keyboard.layouts.clone()
         };
-        for (i, layout) in names.iter().enumerate() {
-            let mut b = Button::new(layout.to_uppercase(), ButtonKind::Chip, theme);
-            b.selected = i == 0;
-            self.add(
+        for (i, code) in names.iter().enumerate() {
+            let name = words::layout_name(code, lang);
+            let first = i == 0;
+            let chip = self.add(
                 layouts,
                 Style {
                     height: Length::Px(44.0),
-                    padding: Insets::symmetric(0.0, 14.0),
-                    ..Style::default()
+                    padding: Insets {
+                        left: 14.0,
+                        right: if names.len() > 1 { 6.0 } else { 14.0 },
+                        ..Insets::default()
+                    },
+                    ..row(2.0)
                 },
-                Kind::Button(b),
+                Kind::Box(Look {
+                    background: Some(if first {
+                        Paint::Rgba(theme.colors.accent.with_alpha(0x29))
+                    } else {
+                        Paint::SurfaceHover
+                    }),
+                    radius: 12.0,
+                    border: first.then_some(Paint::Accent),
+                    ..Look::default()
+                }),
             );
+            let style = theme.text.label.with_weight(600);
+            self.line(
+                chip,
+                &name,
+                if first {
+                    style.with_color(Paint::Accent)
+                } else {
+                    style
+                },
+            );
+            if i > 0 {
+                let mut order = names.clone();
+                order.swap(i - 1, i);
+                let before =
+                    self.small_button(theme, chip, LEFT, &words::layout_before(&name, lang));
+                self.targets
+                    .insert(before, Target::Set(layouts_change(&order)));
+            }
+            if names.len() > 1 {
+                let mut rest = names.clone();
+                rest.remove(i);
+                let remove = self.small_button(
+                    theme,
+                    chip,
+                    icons::CLOSE,
+                    &words::remove_layout(&name, lang),
+                );
+                self.targets
+                    .insert(remove, Target::Set(layouts_change(&rest)));
+            }
         }
+        let mut add = Button::new(words::ADD.get(lang), ButtonKind::Chip, theme)
+            .with_icon(stroked(PLUS, 16.0))
+            .with_name(words::ADD_LAYOUT.get(lang));
+        add.selected = self.keys.adding_layout;
+        let add = self.add(
+            layouts,
+            Style {
+                height: Length::Px(44.0),
+                padding: Insets::symmetric(0.0, 14.0),
+                ..Style::default()
+            },
+            Kind::Button(add),
+        );
+        self.targets.insert(add, Target::AddLayout);
         if let Some((combo, _)) = shortcuts
             .bindings
             .iter()
             .find(|(_, a)| **a == Action::SwitchLayout)
         {
-            let spacer = self.add(
+            self.add(
                 layouts,
                 fill_width(Style::default()),
                 Kind::Box(Look::default()),
             );
-            let _ = spacer;
             self.line(
                 layouts,
                 words::SWITCH_LAYOUT.get(lang),
                 theme.text.body.with_color(Paint::Muted),
             );
-            self.keycap(theme, layouts, &combo.to_string());
+            let here = editing
+                .as_ref()
+                .is_some_and(|e| e.place == EditPlace::Layouts);
+            let keys = self.add(layouts, row(6.0), Kind::Box(Look::default()));
+            self.edit_caps(theme, keys, combo, here);
+            let name =
+                words::change_shortcut(words::SWITCH_LAYOUT.get(lang), &combo.to_string(), lang);
+            self.tree.set_clickable(keys, &name);
+            self.targets.insert(
+                keys,
+                Target::Edit {
+                    action: Action::SwitchLayout,
+                    old: Some(combo.clone()),
+                    place: EditPlace::Layouts,
+                },
+            );
         }
         self.highlighted(layouts, &Setting::Layouts, Look::default());
+        if self.keys.adding_layout {
+            let offered: Vec<_> = words::LAYOUT_NAMES
+                .iter()
+                .filter(|(code, _)| !names.iter().any(|n| n == code))
+                .collect();
+            // Six to a line: the page does not wrap.
+            for line in offered.chunks(6) {
+                let chips = self.add(body, fill_width(row(6.0)), Kind::Box(Look::default()));
+                for (code, name) in line {
+                    let b = self.add(
+                        chips,
+                        Style {
+                            height: Length::Px(36.0),
+                            padding: Insets::symmetric(0.0, 12.0),
+                            ..Style::default()
+                        },
+                        Kind::Button(Button::new(name.get(lang), ButtonKind::Chip, theme)),
+                    );
+                    let mut more = names.clone();
+                    more.push((*code).to_owned());
+                    self.targets.insert(b, Target::Set(layouts_change(&more)));
+                }
+            }
+        }
+        if editing
+            .as_ref()
+            .is_some_and(|e| e.place == EditPlace::Layouts)
+        {
+            let note = self.add(body, fill_width(row(10.0)), Kind::Box(Look::default()));
+            self.edit_note(theme, note, true);
+        }
 
         // Groups.
         let chips = self.add(body, fill_width(row(6.0)), Kind::Box(Look::default()));
@@ -1489,7 +1848,8 @@ impl SettingsView {
             self.targets.insert(id, Target::Group(group));
         }
 
-        // The table.
+        // The table: what each shortcut does, on what, its keys; Change
+        // records new ones.
         let table = self.add(
             body,
             Style {
@@ -1513,8 +1873,9 @@ impl SettingsView {
         );
         for (w, width) in [
             (words::ACTION, None),
-            (words::ACTS_ON, Some(240.0)),
+            (words::ACTS_ON, Some(200.0)),
             (words::KEYS, Some(220.0)),
+            (words::CHANGE_HEADER, Some(110.0)),
         ] {
             let cell = self.add(
                 header,
@@ -1526,39 +1887,71 @@ impl SettingsView {
             );
             self.caption(theme, cell, w);
         }
-        let mut rows: Vec<(String, String, &str, words::ShortcutGroup)> = shortcuts
+        let mut rows: Vec<(
+            hocus_core::shortcuts::Combo,
+            Action,
+            String,
+            &str,
+            ShortcutGroup,
+        )> = shortcuts
             .bindings
             .iter()
             .map(|(combo, action)| {
                 let (label, group, on) = words::action(action, lang);
-                (combo.to_string(), label, on, group)
+                (combo.clone(), action.clone(), label, on, group)
             })
-            .filter(|r| self.group.is_none_or(|g| g == r.3))
+            .filter(|r| self.group.is_none_or(|g| g == r.4))
             .collect();
-        rows.sort_by(|a, b| (a.3 as u8, &a.1).cmp(&(b.3 as u8, &b.1)));
-        for (combo, label, on, _) in rows {
-            let look = Look::default();
+        rows.sort_by(|a, b| (a.4 as u8, &a.2).cmp(&(b.4 as u8, &b.2)));
+        for (combo, action, label, on, _) in rows {
+            let here = editing
+                .as_ref()
+                .is_some_and(|e| e.place == EditPlace::Row(combo.clone()));
+            let look = if here {
+                Look {
+                    background: Some(Paint::Rgba(theme.colors.accent.with_alpha(0x10))),
+                    border: Some(Paint::Accent),
+                    radius: 12.0,
+                    ..Look::default()
+                }
+            } else {
+                Look::default()
+            };
             let line = self.add(
                 table,
                 Style {
-                    height: Length::Px(50.0),
-                    padding: Insets::symmetric(0.0, 18.0),
+                    padding: Insets::symmetric(if here { 10.0 } else { 0.0 }, 18.0),
+                    height: if here { Length::Auto } else { Length::Px(50.0) },
                     ..fill_width(row(16.0))
                 },
                 Kind::Box(look),
             );
-            self.add(
+            let what = self.add(
                 line,
                 Style {
                     width: Length::Fill,
-                    ..Style::default()
+                    ..column(6.0)
                 },
-                Kind::text_line(label, theme.text.body.with_weight(600)),
+                Kind::Box(Look::default()),
             );
+            self.add(
+                what,
+                Style::default(),
+                Kind::text_line(label.clone(), theme.text.body.with_weight(600)),
+            );
+            if here {
+                let note = self.add(what, row(10.0), Kind::Box(Look::default()));
+                self.edit_note(theme, note, false);
+            }
+            let got = here
+                && matches!(
+                    self.keys.editing.as_ref().map(|e| &e.state),
+                    Some(Recording::Got { .. })
+                );
             let scope = self.add(
                 line,
                 Style {
-                    width: Length::Px(240.0),
+                    width: Length::Px(200.0),
                     ..Style::default()
                 },
                 Kind::Box(Look::default()),
@@ -1576,10 +1969,47 @@ impl SettingsView {
                 },
                 Kind::Box(Look::default()),
             );
-            for part in combo.split('+') {
-                self.keycap(theme, keys, part);
+            self.edit_caps(theme, keys, &combo, here);
+            // Changing: the confirmation over Cancel.
+            let cell = self.add(
+                line,
+                Style {
+                    width: Length::Px(110.0),
+                    ..column(6.0)
+                },
+                Kind::Box(Look::default()),
+            );
+            if got {
+                self.confirm_button(theme, cell);
             }
-            let setting = Setting::Shortcut(combo);
+            let (text, target) = if here {
+                (words::CANCEL, Target::CancelEdit)
+            } else {
+                (
+                    words::CHANGE,
+                    Target::Edit {
+                        action: action.clone(),
+                        old: Some(combo.clone()),
+                        place: EditPlace::Row(combo.clone()),
+                    },
+                )
+            };
+            let button = Button::new(text.get(lang), ButtonKind::Plain, theme).with_name(if here {
+                text.get(lang).to_owned()
+            } else {
+                words::change_shortcut(&label, &combo.to_string(), lang)
+            });
+            let b = self.add(
+                cell,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(36.0),
+                    ..Style::default()
+                },
+                Kind::Button(button),
+            );
+            self.targets.insert(b, target);
+            let setting = Setting::Shortcut(combo.to_string());
             if self.highlight.as_ref() == Some(&setting) {
                 self.tree.set_clickable(line, &setting_name(&setting));
             }
@@ -1592,6 +2022,280 @@ impl SettingsView {
                 },
             );
         }
+
+        // A new shortcut, and the original ones back.
+        let foot = self.add(body, fill_width(row(10.0)), Kind::Box(Look::default()));
+        let mut new = Button::new(words::NEW_SHORTCUT.get(lang), ButtonKind::Plain, theme)
+            .with_icon(stroked(PLUS, 16.0));
+        new.selected = self.keys.new_open;
+        let new = self.add(
+            foot,
+            Style {
+                height: Length::Px(44.0),
+                padding: Insets::symmetric(0.0, 16.0),
+                ..Style::default()
+            },
+            Kind::Button(new),
+        );
+        self.targets.insert(new, Target::NewShortcut);
+        self.add(
+            foot,
+            fill_width(Style::default()),
+            Kind::Box(Look::default()),
+        );
+        let mut reset = Button::new(words::RESET.get(lang), ButtonKind::Ghost, theme);
+        reset.enabled = !config.shortcuts.is_empty();
+        let reset = self.add(
+            foot,
+            Style {
+                height: Length::Px(44.0),
+                padding: Insets::symmetric(0.0, 16.0),
+                ..Style::default()
+            },
+            Kind::Button(reset),
+        );
+        self.targets.insert(reset, Target::Reset);
+        if self.keys.resetting {
+            let ask = self.add(body, fill_width(row(10.0)), Kind::Box(Look::default()));
+            self.add(
+                ask,
+                fill_width(Style::default()),
+                Kind::Box(Look::default()),
+            );
+            self.line(
+                ask,
+                words::RESET_NOTE.get(lang),
+                theme.text.label.with_color(Paint::Waiting),
+            );
+            let back = self.add(
+                ask,
+                Style {
+                    height: Length::Px(36.0),
+                    padding: Insets::symmetric(0.0, 14.0),
+                    ..Style::default()
+                },
+                Kind::Button(Button::new(
+                    words::GO_BACK.get(lang),
+                    ButtonKind::Primary,
+                    theme,
+                )),
+            );
+            self.targets
+                .insert(back, Target::Set(crate::edit::Change::forget("shortcuts")));
+            let cancel = self.add(
+                ask,
+                Style {
+                    height: Length::Px(36.0),
+                    padding: Insets::symmetric(0.0, 14.0),
+                    ..Style::default()
+                },
+                Kind::Button(Button::new(
+                    words::CANCEL.get(lang),
+                    ButtonKind::Plain,
+                    theme,
+                )),
+            );
+            self.targets.insert(cancel, Target::Reset);
+        }
+        if self.keys.new_open {
+            let form = self.add(
+                body,
+                Style {
+                    padding: Insets::all(14.0),
+                    ..fill_width(row(12.0))
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    radius: 14.0,
+                    border: editing
+                        .as_ref()
+                        .is_some_and(|e| e.place == EditPlace::New)
+                        .then_some(Paint::Accent),
+                    ..Look::default()
+                }),
+            );
+            let field = self.add(
+                form,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(28.0),
+                    ..Style::default()
+                },
+                Kind::TextField(Box::new(TextField::new(
+                    words::NEW_WHAT.get(lang),
+                    words::NEW_WHAT_HINT.get(lang),
+                    theme.text.body,
+                ))),
+            );
+            self.tree.set_field_value(field, &self.keys.new_text);
+            self.keys.new_field = Some(field);
+            match editing.as_ref().filter(|e| e.place == EditPlace::New) {
+                Some(e) => {
+                    if let Recording::Got { combo, .. } = &e.state {
+                        let keys = self.add(form, row(6.0), Kind::Box(Look::default()));
+                        self.edit_caps(theme, keys, combo, true);
+                    }
+                    let note = self.add(form, row(10.0), Kind::Box(Look::default()));
+                    self.edit_note(theme, note, true);
+                }
+                None => {
+                    let choose = self.add(
+                        form,
+                        Style {
+                            height: Length::Px(36.0),
+                            padding: Insets::symmetric(0.0, 14.0),
+                            ..Style::default()
+                        },
+                        Kind::Button(Button::new(
+                            words::CHOOSE_KEYS.get(lang),
+                            ButtonKind::Primary,
+                            theme,
+                        )),
+                    );
+                    self.targets.insert(choose, Target::ListenNew);
+                }
+            }
+        } else {
+            self.keys.new_field = None;
+        }
+    }
+
+    /// A small icon button inside a chip.
+    fn small_button(&mut self, theme: &Theme, parent: NodeId, icon: &str, name: &str) -> NodeId {
+        self.add(
+            parent,
+            Style {
+                width: Length::Px(30.0),
+                height: Length::Px(30.0),
+                ..Style::default()
+            },
+            Kind::icon_button(stroked(icon, 14.0), name, ButtonKind::Ghost, theme),
+        )
+    }
+
+    /// The keys of a shortcut as caps; while it is changed, the new ones
+    /// once pressed, in the accent.
+    fn edit_caps(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        combo: &hocus_core::shortcuts::Combo,
+        here: bool,
+    ) {
+        let got = match self.keys.editing.as_ref().map(|e| &e.state) {
+            Some(Recording::Got { combo, .. }) if here => Some(combo.clone()),
+            _ => None,
+        };
+        let shown = got.as_ref().unwrap_or(combo);
+        for cap in hocus_shell::actions::caps(shown, self.lang) {
+            if got.is_some() {
+                self.keycap_new(theme, parent, &cap);
+            } else {
+                self.keycap(theme, parent, &cap);
+            }
+        }
+    }
+
+    /// Save, or Replace when the keys are taken.
+    fn confirm_button(&mut self, theme: &Theme, parent: NodeId) {
+        let taken = matches!(
+            self.keys.editing.as_ref().map(|e| &e.state),
+            Some(Recording::Got { owner: Some(_), .. })
+        );
+        let text = if taken { words::REPLACE } else { words::SAVE };
+        let b = self.add(
+            parent,
+            Style {
+                width: Length::Fill,
+                height: Length::Px(36.0),
+                padding: Insets::symmetric(0.0, 12.0),
+                ..Style::default()
+            },
+            Kind::Button(Button::new(text.get(self.lang), ButtonKind::Primary, theme)),
+        );
+        self.targets.insert(b, Target::ConfirmEdit);
+    }
+
+    /// What the shortcut being changed waits for; with its buttons when
+    /// `buttons` (a row has them in its last column).
+    fn edit_note(&mut self, theme: &Theme, parent: NodeId, buttons: bool) {
+        let lang = self.lang;
+        let Some(editing) = self.keys.editing.clone() else {
+            return;
+        };
+        let accent = theme.text.label.with_weight(500).with_color(Paint::Accent);
+        let waiting = theme.text.label.with_weight(500).with_color(Paint::Waiting);
+        let got = match &editing.state {
+            Recording::Listening { refused: false } => {
+                self.line(parent, words::PRESS_KEYS.get(lang), accent);
+                false
+            }
+            Recording::Listening { refused: true } => {
+                self.line(parent, words::NEEDS_MODIFIER.get(lang), waiting);
+                false
+            }
+            Recording::Got { combo, owner: None } => {
+                let keys = hocus_shell::actions::caps(combo, lang).join("+");
+                self.line(parent, &words::new_keys(&keys, lang), accent);
+                true
+            }
+            Recording::Got {
+                owner: Some(owner), ..
+            } => {
+                let (name, _, _) = words::action(owner, lang);
+                self.line(parent, &words::taken_by(&name, lang), waiting);
+                true
+            }
+        };
+        if buttons && got {
+            let room = self.add(parent, row(0.0), Kind::Box(Look::default()));
+            self.tree.set_style(
+                room,
+                Style {
+                    width: Length::Px(130.0),
+                    ..row(0.0)
+                },
+            );
+            self.confirm_button(theme, room);
+        }
+        if buttons {
+            let b = self.add(
+                parent,
+                Style {
+                    height: Length::Px(32.0),
+                    padding: Insets::symmetric(0.0, 12.0),
+                    ..Style::default()
+                },
+                Kind::Button(Button::new(
+                    words::CANCEL.get(lang),
+                    ButtonKind::Plain,
+                    theme,
+                )),
+            );
+            self.targets.insert(b, Target::CancelEdit);
+        }
+    }
+
+    /// A key cap of new keys: in the accent.
+    fn keycap_new(&mut self, theme: &Theme, parent: NodeId, label: &str) {
+        let cap = self.add(
+            parent,
+            Style {
+                padding: Insets::symmetric(4.0, 9.0),
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Rgba(theme.colors.accent.with_alpha(0x29))),
+                radius: 7.0,
+                border: Some(Paint::Accent),
+                ..Look::default()
+            }),
+        );
+        let mono = hocus_ui::TextStyle {
+            typeface: hocus_ui::Typeface::Mono,
+            ..theme.text.label.with_weight(500).with_color(Paint::Accent)
+        };
+        self.line(cap, label, mono);
     }
 
     /// A drag begins on the screen under the pointer, if any.
@@ -2329,6 +3033,136 @@ mod tests {
         out
     }
 
+    fn keyboard_view(toml: &str) -> SettingsView {
+        let mut v = view(Lang::En);
+        v.set_context(Context {
+            config: hocus_core::Config::parse(toml).expect("a configuration"),
+            ..Context::default()
+        });
+        v.open(Some(Page::Keyboard));
+        v.draw(Duration::ZERO);
+        v
+    }
+
+    fn changes(out: &[Outcome]) -> Vec<(String, Option<String>)> {
+        out.iter()
+            .filter_map(|o| match o {
+                Outcome::Change(c) => Some((
+                    c.key.clone(),
+                    c.value.as_ref().map(|v| v.to_string().trim().to_owned()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn combo(s: &str) -> hocus_core::shortcuts::Combo {
+        s.parse().expect("keys")
+    }
+
+    #[test]
+    fn layouts_are_added_removed_and_put_first() {
+        let mut v = keyboard_view("[keyboard]\nlayouts = [\"us\", \"fr\"]\n");
+        let out = click(&mut v, "Put French · AZERTY before");
+        assert_eq!(
+            changes(&out),
+            [("layouts".into(), Some("[\"fr\", \"us\"]".into()))]
+        );
+        let out = click(&mut v, "Remove English · US");
+        assert_eq!(changes(&out), [("layouts".into(), Some("[\"fr\"]".into()))]);
+        click(&mut v, "Add a layout");
+        let out = click(&mut v, "German");
+        assert_eq!(
+            changes(&out),
+            [("layouts".into(), Some("[\"us\", \"fr\", \"de\"]".into()))]
+        );
+    }
+
+    #[test]
+    fn keys_taken_change_nothing_until_replaced() {
+        let mut v = keyboard_view("");
+        let out = click(&mut v, "Change Fullscreen, Super+F11");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Inhibit(true)]),
+            "{out:?}"
+        );
+        assert!(v.recording());
+        // Typing keys alone is refused: they are for typing.
+        assert!(v.record(combo("M")).is_empty());
+        assert!(v.recording());
+        let out = v.record(combo("Super+Down"));
+        assert!(
+            matches!(out.as_slice(), [Outcome::Inhibit(false)]),
+            "{out:?}"
+        );
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Already used by “Minimize”: replace?").is_some());
+        let out = click(&mut v, "Replace");
+        assert_eq!(
+            changes(&out),
+            [
+                ("Super+Down".into(), Some("\"toggle-fullscreen\"".into())),
+                ("Super+F11".into(), Some("\"none\"".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_shortcut_runs_a_command_or_an_action() {
+        let mut v = keyboard_view("");
+        // Under the table.
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        click(&mut v, "New shortcut: start an app, a command or an action");
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        v.text("foot --server");
+        v.draw(Duration::ZERO);
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Choose its keys");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Inhibit(true)]),
+            "{out:?}"
+        );
+        v.record(combo("Super+Return"));
+        v.draw(Duration::ZERO);
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Save");
+        assert_eq!(
+            changes(&out),
+            [(
+                "Super+Return".into(),
+                Some("\"spawn foot --server\"".into())
+            )]
+        );
+        // Escape while recording cancels and gives the shortcuts back.
+        let mut v = keyboard_view("");
+        click(&mut v, "Change Fullscreen, Super+F11");
+        let out = v.key(Key::Escape);
+        assert!(
+            matches!(out.as_slice(), [Outcome::Inhibit(false)]),
+            "{out:?}"
+        );
+        assert!(!v.recording());
+    }
+
+    #[test]
+    fn the_original_shortcuts_come_back_once_asked_twice() {
+        let mut v = keyboard_view("[shortcuts]\n\"Super+M\" = \"toggle-maximized\"\n");
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        assert!(click(&mut v, "Back to the original shortcuts").is_empty());
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Go back");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Change(c)] if c.key.is_empty() && c.value.is_none()),
+            "{out:?}"
+        );
+    }
+
     #[test]
     fn contrast_typed_then_enter_opens_appearance_with_the_switch_focused() {
         let mut v = view(Lang::Fr);
@@ -2354,13 +3188,16 @@ mod tests {
             panic!("{out:?}");
         };
         assert_eq!(
-            (&change.place, change.key),
+            (&change.place, change.key.as_str()),
             (&crate::edit::Place::Section("appearance"), "accent")
         );
-        assert_eq!(change.value.as_str(), Some("amber"));
+        assert_eq!(
+            change.value.as_ref().and_then(|v| v.as_str()),
+            Some("amber")
+        );
         let out = click(&mut v, "High contrast");
         assert!(
-            matches!(out.as_slice(), [Outcome::Change(c)] if c.key == "high_contrast" && c.value.as_bool() == Some(true)),
+            matches!(out.as_slice(), [Outcome::Change(c)] if c.key == "high_contrast" && c.value.as_ref().and_then(|v| v.as_bool()) == Some(true)),
             "{out:?}"
         );
     }

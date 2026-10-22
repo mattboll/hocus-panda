@@ -72,11 +72,117 @@ pub const LAYOUTS: Words = Words::new("Layouts", "Dispositions");
 pub const SWITCH_LAYOUT: Words = Words::new("Switch layout", "Changer de disposition");
 pub const SHORTCUTS: Words = Words::new("Shortcuts", "Raccourcis");
 pub const SHORTCUTS_NOTE: Words = Words::new(
-    "Changing a shortcut comes with #110; the configuration file holds them meanwhile.",
-    "Changer un raccourci arrive avec #110 ; le fichier de configuration les tient en attendant.",
+    "Super+P shows these shortcuts over any window.",
+    "Super+P montre ces raccourcis par-dessus n’importe quelle fenêtre.",
 );
 pub const ACTION: Words = Words::new("Action", "Action");
 pub const KEYS: Words = Words::new("Keys", "Touches");
+pub const CHANGE_HEADER: Words = Words::new("Change", "Modifier");
+pub const CHANGE: Words = Words::new("Change", "Changer");
+pub const CANCEL: Words = Words::new("Cancel", "Annuler");
+pub const SAVE: Words = Words::new("Save", "Enregistrer");
+pub const REPLACE: Words = Words::new("Replace", "Remplacer");
+pub const PRESS_KEYS: Words = Words::new(
+    "Press the new keys · Escape cancels",
+    "Appuie sur la nouvelle combinaison · Échap annule",
+);
+pub const NEEDS_MODIFIER: Words = Words::new(
+    "With Super, Ctrl or Alt, and a key · Escape cancels",
+    "Avec Super, Ctrl ou Alt, et une touche · Échap annule",
+);
+pub const NEW_SHORTCUT: Words = Words::new(
+    "New shortcut: start an app, a command or an action",
+    "Nouveau raccourci : lancer une appli, une commande ou une action",
+);
+pub const NEW_WHAT: Words = Words::new("What the shortcut runs", "Ce que lance le raccourci");
+pub const NEW_WHAT_HINT: Words = Words::new(
+    "An app, a command or an action: firefox, screenshot region…",
+    "Une appli, une commande ou une action : firefox, screenshot region…",
+);
+pub const CHOOSE_KEYS: Words = Words::new("Choose its keys", "Choisir ses touches");
+pub const RESET: Words = Words::new(
+    "Back to the original shortcuts",
+    "Revenir aux raccourcis d’origine",
+);
+pub const RESET_NOTE: Words = Words::new(
+    "Your own shortcuts will be forgotten.",
+    "Tes propres raccourcis seront oubliés.",
+);
+pub const GO_BACK: Words = Words::new("Go back", "Revenir");
+pub const ADD: Words = Words::new("Add", "Ajouter");
+pub const ADD_LAYOUT: Words = Words::new("Add a layout", "Ajouter une disposition");
+
+/// The new keys, as caps joined.
+pub fn new_keys(keys: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("New keys: {keys}"),
+        Lang::Fr => format!("Nouvelles touches\u{a0}: {keys}"),
+    }
+}
+
+/// Keys already bound to another action.
+pub fn taken_by(action: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Already used by “{action}”: replace?"),
+        Lang::Fr => format!("Déjà pris par «\u{a0}{action}\u{a0}»\u{a0}: remplacer\u{a0}?"),
+    }
+}
+
+/// The Change button of a shortcut, for screen readers.
+pub fn change_shortcut(action: &str, keys: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Change {action}, {keys}"),
+        Lang::Fr => format!("Changer {action}, {keys}"),
+    }
+}
+
+pub fn remove_layout(name: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Remove {name}"),
+        Lang::Fr => format!("Retirer {name}"),
+    }
+}
+
+pub fn layout_before(name: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Put {name} before"),
+        Lang::Fr => format!("Placer {name} avant"),
+    }
+}
+
+/// Keyboard layouts offered, by XKB name, in both languages.
+pub const LAYOUT_NAMES: [(&str, Words); 22] = [
+    ("us", Words::new("English · US", "Anglais · US")),
+    ("gb", Words::new("English · UK", "Anglais · Royaume-Uni")),
+    ("fr", Words::new("French · AZERTY", "Français · AZERTY")),
+    ("be", Words::new("Belgian", "Belge")),
+    ("ch", Words::new("Swiss", "Suisse")),
+    ("ca", Words::new("Canadian French", "Français canadien")),
+    ("de", Words::new("German", "Allemand")),
+    ("es", Words::new("Spanish", "Espagnol")),
+    ("latam", Words::new("Latin American", "Latino-américain")),
+    ("it", Words::new("Italian", "Italien")),
+    ("pt", Words::new("Portuguese", "Portugais")),
+    ("br", Words::new("Brazilian", "Brésilien")),
+    ("nl", Words::new("Dutch", "Néerlandais")),
+    ("se", Words::new("Swedish", "Suédois")),
+    ("no", Words::new("Norwegian", "Norvégien")),
+    ("dk", Words::new("Danish", "Danois")),
+    ("fi", Words::new("Finnish", "Finnois")),
+    ("pl", Words::new("Polish", "Polonais")),
+    ("cz", Words::new("Czech", "Tchèque")),
+    ("ru", Words::new("Russian", "Russe")),
+    ("ua", Words::new("Ukrainian", "Ukrainien")),
+    ("gr", Words::new("Greek", "Grec")),
+];
+
+/// A layout's name, or its XKB name when it has none here.
+pub fn layout_name(code: &str, lang: Lang) -> String {
+    LAYOUT_NAMES
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map_or_else(|| code.to_uppercase(), |(_, w)| w.get(lang).to_owned())
+}
 
 pub const SCREENS_NOTE: Words = Words::new(
     "Each set of screens keeps its own layout.",

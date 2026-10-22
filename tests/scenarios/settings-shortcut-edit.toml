@@ -1,0 +1,74 @@
+description = "In the settings' shortcut editor, keys already used show their action and change nothing until confirmed; new keys recorded and saved are written and work at once"
+outputs = ["1280x800"]
+
+[[step]]
+config = ""
+
+[[step]]
+open_settings = { page = "keyboard" }
+
+# Keys already used: the conflict shows, the file is not touched.
+[[step]]
+click_settings = "Change Fullscreen, Super+F11"
+
+[[step]]
+expect_settings = { label = "Press the new keys · Escape cancels" }
+
+[[step]]
+keys = "super+108"
+
+[[step]]
+expect_settings = { label = "Already used by “Minimize”: replace?" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-shortcut-conflict.png" }
+
+[[step]]
+expect_config_file = { lacks = ["Super+Down"] }
+
+[[step]]
+click_settings = "Cancel"
+
+[[step]]
+expect_settings = { label = "Already used by “Minimize”: replace?", shown = false }
+
+# New keys for maximize: recorded, saved, written.
+[[step]]
+click_settings = "Change Maximize or restore, Super+Up"
+
+[[step]]
+keys = "super+50"
+
+[[step]]
+expect_settings = { label = "New keys: Super+M" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-shortcut-new.png" }
+
+[[step]]
+click_settings = "Save"
+
+[[step]]
+expect_config_file = { contains = ["\"Super+M\" = \"toggle-maximized\"", "\"Super+Up\" = \"none\""] }
+
+[[step]]
+expect_settings = { label = "Change Maximize or restore, Super+M" }
+
+# And they work.
+[[step]]
+open = { app_id = "editor", size = [500, 300], color = "#3399ff" }
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+keys = "super+50"
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized" }

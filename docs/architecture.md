@@ -190,7 +190,9 @@ without unlocking leaves our lock screen: a crash never unlocks.
 - The settings app ([decision 0010](decisions/0010-settings-as-a-client.md))
   reads what is in effect through it (`config`, `outputs`), follows the event
   stream, and is told which page to show by `open_settings`
-  (`hocus settings keyboard`).
+  (`hocus settings keyboard`). To record a shortcut, it holds the
+  compositor's own back through keyboard-shortcuts-inhibit, so that the
+  keys reach it; nothing is written until the new keys are confirmed.
 
 ## Configuration
 
