@@ -10,7 +10,12 @@ use hocus_ui::{
     Paint, PixelRect, Point, Rect, Size, Style, Surface, TextField, Theme, Tree,
 };
 
-use crate::{calc, column::View, fuzzy, i18n::Lang, icons, toasts::app_color};
+use crate::{
+    column::View,
+    i18n::Lang,
+    icons,
+    providers::{Context, Enabled, Hit, Provider, providers},
+};
 
 /// The card's width, from the design.
 pub const WIDTH: f32 = 860.0;
@@ -38,18 +43,25 @@ pub enum Choice {
     Launch(App),
     /// A result to put on the clipboard.
     Copy(String),
+    /// An address to open in the browser.
+    Open(String),
+    /// Something to show over the whole screen.
+    Show(Showcase),
+}
+
+/// What the launcher can show over a whole screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Showcase {
+    /// Words as large as they fit.
+    LargeText(String),
+    /// A QR code of the words.
+    Qr(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LauncherEvent {
     Chosen(Choice),
     Closed,
-}
-
-#[derive(Debug, Clone)]
-enum Hit {
-    App(usize),
-    Calc(String),
 }
 
 pub struct Launcher {
@@ -60,6 +72,7 @@ pub struct Launcher {
     list: NodeId,
     rows: Vec<(NodeId, Hit)>,
     apps: Vec<App>,
+    providers: Vec<Box<dyn Provider>>,
     selected: usize,
     open: bool,
     now: Duration,
@@ -189,6 +202,7 @@ impl Launcher {
             list,
             rows: Vec::new(),
             apps: Vec::new(),
+            providers: providers(&Enabled::default()),
             selected: 0,
             open: false,
             now: Duration::ZERO,
@@ -223,6 +237,11 @@ impl Launcher {
         }
     }
 
+    /// Which providers run, from the configuration.
+    pub fn set_providers(&mut self, enabled: &Enabled) {
+        self.providers = providers(enabled);
+    }
+
     /// Opens on an empty field.
     pub fn open(&mut self) {
         self.open = true;
@@ -249,39 +268,14 @@ impl Launcher {
         }
         let query = self.query().trim().to_owned();
         let mut hits = Vec::new();
-        if let Some(value) = calc::evaluate(&query) {
-            hits.push(Hit::Calc(value));
-        }
         if !query.is_empty() {
-            let mut scored: Vec<(i32, usize)> = self
-                .apps
-                .iter()
-                .enumerate()
-                .filter_map(|(i, app)| {
-                    let by_name = fuzzy::score(&query, &app.name);
-                    let by_generic = app
-                        .generic
-                        .as_deref()
-                        .and_then(|g| fuzzy::score(&query, g))
-                        .map(|s| s - 500);
-                    let by_keyword = app
-                        .keywords
-                        .iter()
-                        .filter_map(|k| fuzzy::score(&query, k))
-                        .max()
-                        .map(|s| s - 800);
-                    [by_name, by_generic, by_keyword]
-                        .into_iter()
-                        .flatten()
-                        .max()
-                        .map(|s| (s, i))
-                })
-                .collect();
-            scored.sort_by(|(a, i), (b, j)| {
-                b.cmp(a)
-                    .then_with(|| self.apps[*i].name.cmp(&self.apps[*j].name))
-            });
-            hits.extend(scored.into_iter().map(|(_, i)| Hit::App(i)));
+            let cx = Context {
+                apps: &self.apps,
+                lang: self.lang,
+            };
+            for provider in &self.providers {
+                provider.hits(&query, &cx, &mut hits);
+            }
         }
         hits.truncate(MAX_RESULTS);
         self.selected = 0;
@@ -302,21 +296,8 @@ impl Launcher {
             );
         }
         for (i, hit) in hits.into_iter().enumerate() {
-            let (name, kind, color) = match &hit {
-                Hit::Calc(v) => (
-                    format!("= {v}"),
-                    self.lang.calculator(),
-                    theme.colors.accent,
-                ),
-                Hit::App(a) => {
-                    let app = &self.apps[*a];
-                    (
-                        app.name.clone(),
-                        self.lang.application(),
-                        app_color(&app.name),
-                    )
-                }
-            };
+            let (name, kind) = (hit.title.clone(), hit.kind.clone());
+            let color = hit.color.unwrap_or(theme.colors.accent);
             let Some(row) = self.tree.add(
                 self.list,
                 Style {
@@ -387,10 +368,7 @@ impl Launcher {
 
     fn choose(&self, i: usize) -> Option<LauncherEvent> {
         let (_, hit) = self.rows.get(i)?;
-        Some(LauncherEvent::Chosen(match hit {
-            Hit::App(a) => Choice::Launch(self.apps.get(*a)?.clone()),
-            Hit::Calc(v) => Choice::Copy(v.clone()),
-        }))
+        Some(LauncherEvent::Chosen(hit.choice.clone()))
     }
 
     /// Text typed while open.

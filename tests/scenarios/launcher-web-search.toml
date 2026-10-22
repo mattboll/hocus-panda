@@ -1,0 +1,33 @@
+description = "Web search comes last, and not at all once turned off in the configuration"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "hello there"
+
+[[step]]
+expect_ui = { label = "Search the web for “hello there”" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+config = """
+[launcher]
+web_search = false
+"""
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "hello there"
+
+[[step]]
+expect_ui = { label = "Nothing found" }
+
+[[step]]
+expect_ui = { label = "Search the web for “hello there”", shown = false }
