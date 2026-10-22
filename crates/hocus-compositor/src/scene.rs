@@ -88,7 +88,13 @@ impl State {
             elements.extend(ours.into_iter().map(SceneElement::Frame));
             return elements;
         }
-        // Leaving: the countdown, over everything but the cursor.
+        // The system's password dialog, over everything but the cursor.
+        elements.extend(
+            self.auth_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
+        // Leaving: the countdown, over everything else.
         elements.extend(
             self.leave_elements(renderer, output)
                 .into_iter()

@@ -227,7 +227,12 @@ applications keep the screen awake and ask to lock. Leaving the session
 (#72) asks logind what the machine can do (hibernating is offered only
 where it works) and which applications block shutting down: their reasons
 stop the ten-second countdown until the user decides; the session is then
-saved, windows are asked to close, and logind restarts or powers off. Each source runs on a
+saved, windows are asked to close, and logind restarts or powers off. The
+session is polkit's authentication agent (#83): a request shows a dialog
+drawn by the compositor over every window, with the keyboard and the
+system's label, so that no client can cover it or imitate it; the password
+goes to polkit's own helper (its socket, or the setuid binary of older
+versions), which tells polkit. Each source runs on a
 thread of its own; a missing one leaves its part of the state as it was.
 Only the session itself uses the machine's services: nested or headless,
 quick settings show a stub and change nothing on the machine, and tests give

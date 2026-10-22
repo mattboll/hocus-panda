@@ -5,6 +5,7 @@
 
 mod actions;
 mod api;
+mod authorize;
 mod bars;
 mod capture;
 mod clock;
@@ -120,6 +121,8 @@ pub struct Options {
     /// What started applications inherit, if not the compositor's own
     /// environment.
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
+    /// Runs this instead of polkit's helper to check passwords (tests).
+    pub polkit_helper: Option<PathBuf>,
 }
 
 /// How often the configuration file is looked at by default.
@@ -233,6 +236,11 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     state.is_session = options.session_services || matches!(options.backend, Backend::Tty);
     lock::start(&event_loop.handle(), &mut state);
     leave::start(&event_loop.handle(), &mut state);
+    authorize::start(
+        &event_loop.handle(),
+        &mut state,
+        options.polkit_helper.clone(),
+    );
     lock::start_session(
         &event_loop.handle(),
         &mut state,

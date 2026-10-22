@@ -35,6 +35,7 @@ fn compositor(
         system_bus: system.map(|b| b.address.clone()),
         data_dirs: None,
         child_env: None,
+        polkit_helper: None,
     })
 }
 
@@ -361,5 +362,181 @@ fn hibernating_is_offered_only_where_it_works() -> anyhow::Result<()> {
         assert!(shows(&mut compositor, "Suspend")?);
         assert_eq!(shows(&mut compositor, "Hibernate")?, hibernate);
     }
+    Ok(())
+}
+
+/// polkit's authority, as far as an agent uses it: it remembers where the
+/// agent registered.
+#[derive(Default)]
+struct Authority {
+    agent: Arc<std::sync::Mutex<Option<(String, String)>>>,
+}
+
+#[zbus::interface(name = "org.freedesktop.PolicyKit1.Authority")]
+impl Authority {
+    fn register_authentication_agent(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        _subject: (
+            String,
+            std::collections::HashMap<String, zbus::OwnedVariant>,
+        ),
+        _locale: String,
+        path: String,
+    ) {
+        let sender = header.sender().map(|s| s.to_string()).unwrap_or_default();
+        if let Ok(mut agent) = self.agent.lock() {
+            *agent = Some((sender, path));
+        }
+    }
+}
+
+fn type_keys(compositor: &mut Headless, codes: &[u32]) -> anyhow::Result<()> {
+    for code in codes {
+        for pressed in [true, false] {
+            compositor.request(Request::Key {
+                code: *code,
+                pressed,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_system_asks_for_a_password_over_everything() -> anyhow::Result<()> {
+    if !installed("dbus-daemon") {
+        eprintln!("skipped: no dbus-daemon");
+        return Ok(());
+    }
+    let bus = PrivateBus::start()?;
+    let agent = Arc::new(std::sync::Mutex::new(None));
+    let _service = zbus::block_on(
+        zbus::connection::Builder::address(bus.address.as_str())
+            .serve_at(
+                "/org/freedesktop/PolicyKit1/Authority",
+                Authority {
+                    agent: agent.clone(),
+                },
+            )
+            .name("org.freedesktop.PolicyKit1")
+            .build(),
+    )?;
+    // polkit's helper, as far as the agent talks to it: "panda" passes.
+    let dir = tempfile::tempdir()?;
+    let helper = dir.path().join("helper");
+    std::fs::write(
+        &helper,
+        "#!/bin/sh\nread cookie\necho 'PAM_PROMPT_ECHO_OFF Password: '\nread password\n\
+         if [ \"$password\" = panda ]; then echo SUCCESS; else \
+         echo 'PAM_ERROR_MSG Authentication failure'; echo FAILURE; fi\n",
+    )?;
+    std::fs::set_permissions(&helper, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+    let mut compositor = Headless::start_options(HarnessOptions {
+        headless: HeadlessConfig {
+            renderer: RendererChoice::Pixman,
+            ..Default::default()
+        },
+        api_permission: hocus_api::Permission::Test,
+        watchdog: None,
+        xwayland: false,
+        shell: true,
+        session_bus: None,
+        system_bus: Some(bus.address.clone()),
+        data_dirs: None,
+        child_env: None,
+        polkit_helper: Some(helper),
+    })?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (name, path) = loop {
+        if let Some(found) = agent.lock().ok().and_then(|a| a.clone()) {
+            break found;
+        }
+        anyhow::ensure!(Instant::now() < deadline, "the agent never registered");
+        compositor.dispatch(Duration::from_millis(10))?;
+    };
+
+    // polkit asks, as for `pkexec true`; the call waits for the dialog.
+    let address = bus.address.clone();
+    let (done, answer) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result: zbus::Result<()> = zbus::block_on(async {
+            let conn = zbus::connection::Builder::address(address.as_str())
+                .build()
+                .await?;
+            let proxy = Proxy::new(
+                &conn,
+                name,
+                path,
+                "org.freedesktop.PolicyKit1.AuthenticationAgent",
+            )
+            .await?;
+            let identities: Vec<(&str, std::collections::HashMap<&str, zbus::Variant<'_>>)> =
+                vec![("unix-user", [("uid", zbus::Variant::from(0u32))].into())];
+            proxy
+                .call(
+                    "BeginAuthentication",
+                    &(
+                        "org.freedesktop.policykit.exec",
+                        "Authentication is needed to run `/usr/bin/true' as the super user",
+                        "",
+                        std::collections::HashMap::from([("command_line", "/usr/bin/true")]),
+                        "cookie-1",
+                        identities,
+                    ),
+                )
+                .await
+        });
+        let _ = done.send(result);
+    });
+    wait_for(&mut compositor, "Authentication required")?;
+    assert!(shows(&mut compositor, "/usr/bin/true")?);
+
+    // A window covering the screen stays under it.
+    let _window = hocus_test::client::SolidWindow {
+        app_id: "cover".into(),
+        width: 1920,
+        height: 1080,
+        argb: 0xff_ff_00_00,
+    }
+    .spawn(compositor.socket_path())?;
+    compositor.dispatch_until(Duration::from_secs(10), |c| c.window_count() == 1)?;
+    compositor.advance(FRAME * 2)?;
+    let Reply::Screenshot(shot) = compositor.request(Request::Screenshot {
+        target: hocus_api::Target::Output("HEADLESS-1".into()),
+        cursor: false,
+    })?
+    else {
+        anyhow::bail!("no screenshot");
+    };
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(shot.png()?));
+    decoder.set_transformations(png::Transformations::EXPAND);
+    let mut reader = decoder.read_info()?;
+    let mut buf = vec![0; reader.output_buffer_size().unwrap_or(0)];
+    let info = reader.next_frame(&mut buf)?;
+    let channels = info.color_type.samples();
+    let (w, h) = (info.width as usize, info.height as usize);
+    let i = (h / 2 * w + w / 2) * channels;
+    assert_ne!(&buf[i..i + 3], &[255, 0, 0], "the window covers the dialog");
+
+    // The dialog has the keyboard: "bamboo", then Enter, is refused and
+    // said.
+    type_keys(&mut compositor, &[48, 30, 50, 48, 24, 24, 28])?;
+    wait_for(&mut compositor, "Authentication failure")?;
+    assert!(answer.try_recv().is_err(), "a wrong password let it run");
+    // "panda", then Enter.
+    type_keys(&mut compositor, &[25, 30, 49, 32, 30, 28])?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let result = loop {
+        if let Ok(result) = answer.try_recv() {
+            break result;
+        }
+        anyhow::ensure!(Instant::now() < deadline, "the call never came back");
+        compositor.dispatch(Duration::from_millis(10))?;
+        compositor.advance(FRAME)?;
+    };
+    result?;
+    compositor.advance(FRAME)?;
+    assert!(!shows(&mut compositor, "Authentication required")?);
     Ok(())
 }

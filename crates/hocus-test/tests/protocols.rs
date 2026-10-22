@@ -136,6 +136,7 @@ fn a_sandboxed_client_does_not_see_the_sensitive_protocols() -> anyhow::Result<(
         system_bus: None,
         data_dirs: None,
         child_env: None,
+        polkit_helper: None,
     })?;
     let socket = compositor.socket_path().to_path_buf();
     let dir = tempfile::tempdir()?;
@@ -262,6 +263,7 @@ fn idle_notifications_say_idled_then_resumed() -> anyhow::Result<()> {
         system_bus: None,
         data_dirs: None,
         child_env: None,
+        polkit_helper: None,
     })?;
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let socket = compositor.socket_path().to_path_buf();

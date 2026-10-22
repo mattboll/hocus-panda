@@ -559,6 +559,26 @@ impl Lang {
     pub fn still_open(self) -> &'static str {
         self.pick("Still open:", "Encore ouvertes :")
     }
+
+    /// Over the system's password dialog: a client cannot draw this.
+    pub fn system_asks(self) -> &'static str {
+        self.pick("SYSTEM · HOCUSPANDA", "SYSTÈME · HOCUSPANDA")
+    }
+
+    pub fn authentication_required(self) -> &'static str {
+        self.pick("Authentication required", "Authentification requise")
+    }
+
+    pub fn password_for(self, user: &str) -> String {
+        match self {
+            Self::En => format!("Password for {user}"),
+            Self::Fr => format!("Mot de passe de {user}"),
+        }
+    }
+
+    pub fn authenticate(self) -> &'static str {
+        self.pick("Authenticate", "Authentifier")
+    }
 }
 
 #[cfg(test)]

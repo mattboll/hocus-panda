@@ -241,6 +241,7 @@ impl State {
         self.refresh_lock();
         self.refresh_sessions();
         self.refresh_leaving();
+        self.refresh_authorize();
         self.refresh_dropdown();
         self.refresh_appearance();
         self.refresh_bars();
@@ -468,6 +469,7 @@ impl State {
         self.card_ui(&mut out);
         self.identify_ui(&mut out);
         self.leave_ui(&mut out);
+        self.auth_ui(&mut out);
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;
@@ -520,6 +522,12 @@ pub trait Pixels {
 }
 
 impl Pixels for hocus_shell::lock::Curtain {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+impl Pixels for hocus_shell::authorize::Authorize {
     fn pixels(&self) -> View<'_> {
         self.view()
     }

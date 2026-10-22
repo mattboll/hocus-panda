@@ -18,6 +18,7 @@ fn the_headless_compositor_keeps_the_bundled_fonts() -> anyhow::Result<()> {
         system_bus: None,
         data_dirs: None,
         child_env: None,
+        polkit_helper: None,
     })?;
     compositor.advance(hocus_compositor::FRAME * 10)?;
     assert!(!hocus_ui::text::system_fonts_installed());

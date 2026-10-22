@@ -992,6 +992,7 @@ name = "hocus-platform"
 version = "0.1.0"
 dependencies = [
  "futures-core",
+ "rustix 1.1.5",
  "tracing",
  "zbus",
 ]

@@ -65,6 +65,7 @@ fn compositor(bus: &PrivateBus) -> anyhow::Result<Headless> {
         system_bus: Some(bus.address.clone()),
         data_dirs: None,
         child_env: None,
+        polkit_helper: None,
     })
 }
 
