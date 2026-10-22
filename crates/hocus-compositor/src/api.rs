@@ -257,6 +257,20 @@ impl App {
                 self.open_share_picker(connection, id);
                 return None;
             }
+            Request::CopyPng { png_base64 } => {
+                match base64::engine::general_purpose::STANDARD.decode(&png_base64) {
+                    Ok(png) => {
+                        state.copy_png(png.into());
+                        Reply::Done
+                    }
+                    Err(err) => {
+                        return Some(Err(ApiError::new(
+                            ErrorCode::BadRequest,
+                            format!("not base64: {err}"),
+                        )));
+                    }
+                }
+            }
             Request::IdentifyOutputs => {
                 state.identify_outputs();
                 Reply::Done

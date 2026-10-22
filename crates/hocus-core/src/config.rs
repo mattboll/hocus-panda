@@ -344,6 +344,8 @@ pub struct Screenshots {
     /// The program that reads text in a picture, as tesseract does:
     /// `PROGRAM IMAGE -` prints it.
     pub ocr: String,
+    /// The annotation window, given the capture's file.
+    pub annotate: String,
 }
 
 impl Default for Screenshots {
@@ -353,6 +355,7 @@ impl Default for Screenshots {
             save: true,
             copy: true,
             ocr: "tesseract".into(),
+            annotate: "hocus-annotate".into(),
         }
     }
 }

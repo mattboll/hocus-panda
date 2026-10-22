@@ -67,6 +67,7 @@ folder = ""                # empty: Screenshots in the pictures folder
 save = true                # into the folder
 copy = true                # onto the clipboard (as PNG)
 ocr = "tesseract"          # reads the text for "Copy the text", when installed
+annotate = "hocus-annotate" # the toast's "Annotate", given the capture's file
 
 [recording]                # Super+Shift+R
 folder = ""                # empty: Screencasts in the videos folder

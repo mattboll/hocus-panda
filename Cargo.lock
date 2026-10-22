@@ -1052,6 +1052,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-annotate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "clap",
+ "hocus-api",
+ "hocus-core",
+ "hocus-shell",
+ "hocus-ui",
+ "png",
+ "rustix 1.1.5",
+ "smithay-client-toolkit",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "wayland-client",
+]
+
+[[package]]
 name = "hocus-api"
 version = "0.1.0"
 dependencies = [
@@ -1145,6 +1165,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hocus-annotate",
  "hocus-api",
  "hocus-compositor",
  "hocus-platform",

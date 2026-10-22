@@ -57,6 +57,7 @@ A Cargo workspace; names may move as the code lands.
 | `hocus-ui` | Small retained widget toolkit drawn into textures: layout, text, theme tokens, springs, hit testing, accessibility tree | no |
 | `hocus-shell` | The desktop's own UI built on `hocus-ui`: widget column, dock, launcher, notifications, quick settings, menus, lock screen, pandas | no |
 | `hocus-settings` | The settings app: a Wayland client of its own, drawn with `hocus-ui`, changing the configuration file ([decision 0010](decisions/0010-settings-as-a-client.md)) | no |
+| `hocus-annotate` | The screenshot annotation window (#128): arrows, frames, texts and blurred areas drawn over a capture, a Wayland client drawn with `hocus-ui` as the settings are; copying goes through the compositor, which keeps the clipboard | no |
 | `hocus-platform` | Services behind traits: power, battery, backlight, network, audio, session, notifications (D-Bus); Linux and FreeBSD implementations | no |
 | `hocus-api` | Control protocol types, socket server, event stream; MCP bridge | no |
 | `hocus-test` | Scenario runner, test clients, screenshot comparison | yes |

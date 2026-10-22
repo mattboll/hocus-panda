@@ -631,6 +631,61 @@ impl Lang {
         )
     }
 
+    pub fn annotate(self) -> &'static str {
+        self.pick("Annotate", "Annoter")
+    }
+
+    pub fn annotate_arrow(self) -> &'static str {
+        self.pick("Arrow", "Flèche")
+    }
+
+    pub fn annotate_frame(self) -> &'static str {
+        self.pick("Frame", "Cadre")
+    }
+
+    pub fn annotate_text(self) -> &'static str {
+        self.pick("Text", "Texte")
+    }
+
+    pub fn annotate_blur(self) -> &'static str {
+        self.pick("Blur", "Flou")
+    }
+
+    /// The annotation colours, in their order.
+    pub fn annotate_colour(self, i: usize) -> &'static str {
+        let (en, fr) = match i {
+            0 => ("Red", "Rouge"),
+            1 => ("Yellow", "Jaune"),
+            2 => ("Green", "Vert"),
+            3 => ("Blue", "Bleu"),
+            _ => ("White", "Blanc"),
+        };
+        self.pick(en, fr)
+    }
+
+    pub fn annotate_undo(self) -> &'static str {
+        self.pick("Undo", "Défaire")
+    }
+
+    pub fn annotate_copy(self) -> &'static str {
+        self.pick("Copy", "Copier")
+    }
+
+    pub fn annotate_save(self) -> &'static str {
+        self.pick("Save", "Enregistrer")
+    }
+
+    pub fn annotate_saved(self, name: &str) -> String {
+        match self {
+            Self::En => format!("Saved as {name}"),
+            Self::Fr => format!("Enregistrée sous {name}"),
+        }
+    }
+
+    pub fn annotate_copied(self) -> &'static str {
+        self.pick("Copied", "Copiée")
+    }
+
     pub fn share_title(self) -> &'static str {
         self.pick("Share your screen", "Partager l’écran")
     }

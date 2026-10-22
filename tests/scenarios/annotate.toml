@@ -1,0 +1,60 @@
+description = "A screenshot's toast offers to annotate it; the annotation window draws arrows, frames, texts and blurred areas over it"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[screenshots]
+folder = "{runtime_dir}/shots"
+"""
+
+[[step]]
+open = { app_id = "slides", size = [600, 400], color = "#e8e4da" }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+keys = "99"
+
+[[step]]
+expect_ui = { label = "Annotate" }
+
+[[step]]
+advance_ms = 7000
+
+[[step]]
+open_annotate = "{last_screenshot}"
+
+[[step]]
+drag_annotate = { label = "Capture", by = [-260, -140] }
+
+[[step]]
+click_annotate = "Blur"
+
+[[step]]
+drag_annotate = { label = "Capture", by = [180, 90] }
+
+[[step]]
+click_annotate = "Text"
+
+[[step]]
+click_annotate = "Yellow"
+
+[[step]]
+drag_annotate = { label = "Capture", by = [-120, 60] }
+
+[[step]]
+type = "Too slow here"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_annotate = { label = "Too slow here" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "annotate.png" }
