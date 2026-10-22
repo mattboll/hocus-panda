@@ -2315,7 +2315,7 @@ impl SettingsView {
                 words::TRANSPARENCY,
                 words::TRANSPARENCY_SUB,
                 a.transparency,
-                false,
+                true,
             ),
         ] {
             let look = Look {

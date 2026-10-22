@@ -1017,6 +1017,23 @@ impl Column {
         }
     }
 
+    /// Its see-through panels, from its corner, for the compositor to blur
+    /// what is behind them (#37).
+    pub fn glass(&self) -> Vec<hocus_ui::Glass> {
+        self.tree.glass()
+    }
+
+    /// The popover's see-through panels, from the column's corner.
+    pub fn popover_glass(&self) -> Vec<hocus_ui::Glass> {
+        self.popover.as_ref().map_or_else(Vec::new, |p| {
+            let mut glass = p.tree.glass();
+            for g in &mut glass {
+                g.rect = g.rect.translate(p.at.x, p.at.y);
+            }
+            glass
+        })
+    }
+
     pub fn popover_view(&self) -> Option<View<'_>> {
         self.popover.as_ref().map(|p| View {
             pixels: p.surface.pixels(),
@@ -1074,7 +1091,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
                 ..Style::default()
             },
             Kind::Box(Look {
-                background: Some(Paint::Surface),
+                background: Some(Paint::Glass),
                 radius: 24.0,
                 border: Some(Paint::Border),
                 shadow: 0.0,
@@ -2382,7 +2399,7 @@ fn popover_tree(theme: &Theme, width: f32, height: f32, scale: f32) -> (Tree, No
                 ..Style::default()
             },
             Kind::Box(Look {
-                background: Some(Paint::Surface),
+                background: Some(Paint::Glass),
                 radius: 20.0,
                 border: Some(Paint::Border),
                 shadow: 18.0,

@@ -27,7 +27,12 @@ use smithay::{
     utils::{Logical, Physical, Point, Rectangle, SERIAL_COUNTER, Size},
 };
 
-use crate::{State, desktops::title_and_app_id, window_mode::WindowMode};
+use crate::{
+    State,
+    blur::{Spot, Surface, spots},
+    desktops::title_and_app_id,
+    window_mode::WindowMode,
+};
 
 /// The wall-clock time a virtual clock starts at: a Wednesday afternoon,
 /// the same in every test.
@@ -59,6 +64,10 @@ pub struct Shell {
     /// The desktop shown where it is, when its theme was last given.
     pub(crate) themed_desktop: Option<usize>,
 }
+
+/// One of what the column draws: its popover, its old picture fading, or
+/// itself.
+type ColumnPart<R> = Option<MemoryRenderBufferRenderElement<R>>;
 
 impl Shell {
     pub fn set_theme(&mut self, theme: Theme) {
@@ -488,43 +497,42 @@ impl State {
         }
     }
 
-    /// The column's elements on `output`, front first: popover, then the
-    /// column. None when a fullscreen window covers that output.
+    /// The column's popover and the column on `output`. None when a
+    /// fullscreen window covers that output.
     pub fn shell_elements<R>(
         &self,
         renderer: &mut R,
         output: &Output,
-    ) -> Vec<MemoryRenderBufferRenderElement<R>>
+    ) -> (ColumnPart<R>, ColumnPart<R>, ColumnPart<R>)
     where
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let Some(shell) = &self.shell else {
-            return Vec::new();
+            return (None, None, None);
         };
         let Some((name, area, scale)) = &shell.on else {
-            return Vec::new();
+            return (None, None, None);
         };
         if *name != output.name() || self.fullscreen_on(output) {
-            return Vec::new();
+            return (None, None, None);
         }
         let rect = column_rect(*area);
         let local = Point::<f64, Logical>::from((
             f64::from(rect.loc.x - area.loc.x),
             f64::from(rect.loc.y - area.loc.y),
         ));
-        let mut elements = Vec::new();
         let now = self.clock.now();
-        let mut push = |buffer: &MemoryRenderBuffer,
-                        at: Point<f64, Logical>,
-                        view_size: (u32, u32),
-                        alpha: Option<f32>| {
+        let mut element = |buffer: &MemoryRenderBuffer,
+                           at: Point<f64, Logical>,
+                           view_size: (u32, u32),
+                           alpha: Option<f32>| {
             let (w, h) = view_size;
             let all = Rectangle::from_size(Size::from((f64::from(w), f64::from(h))));
             let size = Size::<f64, Logical>::from((f64::from(w) / scale, f64::from(h) / scale))
                 .to_i32_round();
             let location: Point<f64, Physical> = at.to_physical(*scale);
-            match MemoryRenderBufferRenderElement::from_buffer(
+            MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location,
                 buffer,
@@ -532,24 +540,45 @@ impl State {
                 Some(all),
                 Some(size),
                 Kind::Unspecified,
-            ) {
-                Ok(element) => elements.push(element),
-                Err(err) => tracing::warn!(?err, "could not draw the column"),
-            }
+            )
+            .inspect_err(|err| tracing::warn!(?err, "could not draw the column"))
+            .ok()
         };
-        if let (Some((buffer, at)), Some(view)) = (&shell.popover, shell.column.popover_view()) {
-            let at = local + Point::from((f64::from(at.x), f64::from(at.y)));
-            push(buffer, at, (view.width, view.height), None);
-        }
-        // The old theme's column over the new one, fading.
-        if let Some((buffer, size, fade)) = &shell.fading {
-            push(buffer, local, *size, Some(fade.value(now).clamp(0.0, 1.0)));
-        }
-        if let Some(buffer) = &shell.buffer {
+        let popover = match (&shell.popover, shell.column.popover_view()) {
+            (Some((buffer, at)), Some(view)) => {
+                let at = local + Point::from((f64::from(at.x), f64::from(at.y)));
+                element(buffer, at, (view.width, view.height), None)
+            }
+            _ => None,
+        };
+        // The old theme's column over the new one, fading (#49).
+        let fading = shell.fading.as_ref().and_then(|(buffer, size, fade)| {
+            element(buffer, local, *size, Some(fade.value(now).clamp(0.0, 1.0)))
+        });
+        let column = shell.buffer.as_ref().and_then(|buffer| {
             let view = shell.column.view();
-            push(buffer, local, (view.width, view.height), None);
+            element(buffer, local, (view.width, view.height), None)
+        });
+        (popover, fading, column)
+    }
+
+    /// The column's panels on glass, and its popover's, on `output`.
+    pub(crate) fn shell_glass(&self, output: &Output) -> (Vec<Spot>, Vec<Spot>) {
+        let Some((shell, Some((name, area, _)))) = self.shell.as_ref().map(|s| (s, &s.on)) else {
+            return (Vec::new(), Vec::new());
+        };
+        if *name != output.name() {
+            return (Vec::new(), Vec::new());
         }
-        elements
+        let rect = column_rect(*area);
+        let local = Point::<f64, Logical>::from((
+            f64::from(rect.loc.x - area.loc.x),
+            f64::from(rect.loc.y - area.loc.y),
+        ));
+        (
+            spots(Surface::Popover, local, &shell.column.popover_glass()),
+            spots(Surface::Column, local, &shell.column.glass()),
+        )
     }
 
     /// Whether a fullscreen window is shown on `output`.

@@ -25,3 +25,10 @@ pink = "#9C2F5A"
 interface = "manrope"
 display = "fraunces"
 mono = "jetbrains-mono"
+
+# Depth: panels over frosted glass, where the compositor can blur what is
+# behind them, and shadows under windows.
+[effects]
+glass = 0.92          # how opaque a panel's surface is over the blur
+blur = 32             # how far the blur reaches, logical pixels
+window_shadow = 0.16  # windows' shadows at their darkest

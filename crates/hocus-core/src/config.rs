@@ -64,6 +64,9 @@ pub struct Rule {
     pub pinned: Option<bool>,
     /// Above the other windows.
     pub on_top: Option<bool>,
+    /// What is behind it blurred, for a see-through window, where the
+    /// compositor can blur (#37).
+    pub blur: Option<bool>,
 }
 
 impl Rule {
@@ -84,6 +87,7 @@ impl Rule {
             opacity: later.opacity.or(self.opacity),
             pinned: later.pinned.or(self.pinned),
             on_top: later.on_top.or(self.on_top),
+            blur: later.blur.or(self.blur),
         }
     }
 }
@@ -245,7 +249,8 @@ pub struct Appearance {
     pub high_contrast: bool,
     /// Animations jump to their end.
     pub reduced_motion: bool,
-    /// Frosted glass behind panels (comes with blur, #37).
+    /// Panels see-through over a blur of what is behind them, where the
+    /// compositor can blur (#37); off, they are solid.
     pub transparency: bool,
 }
 
@@ -1277,12 +1282,14 @@ mod tests {
     fn later_rules_override_earlier_ones() -> Result<(), ConfigError> {
         let config = Config::parse(
             "[[rules]]\napp_id = \"chat*\"\noutput = \"laptop\"\ndesktop = 1\n\n\
-             [[rules]]\napp_id = \"chat-work\"\ndesktop = 2\npinned = true\n",
+             [[rules]]\napp_id = \"chat-work\"\ndesktop = 2\npinned = true\nblur = true\n",
         )?;
         let rule = config.rule_for("chat-work", "");
         assert_eq!(rule.output.as_deref(), Some("laptop"));
         assert_eq!(rule.desktop, Some(2));
         assert_eq!(rule.pinned, Some(true));
+        assert_eq!(rule.blur, Some(true));
+        assert_eq!(config.rule_for("chat-home", "").blur, None);
         assert_eq!(config.rule_for("editor", ""), Rule::default());
         Ok(())
     }

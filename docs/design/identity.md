@@ -88,6 +88,13 @@ Text contrast: 4.5:1 minimum everywhere, including small grey labels; a test
 checks every text colour on every background of every theme, with every
 accent.
 
+Depth (#37), in each theme file's `[effects]`: panels are frosted glass
+where the compositor can blur, their surface see-through over the blur
+(dark 84 %, light 86 %, Matrix 88 %, HUD 72 %, paper 92 % opaque; the blur
+reaches 32 px), and solid otherwise. Windows' shadows are black, at most
+50 % dark, 20 % light, 70 % Matrix, 55 % HUD, 16 % paper. The main text
+reads at 4.5:1 on glass over black as over white.
+
 ## Typography
 
 - **Fraunces** — the name and large titles (clock, greetings)

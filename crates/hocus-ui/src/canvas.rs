@@ -10,7 +10,7 @@ use vello_cpu::{
     kurbo::{
         Affine, Arc as KArc, BezPath, Cap, Join, Rect as KRect, RoundedRect, Shape as _, Stroke,
     },
-    peniko::ImageSampler,
+    peniko::{Fill, ImageSampler},
 };
 
 use crate::{
@@ -133,6 +133,35 @@ impl Canvas {
         );
         self.ctx
             .fill_blurred_rounded_rect(&rect, radius, blur / 2.0, false);
+    }
+
+    /// A soft shadow under a rounded rectangle, left out of `outside`: a
+    /// see-through box over it shows what is behind, not its own shadow.
+    pub fn shadow_outside(
+        &mut self,
+        r: Rect,
+        radius: f32,
+        blur: f32,
+        color: Color,
+        outside: (Rect, f32),
+    ) {
+        let (hole, hole_radius) = outside;
+        // Everything the shadow can reach, with the box cut out of it.
+        let reach = r.union(&hole).grow(blur * 2.0);
+        let mut clip = KRect::new(
+            f64::from(reach.x),
+            f64::from(reach.y),
+            f64::from(reach.right()),
+            f64::from(reach.bottom()),
+        )
+        .to_path(TOLERANCE);
+        clip.extend(Self::rounded(hole, hole_radius).path_elements(TOLERANCE));
+        self.ctx.set_transform(self.transform());
+        self.ctx.set_fill_rule(Fill::EvenOdd);
+        self.ctx.push_clip_layer(&clip);
+        self.ctx.set_fill_rule(Fill::NonZero);
+        self.shadow(r, radius, blur, color);
+        self.ctx.pop_layer();
     }
 
     /// An arc of a circle, angles in radians from 3 o'clock, clockwise.

@@ -137,6 +137,21 @@ whenever nothing should move: reduced motion, the power saver, a
 fullscreen window or the lock over it, and the pixman renderer, which
 keeps scenarios deterministic. Only while a wallpaper moves does the loop
 ask for frames.
+Frosted glass (#37) is GLES shaders too. The shell's panels (the column,
+its popovers, quick settings, the launcher's card, toasts) are drawn on a
+`Glass` paint that the theme makes see-through when glass is on, and their
+trees say where those boxes are. Before a GLES backend draws an output,
+each pane of glass, from the back, has the scene behind it drawn into a
+texture of its own (the pane and the blur's reach around it) through a
+damage tracker: when nothing behind changed, nothing is drawn, and the blur
+of the last time stays. Only when something did is the dual Kawase blur run
+on it (halved and doubled back a few times, a few samples per pixel), and
+the scene shows the result under the pane, cut to its corners. Windows a
+rule asks it for get the same behind them. The stats count each blur, per
+output, so that scenarios check a still scene is never blurred again.
+Without shaders (pixman), with transparency off, high contrast or the
+power saver, the theme has no glass and the panels are solid. Windows'
+shadows take their darkness from the theme.
 The window switcher (#39) shows each card's window live: the window's own
 surfaces drawn again, scaled into the card (a rescale element: a surface
 element's size follows the output's scale, not the one it was made at), so

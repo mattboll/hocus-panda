@@ -759,8 +759,10 @@ impl Gpu {
         };
         let start = Instant::now();
         screen.dirty = false;
-        // A wallpaper that moves, before the scene shows it.
+        // A wallpaper that moves, then the blur behind panels, before the
+        // scene shows them.
         state.paint_backdrop(renderer, &screen.output);
+        state.paint_glass(renderer, &screen.output);
         let elements = state.scene_elements(renderer, &screen.output, true);
         let result =
             screen

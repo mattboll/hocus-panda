@@ -21,6 +21,8 @@ const KEPT: usize = 32;
 #[derive(Debug, Default)]
 pub struct Measures {
     frames: HashMap<String, FrameTimes>,
+    /// Blurs computed, per output.
+    blurs: HashMap<String, u64>,
     slow_handlers: VecDeque<SlowHandler>,
     stalls: VecDeque<Stall>,
 }
@@ -42,6 +44,11 @@ impl Measures {
             .unwrap_or(BUCKETS_MS.len());
         times.counts[bucket] += 1;
         times.max = times.max.max(took);
+    }
+
+    /// The blur behind something on `output` was computed again.
+    pub fn blur(&mut self, output: &str) {
+        *self.blurs.entry(output.to_string()).or_default() += 1;
     }
 
     pub fn slow_handler(&mut self, name: &str, took: Duration, at: Duration) {
@@ -78,6 +85,7 @@ impl Measures {
                     frames: times.counts.iter().sum(),
                     histogram,
                     max_ms: times.max.as_secs_f64() * 1000.0,
+                    blurs: self.blurs.get(name).copied().unwrap_or(0),
                 }
             })
             .collect();

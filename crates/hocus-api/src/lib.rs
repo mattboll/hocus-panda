@@ -415,6 +415,10 @@ pub struct OutputStats {
     pub frames: u64,
     pub histogram: Vec<Bucket>,
     pub max_ms: f64,
+    /// Times the blur behind something on it was computed (#37): only when
+    /// what is behind changes, not every frame.
+    #[serde(default)]
+    pub blurs: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

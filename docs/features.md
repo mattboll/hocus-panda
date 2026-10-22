@@ -82,9 +82,9 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - **No title bars by default**: they take room for nothing (Firefox does without). Close, minimize, maximize live elsewhere: widget panel, radial menu at the pointer, gestures, shortcuts. Title bars as an option
 - Client- or server-side decorations, depending on the application
 - Title bar colours from the theme, fade on focus change
-- Soft shadows
-- Frosted blur behind the panel, menus, launcher and notifications
-- Blur behind windows, rounded corners everywhere
+- Soft shadows, as dark as the theme makes them
+- Frosted blur behind the panel, menus, launcher and notifications, computed again only when what is behind changes; solid panels where it cannot blur, with transparency off, high contrast, reduced motion or the power saver
+- Blur behind windows (a rule, for see-through ones), rounded corners everywhere
 - Wobbly windows while moving
 - "Magic lamp" minimize towards the dock
 - Open, close (dissolve, Matrix rain) and resize animations

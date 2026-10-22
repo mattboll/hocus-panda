@@ -1,0 +1,43 @@
+description = "Without shaders (pixman), the column and a toast stay solid over the wallpaper and a window: nothing is blurred, and every machine draws the same pixels"
+shell = true
+dbus = true
+
+[[step]]
+open = { app_id = "doc", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+pointer_move = [600, 400]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [900, 400]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+notify = { app = "Mail", summary = "Alex", body = "Lunch at noon?" }
+
+[[step]]
+wait_wallpapers = true
+
+# The toast settles.
+[[step]]
+advance_ms = 600
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_blur = { at_most = 0 }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "blur-column.png" }
