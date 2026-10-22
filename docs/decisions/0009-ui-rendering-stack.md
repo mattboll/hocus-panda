@@ -82,8 +82,8 @@ CPU, into pixmaps uploaded as textures.
 - Drawing happens on the event loop, widget by widget, only when content
   changes; pixmaps are plain owned data, so drawing can move to a worker
   thread later without changing the model.
-- A fallback font for missing glyphs (emoji, symbols, other scripts) is
-  bundled with the fonts (#22).
+- A fallback for missing glyphs (emoji, symbols, other scripts) is needed
+  whatever the renderer (#103).
 
 ## When to revisit
 

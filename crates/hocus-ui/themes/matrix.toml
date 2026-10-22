@@ -1,0 +1,27 @@
+# Green rain on black and night blue, all monospace.
+name = "matrix"
+
+[colors]
+background = "#02040A"
+surface = "#040A16"
+surface_hover = "#0A1626"
+surface_pressed = "#0F1E33"
+border = "#00F06026"
+text = "#C8F7D4"
+muted = "#6FBF86"
+agent = "#B48CFF"
+waiting = "#F2A65A"
+error = "#F28B7D"
+shadow = "#000000AA"
+
+[accents]
+default = "bamboo"
+bamboo = "#00F060"
+amber = "#F2A65A"
+blue = "#8AB4F8"
+pink = "#F28DB2"
+
+[fonts]
+interface = "jetbrains-mono"
+display = "jetbrains-mono"
+mono = "jetbrains-mono"

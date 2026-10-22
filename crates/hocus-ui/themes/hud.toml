@@ -1,0 +1,27 @@
+# A head-up display: thin lines, grid, cyan.
+name = "hud"
+
+[colors]
+background = "#050A14"
+surface = "#0A1A2E"
+surface_hover = "#10243D"
+surface_pressed = "#162D4A"
+border = "#38D9F540"
+text = "#DDF4FF"
+muted = "#8FB0C6"
+agent = "#B48CFF"
+waiting = "#F2A65A"
+error = "#F28B7D"
+shadow = "#00000099"
+
+[accents]
+default = "blue"
+bamboo = "#7BC47F"
+amber = "#F2A65A"
+blue = "#38D9F5"
+pink = "#F28DB2"
+
+[fonts]
+interface = "space-grotesk"
+display = "space-grotesk"
+mono = "jetbrains-mono"

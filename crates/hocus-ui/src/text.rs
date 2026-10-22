@@ -11,16 +11,24 @@ use parley::{
 
 use crate::{
     geom::Size,
-    theme::{TextStyle, Typeface},
+    theme::{Face, Faces, TextStyle},
 };
 
-/// The interface face, bundled (SIL Open Font License, see fonts/OFL.txt).
-const MANROPE: &[u8] = include_bytes!("../fonts/Manrope.ttf");
+/// The bundled faces (SIL Open Font License, fonts/licenses/): what is
+/// drawn never depends on the fonts of the system.
+const FONTS: [&[u8]; 4] = [
+    include_bytes!("../fonts/Manrope.ttf"),
+    include_bytes!("../fonts/Fraunces.ttf"),
+    include_bytes!("../fonts/JetBrainsMono.ttf"),
+    include_bytes!("../fonts/SpaceGrotesk.ttf"),
+];
 
-/// Fonts and the scratch space of the layout engine, shared by a tree.
+/// Fonts and the scratch space of the layout engine, shared by a tree; the
+/// theme says which face plays which role.
 pub struct Fonts {
     fonts: FontContext,
     layouts: LayoutContext<()>,
+    faces: Faces,
 }
 
 impl fmt::Debug for Fonts {
@@ -29,30 +37,24 @@ impl fmt::Debug for Fonts {
     }
 }
 
-impl Default for Fonts {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Fonts {
-    /// The bundled fonts only: what is drawn never depends on the system.
-    pub fn new() -> Self {
+    pub fn new(faces: Faces) -> Self {
         let mut fonts = FontContext::new();
-        fonts
-            .collection
-            .register_fonts(Blob::new(Arc::new(MANROPE)), None);
+        for data in FONTS {
+            fonts
+                .collection
+                .register_fonts(Blob::new(Arc::new(data)), None);
+        }
         Self {
             fonts,
             layouts: LayoutContext::new(),
+            faces,
         }
     }
 
-    fn family(typeface: Typeface) -> &'static str {
-        // Fraunces and JetBrains Mono come with the themes (#22).
-        match typeface {
-            Typeface::Interface | Typeface::Display | Typeface::Mono => "Manrope",
-        }
+    /// Text is laid out again in the new faces when it is next measured.
+    pub fn set_faces(&mut self, faces: Faces) {
+        self.faces = faces;
     }
 }
 
@@ -61,8 +63,9 @@ pub struct TextBox {
     text: String,
     style: TextStyle,
     layout: Option<Layout<()>>,
-    /// The scale the layout was built at.
+    /// The scale and face the layout was built with.
     scale: f32,
+    face: Option<Face>,
     /// The width lines were broken at, in logical pixels.
     broken_at: Option<Option<f32>>,
 }
@@ -83,6 +86,7 @@ impl TextBox {
             style,
             layout: None,
             scale: 0.0,
+            face: None,
             broken_at: None,
         }
     }
@@ -126,13 +130,14 @@ impl TextBox {
 
     /// The layout at `scale`, in physical pixels.
     pub fn layout(&mut self, fonts: &mut Fonts, max_width: Option<f32>, scale: f32) -> &Layout<()> {
-        if self.layout.is_none() || self.scale != scale {
+        let face = fonts.faces.get(self.style.typeface);
+        if self.layout.is_none() || self.scale != scale || self.face != Some(face) {
             let mut builder =
                 fonts
                     .layouts
                     .ranged_builder(&mut fonts.fonts, &self.text, scale, true);
             builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-                Cow::Borrowed(Fonts::family(self.style.typeface)),
+                Cow::Borrowed(face.family()),
             )));
             builder.push_default(StyleProperty::FontSize(self.style.size));
             builder.push_default(StyleProperty::FontWeight(FontWeight::new(f32::from(
@@ -143,6 +148,7 @@ impl TextBox {
             )));
             self.layout = Some(builder.build(&self.text));
             self.scale = scale;
+            self.face = Some(face);
             self.broken_at = None;
         }
         let layout = self.layout.get_or_insert_with(Layout::new);

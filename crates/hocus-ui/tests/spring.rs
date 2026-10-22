@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use hocus_ui::{
-    Kind, Length, Look, Size, Style, Surface, Theme, Tree,
+    Kind, Length, Look, Paint, Size, Style, Surface, Theme, Tree,
     motion::{Curve, Spring},
     tree::Property,
 };
@@ -13,7 +13,7 @@ mod common;
 #[test]
 fn a_spring_sampled_at_fixed_times_matches_the_references() -> anyhow::Result<()> {
     let theme = Theme::default();
-    let mut tree = Tree::new(theme, Size::new(200.0, 64.0), 1.0);
+    let mut tree = Tree::new(theme.clone(), Size::new(200.0, 64.0), 1.0);
     let root = tree.root();
     let chip = tree
         .add(
@@ -24,7 +24,7 @@ fn a_spring_sampled_at_fixed_times_matches_the_references() -> anyhow::Result<()
                 ..Style::default()
             },
             Kind::Box(Look {
-                background: Some(theme.colors.accent),
+                background: Some(Paint::Accent),
                 radius: 12.0,
                 border: None,
                 shadow: 0.0,

@@ -23,7 +23,7 @@ pub mod tree;
 pub use access::{AccessNode, Role};
 pub use canvas::Canvas;
 pub use geom::{Insets, PixelRect, Point, Rect, Size};
-pub use theme::{Color, TextStyle, Theme, Typeface};
+pub use theme::{Accent, Color, Face, Paint, TextStyle, Theme, ThemeName, Typeface};
 pub use tree::{
     Align, ButtonKind, Direction, Draw, Event, Input, Justify, Key, Kind, Length, Look, NodeId,
     Property, Style, Surface, Tree,

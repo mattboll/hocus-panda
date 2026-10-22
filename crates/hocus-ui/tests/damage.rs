@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use hocus_ui::{
-    Insets, Kind, Length, Look, NodeId, Rect, Size, Style, Surface, Theme, Tree,
+    Insets, Kind, Length, Look, NodeId, Paint, Rect, Size, Style, Surface, Theme, Tree,
     motion::{Curve, Easing},
     tree::Property,
 };
@@ -14,7 +14,7 @@ const MS: fn(u64) -> Duration = Duration::from_millis;
 /// A card with three lines of text.
 fn card() -> anyhow::Result<(Tree, [NodeId; 3])> {
     let theme = Theme::default();
-    let mut tree = Tree::new(theme, Size::new(320.0, 200.0), 2.0);
+    let mut tree = Tree::new(theme.clone(), Size::new(320.0, 200.0), 2.0);
     let root = tree.root();
     let card = tree
         .add(
@@ -26,9 +26,9 @@ fn card() -> anyhow::Result<(Tree, [NodeId; 3])> {
                 ..Style::default()
             },
             Kind::Box(Look {
-                background: Some(theme.colors.surface),
+                background: Some(Paint::Surface),
                 radius: theme.radii.large,
-                border: Some(theme.colors.border),
+                border: Some(Paint::Border),
                 shadow: 0.0,
             }),
         )

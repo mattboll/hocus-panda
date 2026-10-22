@@ -15,7 +15,7 @@ use crate::{
     geom::{Insets, PixelRect, Point, Rect, Size},
     motion::{Animated, Curve},
     text::{Fonts, TextBox},
-    theme::{Color, TextStyle, Theme},
+    theme::{Color, Paint, TextStyle, Theme},
 };
 
 /// A node of a tree; stale ids (of removed nodes) are refused, not reused.
@@ -96,10 +96,10 @@ impl Default for Style {
 /// How a box looks; children draw on top.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Look {
-    pub background: Option<Color>,
+    pub background: Option<Paint>,
     pub radius: f32,
     /// A 1 px line inside the edge.
-    pub border: Option<Color>,
+    pub border: Option<Paint>,
     /// Blur of a shadow under the box, 0 for none.
     pub shadow: f32,
 }
@@ -142,7 +142,7 @@ pub enum Kind {
         path: BezPath,
         view: f32,
         size: f32,
-        color: Color,
+        color: Paint,
         /// What it means; `None` for a decorative icon.
         label: Option<String>,
     },
@@ -176,7 +176,7 @@ impl Kind {
 
     pub fn button(label: impl Into<String>, kind: ButtonKind, theme: &Theme) -> Self {
         let style = match kind {
-            ButtonKind::Primary => theme.text.label.with_color(theme.colors.on_accent),
+            ButtonKind::Primary => theme.text.label.with_color(Paint::OnAccent),
             ButtonKind::Plain => theme.text.label,
         };
         Self::Button {
@@ -186,7 +186,7 @@ impl Kind {
     }
 
     /// An icon from SVG path data in a 24×24 box.
-    pub fn icon(svg_path: &str, size: f32, color: Color, label: Option<&str>) -> Option<Self> {
+    pub fn icon(svg_path: &str, size: f32, color: Paint, label: Option<&str>) -> Option<Self> {
         Some(Self::Icon {
             path: BezPath::from_svg(svg_path).ok()?,
             view: 24.0,
@@ -333,7 +333,7 @@ impl Tree {
                 index: 0,
                 generation: 0,
             },
-            fonts: Fonts::new(),
+            fonts: Fonts::new(theme.faces),
             theme,
             size,
             scale,
@@ -347,7 +347,7 @@ impl Tree {
             pointer: None,
         };
         let look = Look {
-            background: Some(theme.colors.background),
+            background: Some(Paint::Background),
             ..Look::default()
         };
         tree.root = tree.alloc(None, Style::default(), Kind::Box(look));
@@ -360,6 +360,19 @@ impl Tree {
 
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// Draws everything again in another theme or accent.
+    pub fn set_theme(&mut self, theme: Theme) {
+        if theme == self.theme {
+            return;
+        }
+        self.fonts.set_faces(theme.faces);
+        self.theme = theme;
+        self.relayout = true;
+        for node in self.nodes.iter_mut().filter_map(|s| s.node.as_mut()) {
+            node.changed = true;
+        }
     }
 
     pub fn size(&self) -> Size {
@@ -620,7 +633,7 @@ impl Tree {
 
     /// The size of a leaf's content, `None` for a container.
     fn content_size(&mut self, id: NodeId, avail: Size, scale: f32) -> Option<Size> {
-        let theme = self.theme;
+        let spacing = self.theme.spacing;
         let Tree { nodes, fonts, .. } = self;
         let node = nodes.get_mut(id.index as usize)?.node.as_mut()?;
         match &mut node.kind {
@@ -629,8 +642,8 @@ impl Tree {
             Kind::Button { label, .. } => {
                 let s = label.measure(fonts, None, scale);
                 Some(Size::new(
-                    s.w + 2.0 * theme.spacing.l,
-                    (s.h + 2.0 * theme.spacing.s).max(32.0),
+                    s.w + 2.0 * spacing.l,
+                    (s.h + 2.0 * spacing.s).max(32.0),
                 ))
             }
             Kind::Image { pixmap, .. } => Some(Size::new(
@@ -810,12 +823,19 @@ impl Tree {
     /// Draws the parts of the tree that touch `region`.
     fn draw(&mut self, canvas: &mut Canvas, region: Rect) {
         let root = self.root;
-        self.draw_node(canvas, root, region, (0.0, 0.0));
+        let theme = self.theme.clone();
+        self.draw_node(canvas, root, region, (0.0, 0.0), &theme);
     }
 
-    fn draw_node(&mut self, canvas: &mut Canvas, id: NodeId, region: Rect, offset: (f32, f32)) {
+    fn draw_node(
+        &mut self,
+        canvas: &mut Canvas,
+        id: NodeId,
+        region: Rect,
+        offset: (f32, f32),
+        theme: &Theme,
+    ) {
         let now = self.now;
-        let theme = self.theme;
         let focused = self.focus_visible && self.focused == Some(id);
         let scale = self.scale;
         let Some(node) = self.node(id) else {
@@ -849,7 +869,7 @@ impl Tree {
                     canvas,
                     &mut node.kind,
                     rect,
-                    &theme,
+                    theme,
                     fonts,
                     scale,
                     (hovered, pressed),
@@ -879,7 +899,7 @@ impl Tree {
                 canvas.push_clip(rect, radius);
             }
             for child in children {
-                self.draw_node(canvas, child, region, offset);
+                self.draw_node(canvas, child, region, offset, theme);
             }
             if style.clip {
                 canvas.pop();
@@ -1093,14 +1113,14 @@ fn draw_kind(
                 );
             }
             if let Some(bg) = look.background {
-                canvas.fill_rect(rect, look.radius, bg);
+                canvas.fill_rect(rect, look.radius, theme.color(bg));
             }
             if let Some(border) = look.border {
-                canvas.stroke_rect(rect, look.radius, 1.0, border);
+                canvas.stroke_rect(rect, look.radius, 1.0, theme.color(border));
             }
         }
         Kind::Text(text) => {
-            let color = text.style().color;
+            let color = theme.color(text.style().color);
             let layout = text.layout(fonts, Some(rect.w), scale);
             canvas.text(layout, Point::new(rect.x, rect.y), color);
         }
@@ -1119,7 +1139,7 @@ fn draw_kind(
             if kind == ButtonKind::Plain {
                 canvas.stroke_rect(rect, theme.radii.small, 1.0, c.border);
             }
-            let color = label.style().color;
+            let color = theme.color(label.style().color);
             let size = label.measure(fonts, None, scale);
             let at = Point::new(
                 rect.x + (rect.w - size.w) / 2.0,
@@ -1143,7 +1163,7 @@ fn draw_kind(
                 *size,
                 *size,
             );
-            canvas.path(path, *view, at, *color);
+            canvas.path(path, *view, at, theme.color(*color));
         }
         Kind::Custom { draw, .. } => draw.draw(canvas, rect, theme, now),
     }

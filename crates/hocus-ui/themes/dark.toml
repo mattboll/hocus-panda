@@ -1,0 +1,28 @@
+# The panda's black: ink, frosted glass, bamboo.
+name = "dark"
+
+[colors]
+background = "#0E0F12"
+surface = "#1A1C21"
+surface_hover = "#24272D"
+surface_pressed = "#2C3037"
+border = "#FFFFFF14"
+text = "#ECEEF0"
+muted = "#A3A9B2"
+agent = "#B48CFF"
+waiting = "#F2A65A"
+error = "#F28B7D"
+shadow = "#00000066"
+
+# Accent options, tuned for this theme's contrast.
+[accents]
+default = "bamboo"
+bamboo = "#7BC47F"
+amber = "#F2A65A"
+blue = "#8AB4F8"
+pink = "#F28DB2"
+
+[fonts]
+interface = "manrope"
+display = "fraunces"
+mono = "jetbrains-mono"
