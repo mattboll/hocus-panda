@@ -151,6 +151,10 @@ pub struct Decorations {
     pub ring_width: f64,
     /// `#rrggbb`.
     pub accent: String,
+    /// Title bars above windows whose frame the compositor draws.
+    pub title_bars: bool,
+    /// Which side of a title bar has its buttons: `right` or `left`.
+    pub buttons: String,
 }
 
 impl Default for Decorations {
@@ -160,6 +164,8 @@ impl Default for Decorations {
             shadow: true,
             ring_width: 2.0,
             accent: "#7bc47f".into(),
+            title_bars: false,
+            buttons: "right".into(),
         }
     }
 }
@@ -382,6 +388,10 @@ impl Config {
             {
                 return out_of_range(&format!("rules[{i}].desktop"), d.to_string(), "1 to 8");
             }
+        }
+        if !["right", "left"].contains(&self.decorations.buttons.as_str()) {
+            let b = format!("{:?}", self.decorations.buttons);
+            return out_of_range("decorations.buttons", b, "right, left");
         }
         if !THEMES.contains(&self.appearance.theme.as_str()) {
             let t = format!("{:?}", self.appearance.theme);

@@ -13,6 +13,7 @@ pub mod launcher;
 pub mod providers;
 pub mod quick;
 pub mod showcase;
+pub mod titlebar;
 pub mod toasts;
 pub mod units;
 pub mod wallpaper;

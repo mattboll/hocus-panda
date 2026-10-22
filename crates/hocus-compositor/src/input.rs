@@ -123,7 +123,8 @@ impl State {
                 || self.quick_pointer_motion(location)
                 || self.launcher_pointer_motion(location)
                 || self.toasts_pointer_motion(location)
-                || self.shell_pointer_motion(location));
+                || self.shell_pointer_motion(location)
+                || self.bars_pointer_motion(location));
         let under = if over_shell {
             None
         } else {
@@ -163,6 +164,10 @@ impl State {
                 || self.toasts_pointer_button(at, pressed)
                 || self.shell_pointer_button(at, pressed))
         {
+            return;
+        }
+        // Title bars take any button.
+        if !pointer.is_grabbed() && self.bars_pointer_button(at, button, pressed) {
             return;
         }
 

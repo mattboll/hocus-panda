@@ -135,10 +135,17 @@ impl State {
             if !bbox.overlaps(area) && !rect.overlaps(Rectangle::from_size(area.size)) {
                 continue;
             }
+            let id = model_id(window);
+            let bar = id.map_or(0, |id| self.bar_height(id));
+            // The frame: the bar above the client.
+            let frame = Rectangle::<i32, Logical>::new(
+                rect.loc - Point::from((0, bar)),
+                (rect.size.w, rect.size.h + bar).into(),
+            );
             let decorated = self.decorated(window);
             if decorated && focused.as_ref() == Some(window) {
                 let ring =
-                    ring_elements(renderer, &self.textures, &self.style, rect.to_f64(), scale);
+                    ring_elements(renderer, &self.textures, &self.style, frame.to_f64(), scale);
                 elements.extend(ring.into_iter().map(SceneElement::Frame));
             }
             let radius = if decorated {
@@ -146,7 +153,7 @@ impl State {
             } else {
                 0
             };
-            let clip = rect.to_f64().to_physical_precise_round(scale);
+            let clip = frame.to_f64().to_physical_precise_round(scale);
             let origin: Point<i32, _> =
                 (location - geometry.loc - area.loc).to_physical_precise_round(scale);
             let opacity = model_id(window)
@@ -159,9 +166,17 @@ impl State {
                     .into_iter()
                     .map(|e| SceneElement::Window(Rounded::new(e, clip, radius))),
             );
+            if bar > 0
+                && let Some(id) = id
+            {
+                elements.extend(
+                    self.bar_element(renderer, id, rect.loc, scale)
+                        .map(SceneElement::Frame),
+                );
+            }
             if decorated {
                 let shadow =
-                    shadow_elements(renderer, &self.textures, &self.style, rect.to_f64(), scale);
+                    shadow_elements(renderer, &self.textures, &self.style, frame.to_f64(), scale);
                 elements.extend(shadow.into_iter().map(SceneElement::Frame));
             }
         }

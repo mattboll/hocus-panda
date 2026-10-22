@@ -235,7 +235,14 @@ impl State {
             .size
             .map(|[w, h]| Size::from((w, h)))
             .unwrap_or(window.geometry().size);
-        let location = self.place(output, size);
+        // Placed with its bar.
+        let bar = if self.wants_bar(&window) {
+            crate::bars::BAR
+        } else {
+            0
+        };
+        let location =
+            self.place(output, Size::from((size.w, size.h + bar))) + Point::from((0, bar));
         let opacity = rule
             .opacity
             .map(|o| o as f32)
@@ -261,7 +268,11 @@ impl State {
             },
         );
         if rule.size.is_some() {
-            self.resize_to(id, Rectangle::new(location, size), false);
+            let frame = Rectangle::new(
+                location - Point::from((0, bar)),
+                (size.w, size.h + bar).into(),
+            );
+            self.resize_to(id, frame, false);
         }
         self.sync_desktops();
         self.emit(|s| Event::WindowOpened {

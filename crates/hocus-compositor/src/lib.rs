@@ -5,6 +5,7 @@
 
 mod actions;
 mod api;
+mod bars;
 mod capture;
 mod clock;
 mod config_watch;

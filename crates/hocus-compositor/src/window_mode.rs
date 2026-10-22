@@ -223,7 +223,13 @@ impl State {
             .space
             .element_location(&managed.window)
             .unwrap_or(managed.location);
-        Some(Rectangle::new(location, managed.window.geometry().size))
+        // The frame: the bar above the client.
+        let bar = self.bar_height(id);
+        let size = managed.window.geometry().size;
+        Some(Rectangle::new(
+            location - Point::from((0, bar)),
+            (size.w, size.h + bar).into(),
+        ))
     }
 
     /// The output a window is on, or the one under the pointer.
@@ -360,6 +366,21 @@ impl State {
         rect: Rectangle<i32, Logical>,
         state: Option<xdg_toplevel::State>,
     ) {
+        // Fullscreen has no bar.
+        let rect = match state {
+            Some(xdg_toplevel::State::Fullscreen) => rect,
+            _ if self
+                .windows
+                .get(&id)
+                .is_some_and(|m| self.wants_bar(&m.window)) =>
+            {
+                Rectangle::new(
+                    rect.loc + Point::from((0, crate::bars::BAR)),
+                    (rect.size.w, (rect.size.h - crate::bars::BAR).max(1)).into(),
+                )
+            }
+            _ => rect,
+        };
         let Some(managed) = self.windows.get_mut(&id) else {
             return;
         };
