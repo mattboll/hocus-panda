@@ -498,6 +498,67 @@ impl Lang {
     pub fn shut_down(self) -> &'static str {
         self.pick("Shut down", "Éteindre")
     }
+
+    pub fn suspend(self) -> &'static str {
+        self.pick("Suspend", "Mettre en veille")
+    }
+
+    pub fn hibernate(self) -> &'static str {
+        self.pick("Hibernate", "Mettre en veille prolongée")
+    }
+
+    pub fn cancel(self) -> &'static str {
+        self.pick("Cancel", "Annuler")
+    }
+
+    /// "Restarting in 7 s."
+    pub fn leaving_in(self, what: &str, seconds: u32) -> String {
+        match self {
+            Self::En => format!("{what} in {seconds} s."),
+            Self::Fr => format!("{what} dans {seconds} s."),
+        }
+    }
+
+    /// The countdown's subject: "Restarting", "Redémarrage".
+    pub fn leaving(self, what: usize) -> &'static str {
+        match (self, what) {
+            (Self::En, 0) => "Logging out",
+            (Self::En, 1) => "Restarting",
+            (Self::En, _) => "Shutting down",
+            (Self::Fr, 0) => "Déconnexion",
+            (Self::Fr, 1) => "Redémarrage",
+            (Self::Fr, _) => "Extinction",
+        }
+    }
+
+    pub fn now(self, what: &str) -> String {
+        match self {
+            Self::En => format!("{what} now"),
+            Self::Fr => format!("{what} maintenant"),
+        }
+    }
+
+    pub fn anyway(self, what: &str) -> String {
+        match self {
+            Self::En => format!("{what} anyway"),
+            Self::Fr => format!("{what} quand même"),
+        }
+    }
+
+    pub fn held_back(self) -> &'static str {
+        self.pick(
+            "These applications ask to wait:",
+            "Ces applications demandent d’attendre :",
+        )
+    }
+
+    pub fn closing_apps(self) -> &'static str {
+        self.pick("Closing the applications…", "Fermeture des applications…")
+    }
+
+    pub fn still_open(self) -> &'static str {
+        self.pick("Still open:", "Encore ouvertes :")
+    }
 }
 
 #[cfg(test)]

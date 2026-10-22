@@ -49,6 +49,18 @@ pub enum Choice {
     Show(Showcase),
     /// The settings app.
     Settings,
+    /// Locking, sleeping or leaving the session.
+    Session(SessionAction),
+}
+
+/// What the command field can do to the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionAction {
+    Lock,
+    Suspend,
+    LogOut,
+    Restart,
+    ShutDown,
 }
 
 /// What the launcher can show over a whole screen.

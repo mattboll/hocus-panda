@@ -140,6 +140,14 @@ impl State {
             Action::Dropdown => self.toggle_dropdown(),
             Action::Settings => self.open_settings(None),
             Action::Lock => self.lock_now(),
+            Action::LogOut => self.begin_leaving(hocus_shell::leave::Leaving::LogOut),
+            Action::Restart => self.begin_leaving(hocus_shell::leave::Leaving::Restart),
+            Action::ShutDown => self.begin_leaving(hocus_shell::leave::Leaving::ShutDown),
+            Action::Suspend => self.sleep_now(hocus_platform::power::Power::Suspend),
+            Action::Hibernate if self.leaver.caps.hibernate => {
+                self.sleep_now(hocus_platform::power::Power::Hibernate);
+            }
+            Action::Hibernate => tracing::info!("this machine does not hibernate"),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }

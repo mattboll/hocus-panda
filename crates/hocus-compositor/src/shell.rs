@@ -216,6 +216,7 @@ impl State {
             layout,
             layout_name,
             user: self.user.clone(),
+            can_hibernate: self.leaver.caps.hibernate,
             notifications: self.notification_history(),
             status: self.status(),
         }
@@ -239,6 +240,7 @@ impl State {
     pub fn refresh_shell(&mut self) {
         self.refresh_lock();
         self.refresh_sessions();
+        self.refresh_leaving();
         self.refresh_dropdown();
         self.refresh_appearance();
         self.refresh_bars();
@@ -364,7 +366,13 @@ impl State {
             ShellAction::ToggleMaximize => self.run_action(&A::ToggleMaximized, serial),
             ShellAction::Close => self.run_action(&A::Close, serial),
             ShellAction::SwitchLayout => self.run_action(&A::SwitchLayout, serial),
-            ShellAction::LogOut => self.run_action(&A::Quit, serial),
+            ShellAction::Lock => self.run_action(&A::Lock, serial),
+            ShellAction::Settings => self.run_action(&A::Settings, serial),
+            ShellAction::Suspend => self.run_action(&A::Suspend, serial),
+            ShellAction::Hibernate => self.run_action(&A::Hibernate, serial),
+            ShellAction::LogOut => self.run_action(&A::LogOut, serial),
+            ShellAction::Restart => self.run_action(&A::Restart, serial),
+            ShellAction::ShutDown => self.run_action(&A::ShutDown, serial),
             ShellAction::OpenLauncher => self.open_launcher(),
             ShellAction::ShowDesktop { output, desktop } => {
                 if let Some(output) = self.find_output(&output)
@@ -459,6 +467,7 @@ impl State {
         }
         self.card_ui(&mut out);
         self.identify_ui(&mut out);
+        self.leave_ui(&mut out);
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;
@@ -511,6 +520,12 @@ pub trait Pixels {
 }
 
 impl Pixels for hocus_shell::lock::Curtain {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+impl Pixels for hocus_shell::leave::Leave {
     fn pixels(&self) -> View<'_> {
         self.view()
     }

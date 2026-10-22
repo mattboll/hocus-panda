@@ -15,4 +15,5 @@ pub const SETTINGS: &str = "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12h2M3 12h2M1
 pub const LOG_OUT: &str = "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10";
 pub const RESTART: &str = "M20 12a8 8 0 1 1-3-6.3M20 4v5h-5";
 pub const POWER: &str = "M12 3v8M6.3 6.3a8 8 0 1 0 11.4 0";
+pub const MOON: &str = "M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z";
 pub const SEARCH: &str = "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4";

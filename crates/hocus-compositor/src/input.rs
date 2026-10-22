@@ -94,7 +94,8 @@ impl State {
                 let modal = state.launcher_open()
                     || state.quick_open()
                     || state.showcase_open()
-                    || state.card_open();
+                    || state.card_open()
+                    || state.leave_open();
                 match action {
                     // A panel's own shortcut closes it; others still work.
                     Some(action)
@@ -122,6 +123,9 @@ impl State {
             }
             Some(Handled::Panel(sym, modifiers)) if self.locked() => {
                 self.lock_key(sym, &modifiers);
+            }
+            Some(Handled::Panel(sym, _)) if self.leave_open() => {
+                self.leave_key(sym);
             }
             Some(Handled::Panel(sym, _)) if self.card_open() => {
                 self.card_key(sym);
@@ -234,7 +238,8 @@ impl State {
         }
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.card_pointer(location, None)
+            && (self.leave_pointer(location, None)
+                || self.card_pointer(location, None)
                 || self.showcase_pointer(None)
                 || self.quick_pointer_motion(location)
                 || self.launcher_pointer_motion(location)
@@ -291,7 +296,8 @@ impl State {
         }
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && (self.card_pointer(at, Some(pressed))
+            && (self.leave_pointer(at, Some(pressed))
+                || self.card_pointer(at, Some(pressed))
                 || self.showcase_pointer(Some(pressed))
                 || self.quick_pointer_button(at, pressed)
                 || self.launcher_pointer_button(at, pressed)

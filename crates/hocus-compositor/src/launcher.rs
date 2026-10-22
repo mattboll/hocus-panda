@@ -264,6 +264,19 @@ impl State {
                     self.close_launcher();
                     self.open_settings(None);
                 }
+                LauncherEvent::Chosen(Choice::Session(what)) => {
+                    use hocus_core::Action as A;
+                    use hocus_shell::launcher::SessionAction as S;
+                    self.close_launcher();
+                    let action = match what {
+                        S::Lock => A::Lock,
+                        S::Suspend => A::Suspend,
+                        S::LogOut => A::LogOut,
+                        S::Restart => A::Restart,
+                        S::ShutDown => A::ShutDown,
+                    };
+                    self.run_action(&action, smithay::utils::SERIAL_COUNTER.next_serial());
+                }
                 LauncherEvent::Chosen(Choice::Show(what)) => {
                     self.close_launcher();
                     self.show(what);

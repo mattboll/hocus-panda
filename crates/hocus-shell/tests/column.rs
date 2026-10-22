@@ -9,6 +9,7 @@ mod common;
 
 fn state() -> ColumnState {
     ColumnState {
+        can_hibernate: false,
         status: Default::default(),
         time: WallTime {
             hour: 14,
@@ -130,7 +131,9 @@ fn the_account_menu_logs_out() -> anyhow::Result<()> {
     common::expect_reference(&popover, "column-account-menu.png")?;
     let dump = column.access().dump();
     assert!(dump.contains("button \"Lock\""), "{dump}");
-    assert!(dump.contains("disabled"), "{dump}");
+    assert!(dump.contains("button \"Suspend\""), "{dump}");
+    // Not offered where the machine does not hibernate.
+    assert!(!dump.contains("Hibernate"), "{dump}");
     let at = button(&column, "Log out")?;
     assert_eq!(click(&mut column, at), vec![Action::LogOut]);
     Ok(())

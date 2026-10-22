@@ -369,6 +369,15 @@ pub fn action(action: &hocus_core::Action, lang: Lang) -> (String, ShortcutGroup
             G::System,
             EVERYWHERE,
         ),
+        A::LogOut => (w("Log out", "Se déconnecter"), G::System, EVERYWHERE),
+        A::Restart => (w("Restart", "Redémarrer"), G::System, EVERYWHERE),
+        A::ShutDown => (w("Shut down", "Éteindre"), G::System, EVERYWHERE),
+        A::Suspend => (w("Suspend", "Mettre en veille"), G::System, EVERYWHERE),
+        A::Hibernate => (
+            w("Hibernate", "Mettre en veille prolongée"),
+            G::System,
+            EVERYWHERE,
+        ),
         A::SwitchWindows(s) => (
             w("Switch windows", "Alterner les fenêtres"),
             G::Windows,

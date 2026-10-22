@@ -82,7 +82,7 @@ impl Logind {
 
 const LOGIND: &str = "org.freedesktop.login1";
 
-async fn system(bus: &Option<String>) -> zbus::Result<Connection> {
+pub(crate) async fn system(bus: &Option<String>) -> zbus::Result<Connection> {
     match bus {
         Some(address) => {
             zbus::connection::Builder::address(address.as_str())
@@ -93,7 +93,7 @@ async fn system(bus: &Option<String>) -> zbus::Result<Connection> {
     }
 }
 
-async fn manager(conn: &Connection) -> zbus::Result<Proxy<'static>> {
+pub(crate) async fn manager(conn: &Connection) -> zbus::Result<Proxy<'static>> {
     Proxy::new(
         conn,
         LOGIND,

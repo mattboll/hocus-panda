@@ -1,0 +1,75 @@
+# Leaving the session (#72): the account menu offers what the machine can
+# do (no hibernating here); restarting counts ten seconds down and Escape
+# cancels; shutting down, the countdown over, asks windows to close.
+description = "The session menu counts restarting down, Escape cancels, shutting down closes the windows"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+click_ui = "Account: Alex"
+
+[[step]]
+expect_ui = { label = "Suspend" }
+
+[[step]]
+expect_ui = { label = "Hibernate", shown = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "session-menu.png" }
+
+[[step]]
+click_ui = "Restart"
+
+[[step]]
+expect_ui = { label = "Restarting in 10 s." }
+
+[[step]]
+advance_ms = 3000
+
+[[step]]
+expect_ui = { label = "Restarting in 7 s." }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "session-restart.png" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Restarting in 7 s.", shown = false }
+
+[[step]]
+expect_event = { type = "leaving", has = "cancelled" }
+
+[[step]]
+expect_window = { app_id = "doc" }
+
+[[step]]
+click_ui = "Account: Alex"
+
+[[step]]
+click_ui = "Shut down"
+
+[[step]]
+advance_ms = 10000
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_event = { type = "leaving", has = "closing" }
+
+[[step]]
+expect_no_window = "doc"
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_event = { type = "leaving", has = "\"stage\":\"now\"" }

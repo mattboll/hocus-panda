@@ -1,9 +1,17 @@
 //! The session's side of the lock (#30): applications keep the screen
 //! awake and ask to lock through the ScreenSaver service; logind asks to
-//! lock, and the session locks before sleeping. Needs `dbus-daemon`;
-//! skipped without it.
+//! lock, and the session locks before sleeping. Leaving (#72): an
+//! application holding shutting down back is said and waited for, and
+//! the machine offers hibernating only where it works. Needs
+//! `dbus-daemon`; skipped without it.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use hocus_api::{Reply, Request};
 use hocus_compositor::{FRAME, HarnessOptions, Headless, HeadlessConfig, RendererChoice};
@@ -122,10 +130,32 @@ fn an_inhibitor_keeps_the_screen_awake_and_lock_locks() -> anyhow::Result<()> {
 }
 
 /// logind as far as the compositor uses it.
-struct Manager;
+#[derive(Default)]
+struct Manager {
+    /// What ListInhibitors lists.
+    inhibitors: Vec<(String, String, String, String, u32, u32)>,
+    hibernate: bool,
+    powered_off: Arc<AtomicBool>,
+}
 
 #[zbus::interface(name = "org.freedesktop.login1.Manager")]
 impl Manager {
+    fn list_inhibitors(&self) -> Vec<(String, String, String, String, u32, u32)> {
+        self.inhibitors.clone()
+    }
+
+    fn can_suspend(&self) -> &str {
+        "yes"
+    }
+
+    fn can_hibernate(&self) -> &str {
+        if self.hibernate { "yes" } else { "na" }
+    }
+
+    fn power_off(&self, _interactive: bool) {
+        self.powered_off.store(true, Ordering::SeqCst);
+    }
+
     #[zbus(name = "GetSessionByPID")]
     fn get_session_by_pid(&self, _pid: u32) -> OwnedObjectPath {
         OwnedObjectPath::try_from("/org/freedesktop/login1/session/_1").expect("a path")
@@ -151,9 +181,13 @@ impl Session {
 }
 
 fn logind(bus: &PrivateBus) -> anyhow::Result<zbus::Connection> {
+    logind_with(bus, Manager::default())
+}
+
+fn logind_with(bus: &PrivateBus, manager: Manager) -> anyhow::Result<zbus::Connection> {
     Ok(zbus::block_on(
         zbus::connection::Builder::address(bus.address.as_str())
-            .serve_at("/org/freedesktop/login1", Manager)
+            .serve_at("/org/freedesktop/login1", manager)
             .serve_at("/org/freedesktop/login1/session/_1", Session)
             .name("org.freedesktop.login1")
             .build(),
@@ -208,5 +242,124 @@ fn logind_locks_on_request_and_before_sleep() -> anyhow::Result<()> {
         Manager::prepare_for_sleep(iface.signal_emitter(), true).await
     })?;
     wait_for(&mut compositor, "Password")?;
+    Ok(())
+}
+
+/// Clicks the shell's button with this label.
+fn click(compositor: &mut Headless, label: &str) -> anyhow::Result<()> {
+    let Reply::Ui(nodes) = compositor.request(Request::Ui)? else {
+        anyhow::bail!("expected the interface");
+    };
+    let node = nodes
+        .iter()
+        .find(|n| n.role == "button" && n.label.as_deref() == Some(label))
+        .ok_or_else(|| anyhow::anyhow!("no button {label:?}"))?;
+    let r = node.rect;
+    compositor.request(Request::PointerMove {
+        x: f64::from(r.x) + f64::from(r.width) / 2.0,
+        y: f64::from(r.y) + f64::from(r.height) / 2.0,
+    })?;
+    for pressed in [true, false] {
+        compositor.request(Request::PointerButton {
+            button: hocus_api::Button::Left,
+            pressed,
+        })?;
+    }
+    compositor.advance(FRAME)?;
+    Ok(())
+}
+
+/// Lets the compositor's threads reach the bus.
+fn settle(compositor: &mut Headless) -> anyhow::Result<()> {
+    let until = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < until {
+        compositor.dispatch(Duration::from_millis(10))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn an_application_holding_shutdown_back_is_said_and_waited_for() -> anyhow::Result<()> {
+    if !installed("dbus-daemon") {
+        eprintln!("skipped: no dbus-daemon");
+        return Ok(());
+    }
+    let bus = PrivateBus::start()?;
+    let powered_off = Arc::new(AtomicBool::new(false));
+    let _service = logind_with(
+        &bus,
+        Manager {
+            inhibitors: vec![
+                (
+                    "shutdown".into(),
+                    "Editor".into(),
+                    "Unsaved document in notes.txt".into(),
+                    "block".into(),
+                    1000,
+                    4242,
+                ),
+                // Only delays: it does not hold anything back.
+                (
+                    "sleep".into(),
+                    "Hocuspanda".into(),
+                    "Lock the screen before sleep".into(),
+                    "delay".into(),
+                    1000,
+                    1,
+                ),
+            ],
+            powered_off: powered_off.clone(),
+            ..Default::default()
+        },
+    )?;
+    let mut compositor = compositor(None, Some(&bus))?;
+    settle(&mut compositor)?;
+    click(&mut compositor, "Account: Alex")?;
+    click(&mut compositor, "Shut down")?;
+    wait_for(&mut compositor, "Editor — Unsaved document in notes.txt")?;
+    // No countdown: it waits for a decision.
+    compositor.advance(Duration::from_secs(15))?;
+    settle(&mut compositor)?;
+    assert!(shows(
+        &mut compositor,
+        "Editor — Unsaved document in notes.txt"
+    )?);
+    assert!(
+        !powered_off.load(Ordering::SeqCst),
+        "shut down without asking"
+    );
+
+    click(&mut compositor, "Shut down anyway")?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !powered_off.load(Ordering::SeqCst) {
+        anyhow::ensure!(Instant::now() < deadline, "logind was never asked");
+        compositor.dispatch(Duration::from_millis(10))?;
+        compositor.advance(FRAME)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn hibernating_is_offered_only_where_it_works() -> anyhow::Result<()> {
+    if !installed("dbus-daemon") {
+        eprintln!("skipped: no dbus-daemon");
+        return Ok(());
+    }
+    for hibernate in [false, true] {
+        let bus = PrivateBus::start()?;
+        let _service = logind_with(
+            &bus,
+            Manager {
+                hibernate,
+                ..Default::default()
+            },
+        )?;
+        let mut compositor = compositor(None, Some(&bus))?;
+        settle(&mut compositor)?;
+        compositor.advance(FRAME)?;
+        click(&mut compositor, "Account: Alex")?;
+        assert!(shows(&mut compositor, "Suspend")?);
+        assert_eq!(shows(&mut compositor, "Hibernate")?, hibernate);
+    }
     Ok(())
 }

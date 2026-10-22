@@ -108,6 +108,8 @@ pub struct State {
     pub is_session: bool,
     /// Switches virtual terminals, on a TTY.
     pub vt_switch: Option<smithay::backend::session::libseat::LibSeatSession>,
+    /// Leaving the session: its card, what the machine can do (#72).
+    pub leaver: crate::leave::Leaver,
     /// Each screen's name card while "identify" shows them.
     pub identifying: Vec<(String, crate::shell::Panel<hocus_shell::identify::Identify>)>,
     /// What screens are set to, and what was asked (#28).
@@ -222,6 +224,7 @@ impl State {
             vt_switch: None,
             output_settings: Default::default(),
             identifying: Vec::new(),
+            leaver: Default::default(),
             output_management: crate::handlers::output_management::OutputManagement::new(dh),
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
             settings_started: None,
