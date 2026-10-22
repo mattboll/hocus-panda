@@ -50,6 +50,7 @@ fn a_flood_from_one_app_is_rate_limited_and_the_loop_keeps_its_budget() -> anyho
                     actions: &[],
                     urgency: 1,
                     timeout_ms: -1,
+                    hints: &[],
                 },
             )?;
         }

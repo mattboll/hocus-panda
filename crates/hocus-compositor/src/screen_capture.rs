@@ -192,12 +192,13 @@ impl State {
     /// Whether the screen is being shared now.
     pub fn sharing(&self) -> bool {
         let now = self.clock.now();
-        // A tool waiting for the screen to change still shares it.
+        // A tool waiting for the screen to change still shares it; one
+        // that went while it waited does not.
         let waiting = self
             .screen_capture
             .pending
             .iter()
-            .any(|p| matches!(p.reply, Reply::Wlr(_, true)));
+            .any(|p| matches!(&p.reply, Reply::Wlr(frame, true) if frame.is_alive()));
         waiting
             || self.screen_capture.sharing_sessions > 0
             || self
@@ -253,6 +254,14 @@ impl App {
         let pending = std::mem::take(&mut self.state.screen_capture.pending);
         let mut waiting = Vec::new();
         for p in pending {
+            // The tool went: nothing to answer.
+            let alive = match &p.reply {
+                Reply::Ext(frame) => frame.is_alive(),
+                Reply::Wlr(frame, _) => frame.is_alive(),
+            };
+            if !alive {
+                continue;
+            }
             let ready = p.after.as_ref().is_none_or(|(name, n)| {
                 self.state
                     .space

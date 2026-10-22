@@ -41,6 +41,7 @@ mod notify;
 mod output_spec;
 mod outputs;
 mod pandas;
+mod phone;
 mod quick;
 mod recording;
 mod scene;

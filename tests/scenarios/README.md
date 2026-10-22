@@ -60,7 +60,12 @@ Steps, one per `[[step]]` table:
 | `type = "fir"` | types text as on a US keyboard |
 | `expect_runtime_file = { name, lines?, contains?, lacks? }` | a file a started program wrote in the compositor's runtime directory: so many lines, with or without these strings (the test client adds a line to `<app id>.starts` each time it starts) |
 | `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
-| `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces? }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires) |
+| `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces?, hints? = { "x-kde-appname" = "…" } }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires; `hints` of text) |
+| `phone = { name, battery, charging? }` | KDE Connect, a stand-in on the private bus, with one phone paired and within reach (its files at `{runtime_dir}/phone-files`); again, its battery changes |
+| `phone_notification = { app, title, text, reply? = true }` | the phone posts a notification; `reply` when its application takes replies (the reply ids are `r1`, `r2`… in order) |
+| `phone_remove = 1` | the notification it posted first (from 1) goes on the phone |
+| `expect_phone = "reply r1 On my way"` | the phone was asked this: `ring`, `reply ID TEXT`, `clipboard TEXT`, `share URL`, `browse` |
+| `expect_phone_state = "absent"` | KDE Connect as the session found it, once so: `absent`, `stopped`, `running`, `off` |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
 | `right_click_ui = "Chat"` | the same with the secondary button |
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |

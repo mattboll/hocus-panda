@@ -1,0 +1,13 @@
+description = "Without KDE Connect on the bus, the session starts with no phone in the column"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+expect_phone_state = "absent"
+
+[[step]]
+expect_ui = { label = "Ring", shown = false }
+
+[[step]]
+expect_ui = { label = "Command field" }

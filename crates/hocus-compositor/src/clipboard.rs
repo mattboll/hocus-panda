@@ -180,6 +180,15 @@ impl State {
         Some((mime, OwnedFd::from(writer)))
     }
 
+    /// The text copied last, as read (none when the history is off).
+    pub fn last_copied(&self) -> Option<String> {
+        self.clipboard
+            .read
+            .iter()
+            .max_by_key(|(n, _)| *n)
+            .map(|(_, text)| text.clone())
+    }
+
     /// The shell copied text itself (a calculator result, a paste).
     pub fn shell_copied(&mut self, text: &str) {
         self.clipboard.made += 1;

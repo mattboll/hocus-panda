@@ -56,6 +56,10 @@ pub struct Notification {
     pub expiry: Expiry,
     /// It replaces the notification of the same id.
     pub replaces: bool,
+    /// The application and event that KDE's notifications name in their
+    /// hints (`x-kde-appname`, `x-kde-eventId`): KDE Connect's copies of
+    /// phone notifications, which the phone module shows itself.
+    pub kde_event: Option<(String, String)>,
 }
 
 /// What clients ask, in order.
@@ -158,6 +162,12 @@ impl Server {
             t if t > 0 => Expiry::After(Duration::from_millis(t as u64)),
             _ => Expiry::Default,
         };
+        let text = |key: &str| {
+            hints
+                .get(key)
+                .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+        };
+        let kde_event = text("x-kde-appname").zip(text("x-kde-eventId"));
         (self.sink)(Incoming::Notify(Notification {
             id,
             app: app_name,
@@ -172,6 +182,7 @@ impl Server {
             urgency,
             expiry,
             replaces,
+            kde_event,
         }));
         id
     }

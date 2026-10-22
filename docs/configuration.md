@@ -75,6 +75,10 @@ every_hours = 6            # between looks, 1 to 168; never while fullscreen or 
 check = ""                 # a command printing NAME VERSION (or NAME OLD -> NEW) per update;
 install = ""               #   empty: apt, dnf, pacman or pkg, installed through polkit
 
+[phone]                    # through KDE Connect, when it runs: a phone paired and within reach
+enabled = true             # its line in the column (battery, Ring), its popover
+notifications = true       # its notifications as toasts, with a reply typed into them
+
 [[calendars]]              # one per account or subscription (Settings → Accounts and calendar)
 name = "Work"
 kind = "caldav"            # or "subscription": an ICS link, read as it is

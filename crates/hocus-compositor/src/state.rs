@@ -118,6 +118,8 @@ pub struct State {
     pub recorder: crate::recording::Recorder,
     /// System updates (#84).
     pub updates: crate::updates::Updates,
+    /// The phone, through KDE Connect (#85).
+    pub phone: crate::phone::PhoneState,
     pub calendar: crate::calendar::Calendar,
     /// Notes and to-dos (#79).
     pub notes: crate::notes::NotesState,
@@ -282,6 +284,7 @@ impl State {
             comfort: Default::default(),
             notes: Default::default(),
             updates: Default::default(),
+            phone: Default::default(),
             calendar: Default::default(),
             gamma_wanted: Vec::new(),
             share: None,

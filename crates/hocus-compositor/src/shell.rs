@@ -88,6 +88,7 @@ pub fn start(
     state.shell = Some(Shell::new(Theme::default(), lang));
     crate::notify::start(handle, state, session_bus, lang);
     crate::tray::start(handle, state, session_bus);
+    crate::phone::start(handle, state, session_bus);
     crate::launcher::start(handle, state, lang, data_dirs);
     crate::quick::start(handle, state, lang);
     crate::wallpaper::start(handle, state);
@@ -233,6 +234,7 @@ impl State {
             sharing: self.sharing(),
             todos: self.open_todos(),
             updates: self.updates_line(),
+            phone: self.phone_line(),
             meeting: self.meeting_card(),
             calendar_set: !self.config.calendars.is_empty(),
             agenda: self.agenda(),
@@ -264,6 +266,7 @@ impl State {
         self.refresh_share();
         self.refresh_night();
         self.refresh_updates();
+        self.refresh_phone();
         self.refresh_calendar();
         self.refresh_motion();
         self.refresh_slides();
@@ -433,6 +436,9 @@ impl State {
             ShellAction::StopSharing => self.stop_sharing(),
             ShellAction::TickTodo(index) => self.tick_note(index),
             ShellAction::InstallUpdates => self.install_updates(),
+            ShellAction::RingPhone => self.ring_phone(),
+            ShellAction::SendClipboardToPhone => self.send_clipboard_to_phone(),
+            ShellAction::BrowsePhone => self.browse_phone(),
             ShellAction::JoinMeeting => self.join_meeting(),
             ShellAction::TrayActivate(key) => self.tray_activate(key),
             ShellAction::TrayMenu(key) => self.tray_menu(key),

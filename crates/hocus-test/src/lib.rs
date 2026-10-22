@@ -6,6 +6,7 @@ pub mod client;
 pub mod fuzz;
 pub mod image;
 pub mod layer;
+pub mod phone;
 pub mod randr;
 pub mod scenario;
 pub mod screencopy;
