@@ -46,6 +46,31 @@ use wayland_client::{
         wl_surface,
     },
 };
+use wayland_protocols::{
+    wp::keyboard_shortcuts_inhibit::zv1::client::{
+        zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1,
+        zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1,
+    },
+    xdg::activation::v1::client::{
+        xdg_activation_token_v1::{self, XdgActivationTokenV1},
+        xdg_activation_v1::XdgActivationV1,
+    },
+};
+
+/// What the test asks of a running client.
+#[derive(Debug)]
+enum Command {
+    Copy(String),
+    /// Asks the compositor to bring its window forward (xdg-activation).
+    Activate,
+}
+
+/// What a test client does besides showing its window.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClientOptions {
+    /// Holds the compositor's shortcuts back while it has the keyboard.
+    pub inhibit_shortcuts: bool,
+}
 
 /// The text formats the test client copies and reads.
 const TEXT: [&str; 2] = ["text/plain;charset=utf-8", "UTF8_STRING"];
@@ -107,15 +132,22 @@ pub struct TestClient {
     pub spec: SolidWindow,
     events: Arc<Mutex<Vec<ClientEvent>>>,
     clipboard: Arc<Mutex<Option<String>>>,
-    copies: Sender<String>,
+    commands: Sender<Command>,
     thread: JoinHandle<anyhow::Result<()>>,
 }
 
 impl TestClient {
     /// Takes the clipboard with `text`, as Ctrl+C would.
     pub fn copy(&self, text: &str) -> anyhow::Result<()> {
-        self.copies
-            .send(text.to_owned())
+        self.commands
+            .send(Command::Copy(text.to_owned()))
+            .context("the test client is gone")
+    }
+
+    /// Asks for its window to come forward, with a token of its own.
+    pub fn activate(&self) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::Activate)
             .context("the test client is gone")
     }
 
@@ -140,12 +172,16 @@ impl SolidWindow {
     /// Connects to the compositor at `socket` and shows the window from a
     /// thread of its own, until the compositor closes it or goes away.
     pub fn spawn(self, socket: &Path) -> anyhow::Result<TestClient> {
+        self.spawn_with(socket, ClientOptions::default())
+    }
+
+    pub fn spawn_with(self, socket: &Path, options: ClientOptions) -> anyhow::Result<TestClient> {
         let stream = UnixStream::connect(socket)
             .with_context(|| format!("could not connect to {}", socket.display()))?;
         let conn = Connection::from_socket(stream)?;
         let events = Arc::new(Mutex::new(Vec::new()));
         let clipboard = Arc::new(Mutex::new(None));
-        let (copies, to_copy) = channel();
+        let (commands, to_do) = channel();
         let thread = std::thread::Builder::new()
             .name(format!("client {}", self.app_id))
             .spawn({
@@ -154,13 +190,13 @@ impl SolidWindow {
                     events: events.clone(),
                     clipboard: clipboard.clone(),
                 };
-                move || spec.run(conn, shared, to_copy)
+                move || spec.run(conn, shared, to_do, options)
             })?;
         Ok(TestClient {
             spec: self,
             events,
             clipboard,
-            copies,
+            commands,
             thread,
         })
     }
@@ -169,7 +205,8 @@ impl SolidWindow {
         self,
         conn: Connection,
         shared: Shared,
-        to_copy: Receiver<String>,
+        to_do: Receiver<Command>,
+        options: ClientOptions,
     ) -> anyhow::Result<()> {
         let (globals, mut queue) = registry_queue_init(&conn)?;
         let qh = queue.handle();
@@ -188,6 +225,13 @@ impl SolidWindow {
         window.set_app_id(self.app_id.clone());
         window.set_min_size(Some((self.width, self.height)));
         window.commit();
+        if options.inhibit_shortcuts {
+            let manager: ZwpKeyboardShortcutsInhibitManagerV1 = globals
+                .bind(&qh, 1..=1, ())
+                .context("no keyboard shortcuts inhibitor")?;
+            manager.inhibit_shortcuts(window.wl_surface(), &seat, &qh, ());
+        }
+        let activation: Option<XdgActivationV1> = globals.bind(&qh, 1..=1, ()).ok();
 
         let pool = SlotPool::new((self.width * self.height * 4) as usize, &shm)?;
         let mut client = Client {
@@ -202,13 +246,18 @@ impl SolidWindow {
             data_devices,
             data_device,
             copied: None,
+            seat: seat.clone(),
+            activation,
             serial: 0,
             drawn: None,
             closed: false,
         };
         while !client.closed {
-            while let Ok(text) = to_copy.try_recv() {
-                client.copy(text, &qh);
+            while let Ok(command) = to_do.try_recv() {
+                match command {
+                    Command::Copy(text) => client.copy(text, &qh),
+                    Command::Activate => client.ask_activation(&qh),
+                }
             }
             queue.flush()?;
             queue.dispatch_pending(&mut client)?;
@@ -247,6 +296,8 @@ struct Client {
     data_device: DataDevice,
     /// What the client offers as the clipboard, while it holds it.
     copied: Option<(CopyPasteSource, String)>,
+    seat: wl_seat::WlSeat,
+    activation: Option<XdgActivationV1>,
     /// The last input serial, which taking the clipboard needs.
     serial: u32,
     /// The size of the last buffer, if one was attached.
@@ -259,6 +310,18 @@ impl Client {
         if let Ok(mut events) = self.events.lock() {
             events.push(event);
         }
+    }
+
+    /// A token for its own window, with its last input serial; used as
+    /// soon as it comes.
+    fn ask_activation(&mut self, qh: &QueueHandle<Self>) {
+        let Some(activation) = &self.activation else {
+            return;
+        };
+        let token = activation.get_activation_token(qh, ());
+        token.set_serial(self.serial, &self.seat);
+        token.set_surface(self.window.wl_surface());
+        token.commit();
     }
 
     fn copy(&mut self, text: String, qh: &QueueHandle<Self>) {
@@ -574,3 +637,57 @@ delegate_shm!(Client);
 delegate_xdg_shell!(Client);
 delegate_xdg_window!(Client);
 delegate_registry!(Client);
+
+impl Dispatch<ZwpKeyboardShortcutsInhibitManagerV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpKeyboardShortcutsInhibitManagerV1,
+        _: <ZwpKeyboardShortcutsInhibitManagerV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpKeyboardShortcutsInhibitorV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpKeyboardShortcutsInhibitorV1,
+        _: <ZwpKeyboardShortcutsInhibitorV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<XdgActivationV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &XdgActivationV1,
+        _: <XdgActivationV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<XdgActivationTokenV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        token: &XdgActivationTokenV1,
+        event: xdg_activation_token_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_activation_token_v1::Event::Done { token: name } = event {
+            if let Some(activation) = &client.activation {
+                activation.activate(name, client.window.wl_surface());
+            }
+            token.destroy();
+        }
+    }
+}

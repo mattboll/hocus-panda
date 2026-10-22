@@ -32,6 +32,8 @@ pub struct WinitBackend {
     backend: WinitGraphicsBackend<GlesRenderer>,
     output: Output,
     damage_tracker: OutputDamageTracker,
+    /// Frames presented, for presentation-time.
+    presented: u64,
 }
 
 impl std::fmt::Debug for WinitBackend {
@@ -89,6 +91,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         backend,
         output,
         damage_tracker,
+        presented: 0,
     })
 }
 
@@ -171,6 +174,7 @@ impl WinitBackend {
                 }
             }
         };
+        let drawn = damage.is_some();
         if let Some(damage) = damage {
             match self.backend.submit(Some(&damage)) {
                 Ok(()) => state.measures.frame(&self.output.name(), start.elapsed()),
@@ -179,6 +183,10 @@ impl WinitBackend {
         }
 
         let elapsed = state.clock.now();
+        if drawn {
+            self.presented += 1;
+            state.presented(&self.output, elapsed, self.presented);
+        }
         for window in state.space.elements() {
             window.send_frame(&self.output, elapsed, Some(Duration::ZERO), |_, _| {
                 Some(self.output.clone())

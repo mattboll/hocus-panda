@@ -66,7 +66,10 @@ impl State {
                 if !pressed {
                     return FilterResult::Forward;
                 }
+                // A window may hold the shortcuts back while it has the
+                // keyboard (keyboard-shortcuts-inhibit).
                 let action = combo_of(modifiers, &keysym)
+                    .filter(|_| !state.shortcuts_inhibited())
                     .and_then(|combo| state.shortcuts.action(&combo).cloned());
                 let modal = state.launcher_open() || state.quick_open() || state.showcase_open();
                 match action {
@@ -117,6 +120,26 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // Games and 3D tools read the motion itself (relative-pointer),
+        // and may hold the pointer still or within their window.
+        let from = pointer.current_location();
+        // The motion asked for, even when the pointer stays still.
+        let delta = location - from;
+        let location = self.constrained(from, location);
+        if !pointer.is_grabbed() {
+            let focus = pointer
+                .current_focus()
+                .and_then(|s| self.surface_under(from).filter(|(u, _)| *u == s));
+            pointer.relative_motion(
+                self,
+                focus,
+                &smithay::input::pointer::RelativeMotionEvent {
+                    delta,
+                    delta_unaccel: delta,
+                    utime: self.clock.now().as_micros() as u64,
+                },
+            );
+        }
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
             && (self.showcase_pointer(None)

@@ -1,0 +1,20 @@
+description = "A window that asks with a fresh activation token comes forward and takes the keyboard"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "notes", size = [300, 200], color = "#e8e4da" }
+
+[[step]]
+expect_focus = "notes"
+
+[[step]]
+activate = "editor"
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+expect_stack = ["notes", "editor"]

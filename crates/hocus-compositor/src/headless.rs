@@ -289,6 +289,9 @@ where
                     surface_primary_scanout_output,
                 );
             }
+            if drawn {
+                state.presented(&out.output, now, out.frames);
+            }
         }
     }
 }

@@ -85,6 +85,8 @@ pub struct State {
     pub quick: Option<crate::quick::QuickPanel>,
     /// Wallpapers, when the shell runs.
     pub wallpapers: Option<crate::wallpaper::Wallpapers>,
+    /// The common batch of protocols (#32).
+    pub protocols: crate::handlers::protocols::Protocols,
     /// The configuration file, when there is one.
     pub config_path: Option<std::path::PathBuf>,
     /// When the settings app was started, until its window comes.
@@ -195,7 +197,12 @@ impl State {
             snap_preview_buffer: SolidColorBuffer::default(),
             cursor: CursorImageStatus::default_named(),
             arrows: Arrows::default(),
-            foreign_toplevels: ForeignToplevelListState::new::<Self>(dh),
+            // Sandboxed clients do not see the list of windows.
+            foreign_toplevels: ForeignToplevelListState::new_with_filter::<Self>(
+                dh,
+                crate::handlers::protocols::trusted,
+            ),
+            protocols: crate::handlers::protocols::Protocols::new(dh),
             workspaces: WorkspaceState::new(dh),
             measures: Measures::default(),
             watchdog: None,
@@ -258,6 +265,8 @@ impl State {
 #[derive(Debug, Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// The sandbox it connected from (security-context), if any.
+    pub security_context: Option<smithay::wayland::security_context::SecurityContext>,
 }
 
 impl ClientData for ClientState {

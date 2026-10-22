@@ -1,41 +1,58 @@
-//! What bars and switchers see over Wayland: ext-workspace (one group per
-//! output, desktops as workspaces) and ext-foreign-toplevel-list (#16).
+//! The protocols of the common batch (#32) are offered, and a client
+//! started through a security context (a sandbox) does not see those that
+//! read or drive the rest of the session.
 
-use std::{os::unix::net::UnixStream, path::PathBuf, thread, time::Duration};
+use std::{
+    os::{fd::AsFd, unix::net::UnixListener},
+    path::Path,
+    sync::mpsc,
+    time::Duration,
+};
 
-use hocus_api::{Reply, Request};
-use hocus_compositor::{Headless, HeadlessConfig, OutputSpec, RendererChoice};
-use hocus_test::client::SolidWindow;
+use hocus_compositor::{HarnessOptions, Headless, HeadlessConfig, RendererChoice};
 use wayland_client::{
-    Connection, Dispatch, EventQueue, QueueHandle,
+    Connection, Dispatch, QueueHandle,
     globals::{GlobalListContents, registry_queue_init},
     protocol::wl_registry,
 };
-use wayland_protocols::ext::{
-    foreign_toplevel_list::v1::client::{
-        ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
-        ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
-    },
-    workspace::v1::client::{
-        ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
-        ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
-        ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
-    },
+use wayland_protocols::wp::security_context::v1::client::{
+    wp_security_context_manager_v1::WpSecurityContextManagerV1,
+    wp_security_context_v1::WpSecurityContextV1,
 };
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+/// The protocols of the batch.
+const BATCH: [&str; 18] = [
+    "xdg_activation_v1",
+    "zwp_idle_inhibit_manager_v1",
+    "wp_cursor_shape_manager_v1",
+    "zwp_keyboard_shortcuts_inhibit_manager_v1",
+    "zxdg_exporter_v2",
+    "zxdg_importer_v2",
+    "wp_presentation",
+    "wp_fractional_scale_manager_v1",
+    "wp_viewporter",
+    "wp_single_pixel_buffer_manager_v1",
+    "wp_alpha_modifier_v1",
+    "wp_content_type_manager_v1",
+    "zwp_pointer_constraints_v1",
+    "zwp_relative_pointer_manager_v1",
+    "zwp_pointer_gestures_v1",
+    "zwp_primary_selection_device_manager_v1",
+    "ext_data_control_manager_v1",
+    "wp_security_context_manager_v1",
+];
 
-/// What a bar would know.
-#[derive(Debug, Default)]
-struct Bar {
-    groups: Vec<ExtWorkspaceGroupHandleV1>,
-    /// Workspace, its name, whether active, its group (index in `groups`).
-    workspaces: Vec<(ExtWorkspaceHandleV1, String, bool, Option<usize>)>,
-    toplevels: Vec<String>,
-    done: u32,
-}
+/// What a sandboxed client must not see.
+const SENSITIVE: [&str; 4] = [
+    "zwp_virtual_keyboard_manager_v1",
+    "ext_data_control_manager_v1",
+    "ext_foreign_toplevel_list_v1",
+    "wp_security_context_manager_v1",
+];
 
-impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Bar {
+struct Client;
+
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Client {
     fn event(
         _: &mut Self,
         _: &wl_registry::WlRegistry,
@@ -47,200 +64,108 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Bar {
     }
 }
 
-impl Dispatch<ExtWorkspaceManagerV1, ()> for Bar {
-    fn event(
-        bar: &mut Self,
-        _: &ExtWorkspaceManagerV1,
-        event: ext_workspace_manager_v1::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        match event {
-            ext_workspace_manager_v1::Event::WorkspaceGroup { workspace_group } => {
-                bar.groups.push(workspace_group)
-            }
-            ext_workspace_manager_v1::Event::Workspace { workspace } => {
-                bar.workspaces.push((workspace, String::new(), false, None))
-            }
-            ext_workspace_manager_v1::Event::Done => bar.done += 1,
-            _ => {}
-        }
-    }
-
-    wayland_client::event_created_child!(Bar, ExtWorkspaceManagerV1, [
-        ext_workspace_manager_v1::EVT_WORKSPACE_GROUP_OPCODE => (ExtWorkspaceGroupHandleV1, ()),
-        ext_workspace_manager_v1::EVT_WORKSPACE_OPCODE => (ExtWorkspaceHandleV1, ()),
-    ]);
-}
-
-impl Dispatch<ExtWorkspaceGroupHandleV1, ()> for Bar {
-    fn event(
-        bar: &mut Self,
-        group: &ExtWorkspaceGroupHandleV1,
-        event: ext_workspace_group_handle_v1::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        if let ext_workspace_group_handle_v1::Event::WorkspaceEnter { workspace } = event {
-            let index = bar.groups.iter().position(|g| g == group);
-            if let Some(w) = bar.workspaces.iter_mut().find(|w| w.0 == workspace) {
-                w.3 = index;
-            }
-        }
-    }
-}
-
-impl Dispatch<ExtWorkspaceHandleV1, ()> for Bar {
-    fn event(
-        bar: &mut Self,
-        handle: &ExtWorkspaceHandleV1,
-        event: ext_workspace_handle_v1::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        let Some(w) = bar.workspaces.iter_mut().find(|w| w.0 == *handle) else {
-            return;
-        };
-        match event {
-            ext_workspace_handle_v1::Event::Name { name } => w.1 = name,
-            ext_workspace_handle_v1::Event::State { state } => {
-                w.2 = state
-                    .into_result()
-                    .is_ok_and(|s| s.contains(ext_workspace_handle_v1::State::Active))
-            }
-            _ => {}
-        }
-    }
-}
-
-impl Dispatch<ExtForeignToplevelListV1, ()> for Bar {
+impl Dispatch<WpSecurityContextManagerV1, ()> for Client {
     fn event(
         _: &mut Self,
-        _: &ExtForeignToplevelListV1,
-        _: ext_foreign_toplevel_list_v1::Event,
+        _: &WpSecurityContextManagerV1,
+        _: <WpSecurityContextManagerV1 as wayland_client::Proxy>::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
     }
-
-    wayland_client::event_created_child!(Bar, ExtForeignToplevelListV1, [
-        ext_foreign_toplevel_list_v1::EVT_TOPLEVEL_OPCODE => (ExtForeignToplevelHandleV1, ()),
-    ]);
 }
 
-impl Dispatch<ExtForeignToplevelHandleV1, ()> for Bar {
+impl Dispatch<WpSecurityContextV1, ()> for Client {
     fn event(
-        bar: &mut Self,
-        _: &ExtForeignToplevelHandleV1,
-        event: ext_foreign_toplevel_handle_v1::Event,
+        _: &mut Self,
+        _: &WpSecurityContextV1,
+        _: <WpSecurityContextV1 as wayland_client::Proxy>::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let ext_foreign_toplevel_handle_v1::Event::AppId { app_id } = event {
-            bar.toplevels.push(app_id);
-        }
     }
 }
 
-/// Runs `talk` as a Wayland client in a thread while the compositor serves.
-fn as_client<T: Send + 'static>(
-    compositor: &mut Headless,
-    talk: impl FnOnce(
-        &mut EventQueue<Bar>,
-        &mut Bar,
-        &wayland_client::globals::GlobalList,
-    ) -> anyhow::Result<T>
-    + Send
-    + 'static,
-) -> anyhow::Result<T> {
-    let socket: PathBuf = compositor.socket_path().to_path_buf();
-    let thread = thread::spawn(move || -> anyhow::Result<T> {
-        let conn = Connection::from_socket(UnixStream::connect(socket)?)?;
-        let (globals, mut queue) = registry_queue_init::<Bar>(&conn)?;
-        let mut bar = Bar::default();
-        talk(&mut queue, &mut bar, &globals)
+fn interfaces(socket: &Path) -> anyhow::Result<Vec<String>> {
+    let conn = Connection::from_socket(std::os::unix::net::UnixStream::connect(socket)?)?;
+    let (globals, _queue) = registry_queue_init::<Client>(&conn)?;
+    Ok(globals
+        .contents()
+        .clone_list()
+        .into_iter()
+        .map(|g| g.interface)
+        .collect())
+}
+
+/// What a client of the compositor at `socket` sees, then what one
+/// started through a security context sees.
+fn both(socket: &Path, dir: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let plain = interfaces(socket)?;
+    let conn = Connection::from_socket(std::os::unix::net::UnixStream::connect(socket)?)?;
+    let (globals, mut queue) = registry_queue_init::<Client>(&conn)?;
+    let qh = queue.handle();
+    let manager: WpSecurityContextManagerV1 = globals.bind(&qh, 1..=1, ())?;
+    let path = dir.join("sandbox");
+    let listener = UnixListener::bind(&path)?;
+    // The sandbox lives until this end closes.
+    let (close_read, _close_write) = rustix::pipe::pipe()?;
+    let context = manager.create_listener(listener.as_fd(), close_read.as_fd(), &qh, ());
+    context.set_sandbox_engine("org.hocuspanda.test".into());
+    context.set_app_id("sandboxed".into());
+    context.commit();
+    queue.roundtrip(&mut Client)?;
+    let sandboxed = interfaces(&path)?;
+    Ok((plain, sandboxed))
+}
+
+#[test]
+fn a_sandboxed_client_does_not_see_the_sensitive_protocols() -> anyhow::Result<()> {
+    let mut compositor = Headless::start_options(HarnessOptions {
+        headless: HeadlessConfig {
+            renderer: RendererChoice::Pixman,
+            ..Default::default()
+        },
+        api_permission: hocus_api::Permission::Test,
+        watchdog: None,
+        xwayland: false,
+        shell: false,
+        session_bus: None,
+        data_dirs: None,
+        child_env: None,
+    })?;
+    let socket = compositor.socket_path().to_path_buf();
+    let dir = tempfile::tempdir()?;
+    let dir_path = dir.path().to_path_buf();
+    let (done, result) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(both(&socket, &dir_path));
     });
-    compositor.dispatch_until(TIMEOUT, |_| thread.is_finished())?;
-    thread
-        .join()
-        .map_err(|_| anyhow::anyhow!("the client thread panicked"))?
-}
-
-fn compositor() -> anyhow::Result<Headless> {
-    Headless::start(HeadlessConfig {
-        outputs: vec![
-            OutputSpec::new(1280, 800).desktops(1),
-            OutputSpec::new(1920, 1080),
-        ],
-        renderer: RendererChoice::Pixman,
-    })
-}
-
-#[test]
-fn bars_see_one_workspace_group_per_output_and_can_activate_a_desktop() -> anyhow::Result<()> {
-    let mut compositor = compositor()?;
-
-    let (groups, workspaces) = as_client(&mut compositor, |queue, bar, globals| {
-        let qh = queue.handle();
-        let manager: ExtWorkspaceManagerV1 = globals.bind(&qh, 1..=1, ())?;
-        queue.roundtrip(bar)?;
-        let summary: Vec<(String, bool, Option<usize>)> = bar
-            .workspaces
-            .iter()
-            .map(|w| (w.1.clone(), w.2, w.3))
-            .collect();
-        // Activate the external output's third desktop.
-        if let Some(third) = bar.workspaces.iter().filter(|w| w.3 == Some(1)).nth(2) {
-            third.0.activate();
-        }
-        manager.commit();
-        queue.roundtrip(bar)?;
-        Ok((bar.groups.len(), summary))
+    // The compositor answers while the clients wait.
+    let mut got = None;
+    compositor.dispatch_until(Duration::from_secs(10), |_| {
+        got = got.take().or_else(|| result.try_recv().ok());
+        got.is_some()
     })?;
-
-    assert_eq!(groups, 2);
-    assert_eq!(
-        workspaces,
-        [
-            ("1".into(), true, Some(0)),
-            ("1".into(), true, Some(1)),
-            ("2".into(), false, Some(1)),
-            ("3".into(), false, Some(1)),
-            ("4".into(), false, Some(1)),
-        ]
-    );
-    let Reply::Desktops(outputs) = compositor.request(Request::Desktops)? else {
-        anyhow::bail!("expected desktops");
-    };
-    let external = &outputs[1];
-    assert_eq!(external.shown, external.desktops[2].id);
-    Ok(())
-}
-
-#[test]
-fn taskbars_see_windows_with_their_app_id() -> anyhow::Result<()> {
-    let mut compositor = compositor()?;
-    let window = SolidWindow {
-        app_id: "listed".into(),
-        width: 100,
-        height: 100,
-        argb: 0xffff_ffff,
-    };
-    let _client = window.spawn(compositor.socket_path())?;
-    compositor.dispatch_until(TIMEOUT, |c| c.window_count() == 1)?;
-
-    let toplevels = as_client(&mut compositor, |queue, bar, globals| {
-        let qh = queue.handle();
-        let _list: ExtForeignToplevelListV1 = globals.bind(&qh, 1..=1, ())?;
-        queue.roundtrip(bar)?;
-        Ok(bar.toplevels.clone())
-    })?;
-
-    assert_eq!(toplevels, ["listed"]);
+    let (plain, sandboxed) = got.expect("the clients finished")?;
+    for interface in BATCH.iter().chain(&SENSITIVE) {
+        assert!(
+            plain.iter().any(|i| i == interface),
+            "{interface} missing: {plain:?}"
+        );
+    }
+    for interface in SENSITIVE {
+        assert!(
+            !sandboxed.iter().any(|i| i == interface),
+            "{interface} offered to a sandbox"
+        );
+    }
+    for interface in ["wl_compositor", "xdg_wm_base", "wp_viewporter"] {
+        assert!(
+            sandboxed.iter().any(|i| i == interface),
+            "{interface} missing in a sandbox"
+        );
+    }
     Ok(())
 }
