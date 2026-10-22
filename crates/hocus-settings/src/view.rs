@@ -22,8 +22,10 @@ use crate::{
 };
 
 mod personalise;
+mod work;
 
 use personalise::WallpaperPage;
+use work::{Field, Fields};
 
 /// What the window shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +51,8 @@ pub enum Outcome {
     /// The compositor holds its own shortcuts back while keys are
     /// recorded (keyboard-shortcuts-inhibit), or no longer.
     Inhibit(bool),
+    /// The system's time zone is set through timedated (polkit asks).
+    SetTimeZone(String),
 }
 
 /// What a node does when clicked.
@@ -89,6 +93,10 @@ enum Target {
     InstallUpdates,
     /// The wallpaper of this screen shows, or every screen's.
     WallpaperScreen(Option<String>),
+    /// What a field of the Work pages holds is written.
+    Commit(Field),
+    /// The system's time zone is set to this one.
+    SetZone(String),
 }
 
 /// Which of a screen's choices are open.
@@ -318,6 +326,10 @@ pub struct SettingsView {
     keys: KeyboardPage,
     accounts: AccountsPage,
     wallpaper: WallpaperPage,
+    /// The Work pages' fields.
+    fields: Fields,
+    /// Why the system did not take the time zone chosen last.
+    zone_refused: Option<String>,
     dirty: bool,
     now: Duration,
 }
@@ -395,6 +407,8 @@ impl SettingsView {
             keys: KeyboardPage::default(),
             accounts: AccountsPage::default(),
             wallpaper: WallpaperPage::default(),
+            fields: Fields::default(),
+            zone_refused: None,
             dirty: true,
             now: Duration::ZERO,
         }
@@ -412,16 +426,48 @@ impl SettingsView {
     }
 
     /// What is in effect changed (the file, the screens).
-    pub fn set_context(&mut self, ctx: Context) {
+    pub fn set_context(&mut self, mut ctx: Context) {
+        // The compositor does not say the system's zone: timedated does.
+        if ctx.zone == catalogue::SystemZone::Unknown {
+            ctx.zone = self.ctx.zone.clone();
+        }
         // What was typed in the wallpaper's fields is in the file now.
         if ctx.config.wallpaper != self.ctx.config.wallpaper {
             self.wallpaper.leave();
+        }
+        if ctx.config != self.ctx.config {
+            self.fields.leave();
         }
         self.ctx = ctx;
         // A language chosen here is spoken at once.
         self.lang = lang_of(&self.ctx.config, self.session_lang);
         if !self.query.is_empty() {
             self.hits = catalogue::search(&self.query, &self.ctx, self.lang);
+        }
+        self.dirty = true;
+    }
+
+    /// What timedated says the system's zone is.
+    pub fn set_zone(&mut self, zone: catalogue::SystemZone) {
+        if zone != self.ctx.zone {
+            // Changed: a refusal before no longer holds.
+            self.zone_refused = None;
+            self.ctx.zone = zone;
+            if !self.query.is_empty() {
+                self.hits = catalogue::search(&self.query, &self.ctx, self.lang);
+            }
+            self.dirty = true;
+        }
+    }
+
+    /// The system took the zone asked for, or refused it, and why.
+    pub fn zone_set(&mut self, result: Result<String, String>) {
+        match result {
+            Ok(zone) => {
+                self.zone_refused = None;
+                self.set_zone(catalogue::SystemZone::Known(zone));
+            }
+            Err(why) => self.zone_refused = Some(why),
         }
         self.dirty = true;
     }
@@ -460,6 +506,7 @@ impl SettingsView {
             self.scroll = 0.0;
             self.group = None;
             self.wallpaper.leave();
+            self.fields.leave();
         }
         self.screen = screen;
         self.typing = screen == Screen::Home;
@@ -552,6 +599,19 @@ impl SettingsView {
                 Key::Enter => return self.commit(entry),
                 Key::Escape => {
                     self.wallpaper.forget(entry);
+                    self.tree.set_focus(None);
+                    self.dirty = true;
+                    return Vec::new();
+                }
+                _ => {}
+            }
+        }
+        // A Work page's field: Enter writes it, Escape forgets it.
+        if let Some(field) = self.fields.field_of(self.tree.focused()) {
+            match key {
+                Key::Enter => return self.commit_field(field),
+                Key::Escape => {
+                    self.fields.forget(&field);
                     self.tree.set_focus(None);
                     self.dirty = true;
                     return Vec::new();
@@ -656,6 +716,7 @@ impl SettingsView {
         // keyboard keeps it.
         if self.accounts.index(self.tree.focused()).is_some()
             || self.wallpaper.entry_of(self.tree.focused()).is_some()
+            || self.fields.field_of(self.tree.focused()).is_some()
         {
             let events = self.tree.text_input(text);
             return self.handle(events);
@@ -721,10 +782,17 @@ impl SettingsView {
                         self.wallpaper.type_into(entry, typed);
                     }
                 }
+                Event::Changed(id) if self.fields.field_of(Some(id)).is_some() => {
+                    if let Some(field) = self.fields.field_of(Some(id)) {
+                        let typed = self.tree.field_value(id).unwrap_or_default().to_owned();
+                        self.fields.type_into(field, typed);
+                    }
+                }
                 // A click in the form's fields: Enter is the key's to see.
                 Event::Activated(id)
                     if self.accounts.index(Some(id)).is_some()
-                        || self.wallpaper.entry_of(Some(id)).is_some() => {}
+                        || self.wallpaper.entry_of(Some(id)).is_some()
+                        || self.fields.field_of(Some(id)).is_some() => {}
                 Event::Activated(id) => match self.targets.get(&id).cloned() {
                     Some(Target::Home) => {
                         self.highlight = None;
@@ -796,6 +864,12 @@ impl SettingsView {
                         self.dirty = true;
                     }
                     Some(Target::Identify) => out.push(Outcome::Identify),
+                    Some(Target::Commit(field)) => out.extend(self.commit_field(field)),
+                    Some(Target::SetZone(zone)) => {
+                        self.zone_refused = None;
+                        self.dirty = true;
+                        out.push(Outcome::SetTimeZone(zone));
+                    }
                     Some(Target::WallpaperScreen(screen)) => {
                         self.wallpaper.show(screen);
                         self.dirty = true;
@@ -962,6 +1036,8 @@ impl SettingsView {
         self.accounts.fields = [None; 4];
         let typing_entry = self.wallpaper.entry_of(self.tree.focused());
         self.wallpaper.fields.clear();
+        let typing_field = self.fields.field_of(self.tree.focused());
+        self.fields.nodes.clear();
         let root = self.tree.root();
         for child in self.tree.children(root) {
             self.tree.remove(child);
@@ -1009,6 +1085,8 @@ impl SettingsView {
             self.tree.set_focus(self.accounts.fields[i]);
         } else if let Some(field) = typing_entry.and_then(|e| self.wallpaper.node(e)) {
             self.tree.set_focus(Some(field));
+        } else if let Some(node) = typing_field.and_then(|f| self.fields.node(&f)) {
+            self.tree.set_focus(Some(node));
         } else if self.typing {
             self.tree.set_focus(self.field);
         }
@@ -1468,6 +1546,10 @@ impl SettingsView {
             Page::Pandas => self.pandas(theme, body),
             Page::Accessibility => self.accessibility(theme, body),
             Page::Desktops => self.desktops(theme, body),
+            Page::Windows => self.windows(theme, body),
+            Page::Mouse => self.mouse(theme, body),
+            Page::Captures => self.captures(theme, body),
+            Page::Clipboard => self.clipboard(theme, body),
             Page::Language => self.language(theme, body),
             Page::Welcome => self.welcome(theme, body),
             Page::About => self.about(theme, body),
@@ -2063,54 +2145,6 @@ impl SettingsView {
                 Kind::text(text.get(lang), theme.text.body),
             );
         }
-    }
-
-    /// Desktops: what each corner of a screen does (#86).
-    fn desktops(&mut self, theme: &Theme, body: NodeId) {
-        use hocus_core::config::Trigger;
-        let lang = self.lang;
-        let c = self.ctx.config.hot_corners.clone();
-        let section = self.section(theme, body, words::HOT_CORNERS);
-        self.add(
-            section,
-            fill_width(Style::default()),
-            Kind::text(
-                words::HOT_CORNERS_NOTE.get(lang),
-                theme.text.label.with_weight(500).with_color(Paint::Muted),
-            ),
-        );
-        for (key, name, current) in [
-            ("top_left", words::TOP_LEFT, c.top_left),
-            ("top_right", words::TOP_RIGHT, c.top_right),
-            ("bottom_left", words::BOTTOM_LEFT, c.bottom_left),
-            ("bottom_right", words::BOTTOM_RIGHT, c.bottom_right),
-        ] {
-            // The corner's name above its choices, which then fit.
-            let corner = self.add(section, column(8.0), Kind::Box(Look::default()));
-            self.line(corner, name.get(lang), theme.text.body.with_weight(600));
-            let line = self.add(corner, row(8.0), Kind::Box(Look::default()));
-            for trigger in Trigger::ALL {
-                let mut button =
-                    Button::new(words::trigger(trigger).get(lang), ButtonKind::Plain, theme);
-                button.selected = trigger == current;
-                let b = self.add(
-                    line,
-                    Style {
-                        height: Length::Px(40.0),
-                        padding: Insets::symmetric(0.0, 14.0),
-                        ..Style::default()
-                    },
-                    Kind::Button(button),
-                );
-                let label = format!("{}: {}", name.get(lang), words::trigger(trigger).get(lang));
-                self.tree.set_name(b, &label);
-                self.targets.insert(
-                    b,
-                    Target::Set(Change::new("hot_corners", key, trigger.as_str())),
-                );
-            }
-        }
-        self.highlighted(section, &Setting::HotCorners, Look::default());
     }
 
     fn appearance(&mut self, theme: &Theme, body: NodeId) {
@@ -4101,36 +4135,292 @@ mod tests {
     }
 
     #[test]
-    fn the_clock_and_its_time_zone_are_chosen() {
+    fn the_clock_and_the_system_s_time_zone_are_chosen() {
+        use catalogue::SystemZone;
         let mut v = page_view("", Page::Language, &[]);
         assert!(find(&v.access(), "24 hours · 14:37").expect("24").selected);
         let out = click(&mut v, "12 hours · 2:37 PM");
         assert_eq!(changes(&out), [("format".into(), Some("\"12h\"".into()))]);
+        v.set_zone(SystemZone::Known("Europe/Paris".into()));
+        v.draw(Duration::ZERO);
         v.scroll(10_000.0);
         v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Paris").expect("paris").selected);
+        // Asked of the system, never written in the file.
         let out = click(&mut v, "Tokyo");
-        assert_eq!(
-            changes(&out),
-            [("time_zone".into(), Some("\"Asia/Tokyo\"".into()))]
-        );
-        let mut v = page_view("[clock]\ntime_zone = \"Asia/Tokyo\"\n", Page::Language, &[]);
         assert!(
-            !find(&v.access(), "Time zone: Like the system")
-                .expect("system")
-                .selected
+            matches!(out.as_slice(), [Outcome::SetTimeZone(z)] if z == "Asia/Tokyo"),
+            "{out:?}"
         );
-        let out = click(&mut v, "Time zone: Like the system");
-        assert_eq!(changes(&out), [("time_zone".into(), None)]);
-        // One the list does not offer shows, chosen.
-        let v = page_view(
-            "[clock]\ntime_zone = \"America/Halifax\"\n",
-            Page::Language,
-            &[],
-        );
+        v.zone_set(Err("Permission denied".into()));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Not changed: Permission denied").is_some());
+        assert!(find(&v.access(), "Paris").expect("paris").selected);
+        v.zone_set(Ok("Asia/Tokyo".into()));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Tokyo").expect("tokyo").selected);
+        assert!(find(&v.access(), "Not changed: Permission denied").is_none());
+        // One the list does not offer shows, chosen; the compositor's news
+        // keep it.
+        v.set_zone(SystemZone::Known("America/Halifax".into()));
+        v.set_context(v.context().clone());
+        v.set_context(Context {
+            config: v.context().config.clone(),
+            ..Context::default()
+        });
+        v.draw(Duration::ZERO);
         assert!(
             find(&v.access(), "America/Halifax")
                 .expect("its own")
                 .selected
         );
+        // Without timedated, nothing is offered to change.
+        v.set_zone(SystemZone::Absent("no system bus".into()));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Tokyo").expect("tokyo").disabled);
+        assert!(click(&mut v, "Tokyo").is_empty());
+    }
+
+    fn screen(name: &str, desktops: u32) -> hocus_api::ScreenInfo {
+        hocus_api::ScreenInfo {
+            name: name.into(),
+            make: String::new(),
+            model: "Headless".into(),
+            enabled: true,
+            modes: Vec::new(),
+            current_mode: None,
+            preferred_mode: None,
+            scale: 1.0,
+            transform: "normal".into(),
+            geometry: hocus_api::Rect {
+                x: 0,
+                y: 0,
+                width: 1280,
+                height: 800,
+            },
+            vrr: false,
+            vrr_capable: false,
+            primary: false,
+            desktops,
+            layout: None,
+        }
+    }
+
+    fn values(out: &[Outcome]) -> Vec<(crate::edit::Place, String, Option<String>)> {
+        out.iter()
+            .filter_map(|o| match o {
+                Outcome::Change(c) => Some((
+                    c.place.clone(),
+                    c.key.clone(),
+                    c.value.as_ref().map(|v| v.to_string().trim().to_owned()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_screen_s_desktops_are_counted_and_named() {
+        use crate::edit::Place;
+        let mut v = page_view(
+            "[[outputs]]\nname = \"HEADLESS-2\"\ndesktop_names = [\"Mail\"]\n",
+            Page::Desktops,
+            &[],
+        );
+        let mut ctx = v.context().clone();
+        ctx.screens = vec![screen("HEADLESS-1", 2), screen("HEADLESS-2", 1)];
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "One desktop more on HEADLESS-1");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Output("HEADLESS-1".into()),
+                "desktops".into(),
+                Some("3".into())
+            )]
+        );
+        let field = v.fields.node(&Field::DesktopName {
+            output: "HEADLESS-2".into(),
+            index: 0,
+        });
+        assert_eq!(field.and_then(|f| v.tree.field_value(f)), Some("Mail"));
+        click(&mut v, "Name of desktop 2 on HEADLESS-1");
+        v.text("Code");
+        let out = v.key(Key::Enter);
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Output("HEADLESS-1".into()),
+                "desktop_names".into(),
+                Some("[\"\", \"Code\"]".into())
+            )]
+        );
+        // Emptied, the name goes, and the key with the last one.
+        click(&mut v, "Name of desktop 1 on HEADLESS-2");
+        for _ in 0.."Mail".len() {
+            v.key(Key::Backspace);
+        }
+        let out = v.key(Key::Enter);
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Output("HEADLESS-2".into()),
+                "desktop_names".into(),
+                None
+            )]
+        );
+    }
+
+    #[test]
+    fn window_rules_are_switched_removed_and_added() {
+        use crate::edit::Place;
+        let mut v = page_view(
+            "[[rules]]\napp_id = \"chat*\"\ndesktop = 2\nmaximized = true\n",
+            Page::Windows,
+            &[],
+        );
+        let out = click(&mut v, "Between windows: 8 px");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("windows.gaps"),
+                "inner".into(),
+                Some("8".into())
+            )]
+        );
+        let out = click(&mut v, "Snap at the edges");
+        assert_eq!(changes(&out), [("snap".into(), Some("false".into()))]);
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "desktop 2").is_some());
+        assert!(
+            find(&v.access(), "chat*: Maximized")
+                .expect("chip")
+                .selected
+        );
+        let out = click(&mut v, "chat*: Maximized");
+        assert_eq!(values(&out), [(Place::Rule(0), "maximized".into(), None)]);
+        let out = click(&mut v, "chat*: Above the others");
+        assert_eq!(
+            values(&out),
+            [(Place::Rule(0), "on_top".into(), Some("true".into()))]
+        );
+        let out = click(&mut v, "Remove the rule for chat*");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Change(c)] if c.place == Place::Rule(0) && c.key.is_empty() && c.value.is_none()),
+            "{out:?}"
+        );
+        click(&mut v, "App of a new rule");
+        v.text("editor");
+        let out = click(&mut v, "Add the rule");
+        assert_eq!(
+            values(&out),
+            [(Place::Rule(1), "app_id".into(), Some("\"editor\"".into()))]
+        );
+    }
+
+    #[test]
+    fn the_touchpad_the_mouse_gestures_and_corners_are_set_apart() {
+        use crate::edit::Place;
+        let mut v = page_view("", Page::Mouse, &[]);
+        let out = click(&mut v, "Touchpad: Natural scrolling");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("touchpad"),
+                "natural_scroll".into(),
+                Some("true".into())
+            )]
+        );
+        let out = click(&mut v, "Mouse: Natural scrolling");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("mouse"),
+                "natural_scroll".into(),
+                Some("true".into())
+            )]
+        );
+        assert!(
+            find(&v.access(), "Mouse: Speed: Normal")
+                .expect("speed")
+                .selected
+        );
+        let out = click(&mut v, "Mouse: Speed: Fast");
+        assert_eq!(
+            values(&out),
+            [(Place::Section("mouse"), "speed".into(), Some("0.3".into()))]
+        );
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Four fingers down: Desktop");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("gestures"),
+                "four_down".into(),
+                Some("\"show-desktop\"".into())
+            )]
+        );
+        let out = click(&mut v, "Top left: Overview");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("hot_corners"),
+                "top_left".into(),
+                Some("\"overview\"".into())
+            )]
+        );
+    }
+
+    #[test]
+    fn captures_and_the_clipboard_are_set() {
+        use crate::edit::Place;
+        let mut v = page_view("", Page::Captures, &[]);
+        let out = click(&mut v, "Copy to the clipboard");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("screenshots"),
+                "copy".into(),
+                Some("false".into())
+            )]
+        );
+        click(&mut v, "Screenshots folder");
+        v.text("~/Pictures/Shots");
+        let out = v.key(Key::Enter);
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("screenshots"),
+                "folder".into(),
+                Some("\"~/Pictures/Shots\"".into())
+            )]
+        );
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Frames a second: 60");
+        assert_eq!(
+            values(&out),
+            [(Place::Section("recording"), "fps".into(), Some("60".into()))]
+        );
+        let out = click(&mut v, "Microphone");
+        assert_eq!(changes(&out), [("microphone".into(), Some("true".into()))]);
+
+        let mut v = page_view("[clipboard]\nhistory = false\n", Page::Clipboard, &[]);
+        // Without a history, nothing is kept across sessions.
+        assert!(!find(&v.access(), "Across sessions").expect("kept").selected);
+        let out = click(&mut v, "Copies kept: 50");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("clipboard"),
+                "entries".into(),
+                Some("50".into())
+            )]
+        );
+        let out = click(&mut v, "Keep a history");
+        assert_eq!(changes(&out), [("history".into(), Some("true".into()))]);
     }
 }

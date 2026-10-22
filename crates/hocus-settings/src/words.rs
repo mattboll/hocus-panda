@@ -658,9 +658,21 @@ pub const HOURS_24: Words = Words::new("24 hours · 14:37", "24 heures · 14:37"
 pub const HOURS_12: Words = Words::new("12 hours · 2:37 PM", "12 heures · 2:37 PM");
 pub const TIME_ZONE: Words = Words::new("Time zone", "Fuseau horaire");
 pub const TIME_ZONE_NOTE: Words = Words::new(
-    "The clock, the agenda and the lock screen follow it; applications follow the system’s.",
-    "L’horloge, l’agenda et l’écran de verrouillage le suivent ; les applications suivent celui du système.",
+    "The system’s: the clock, the agenda, the lock screen and applications follow it. Changing it asks for an administrator’s password.",
+    "Celui du système : l’horloge, l’agenda, l’écran de verrouillage et les applications le suivent. Le changer demande le mot de passe d’un administrateur.",
 );
+pub const NO_TIMEDATED: Words = Words::new(
+    "The system’s time zone is set through systemd-timedated, which is not here: change it with the system’s own tools.",
+    "Le fuseau du système se règle par systemd-timedated, absent ici : changez-le avec les outils du système.",
+);
+
+/// The system did not change its zone, and why.
+pub fn zone_refused(why: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Not changed: {why}"),
+        Lang::Fr => format!("Pas changé\u{a0}: {why}"),
+    }
+}
 
 /// Time zones offered, by region: the city named, its zone.
 pub const ZONES: [(Words, &[(&str, Words)]); 4] = [
@@ -763,3 +775,333 @@ pub fn clock_short(format: hocus_core::config::ClockFormat) -> &'static str {
         hocus_core::config::ClockFormat::Twelve => "12 h",
     }
 }
+
+// Desktops.
+pub const NEW_SCREENS: Words = Words::new("New screens", "Nouveaux écrans");
+pub const NEW_SCREENS_NOTE: Words = Words::new(
+    "Desktops of a screen plugged for the first time; each then keeps its own.",
+    "Les bureaux d’un écran branché pour la première fois ; chacun garde ensuite les siens.",
+);
+pub const DESKTOP_NAMES_NOTE: Words = Words::new(
+    "A name shows in the column and in bars that list desktops; empty, the desktop goes by its number. Type it, then Enter.",
+    "Un nom s’affiche dans la colonne et dans les barres qui listent les bureaux ; vide, le bureau garde son numéro. Tape-le, puis Entrée.",
+);
+pub const SWITCHING: Words = Words::new("Switching", "Changer de bureau");
+pub const SWITCHING_NOTE: Words = Words::new(
+    "Super+1…9, Ctrl+Alt+Left and Right, or three fingers sideways: always on the screen under the pointer.",
+    "Super+1…9, Ctrl+Alt+Gauche et Droite, ou trois doigts sur le côté : toujours sur l’écran sous le pointeur.",
+);
+pub const FEWER_NEW: Words = Words::new(
+    "One desktop fewer for new screens",
+    "Un bureau de moins pour les nouveaux écrans",
+);
+pub const MORE_NEW: Words = Words::new(
+    "One desktop more for new screens",
+    "Un bureau de plus pour les nouveaux écrans",
+);
+pub const DESKTOP_NAMES: Words = Words::new("Desktop names", "Noms des bureaux");
+
+/// "Name of desktop 2", told apart by screen when there are several.
+pub fn desktop_name_field(n: usize, screen: Option<&str>, lang: Lang) -> String {
+    match (lang, screen) {
+        (Lang::En, None) => format!("Name of desktop {n}"),
+        (Lang::En, Some(s)) => format!("Name of desktop {n} on {s}"),
+        (Lang::Fr, None) => format!("Nom du bureau {n}"),
+        (Lang::Fr, Some(s)) => format!("Nom du bureau {n} sur {s}"),
+    }
+}
+
+/// "Desktop 2", a name field's hint.
+pub fn desktop_hint(n: usize, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Desktop {n}"),
+        Lang::Fr => format!("Bureau {n}"),
+    }
+}
+
+/// A stepper's button, told apart by screen when there are several.
+pub fn on_screen(words: Words, screen: Option<&str>, lang: Lang) -> String {
+    match (lang, screen) {
+        (_, None) => words.get(lang).to_owned(),
+        (Lang::En, Some(s)) => format!("{} on {s}", words.get(lang)),
+        (Lang::Fr, Some(s)) => format!("{} sur {s}", words.get(lang)),
+    }
+}
+
+// Windows.
+pub const SNAPPING: Words = Words::new("Snapping", "Aimantation");
+pub const SNAP_EDGES: Words = Words::new("Snap at the edges", "Aimanter aux bords");
+pub const SNAP_EDGES_SUB: Words = Words::new(
+    "Dragged to an edge or a corner: a half, a quarter, the top maximizes",
+    "Glissée vers un bord ou un coin : une moitié, un quart, le haut agrandit",
+);
+pub const SNAP_NOTE: Words = Words::new(
+    "Off, windows move freely; their edges still stick to the screen’s and to each other. Super+Left and Super+Right snap either way.",
+    "Désactivé, les fenêtres bougent librement ; leurs bords collent toujours à ceux de l’écran et entre eux. Super+Gauche et Super+Droite aimantent dans tous les cas.",
+);
+pub const GAPS: Words = Words::new("Gaps", "Espaces");
+pub const GAPS_INNER: Words = Words::new("Between windows", "Entre les fenêtres");
+pub const GAPS_OUTER: Words = Words::new("At the edges", "Aux bords");
+pub const GAPS_NOTE: Words = Words::new(
+    "Around maximized, snapped and tiled windows; in logical pixels.",
+    "Autour des fenêtres agrandies, aimantées et en mosaïque ; en pixels logiques.",
+);
+pub const EFFECTS: Words = Words::new("Effects", "Effets");
+pub const WOBBLY: Words = Words::new("Wobbly windows", "Fenêtres en gelée");
+pub const WOBBLY_SUB: Words = Words::new(
+    "They bend while dragged",
+    "Elles plient quand on les glisse",
+);
+pub const SHADOWS: Words = Words::new("Shadows", "Ombres");
+pub const SHADOWS_SUB: Words = Words::new(
+    "Soft, as dark as the theme",
+    "Douces, aussi sombres que le thème",
+);
+pub const TITLE_BARS: Words = Words::new("Title bars", "Barres de titre");
+pub const TITLE_BARS_SUB: Words = Words::new("Above each window", "Au-dessus de chaque fenêtre");
+pub const CORNERS: Words = Words::new("Rounded corners", "Coins arrondis");
+pub const EFFECTS_NOTE: Words = Words::new(
+    "Thrown fast, a window glides and lands, on another screen if aimed there. Reduced motion stills them all.",
+    "Lancée vite, une fenêtre glisse et se pose, sur un autre écran si on la vise. Le mouvement réduit les arrête toutes.",
+);
+pub const RULES: Words = Words::new("Window rules", "Règles des fenêtres");
+pub const RULES_NOTE: Words = Words::new(
+    "The windows of an app, by its id or a pattern (* and ?), open as set here; a later rule wins over an earlier one. Desktop, screen, size and opacity are set in the file.",
+    "Les fenêtres d’une appli, par son identifiant ou un motif (* et ?), s’ouvrent comme réglé ici ; une règle plus bas l’emporte. Bureau, écran, taille et opacité se règlent dans le fichier.",
+);
+pub const NO_RULE: Words = Words::new(
+    "No rule: windows open where the pointer is.",
+    "Aucune règle : les fenêtres s’ouvrent là où est le pointeur.",
+);
+pub const ANY_APP: Words = Words::new("Any app", "Toute appli");
+pub const RULE_MAXIMIZED: Words = Words::new("Maximized", "Agrandie");
+pub const RULE_PINNED: Words = Words::new("On every desktop", "Sur tous les bureaux");
+pub const RULE_ON_TOP: Words = Words::new("Above the others", "Au-dessus des autres");
+pub const RULE_BLUR: Words = Words::new("Blur behind", "Flou derrière");
+pub const NEW_RULE: Words = Words::new("App of a new rule", "Appli d’une nouvelle règle");
+pub const NEW_RULE_HINT: Words = Words::new(
+    "Its id or a pattern: org.mozilla.firefox, chat*",
+    "Son identifiant ou un motif : org.mozilla.firefox, chat*",
+);
+pub const ADD_RULE: Words = Words::new("Add the rule", "Ajouter la règle");
+
+/// "chat*: Maximized", a rule's choice for screen readers.
+pub fn of_rule(pattern: &str, what: Words, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{pattern}: {}", what.get(lang)),
+        Lang::Fr => format!("{pattern} : {}", what.get(lang)),
+    }
+}
+
+pub fn remove_rule(pattern: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Remove the rule for {pattern}"),
+        Lang::Fr => format!("Retirer la règle de {pattern}"),
+    }
+}
+
+/// What a rule sets that the page does not change, in words.
+pub fn rule_detail(rule: &hocus_core::config::Rule, lang: Lang) -> String {
+    let mut said = Vec::new();
+    if let Some(t) = &rule.title {
+        said.push(match lang {
+            Lang::En => format!("title {t}"),
+            Lang::Fr => format!("titre {t}"),
+        });
+    }
+    if let Some(d) = rule.desktop {
+        said.push(match lang {
+            Lang::En => format!("desktop {d}"),
+            Lang::Fr => format!("bureau {d}"),
+        });
+    }
+    if let Some(o) = &rule.output {
+        said.push(o.clone());
+    }
+    if let Some([w, h]) = rule.size {
+        said.push(format!("{w} × {h}"));
+    }
+    if let Some(o) = rule.opacity {
+        let p = (o * 100.0).round() as u32;
+        said.push(match lang {
+            Lang::En => format!("opacity {}", percent(p, lang)),
+            Lang::Fr => format!("opacité {}", percent(p, lang)),
+        });
+    }
+    said.join(" · ")
+}
+
+/// "8 px", "Between windows: 8 px".
+pub fn pixels(n: u32) -> String {
+    format!("{n} px")
+}
+
+pub fn named_value(name: Words, value: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{}: {value}", name.get(lang)),
+        Lang::Fr => format!("{} : {value}", name.get(lang)),
+    }
+}
+
+// Mouse and touchpad.
+pub const TOUCHPAD: Words = Words::new("Touchpad", "Pavé tactile");
+pub const MOUSE: Words = Words::new("Mouse", "Souris");
+pub const NATURAL_SCROLL: Words = Words::new("Natural scrolling", "Défilement naturel");
+pub const NATURAL_SCROLL_SUB: Words = Words::new(
+    "The content follows the fingers",
+    "Le contenu suit les doigts",
+);
+pub const NATURAL_WHEEL_SUB: Words = Words::new(
+    "The content follows the wheel, as on a touchpad",
+    "Le contenu suit la molette, comme sur un pavé",
+);
+pub const TAP_TO_CLICK: Words = Words::new("Tap to click", "Toucher pour cliquer");
+pub const TAP_TO_CLICK_SUB: Words = Words::new(
+    "One finger the left button, two the right",
+    "Un doigt le bouton gauche, deux le droit",
+);
+pub const WHILE_TYPING: Words = Words::new("Off while typing", "Coupé pendant la frappe");
+pub const WHILE_TYPING_SUB: Words = Words::new(
+    "A palm brushing it does nothing",
+    "Une paume qui l’effleure ne fait rien",
+);
+pub const LEFT_HANDED: Words = Words::new("Left-handed", "Gaucher");
+pub const LEFT_HANDED_SUB: Words = Words::new(
+    "The buttons swapped, the touchpad’s too",
+    "Les boutons inversés, ceux du pavé aussi",
+);
+pub const SPEED: Words = Words::new("Speed", "Vitesse");
+pub const SPEEDS: [(f64, Words); 5] = [
+    (-0.6, Words::new("Slowest", "Très lente")),
+    (-0.3, Words::new("Slow", "Lente")),
+    (0.0, Words::new("Normal", "Normale")),
+    (0.3, Words::new("Fast", "Rapide")),
+    (0.6, Words::new("Fastest", "Très rapide")),
+];
+pub const POINTING_NOTE: Words = Words::new(
+    "Set at once on a session of its own; in a window of another session, that one’s settings apply.",
+    "Réglé à l’instant sur une session à part entière ; dans une fenêtre d’une autre session, ce sont ses réglages qui s’appliquent.",
+);
+pub const GESTURES: Words = Words::new("Gestures", "Gestes");
+pub const THREE_SIDEWAYS: Words = Words::new("Three fingers sideways", "Trois doigts sur le côté");
+pub const THREE_SIDEWAYS_SUB: Words = Words::new(
+    "Switch desktops, the windows following the fingers",
+    "Changent de bureau, les fenêtres suivant les doigts",
+);
+pub const THREE_UP: Words = Words::new("Three fingers up", "Trois doigts vers le haut");
+pub const THREE_DOWN: Words = Words::new("Three fingers down", "Trois doigts vers le bas");
+pub const FOUR_UP: Words = Words::new("Four fingers up", "Quatre doigts vers le haut");
+pub const FOUR_DOWN: Words = Words::new("Four fingers down", "Quatre doigts vers le bas");
+pub const SUPER_ALONE: Words = Words::new("Super alone", "Super seul");
+pub const GESTURES_NOTE: Words = Words::new(
+    "Two fingers stay the applications’: scrolling, zooming in the browser. A pinch closing in opens the window switcher.",
+    "Deux doigts restent aux applications : défiler, zoomer dans le navigateur. Un pincement qui se referme ouvre le sélecteur de fenêtres.",
+);
+
+/// "Touchpad: Natural scrolling", told apart from the mouse's.
+pub fn of_device(device: Words, what: Words, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{}: {}", device.get(lang), what.get(lang)),
+        Lang::Fr => format!("{} : {}", device.get(lang), what.get(lang)),
+    }
+}
+
+// Screenshots and recording.
+pub const SCREENSHOTS: Words = Words::new("Screenshots", "Captures d’écran");
+pub const SAVE_SHOTS: Words = Words::new("Save to a folder", "Enregistrer dans un dossier");
+pub const SAVE_SHOTS_SUB: Words = Words::new("Each capture as a PNG", "Chaque capture en PNG");
+pub const COPY_SHOTS: Words = Words::new("Copy to the clipboard", "Copier dans le presse-papiers");
+pub const COPY_SHOTS_SUB: Words = Words::new("To paste it at once", "Pour la coller aussitôt");
+pub const SHOTS_FOLDER: Words = Words::new("Screenshots folder", "Dossier des captures");
+pub const SHOTS_FOLDER_HINT: Words = Words::new(
+    "Empty: Screenshots in the pictures folder",
+    "Vide : Captures dans le dossier des images",
+);
+pub const SHOTS_NOTE: Words = Words::new(
+    "A toast then offers to open, annotate, delete or copy its text.",
+    "Une bulle propose ensuite de l’ouvrir, l’annoter, la supprimer ou copier son texte.",
+);
+pub const RECORDING: Words = Words::new("Recording", "Enregistrement");
+pub const FPS: Words = Words::new("Frames a second", "Images par seconde");
+pub const COUNTDOWN: Words = Words::new("Countdown", "Décompte");
+pub const SHOW_CLICKS: Words = Words::new("Show clicks", "Montrer les clics");
+pub const SHOW_CLICKS_SUB: Words = Words::new(
+    "Rings in the video, never on the screen",
+    "Des anneaux dans la vidéo, jamais à l’écran",
+);
+pub const SHOW_KEYS: Words = Words::new("Show keys", "Montrer les touches");
+pub const SHOW_KEYS_SUB: Words = Words::new(
+    "Combinations drawn in the video, never plain typing",
+    "Les combinaisons dans la vidéo, jamais la frappe",
+);
+pub const MICROPHONE: Words = Words::new("Microphone", "Micro");
+pub const MICROPHONE_SUB: Words = Words::new("Your voice", "Ta voix");
+pub const SYSTEM_SOUND: Words = Words::new("System sound", "Son du système");
+pub const SYSTEM_SOUND_SUB: Words = Words::new("What plays", "Ce qui joue");
+pub const WEBCAM: Words = Words::new("Webcam", "Webcam");
+pub const WEBCAM_SUB: Words = Words::new(
+    "A round bubble, moved with the pointer",
+    "Une bulle ronde, déplacée au pointeur",
+);
+pub const HARDWARE: Words = Words::new("Graphics card encodes", "Encodage par la carte graphique");
+pub const HARDWARE_SUB: Words =
+    Words::new("Lighter, where it can", "Plus léger, quand elle le peut");
+pub const RECORDING_FOLDER: Words = Words::new("Recordings folder", "Dossier des enregistrements");
+pub const RECORDING_FOLDER_HINT: Words = Words::new(
+    "Empty: Screencasts in the videos folder",
+    "Vide : Screencasts dans le dossier des vidéos",
+);
+pub const RECORDING_NOTE: Words = Words::new(
+    "Sound, webcam and keys start like this when picking what to record; the picker changes them for that recording.",
+    "Le son, la webcam et les touches démarrent ainsi au choix de ce qu’on enregistre ; le sélecteur les change pour cet enregistrement.",
+);
+pub const FOLDER_FIELD_NOTE: Words = Words::new(
+    "Type its path, then Enter; empty, the usual folder.",
+    "Tape son chemin, puis Entrée ; vide, le dossier habituel.",
+);
+
+/// "3 s".
+pub fn seconds(n: u32, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{n} s"),
+        Lang::Fr => format!("{n}\u{a0}s"),
+    }
+}
+
+// Clipboard and emoji.
+pub const CLIPBOARD_HISTORY: Words =
+    Words::new("Clipboard history", "Historique du presse-papiers");
+pub const KEEP_HISTORY: Words = Words::new("Keep a history", "Garder un historique");
+pub const KEEP_HISTORY_SUB: Words = Words::new(
+    "Never what password managers mark secret",
+    "Jamais les mots de passe",
+);
+pub const ACROSS_SESSIONS: Words = Words::new("Across sessions", "D’une session à l’autre");
+pub const ACROSS_SESSIONS_SUB: Words =
+    Words::new("Kept encrypted on disk", "Gardé chiffré sur le disque");
+pub const ENTRIES: Words = Words::new("Copies kept", "Copies gardées");
+pub const CLIPBOARD_NOTE: Words = Words::new(
+    "Newest first; Enter pastes into the focused app, Tab pins, Delete forgets. Pinned ones are kept besides.",
+    "Les plus récentes d’abord ; Entrée colle dans l’appli active, Tab épingle, Suppr oublie. Les épinglées sont gardées en plus.",
+);
+pub const EMOJI: Words = Words::new("Emoji", "Emoji");
+pub const EMOJI_NOTE: Words = Words::new(
+    "Searched in English and French, recent ones first; Tab changes the skin tone, Enter types it into the focused app.",
+    "Cherchés en anglais et en français, les récents d’abord ; Tab change la couleur de peau, Entrée l’écrit dans l’appli active.",
+);
+
+/// "100 copies kept".
+pub fn copies(n: u32, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{n} copies kept"),
+        Lang::Fr => format!("{n} copies gardées"),
+    }
+}
+
+// Home tiles of the Work pages.
+pub const CLASSIC_SCROLL: Words = Words::new("Classic scrolling", "Défilement classique");
+pub const SAVED_AND_COPIED: Words = Words::new("Saved and copied", "Enregistrées et copiées");
+pub const SAVED: Words = Words::new("Saved", "Enregistrées");
+pub const COPIED: Words = Words::new("Copied", "Copiées");
+pub const NEITHER: Words = Words::new("Neither saved nor copied", "Ni enregistrées ni copiées");
+pub const DESKTOP_COUNT: Words = Words::new("Desktops per screen", "Bureaux par écran");

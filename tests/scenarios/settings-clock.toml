@@ -1,6 +1,10 @@
-description = "Language and region sets the clock to 12 hours and Tokyo's time zone: the column's clock follows at once; in the dark and light themes"
+# Language and region's clock (#67): its format is the file's; its time
+# zone is the system's, set through timedated (a stand-in here, on a
+# private system bus), which the column follows once timedated says so.
+description = "Language and region sets the clock to 12 hours and asks timedated for Tokyo's time zone: the column's clock follows once it is the system's; in the dark and light themes"
 outputs = ["1280x800"]
 shell = true
+timedated = "UTC"
 
 [[step]]
 open_settings = { page = "language" }
@@ -21,6 +25,9 @@ expect_config_file = { contains = ["[clock]", "format = \"12h\""] }
 expect_ui = { label = "2:37 PM" }
 
 [[step]]
+expect_settings = { label = "UTC", selected = true }
+
+[[step]]
 pointer_move = [500, 500]
 
 [[step]]
@@ -30,7 +37,7 @@ scroll = 600
 click_settings = "Tokyo"
 
 [[step]]
-expect_config_file = { contains = ["time_zone = \"Asia/Tokyo\""] }
+expect_timedated = "SetTimezone Asia/Tokyo interactive"
 
 # 14:37 in UTC, the virtual clock's zone, is 23:37 in Tokyo.
 [[step]]
@@ -38,6 +45,32 @@ expect_ui = { label = "11:37 PM" }
 
 [[step]]
 expect_settings = { label = "Tokyo", selected = true }
+
+[[step]]
+expect_config_file = { lacks = ["Tokyo", "time_zone"] }
+
+# Refused, as polkit would: the zone stays, and the page says why.
+[[step]]
+timedated_refuses = true
+
+[[step]]
+click_settings = "Paris"
+
+[[step]]
+expect_timedated = "SetTimezone Europe/Paris interactive"
+
+[[step]]
+expect_settings = { label = "Not changed: Permission denied" }
+
+[[step]]
+expect_settings = { label = "Tokyo", selected = true }
+
+[[step]]
+expect_ui = { label = "11:37 PM" }
+
+# Off the chips: nothing hovered in the pictures.
+[[step]]
+pointer_move = [330, 760]
 
 [[step]]
 scroll = -600
@@ -48,13 +81,17 @@ frames = 2
 [[step]]
 expect_screenshot = { output = "HEADLESS-1", reference = "settings-clock.png" }
 
+# Set elsewhere (timedatectl): the column and the page follow.
+[[step]]
+timedated_zone = "America/New_York"
+
+[[step]]
+expect_ui = { label = "10:37 AM" }
+
 [[step]]
 config = """
 [appearance]
 theme = "light"
-
-[clock]
-time_zone = "America/New_York"
 """
 
 [[step]]
@@ -71,12 +108,3 @@ frames = 2
 
 [[step]]
 expect_screenshot = { output = "HEADLESS-1", reference = "settings-clock-light.png" }
-
-[[step]]
-scroll = -600
-
-[[step]]
-click_settings = "Time zone: Like the system"
-
-[[step]]
-expect_ui = { label = "14:37" }

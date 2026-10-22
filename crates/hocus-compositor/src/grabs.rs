@@ -209,14 +209,17 @@ impl PointerGrab<State> for MoveGrab {
         }
         let location = self.initial_location.to_f64() + (event.location - self.start_data.location);
         let mut location = location.to_i32_round();
-        // At an edge, a zone shows where the window would snap; elsewhere,
-        // its edges stick to the work area's and to other windows'.
+        // At an edge, a zone shows where the window would snap (unless
+        // snapping is off); elsewhere, its edges stick to the work area's and to other windows'.
         let pointer = event.location;
         let output = state.space.output_under(pointer).next().cloned();
-        let zone = output.as_ref().and_then(|o| {
-            let whole = rect(state.space.output_geometry(o)?);
-            Zone::at(whole, pointer.x, pointer.y, SNAP_EDGE)
-        });
+        let zone = output
+            .as_ref()
+            .filter(|_| state.config.windows.snap)
+            .and_then(|o| {
+                let whole = rect(state.space.output_geometry(o)?);
+                Zone::at(whole, pointer.x, pointer.y, SNAP_EDGE)
+            });
         state.set_snap_preview(output.clone().zip(zone));
         if zone.is_none()
             && let Some(output) = output

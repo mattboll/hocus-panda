@@ -57,6 +57,9 @@ pub struct Scenario {
     /// Gives the compositor a private D-Bus bus (notifications).
     #[serde(default)]
     pub dbus: bool,
+    /// A stand-in for timedated in this time zone, on a private system bus
+    /// the compositor and the settings follow; never the machine's.
+    pub timedated: Option<String>,
     /// Programs the scenario runs; it is skipped where one is missing.
     #[serde(default)]
     pub needs: Vec<String>,
@@ -138,6 +141,15 @@ pub enum Step {
     /// The phone was asked this: `ring`, `reply ID TEXT`, `clipboard
     /// TEXT`, `share URL`, `browse` (`{runtime_dir}` as in `config`).
     ExpectPhone(String),
+    /// The timedated stand-in was asked this: `SetTimezone ZONE
+    /// interactive`.
+    ExpectTimedated(String),
+    /// The system's zone changes in the timedated stand-in, as if set
+    /// elsewhere.
+    TimedatedZone(String),
+    /// The timedated stand-in refuses to set the zone from now on, as
+    /// polkit would, or no longer.
+    TimedatedRefuses(bool),
     /// KDE Connect as the session found it, once so: `absent`,
     /// `stopped`, `running`, `off`.
     ExpectPhoneState(String),
@@ -812,6 +824,9 @@ impl fmt::Display for Step {
             Self::PhoneRemove(n) => write!(f, "phone_remove {n}"),
             Self::ExpectPhone(asked) => write!(f, "expect_phone {asked:?}"),
             Self::ExpectPhoneState(state) => write!(f, "expect_phone_state {state:?}"),
+            Self::ExpectTimedated(asked) => write!(f, "expect_timedated {asked:?}"),
+            Self::TimedatedZone(zone) => write!(f, "timedated_zone {zone}"),
+            Self::TimedatedRefuses(r) => write!(f, "timedated_refuses {r}"),
             Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
             Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
             Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
@@ -914,6 +929,17 @@ impl Scenario {
         } else {
             None
         };
+        // The system bus, with timedated alone on it.
+        let system_bus = match &self.timedated {
+            Some(_) => Some(crate::bus::PrivateBus::start()?),
+            None => None,
+        };
+        let timedated = match (&system_bus, &self.timedated) {
+            (Some(bus), Some(zone)) => {
+                Some(crate::timedated::FakeTimedated::start(&bus.address, zone)?)
+            }
+            _ => None,
+        };
         let compositor = Headless::start_options(HarnessOptions {
             headless: HeadlessConfig {
                 outputs,
@@ -929,7 +955,7 @@ impl Scenario {
             xwayland: self.xwayland,
             shell: self.shell,
             session_bus: bus.as_ref().map(|b| b.address.clone()),
-            system_bus: None,
+            system_bus: system_bus.as_ref().map(|b| b.address.clone()),
             data_dirs: (!self.data_dirs.is_empty())
                 .then(|| self.data_dirs.iter().map(|d| self.dir.join(d)).collect()),
             child_env: self.child_env.as_ref().map(|env| {
@@ -961,6 +987,8 @@ impl Scenario {
             sharing: None,
             lock_client: None,
             bus,
+            timedated,
+            system_bus,
             tray_apps: Vec::new(),
             phone: None,
             phone_posted: Vec::new(),
@@ -1004,6 +1032,9 @@ struct Run<'a> {
     phone: Option<crate::phone::FakePhone>,
     phone_posted: Vec<String>,
     bus: Option<crate::bus::PrivateBus>,
+    /// timedated's stand-in; before its bus, so that it goes first.
+    timedated: Option<crate::timedated::FakeTimedated>,
+    system_bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
     caldav: Option<crate::caldav::Server>,
@@ -1080,6 +1111,35 @@ impl Run<'_> {
                     .as_ref()
                     .context("no phone: a `phone` step first")?
                     .remove(id)
+            }
+            Step::ExpectTimedated(expected) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let asked = self
+                        .timedated
+                        .as_ref()
+                        .context("no timedated: the scenario needs `timedated = \"ZONE\"`")?
+                        .asked();
+                    if asked.contains(expected) {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("timedated was asked {asked:?}, not {expected:?}");
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
+            Step::TimedatedZone(zone) => self
+                .timedated
+                .as_ref()
+                .context("no timedated: the scenario needs `timedated = \"ZONE\"`")?
+                .set_zone(zone),
+            Step::TimedatedRefuses(refuse) => {
+                self.timedated
+                    .as_ref()
+                    .context("no timedated: the scenario needs `timedated = \"ZONE\"`")?
+                    .refuse(*refuse);
+                Ok(())
             }
             Step::ExpectPhone(expected) => {
                 let runtime = self.compositor.runtime_dir().to_string_lossy().into_owned();
@@ -2192,6 +2252,11 @@ impl Run<'_> {
                 .transpose()?,
             lang: hocus_shell::Lang::En,
             app_id: "hocus-settings".into(),
+            // Never the machine's: the stand-in's, or none.
+            system_bus: match &self.system_bus {
+                Some(bus) => hocus_settings::client::SystemBus::At(bus.address.clone()),
+                None => hocus_settings::client::SystemBus::Off,
+            },
         })?;
         self.settings = Some(running);
         let deadline = Instant::now() + CLIENT_TIMEOUT;

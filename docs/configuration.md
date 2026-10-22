@@ -7,6 +7,11 @@ configuration stays; `hocus msg config` shows the configuration in effect and
 the last error.
 
 ```toml
+[windows]
+snap = true        # dragged to a screen's edge or corner, a window snaps there (halves, quarters,
+                   #   the top maximizes); false: it moves freely, its edges still stick
+wobbly = true      # a dragged window bends like jelly; false: stiff (thrown, it still glides)
+
 [windows.gaps]
 inner = 8          # between windows, logical pixels (0 to 64)
 outer = 8          # around them, at the edges of the work area (0 to 64)
@@ -27,6 +32,18 @@ options = "caps:escape"  # XKB options
 repeat_delay = 200       # ms
 repeat_rate = 25         # per second
 numlock = true           # Num Lock on at start
+
+[mouse]                    # mice, trackballs, pointing sticks: set through libinput on a session of
+                           #   its own (in a window of another session, that one's settings apply)
+natural_scroll = false     # the content follows the wheel
+left_handed = false        # the buttons swapped, the touchpads' too
+speed = 0.0                # -1 (slowest) to 1 (fastest)
+
+[touchpad]
+natural_scroll = false     # the content follows the fingers
+tap_to_click = false       # one finger taps the left button, two the right, three the middle
+disable_while_typing = true
+speed = 0.0                # -1 to 1
 
 [decorations]
 radius = 12        # window corners (0 to 32)
@@ -159,8 +176,9 @@ herdr_socket = ""          # empty: $XDG_CONFIG_HOME/herdr/herdr.sock, looked fo
 interface = "auto"         # en or fr; auto follows the session's locale (LANG); changed at once
 
 [clock]                    # the column's, the lock screen's and the agenda's
-format = "24h"             # or 12h (2:37 PM)
-time_zone = ""             # a time zone of the system's database (Europe/Paris); empty: the system's
+format = "24h"             # or 12h (2:37 PM); the time zone is the system's: the settings' Language
+                           #   and region page sets it through systemd-timedated (polkit asks), and the
+                           #   clock follows it, and /etc/localtime, as they change
 
 [hot_corners]              # the pointer resting in a screen's corner; one against another screen does nothing
 delay_ms = 150             # so that passing by does nothing
@@ -201,6 +219,9 @@ position = [0, 0]          # logical, top-left corner
 vrr = false                # adaptive sync, where the screen and GPU can
 primary = true             # where unplugged screens' desktops and windows go
 desktops = 1               # its own desktops, 1 to 8 (desktops.per_output otherwise)
+desktop_names = ["Mail", "Code"]  # its desktops' names, in order (at most 8, 32 characters each); one
+                           #   empty or left out goes by its number. Shown in the column and to bars
+                           #   (ext-workspace)
 mirror = "eDP-1"           # shows that screen's picture, scaled to fit; its own desktops wait
 
 [[layouts]]                # how a set of screens is placed (the Screens page writes them)
@@ -219,7 +240,10 @@ positions = { DP-1 = [0, 0], eDP-1 = [320, 1440] }
 Each `[[rules]]` applies to the windows whose `app_id` and `title` match its
 patterns (both optional); when several match, later rules override earlier
 ones, field by field. Super+wheel over a window changes its opacity, and the
-new opacity is remembered for that application.
+new opacity is remembered for that application. The settings' Windows page
+lists the rules, adds one for an app, turns what it sets (maximized, on every
+desktop, above the others, blur) on or off, and removes it; the rest of a
+rule is written in the file.
 
 ## Screens
 

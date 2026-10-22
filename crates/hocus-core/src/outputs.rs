@@ -30,6 +30,9 @@ pub struct OutputConfig {
     pub primary: Option<bool>,
     /// Desktops of its own, 1 to 8; `desktops.per_output` otherwise.
     pub desktops: Option<u32>,
+    /// Its desktops' names, in order (`["Mail", "Code"]`); one left out or
+    /// empty is called by its number.
+    pub desktop_names: Vec<String>,
     /// Shows this other screen's picture, scaled to fit, instead of
     /// desktops of its own, which wait for it (#125): a projector showing
     /// the laptop.
@@ -208,6 +211,17 @@ impl OutputConfig {
             && !(1..=8).contains(&n)
         {
             return Err(format!("desktops = {n}: expected 1 to 8"));
+        }
+        if self.desktop_names.len() > 8 {
+            return Err(format!(
+                "desktop_names: {} names, expected at most 8",
+                self.desktop_names.len()
+            ));
+        }
+        if let Some(long) = self.desktop_names.iter().find(|n| n.chars().count() > 32) {
+            return Err(format!(
+                "desktop_names: {long:?} is longer than 32 characters"
+            ));
         }
         Ok(())
     }

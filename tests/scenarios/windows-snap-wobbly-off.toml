@@ -1,0 +1,67 @@
+# Snapping and wobbly windows turned off (#67): dragged to the left edge,
+# a window shows no zone and does not bend; let go, it stays where it was
+# dropped, not snapped.
+description = "With snapping and wobbly windows off, a window dragged to an edge stays stiff and is not snapped"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+config = """
+[windows]
+snap = false
+wobbly = false
+"""
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [100, 400]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [2, 400]
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "windows-snap-wobbly-off.png" }
+
+[[step]]
+advance_ms = 120
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_window = { app_id = "doc", state = "normal" }
+
+[[step]]
+expect_idle = { for_ms = 300 }

@@ -1,0 +1,59 @@
+description = "French chosen on Language and region: the Work pages speak it at once, without restart"
+outputs = ["1280x800"]
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+click_settings = "Français"
+
+[[step]]
+expect_config_file = { contains = ["interface = \"fr\""] }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+click_settings = "Bureaux"
+
+[[step]]
+expect_settings = { label = "Nom du bureau 1" }
+
+[[step]]
+expect_settings = { label = "Un bureau de plus" }
+
+[[step]]
+click_settings = "Fenêtres"
+
+[[step]]
+expect_settings = { label = "Aimanter aux bords", selected = true }
+
+[[step]]
+expect_settings = { label = "Entre les fenêtres : 0 px", selected = true }
+
+[[step]]
+click_settings = "Souris et pavé"
+
+[[step]]
+expect_settings = { label = "Pavé tactile : Défilement naturel", selected = false }
+
+[[step]]
+expect_settings = { label = "Souris : Vitesse : Normale", selected = true }
+
+[[step]]
+click_settings = "Captures et enregistrement"
+
+[[step]]
+expect_settings = { label = "Enregistrer dans un dossier", selected = true }
+
+[[step]]
+click_settings = "Presse-papiers et emoji"
+
+[[step]]
+expect_settings = { label = "Garder un historique", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-french-work.png" }

@@ -47,6 +47,7 @@ mod output_spec;
 mod outputs;
 mod pandas;
 mod phone;
+mod pointing;
 mod quick;
 mod recording;
 mod scene;
@@ -62,6 +63,7 @@ mod socket;
 mod state;
 mod stats;
 mod surface;
+mod timezone;
 mod tray;
 mod tty;
 mod updates;
@@ -266,6 +268,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     screenshot::start(&event_loop.handle(), &mut state);
     recording::start(&event_loop.handle(), &mut state);
     updates::start(&event_loop.handle(), &mut state);
+    timezone::start(&event_loop.handle(), &state);
     authorize::start(
         &event_loop.handle(),
         &mut state,

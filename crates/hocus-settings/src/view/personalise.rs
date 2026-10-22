@@ -9,6 +9,7 @@ use hocus_core::config::{ClockFormat, Wallpaper, WallpaperSpec, parse_hex};
 use hocus_shell::panda::{Character, Panda};
 
 use super::*;
+use crate::catalogue::SystemZone;
 
 /// A text field of the Wallpaper page: what is typed is written with
 /// Enter.
@@ -289,7 +290,7 @@ impl SettingsView {
     }
 
     /// A muted line under a control.
-    fn note(&mut self, theme: &Theme, parent: NodeId, words: words::Words) {
+    pub(super) fn note(&mut self, theme: &Theme, parent: NodeId, words: words::Words) {
         let paint = Paint::Muted;
         self.note_painted(theme, parent, words, paint);
     }
@@ -957,25 +958,19 @@ impl SettingsView {
         }
         self.highlighted(section, &Setting::Clock, Look::default());
 
-        // A list of cities, by region; the map comes later.
+        // The system's, through timedated: a list of cities, by region;
+        // the map comes later.
         let section = self.section(theme, body, words::TIME_ZONE);
-        let zone = clock.time_zone.as_str();
+        let system = self.ctx.zone.clone();
+        let zone = system.name();
+        let works = !matches!(system, SystemZone::Absent(_));
+        // Why nothing can be chosen, before what cannot be.
+        if let SystemZone::Absent(why) = &system {
+            tracing::debug!(why, "no timedated");
+            self.note(theme, section, words::NO_TIMEDATED);
+        }
         let line = self.add(section, row(8.0), Kind::Box(Look::default()));
-        let system = Target::Set(Change {
-            value: None,
-            ..Change::new("clock", "time_zone", "")
-        });
-        let b = self.choice(
-            theme,
-            line,
-            words::LIKE_THE_SYSTEM.get(lang),
-            zone.is_empty(),
-            system,
-        );
-        // Told apart from the interface language's.
-        let name = labelled(words::TIME_ZONE, words::LIKE_THE_SYSTEM.get(lang), lang);
-        self.tree.set_name(b, &name);
-        self.zone_chip(theme, line, "UTC", "UTC", zone == "UTC");
+        self.zone_chip(theme, line, "UTC", "UTC", (zone == "UTC", works));
         let offered = words::ZONES
             .iter()
             .flat_map(|(_, cities)| cities.iter())
@@ -983,7 +978,7 @@ impl SettingsView {
         // One set in the file and not offered shows too, chosen.
         if !zone.is_empty() && zone != "UTC" && !offered {
             let name = words::zone_name(zone, lang);
-            self.zone_chip(theme, line, zone, &name, true);
+            self.zone_chip(theme, line, zone, &name, (true, works));
         }
         let per_line = if self.tree.size().w >= 1180.0 { 7 } else { 4 };
         for (region, cities) in words::ZONES {
@@ -997,17 +992,39 @@ impl SettingsView {
             for some in cities.chunks(per_line) {
                 let chips = self.add(group, fill_width(row(6.0)), Kind::Box(Look::default()));
                 for (id, city) in some {
-                    self.zone_chip(theme, chips, id, city.get(lang), zone == *id);
+                    self.zone_chip(theme, chips, id, city.get(lang), (zone == *id, works));
                 }
             }
         }
-        self.note(theme, section, words::TIME_ZONE_NOTE);
+        if works {
+            self.note(theme, section, words::TIME_ZONE_NOTE);
+        }
+        if let Some(why) = self.zone_refused.clone() {
+            let text = words::zone_refused(&why, lang);
+            self.add(
+                section,
+                fill_width(Style::default()),
+                Kind::text(
+                    &text,
+                    theme.text.label.with_weight(500).with_color(Paint::Waiting),
+                ),
+            );
+        }
         self.highlighted(section, &Setting::TimeZone, Look::default());
     }
 
-    fn zone_chip(&mut self, theme: &Theme, parent: NodeId, id: &str, name: &str, chosen: bool) {
+    /// A zone to choose; greyed where the system's cannot be set.
+    fn zone_chip(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        id: &str,
+        name: &str,
+        (chosen, works): (bool, bool),
+    ) {
         let mut b = Button::new(name, ButtonKind::Chip, theme);
         b.selected = chosen;
+        b.enabled = works;
         let chip = self.add(
             parent,
             Style {
@@ -1017,7 +1034,6 @@ impl SettingsView {
             },
             Kind::Button(b),
         );
-        let change = Change::new("clock", "time_zone", id);
-        self.targets.insert(chip, Target::Set(change));
+        self.targets.insert(chip, Target::SetZone(id.to_owned()));
     }
 }

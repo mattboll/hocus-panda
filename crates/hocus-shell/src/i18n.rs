@@ -243,6 +243,14 @@ impl Lang {
         }
     }
 
+    /// A named desktop: "Mail · desktop 2 of 4".
+    pub fn desktop_named(self, name: &str, shown: usize, count: usize) -> String {
+        match self {
+            Self::En => format!("{name} · desktop {shown} of {count}"),
+            Self::Fr => format!("{name} · bureau {shown} sur {count}"),
+        }
+    }
+
     pub fn desktops_title(self) -> &'static str {
         self.pick("Desktops of each screen", "Bureaux de chaque écran")
     }

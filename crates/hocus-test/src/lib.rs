@@ -12,6 +12,7 @@ pub mod randr;
 pub mod scenario;
 pub mod screencopy;
 pub mod session_lock;
+pub mod timedated;
 pub mod tray;
 pub mod x11;
 

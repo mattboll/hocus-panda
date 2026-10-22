@@ -140,6 +140,10 @@ impl Page {
                 | Self::Account
                 | Self::Accounts
                 | Self::Desktops
+                | Self::Windows
+                | Self::Mouse
+                | Self::Captures
+                | Self::Clipboard
                 | Self::Language
                 | Self::About
                 | Self::Welcome
@@ -266,6 +270,43 @@ impl Page {
                 "résolution",
             ],
             Keyboard => &["keys", "touches", "layout", "azerty", "qwerty", "raccourci"],
+            Desktops => &[
+                "workspace",
+                "espace de travail",
+                "virtual",
+                "virtuel",
+                "switch desktop",
+            ],
+            Windows => &[
+                "window", "fenêtre", "snap", "aimanter", "gaps", "espaces", "wobbly", "gelée",
+                "rules", "règles", "effects", "effets",
+            ],
+            Mouse => &[
+                "touchpad",
+                "trackpad",
+                "pavé tactile",
+                "scroll",
+                "défilement",
+                "gesture",
+                "geste",
+                "corner",
+                "coin",
+                "pointer",
+                "pointeur",
+            ],
+            Captures => &[
+                "screenshot",
+                "capture d’écran",
+                "capture d'écran",
+                "record",
+                "enregistrer",
+                "video",
+                "vidéo",
+                "screencast",
+            ],
+            Clipboard => &[
+                "copy", "copier", "paste", "coller", "emoji", "émoji", "smiley",
+            ],
             Sound => &["audio", "volume"],
             Power => &["battery", "batterie", "sleep", "veille"],
             Network => &["wifi", "wi-fi", "internet"],
@@ -359,6 +400,65 @@ impl Page {
                 }
             }
             Self::Pandas => on_off(ctx.config.pandas.enabled, lang),
+            Self::Desktops => {
+                let counts: Vec<String> =
+                    ctx.screens.iter().map(|s| s.desktops.to_string()).collect();
+                match counts.as_slice() {
+                    [] => words::desktops(ctx.config.desktops.per_output, lang),
+                    [_] => ctx
+                        .screens
+                        .first()
+                        .map(|s| words::desktops(s.desktops, lang))
+                        .unwrap_or_default(),
+                    _ => format!("{} · {}", words::DESKTOPS.get(lang), counts.join(" · ")),
+                }
+            }
+            Self::Windows => {
+                let w = &ctx.config.windows;
+                let mut said = Vec::new();
+                if w.snap {
+                    said.push(words::SNAPPING.get(lang).to_owned());
+                }
+                said.push(format!(
+                    "{} {}",
+                    words::GAPS.get(lang),
+                    words::pixels(w.gaps.inner)
+                ));
+                if w.wobbly {
+                    said.push(words::WOBBLY.get(lang).to_owned());
+                }
+                said.join(" · ")
+            }
+            Self::Mouse => {
+                let t = &ctx.config.touchpad;
+                let mut said = vec![if t.natural_scroll {
+                    words::NATURAL_SCROLL.get(lang)
+                } else {
+                    words::CLASSIC_SCROLL.get(lang)
+                }];
+                if t.tap_to_click {
+                    said.push(words::TAP_TO_CLICK.get(lang));
+                }
+                said.join(" · ")
+            }
+            Self::Captures => {
+                let s = &ctx.config.screenshots;
+                let shots = match (s.save, s.copy) {
+                    (true, true) => words::SAVED_AND_COPIED,
+                    (true, false) => words::SAVED,
+                    (false, true) => words::COPIED,
+                    (false, false) => words::NEITHER,
+                };
+                format!("{} · {} fps", shots.get(lang), ctx.config.recording.fps)
+            }
+            Self::Clipboard => {
+                let c = &ctx.config.clipboard;
+                if c.history {
+                    words::copies(c.entries, lang)
+                } else {
+                    words::OFF.get(lang).to_owned()
+                }
+            }
             Self::Accessibility => {
                 let a = &ctx.config.appearance;
                 let mut said = vec![words::percent(a.text_size, lang)];
@@ -377,6 +477,19 @@ impl Page {
 
 fn on_off(on: bool, lang: Lang) -> String {
     if on { words::ON } else { words::OFF }.get(lang).to_owned()
+}
+
+/// The keys of an action, or that it has none.
+fn keys_of(ctx: &Context, action: &hocus_core::Action, lang: Lang) -> String {
+    ctx.config
+        .shortcuts()
+        .bindings
+        .iter()
+        .find(|(_, a)| *a == action)
+        .map_or_else(
+            || words::NO_KEYS.get(lang).to_owned(),
+            |(combo, _)| combo.to_string(),
+        )
 }
 
 /// The magnifier's keys: zoom in, then out.
@@ -411,10 +524,33 @@ fn interface_name(ctx: &Context, lang: Lang) -> String {
     .to_owned()
 }
 
+/// The system's time zone, as timedated says it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SystemZone {
+    /// Not heard yet.
+    #[default]
+    Unknown,
+    Known(String),
+    /// No timedated to ask, and why: the zone is not changed here.
+    Absent(String),
+}
+
+impl SystemZone {
+    /// Its name, empty when unknown.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Known(name) => name,
+            Self::Unknown | Self::Absent(_) => "",
+        }
+    }
+}
+
 /// What the settings show: the configuration in effect and the screens.
 #[derive(Debug, Clone, Default)]
 pub struct Context {
     pub config: Config,
+    /// The system's time zone, for Language and region.
+    pub zone: SystemZone,
     pub outputs: Vec<OutputInfo>,
     /// Every connected screen, on or off, for the Screens page.
     pub screens: Vec<hocus_api::ScreenInfo>,
@@ -442,6 +578,20 @@ pub enum Setting {
     /// A screen, by its name.
     Screen(String),
     HotCorners,
+    DesktopCount,
+    DesktopNames,
+    Snap,
+    Gaps,
+    Wobbly,
+    TitleBars,
+    Rules,
+    NaturalScroll,
+    TapToClick,
+    Gestures,
+    Screenshots,
+    Recording,
+    ClipboardHistory,
+    Emoji,
     InterfaceLanguage,
     Clock,
     TimeZone,
@@ -462,7 +612,13 @@ impl Setting {
             | Self::ThemePerDesktop => Page::Appearance,
             Self::Layouts | Self::Shortcut(_) => Page::Keyboard,
             Self::Screen(_) => Page::Screens,
-            Self::HotCorners => Page::Desktops,
+            Self::DesktopCount | Self::DesktopNames => Page::Desktops,
+            Self::Snap | Self::Gaps | Self::Wobbly | Self::TitleBars | Self::Rules => Page::Windows,
+            Self::NaturalScroll | Self::TapToClick | Self::Gestures | Self::HotCorners => {
+                Page::Mouse
+            }
+            Self::Screenshots | Self::Recording => Page::Captures,
+            Self::ClipboardHistory | Self::Emoji => Page::Clipboard,
             Self::InterfaceLanguage | Self::Clock | Self::TimeZone => Page::Language,
             Self::Dock => Page::ColumnDock,
             Self::Pandas => Page::Pandas,
@@ -607,7 +763,7 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
                 vec!["timezone".into(), "fuseau".into(), "utc".into()],
             ]
             .concat(),
-            words::zone_name(&ctx.config.clock.time_zone, lang),
+            words::zone_name(ctx.zone.name(), lang),
         ),
         (
             Setting::Dock,
@@ -665,6 +821,218 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
                     format!("{set}/4")
                 }
             },
+        ),
+        (
+            Setting::DesktopCount,
+            words::DESKTOP_COUNT.get(lang).to_owned(),
+            [
+                both(words::DESKTOP_COUNT),
+                both(words::DESKTOPS),
+                vec!["workspaces".into(), "how many".into(), "combien".into()],
+            ]
+            .concat(),
+            Page::Desktops.summary(ctx, lang),
+        ),
+        (
+            Setting::DesktopNames,
+            words::DESKTOP_NAMES.get(lang).to_owned(),
+            [
+                both(words::DESKTOP_NAMES),
+                vec![
+                    "name".into(),
+                    "nom".into(),
+                    "rename".into(),
+                    "renommer".into(),
+                ],
+            ]
+            .concat(),
+            {
+                let names: Vec<&str> = ctx
+                    .config
+                    .outputs
+                    .iter()
+                    .flat_map(|o| o.desktop_names.iter())
+                    .map(String::as_str)
+                    .filter(|n| !n.is_empty())
+                    .collect();
+                names.join(", ")
+            },
+        ),
+        (
+            Setting::Snap,
+            words::SNAP_EDGES.get(lang).to_owned(),
+            [
+                both(words::SNAP_EDGES),
+                both(words::SNAPPING),
+                vec![
+                    "snap".into(),
+                    "aimanter".into(),
+                    "halves".into(),
+                    "moitiés".into(),
+                    "quarters".into(),
+                    "quarts".into(),
+                ],
+            ]
+            .concat(),
+            on_off(ctx.config.windows.snap),
+        ),
+        (
+            Setting::Gaps,
+            words::GAPS.get(lang).to_owned(),
+            [
+                both(words::GAPS),
+                vec![
+                    "gap".into(),
+                    "margin".into(),
+                    "marge".into(),
+                    "espace".into(),
+                ],
+            ]
+            .concat(),
+            words::pixels(ctx.config.windows.gaps.inner),
+        ),
+        (
+            Setting::Wobbly,
+            words::WOBBLY.get(lang).to_owned(),
+            [
+                both(words::WOBBLY),
+                vec![
+                    "wobbly".into(),
+                    "jelly".into(),
+                    "gelée".into(),
+                    "compiz".into(),
+                    "effects".into(),
+                    "effets".into(),
+                ],
+            ]
+            .concat(),
+            on_off(ctx.config.windows.wobbly),
+        ),
+        (
+            Setting::TitleBars,
+            words::TITLE_BARS.get(lang).to_owned(),
+            [
+                both(words::TITLE_BARS),
+                vec![
+                    "title".into(),
+                    "titre".into(),
+                    "decorations".into(),
+                    "décorations".into(),
+                ],
+            ]
+            .concat(),
+            on_off(ctx.config.decorations.title_bars),
+        ),
+        (
+            Setting::Rules,
+            words::RULES.get(lang).to_owned(),
+            [
+                both(words::RULES),
+                vec!["rule".into(), "règle".into(), "app_id".into()],
+            ]
+            .concat(),
+            ctx.config.rules.len().to_string(),
+        ),
+        (
+            Setting::NaturalScroll,
+            words::NATURAL_SCROLL.get(lang).to_owned(),
+            [
+                both(words::NATURAL_SCROLL),
+                vec![
+                    "scroll".into(),
+                    "défilement".into(),
+                    "reverse".into(),
+                    "inverser".into(),
+                ],
+            ]
+            .concat(),
+            on_off(ctx.config.touchpad.natural_scroll),
+        ),
+        (
+            Setting::TapToClick,
+            words::TAP_TO_CLICK.get(lang).to_owned(),
+            [
+                both(words::TAP_TO_CLICK),
+                vec!["tap".into(), "taper".into(), "click".into(), "clic".into()],
+            ]
+            .concat(),
+            on_off(ctx.config.touchpad.tap_to_click),
+        ),
+        (
+            Setting::Gestures,
+            words::GESTURES.get(lang).to_owned(),
+            [
+                both(words::GESTURES),
+                vec![
+                    "gesture".into(),
+                    "geste".into(),
+                    "fingers".into(),
+                    "doigts".into(),
+                    "swipe".into(),
+                ],
+            ]
+            .concat(),
+            words::trigger(ctx.config.gestures.three_up)
+                .get(lang)
+                .to_owned(),
+        ),
+        (
+            Setting::Screenshots,
+            words::SCREENSHOTS.get(lang).to_owned(),
+            [
+                both(words::SCREENSHOTS),
+                vec![
+                    "screenshot".into(),
+                    "capture".into(),
+                    "print".into(),
+                    "impr".into(),
+                ],
+            ]
+            .concat(),
+            Page::Captures.summary(ctx, lang),
+        ),
+        (
+            Setting::Recording,
+            words::RECORDING.get(lang).to_owned(),
+            [
+                both(words::RECORDING),
+                vec![
+                    "record".into(),
+                    "screencast".into(),
+                    "video".into(),
+                    "vidéo".into(),
+                    "micro".into(),
+                    "webcam".into(),
+                ],
+            ]
+            .concat(),
+            format!("{} fps", ctx.config.recording.fps),
+        ),
+        (
+            Setting::ClipboardHistory,
+            words::CLIPBOARD_HISTORY.get(lang).to_owned(),
+            [
+                both(words::CLIPBOARD_HISTORY),
+                vec![
+                    "clipboard".into(),
+                    "presse-papiers".into(),
+                    "copy".into(),
+                    "paste".into(),
+                    "coller".into(),
+                ],
+            ]
+            .concat(),
+            Page::Clipboard.summary(ctx, lang),
+        ),
+        (
+            Setting::Emoji,
+            words::EMOJI.get(lang).to_owned(),
+            [
+                both(words::EMOJI),
+                vec!["emoji".into(), "smiley".into(), "émoticône".into()],
+            ]
+            .concat(),
+            keys_of(ctx, &hocus_core::Action::Emoji, lang),
         ),
         (
             Setting::Layouts,
@@ -816,6 +1184,25 @@ mod tests {
         assert_eq!(hits[0].setting, Some(Setting::Clock), "{hits:?}");
         let hits = search("loupe", &ctx(), Lang::Fr);
         assert_eq!(hits[0].page, Page::Accessibility, "{hits:?}");
+    }
+
+    #[test]
+    fn the_work_settings_are_found_in_either_language() {
+        let hits = search("wobbly", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::Wobbly), "{hits:?}");
+        let hits = search("pavé tactile", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].page, Page::Mouse, "{hits:?}");
+        let hits = search("défilement naturel", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::NaturalScroll), "{hits:?}");
+        let hits = search("coins actifs", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].page, Page::Mouse, "{hits:?}");
+        let hits = search("emoji", &ctx(), Lang::En);
+        assert_eq!(hits[0].page, Page::Clipboard, "{hits:?}");
+        let hits = search("règles", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::Rules), "{hits:?}");
+        for page in Family::Work.pages() {
+            assert!(page.available(), "{page:?}");
+        }
     }
 
     #[test]

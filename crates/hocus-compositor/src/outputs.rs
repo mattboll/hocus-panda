@@ -414,10 +414,13 @@ impl State {
         let lit: Vec<String> = self.space.outputs().map(Output::name).collect();
         let mut changed = false;
         for name in &lit {
+            let key = hocus_core::OutputName(name.clone());
+            if self.name_desktops(&key) {
+                changed = true;
+            }
             let Some(file) = self.config.output(name) else {
                 continue;
             };
-            let key = hocus_core::OutputName(name.clone());
             if file.primary == Some(true)
                 && self.model.primary().map(|o| &o.name) != Some(&key)
                 && self.model.set_primary(&key).is_ok()
@@ -438,6 +441,42 @@ impl State {
             self.sync_desktops();
             self.apply_focus(smithay::utils::SERIAL_COUNTER.next_serial());
         }
+    }
+
+    /// An output's own desktops take the names the file gives them, the
+    /// others their number; whether one changed.
+    fn name_desktops(&mut self, output: &hocus_core::OutputName) -> bool {
+        let Some(own) = self.model.own_desktops(output).map(<[_]>::to_vec) else {
+            return false;
+        };
+        let mut changed = false;
+        for (i, id) in own.into_iter().enumerate() {
+            let wanted = self.desktop_name(id).unwrap_or_else(|| (i + 1).to_string());
+            if self.model.desktop(id).is_some_and(|d| d.name != wanted) {
+                if let Err(err) = self.model.rename(id, wanted) {
+                    tracing::warn!(output = output.0, %err, "could not name a desktop");
+                }
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// The name the file gives a desktop, on the output it belongs to.
+    pub fn desktop_name(&self, id: hocus_core::DesktopId) -> Option<String> {
+        let home = &self.model.desktop(id)?.home;
+        let index = self
+            .model
+            .own_desktops(home)?
+            .iter()
+            .position(|d| *d == id)?;
+        let name = self
+            .config
+            .output(&home.0)?
+            .desktop_names
+            .get(index)?
+            .trim();
+        (!name.is_empty()).then(|| name.to_owned())
     }
 
     /// Shows each lit screen's name on it for three seconds.

@@ -13,6 +13,8 @@ pub struct Config {
     pub windows: Windows,
     pub desktops: Desktops,
     pub keyboard: Keyboard,
+    pub mouse: Mouse,
+    pub touchpad: Touchpad,
     pub decorations: Decorations,
     pub appearance: Appearance,
     pub wallpaper: Wallpaper,
@@ -117,10 +119,26 @@ pub fn glob(pattern: &str, text: &str) -> bool {
     p[pi..].iter().all(|c| *c == '*')
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Windows {
     pub gaps: Gaps,
+    /// A window dragged to a screen's edge or corner snaps there, a zone
+    /// showing where first; off, it moves freely (its edges still stick).
+    pub snap: bool,
+    /// A dragged window bends like jelly (#35); off, it moves stiff. With
+    /// reduced motion it never bends.
+    pub wobbly: bool,
+}
+
+impl Default for Windows {
+    fn default() -> Self {
+        Self {
+            gaps: Gaps::default(),
+            snap: true,
+            wobbly: true,
+        }
+    }
 }
 
 /// Space between windows (`inner`) and around them at the edges of the
@@ -204,6 +222,83 @@ impl Default for Keyboard {
             repeat_delay: 200,
             repeat_rate: 25,
             numlock: true,
+        }
+    }
+}
+
+/// Mice, trackballs and pointing sticks, set through libinput on a
+/// session of its own (in a window of another session, that one's own
+/// settings apply).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Mouse {
+    /// The content follows the wheel, as a finger on a phone pushes it.
+    pub natural_scroll: bool,
+    /// The buttons swapped, for the left hand.
+    pub left_handed: bool,
+    /// The pointer's speed, -1 (slowest) to 1 (fastest); 0 is libinput's.
+    pub speed: f64,
+}
+
+/// Touchpads, set through libinput as mice are.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Touchpad {
+    /// The content follows the fingers.
+    pub natural_scroll: bool,
+    /// A tap clicks: one finger the left button, two the right, three the
+    /// middle.
+    pub tap_to_click: bool,
+    /// Off while typing, so that a palm does not move the pointer.
+    pub disable_while_typing: bool,
+    /// -1 (slowest) to 1 (fastest); 0 is libinput's.
+    pub speed: f64,
+}
+
+impl Default for Touchpad {
+    fn default() -> Self {
+        Self {
+            natural_scroll: false,
+            tap_to_click: false,
+            disable_while_typing: true,
+            speed: 0.0,
+        }
+    }
+}
+
+/// What one pointing device is set to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pointing {
+    pub natural_scroll: bool,
+    pub left_handed: bool,
+    pub speed: f64,
+    /// For a touchpad only.
+    pub tap_to_click: Option<bool>,
+    pub disable_while_typing: Option<bool>,
+}
+
+impl Config {
+    /// What a pointing device is set to: a touchpad's settings, or a
+    /// mouse's. A touchpad's buttons follow the mouse's hand.
+    pub fn pointing(&self, touchpad: bool) -> Pointing {
+        let m = &self.mouse;
+        if touchpad {
+            let t = &self.touchpad;
+            Pointing {
+                natural_scroll: t.natural_scroll,
+                left_handed: m.left_handed,
+                speed: t.speed,
+                tap_to_click: Some(t.tap_to_click),
+                disable_while_typing: Some(t.disable_while_typing),
+            }
+        } else {
+            Pointing {
+                natural_scroll: m.natural_scroll,
+                left_handed: m.left_handed,
+                speed: m.speed,
+                tap_to_click: None,
+                disable_while_typing: None,
+            }
         }
     }
 }
@@ -583,14 +678,12 @@ impl ClockFormat {
     }
 }
 
-/// The clock: its format and the time zone it follows.
+/// The clock: its format. Its time zone is the system's (set through
+/// timedated, from the settings' Language and region page).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Clock {
     pub format: ClockFormat,
-    /// A time zone of the tz database (`Europe/Paris`); empty: the
-    /// system's.
-    pub time_zone: String,
 }
 
 impl Clock {
@@ -1071,6 +1164,14 @@ impl Config {
         if outer > 64 {
             return out_of_range("windows.gaps.outer", outer.to_string(), "0 to 64");
         }
+        for (key, speed) in [
+            ("mouse.speed", self.mouse.speed),
+            ("touchpad.speed", self.touchpad.speed),
+        ] {
+            if !(-1.0..=1.0).contains(&speed) {
+                return out_of_range(key, speed.to_string(), "-1 to 1");
+            }
+        }
         if !(1..=8).contains(&self.desktops.per_output) {
             let n = self.desktops.per_output.to_string();
             return out_of_range("desktops.per_output", n, "1 to 8");
@@ -1194,14 +1295,6 @@ impl Config {
                 );
             }
         }
-        let zone = &self.clock.time_zone;
-        if !zone.is_empty() && !Clock::zone_name_is_valid(zone) {
-            return out_of_range(
-                "clock.time_zone",
-                format!("{zone:?}"),
-                "a time zone like \"Europe/Paris\", or \"\" for the system's",
-            );
-        }
         if !(0.2..=0.9).contains(&self.dropdown.height) {
             let h = self.dropdown.height.to_string();
             return out_of_range("dropdown.height", h, "0.2 to 0.9");
@@ -1273,9 +1366,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_clock_reads_its_format_and_zone() -> Result<(), ConfigError> {
-        let config =
-            Config::parse("[clock]\nformat = \"12h\"\ntime_zone = \"America/New_York\"\n")?;
+    fn the_clock_reads_its_format() -> Result<(), ConfigError> {
+        let config = Config::parse("[clock]\nformat = \"12h\"\n")?;
         assert_eq!(config.clock.format, ClockFormat::Twelve);
         assert_eq!(config.clock.format.time(14, 37), "2:37 PM");
         assert_eq!(config.clock.format.time(0, 5), "12:05 AM");
@@ -1288,9 +1380,11 @@ mod tests {
             "Europe/Paris ",
             "Europe//Paris",
         ] {
-            let text = format!("[clock]\ntime_zone = {bad:?}\n");
-            assert!(Config::parse(&text).is_err(), "{bad}");
+            assert!(!Clock::zone_name_is_valid(bad), "{bad}");
         }
+        assert!(Clock::zone_name_is_valid("America/Argentina/Buenos_Aires"));
+        // The zone is the system's now, not the file's.
+        assert!(Config::parse("[clock]\ntime_zone = \"Asia/Tokyo\"\n").is_err());
         assert!(Config::parse("[clock]\nformat = \"13h\"\n").is_err());
         Ok(())
     }
@@ -1354,6 +1448,52 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(error, "line 2: windows.gaps.outer = 100: expected 0 to 64");
         assert!(Config::parse("[decorations]\naccent = \"green\"\n").is_err());
+    }
+
+    #[test]
+    fn a_touchpad_and_a_mouse_are_set_apart() -> Result<(), ConfigError> {
+        let config = Config::parse(
+            "[mouse]\nleft_handed = true\nspeed = -0.5\n\n\
+             [touchpad]\nnatural_scroll = true\ntap_to_click = true\n",
+        )?;
+        let pad = config.pointing(true);
+        assert!(pad.natural_scroll && pad.left_handed);
+        assert_eq!(pad.tap_to_click, Some(true));
+        assert_eq!(pad.disable_while_typing, Some(true));
+        assert_eq!(pad.speed, 0.0);
+        let mouse = config.pointing(false);
+        assert!(!mouse.natural_scroll && mouse.left_handed);
+        assert_eq!((mouse.speed, mouse.tap_to_click), (-0.5, None));
+        let err = Config::parse("[touchpad]\nspeed = 2\n").expect_err("too fast");
+        assert!(err.0.contains("touchpad.speed = 2"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn snapping_and_wobbling_are_on_until_turned_off() -> Result<(), ConfigError> {
+        let windows = Config::parse("")?.windows;
+        assert!(windows.snap && windows.wobbly);
+        let windows = Config::parse("[windows]\nsnap = false\nwobbly = false\n")?.windows;
+        assert!(!windows.snap && !windows.wobbly);
+        Ok(())
+    }
+
+    #[test]
+    fn desktops_are_named_per_screen() -> Result<(), ConfigError> {
+        let c = Config::parse(
+            "[[outputs]]\nname = \"DP-1\"\ndesktop_names = [\"Mail\", \"\", \"Code\"]\n",
+        )?;
+        let names = c.output("DP-1").map(|o| o.desktop_names.clone());
+        assert_eq!(
+            names,
+            Some(vec!["Mail".into(), String::new(), "Code".into()])
+        );
+        let nine = format!(
+            "[[outputs]]\nname = \"DP-1\"\ndesktop_names = [{}]\n",
+            ["\"a\""; 9].join(", ")
+        );
+        assert!(Config::parse(&nine).is_err());
+        Ok(())
     }
 
     #[test]
