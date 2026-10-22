@@ -1,6 +1,6 @@
 [package]
 name = "hocus-annotate"
-description = "The screenshot annotation view: a Wayland client drawn with hocus-ui."
+description = "The capture editors: screenshot annotation and recording trim, Wayland clients drawn with hocus-ui."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

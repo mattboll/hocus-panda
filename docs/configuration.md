@@ -107,6 +107,7 @@ microphone_device = "default"
 system_device = "@DEFAULT_MONITOR@"  # what plays
 camera_input = "v4l2"
 camera_device = "/dev/video0"
+editor = "hocus-trim"      # the toast's "Trim", given the recording's file
 
 [settings]                 # the settings app (Super+Comma)
 command = "hocus-settings" # `--page <page>` is added for a page

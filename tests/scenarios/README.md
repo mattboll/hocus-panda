@@ -70,6 +70,8 @@ Steps, one per `[[step]]` table:
 | `expect_budget = { max_ms = 50 }` | every frame drawn so far took at most that long, and no loop handler went over its budget |
 | `expect_state_file = { name, contains? = […], lacks? = […] }` | a file of the compositor's state directory (notes, the saved session) holds these strings, once written |
 | `restart = true` | the compositor goes as a crash would, and a new one starts on the same configuration and state; clients go with it |
+| `open_trim = "{last_recording}"` | opens the recording editor on a file (the last recording saved), in-process, and waits for it; `expect_trim`, `click_trim`, `drag_trim` drive it as the annotation window's steps do |
+| `expect_export = { name_has, length? = [from, to], max_bytes? }` | a file the editor exported beside the last recording, once the editor names it: its length in seconds (ffprobe) and its size |
 | `expect_recording = { audio?, keys_at_ms? }` | the last recording saved, read by ffprobe and ffmpeg once done: with a sound track as long as the picture (or none); keys drawn near the bottom from this time in the video, the top unchanged |
 | `caldav = { dir, user, password }` | a CalDAV server on 127.0.0.1 serves the `.ics` files of `dir` (relative to the scenario); its calendar's address is `{caldav}` in later configuration, `type` and `calendar_password` steps |
 | `caldav_stop = true` | the CalDAV server goes, as the network would |

@@ -125,6 +125,15 @@ Only combinations with Super, Ctrl or Alt and keys that are not text (Enter,
 arrows, F-keys…) are shown: plain typing, which may be a password, never is,
 nor anything while locked or while polkit asks.
 
+The recording editor (#132) is `hocus-trim`, a client of its own beside the
+annotation window (they share the window code, each editor acting on what
+its view asks). It asks everything of the encoder as processes on worker
+threads: the recording's length, a strip of thumbnails, the frame where a
+handle stops, the frames while it plays, and the export, cut in MP4, WebM
+or GIF. A size limit is met by trying again smaller (a lower rate, a
+narrower GIF) until the file fits. The compositor only offers it, from the
+recording's toast.
+
 System updates (#84) are looked for on a worker thread every few hours,
 never while a window is fullscreen or on the power saver: apt, dnf, pacman
 (`checkupdates`) or pkg, read without root; installing goes through
