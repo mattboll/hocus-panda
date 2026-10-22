@@ -6,7 +6,9 @@
 pub mod config;
 pub mod model;
 pub mod shortcuts;
+pub mod snap;
 
 pub use config::{Config, ConfigError};
 pub use model::{Desktop, DesktopId, Model, ModelError, Output, OutputName, Rect, WindowId};
 pub use shortcuts::{Action, Combo, Key, Modifiers, Scope, Shortcuts};
+pub use snap::Zone;

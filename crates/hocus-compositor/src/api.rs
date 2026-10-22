@@ -99,6 +99,7 @@ impl State {
         match self.windows.get(&id).map(|m| m.mode) {
             Some(WindowMode::Maximized { .. }) => WindowState::Maximized,
             Some(WindowMode::Fullscreen { .. }) => WindowState::Fullscreen,
+            Some(WindowMode::Snapped { .. }) => WindowState::Snapped,
             _ => WindowState::Normal,
         }
     }
@@ -384,6 +385,12 @@ impl App {
                         format!("no window with id {window}"),
                     )));
                 }
+                if wanted == WindowState::Snapped {
+                    return Some(Err(ApiError::new(
+                        ErrorCode::BadRequest,
+                        "snapping needs a zone: use snap_window",
+                    )));
+                }
                 let serial = SERIAL_COUNTER.next_serial();
                 // From whatever it is now to what is asked.
                 if state.model.is_minimized(id) {
@@ -392,8 +399,9 @@ impl App {
                 match wanted {
                     WindowState::Normal => {
                         state.set_fullscreen(id, false, None, serial);
-                        state.set_maximized(id, false, serial);
+                        state.unlay(id, serial);
                     }
+                    WindowState::Snapped => {}
                     WindowState::Maximized => {
                         state.set_fullscreen(id, false, None, serial);
                         state.set_maximized(id, true, serial);
@@ -401,6 +409,21 @@ impl App {
                     WindowState::Fullscreen => state.set_fullscreen(id, true, None, serial),
                     WindowState::Minimized => state.minimize(id, serial),
                 }
+                Reply::Done
+            }
+            Request::SnapWindow { window, zone } => {
+                let id = hocus_core::WindowId(window);
+                let zone: hocus_core::Zone = match zone.parse() {
+                    Ok(zone) => zone,
+                    Err(err) => return Some(Err(ApiError::new(ErrorCode::BadRequest, err))),
+                };
+                if !state.windows.contains_key(&id) {
+                    return Some(Err(ApiError::new(
+                        ErrorCode::NotFound,
+                        format!("no window with id {window}"),
+                    )));
+                }
+                state.snap(id, zone, SERIAL_COUNTER.next_serial());
                 Reply::Done
             }
             Request::CloseWindow { window: wanted } => {

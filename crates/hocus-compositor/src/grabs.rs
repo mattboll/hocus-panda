@@ -3,7 +3,7 @@
 //! The grab structure follows smithay's `smallvil` example (MIT, Copyright
 //! (c) 2017 Victor Berger and Victoria Brekenfeld).
 
-use hocus_core::WindowId;
+use hocus_core::{WindowId, Zone, snap::magnet};
 use smithay::{
     desktop::Window,
     input::pointer::{
@@ -16,16 +16,24 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Logical, Point, Rectangle, Serial, Size},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
 };
 
-use crate::{State, desktops::model_id, window_mode::WindowMode};
+use crate::{
+    State,
+    desktops::{model_id, rect},
+    window_mode::WindowMode,
+};
 
 /// `BTN_LEFT` and `BTN_RIGHT` from linux/input-event-codes.h.
 pub const BTN_LEFT: u32 = 0x110;
 pub const BTN_RIGHT: u32 = 0x111;
 /// How far the pointer must pull a maximized window before it lets go.
 const TEAR_OFF: f64 = 32.0;
+/// How close to an output's edge the pointer snaps a window.
+const SNAP_EDGE: f64 = 8.0;
+/// How close an edge must come to stick.
+const MAGNET: i32 = 12;
 /// The band around a window, outside it, that resizes (or moves, on top).
 pub const FRAME: i32 = 8;
 /// Windows are never resized below this.
@@ -194,9 +202,38 @@ impl PointerGrab<State> for MoveGrab {
             self.tear_off(state, event.location, event.serial);
         }
         let location = self.initial_location.to_f64() + (event.location - self.start_data.location);
-        state
-            .space
-            .map_element(self.window.clone(), location.to_i32_round(), true);
+        let mut location = location.to_i32_round();
+        // At an edge, a zone shows where the window would snap; elsewhere,
+        // its edges stick to the work area's and to other windows'.
+        let pointer = event.location;
+        let output = state.space.output_under(pointer).next().cloned();
+        let zone = output.as_ref().and_then(|o| {
+            let whole = rect(state.space.output_geometry(o)?);
+            Zone::at(whole, pointer.x, pointer.y, SNAP_EDGE)
+        });
+        state.set_snap_preview(output.clone().zip(zone));
+        if zone.is_none()
+            && let Some(output) = output
+        {
+            let area = rect(state.work_area(&output));
+            let others: Vec<_> = state
+                .space
+                .elements()
+                .filter(|w| **w != self.window)
+                .filter_map(|w| state.space.element_geometry(w))
+                .map(rect)
+                .collect();
+            let size = self.window.geometry().size;
+            let me = hocus_core::Rect {
+                x: location.x,
+                y: location.y,
+                width: size.w,
+                height: size.h,
+            };
+            let (x, y) = magnet(me, area, &others, state.config.windows.gaps, MAGNET);
+            location = (x, y).into();
+        }
+        state.space.map_element(self.window.clone(), location, true);
         state.needs_redraw = true;
     }
 
@@ -219,6 +256,11 @@ impl PointerGrab<State> for MoveGrab {
     }
 
     fn unset(&mut self, state: &mut State) {
+        if let (Some((_, zone)), Some(id)) = (state.snap_preview.take(), model_id(&self.window)) {
+            state.needs_redraw = true;
+            state.snap(id, zone, SERIAL_COUNTER.next_serial());
+            return;
+        }
         state.sync_desktops();
     }
 }
@@ -231,7 +273,7 @@ impl MoveGrab {
         let Some(id) = model_id(&self.window) else {
             return;
         };
-        let Some(WindowMode::Maximized { restore }) = state.windows.get(&id).map(|m| m.mode) else {
+        let Some(restore) = state.windows.get(&id).and_then(|m| m.mode.restore()) else {
             return;
         };
         let current = state
@@ -246,7 +288,7 @@ impl MoveGrab {
             0.5
         };
         let grip_y = (taken.y - f64::from(current.loc.y)).clamp(0.0, f64::from(restore.size.h));
-        state.set_maximized(id, false, serial);
+        state.unlay(id, serial);
         let location = Point::<f64, Logical>::from((
             pointer.x - share * f64::from(restore.size.w),
             pointer.y - grip_y,
@@ -339,7 +381,7 @@ impl State {
             .and_then(|id| self.windows.get(&id))
             .map(|m| m.mode)
         {
-            Some(WindowMode::Maximized { .. }) => Hold::Maximized,
+            Some(WindowMode::Maximized { .. } | WindowMode::Snapped { .. }) => Hold::Maximized,
             // A fullscreen window does not move.
             Some(WindowMode::Fullscreen { .. }) => return,
             _ => Hold::Free,

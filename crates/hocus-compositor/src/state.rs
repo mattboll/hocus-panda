@@ -23,7 +23,8 @@ use smithay::{
     },
 };
 
-use hocus_core::{Config, Model, Shortcuts, WindowId};
+use hocus_core::{Config, Model, Shortcuts, WindowId, Zone};
+use smithay::{backend::renderer::element::solid::SolidColorBuffer, output::Output};
 
 use crate::{
     Clock,
@@ -65,6 +66,9 @@ pub struct State {
     pub style: Style,
     pub textures: Textures,
     pub xdg_decoration_state: XdgDecorationState,
+    /// Where a dragged window would snap, shown while it is dragged.
+    pub snap_preview: Option<(Output, Zone)>,
+    pub snap_preview_buffer: SolidColorBuffer,
     /// What the pointer looks like, as clients set it.
     pub cursor: CursorImageStatus,
     pub arrows: Arrows,
@@ -129,6 +133,8 @@ impl State {
             style: Style::default(),
             textures: Textures::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
+            snap_preview: None,
+            snap_preview_buffer: SolidColorBuffer::default(),
             cursor: CursorImageStatus::default_named(),
             arrows: Arrows::default(),
             foreign_toplevels: ForeignToplevelListState::new::<Self>(dh),

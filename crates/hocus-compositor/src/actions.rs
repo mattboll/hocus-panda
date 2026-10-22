@@ -70,6 +70,11 @@ impl State {
                     self.toggle_maximized(window, serial);
                 }
             }
+            Action::Snap(zone) => {
+                if let Some(window) = self.model.focused() {
+                    self.snap(window, *zone, serial);
+                }
+            }
             Action::ToggleFullscreen => {
                 if let Some(window) = self.model.focused() {
                     let on = !matches!(

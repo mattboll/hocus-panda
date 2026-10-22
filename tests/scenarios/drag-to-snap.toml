@@ -1,0 +1,51 @@
+description = "A window dragged to the left edge of the external output shows a preview, then fills the left half of its work area minus gaps"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+config = """
+[windows.gaps]
+inner = 8
+outer = 8
+"""
+
+[[step]]
+pointer_move = [1800, 500]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+pointer_move = [2200, 500]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [1800, 520]
+
+[[step]]
+pointer_move = [1283, 540]
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "drag-to-snap.preview.png" }
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-2", geometry = [1288, 8, 948, 1064], state = "snapped" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "drag-to-snap.snapped.png" }

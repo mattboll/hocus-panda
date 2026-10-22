@@ -4,6 +4,8 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
+use crate::Zone;
+
 /// What an action acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum Scope {
@@ -31,6 +33,8 @@ pub enum Action {
     SendToOutputRight,
     ToggleMaximized,
     ToggleFullscreen,
+    /// Snaps the focused window to a zone of its output.
+    Snap(Zone),
     Minimize,
     Close,
     /// The next keyboard layout.
@@ -56,6 +60,7 @@ impl fmt::Display for Action {
             Self::SendToOutputLeft => write!(f, "send-to-output-left"),
             Self::SendToOutputRight => write!(f, "send-to-output-right"),
             Self::ToggleMaximized => write!(f, "toggle-maximized"),
+            Self::Snap(zone) => write!(f, "snap {}", zone.name()),
             Self::ToggleFullscreen => write!(f, "toggle-fullscreen"),
             Self::Minimize => write!(f, "minimize"),
             Self::Close => write!(f, "close"),
@@ -104,6 +109,10 @@ impl FromStr for Action {
             "send-to-output-left" => bare(Self::SendToOutputLeft),
             "send-to-output-right" => bare(Self::SendToOutputRight),
             "toggle-maximized" => bare(Self::ToggleMaximized),
+            "snap" => rest
+                .parse()
+                .map(Self::Snap)
+                .map_err(|e| format!("snap: {e}")),
             "toggle-fullscreen" => bare(Self::ToggleFullscreen),
             "minimize" => bare(Self::Minimize),
             "close" => bare(Self::Close),
@@ -217,6 +226,8 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Shift+Left", Action::SendToOutputLeft),
         ("Super+Shift+Right", Action::SendToOutputRight),
         ("Super+Up", Action::ToggleMaximized),
+        ("Super+Left", Action::Snap(Zone::Left)),
+        ("Super+Right", Action::Snap(Zone::Right)),
         ("Super+Down", Action::Minimize),
         ("Super+Shift+F", Action::ToggleFullscreen),
         ("Alt+F4", Action::Close),
