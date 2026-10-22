@@ -85,6 +85,8 @@ pub struct State {
     pub quick: Option<crate::quick::QuickPanel>,
     /// Wallpapers, when the shell runs.
     pub wallpapers: Option<crate::wallpaper::Wallpapers>,
+    /// Screenshot tools and screen sharing (#114).
+    pub screen_capture: crate::screen_capture::ScreenCapture,
     /// The common batch of protocols (#32).
     pub protocols: crate::handlers::protocols::Protocols,
     /// The configuration file, when there is one.
@@ -203,6 +205,7 @@ impl State {
                 crate::handlers::protocols::trusted,
             ),
             protocols: crate::handlers::protocols::Protocols::new(dh),
+            screen_capture: Default::default(),
             workspaces: WorkspaceState::new(dh),
             measures: Measures::default(),
             watchdog: None,

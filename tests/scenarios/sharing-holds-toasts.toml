@@ -1,0 +1,37 @@
+description = "While the screen is shared, notifications are held; afterwards one toast says how many came"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+open = { app_id = "slides", size = [600, 400], color = "#e8e4da" }
+
+[[step]]
+share = true
+
+[[step]]
+frames = 2
+
+[[step]]
+notify = { app = "Mail", summary = "Salary review" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Salary review", shown = false }
+
+[[step]]
+stop_sharing = true
+
+[[step]]
+advance_ms = 2500
+
+[[step]]
+expect_ui = { label = "1 notification while you were sharing" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "sharing-holds-toasts.png" }

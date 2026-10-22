@@ -24,6 +24,7 @@ mod notify;
 mod output_spec;
 mod quick;
 mod scene;
+mod screen_capture;
 mod settings;
 mod shell;
 mod socket;
@@ -197,6 +198,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         api,
         screenshots,
     )?;
+    screen_capture::init(&display.handle());
     socket::insert(&event_loop.handle(), socket, display)?;
     if matches!(state.clock, Clock::Monotonic { .. }) {
         fonts::start(&event_loop.handle());
@@ -273,6 +275,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     let handle = event_loop.handle();
     event_loop.run(None, &mut app, |app| {
         app.state.refresh_shell();
+        app.serve_captures();
         match &mut app.backend {
             BackendState::Winit(winit) => winit.after_dispatch(&mut app.state),
             BackendState::Headless(headless) => headless.after_dispatch(&handle, &app.state),

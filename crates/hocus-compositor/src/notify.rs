@@ -36,6 +36,7 @@ const INSET: i32 = 8;
 #[derive(Debug)]
 pub struct ToastPanel {
     toasts: Toasts,
+    lang: Lang,
     server: Option<Notifications>,
     /// The output they are on, its work area and scale.
     on: Option<(String, Rectangle<i32, Logical>, f64)>,
@@ -50,6 +51,9 @@ impl ToastPanel {
     }
 }
 
+/// The id of the shell's own summary toast, out of the server's range.
+const SUMMARY: u32 = u32::MAX;
+
 /// Serves notifications on the bus at `address`; toasts are shown even if
 /// the bus is not there (nothing then sends any).
 pub fn start(
@@ -60,6 +64,7 @@ pub fn start(
 ) {
     let mut panel = ToastPanel {
         toasts: Toasts::new(Theme::default(), lang, 600.0, 1.0),
+        lang,
         server: None,
         on: None,
         buffer: None,
@@ -116,6 +121,8 @@ impl State {
     fn on_notification(&mut self, incoming: Incoming) {
         let now = self.clock.now();
         let dnd = self.dnd();
+        // While the screen is shared, nothing private shows on it.
+        let sharing = self.sharing();
         // A first toast goes where the user works; the others join it.
         let place = self
             .toasts
@@ -146,8 +153,11 @@ impl State {
                 let toast = toast_of(n);
                 // Do not disturb holds all but critical ones: the column's
                 // history keeps them.
-                if dnd && !toast.critical {
+                if (dnd || sharing) && !toast.critical {
                     panel.toasts.remember(&toast);
+                    if sharing && !dnd {
+                        self.screen_capture.held += 1;
+                    }
                     Vec::new()
                 } else {
                     let events = panel.toasts.show(toast, now);
@@ -168,6 +178,33 @@ impl State {
         self.needs_redraw = true;
     }
 
+    /// Sharing stopped: what was held is summed up in one toast.
+    fn after_sharing(&mut self) {
+        let sharing = self.sharing();
+        let stopped = self.screen_capture.was_sharing && !sharing;
+        self.screen_capture.was_sharing = sharing;
+        let held = std::mem::take(&mut self.screen_capture.held);
+        if !stopped || held == 0 {
+            self.screen_capture.held = held;
+            return;
+        }
+        let Some(lang) = self.toasts.as_ref().map(|p| p.lang) else {
+            return;
+        };
+        self.on_notification(Incoming::Notify(
+            hocus_platform::notifications::Notification {
+                id: SUMMARY,
+                app: "Hocuspanda".into(),
+                summary: lang.held_while_sharing(held),
+                body: lang.in_the_column().into(),
+                actions: Vec::new(),
+                urgency: Urgency::Normal,
+                expiry: Expiry::Default,
+                replaces: true,
+            },
+        ));
+    }
+
     fn toast_place(&self, output: &Output) -> (String, Rectangle<i32, Logical>, f64) {
         (
             output.name(),
@@ -180,7 +217,10 @@ impl State {
         let Some(server) = self.toasts.as_ref().and_then(|p| p.server.as_ref()) else {
             return;
         };
-        for event in events {
+        // The shell's own toasts are not the server's to report.
+        for event in events.into_iter().filter(|e| {
+            !matches!(e, ToastEvent::Expired(id) | ToastEvent::Dismissed(id) | ToastEvent::Action(id, _) if *id == SUMMARY)
+        }) {
             match event {
                 ToastEvent::Expired(id) => server.closed(id, CloseReason::Expired),
                 ToastEvent::Dismissed(id) => server.closed(id, CloseReason::Dismissed),
@@ -223,6 +263,7 @@ impl State {
     /// Expires, follows the work area, and draws what changed; called after
     /// each dispatch.
     pub fn refresh_toasts(&mut self) {
+        self.after_sharing();
         let now = self.clock.now();
         let place = self
             .toasts

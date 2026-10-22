@@ -214,6 +214,7 @@ impl Headless {
     pub fn dispatch(&mut self, timeout: Duration) -> anyhow::Result<()> {
         self.event_loop.dispatch(Some(timeout), &mut self.app)?;
         self.app.state.refresh_shell();
+        self.app.serve_captures();
         self.app.state.display_handle.flush_clients()?;
         Ok(())
     }
