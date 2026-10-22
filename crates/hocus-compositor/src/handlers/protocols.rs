@@ -88,6 +88,9 @@ pub struct Protocols {
     pub keyboard_focus: Option<WlSurface>,
     pub foreign: XdgForeignState,
     pub presentation: PresentationState,
+    /// text-input-v3: the history and the emoji picker type into the
+    /// focused application.
+    pub _text_input: smithay::wayland::text_input::TextInputManagerState,
     pub fractional_scale: FractionalScaleManagerState,
     pub primary_selection: PrimarySelectionState,
     pub data_control: ExtDataControlState,
@@ -122,6 +125,7 @@ impl Protocols {
             foreign: XdgForeignState::new::<State>(dh),
             // CLOCK_MONOTONIC, as the frame times.
             presentation: PresentationState::new::<State>(dh, 1),
+            _text_input: smithay::wayland::text_input::TextInputManagerState::new::<State>(dh),
             fractional_scale: FractionalScaleManagerState::new::<State>(dh),
             primary_selection,
             data_control,
@@ -302,6 +306,7 @@ delegate_relative_pointer!(State);
 delegate_pointer_gestures!(State);
 delegate_virtual_keyboard_manager!(State);
 delegate_presentation!(State);
+smithay::delegate_text_input_manager!(State);
 
 impl State {
     /// Tells the windows on `output` that the frame drawn at `now` is on

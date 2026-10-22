@@ -66,6 +66,10 @@ pub enum Action {
     /// Sleep at once, locked first.
     Suspend,
     Hibernate,
+    /// The clipboard history (#71).
+    ClipboardHistory,
+    /// The emoji picker (#71).
+    Emoji,
     /// A screenshot (#69), after `delay` seconds.
     Screenshot {
         mode: ScreenshotMode,
@@ -159,6 +163,8 @@ impl fmt::Display for Action {
             Self::ShutDown => write!(f, "shut-down"),
             Self::Suspend => write!(f, "suspend"),
             Self::Hibernate => write!(f, "hibernate"),
+            Self::ClipboardHistory => write!(f, "clipboard-history"),
+            Self::Emoji => write!(f, "emoji"),
             Self::Screenshot { mode, delay: 0 } => write!(f, "screenshot {mode}"),
             Self::Screenshot { mode, delay } => write!(f, "screenshot {mode} {delay}"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
@@ -228,6 +234,8 @@ impl FromStr for Action {
             "shut-down" => bare(Self::ShutDown),
             "suspend" => bare(Self::Suspend),
             "hibernate" => bare(Self::Hibernate),
+            "clipboard-history" => bare(Self::ClipboardHistory),
+            "emoji" => bare(Self::Emoji),
             "screenshot" => {
                 let mut words = rest.split_whitespace();
                 let mode = words.next().unwrap_or("screen").parse()?;
@@ -366,6 +374,8 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Backtick", Action::Dropdown),
         ("Super+Comma", Action::Settings),
         ("Super+L", Action::Lock),
+        ("Super+V", Action::ClipboardHistory),
+        ("Super+Period", Action::Emoji),
         ("Print", Action::screenshot(ScreenshotMode::Screen)),
         ("Super+Print", Action::screenshot(ScreenshotMode::All)),
         ("Shift+Print", Action::screenshot(ScreenshotMode::Region)),

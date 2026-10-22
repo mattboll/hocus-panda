@@ -7,6 +7,7 @@
 pub mod authorize;
 pub mod calc;
 pub mod column;
+pub mod emoji;
 pub mod fuzzy;
 pub mod i18n;
 pub mod icons;

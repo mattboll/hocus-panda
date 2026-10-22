@@ -22,6 +22,7 @@ pub struct Config {
     pub idle: Idle,
     pub session: SessionConfig,
     pub screenshots: Screenshots,
+    pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
@@ -302,6 +303,28 @@ impl Default for SessionConfig {
         Self {
             restore: "ask".into(),
             autostart: true,
+        }
+    }
+}
+
+/// The clipboard history (#71).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClipboardConfig {
+    /// Keeps what is copied (never what password managers mark secret).
+    pub history: bool,
+    /// How many copies are kept, pinned ones besides.
+    pub entries: u32,
+    /// Kept across sessions, encrypted.
+    pub keep: bool,
+}
+
+impl Default for ClipboardConfig {
+    fn default() -> Self {
+        Self {
+            history: true,
+            entries: 100,
+            keep: true,
         }
     }
 }

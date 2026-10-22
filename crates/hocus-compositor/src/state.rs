@@ -108,6 +108,8 @@ pub struct State {
     pub is_session: bool,
     /// Switches virtual terminals, on a TTY.
     pub vt_switch: Option<smithay::backend::session::libseat::LibSeatSession>,
+    /// The clipboard history and the emoji picker (#71).
+    pub clipboard: crate::clipboard::Clipboard,
     /// The screenshot tool (#69).
     pub shots: crate::screenshot::Screenshots,
     /// polkit's password requests and their dialog (#83).
@@ -231,6 +233,7 @@ impl State {
             leaver: Default::default(),
             authorizer: Default::default(),
             shots: Default::default(),
+            clipboard: Default::default(),
             output_management: crate::handlers::output_management::OutputManagement::new(dh),
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
             settings_started: None,

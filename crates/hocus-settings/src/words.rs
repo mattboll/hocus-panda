@@ -373,6 +373,12 @@ pub fn action(action: &hocus_core::Action, lang: Lang) -> (String, ShortcutGroup
         A::Restart => (w("Restart", "Redémarrer"), G::System, EVERYWHERE),
         A::ShutDown => (w("Shut down", "Éteindre"), G::System, EVERYWHERE),
         A::Suspend => (w("Suspend", "Mettre en veille"), G::System, EVERYWHERE),
+        A::ClipboardHistory => (
+            w("Clipboard history", "Historique du presse-papiers"),
+            G::System,
+            EVERYWHERE,
+        ),
+        A::Emoji => (w("Emoji", "Emoji"), G::System, EVERYWHERE),
         A::Screenshot { mode, delay } => (
             match (lang, delay) {
                 (Lang::En, 0) => format!("Screenshot: {mode}"),

@@ -41,7 +41,7 @@ pub fn score(query: &str, text: &str) -> Option<i32> {
 }
 
 /// Lower case, without the accents of Latin letters.
-fn fold(s: &str) -> String {
+pub fn fold(s: &str) -> String {
     s.chars()
         .flat_map(char::to_lowercase)
         .map(|c| match c {

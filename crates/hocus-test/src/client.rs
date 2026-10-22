@@ -12,6 +12,10 @@ use std::{
     },
     thread::JoinHandle,
 };
+use wayland_protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3::ZwpTextInputManagerV3,
+    zwp_text_input_v3::{self, ZwpTextInputV3},
+};
 
 use anyhow::Context;
 use rustix::event::{PollFd, PollFlags, Timespec};
@@ -61,6 +65,8 @@ use wayland_protocols::{
 #[derive(Debug)]
 enum Command {
     Copy(String),
+    /// A copy a password manager makes: marked secret.
+    CopySecret(String),
     /// Asks the compositor to bring its window forward (xdg-activation).
     Activate,
 }
@@ -85,7 +91,7 @@ pub struct SolidWindow {
 }
 
 /// What the test client was told by the compositor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientEvent {
     /// A configure with the suggested size; 0 lets the client choose.
     Configure {
@@ -108,6 +114,8 @@ pub enum ClientEvent {
     },
     /// The compositor asked the window to close; the client then exits.
     Close,
+    /// Text typed into it through text-input (the history, emoji).
+    Text(String),
 }
 
 impl fmt::Display for ClientEvent {
@@ -122,6 +130,7 @@ impl fmt::Display for ClientEvent {
             Self::KeyboardLeave => write!(f, "keyboard_leave"),
             Self::Key { code, pressed: p } => write!(f, "key {code} {}", pressed(*p)),
             Self::Close => write!(f, "close"),
+            Self::Text(text) => write!(f, "text {text}"),
         }
     }
 }
@@ -141,6 +150,14 @@ impl TestClient {
     pub fn copy(&self, text: &str) -> anyhow::Result<()> {
         self.commands
             .send(Command::Copy(text.to_owned()))
+            .context("the test client is gone")
+    }
+
+    /// Takes the clipboard with `text` marked secret, as a password
+    /// manager does.
+    pub fn copy_secret(&self, text: &str) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::CopySecret(text.to_owned()))
             .context("the test client is gone")
     }
 
@@ -232,6 +249,11 @@ impl SolidWindow {
             manager.inhibit_shortcuts(window.wl_surface(), &seat, &qh, ());
         }
         let activation: Option<XdgActivationV1> = globals.bind(&qh, 1..=1, ()).ok();
+        // Typing from the compositor: on while it has the keyboard.
+        let text_input = globals
+            .bind::<ZwpTextInputManagerV3, _, _>(&qh, 1..=1, ())
+            .ok()
+            .map(|m| m.get_text_input(&seat, &qh, ()));
 
         let pool = SlotPool::new((self.width * self.height * 4) as usize, &shm)?;
         let mut client = Client {
@@ -246,8 +268,11 @@ impl SolidWindow {
             data_devices,
             data_device,
             copied: None,
+            sources: Vec::new(),
             seat: seat.clone(),
             activation,
+            _text_input: text_input,
+            typed: None,
             serial: 0,
             drawn: None,
             closed: false,
@@ -255,7 +280,8 @@ impl SolidWindow {
         while !client.closed {
             while let Ok(command) = to_do.try_recv() {
                 match command {
-                    Command::Copy(text) => client.copy(text, &qh),
+                    Command::Copy(text) => client.copy(text, false, &qh),
+                    Command::CopySecret(text) => client.copy(text, true, &qh),
                     Command::Activate => client.ask_activation(&qh),
                 }
             }
@@ -296,8 +322,15 @@ struct Client {
     data_device: DataDevice,
     /// What the client offers as the clipboard, while it holds it.
     copied: Option<(CopyPasteSource, String)>,
+    /// Sources it made before, and their text: a reader asking one late
+    /// gets that one's.
+    sources: Vec<(CopyPasteSource, String)>,
     seat: wl_seat::WlSeat,
     activation: Option<XdgActivationV1>,
+    /// Kept alive: dropping it would not end it, but it is the client's own.
+    _text_input: Option<ZwpTextInputV3>,
+    /// Text committed, recorded at the next `done`.
+    typed: Option<String>,
     /// The last input serial, which taking the clipboard needs.
     serial: u32,
     /// The size of the last buffer, if one was attached.
@@ -324,9 +357,14 @@ impl Client {
         token.commit();
     }
 
-    fn copy(&mut self, text: String, qh: &QueueHandle<Self>) {
-        let source = self.data_devices.create_copy_paste_source(qh, TEXT);
+    fn copy(&mut self, text: String, secret: bool, qh: &QueueHandle<Self>) {
+        let mut mimes = TEXT.to_vec();
+        if secret {
+            mimes.push("x-kde-passwordManagerHint");
+        }
+        let source = self.data_devices.create_copy_paste_source(qh, mimes);
         source.set_selection(&self.data_device, self.serial);
+        self.sources.push((source.clone(), text.clone()));
         self.copied = Some((source, text));
     }
 
@@ -626,11 +664,13 @@ impl DataSourceHandler for Client {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &WlDataSource,
-        _: String,
+        asked: &WlDataSource,
+        mime: String,
         mut pipe: WritePipe,
     ) {
-        if let Some((_, text)) = &self.copied {
+        if mime == "x-kde-passwordManagerHint" {
+            let _ = pipe.write_all(b"secret");
+        } else if let Some((_, text)) = self.sources.iter().find(|(s, _)| s.inner() == asked) {
             let _ = pipe.write_all(text.as_bytes());
         }
     }
@@ -647,6 +687,47 @@ impl DataSourceHandler for Client {
 }
 
 delegate_data_device!(Client);
+
+impl Dispatch<ZwpTextInputManagerV3, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpTextInputManagerV3,
+        _: <ZwpTextInputManagerV3 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpTextInputV3, ()> for Client {
+    fn event(
+        client: &mut Self,
+        text_input: &ZwpTextInputV3,
+        event: zwp_text_input_v3::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwp_text_input_v3::Event::Enter { .. } => {
+                text_input.enable();
+                text_input.commit();
+            }
+            zwp_text_input_v3::Event::Leave { .. } => {
+                text_input.disable();
+                text_input.commit();
+            }
+            zwp_text_input_v3::Event::CommitString { text } => client.typed = text,
+            zwp_text_input_v3::Event::Done { .. } => {
+                if let Some(text) = client.typed.take() {
+                    client.record(ClientEvent::Text(text));
+                }
+            }
+            _ => {}
+        }
+    }
+}
 delegate_compositor!(Client);
 delegate_output!(Client);
 delegate_shm!(Client);

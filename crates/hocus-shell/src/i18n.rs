@@ -629,6 +629,32 @@ impl Lang {
     pub fn no_text_found(self) -> &'static str {
         self.pick("No text found", "Aucun texte trouvé")
     }
+
+    pub fn history_hint(self) -> &'static str {
+        self.pick(
+            "Enter pastes · Tab pins · Delete forgets",
+            "Entrée colle · Tab épingle · Suppr oublie",
+        )
+    }
+
+    pub fn emoji_hint(self, tone: &str) -> String {
+        match self {
+            Self::En => format!("Enter types it · Tab: skin tone {tone}"),
+            Self::Fr => format!("Entrée l’écrit · Tab : teinte {tone}"),
+        }
+    }
+
+    pub fn pinned(self) -> &'static str {
+        self.pick("Pinned", "Épinglé")
+    }
+
+    pub fn clear_history(self) -> &'static str {
+        self.pick("Clear the history", "Effacer l’historique")
+    }
+
+    pub fn copied_paste(self) -> &'static str {
+        self.pick("Copied: paste it", "Copié : collez-le")
+    }
 }
 
 #[cfg(test)]
