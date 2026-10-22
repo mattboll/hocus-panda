@@ -1,0 +1,596 @@
+//! Idle, the curtain and the lock (#29). Without input, the curtain dims
+//! every screen with a countdown, then the session locks; idle inhibitors
+//! and fullscreen windows hold it off, and the countdown starts again when
+//! they stop. Locked, the screens show only the lock: a lock client's
+//! surfaces (ext-session-lock), or our own lock screen, which checks the
+//! password through PAM on a worker thread. A lock client that goes away
+//! without unlocking leaves our lock screen: a crash never unlocks.
+
+use std::{collections::BTreeMap, time::Duration};
+
+use hocus_api::UiNode;
+use hocus_platform::auth::{Auth, Checker, Pam};
+use hocus_shell::lock::{Check, Curtain, LockScreen};
+use hocus_ui::{Key, Size as UiSize};
+use smithay::{
+    backend::renderer::{
+        ImportAll, ImportMem, Renderer, Texture,
+        element::{
+            Kind,
+            memory::MemoryRenderBufferRenderElement,
+            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+        },
+    },
+    delegate_session_lock,
+    input::keyboard::{Keysym, ModifiersState},
+    output::Output,
+    reexports::{
+        calloop::{
+            LoopHandle, RegistrationToken, channel,
+            timer::{TimeoutAction, Timer},
+        },
+        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
+        wayland_server::{Resource, protocol::wl_output::WlOutput},
+    },
+    utils::{Logical, Physical, Point, SERIAL_COUNTER, Scale, Size},
+    wayland::session_lock::{
+        LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
+    },
+};
+
+use crate::{App, State, handlers::protocols::trusted, shell::Panel};
+
+/// Where the session stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    Unlocked,
+    /// The curtain dims the screens since then.
+    Curtain {
+        since: Duration,
+    },
+    Locked,
+}
+
+/// Who draws the lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum By {
+    Us,
+    /// A lock client, while its lock object lives.
+    Client(ExtSessionLockV1),
+}
+
+/// The password checked in tests (the virtual clock never runs a real
+/// session).
+struct TestChecker;
+
+impl Checker for TestChecker {
+    fn check(&mut self, _: &str, password: &str) -> bool {
+        password == "panda"
+    }
+}
+
+pub struct Locking {
+    pub phase: Phase,
+    by: By,
+    /// The last input, or the last moment something held idle off.
+    last_activity: Duration,
+    /// The last input alone, for idle notifications that ignore holds.
+    last_input: Duration,
+    state: SessionLockManagerState,
+    lock_surfaces: BTreeMap<String, LockSurface>,
+    curtains: BTreeMap<String, Panel<Curtain>>,
+    screens: BTreeMap<String, Panel<LockScreen>>,
+    auth: Option<Auth>,
+    /// The timer that wakes the loop at the next deadline, and when.
+    timer: Option<(RegistrationToken, Duration)>,
+}
+
+impl std::fmt::Debug for Locking {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Locking")
+            .field("phase", &self.phase)
+            .field("by", &self.by)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Locking {
+    pub fn new(dh: &smithay::reexports::wayland_server::DisplayHandle) -> Self {
+        Self {
+            phase: Phase::Unlocked,
+            by: By::Us,
+            last_activity: Duration::ZERO,
+            last_input: Duration::ZERO,
+            state: SessionLockManagerState::new::<State, _>(dh, trusted),
+            lock_surfaces: BTreeMap::new(),
+            curtains: BTreeMap::new(),
+            screens: BTreeMap::new(),
+            auth: None,
+            timer: None,
+        }
+    }
+}
+
+/// Starts the password service; its answers come back to the loop.
+pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
+    let (done, results) = channel::channel::<bool>();
+    if let Err(err) = handle.insert_source(results, |event, _, app| {
+        if let channel::Event::Msg(ok) = event {
+            app.timed("password", |app| app.state.password_checked(ok));
+        }
+    }) {
+        tracing::warn!(err = %err.error, "no password checks");
+        return;
+    }
+    let checker: Box<dyn Checker> = match state.clock {
+        crate::clock::Clock::Virtual { .. } => Box::new(TestChecker),
+        crate::clock::Clock::Monotonic { .. } => Box::new(Pam),
+    };
+    match Auth::start(checker, move |ok| {
+        let _ = done.send(ok);
+    }) {
+        Ok(auth) => state.locking.auth = Some(auth),
+        Err(err) => tracing::warn!(%err, "no password checks"),
+    }
+}
+
+impl State {
+    pub fn locked(&self) -> bool {
+        self.locking.phase == Phase::Locked
+    }
+
+    /// Input happened: the countdown starts again, the curtain lifts.
+    pub fn activity(&mut self) {
+        let now = self.clock.now();
+        self.locking.last_activity = now;
+        self.locking.last_input = now;
+        self.idle_resumed();
+        if matches!(self.locking.phase, Phase::Curtain { .. }) {
+            self.locking.phase = Phase::Unlocked;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// The last activity (holds included) and the last input.
+    pub fn idle_since(&self) -> (Duration, Duration) {
+        (self.locking.last_activity, self.locking.last_input)
+    }
+
+    /// Locks now, with our lock screen.
+    pub fn lock_now(&mut self) {
+        if self.locked() {
+            return;
+        }
+        tracing::info!("locking");
+        self.locking.phase = Phase::Locked;
+        self.locking.by = By::Us;
+        self.lock_began();
+    }
+
+    /// What every lock does: no window keeps the keyboard or the pointer,
+    /// the shell's panels close.
+    fn lock_began(&mut self) {
+        self.close_launcher();
+        self.close_quick();
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial());
+        }
+        for screen in self.locking.screens.values_mut() {
+            screen.view.set_check(Check::Typing);
+        }
+        self.lock_keyboard();
+        self.needs_redraw = true;
+    }
+
+    fn unlock(&mut self) {
+        tracing::info!("unlocked");
+        self.locking.phase = Phase::Unlocked;
+        self.locking.by = By::Us;
+        self.locking.lock_surfaces.clear();
+        self.locking.last_activity = self.clock.now();
+        self.locking.screens.clear();
+        self.apply_focus(SERIAL_COUNTER.next_serial());
+        self.needs_redraw = true;
+    }
+
+    fn password_checked(&mut self, ok: bool) {
+        if !self.locked() {
+            return;
+        }
+        if ok {
+            self.unlock();
+        } else {
+            for screen in self.locking.screens.values_mut() {
+                screen.view.set_check(Check::Failed);
+            }
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Whether a lock client draws the lock now.
+    fn client_lock(&self) -> bool {
+        matches!(&self.locking.by, By::Client(lock) if lock.is_alive())
+    }
+
+    /// Locked, keys go to the lock: a lock client's surface, or our lock
+    /// screen. Whether `sym` was ours.
+    pub fn lock_key(&mut self, sym: Keysym, modifiers: &ModifiersState) -> bool {
+        if !self.locked() || self.client_lock() {
+            return false;
+        }
+        let user = self.user.clone();
+        let mut password = None;
+        for screen in self.locking.screens.values_mut() {
+            match crate::launcher::key_of(sym) {
+                Some(key) => {
+                    if let Some(p) = screen.view.key(key)
+                        && password.is_none()
+                    {
+                        password = Some(p);
+                    }
+                }
+                None if !modifiers.ctrl && !modifiers.alt && !modifiers.logo => {
+                    if let Some(c) = sym.key_char().filter(|c| !c.is_control()) {
+                        screen.view.text(c.encode_utf8(&mut [0; 4]));
+                    }
+                }
+                None => {}
+            }
+        }
+        if let (Some(password), Some(auth)) = (password, &self.locking.auth) {
+            // Every screen shows the same field: they are all checking.
+            for screen in self.locking.screens.values_mut() {
+                screen.view.set_check(Check::Checking);
+                screen.view.key(Key::Escape);
+            }
+            auth.check(&user, password);
+        }
+        self.needs_redraw = true;
+        true
+    }
+
+    /// The keyboard goes to the lock client's surface on the output under
+    /// the pointer, or to nobody (our lock screen takes keys itself).
+    fn lock_keyboard(&mut self) {
+        let surface = self.client_lock().then(|| {
+            let output = self.output_under_pointer()?;
+            self.locking
+                .lock_surfaces
+                .get(&output.name())
+                .or_else(|| self.locking.lock_surfaces.values().next())
+                .map(|s| s.wl_surface().clone())
+        });
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.set_focus(self, surface.flatten(), SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    /// After each dispatch: holds, the curtain, the lock, a lock client
+    /// gone, and the timer for what comes next.
+    pub fn refresh_lock(&mut self) {
+        let now = self.clock.now();
+        // A crashed lock client leaves our lock screen, never an unlocked
+        // session.
+        if self.locked()
+            && let By::Client(lock) = &self.locking.by
+            && !lock.is_alive()
+        {
+            tracing::warn!("the lock client went away: our lock screen takes over");
+            self.locking.by = By::Us;
+            self.locking.lock_surfaces.clear();
+            self.lock_keyboard();
+            self.needs_redraw = true;
+        }
+        if self.idle_held() {
+            self.locking.last_activity = now;
+            if matches!(self.locking.phase, Phase::Curtain { .. }) {
+                self.locking.phase = Phase::Unlocked;
+                self.needs_redraw = true;
+            }
+        }
+        let idle = self.config.idle;
+        let idle_for = now.saturating_sub(self.locking.last_activity);
+        match self.locking.phase {
+            Phase::Unlocked
+                if idle.curtain_after > 0
+                    && idle_for >= Duration::from_secs(u64::from(idle.curtain_after)) =>
+            {
+                tracing::info!("idle: the curtain falls");
+                self.locking.phase = Phase::Curtain { since: now };
+                self.needs_redraw = true;
+            }
+            Phase::Curtain { since }
+                if idle.lock
+                    && now.saturating_sub(since)
+                        >= Duration::from_secs(u64::from(idle.lock_after)) =>
+            {
+                self.lock_now();
+            }
+            _ => {}
+        }
+        self.refresh_idle_notifications();
+        self.refresh_lock_panels();
+        self.schedule_lock_timer();
+    }
+
+    /// Something keeps the session awake: an inhibitor's surface shown,
+    /// or a fullscreen window.
+    fn idle_held(&self) -> bool {
+        let shown =
+            |surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface| {
+                self.window_for(surface)
+                    .is_some_and(|w| self.space.element_location(&w).is_some())
+            };
+        self.protocols
+            .inhibiting
+            .iter()
+            .any(|s| s.is_alive() && shown(s))
+            || self.space.outputs().any(|o| self.fullscreen_on(o))
+    }
+
+    /// The next moment something happens without input: the curtain, the
+    /// lock, a second of the countdown, an idle notification.
+    fn next_deadline(&self) -> Option<Duration> {
+        let idle = self.config.idle;
+        let mut next = match self.locking.phase {
+            Phase::Unlocked if idle.curtain_after > 0 => Some(
+                self.locking.last_activity + Duration::from_secs(u64::from(idle.curtain_after)),
+            ),
+            Phase::Curtain { since } => {
+                let elapsed = self.clock.now().saturating_sub(since);
+                // The countdown shows seconds.
+                Some(since + Duration::from_secs(elapsed.as_secs() + 1))
+            }
+            _ => None,
+        };
+        if let Some(n) = self.next_idle_notification() {
+            next = Some(next.map_or(n, |d| d.min(n)));
+        }
+        next
+    }
+
+    /// Wakes the loop at the next deadline (the virtual clock of tests
+    /// moves by itself and needs none).
+    fn schedule_lock_timer(&mut self) {
+        if matches!(self.clock, crate::clock::Clock::Virtual { .. }) {
+            return;
+        }
+        let Some(handle) = self.loop_handle.clone() else {
+            return;
+        };
+        let next = self.next_deadline();
+        if self.locking.timer.as_ref().map(|t| t.1) == next {
+            return;
+        }
+        if let Some((token, _)) = self.locking.timer.take() {
+            handle.remove(token);
+        }
+        let Some(at) = next else {
+            return;
+        };
+        let wait = at.saturating_sub(self.clock.now());
+        match handle.insert_source(Timer::from_duration(wait), |_, _, app| {
+            app.state.locking.timer = None;
+            app.state.needs_redraw = true;
+            TimeoutAction::Drop
+        }) {
+            Ok(token) => self.locking.timer = Some((token, at)),
+            Err(err) => tracing::warn!(%err, "no idle timer"),
+        }
+    }
+
+    /// The curtain's and the lock screens' contents, per output.
+    fn refresh_lock_panels(&mut self) {
+        let now = self.clock.now();
+        let theme = self.theme();
+        let lang = self.shell_lang();
+        let outputs: Vec<(String, UiSize, f32)> = self
+            .space
+            .outputs()
+            .filter_map(|o| {
+                let g = self.space.output_geometry(o)?;
+                let scale = o.current_scale().fractional_scale() as f32;
+                Some((
+                    o.name(),
+                    UiSize::new(g.size.w as f32, g.size.h as f32),
+                    scale,
+                ))
+            })
+            .collect();
+        let curtain = match self.locking.phase {
+            Phase::Curtain { since } => {
+                let left = Duration::from_secs(u64::from(self.config.idle.lock_after))
+                    .saturating_sub(now.saturating_sub(since));
+                Some(left.as_secs_f64().ceil() as u32)
+            }
+            _ => None,
+        };
+        match curtain {
+            Some(seconds) => {
+                for (name, size, scale) in &outputs {
+                    let panel = self
+                        .locking
+                        .curtains
+                        .entry(name.clone())
+                        .or_insert_with(|| {
+                            Panel::new(Curtain::new(theme.clone(), lang, *size, *scale))
+                        });
+                    panel.view.resize(*size, *scale);
+                    panel.view.set_theme(theme.clone());
+                    panel.view.set_seconds(seconds);
+                    let drawn = panel.view.draw(now);
+                    if panel.upload(&drawn) {
+                        self.needs_redraw = true;
+                    }
+                }
+            }
+            None if !self.locking.curtains.is_empty() => {
+                self.locking.curtains.clear();
+                self.needs_redraw = true;
+            }
+            None => {}
+        }
+        let ours = self.locked() && !self.client_lock();
+        if ours {
+            let user = self.user.clone();
+            let time = self.wall_time();
+            let caps = self
+                .seat
+                .get_keyboard()
+                .is_some_and(|k| k.modifier_state().caps_lock);
+            for (name, size, scale) in &outputs {
+                let panel = self.locking.screens.entry(name.clone()).or_insert_with(|| {
+                    Panel::new(LockScreen::new(theme.clone(), lang, *size, *scale, &user))
+                });
+                panel.view.resize(*size, *scale);
+                panel.view.set_theme(theme.clone());
+                panel.view.set_time(time);
+                panel.view.set_caps_lock(caps);
+                let drawn = panel.view.draw(now);
+                if panel.upload(&drawn) {
+                    self.needs_redraw = true;
+                }
+            }
+        }
+    }
+
+    /// The curtain over `output`, above everything but the cursor.
+    pub fn curtain_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Vec<MemoryRenderBufferRenderElement<R>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        self.locking
+            .curtains
+            .get(&output.name())
+            .and_then(|p| p.element(renderer, output, Point::default()))
+            .into_iter()
+            .collect()
+    }
+
+    /// Everything a locked `output` shows: the lock client's surface, or
+    /// our lock screen. Nothing else is drawn.
+    pub fn lock_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> (
+        Vec<WaylandSurfaceRenderElement<R>>,
+        Vec<MemoryRenderBufferRenderElement<R>>,
+    )
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let scale = Scale::from(output.current_scale().fractional_scale());
+        if self.client_lock()
+            && let Some(surface) = self.locking.lock_surfaces.get(&output.name())
+        {
+            let elements = render_elements_from_surface_tree(
+                renderer,
+                surface.wl_surface(),
+                Point::<i32, Physical>::default(),
+                scale,
+                1.0,
+                Kind::Unspecified,
+            );
+            return (elements, Vec::new());
+        }
+        let ours = self
+            .locking
+            .screens
+            .get(&output.name())
+            .and_then(|p| p.element(renderer, output, Point::default()))
+            .into_iter()
+            .collect();
+        (Vec::new(), ours)
+    }
+
+    /// The lock and the curtain for the control API.
+    pub fn lock_ui(&self, out: &mut Vec<UiNode>) {
+        for (name, panel) in self.locking.curtains.iter() {
+            if let Some(o) = self
+                .find_output(name)
+                .and_then(|o| self.space.output_geometry(&o))
+            {
+                crate::shell::flatten(&panel.view.access(), o.loc, 0, out);
+            }
+        }
+        for (name, panel) in self.locking.screens.iter() {
+            if self.locked()
+                && !self.client_lock()
+                && let Some(o) = self
+                    .find_output(name)
+                    .and_then(|o| self.space.output_geometry(&o))
+            {
+                crate::shell::flatten(&panel.view.access(), o.loc, 0, out);
+            }
+        }
+    }
+}
+
+impl SessionLockHandler for State {
+    fn lock_state(&mut self) -> &mut SessionLockManagerState {
+        &mut self.locking.state
+    }
+
+    /// A lock client may lock an unlocked session, or take over from our
+    /// own lock screen; not from another living lock client.
+    fn lock(&mut self, confirmation: SessionLocker) {
+        if self.client_lock() {
+            return;
+        }
+        let lock = confirmation.ext_session_lock().clone();
+        self.locking.phase = Phase::Locked;
+        self.locking.by = By::Client(lock);
+        self.lock_began();
+        // The next frame shows nothing but the lock.
+        confirmation.lock();
+    }
+
+    fn unlock(&mut self) {
+        if self.client_lock() {
+            State::unlock(self);
+        }
+    }
+
+    fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
+        let Some(output) = Output::from_resource(&output) else {
+            return;
+        };
+        let Some(g) = self.space.output_geometry(&output) else {
+            return;
+        };
+        surface.with_pending_state(|s| {
+            s.size = Some(Size::from((g.size.w as u32, g.size.h as u32)));
+        });
+        surface.send_configure();
+        self.locking.lock_surfaces.insert(output.name(), surface);
+        self.lock_keyboard();
+        self.needs_redraw = true;
+    }
+}
+delegate_session_lock!(State);
+
+impl State {
+    /// Locked by a client: its surface under `pos`, where its origin is.
+    pub fn lock_surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(
+        smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+        Point<f64, Logical>,
+    )> {
+        if !self.client_lock() {
+            return None;
+        }
+        let output = self.space.output_under(pos).next()?;
+        let origin = self.space.output_geometry(output)?.loc.to_f64();
+        let surface = self.locking.lock_surfaces.get(&output.name())?;
+        Some((surface.wl_surface().clone(), origin))
+    }
+}

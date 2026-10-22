@@ -85,6 +85,15 @@ pub struct State {
     pub quick: Option<crate::quick::QuickPanel>,
     /// Wallpapers, when the shell runs.
     pub wallpapers: Option<crate::wallpaper::Wallpapers>,
+    /// The user's clock: the system's, or a fixed one under the virtual
+    /// clock of tests.
+    pub wall: crate::shell::WallClock,
+    /// Idle, the curtain and the lock (#29).
+    pub locking: crate::lock::Locking,
+    /// Third-party idle notifications (ext-idle-notify).
+    pub idle_notifications: Vec<
+        smithay::reexports::wayland_protocols::ext::idle_notify::v1::server::ext_idle_notification_v1::ExtIdleNotificationV1,
+    >,
     /// Screenshot tools and screen sharing (#114).
     pub screen_capture: crate::screen_capture::ScreenCapture,
     /// The common batch of protocols (#32).
@@ -193,9 +202,13 @@ impl State {
             settings_started: None,
             child_env: None,
             layout_index: 0,
-            user: std::env::var("USER")
-                .or_else(|_| std::env::var("LOGNAME"))
-                .unwrap_or_default(),
+            // Tests show the same name on every machine.
+            user: match clock {
+                Clock::Virtual { .. } => "Alex".into(),
+                Clock::Monotonic { .. } => std::env::var("USER")
+                    .or_else(|_| std::env::var("LOGNAME"))
+                    .unwrap_or_default(),
+            },
             snap_preview_buffer: SolidColorBuffer::default(),
             cursor: CursorImageStatus::default_named(),
             arrows: Arrows::default(),
@@ -206,6 +219,14 @@ impl State {
             ),
             protocols: crate::handlers::protocols::Protocols::new(dh),
             screen_capture: Default::default(),
+            locking: crate::lock::Locking::new(dh),
+            wall: match clock {
+                Clock::Monotonic { .. } => {
+                    crate::shell::WallClock::System(jiff::tz::TimeZone::system())
+                }
+                Clock::Virtual { .. } => crate::shell::WallClock::Virtual,
+            },
+            idle_notifications: Vec::new(),
             workspaces: WorkspaceState::new(dh),
             measures: Measures::default(),
             watchdog: None,

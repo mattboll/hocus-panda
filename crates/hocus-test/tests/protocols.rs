@@ -170,3 +170,118 @@ fn a_sandboxed_client_does_not_see_the_sensitive_protocols() -> anyhow::Result<(
     }
     Ok(())
 }
+
+mod idle {
+    use std::sync::{Arc, Mutex};
+
+    use wayland_client::{
+        Connection, Dispatch, QueueHandle,
+        globals::{GlobalListContents, registry_queue_init},
+        protocol::{wl_registry, wl_seat},
+    };
+    use wayland_protocols::ext::idle_notify::v1::client::{
+        ext_idle_notification_v1::{self, ExtIdleNotificationV1},
+        ext_idle_notifier_v1::ExtIdleNotifierV1,
+    };
+
+    pub struct Watcher(pub Arc<Mutex<Vec<&'static str>>>);
+
+    /// Asks to be told after `ms` of idle, then records what it is told.
+    pub fn watch(
+        socket: &std::path::Path,
+        ms: u32,
+        seen: Arc<Mutex<Vec<&'static str>>>,
+    ) -> anyhow::Result<()> {
+        let conn = Connection::from_socket(std::os::unix::net::UnixStream::connect(socket)?)?;
+        let (globals, mut queue) = registry_queue_init::<Watcher>(&conn)?;
+        let qh = queue.handle();
+        let notifier: ExtIdleNotifierV1 = globals.bind(&qh, 1..=2, ())?;
+        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ())?;
+        notifier.get_idle_notification(ms, &seat, &qh, ());
+        let mut watcher = Watcher(seen);
+        loop {
+            queue.blocking_dispatch(&mut watcher)?;
+        }
+    }
+
+    impl Dispatch<ExtIdleNotificationV1, ()> for Watcher {
+        fn event(
+            w: &mut Self,
+            _: &ExtIdleNotificationV1,
+            event: ext_idle_notification_v1::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            let what = match event {
+                ext_idle_notification_v1::Event::Idled => "idled",
+                ext_idle_notification_v1::Event::Resumed => "resumed",
+                _ => return,
+            };
+            if let Ok(mut seen) = w.0.lock() {
+                seen.push(what);
+            }
+        }
+    }
+
+    macro_rules! ignore {
+        ($($t:ty),*) => {$(
+            impl Dispatch<$t, ()> for Watcher {
+                fn event(_: &mut Self, _: &$t, _: <$t as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+            }
+        )*};
+    }
+    ignore!(ExtIdleNotifierV1, wl_seat::WlSeat);
+
+    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Watcher {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &GlobalListContents,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+}
+
+#[test]
+fn idle_notifications_say_idled_then_resumed() -> anyhow::Result<()> {
+    let mut compositor = Headless::start_options(HarnessOptions {
+        headless: HeadlessConfig {
+            renderer: RendererChoice::Pixman,
+            ..Default::default()
+        },
+        api_permission: hocus_api::Permission::Test,
+        watchdog: None,
+        xwayland: false,
+        shell: false,
+        session_bus: None,
+        data_dirs: None,
+        child_env: None,
+    })?;
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let socket = compositor.socket_path().to_path_buf();
+    std::thread::spawn({
+        let seen = seen.clone();
+        move || idle::watch(&socket, 1000, seen)
+    });
+    let seen_now = |s: &std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>| {
+        s.lock().map(|v| v.clone()).unwrap_or_default()
+    };
+    // Its request arrives.
+    let until = std::time::Instant::now() + Duration::from_millis(100);
+    while std::time::Instant::now() < until {
+        compositor.dispatch(Duration::from_millis(5))?;
+    }
+    compositor.advance(Duration::from_millis(500))?;
+    assert!(seen_now(&seen).is_empty(), "too early");
+    compositor.advance(Duration::from_millis(700))?;
+    compositor.dispatch_until(Duration::from_secs(5), |_| seen_now(&seen) == ["idled"])?;
+    compositor.request(hocus_api::Request::PointerMove { x: 10.0, y: 10.0 })?;
+    compositor.dispatch_until(Duration::from_secs(5), |_| {
+        seen_now(&seen) == ["idled", "resumed"]
+    })?;
+    Ok(())
+}

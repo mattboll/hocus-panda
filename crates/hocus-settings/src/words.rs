@@ -320,6 +320,11 @@ pub fn action(action: &hocus_core::Action, lang: Lang) -> (String, ShortcutGroup
             POINTER_SCREEN,
         ),
         A::Settings => (w("Settings", "Réglages"), G::System, EVERYWHERE),
+        A::Lock => (
+            w("Lock the session", "Verrouiller la session"),
+            G::System,
+            EVERYWHERE,
+        ),
         A::SwitchWindows(s) => (
             w("Switch windows", "Alterner les fenêtres"),
             G::Windows,

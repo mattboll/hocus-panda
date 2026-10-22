@@ -18,8 +18,10 @@ mod grabs;
 mod handlers;
 mod harness;
 mod headless;
+mod idle_notify;
 mod input;
 mod launcher;
+mod lock;
 mod notify;
 mod output_spec;
 mod quick;
@@ -199,6 +201,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         screenshots,
     )?;
     screen_capture::init(&display.handle());
+    idle_notify::init(&display.handle());
     socket::insert(&event_loop.handle(), socket, display)?;
     if matches!(state.clock, Clock::Monotonic { .. }) {
         fonts::start(&event_loop.handle());
@@ -207,6 +210,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         state.watchdog = Some(watchdog::start(&event_loop.handle(), config.clone())?);
     }
     state.loop_handle = Some(event_loop.handle());
+    lock::start(&event_loop.handle(), &mut state);
     if options.shell {
         state.child_env = options.child_env.clone();
         shell::start(

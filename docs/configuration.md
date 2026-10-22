@@ -48,6 +48,11 @@ colour = "#0e0f12"         # around a fitted image, or the whole screen; the the
 output = "DP-1"
 image = "~/Pictures/wide.png"
 
+[idle]                     # nobody at the keyboard
+curtain_after = 300        # seconds before the curtain dims the screens (0: never)
+lock_after = 30            # seconds of curtain before the session locks
+lock = true                # false: the curtain only dims
+
 [settings]                 # the settings app (Super+Comma)
 command = "hocus-settings" # `--page <page>` is added for a page
 app_id = "hocus-settings"  # how its window is recognised
@@ -114,6 +119,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `launcher` | opens the launcher (applications, calculator), or closes it |
 | `quick-settings` | opens quick settings on the screen under the pointer, or closes them |
 | `settings` | opens the settings app, or brings its window forward |
+| `lock` | locks the session now |
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `spawn COMMAND` | runs a command through the shell |
@@ -143,5 +149,6 @@ Defaults:
 | Super+A | `quick-settings` |
 | Super+Backtick | `dropdown` |
 | Super+Comma | `settings` |
+| Super+L | `lock` |
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |
 | Ctrl+Alt+BackSpace | `quit` |

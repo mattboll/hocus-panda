@@ -138,6 +138,7 @@ impl State {
             Action::QuickSettings => self.toggle_quick(),
             Action::Dropdown => self.toggle_dropdown(),
             Action::Settings => self.open_settings(None),
+            Action::Lock => self.lock_now(),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }

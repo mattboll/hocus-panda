@@ -19,6 +19,7 @@ pub struct Config {
     pub launcher: Launcher,
     pub dropdown: Dropdown,
     pub settings: Settings,
+    pub idle: Idle,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
@@ -276,6 +277,29 @@ impl Wallpaper {
                 .and_then(|s| s.mode.clone())
                 .unwrap_or_else(|| self.mode.clone()),
             colour: pick(own.map(|s| &s.colour), &self.colour),
+        }
+    }
+}
+
+/// What happens when nobody uses the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Idle {
+    /// Seconds without input before the curtain dims the screens; 0 for
+    /// never.
+    pub curtain_after: u32,
+    /// Seconds the curtain shows before the session locks.
+    pub lock_after: u32,
+    /// Whether the curtain ends by locking; otherwise it only dims.
+    pub lock: bool,
+}
+
+impl Default for Idle {
+    fn default() -> Self {
+        Self {
+            curtain_after: 300,
+            lock_after: 30,
+            lock: true,
         }
     }
 }

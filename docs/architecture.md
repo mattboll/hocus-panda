@@ -118,6 +118,16 @@ picker come with #116. While the screen is shared, toasts are held and
 one summarises them afterwards. Idle notification (#29) and drm-lease
 (#27) come with their issues.
 
+## Idle and lock
+
+Without input, the curtain dims every screen with a countdown, then the
+session locks. Idle inhibitors (shown windows) and fullscreen windows hold
+it off; the countdown starts again when they stop. ext-idle-notify tells
+third-party tools. Locked, the screens show nothing but the lock: a lock
+client's surfaces (ext-session-lock), or our own lock screen, whose
+password goes to PAM on a worker thread. A lock client that goes away
+without unlocking leaves our lock screen: a crash never unlocks.
+
 ## Control API
 
 - UNIX socket next to the Wayland one (`hocus-0.api` beside `hocus-0`),

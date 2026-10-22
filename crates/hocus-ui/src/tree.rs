@@ -427,6 +427,8 @@ pub struct TextField {
     cursor: usize,
     /// What it is for, for screen readers.
     name: String,
+    /// Shown as dots (a password); its value is never drawn.
+    secret: bool,
 }
 
 impl TextField {
@@ -436,6 +438,22 @@ impl TextField {
             placeholder: TextBox::new(placeholder, style.with_color(Paint::Muted)),
             cursor: 0,
             name: name.to_owned(),
+            secret: false,
+        }
+    }
+
+    /// A password field: dots instead of what is typed.
+    pub fn secret(mut self) -> Self {
+        self.secret = true;
+        self
+    }
+
+    /// What is drawn for `text`: itself, or a dot per character.
+    fn shown(&self, text: &str) -> String {
+        if self.secret {
+            "•".repeat(text.chars().count())
+        } else {
+            text.to_owned()
         }
     }
 
@@ -1741,8 +1759,13 @@ fn draw_kind(
         }
         Kind::TextField(field) => {
             let empty = field.value.text().is_empty();
+            let mut dots = field
+                .secret
+                .then(|| TextBox::new(field.shown(field.value.text()), *field.value.style()));
             let shown = if empty {
                 &mut field.placeholder
+            } else if let Some(dots) = dots.as_mut() {
+                dots
             } else {
                 &mut field.value
             };
@@ -1755,7 +1778,7 @@ fn draw_kind(
                 canvas.pop();
             }
             if caret {
-                let before = &field.value.text()[..field.cursor];
+                let before = field.shown(&field.value.text()[..field.cursor]);
                 let x = TextBox::new(before, *field.value.style())
                     .measure(fonts, None, scale)
                     .w;

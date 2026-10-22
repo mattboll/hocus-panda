@@ -6,4 +6,5 @@ pub mod image;
 pub mod layer;
 pub mod scenario;
 pub mod screencopy;
+pub mod session_lock;
 pub mod x11;

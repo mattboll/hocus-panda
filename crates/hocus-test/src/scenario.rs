@@ -103,6 +103,13 @@ pub enum Step {
     ClickUi(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
+    /// A lock client locks the session with a surface of this colour on
+    /// every output: `"#rrggbb"`; waits until it is locked.
+    LockClient(String),
+    /// The lock client unlocks.
+    UnlockClient(bool),
+    /// The lock client goes away without unlocking, as a crash would.
+    CrashLockClient(bool),
     /// A screen sharing tool starts copying the first output again and
     /// again (wlr-screencopy with damage).
     Share(bool),
@@ -406,6 +413,9 @@ impl fmt::Display for Step {
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
             Self::Share(_) => write!(f, "share"),
+            Self::LockClient(_) => write!(f, "lock_client"),
+            Self::UnlockClient(_) => write!(f, "unlock_client"),
+            Self::CrashLockClient(_) => write!(f, "crash_lock_client"),
             Self::StopSharing(_) => write!(f, "stop_sharing"),
             Self::OpenLayer(spec) => write!(f, "open_layer {}", spec.namespace),
             Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
@@ -543,6 +553,7 @@ impl Scenario {
             settings: None,
             layers: Vec::new(),
             sharing: None,
+            lock_client: None,
             bus,
             events: Vec::new(),
         };
@@ -563,6 +574,7 @@ struct Run<'a> {
     x11_clients: Vec<X11Client>,
     settings: Option<hocus_settings::client::Running>,
     layers: Vec<crate::layer::LayerClient>,
+    lock_client: Option<crate::session_lock::LockClient>,
     sharing: Option<(
         std::sync::Arc<std::sync::atomic::AtomicBool>,
         std::thread::JoinHandle<anyhow::Result<()>>,
@@ -581,6 +593,42 @@ impl Run<'_> {
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
             Step::OpenSettings(open) => self.open_settings(open),
+            Step::LockClient(color) => {
+                let client = crate::session_lock::LockClient::spawn(
+                    self.compositor.socket_path(),
+                    parse_color(color)?,
+                )?;
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !client.is_locked() {
+                    anyhow::ensure!(Instant::now() < deadline, "the session never locked");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                self.lock_client = Some(client);
+                // Its surfaces get configured and drawn.
+                let until = Instant::now() + Duration::from_millis(100);
+                while Instant::now() < until {
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                self.compositor.advance(FRAME)
+            }
+            Step::UnlockClient(_) | Step::CrashLockClient(_) => {
+                let client = self.lock_client.take().context("no lock client")?;
+                if matches!(step, Step::UnlockClient(_)) {
+                    client.unlock();
+                } else {
+                    client.vanish();
+                }
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !client.is_finished() {
+                    anyhow::ensure!(Instant::now() < deadline, "the lock client never left");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                let until = Instant::now() + Duration::from_millis(50);
+                while Instant::now() < until {
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                self.compositor.advance(FRAME)
+            }
             Step::Share(_) => {
                 let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let socket = self.compositor.socket_path().to_path_buf();

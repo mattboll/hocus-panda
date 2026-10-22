@@ -54,6 +54,7 @@ impl State {
         };
         let serial = SERIAL_COUNTER.next_serial();
         let pressed = state == KeyState::Pressed;
+        self.activity();
         let handled = keyboard.input::<Handled, _>(
             self,
             code,
@@ -65,6 +66,14 @@ impl State {
                 // nor the release that follows it.
                 if !pressed {
                     return FilterResult::Forward;
+                }
+                // Locked: no shortcut; our lock screen takes the keys, a
+                // lock client gets them as the surface with the keyboard.
+                if state.locked() {
+                    return FilterResult::Intercept(Handled::Panel(
+                        keysym.modified_sym(),
+                        *modifiers,
+                    ));
                 }
                 // A window may hold the shortcuts back while it has the
                 // keyboard (keyboard-shortcuts-inhibit).
@@ -89,6 +98,9 @@ impl State {
         );
         match handled {
             Some(Handled::Shortcut(action)) => self.run_action(&action, serial),
+            Some(Handled::Panel(sym, modifiers)) if self.locked() => {
+                self.lock_key(sym, &modifiers);
+            }
             Some(Handled::Panel(sym, modifiers))
                 if !self.showcase_key(sym) && !self.launcher_key(sym, &modifiers) =>
             {
@@ -120,6 +132,23 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        self.activity();
+        // Locked: only a lock client's surface sees the pointer.
+        if self.locked() {
+            let under = self.lock_surface_under(location);
+            pointer.motion(
+                self,
+                under,
+                &MotionEvent {
+                    location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: time_msec,
+                },
+            );
+            pointer.frame(self);
+            self.needs_redraw = true;
+            return;
+        }
         // Games and 3D tools read the motion itself (relative-pointer),
         // and may hold the pointer still or within their window.
         let from = pointer.current_location();
@@ -179,6 +208,23 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let at = pointer.current_location();
         let pressed = state == ButtonState::Pressed;
+        self.activity();
+        // Locked: a lock client's surface gets the button, nothing else.
+        if self.locked() {
+            if self.lock_surface_under(at).is_some() {
+                pointer.button(
+                    self,
+                    &ButtonEvent {
+                        button,
+                        state,
+                        serial,
+                        time: time_msec,
+                    },
+                );
+                pointer.frame(self);
+            }
+            return;
+        }
         if button == BTN_LEFT
             && !pointer.is_grabbed()
             && (self.showcase_pointer(Some(pressed))
@@ -253,6 +299,7 @@ impl State {
                 .amount(axis)
                 .unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0)
         };
+        self.activity();
         if self.opacity_wheel(amount(Axis::Vertical)) {
             return;
         }
@@ -278,6 +325,7 @@ impl State {
     /// A wheel scroll, `dy` in logical pixels (15 per notch, down positive),
     /// from a device or injected through the control API.
     pub fn scroll(&mut self, dy: f64, time_msec: u32) {
+        self.activity();
         if self.opacity_wheel(dy) {
             return;
         }
@@ -294,6 +342,9 @@ impl State {
     /// Super+wheel over a window changes its opacity, remembered for its
     /// app; the client sees no scroll.
     fn opacity_wheel(&mut self, dy: f64) -> bool {
+        if self.locked() {
+            return false;
+        }
         let logo = self
             .seat
             .get_keyboard()
