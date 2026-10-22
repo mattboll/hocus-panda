@@ -46,7 +46,7 @@ disable_while_typing = true
 speed = 0.0                # -1 to 1
 
 [decorations]
-radius = 12        # window corners (0 to 32)
+radius = 14        # window corners (0 to 32)
 shadow = true
 ring_width = 2     # focus ring
 accent = "theme"   # the focus ring: theme (the accent in effect) or "#rrggbb"

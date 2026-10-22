@@ -459,6 +459,57 @@ struct File {
     effects: Effects,
 }
 
+/// Where the world's light comes from through the day (#161): shadows
+/// under windows and panels fall away from it, as the boards draw them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Daylight {
+    Morning,
+    #[default]
+    Afternoon,
+    Evening,
+    Night,
+}
+
+impl Daylight {
+    /// The light at `hour` (0 to 23), as the user reads the time.
+    pub fn at(hour: u8) -> Self {
+        match hour {
+            6..=11 => Self::Morning,
+            12..=17 => Self::Afternoon,
+            18..=21 => Self::Evening,
+            _ => Self::Night,
+        }
+    }
+
+    /// The shadow's offset and blur, logical pixels, and how much darker
+    /// than the theme's it is: the morning sun low on one side, the
+    /// afternoon's high, the evening's low on the other, the night's lamp.
+    fn shape(self) -> (f32, f32, f32, f32) {
+        match self {
+            Self::Morning => (26.0, 30.0, 60.0, 1.0),
+            Self::Afternoon => (0.0, 36.0, 70.0, 1.0),
+            Self::Evening => (-32.0, 28.0, 64.0, 1.0),
+            Self::Night => (0.0, 22.0, 60.0, 1.3),
+        }
+    }
+}
+
+/// The shadow under windows and panels: black, offset and blurred.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+    pub dx: f32,
+    pub dy: f32,
+    pub blur: f32,
+    /// At its darkest, 0 to 1.
+    pub alpha: f32,
+}
+
+impl Shadow {
+    pub fn color(&self) -> Color {
+        Color::rgba(0, 0, 0, (self.alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     pub name: String,
@@ -467,6 +518,8 @@ pub struct Theme {
     pub accent: Accent,
     pub faces: Faces,
     pub effects: Effects,
+    /// The shadow of the hour, from [`Theme::with_daylight`].
+    pub shadow: Shadow,
     pub radii: Radii,
     pub spacing: Spacing,
     pub text: TypeScale,
@@ -496,6 +549,12 @@ impl Theme {
             accent: file.accents.default,
             faces: file.fonts,
             effects: file.effects,
+            shadow: Shadow {
+                dx: 0.0,
+                dy: 0.0,
+                blur: 0.0,
+                alpha: 0.0,
+            },
             radii: Radii {
                 small: 8.0,
                 medium: 12.0,
@@ -514,7 +573,7 @@ impl Theme {
         };
         theme.set_accent(theme.accent);
         theme.colors.glass = theme.colors.surface;
-        Ok(theme)
+        Ok(theme.with_daylight(Daylight::default()))
     }
 
     /// Panels see-through over a blur of what is behind them, or as solid
@@ -531,6 +590,19 @@ impl Theme {
     }
 
     /// Whether panels are see-through: glass is on.
+    /// Shadows as the light at that time of day casts them, as dark as
+    /// the theme makes them (darker at night, at most 0.85).
+    pub fn with_daylight(mut self, light: Daylight) -> Self {
+        let (dx, dy, blur, darker) = light.shape();
+        self.shadow = Shadow {
+            dx,
+            dy,
+            blur,
+            alpha: (self.effects.window_shadow * darker).min(0.85),
+        };
+        self
+    }
+
     pub fn has_glass(&self) -> bool {
         self.colors.glass.a < self.colors.surface.a
     }
@@ -688,6 +760,28 @@ impl fmt::Display for Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shadows_turn_with_the_hour_and_darken_at_night() {
+        assert_eq!(Daylight::at(8), Daylight::Morning);
+        assert_eq!(Daylight::at(14), Daylight::Afternoon);
+        assert_eq!(Daylight::at(19), Daylight::Evening);
+        assert_eq!(Daylight::at(2), Daylight::Night);
+        let dark = Theme::builtin(ThemeName::Dark);
+        // The light of the afternoon, falling straight down.
+        assert_eq!(
+            (dark.shadow.dx, dark.shadow.dy, dark.shadow.blur),
+            (0.0, 36.0, 70.0)
+        );
+        let evening = dark.clone().with_daylight(Daylight::Evening);
+        assert!(evening.shadow.dx < 0.0, "the low sun on the other side");
+        let night = dark.with_daylight(Daylight::Night);
+        assert!(
+            (night.shadow.alpha - 0.65).abs() < 1e-6,
+            "{}",
+            night.shadow.alpha
+        );
+    }
 
     #[test]
     fn colours_read_from_hex() {

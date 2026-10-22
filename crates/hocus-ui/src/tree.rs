@@ -116,7 +116,8 @@ pub struct Look {
     pub radius: f32,
     /// A 1 px line inside the edge.
     pub border: Option<Paint>,
-    /// Blur of a shadow under the box, 0 for none.
+    /// Above 0, the box casts the shadow of the hour (`Theme::shadow`):
+    /// panels and windows under one light.
     pub shadow: f32,
 }
 
@@ -1240,7 +1241,8 @@ impl Tree {
         if let Kind::Box(look) = &node.kind
             && look.shadow > 0.0
         {
-            r = r.union(&r.translate(0.0, look.shadow / 3.0).grow(look.shadow * 1.25));
+            let s = self.theme.shadow;
+            r = r.union(&r.translate(s.dx, s.dy).grow(s.blur * 1.25));
         }
         if self.focus_visible && self.focused == Some(id) {
             r = r.grow(self.theme.focus_ring * 2.0);
@@ -1744,19 +1746,15 @@ fn draw_kind(
             // A see-through panel: its shadow stays outside, and its hover
             // as see-through as its surface.
             let glass = look.background == Some(Paint::Glass) && theme.has_glass();
+            // Panels cast the shadow of the hour, as windows do (#161).
             if look.shadow > 0.0 {
-                let under = rect.translate(0.0, look.shadow / 3.0);
-                let color = theme.colors.shadow;
+                let s = theme.shadow;
+                let under = rect.translate(s.dx, s.dy);
+                let color = s.color();
                 if glass {
-                    canvas.shadow_outside(
-                        under,
-                        look.radius,
-                        look.shadow,
-                        color,
-                        (rect, look.radius),
-                    );
+                    canvas.shadow_outside(under, look.radius, s.blur, color, (rect, look.radius));
                 } else {
-                    canvas.shadow(under, look.radius, look.shadow, color);
+                    canvas.shadow(under, look.radius, s.blur, color);
                 }
             }
             let tint = tint.map(|t| {

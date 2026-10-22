@@ -31,9 +31,11 @@ use smithay::{
 pub struct Style {
     /// Corner radius, logical pixels.
     pub radius: f64,
-    /// Shadow spread (blur radius) and vertical offset, logical pixels.
+    /// Shadow spread (blur radius) and offset, logical pixels: the light
+    /// of the hour's (#161).
     pub shadow_blur: f64,
-    pub shadow_offset: f64,
+    pub shadow_dx: f64,
+    pub shadow_dy: f64,
     /// Shadow opacity at its darkest, 0 to 1.
     pub shadow_alpha: f64,
     /// The focus ring: width in logical pixels, colour as RGB.
@@ -47,9 +49,10 @@ impl Default for Style {
     /// The dark theme with the bamboo accent (docs/design/identity.md).
     fn default() -> Self {
         Self {
-            radius: 12.0,
-            shadow_blur: 22.0,
-            shadow_offset: 6.0,
+            radius: 14.0,
+            shadow_blur: 70.0,
+            shadow_dx: 0.0,
+            shadow_dy: 36.0,
             shadow_alpha: 0.5,
             ring_width: 2.0,
             accent: [0x7B, 0xC4, 0x7F],
@@ -503,7 +506,8 @@ where
     let (texture, corner) = textures.get(Piece::Shadow, style, scale);
     let inset = f64::from(corner) / scale - style.radius;
     let mut below = rect;
-    below.loc.y += style.shadow_offset;
+    below.loc.x += style.shadow_dx;
+    below.loc.y += style.shadow_dy;
     nine_slice(renderer, &texture, corner, inset, below, scale, alpha)
 }
 

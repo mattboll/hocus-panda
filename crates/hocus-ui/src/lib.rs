@@ -25,7 +25,9 @@ pub use access::{AccessNode, Role};
 pub use canvas::Canvas;
 pub use geom::{Insets, PixelRect, Point, Rect, Size};
 pub use shape::{Shape, Transform};
-pub use theme::{Accent, Color, Face, Paint, TextStyle, Theme, ThemeName, Typeface};
+pub use theme::{
+    Accent, Color, Daylight, Face, Paint, Shadow, TextStyle, Theme, ThemeName, Typeface,
+};
 pub use tree::{
     Align, Button, ButtonKind, Direction, Draw, Event, Glass, Icon, Input, Justify, Key, Kind,
     Length, Look, NodeId, Property, Style, Surface, TextField, Tree,
