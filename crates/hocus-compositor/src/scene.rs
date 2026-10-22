@@ -379,6 +379,10 @@ impl State {
             // Drawn at its size, then scaled about its middle: an element's
             // size follows the output's scale, not the one it was made at.
             let centre = middle.to_physical_precise_round(scale);
+            // The Matrix theme's glyphs over a window materializing.
+            if let Some(open) = managed.and_then(|m| m.motion.matrix(self.clock.now())) {
+                elements.extend(self.matrix_open_elements(renderer, open, frame_now, scale));
+            }
             if let Some((id, r, fade)) = morph {
                 let clip_now = r.to_physical_precise_round(scale);
                 elements.extend(

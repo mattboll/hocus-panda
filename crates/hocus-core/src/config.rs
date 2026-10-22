@@ -169,6 +169,7 @@ pub struct Decorations {
     pub radius: f64,
     pub shadow: bool,
     pub ring_width: f64,
+    /// The focus ring's colour: `theme` (the accent in effect) or
     /// `#rrggbb`.
     pub accent: String,
     /// Title bars above windows whose frame the compositor draws.
@@ -183,7 +184,7 @@ impl Default for Decorations {
             radius: 12.0,
             shadow: true,
             ring_width: 2.0,
-            accent: "#7bc47f".into(),
+            accent: "theme".into(),
             title_bars: false,
             buttons: "right".into(),
         }
@@ -1028,9 +1029,13 @@ impl Config {
                 "an http(s) address with {} where the words go",
             );
         }
-        if self.accent().is_none() {
+        if self.decorations.accent != "theme" && self.accent().is_none() {
             let a = format!("{:?}", self.decorations.accent);
-            return out_of_range("decorations.accent", a, "a colour like \"#7bc47f\"");
+            return out_of_range(
+                "decorations.accent",
+                a,
+                "\"theme\" or a colour like \"#7bc47f\"",
+            );
         }
         Ok(())
     }
@@ -1063,7 +1068,8 @@ impl Config {
         shortcuts
     }
 
-    /// The accent as RGB.
+    /// The focus ring's own colour as RGB; `None` when it follows the
+    /// theme.
     pub fn accent(&self) -> Option<[u8; 3]> {
         parse_hex(&self.decorations.accent)
     }

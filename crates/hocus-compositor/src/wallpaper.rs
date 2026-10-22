@@ -7,7 +7,7 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::mpsc};
 
 use hocus_core::config::WallpaperSpec;
-use hocus_shell::wallpaper::{self, Mode, Picture, Request, Source};
+use hocus_shell::wallpaper::{self, Mode, Pattern, Picture, Request, Source};
 use hocus_ui::{Accent, Color, Theme, ThemeName};
 use smithay::{
     backend::{
@@ -33,10 +33,12 @@ struct Wanted {
     spec: WallpaperSpec,
     width: u32,
     height: u32,
+    /// Physical pixels per logical one, for the size of a pattern.
+    scale: f64,
     /// The ten minutes of the day, for the glow and folders.
     slot: u32,
     base: Color,
-    grid: bool,
+    pattern: Pattern,
 }
 
 #[derive(Debug)]
@@ -142,7 +144,11 @@ impl State {
     /// the shell the theme in effect.
     pub fn refresh_appearance(&mut self) {
         let base = self.configured_theme();
-        let grid = base.name == "hud";
+        let pattern = match base.name.parse::<ThemeName>() {
+            Ok(ThemeName::Hud) => Pattern::Grid,
+            Ok(ThemeName::Matrix) => Pattern::Rain,
+            _ => Pattern::None,
+        };
         let slot = self.wall_minutes() / 10;
         let outputs: Vec<Output> = self.space.outputs().cloned().collect();
         let Some(papers) = self.wallpapers.as_mut() else {
@@ -161,9 +167,10 @@ impl State {
             let wanted = Wanted {
                 width: mode.size.w.max(1) as u32,
                 height: mode.size.h.max(1) as u32,
+                scale: output.current_scale().fractional_scale(),
                 slot: if still { 0 } else { slot },
                 base: base.colors.background,
-                grid,
+                pattern,
                 spec,
             };
             let current = papers.papers.get(&name).map(|p| &p.wanted);
@@ -184,13 +191,14 @@ impl State {
                 "colour" => Some(Source::Colour),
                 _ => None,
             }
-            .unwrap_or(Source::Glow { grid });
+            .unwrap_or(Source::Glow(pattern));
             let request = Request {
                 source,
                 mode: Mode::parse(&s.mode),
                 colour,
                 width: wanted.width,
                 height: wanted.height,
+                scale: wanted.scale as f32,
                 hour: (wanted.slot * 10) as f32 / 60.0,
             };
             let paper = papers.papers.entry(name.clone()).or_insert_with(|| Paper {
@@ -272,6 +280,13 @@ impl State {
     /// Gives every part of the shell the theme in effect, when it changed.
     fn apply_theme(&mut self) {
         let theme = self.theme();
+        // The focus ring in the accent, unless it has a colour of its own.
+        let a = theme.colors.accent;
+        if self.config.decorations.accent == "theme" && self.style.accent != [a.r, a.g, a.b] {
+            self.style.accent = [a.r, a.g, a.b];
+            self.textures.clear();
+            self.needs_redraw = true;
+        }
         if self.applied_theme.as_ref() == Some(&theme) {
             return;
         }

@@ -19,6 +19,7 @@ pub mod ink;
 pub mod launcher;
 pub mod leave;
 pub mod lock;
+pub mod matrix;
 pub mod panda;
 pub mod phone;
 pub mod picker;

@@ -1,7 +1,8 @@
-//! Wallpapers as pixels: the theme's soft glow placed by the time of day,
-//! an image filling, fitting, stretched or centred, a folder of images
-//! through the day, or a plain colour. Everything here is plain
-//! computation: the compositor runs it on a worker thread, never the loop.
+//! Wallpapers as pixels: the theme's soft glow placed by the time of day
+//! (with the HUD's grid, or the Matrix theme's rain), an image filling,
+//! fitting, stretched or centred, a folder of images through the day, or a
+//! plain colour. Everything here is plain computation: the compositor runs
+//! it on a worker thread, never the loop.
 
 use std::path::{Path, PathBuf};
 
@@ -10,15 +11,23 @@ use image::{DynamicImage, RgbaImage, imageops::FilterType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// The theme's light, placed by the time of day; `grid` for the HUD
-    /// theme.
-    Glow {
-        grid: bool,
-    },
+    /// The theme's light, placed by the time of day, and its pattern.
+    Glow(Pattern),
     Image(PathBuf),
     /// Its images in name order, through the day.
     Folder(PathBuf),
     Colour,
+}
+
+/// What a theme draws over its glow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pattern {
+    None,
+    /// The HUD theme's grid.
+    Grid,
+    /// The Matrix theme's rain, still, on night blue (an animated rain is
+    /// #108's).
+    Rain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +61,8 @@ pub struct Request {
     pub colour: Color,
     pub width: u32,
     pub height: u32,
+    /// Physical pixels per logical one: patterns keep their size.
+    pub scale: f32,
     /// The hour, 0 to 24, as a fraction.
     pub hour: f32,
 }
@@ -70,7 +81,8 @@ pub fn render(req: &Request) -> Result<Picture, String> {
     let (w, h) = (req.width.max(1), req.height.max(1));
     let image = match &req.source {
         Source::Colour => solid(w, h, req.colour),
-        Source::Glow { grid } => glow(w, h, req.colour, req.hour, *grid),
+        Source::Glow(Pattern::Rain) => rain(w, h, req.colour, req.hour, req.scale),
+        Source::Glow(pattern) => glow(w, h, req.colour, req.hour, *pattern == Pattern::Grid),
         Source::Image(path) => place(&open(path)?, w, h, req.mode, req.colour),
         Source::Folder(dir) => {
             let path = of_the_hour(dir, req.hour)?;
@@ -148,10 +160,10 @@ fn place(src: &DynamicImage, w: u32, h: u32, mode: Mode, around: Color) -> RgbaI
     out
 }
 
-/// The identity's wallpaper: the base colour, and a soft light where the
-/// sun is (low and warm in the morning and the evening, high at noon,
-/// night blue at night).
-fn glow(w: u32, h: u32, base: Color, hour: f32, grid: bool) -> RgbaImage {
+/// Where the sun is at `hour`, as fractions of the screen, and its light
+/// (low and warm in the morning and the evening, high at noon, night blue
+/// at night).
+fn sun(hour: f32) -> (f32, f32, Color) {
     let hour = hour.rem_euclid(24.0);
     let day = (6.0..20.0).contains(&hour);
     let (cx, cy, light) = if day {
@@ -166,6 +178,13 @@ fn glow(w: u32, h: u32, base: Color, hour: f32, grid: bool) -> RgbaImage {
     } else {
         (0.5, 0.05, Color::rgb(0x2f, 0x5f, 0xa8))
     };
+    (cx, cy, light)
+}
+
+/// The identity's wallpaper: the base colour, and a soft light where the
+/// sun is.
+fn glow(w: u32, h: u32, base: Color, hour: f32, grid: bool) -> RgbaImage {
+    let (cx, cy, light) = sun(hour);
     let (fw, fh) = (w as f32, h as f32);
     let radius = fw.max(fh) * 0.9;
     // Light themes get a gentler light.
@@ -181,6 +200,34 @@ fn glow(w: u32, h: u32, base: Color, hour: f32, grid: bool) -> RgbaImage {
         }
         image::Rgba([c.r, c.g, c.b, 255])
     })
+}
+
+/// The Matrix theme's wallpaper (as in the boards): from the base colour
+/// at the top to night blue at the bottom, a night-blue light where the
+/// sun is whatever the hour, and the rain, still.
+fn rain(w: u32, h: u32, base: Color, hour: f32, scale: f32) -> RgbaImage {
+    let (cx, cy, _) = sun(hour);
+    let light = Color::rgb(0x1e, 0x3c, 0x8c);
+    let (fw, fh) = (w as f32, h as f32);
+    // An ellipse about half the screen wide, gone at 70 % of it.
+    let (rx, ry) = (fw * 0.52, fh * 0.83);
+    let mut image = RgbaImage::from_fn(w, h, |x, y| {
+        let dx = (x as f32 - cx * fw) / rx;
+        let dy = (y as f32 - cy * fh) / ry;
+        let d = (dx * dx + dy * dy).sqrt();
+        let a = 0.18 * (1.0 - d / 0.7).clamp(0.0, 1.0);
+        let c = base
+            .mix(crate::matrix::NIGHT, y as f32 / fh.max(1.0))
+            .mix(light, a);
+        image::Rgba([c.r, c.g, c.b, 255])
+    });
+    // The same rain for a screen of the same size.
+    crate::matrix::draw_rain(
+        &mut image,
+        scale.max(0.5),
+        (u64::from(w) << 32) | u64::from(h),
+    );
+    image
 }
 
 /// The colour that stands out: the most common saturated hue, averaged.
@@ -262,5 +309,45 @@ mod tests {
         let left = morning.get_pixel(5, 45).0[0];
         let right = morning.get_pixel(95, 45).0[0];
         assert!(left > right, "{left} {right}");
+    }
+
+    #[test]
+    fn the_matrix_rain_falls_on_night_blue() {
+        let base = Color::rgb(0x02, 0x04, 0x0a);
+        let request = |scale| Request {
+            source: Source::Glow(Pattern::Rain),
+            mode: Mode::Fill,
+            colour: base,
+            width: 640,
+            height: 400,
+            scale,
+            hour: 23.0,
+        };
+        let picture = render(&request(1.0)).map_err(|e| e.to_string());
+        let Ok(picture) = picture else {
+            panic!("{picture:?}");
+        };
+        let at = |x: u32, y: u32| {
+            let i = ((y * picture.width + x) * 4) as usize;
+            Color::rgb(
+                picture.pixels[i],
+                picture.pixels[i + 1],
+                picture.pixels[i + 2],
+            )
+        };
+        // Darker and blacker at the top than at the bottom, away from the
+        // drops (the gap between two columns).
+        let (top, bottom) = (at(40, 0), at(40, 399));
+        assert!(bottom.b > top.b, "{top:?} {bottom:?}");
+        assert!(top.r < 0x10 && top.g < 0x10, "never brownish: {top:?}");
+        // Green glyphs somewhere, and the same picture again.
+        let green = picture
+            .pixels
+            .chunks(4)
+            .filter(|p| p[1] > 60 && p[1] > 2 * p[0])
+            .count();
+        assert!(green > 200, "{green}");
+        let again = render(&request(1.0)).map(|p| p.pixels);
+        assert!(again.is_ok_and(|p| p == picture.pixels));
     }
 }

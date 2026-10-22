@@ -119,6 +119,15 @@ screen only: the model switches at once and only the picture moves, the
 windows of the desktops passing by drawn where they wait. A three-finger
 swipe holds the strip under the fingers and lets it spring to the nearest
 desktop; the switcher shows the screen's desktops meanwhile.
+The Matrix theme (#50) has windows of its own: one materializes from a
+column of glyphs that fills its place row by row, one closing glitches,
+turns to glyphs and drains off as rain. Like the magic lamp, these are
+drawn with the elements every renderer has (rows and columns cut from a
+sheet of glyphs drawn once per scale, plain colours, the window's
+picture), evaluated in closed form at the clock's time, so that headless
+scenarios sample them. The glyphs are strokes of our own after
+half-width katakana: no bundled font has them. The theme's wallpaper is
+its still rain, drawn with the other wallpapers on their worker thread.
 The window switcher (#39) shows each card's window live: the window's own
 surfaces drawn again, scaled into the card (a rescale element: a surface
 element's size follows the output's scale, not the one it was made at), so

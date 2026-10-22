@@ -1,0 +1,49 @@
+description = "In the Matrix theme a closing window glitches and turns green, decomposes into glyphs from a few points, and drains off as rain; sampled at each phase; then nothing is left and nothing is drawn"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+close = "editor"
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-close-glitch.png" }
+
+[[step]]
+advance_ms = 130
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-close-glyphs.png" }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-close-rain.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_no_window = "editor"
+
+[[step]]
+expect_idle = { for_ms = 5000 }
