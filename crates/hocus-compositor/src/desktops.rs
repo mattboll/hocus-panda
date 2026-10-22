@@ -416,6 +416,7 @@ impl State {
     /// Maps the windows the model shows, bottom to top, where they were;
     /// unmaps the others and remembers where they were.
     pub fn sync_desktops(&mut self) {
+        self.layout_tiles();
         for managed in self.windows.values_mut() {
             if let Some(location) = self.space.element_location(&managed.window) {
                 managed.location = location;

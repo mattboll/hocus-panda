@@ -66,6 +66,9 @@ same keys twice, the first one wins and the second is reported.
 | `send-to-next-desktop`, `send-to-previous-desktop` | the same, to the next or previous desktop of its output |
 | `send-to-output-left`, `send-to-output-right` | sends the focused window to the output beside |
 | `toggle-maximized`, `toggle-fullscreen`, `minimize`, `close` | the focused window |
+| `toggle-tiling` | tiles the shown desktop of the output under the pointer as master and stack, or back to floating |
+| `make-master`, `grow-master`, `shrink-master` | the focused window becomes the master; the master's share of the width grows or shrinks |
+| `toggle-floating` | takes the focused window out of the tiling, or back in as master |
 | `snap ZONE` | snaps the focused window: `left`, `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right`, `top` (maximize) |
 | `switch-layout` | the next keyboard layout |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
@@ -85,7 +88,11 @@ Defaults:
 | Super+Up | `toggle-maximized` |
 | Super+Left / Right | `snap left` / `snap right` |
 | Super+Down | `minimize` |
-| Super+Shift+F | `toggle-fullscreen` |
+| Super+F11 | `toggle-fullscreen` |
+| Super+Shift+T | `toggle-tiling` |
+| Super+Shift+J | `make-master` |
+| Super+Shift+H / L | `shrink-master` / `grow-master` |
+| Super+Shift+F | `toggle-floating` |
 | Alt+F4 | `close` |
 | Super+Ctrl+Space | `switch-layout` |
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |

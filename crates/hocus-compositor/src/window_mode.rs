@@ -34,6 +34,10 @@ pub enum WindowMode {
         zone: Zone,
         restore: Rectangle<i32, Logical>,
     },
+    /// Laid out by its desktop's tiling.
+    Tiled {
+        restore: Rectangle<i32, Logical>,
+    },
 }
 
 impl WindowMode {
@@ -41,7 +45,9 @@ impl WindowMode {
     pub fn restore(self) -> Option<Rectangle<i32, Logical>> {
         match self {
             Self::Normal => None,
-            Self::Maximized { restore } | Self::Snapped { restore, .. } => Some(restore),
+            Self::Maximized { restore }
+            | Self::Snapped { restore, .. }
+            | Self::Tiled { restore } => Some(restore),
             Self::Fullscreen { restore, .. } => Some(restore),
         }
     }
@@ -127,12 +133,83 @@ impl State {
                 self.configure(id, restore, None);
                 self.set_mode(id, WindowMode::Normal, serial);
             }
+            // Out of the tiling: floating at its own size.
+            Some(WindowMode::Tiled { .. }) => {
+                self.model.set_floating(id, true);
+                self.sync_desktops();
+                self.apply_focus(serial);
+            }
             _ => {}
         }
     }
 
+    /// Places the windows of tiled desktops, and gives the others that were
+    /// tiled their floating place back. Only windows whose place changes
+    /// are told.
+    pub fn layout_tiles(&mut self) {
+        let mut tiled = std::collections::BTreeSet::new();
+        let outputs: Vec<_> = self.model.outputs().to_vec();
+        for out in outputs {
+            let Some(output) = self.find_output(&out.name.0) else {
+                continue;
+            };
+            let area = rect(self.work_area(&output));
+            for desktop in &out.desktops {
+                if !self.model.is_tiling(*desktop) {
+                    continue;
+                }
+                let tiles = self.model.tiles(*desktop);
+                let ratio = self.model.master_ratio(*desktop);
+                let rects = hocus_core::tiling::layout(
+                    area,
+                    tiles.len(),
+                    ratio,
+                    self.config.windows.gaps.inner,
+                );
+                for (id, r) in tiles.into_iter().zip(rects) {
+                    let Some(mode) = self.windows.get(&id).map(|m| m.mode) else {
+                        continue;
+                    };
+                    let restore = match mode {
+                        WindowMode::Normal => self.current_rect(id),
+                        WindowMode::Tiled { restore } => Some(restore),
+                        // Maximized, fullscreen and snapped windows keep
+                        // their own place.
+                        _ => None,
+                    };
+                    let Some(restore) = restore else {
+                        continue;
+                    };
+                    tiled.insert(id);
+                    let target = rectangle(r);
+                    if self.current_rect(id) != Some(target) {
+                        self.configure(id, target, None);
+                    }
+                    if let Some(managed) = self.windows.get_mut(&id) {
+                        managed.mode = WindowMode::Tiled { restore };
+                    }
+                }
+            }
+        }
+        let released: Vec<(WindowId, Rectangle<i32, Logical>)> = self
+            .windows
+            .iter()
+            .filter(|(id, _)| !tiled.contains(*id))
+            .filter_map(|(id, m)| match m.mode {
+                WindowMode::Tiled { restore } => Some((*id, restore)),
+                _ => None,
+            })
+            .collect();
+        for (id, restore) in released {
+            self.configure(id, restore, None);
+            if let Some(managed) = self.windows.get_mut(&id) {
+                managed.mode = WindowMode::Normal;
+            }
+        }
+    }
+
     /// The window's current place and size.
-    fn current_rect(&self, id: WindowId) -> Option<Rectangle<i32, Logical>> {
+    pub fn current_rect(&self, id: WindowId) -> Option<Rectangle<i32, Logical>> {
         let managed = self.windows.get(&id)?;
         let location = self
             .space

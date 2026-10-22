@@ -150,7 +150,12 @@ impl State {
     fn decorated(&self, window: &Window) -> bool {
         let normal = model_id(window)
             .and_then(|id| self.windows.get(&id))
-            .is_none_or(|m| matches!(m.mode, WindowMode::Normal | WindowMode::Snapped { .. }));
+            .is_none_or(|m| {
+                matches!(
+                    m.mode,
+                    WindowMode::Normal | WindowMode::Snapped { .. } | WindowMode::Tiled { .. }
+                )
+            });
         let server_side = window
             .toplevel()
             .is_some_and(|t| t.current_state().decoration_mode == Some(DecorationMode::ServerSide));

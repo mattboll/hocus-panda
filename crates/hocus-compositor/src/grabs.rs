@@ -381,7 +381,11 @@ impl State {
             .and_then(|id| self.windows.get(&id))
             .map(|m| m.mode)
         {
-            Some(WindowMode::Maximized { .. } | WindowMode::Snapped { .. }) => Hold::Maximized,
+            Some(
+                WindowMode::Maximized { .. }
+                | WindowMode::Snapped { .. }
+                | WindowMode::Tiled { .. },
+            ) => Hold::Maximized,
             // A fullscreen window does not move.
             Some(WindowMode::Fullscreen { .. }) => return,
             _ => Hold::Free,

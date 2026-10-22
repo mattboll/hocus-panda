@@ -104,6 +104,7 @@ impl State {
             Some(WindowMode::Maximized { .. }) => WindowState::Maximized,
             Some(WindowMode::Fullscreen { .. }) => WindowState::Fullscreen,
             Some(WindowMode::Snapped { .. }) => WindowState::Snapped,
+            Some(WindowMode::Tiled { .. }) => WindowState::Tiled,
             _ => WindowState::Normal,
         }
     }
@@ -393,7 +394,7 @@ impl App {
                         format!("no window with id {window}"),
                     )));
                 }
-                if wanted == WindowState::Snapped {
+                if matches!(wanted, WindowState::Snapped | WindowState::Tiled) {
                     return Some(Err(ApiError::new(
                         ErrorCode::BadRequest,
                         "snapping needs a zone: use snap_window",
@@ -409,7 +410,7 @@ impl App {
                         state.set_fullscreen(id, false, None, serial);
                         state.unlay(id, serial);
                     }
-                    WindowState::Snapped => {}
+                    WindowState::Snapped | WindowState::Tiled => {}
                     WindowState::Maximized => {
                         state.set_fullscreen(id, false, None, serial);
                         state.set_maximized(id, true, serial);

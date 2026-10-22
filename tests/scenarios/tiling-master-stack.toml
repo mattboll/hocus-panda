@@ -1,0 +1,47 @@
+description = "Tiling a desktop puts the newest window as master on the left and the others in a column on the right; turning it off gives each its place back"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[windows.gaps]
+inner = 10
+"""
+
+[[step]]
+open = { app_id = "a", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "b", size = [400, 300], color = "#f2a65a" }
+
+[[step]]
+open = { app_id = "c", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+keys = "super+shift+t"
+
+[[step]]
+expect_window = { app_id = "c", geometry = [0, 0, 699, 800], state = "tiled" }
+
+[[step]]
+expect_window = { app_id = "b", geometry = [709, 0, 571, 395], state = "tiled" }
+
+[[step]]
+expect_window = { app_id = "a", geometry = [709, 405, 571, 395], state = "tiled" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tiling-master-stack.png" }
+
+[[step]]
+keys = "super+shift+t"
+
+[[step]]
+expect_window = { app_id = "a", geometry = [440, 250, 400, 300], state = "normal" }
+
+[[step]]
+expect_window = { app_id = "b", geometry = [472, 282, 400, 300], state = "normal" }
+
+[[step]]
+expect_window = { app_id = "c", geometry = [504, 314, 400, 300], state = "normal" }

@@ -379,6 +379,8 @@ pub enum WindowState {
     Minimized,
     /// Snapped to a half or a quarter.
     Snapped,
+    /// Laid out by its desktop's tiling.
+    Tiled,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
