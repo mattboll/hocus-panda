@@ -134,6 +134,9 @@ pinned = [                 # desktop entries, in order; those not installed are 
   "org.gnome.Nautilus.desktop", "thunderbird.desktop",
 ]
 
+[language]
+interface = "auto"         # en or fr; auto follows the session's locale (LANG); changed at once
+
 [hot_corners]              # the pointer resting in a screen's corner; one against another screen does nothing
 delay_ms = 150             # so that passing by does nothing
 top_left = "none"          # overview, launcher, show-desktop or none

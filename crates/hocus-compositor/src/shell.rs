@@ -57,6 +57,10 @@ impl Shell {
         self.column.set_theme(theme);
     }
 
+    pub fn set_lang(&mut self, lang: Lang) {
+        self.column.set_lang(lang);
+    }
+
     pub fn new(theme: Theme, lang: Lang) -> Self {
         Self {
             column: Column::new(theme, lang, 600.0, 1.0),
@@ -264,6 +268,7 @@ impl State {
         self.refresh_motion();
         self.refresh_slides();
         self.refresh_alt_tab();
+        self.refresh_lang();
         self.refresh_dock();
         self.refresh_corners();
         self.refresh_ink();

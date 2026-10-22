@@ -1,0 +1,37 @@
+description = "The Language page sets the interface in French: written to the configuration, and the column and the settings speak French at once"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+expect_settings = { label = "Like the system", selected = true }
+
+[[step]]
+expect_ui = { label = "No meeting today" }
+
+[[step]]
+click_settings = "Français"
+
+[[step]]
+expect_config_file = { contains = ["[language]", "interface = \"fr\""] }
+
+[[step]]
+expect_ui = { label = "Aucune réunion aujourd’hui" }
+
+[[step]]
+expect_settings = { label = "Comme le système", selected = false }
+
+[[step]]
+expect_settings = { label = "Français", selected = true }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-language.png" }
+
+# And back, at once too.
+[[step]]
+click_settings = "English"
+
+[[step]]
+expect_ui = { label = "No meeting today" }

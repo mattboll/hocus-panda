@@ -28,6 +28,7 @@ pub struct Config {
     /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
     pub calendars: Vec<CalendarAccount>,
     pub dock: Dock,
+    pub language: Language,
     pub hot_corners: HotCorners,
     pub gestures: Gestures,
     pub clipboard: ClipboardConfig,
@@ -393,6 +394,23 @@ impl Default for Dock {
             .to_vec(),
         }
     }
+}
+
+/// The interface's language (#51).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InterfaceLanguage {
+    /// The session's locale (`LANG`).
+    #[default]
+    Auto,
+    En,
+    Fr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Language {
+    pub interface: InterfaceLanguage,
 }
 
 /// What a hot corner, Super alone or a touchpad gesture does (#86).

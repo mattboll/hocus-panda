@@ -411,3 +411,13 @@ pub fn trigger(t: hocus_core::config::Trigger) -> Words {
         Trigger::None => NOTHING,
     }
 }
+
+pub const INTERFACE_LANGUAGE: Words = Words::new("Interface language", "Langue de l’interface");
+pub const INTERFACE_LANGUAGE_NOTE: Words = Words::new(
+    "The column, panels, menus and this app change at once; applications follow their own setting.",
+    "La colonne, les panneaux, les menus et cette appli changent tout de suite ; les applications suivent leur propre réglage.",
+);
+pub const LIKE_THE_SYSTEM: Words = Words::new("Like the system", "Comme le système");
+/// Language names are written in their own language.
+pub const ENGLISH: Words = Words::new("English", "English");
+pub const FRENCH: Words = Words::new("Français", "Français");

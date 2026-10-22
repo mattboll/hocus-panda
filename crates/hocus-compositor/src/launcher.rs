@@ -76,6 +76,13 @@ impl LauncherPanel {
     pub fn set_theme(&mut self, theme: Theme) {
         self.launcher.set_theme(theme);
     }
+
+    pub fn set_lang(&mut self, lang: Lang) {
+        if lang != self.lang {
+            self.lang = lang;
+            self.launcher.set_lang(lang);
+        }
+    }
 }
 
 pub fn start(

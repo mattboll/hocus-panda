@@ -384,6 +384,17 @@ impl Column {
         self.tree.size()
     }
 
+    /// Speaks `lang` from now on: built again, showing what it showed.
+    pub fn set_lang(&mut self, lang: Lang) {
+        if lang == self.lang {
+            return;
+        }
+        let state = self.state.clone();
+        let size = self.tree.size();
+        *self = Self::new(self.tree.theme().clone(), lang, size.h, self.tree.scale());
+        self.apply(&state, true);
+    }
+
     pub fn resize(&mut self, height: f32, scale: f32) {
         let size = Size::new(WIDTH, height);
         if size != self.tree.size() || scale != self.tree.scale() {

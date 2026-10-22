@@ -161,6 +161,21 @@ impl Sheet {
         self.open
     }
 
+    /// Speaks `lang` from now on: built again on the next state.
+    pub fn set_lang(&mut self, lang: Lang) {
+        if lang == self.lang {
+            return;
+        }
+        let open = self.open;
+        let state = self.state.take();
+        let size = self.tree.size();
+        *self = Self::new(self.tree.theme().clone(), lang, size.h, self.tree.scale());
+        self.open = open;
+        if let Some(state) = state {
+            self.set_state(&state);
+        }
+    }
+
     pub fn set_theme(&mut self, theme: Theme) {
         self.tree.set_theme(theme);
     }

@@ -348,6 +348,24 @@ impl Launcher {
         self.open
     }
 
+    /// Speaks `lang` from now on: built again, closed, keeping what it
+    /// knows.
+    pub fn set_lang(&mut self, lang: Lang) {
+        if lang == self.lang {
+            return;
+        }
+        let mut fresh = Self::new(self.tree.theme().clone(), lang, self.tree.scale());
+        fresh.apps = std::mem::take(&mut self.apps);
+        fresh.providers = std::mem::take(&mut self.providers);
+        fresh.history = std::mem::take(&mut self.history);
+        fresh.recents = std::mem::take(&mut self.recents);
+        fresh.tone = self.tone;
+        fresh.shortcuts = std::mem::take(&mut self.shortcuts);
+        fresh.action_recents = std::mem::take(&mut self.action_recents);
+        fresh.notes = std::mem::take(&mut self.notes);
+        *self = fresh;
+    }
+
     pub fn size(&self) -> Size {
         self.tree.size()
     }

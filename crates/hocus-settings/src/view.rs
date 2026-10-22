@@ -285,6 +285,8 @@ impl Draw for Swatch {
 
 pub struct SettingsView {
     lang: Lang,
+    /// The session's language, for an interface that follows it.
+    session_lang: Lang,
     tree: Tree,
     surface: Surface,
     ctx: Context,
@@ -351,10 +353,21 @@ fn fill_width(style: Style) -> Style {
     }
 }
 
+/// The interface's language: as set, or the session's.
+fn lang_of(config: &hocus_core::Config, session: Lang) -> Lang {
+    use hocus_core::config::InterfaceLanguage;
+    match config.language.interface {
+        InterfaceLanguage::Auto => session,
+        InterfaceLanguage::En => Lang::En,
+        InterfaceLanguage::Fr => Lang::Fr,
+    }
+}
+
 impl SettingsView {
     pub fn new(theme: Theme, lang: Lang, size: Size, scale: f32, ctx: Context) -> Self {
         Self {
-            lang,
+            lang: lang_of(&ctx.config, lang),
+            session_lang: lang,
             tree: Tree::new(theme, size, scale),
             surface: Surface::new(size, scale),
             ctx,
@@ -393,6 +406,8 @@ impl SettingsView {
     /// What is in effect changed (the file, the screens).
     pub fn set_context(&mut self, ctx: Context) {
         self.ctx = ctx;
+        // A language chosen here is spoken at once.
+        self.lang = lang_of(&self.ctx.config, self.session_lang);
         if !self.query.is_empty() {
             self.hits = catalogue::search(&self.query, &self.ctx, self.lang);
         }
@@ -401,6 +416,11 @@ impl SettingsView {
 
     pub fn context(&self) -> &Context {
         &self.ctx
+    }
+
+    /// The language it speaks.
+    pub fn lang(&self) -> Lang {
+        self.lang
     }
 
     pub fn resize(&mut self, size: Size, scale: f32) {
@@ -1399,6 +1419,7 @@ impl SettingsView {
         match page {
             Page::Appearance => self.appearance(theme, body),
             Page::Desktops => self.desktops(theme, body),
+            Page::Language => self.language(theme, body),
             Page::Keyboard => self.keyboard(theme, body),
             Page::Screens => self.screens(theme, body),
             Page::Account => self.account(theme, body),
@@ -1743,6 +1764,48 @@ impl SettingsView {
             );
             self.tree.set_focus(Some(id));
         }
+    }
+
+    /// Language: the interface's (#51), changed at once.
+    fn language(&mut self, theme: &Theme, body: NodeId) {
+        use hocus_core::config::InterfaceLanguage;
+        let lang = self.lang;
+        let current = self.ctx.config.language.interface;
+        let section = self.section(theme, body, words::INTERFACE_LANGUAGE);
+        let line = self.add(section, row(8.0), Kind::Box(Look::default()));
+        for (value, name) in [
+            (InterfaceLanguage::Auto, words::LIKE_THE_SYSTEM),
+            (InterfaceLanguage::En, words::ENGLISH),
+            (InterfaceLanguage::Fr, words::FRENCH),
+        ] {
+            let mut button = Button::new(name.get(lang), ButtonKind::Plain, theme);
+            button.selected = value == current;
+            let b = self.add(
+                line,
+                Style {
+                    height: Length::Px(44.0),
+                    padding: Insets::symmetric(0.0, 16.0),
+                    ..Style::default()
+                },
+                Kind::Button(button),
+            );
+            let id = match value {
+                InterfaceLanguage::Auto => "auto",
+                InterfaceLanguage::En => "en",
+                InterfaceLanguage::Fr => "fr",
+            };
+            self.targets
+                .insert(b, Target::Set(Change::new("language", "interface", id)));
+        }
+        self.add(
+            section,
+            fill_width(Style::default()),
+            Kind::text(
+                words::INTERFACE_LANGUAGE_NOTE.get(lang),
+                theme.text.label.with_weight(500).with_color(Paint::Muted),
+            ),
+        );
+        self.highlighted(section, &Setting::InterfaceLanguage, Look::default());
     }
 
     /// Desktops: what each corner of a screen does (#86).
