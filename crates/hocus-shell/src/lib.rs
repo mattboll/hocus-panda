@@ -29,6 +29,7 @@ pub mod toasts;
 pub mod units;
 pub mod wallpaper;
 pub mod welcome;
+pub mod window_switcher;
 
 pub use column::{
     Action, ActiveWindow, Column, ColumnState, ScreenDesktops, TrayApp, TrayMenuEntry, WallTime,

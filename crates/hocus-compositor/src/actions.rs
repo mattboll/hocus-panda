@@ -160,9 +160,7 @@ impl State {
             Action::NightLight => self.toggle_night_light(),
             Action::ZoomIn => self.zoom_step(true),
             Action::ZoomOut => self.zoom_step(false),
-            Action::SwitchWindows(_) => {
-                tracing::debug!("the window switcher comes with #39");
-            }
+            Action::SwitchWindows(scope) => self.switch_windows(*scope),
             Action::Spawn(command) => self.spawn_command(command),
         }
     }

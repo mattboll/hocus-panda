@@ -119,6 +119,10 @@ screen only: the model switches at once and only the picture moves, the
 windows of the desktops passing by drawn where they wait. A three-finger
 swipe holds the strip under the fingers and lets it spring to the nearest
 desktop; the switcher shows the screen's desktops meanwhile.
+The window switcher (#39) shows each card's window live: the window's own
+surfaces drawn again, scaled into the card (a rescale element: a surface
+element's size follows the output's scale, not the one it was made at), so
+there is no snapshot to keep up to date.
 
 A mirroring screen (#125, `mirror` in its `[[outputs]]` entry) stays lit but
 leaves the layout as an unplugged one would: its windows wait on the

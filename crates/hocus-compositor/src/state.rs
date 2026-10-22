@@ -141,6 +141,8 @@ pub struct State {
     pub instant_motion: bool,
     /// Desktops sliding, screen by screen (#36).
     pub slides: crate::slide::Slides,
+    /// The window switcher (#39).
+    pub alt_tab: crate::alt_tab::AltTab,
     /// wlr-output-management and output-power, for third-party tools.
     pub output_management: crate::handlers::output_management::OutputManagement,
     /// linux-dmabuf, whose global the TTY backend makes for its GPU.
@@ -254,6 +256,7 @@ impl State {
             mirrors: Vec::new(),
             instant_motion: false,
             slides: Default::default(),
+            alt_tab: Default::default(),
             identifying: Vec::new(),
             leaver: Default::default(),
             authorizer: Default::default(),

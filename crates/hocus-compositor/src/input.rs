@@ -27,6 +27,8 @@ enum Handled {
     Vt(i32),
     /// Keys pressed in the action palette: what it looks for.
     PaletteKeys(hocus_core::shortcuts::Combo),
+    /// The modifier holding the window switcher was let go.
+    AltTabDone,
     /// A key for the open launcher or quick settings.
     Panel(
         smithay::input::keyboard::Keysym,
@@ -57,6 +59,19 @@ impl State {
                 use smithay::backend::input::GestureEndEvent;
                 self.swipe_end(event.cancelled());
             }
+            // A pinch closing in opens the window switcher (#39).
+            InputEvent::GesturePinchBegin { event } => {
+                use smithay::backend::input::GestureBeginEvent;
+                self.pinch_begin(event.fingers());
+            }
+            InputEvent::GesturePinchUpdate { event } => {
+                use smithay::backend::input::GesturePinchUpdateEvent;
+                self.pinch_update(event.scale());
+            }
+            InputEvent::GesturePinchEnd { event } => {
+                use smithay::backend::input::GestureEndEvent;
+                self.pinch_end(event.cancelled());
+            }
             _ => {}
         }
     }
@@ -80,6 +95,10 @@ impl State {
             serial,
             time_msec,
             |state, modifiers, keysym| {
+                // The window switcher picks when what held it is let go.
+                if !pressed && state.alt_tab_released(modifiers) {
+                    return FilterResult::Intercept(Handled::AltTabDone);
+                }
                 // Shortcuts act on press; the client never sees the press,
                 // nor the release that follows it.
                 if !pressed {
@@ -129,7 +148,8 @@ impl State {
                     || state.card_open()
                     || state.leave_open()
                     || state.auth_open()
-                    || state.picking();
+                    || state.picking()
+                    || state.alt_tab_open();
                 match action {
                     // A panel's own shortcut closes it; others still work.
                     Some(action)
@@ -167,6 +187,10 @@ impl State {
             }
             Some(Handled::Panel(sym, modifiers)) if self.locked() => {
                 self.lock_key(sym, &modifiers);
+            }
+            Some(Handled::AltTabDone) => self.alt_tab_pick(serial),
+            Some(Handled::Panel(sym, modifiers)) if self.alt_tab_open() => {
+                self.alt_tab_key(sym, &modifiers, serial);
             }
             Some(Handled::Panel(sym, _)) if self.share_open() => {
                 self.share_key(sym);
@@ -291,7 +315,8 @@ impl State {
         }
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.share_pointer(location, None)
+            && (self.alt_tab_pointer(location, None, SERIAL_COUNTER.next_serial())
+                || self.share_pointer(location, None)
                 || self.recording_pointer(location, None)
                 || self.picker_pointer(location, None)
                 || self.auth_pointer(location, None)
@@ -354,7 +379,8 @@ impl State {
         self.recording_click(at, pressed);
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && (self.share_pointer(at, Some(pressed))
+            && (self.alt_tab_pointer(at, Some(pressed), serial)
+                || self.share_pointer(at, Some(pressed))
                 || self.recording_pointer(at, Some(pressed))
                 || self.picker_pointer(at, Some(pressed))
                 || self.auth_pointer(at, Some(pressed))
