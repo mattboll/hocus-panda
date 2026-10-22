@@ -1,0 +1,38 @@
+description = "Super+Space opens the launcher; \"fir\" puts Firefox first"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+type = "fir"
+
+# Firefox before Firewall: same start, shorter name; the hidden entry is not offered.
+[[step]]
+expect_ui = { label = "Firefox", selected = true }
+
+[[step]]
+expect_ui = { label = "Firewall", selected = false }
+
+[[step]]
+expect_ui = { label = "Fireworks Helper", shown = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "launcher-fuzzy.png" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Firefox", shown = false }

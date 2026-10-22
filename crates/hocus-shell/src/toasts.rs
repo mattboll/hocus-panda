@@ -559,7 +559,10 @@ impl Toasts {
             other => other,
         };
         let mut events = Vec::new();
-        for Event::Activated(node) in self.tree.input(forwarded) {
+        for event in self.tree.input(forwarded) {
+            let Event::Activated(node) = event else {
+                continue;
+            };
             let Some(i) = self.cards.iter().position(|c| {
                 c.card == node || c.dismiss == node || c.buttons.iter().any(|(b, _)| *b == node)
             }) else {

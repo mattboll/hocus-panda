@@ -51,8 +51,9 @@ impl SeatHandler for State {
 delegate_seat!(State);
 
 impl SelectionHandler for State {
-    /// Selections the compositor offers are X11 clients': nothing to carry.
-    type SelectionUserData = ();
+    /// What the compositor itself offers: an X11 client's selection, or
+    /// text from the shell.
+    type SelectionUserData = crate::launcher::Offer;
 
     /// A Wayland client took the selection: X11 clients see it offered.
     fn new_selection(
@@ -75,12 +76,17 @@ impl SelectionHandler for State {
         mime_type: String,
         fd: OwnedFd,
         _seat: Seat<Self>,
-        _user_data: &(),
+        offer: &crate::launcher::Offer,
     ) {
-        if let (Some(xwm), Some(handle)) = (self.xwm.as_mut(), self.loop_handle.clone())
-            && let Err(err) = xwm.send_selection(ty, mime_type, fd, handle)
-        {
-            tracing::warn!(?err, "could not read the X11 selection");
+        match offer {
+            crate::launcher::Offer::Text(text) => crate::launcher::send_text(text.clone(), fd),
+            crate::launcher::Offer::X11 => {
+                if let (Some(xwm), Some(handle)) = (self.xwm.as_mut(), self.loop_handle.clone())
+                    && let Err(err) = xwm.send_selection(ty, mime_type, fd, handle)
+                {
+                    tracing::warn!(?err, "could not read the X11 selection");
+                }
+            }
         }
     }
 }

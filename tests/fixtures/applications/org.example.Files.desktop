@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Files
+GenericName=File Manager
+Keywords=folder;manager;explore;
+Exec=true %U

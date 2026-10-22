@@ -247,6 +247,7 @@ pub enum Kind {
         draw: Box<dyn Draw>,
         label: Option<String>,
     },
+    TextField(Box<TextField>),
 }
 
 impl fmt::Debug for Kind {
@@ -258,6 +259,7 @@ impl fmt::Debug for Kind {
             Self::Image { alt, .. } => f.debug_struct("Image").field("alt", alt).finish(),
             Self::Icon { label, .. } => f.debug_struct("Icon").field("label", label).finish(),
             Self::Custom { label, .. } => f.debug_struct("Custom").field("label", label).finish(),
+            Self::TextField(field) => field.fmt(f),
         }
     }
 }
@@ -305,7 +307,7 @@ impl Kind {
     }
 
     fn focusable(&self) -> bool {
-        matches!(self, Self::Button(b) if b.enabled)
+        matches!(self, Self::Button(b) if b.enabled) || matches!(self, Self::TextField(_))
     }
 }
 
@@ -346,6 +348,8 @@ struct Node {
     moving: bool,
     /// A box that takes clicks, with its name for screen readers.
     clickable: Option<String>,
+    /// A clickable box that is the current choice (a result in a list).
+    chosen: bool,
 }
 
 impl Node {
@@ -380,13 +384,84 @@ pub enum Key {
     BackTab,
     Enter,
     Space,
+    Escape,
+    Up,
+    Down,
+    Left,
+    Right,
+    Home,
+    End,
+    Backspace,
+    Delete,
 }
 
 /// What came out of input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
-    /// A button was clicked, or pressed from the keyboard.
+    /// A button was clicked, or pressed from the keyboard; Enter in a text
+    /// field.
     Activated(NodeId),
+    /// The text of a field changed.
+    Changed(NodeId),
+}
+
+/// A line of editable text.
+#[derive(Debug)]
+pub struct TextField {
+    value: TextBox,
+    placeholder: TextBox,
+    /// Byte index of the caret in the value.
+    cursor: usize,
+    /// What it is for, for screen readers.
+    name: String,
+}
+
+impl TextField {
+    pub fn new(name: &str, placeholder: &str, style: TextStyle) -> Self {
+        Self {
+            value: TextBox::new("", style),
+            placeholder: TextBox::new(placeholder, style.with_color(Paint::Muted)),
+            cursor: 0,
+            name: name.to_owned(),
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        self.value.text()
+    }
+
+    fn set(&mut self, text: &str, cursor: usize) {
+        self.value.set_text(text);
+        self.cursor = cursor.min(text.len());
+    }
+
+    /// Edits with `key`; whether the value changed.
+    fn key(&mut self, key: Key) -> (bool, bool) {
+        let text = self.value.text().to_owned();
+        let c = self.cursor;
+        let prev = text[..c].char_indices().next_back().map_or(0, |(i, _)| i);
+        let next = text[c..].chars().next().map_or(c, |ch| c + ch.len_utf8());
+        let (value, cursor) = match key {
+            Key::Backspace if c > 0 => (format!("{}{}", &text[..prev], &text[c..]), prev),
+            Key::Delete if c < text.len() => (format!("{}{}", &text[..c], &text[next..]), c),
+            Key::Left => (text.clone(), prev),
+            Key::Right => (text.clone(), next),
+            Key::Home => (text.clone(), 0),
+            Key::End => (text.clone(), text.len()),
+            _ => return (false, false),
+        };
+        let changed = value != text;
+        let moved = cursor != c;
+        self.set(&value, cursor);
+        (changed, changed || moved)
+    }
+
+    fn insert(&mut self, s: &str) {
+        let text = self.value.text();
+        let value = format!("{}{s}{}", &text[..self.cursor], &text[self.cursor..]);
+        let cursor = self.cursor + s.len();
+        self.set(&value, cursor);
+    }
 }
 
 /// A tree of widgets drawn on one surface.
@@ -500,6 +575,7 @@ impl Tree {
             pressed: false,
             moving: false,
             clickable: None,
+            chosen: false,
         };
         if let Some(index) = self.free.pop() {
             let slot = &mut self.nodes[index as usize];
@@ -666,6 +742,13 @@ impl Tree {
             } else if node.clickable.is_some() {
                 node.clickable = Some(name.to_owned());
             }
+        }
+    }
+
+    /// Marks a clickable box as the current choice, for screen readers.
+    pub fn set_selected_box(&mut self, id: NodeId, chosen: bool) {
+        if let Some(node) = self.node_mut(id) {
+            node.chosen = chosen;
         }
     }
 
@@ -898,6 +981,11 @@ impl Tree {
             )),
             Kind::Icon { icon, .. } => Some(Size::new(icon.size, icon.size)),
             Kind::Custom { draw, .. } => Some(draw.size()),
+            Kind::TextField(field) => {
+                let v = field.value.measure(fonts, None, scale);
+                let p = field.placeholder.measure(fonts, None, scale);
+                Some(Size::new(v.w.max(p.w), v.h.max(p.h)))
+            }
         }
     }
 
@@ -1115,7 +1203,7 @@ impl Tree {
                     theme,
                     fonts,
                     scale,
-                    (hovered, pressed),
+                    (hovered, pressed, self.focused == Some(id)),
                     now,
                 );
             }
@@ -1289,11 +1377,77 @@ impl Tree {
                     self.set_focus_visible(true);
                 }
             }
-            Input::Key(Key::Enter | Key::Space) => {
+            Input::Key(Key::Enter) => {
                 events.extend(self.focused.map(Event::Activated));
+            }
+            Input::Key(Key::Space) => {
+                // In a field, a space is text.
+                if self.focused_field().is_some() {
+                    events.extend(self.text_input(" "));
+                } else {
+                    events.extend(self.focused.map(Event::Activated));
+                }
+            }
+            Input::Key(key) => {
+                if let Some(id) = self.focused_field() {
+                    let mut edited = (false, false);
+                    if let Some(Kind::TextField(field)) = self.node_mut(id).map(|n| &mut n.kind) {
+                        edited = field.key(key);
+                    }
+                    if edited.1 {
+                        self.mark(id);
+                        self.relayout = true;
+                    }
+                    if edited.0 {
+                        events.push(Event::Changed(id));
+                    }
+                }
             }
         }
         events
+    }
+
+    fn focused_field(&self) -> Option<NodeId> {
+        let id = self.focused?;
+        matches!(self.node(id)?.kind, Kind::TextField(_)).then_some(id)
+    }
+
+    /// Types `text` into the focused field.
+    pub fn text_input(&mut self, text: &str) -> Vec<Event> {
+        let Some(id) = self.focused_field() else {
+            return Vec::new();
+        };
+        if let Some(Kind::TextField(field)) = self.node_mut(id).map(|n| &mut n.kind) {
+            field.insert(text);
+        }
+        self.mark(id);
+        self.relayout = true;
+        vec![Event::Changed(id)]
+    }
+
+    /// Gives a node the keyboard, without the ring (a field shows its caret).
+    pub fn set_focus(&mut self, id: Option<NodeId>) {
+        self.focus(id);
+        self.set_focus_visible(false);
+    }
+
+    /// The text of a field.
+    pub fn field_value(&self, id: NodeId) -> Option<&str> {
+        match &self.node(id)?.kind {
+            Kind::TextField(field) => Some(field.value()),
+            _ => None,
+        }
+    }
+
+    /// Replaces the text of a field, the caret at its end.
+    pub fn set_field_value(&mut self, id: NodeId, text: &str) {
+        if let Some(Kind::TextField(field)) = self.node_mut(id).map(|n| &mut n.kind)
+            && field.value() != text
+        {
+            field.set(text, text.len());
+            self.mark(id);
+            self.relayout = true;
+        }
     }
 
     // Accessibility.
@@ -1322,6 +1476,7 @@ impl Tree {
             Kind::Icon { label: None, .. } => return None,
             Kind::Icon { label, .. } => (Role::Icon, label.clone()),
             Kind::Custom { label, .. } => (Role::Custom, label.clone()),
+            Kind::TextField(field) => (Role::Field, Some(field.name.clone())),
         };
         Some(AccessNode {
             role,
@@ -1329,7 +1484,7 @@ impl Tree {
             rect: node.rect,
             focused: self.focused == Some(id),
             disabled: matches!(&node.kind, Kind::Button(b) if !b.enabled),
-            selected: matches!(&node.kind, Kind::Button(b) if b.selected),
+            selected: matches!(&node.kind, Kind::Button(b) if b.selected) || node.chosen,
             children: node
                 .children
                 .iter()
@@ -1347,7 +1502,7 @@ fn draw_kind(
     theme: &Theme,
     fonts: &mut Fonts,
     scale: f32,
-    (hovered, pressed): (bool, bool),
+    (hovered, pressed, caret): (bool, bool, bool),
     now: Duration,
 ) {
     match kind {
@@ -1463,6 +1618,30 @@ fn draw_kind(
             icon.draw(canvas, at, theme.color(*color));
         }
         Kind::Custom { draw, .. } => draw.draw(canvas, rect, theme, now),
+        Kind::TextField(field) => {
+            let empty = field.value.text().is_empty();
+            let shown = if empty {
+                &mut field.placeholder
+            } else {
+                &mut field.value
+            };
+            let color = theme.color(shown.style().color);
+            let size = shown.measure(fonts, None, scale);
+            let y = rect.y + (rect.h - size.h) / 2.0;
+            if let Some(layout) = shown.laid_out() {
+                canvas.push_clip(rect, 0.0);
+                canvas.text(layout, Point::new(rect.x, y), color);
+                canvas.pop();
+            }
+            if caret {
+                let before = &field.value.text()[..field.cursor];
+                let x = TextBox::new(before, *field.value.style())
+                    .measure(fonts, None, scale)
+                    .w;
+                let caret = Rect::new((rect.x + x).min(rect.right() - 2.0), y, 2.0, size.h);
+                canvas.fill_rect(caret, 1.0, theme.colors.accent);
+            }
+        }
     }
 }
 

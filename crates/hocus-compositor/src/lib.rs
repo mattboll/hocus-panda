@@ -16,6 +16,7 @@ mod handlers;
 mod harness;
 mod headless;
 mod input;
+mod launcher;
 mod notify;
 mod output_spec;
 mod scene;
@@ -86,6 +87,12 @@ pub struct Options {
     pub shell: bool,
     /// Serves notifications on this session bus (with the shell).
     pub session_bus: Option<String>,
+    /// Where the launcher reads desktop entries (`applications/` below
+    /// each); the XDG data directories if `None`.
+    pub data_dirs: Option<Vec<std::path::PathBuf>>,
+    /// What started applications inherit, if not the compositor's own
+    /// environment.
+    pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
 }
 
 /// How often the configuration file is looked at by default.
@@ -190,10 +197,12 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     }
     state.loop_handle = Some(event_loop.handle());
     if options.shell {
+        state.child_env = options.child_env.clone();
         shell::start(
             &event_loop.handle(),
             &mut state,
             options.session_bus.as_deref(),
+            options.data_dirs.clone(),
         );
     }
     if options.xwayland {

@@ -79,6 +79,11 @@ pub struct State {
     pub shell: Option<crate::shell::Shell>,
     /// Notifications as toasts, when the shell runs.
     pub toasts: Option<crate::notify::ToastPanel>,
+    /// The launcher, when the shell runs.
+    pub launcher: Option<crate::launcher::LauncherPanel>,
+    /// What started applications inherit, if not the compositor's own
+    /// environment (tests).
+    pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
     /// The keyboard layout in use, by its place in the configuration.
     pub layout_index: usize,
     /// Who is logged in, as the column shows it.
@@ -160,6 +165,8 @@ impl State {
             snap_preview: None,
             shell: None,
             toasts: None,
+            launcher: None,
+            child_env: None,
             layout_index: 0,
             user: std::env::var("USER")
                 .or_else(|_| std::env::var("LOGNAME"))

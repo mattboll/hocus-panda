@@ -1,0 +1,21 @@
+description = "An application started from the launcher gets the session's Wayland socket and no LD_PRELOAD"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+child_env = { LD_PRELOAD = "/tmp/not-a-library.so", LANG = "C.UTF-8" }
+
+# From the column's command field this time.
+[[step]]
+click_ui = "Command field"
+
+[[step]]
+type = "environment"
+
+[[step]]
+expect_ui = { label = "Environment Probe", selected = true }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_runtime_file = { name = "launched-env", contains = ["WAYLAND_DISPLAY=", "XDG_CURRENT_DESKTOP=Hocuspanda", "LANG=C.UTF-8"], lacks = ["LD_PRELOAD="] }

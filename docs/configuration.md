@@ -71,6 +71,7 @@ same keys twice, the first one wins and the second is reported.
 | `toggle-floating` | takes the focused window out of the tiling, or back in as master |
 | `snap ZONE` | snaps the focused window: `left`, `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right`, `top` (maximize) |
 | `switch-layout` | the next keyboard layout |
+| `launcher` | opens the launcher (applications, calculator), or closes it |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `spawn COMMAND` | runs a command through the shell |
 | `quit` | ends the session |
@@ -95,5 +96,6 @@ Defaults:
 | Super+Shift+F | `toggle-floating` |
 | Alt+F4 | `close` |
 | Super+Ctrl+Space | `switch-layout` |
+| Super+Space | `launcher` |
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |
 | Ctrl+Alt+BackSpace | `quit` |
