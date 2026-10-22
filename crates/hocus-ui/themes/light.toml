@@ -1,0 +1,28 @@
+# The panda's white fur, soft shadows. Accents are darker than on dark
+# themes, for 4.5:1 on the light background.
+name = "light"
+
+[colors]
+background = "#E9E6DF"
+surface = "#FFFFFF"
+surface_hover = "#F3F1EC"
+surface_pressed = "#E6E3DC"
+border = "#0000001A"
+text = "#1B1D21"
+muted = "#575B61"
+agent = "#6B46C1"
+waiting = "#8F5410"
+error = "#B3261E"
+shadow = "#00000033"
+
+[accents]
+default = "bamboo"
+bamboo = "#287046"
+amber = "#8F5410"
+blue = "#2D5A9E"
+pink = "#A3305F"
+
+[fonts]
+interface = "manrope"
+display = "fraunces"
+mono = "jetbrains-mono"

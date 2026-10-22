@@ -45,19 +45,22 @@ plus one accent colour.
 | Theme | Base | Surface | Accent | Feel |
 |---|---|---|---|---|
 | Dark | `#0E0F12` | `#1A1C21` | `#7BC47F` bamboo | ink, frosted glass, bamboo |
-| Light | `#E9E6DF` | `#FFFFFF` | `#2E7D4F` | white fur, soft shadows |
+| Light | `#E9E6DF` | `#FFFFFF` | `#287046` | white fur, soft shadows |
 | Matrix | `#02040A` → `#050B1C` | `#040A16` | `#00F060` | green rain on black and night blue, all monospace |
 | HUD | `#050A14` | `#0A1A2E` | `#38D9F5` | head-up display, thin lines, grid |
 | Paper | `#F1E9DA` | `#FFFBF3` | `#56702A` | warm, ink and bamboo |
 
 Accent options: bamboo `#7BC47F`, amber `#F2A65A`, blue `#8AB4F8`, pink
-`#F28DB2` (darker variants on light themes for contrast). Themes can be set
+`#F28DB2` (darker variants on light themes for contrast; each theme file in
+`crates/hocus-ui/themes/` holds its own). Themes can be set
 per desktop.
 
 Agents each get their own colour (cursor, label, halo); violet `#B48CFF` in
 the mockups for an agent acting on screen. Waiting = amber, error = coral.
 
-Text contrast: 4.5:1 minimum everywhere, including small grey labels.
+Text contrast: 4.5:1 minimum everywhere, including small grey labels; a test
+checks every text colour on every background of every theme, with every
+accent.
 
 ## Typography
 

@@ -12,7 +12,7 @@ use std::{
 use anyhow::Context;
 use hocus_ui::{
     Align, ButtonKind, Canvas, Direction, Draw, Event, Input, Insets, Key, Kind, Length, Look,
-    NodeId, Point, Rect, Size, Style, Surface, Theme, Tree,
+    NodeId, Paint, Point, Rect, Size, Style, Surface, Theme, Tree,
     motion::{Curve, Spring},
     tree::Property,
 };
@@ -81,7 +81,7 @@ struct Gallery {
 impl Gallery {
     fn new(scale: f32) -> anyhow::Result<Self> {
         let theme = Theme::default();
-        let mut tree = Tree::new(theme, SIZE, scale);
+        let mut tree = Tree::new(theme.clone(), SIZE, scale);
         let root = tree.root();
         let none = || anyhow::anyhow!("not added");
         tree.set_style(
@@ -109,9 +109,9 @@ impl Gallery {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(theme.colors.surface),
+                    background: Some(Paint::Surface),
                     radius: theme.radii.large,
-                    border: Some(theme.colors.border),
+                    border: Some(Paint::Border),
                     shadow: 12.0,
                 }),
             )
@@ -149,7 +149,7 @@ impl Gallery {
                 Style::default(),
                 Kind::text(
                     "0\u{202f}% · étape 3 sur 7",
-                    theme.text.body.with_color(theme.colors.muted),
+                    theme.text.body.with_color(Paint::Muted),
                 ),
             )
             .ok_or_else(none)?;
@@ -163,7 +163,7 @@ impl Gallery {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(theme.colors.surface),
+                    background: Some(Paint::Surface),
                     radius: theme.radii.large,
                     border: None,
                     shadow: 0.0,
@@ -179,7 +179,7 @@ impl Gallery {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(theme.colors.accent),
+                    background: Some(Paint::Accent),
                     radius: theme.radii.medium,
                     border: None,
                     shadow: 0.0,

@@ -1,14 +1,14 @@
 //! The accessibility tree, and the input that goes with it.
 
 use hocus_ui::{
-    ButtonKind, Direction, Event, Input, Key, Kind, Point, Role, Size, Style, Theme, Tree,
+    ButtonKind, Direction, Event, Input, Key, Kind, Paint, Point, Role, Size, Style, Theme, Tree,
 };
 
 const CHECK: &str = "M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z";
 
 fn dialog() -> anyhow::Result<(Tree, hocus_ui::NodeId, hocus_ui::NodeId)> {
     let theme = Theme::default();
-    let mut tree = Tree::new(theme, Size::new(320.0, 160.0), 1.0);
+    let mut tree = Tree::new(theme.clone(), Size::new(320.0, 160.0), 1.0);
     let root = tree.root();
     let none = || anyhow::anyhow!("not added");
     tree.add(
@@ -17,7 +17,7 @@ fn dialog() -> anyhow::Result<(Tree, hocus_ui::NodeId, hocus_ui::NodeId)> {
         Kind::text("Quitter la session ?", theme.text.title),
     )
     .ok_or_else(none)?;
-    let icon = Kind::icon(CHECK, 16.0, theme.colors.accent, None).ok_or_else(none)?;
+    let icon = Kind::icon(CHECK, 16.0, Paint::Accent, None).ok_or_else(none)?;
     tree.add(root, Style::default(), icon).ok_or_else(none)?;
     let row = tree
         .add(

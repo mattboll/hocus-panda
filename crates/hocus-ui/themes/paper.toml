@@ -1,0 +1,27 @@
+# Warm paper, ink and bamboo.
+name = "paper"
+
+[colors]
+background = "#F1E9DA"
+surface = "#FFFBF3"
+surface_hover = "#F7F0E3"
+surface_pressed = "#EDE4D3"
+border = "#2B26201F"
+text = "#2B2620"
+muted = "#625A4E"
+agent = "#6B46C1"
+waiting = "#8A4F0F"
+error = "#A8261E"
+shadow = "#2B262033"
+
+[accents]
+default = "bamboo"
+bamboo = "#56702A"
+amber = "#8A4F0F"
+blue = "#2D5A9E"
+pink = "#9C2F5A"
+
+[fonts]
+interface = "manrope"
+display = "fraunces"
+mono = "jetbrains-mono"
