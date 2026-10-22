@@ -170,6 +170,10 @@ pub enum Step {
     /// (relative to the scenario) to `user` and `password`; its calendar's
     /// address is `{caldav}` in later steps.
     Caldav(CaldavStep),
+    /// The last recording saved, as ffprobe and ffmpeg read it, once
+    /// done: `{ audio?, keys_at_ms? }`: with a sound track as long as the
+    /// picture; keys drawn near the bottom from this time in the video.
+    ExpectRecording(ExpectRecording),
     /// The CalDAV server goes, as the network would.
     CaldavStop(bool),
     /// The settings keep a calendar account's password: `{ id, password }`.
@@ -295,6 +299,13 @@ pub struct OpenWindow {
 #[serde(deny_unknown_fields)]
 pub struct ExpectAccent {
     pub hue: [f32; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectRecording {
+    pub audio: Option<bool>,
+    pub keys_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -605,6 +616,7 @@ impl fmt::Display for Step {
             Self::OpenAnnotate(file) => write!(f, "open_annotate {file:?}"),
             Self::WaitWallpapers(_) => write!(f, "wait_wallpapers"),
             Self::Restart(_) => write!(f, "restart"),
+            Self::ExpectRecording(e) => write!(f, "expect_recording {e:?}"),
             Self::Caldav(c) => write!(f, "caldav {}", c.dir.display()),
             Self::CaldavStop(_) => write!(f, "caldav_stop"),
             Self::CalendarPassword(p) => write!(f, "calendar_password {}", p.id),
@@ -1042,6 +1054,7 @@ impl Run<'_> {
                 Ok(())
             }
             Step::ExpectCalendars(expected) => self.expect_calendars(expected),
+            Step::ExpectRecording(expected) => self.expect_recording(expected),
             Step::Restart(_) => {
                 self.clients.clear();
                 self.x11_clients.clear();
@@ -1518,6 +1531,97 @@ impl Run<'_> {
     /// Started programs run in their own time: the file gets a moment.
     /// A file of the state directory holds these strings, and lacks those,
     /// once its worker wrote it.
+    /// The encoder finishes on its own threads: waited for in real time.
+    fn expect_recording(&mut self, expected: &ExpectRecording) -> anyhow::Result<()> {
+        let deadline = Instant::now() + CLIENT_TIMEOUT * 2;
+        let path = loop {
+            // Events arrive with replies.
+            self.request(Request::Version)?;
+            self.events.extend(self.compositor.take_events());
+            let saved = self.events.iter().rev().find_map(|e| match e {
+                hocus_api::Event::Recording { path, .. } => path.clone(),
+                _ => None,
+            });
+            if let Some(path) = saved {
+                break path;
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "no recording saved; events: {:?}",
+                self.events
+            );
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        };
+        let probe = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-show_entries"])
+            .args(["stream=codec_type,duration,width,height", "-of", "csv=p=0"])
+            .arg(&path)
+            .output()?;
+        let streams = String::from_utf8_lossy(&probe.stdout).into_owned();
+        let length = |kind: &str| {
+            streams
+                .lines()
+                .filter(|l| l.starts_with(kind))
+                .find_map(|l| l.rsplit(',').next()?.parse::<f64>().ok())
+        };
+        let (video, audio) = (length("video"), length("audio"));
+        if let Some(wanted) = expected.audio {
+            anyhow::ensure!(audio.is_some() == wanted, "{path}: streams\n{streams}");
+            if let (true, Some(v), Some(a)) = (wanted, video, audio) {
+                anyhow::ensure!((v - a).abs() < 0.15, "{path}: picture {v} s, sound {a} s");
+            }
+        }
+        if let Some(at) = expected.keys_at_ms {
+            let size = streams
+                .lines()
+                .find(|l| l.starts_with("video"))
+                .and_then(|l| {
+                    let mut f = l.split(',').skip(1);
+                    Some((
+                        f.next()?.parse::<usize>().ok()?,
+                        f.next()?.parse::<usize>().ok()?,
+                    ))
+                })
+                .context("no picture")?;
+            let frame = |ms: u64| -> anyhow::Result<Vec<u8>> {
+                let out = std::process::Command::new("ffmpeg")
+                    .args([
+                        "-v",
+                        "error",
+                        "-ss",
+                        &format!("{:.3}", ms as f64 / 1000.0),
+                        "-i",
+                    ])
+                    .arg(&path)
+                    .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"])
+                    .output()?;
+                anyhow::ensure!(out.stdout.len() == size.0 * size.1, "no frame at {ms} ms");
+                Ok(out.stdout)
+            };
+            let (before, after) = (frame(at.saturating_sub(400).max(50))?, frame(at + 300)?);
+            // Mean difference over a band: rows and columns as fractions.
+            let band = |y0: f64, y1: f64, x0: f64, x1: f64| {
+                let (w, h) = (size.0 as f64, size.1 as f64);
+                let (mut sum, mut n) = (0u64, 0u64);
+                for y in (h * y0) as usize..(h * y1) as usize {
+                    for x in (w * x0) as usize..(w * x1) as usize {
+                        let i = y * size.0 + x;
+                        sum += u64::from(before[i].abs_diff(after[i]));
+                        n += 1;
+                    }
+                }
+                sum / n.max(1)
+            };
+            let bottom = band(0.75, 1.0, 0.2, 0.8);
+            let top = band(0.0, 0.5, 0.0, 1.0);
+            anyhow::ensure!(
+                bottom > 8 && top < 4,
+                "keys at {at} ms: the bottom changed by {bottom}, the top by {top}"
+            );
+        }
+        Ok(())
+    }
+
     /// Syncs run on threads, against real sockets: waited for in real time.
     fn expect_calendars(&mut self, expected: &ExpectCalendars) -> anyhow::Result<()> {
         let deadline = Instant::now() + CLIENT_TIMEOUT;

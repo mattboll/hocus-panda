@@ -98,6 +98,15 @@ countdown = 3              # seconds before it starts, 0 to 10
 show_clicks = true         # rings in the video, never on the screen
 hardware = true            # VA-API encoding when the graphics card has it
 encoder = "ffmpeg"         # the encoder, run as a process of its own
+microphone = false         # the options offered when picking what to record, as they start
+system_sound = false       #   (the picker's buttons change them for the session)
+camera = false             #   a webcam bubble, moved with the pointer while recording
+show_keys = false          #   combinations (Ctrl+C, Super+Tab…) drawn in the video; never plain typing
+sound = "pulse"            # how the encoder reads sound: pulse (PipeWire too), oss (FreeBSD), alsa
+microphone_device = "default"
+system_device = "@DEFAULT_MONITOR@"  # what plays
+camera_input = "v4l2"
+camera_device = "/dev/video0"
 
 [settings]                 # the settings app (Super+Comma)
 command = "hocus-settings" # `--page <page>` is added for a page

@@ -484,6 +484,22 @@ pub struct Recording {
     pub hardware: bool,
     /// The encoder, as ffmpeg takes its arguments.
     pub encoder: String,
+    /// The options offered when picking what to record (#131), as they
+    /// start: the microphone, the system's sound, a webcam bubble, the keys
+    /// pressed drawn in the video.
+    pub microphone: bool,
+    pub system_sound: bool,
+    pub camera: bool,
+    pub show_keys: bool,
+    /// How the encoder reads sound: `pulse` (PipeWire too), `oss`
+    /// (FreeBSD), `alsa`.
+    pub sound: String,
+    pub microphone_device: String,
+    /// The system's sound: the monitor of what plays.
+    pub system_device: String,
+    /// How the encoder reads the webcam: `v4l2` (Linux, FreeBSD's webcamd).
+    pub camera_input: String,
+    pub camera_device: String,
 }
 
 impl Default for Recording {
@@ -495,6 +511,23 @@ impl Default for Recording {
             show_clicks: true,
             hardware: true,
             encoder: "ffmpeg".into(),
+            microphone: false,
+            system_sound: false,
+            camera: false,
+            show_keys: false,
+            sound: if cfg!(target_os = "freebsd") {
+                "oss".into()
+            } else {
+                "pulse".into()
+            },
+            microphone_device: if cfg!(target_os = "freebsd") {
+                "/dev/dsp".into()
+            } else {
+                "default".into()
+            },
+            system_device: "@DEFAULT_MONITOR@".into(),
+            camera_input: "v4l2".into(),
+            camera_device: "/dev/video0".into(),
         }
     }
 }

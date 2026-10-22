@@ -114,6 +114,17 @@ owned, to a worker thread that feeds an encoder process (ffmpeg, VA-API when
 the card has it) at a steady rate and paints click rings into it. A frame
 the worker has no room for is dropped; the loop never waits for it.
 
+Its options (#131) stay off the loop too. Sound is recorded by the encoder,
+one segment per stretch between pauses, and put with the picture once it is
+done, cut or padded to its length. The webcam is read by an encoder process
+of its own as small square frames that the worker cuts into a circle in each
+frame; on the screen only a mark shows where it goes, and the pointer moves
+it. Keys are drawn into a small picture on the loop when a combination is
+pressed, and the worker lays it near the bottom of the frames that follow.
+Only combinations with Super, Ctrl or Alt and keys that are not text (Enter,
+arrows, F-keys…) are shown: plain typing, which may be a password, never is,
+nor anything while locked or while polkit asks.
+
 System updates (#84) are looked for on a worker thread every few hours,
 never while a window is fullscreen or on the power saver: apt, dnf, pacman
 (`checkupdates`) or pkg, read without root; installing goes through

@@ -6,11 +6,11 @@
 use std::time::Duration;
 
 use hocus_ui::{
-    AccessNode, Align, Color, Insets, Justify, Kind, Length, Look, NodeId, Paint, PixelRect, Point,
-    Rect, Size, Style, Surface, Theme, Tree,
+    AccessNode, Align, Button, ButtonKind, Color, Direction, Icon, Insets, Justify, Kind, Length,
+    Look, NodeId, Paint, PixelRect, Point, Rect, Size, Style, Surface, Theme, Tree,
 };
 
-use crate::{column::View, i18n::Lang};
+use crate::{column::View, i18n::Lang, icons};
 
 /// What is being chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,36 @@ pub enum PickMode {
     Window,
     /// What to record: a region drawn, a window clicked, or the screen.
     Record,
+}
+
+/// What a recording takes besides the picture (#131), offered while
+/// picking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RecordOptions {
+    pub microphone: bool,
+    pub system_sound: bool,
+    /// `None`: no camera here.
+    pub camera: Option<bool>,
+    pub show_keys: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordOption {
+    Microphone,
+    SystemSound,
+    Camera,
+    ShowKeys,
+}
+
+impl RecordOptions {
+    pub fn toggle(&mut self, option: RecordOption) {
+        match option {
+            RecordOption::Microphone => self.microphone = !self.microphone,
+            RecordOption::SystemSound => self.system_sound = !self.system_sound,
+            RecordOption::Camera => self.camera = self.camera.map(|on| !on),
+            RecordOption::ShowKeys => self.show_keys = !self.show_keys,
+        }
+    }
 }
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
@@ -31,6 +61,9 @@ pub struct Picker {
     mode: PickMode,
     /// What is chosen on this screen, in its logical pixels.
     chosen: Option<Rect>,
+    options: RecordOptions,
+    /// The options' buttons, while they show.
+    option_nodes: Vec<(NodeId, RecordOption)>,
 }
 
 impl std::fmt::Debug for Picker {
@@ -50,9 +83,31 @@ impl Picker {
             lang,
             mode,
             chosen: None,
+            options: RecordOptions::default(),
+            option_nodes: Vec::new(),
         };
         picker.build();
         picker
+    }
+
+    /// The recording's options, shown under the hint.
+    pub fn set_options(&mut self, options: RecordOptions) {
+        if options != self.options {
+            self.options = options;
+            self.build();
+        }
+    }
+
+    /// The option whose button is at `at`, in this screen's logical
+    /// pixels; an unavailable one is none.
+    pub fn option_at(&self, at: Point) -> Option<RecordOption> {
+        self.option_nodes
+            .iter()
+            .find(|(id, option)| {
+                self.tree.rect(*id).is_some_and(|r| r.contains(at))
+                    && !(*option == RecordOption::Camera && self.options.camera.is_none())
+            })
+            .map(|(_, option)| *option)
     }
 
     /// The region drawn, or the window under the pointer, on this screen.
@@ -72,6 +127,7 @@ impl Picker {
         for child in t.children(root) {
             t.remove(child);
         }
+        self.option_nodes.clear();
         // Only the dimming and the marks: what is chosen shows through.
         t.set_look(root, Look::default());
         let dim = |t: &mut Tree, r: Rect| {
@@ -133,6 +189,9 @@ impl Picker {
                 Kind::text_line(hint, theme.text.body),
             )
             .unwrap_or_else(MISSING);
+            if self.mode == PickMode::Record {
+                self.option_nodes = options_row(t, &theme, self.lang, size, self.options);
+            }
             return;
         };
         // Dim around what is chosen.
@@ -209,6 +268,90 @@ impl Picker {
     pub fn access(&self) -> AccessNode {
         self.tree.access()
     }
+}
+
+/// The recording's options under the hint: on ones in the accent; the
+/// camera unavailable when there is none.
+fn options_row(
+    t: &mut Tree,
+    theme: &Theme,
+    lang: Lang,
+    size: Size,
+    options: RecordOptions,
+) -> Vec<(NodeId, RecordOption)> {
+    let row = t
+        .add(
+            t.root(),
+            Style {
+                at: Some(Point::new(0.0, size.h / 2.0 + 34.0)),
+                width: Length::Px(size.w),
+                direction: Direction::Row,
+                justify: Justify::Center,
+                gap: 6.0,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(MISSING);
+    let camera_label = match options.camera {
+        Some(_) => lang.camera(),
+        None => lang.no_camera(),
+    };
+    let all = [
+        (
+            RecordOption::Microphone,
+            icons::MICROPHONE,
+            lang.microphone(),
+            options.microphone,
+        ),
+        (
+            RecordOption::SystemSound,
+            icons::SOUND,
+            lang.system_sound(),
+            options.system_sound,
+        ),
+        (
+            RecordOption::Camera,
+            icons::CAMERA,
+            camera_label,
+            options.camera == Some(true),
+        ),
+        (
+            RecordOption::ShowKeys,
+            icons::KEYBOARD,
+            lang.show_keys(),
+            options.show_keys,
+        ),
+    ];
+    let mut out = Vec::new();
+    for (option, icon, label, on) in all {
+        let kind = if on {
+            ButtonKind::Primary
+        } else {
+            ButtonKind::Plain
+        };
+        let mut button = Button::new(label, kind, theme);
+        if let Some(icon) = Icon::stroked(icon, 16.0, 2.0) {
+            button = button.with_icon(icon);
+        }
+        let id = t
+            .add(
+                row,
+                Style {
+                    height: Length::Px(40.0),
+                    padding: Insets::symmetric(0.0, 12.0),
+                    ..Style::default()
+                },
+                Kind::Button(button),
+            )
+            .unwrap_or_else(MISSING);
+        t.set_selected(id, on);
+        if option == RecordOption::Camera && options.camera.is_none() {
+            t.set_enabled(id, false);
+        }
+        out.push((id, option));
+    }
+    out
 }
 
 #[cfg(test)]

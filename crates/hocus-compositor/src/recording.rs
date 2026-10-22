@@ -10,7 +10,7 @@
 //! no room for is dropped: the loop never waits for it.
 
 use std::{
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
@@ -34,7 +34,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle},
 };
 
-use crate::{App, State, capture::Pixels, scene::SceneElement, shell::Panel};
+use crate::{App, State, capture::Pixels, media, scene::SceneElement, shell::Panel};
 
 /// Frames waiting for the worker, at most.
 const QUEUE: usize = 4;
@@ -83,6 +83,22 @@ struct Running {
     last: Option<(Duration, u64)>,
     /// Clicks, where (global) and when.
     clicks: Vec<(Point<f64, Logical>, Duration)>,
+    /// The keys pressed are drawn in the video.
+    show_keys: bool,
+    /// The video's pixels to a logical one.
+    scale: f64,
+}
+
+/// Where the webcam's bubble is: its mark on the screen, outside the
+/// video, that the pointer moves within what is recorded.
+struct Bubble {
+    output: String,
+    /// Its corner, logical, from the output's.
+    place: Point<i32, Logical>,
+    diameter: i32,
+    panel: Panel<hocus_shell::recording::BubbleMark>,
+    /// While dragged: where the pointer took it, from its corner.
+    held: Option<Point<f64, Logical>>,
 }
 
 impl Running {
@@ -104,6 +120,21 @@ enum Feed {
     Stop {
         at: Duration,
     },
+    /// Keys pressed, drawn from `at` in the video.
+    Keys {
+        at: Duration,
+        caps: hocus_shell::recording::Overlay,
+    },
+    /// The webcam's bubble moved: its corner, video pixels.
+    Bubble {
+        x: u32,
+        y: u32,
+    },
+    /// The sound stops while paused, and starts again.
+    Pause {
+        at: Duration,
+    },
+    Resume,
 }
 
 /// A click's ring in a frame: its centre in pixels, how far it has grown
@@ -138,6 +169,12 @@ pub struct Recorder {
     done: Option<channel::Sender<Finished>>,
     /// The red of the frame.
     red: smithay::backend::renderer::element::solid::SolidColorBuffer,
+    /// What the next recording takes besides the screen; from the
+    /// configuration, changed in the picker for the session.
+    pub options: hocus_shell::picker::RecordOptions,
+    /// The configuration's options they came from.
+    options_from: Option<[bool; 4]>,
+    bubble: Option<Bubble>,
 }
 
 impl std::fmt::Debug for Recorder {
@@ -175,12 +212,19 @@ impl crate::shell::Pixels for RecordBar {
     }
 }
 
+impl crate::shell::Pixels for hocus_shell::recording::BubbleMark {
+    fn pixels(&self) -> hocus_shell::column::View<'_> {
+        self.view()
+    }
+}
+
 impl State {
     /// The record action: picks what to record, gives up the countdown, or
     /// stops.
     pub fn toggle_recording(&mut self) {
         match &self.recorder.phase {
             Phase::Idle if !self.picking() => {
+                self.refresh_record_options();
                 self.start_picking_for(hocus_shell::picker::PickMode::Record);
             }
             Phase::Idle | Phase::Finishing => {}
@@ -191,6 +235,35 @@ impl State {
             }
             Phase::Recording(_) => self.stop_recording(),
         }
+    }
+
+    /// The options as the configuration gives them, when it changed; the
+    /// camera offered only where there is one.
+    fn refresh_record_options(&mut self) {
+        let r = &self.config.recording;
+        let wanted = [r.microphone, r.system_sound, r.camera, r.show_keys];
+        if self.recorder.options_from != Some(wanted) {
+            self.recorder.options_from = Some(wanted);
+            self.recorder.options = hocus_shell::picker::RecordOptions {
+                microphone: r.microphone,
+                system_sound: r.system_sound,
+                camera: Some(r.camera),
+                show_keys: r.show_keys,
+            };
+        }
+        // One look at the device, when asked to record.
+        let here = r.camera_input != "v4l2" || Path::new(&r.camera_device).exists();
+        let o = &mut self.recorder.options;
+        o.camera = match (here, o.camera) {
+            (false, _) => None,
+            (true, Some(on)) => Some(on),
+            (true, None) => Some(r.camera),
+        };
+    }
+
+    /// An option toggled in the picker.
+    pub fn toggle_record_option(&mut self, option: hocus_shell::picker::RecordOption) {
+        self.recorder.options.toggle(option);
     }
 
     pub fn recording(&self) -> bool {
@@ -324,7 +397,25 @@ impl State {
             fps: self.config.recording.fps,
             hardware: self.config.recording.hardware,
             encoder: self.config.recording.encoder.clone(),
+            sound: self.recorded_sound(),
+            camera: None,
+            bubble: (0, 0),
         };
+        let mut settings = settings;
+        let scale = self
+            .target_place(&target)
+            .and_then(|(o, _)| self.find_output(&o))
+            .map_or(1.0, |o| o.current_scale().fractional_scale());
+        if self.recorder.options.camera == Some(true) {
+            let (x, y, d) = self.place_bubble(&target, size, scale);
+            let r = &self.config.recording;
+            settings.camera = Some(media::Camera {
+                input: r.camera_input.clone(),
+                device: r.camera_device.clone(),
+                diameter: d,
+            });
+            settings.bubble = (x, y);
+        }
         let spawned = std::thread::Builder::new()
             .name("recording".into())
             .spawn(move || {
@@ -355,7 +446,56 @@ impl State {
             paused_since: None,
             last: None,
             clicks: Vec::new(),
+            show_keys: self.recorder.options.show_keys,
+            scale,
         }));
+    }
+
+    /// The sound to record, as the options and the configuration say.
+    fn recorded_sound(&self) -> Option<media::Sound> {
+        let r = &self.config.recording;
+        let o = &self.recorder.options;
+        let devices: Vec<String> = [
+            (o.microphone, &r.microphone_device),
+            (o.system_sound, &r.system_device),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, d)| d.clone())
+        .collect();
+        (!devices.is_empty()).then(|| media::Sound {
+            format: r.sound.clone(),
+            devices,
+        })
+    }
+
+    /// The bubble's first place, bottom right of what is recorded, and
+    /// its mark on the screen: its corner and diameter in video pixels.
+    fn place_bubble(&mut self, target: &Target, size: (u32, u32), scale: f64) -> (u32, u32, u32) {
+        let short = size.0.min(size.1);
+        let d = ((f64::from(short) * 0.28) as u32).clamp(64, (short / 2).max(16)) / 2 * 2;
+        let margin = (f64::from(short) * 0.04) as u32;
+        let x = size.0.saturating_sub(d + margin);
+        let y = size.1.saturating_sub(d + margin);
+        if let Some((output, rect)) = self.target_place(target) {
+            let logical = |v: u32| (f64::from(v) / scale).round() as i32;
+            let mark = hocus_shell::recording::BubbleMark::new(
+                self.theme(),
+                self.shell_lang(),
+                logical(d) as f32,
+                scale as f32,
+            );
+            let mut panel = Panel::new(mark);
+            panel.upload(&[]);
+            self.recorder.bubble = Some(Bubble {
+                output,
+                place: rect.loc + Point::from((logical(x), logical(y))),
+                diameter: logical(d),
+                panel,
+                held: None,
+            });
+        }
+        (x, y, d)
     }
 
     fn stop_recording(&mut self) {
@@ -367,6 +507,7 @@ impl State {
             }
         }
         self.recorder.bar = None;
+        self.recorder.bubble = None;
         self.needs_redraw = true;
     }
 
@@ -403,6 +544,33 @@ impl State {
         }
     }
 
+    /// A key pressed while the keys are shown: a combination, or a key that
+    /// is not text, is drawn in the video. Plain typing never is: it may be
+    /// a password.
+    pub fn recording_key(
+        &mut self,
+        modifiers: &smithay::input::keyboard::ModifiersState,
+        sym: smithay::input::keyboard::Keysym,
+    ) {
+        let showing = matches!(
+            &self.recorder.phase,
+            Phase::Recording(r) if r.show_keys && r.paused_since.is_none()
+        );
+        if !showing || self.auth_open() {
+            return;
+        }
+        let Some(parts) = key_parts(modifiers, sym) else {
+            return;
+        };
+        let theme = self.theme();
+        let now = self.clock.now();
+        if let Phase::Recording(running) = &self.recorder.phase {
+            let caps = hocus_shell::recording::key_caps(&theme, &parts, running.scale as f32);
+            let at = running.elapsed(now);
+            let _ = running.feed.send(Feed::Keys { at, caps });
+        }
+    }
+
     /// A button pressed anywhere: its ring goes in the video.
     pub fn recording_click(&mut self, at: Point<f64, Logical>, pressed: bool) {
         if !pressed || !self.config.recording.show_clicks {
@@ -415,8 +583,71 @@ impl State {
         }
     }
 
-    /// The bar takes the pointer over it: pause, resume, stop.
+    /// The webcam's mark takes the pointer: dragged, the bubble moves
+    /// within what is recorded.
+    fn bubble_pointer(&mut self, at: Point<f64, Logical>, pressed: Option<bool>) -> bool {
+        let Phase::Recording(running) = &self.recorder.phase else {
+            return false;
+        };
+        let Some((output, rect)) = self.target_place(&running.target) else {
+            return false;
+        };
+        let scale = running.scale;
+        let Some(area) = self
+            .find_output(&output)
+            .and_then(|o| self.space.output_geometry(&o))
+        else {
+            return false;
+        };
+        let Some(bubble) = &mut self.recorder.bubble else {
+            return false;
+        };
+        if bubble.output != output {
+            return false;
+        }
+        let corner = (area.loc + bubble.place).to_f64();
+        let r = f64::from(bubble.diameter) / 2.0;
+        let centre = corner + Point::from((r, r));
+        let over = (at.x - centre.x).hypot(at.y - centre.y) <= r;
+        match (pressed, bubble.held) {
+            (Some(true), _) if over => {
+                bubble.held = Some(at - corner);
+                true
+            }
+            (None, Some(held)) => {
+                let d = bubble.diameter;
+                let want: Point<i32, Logical> = (at - held - area.loc.to_f64()).to_i32_round();
+                let place = Point::from((
+                    want.x
+                        .clamp(rect.loc.x, rect.loc.x + (rect.size.w - d).max(0)),
+                    want.y
+                        .clamp(rect.loc.y, rect.loc.y + (rect.size.h - d).max(0)),
+                ));
+                if place != bubble.place {
+                    bubble.place = place;
+                    let video = |v: i32| (f64::from(v.max(0)) * scale).round() as u32;
+                    let (x, y) = (video(place.x - rect.loc.x), video(place.y - rect.loc.y));
+                    if let Phase::Recording(running) = &self.recorder.phase {
+                        let _ = running.feed.send(Feed::Bubble { x, y });
+                    }
+                    self.needs_redraw = true;
+                }
+                true
+            }
+            (Some(false), Some(_)) => {
+                bubble.held = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The bar takes the pointer over it: pause, resume, stop; the
+    /// webcam's mark is dragged.
     pub fn recording_pointer(&mut self, at: Point<f64, Logical>, pressed: Option<bool>) -> bool {
+        if self.bubble_pointer(at, pressed) {
+            return true;
+        }
         let Some((name, place, panel)) = &mut self.recorder.bar else {
             return false;
         };
@@ -465,12 +696,17 @@ impl State {
         let now = self.clock.now();
         if let Phase::Recording(running) = &mut self.recorder.phase {
             match (pause, running.paused_since) {
-                (true, None) => running.paused_since = Some(now),
+                (true, None) => {
+                    let at = running.elapsed(now);
+                    running.paused_since = Some(now);
+                    let _ = running.feed.send(Feed::Pause { at });
+                }
                 (false, Some(since)) => {
                     running.paused_total += now - since;
                     running.paused_since = None;
                     // The next frame is taken at once.
                     running.last = None;
+                    let _ = running.feed.send(Feed::Resume);
                 }
                 _ => {}
             }
@@ -542,6 +778,12 @@ impl State {
         {
             out.push(SceneElement::Frame(e));
         }
+        if let Some(bubble) = &self.recorder.bubble
+            && bubble.output == output.name()
+            && let Some(e) = bubble.panel.element(renderer, output, bubble.place)
+        {
+            out.push(SceneElement::Frame(e));
+        }
         let Some((name, rect)) = self.target_place(target) else {
             return out;
         };
@@ -585,16 +827,22 @@ impl State {
         out
     }
 
-    /// The bar's buttons, for the control API.
+    /// The bar's buttons and the webcam's mark, for the control API.
     pub fn recording_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
-        let Some((name, place, panel)) = &self.recorder.bar else {
-            return;
+        let at = |name: &str| {
+            self.find_output(name)
+                .and_then(|o| self.space.output_geometry(&o))
+                .map(|g| g.loc)
         };
-        if let Some(g) = self
-            .find_output(name)
-            .and_then(|o| self.space.output_geometry(&o))
+        if let Some((name, place, panel)) = &self.recorder.bar
+            && let Some(loc) = at(name)
         {
-            crate::shell::flatten(&panel.view.access(), g.loc + *place, 0, out);
+            crate::shell::flatten(&panel.view.access(), loc + *place, 0, out);
+        }
+        if let Some(bubble) = &self.recorder.bubble
+            && let Some(loc) = at(&bubble.output)
+        {
+            crate::shell::flatten(&bubble.panel.view.access(), loc + bubble.place, 0, out);
         }
     }
 }
@@ -725,6 +973,79 @@ impl App {
     }
 }
 
+/// The caps of a key pressed with `modifiers`: none for a modifier alone,
+/// nor for text typed without Super, Ctrl or Alt.
+fn key_parts(
+    modifiers: &smithay::input::keyboard::ModifiersState,
+    sym: smithay::input::keyboard::Keysym,
+) -> Option<Vec<String>> {
+    use smithay::input::keyboard::Keysym as K;
+    let special = match sym {
+        K::Return | K::KP_Enter => Some("Enter"),
+        K::Escape => Some("Esc"),
+        K::Tab | K::ISO_Left_Tab => Some("Tab"),
+        K::BackSpace => Some("Backspace"),
+        K::Delete => Some("Del"),
+        K::Left => Some("←"),
+        K::Right => Some("→"),
+        K::Up => Some("↑"),
+        K::Down => Some("↓"),
+        K::Home => Some("Home"),
+        K::End => Some("End"),
+        K::Page_Up => Some("PgUp"),
+        K::Page_Down => Some("PgDn"),
+        K::Print => Some("Print"),
+        K::space => Some("Space"),
+        _ => None,
+    };
+    let raw = sym.raw();
+    let function = (K::F1.raw()..=K::F24.raw())
+        .contains(&raw)
+        .then(|| format!("F{}", raw - K::F1.raw() + 1));
+    let modifier_alone = matches!(
+        sym,
+        K::Control_L
+            | K::Control_R
+            | K::Alt_L
+            | K::Alt_R
+            | K::Shift_L
+            | K::Shift_R
+            | K::Super_L
+            | K::Super_R
+            | K::Meta_L
+            | K::Meta_R
+            | K::ISO_Level3_Shift
+    );
+    if modifier_alone {
+        return None;
+    }
+    let held = modifiers.logo || modifiers.ctrl || modifiers.alt;
+    // Space and plain keys are typing unless held with a modifier.
+    let shown_alone = function.is_some() || special.is_some_and(|s| s != "Space");
+    if !held && !shown_alone {
+        return None;
+    }
+    let key = match (special, function, sym.key_char()) {
+        (Some(name), _, _) => name.to_owned(),
+        (None, Some(f), _) => f,
+        (None, None, Some(c)) if !c.is_control() => c.to_uppercase().collect(),
+        _ => return None,
+    };
+    let mut parts = Vec::new();
+    for (on, name) in [
+        (modifiers.logo, "Super"),
+        (modifiers.ctrl, "Ctrl"),
+        (modifiers.alt, "Alt"),
+        (modifiers.shift, "Shift"),
+    ] {
+        if on {
+            parts.push(name.to_owned());
+        }
+    }
+    parts.push(key);
+    Some(parts)
+}
+
 /// `pixels` at exactly `size`: cut, or padded with black (a window that
 /// grew or shrank).
 fn fit(pixels: Pixels, (w, h): (u32, u32)) -> Pixels {
@@ -794,33 +1115,76 @@ struct Settings {
     fps: u32,
     hardware: bool,
     encoder: String,
+    sound: Option<media::Sound>,
+    camera: Option<media::Camera>,
+    /// The bubble's corner at the start, video pixels.
+    bubble: (u32, u32),
 }
 
 /// Feeds the encoder at a steady rate until told to stop: each frame
-/// slot gets the latest frame taken before it. The file's path.
+/// slot gets the latest frame taken before it, with the bubble and the keys
+/// over it. The sound, recorded beside, is put with the video at the end.
+/// The file's path.
 fn encode(
     settings: &Settings,
     frames: &Receiver<Feed>,
     in_flight: &AtomicUsize,
 ) -> Result<PathBuf, String> {
     let path = reserve(&settings.folder, &settings.name)?;
+    // With sound, the picture goes to a file of its own first.
+    let video = match &settings.sound {
+        Some(_) => hidden_beside(&path, "video.mp4"),
+        None => path.clone(),
+    };
     let codec = codec(settings);
-    let mut child = spawn_encoder(settings, &codec, &path)?;
+    let mut child = spawn_encoder(settings, &codec, &video)?;
     let mut stdin = child.stdin.take().ok_or("the encoder has no input")?;
+    let mut sound = match &settings.sound {
+        Some(s) => {
+            let base = hidden_beside(&path, "sound");
+            match media::SoundRecorder::start(&settings.encoder, s.clone(), &base) {
+                Ok(recorder) => Some(recorder),
+                Err(err) => {
+                    tracing::warn!(err, "recording without sound");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+    let mut overlays = media::Overlays {
+        bubble: settings.bubble,
+        camera: settings.camera.as_ref().and_then(|c| {
+            match media::CameraFeed::start(&settings.encoder, c) {
+                Ok(feed) => Some(feed),
+                Err(err) => {
+                    tracing::warn!(err, "recording without the camera");
+                    None
+                }
+            }
+        }),
+        ..media::Overlays::default()
+    };
     let slot = Duration::from_secs(1) / settings.fps;
     let mut written: u64 = 0;
     let mut last: Option<Vec<u8>> = None;
     let mut fail = None;
-    let mut write_until = |until: Duration, last: &Option<Vec<u8>>, written: &mut u64| {
-        let Some(frame) = last else {
-            return Ok(());
+    let mut fill =
+        |until: Duration, last: &Option<Vec<u8>>, written: &mut u64, overlays: &media::Overlays| {
+            let Some(frame) = last else {
+                return Ok(());
+            };
+            media::write_slots(
+                &mut stdin,
+                frame,
+                settings.size,
+                slot,
+                written,
+                until,
+                overlays,
+            )
+            .map_err(|e| e.to_string())
         };
-        while slot * (*written as u32) < until {
-            stdin.write_all(frame).map_err(|e| e.to_string())?;
-            *written += 1;
-        }
-        Ok::<(), String>(())
-    };
     loop {
         match frames.recv() {
             Ok(Feed::Frame {
@@ -829,7 +1193,7 @@ fn encode(
                 rings,
             }) => {
                 in_flight.fetch_sub(1, Ordering::Relaxed);
-                if let Err(err) = write_until(at, &last, &mut written) {
+                if let Err(err) = fill(at, &last, &mut written, &overlays) {
                     fail = Some(err);
                     break;
                 }
@@ -838,10 +1202,28 @@ fn encode(
                 }
                 last = Some(pixels.rgba);
             }
+            Ok(Feed::Keys { at, caps }) => overlays.keys = Some((at, caps)),
+            Ok(Feed::Bubble { x, y }) => overlays.bubble = (x, y),
+            Ok(Feed::Pause { at }) => {
+                if let Err(err) = fill(at, &last, &mut written, &overlays) {
+                    fail = Some(err);
+                    break;
+                }
+                if let Some(sound) = &mut sound {
+                    sound.pause();
+                }
+            }
+            Ok(Feed::Resume) => {
+                if let Some(sound) = &mut sound
+                    && let Err(err) = sound.resume()
+                {
+                    tracing::warn!(err, "the sound did not start again");
+                }
+            }
             Ok(Feed::Stop { at }) => {
                 // At least one frame, the last one shown until the end.
                 let until = at.max(slot);
-                if let Err(err) = write_until(until, &last, &mut written) {
+                if let Err(err) = fill(until, &last, &mut written, &overlays) {
                     fail = Some(err);
                 }
                 break;
@@ -850,7 +1232,9 @@ fn encode(
             Err(_) => break,
         }
     }
-    drop(write_until);
+    drop(fill);
+    overlays.camera = None;
+    let segments = sound.map(media::SoundRecorder::finish);
     // The end of the input ends the file.
     drop(stdin);
     let mut errors = String::new();
@@ -858,16 +1242,54 @@ fn encode(
         let _ = stderr.read_to_string(&mut errors);
     }
     let status = child.wait().map_err(|e| e.to_string())?;
-    match (status.success(), fail) {
-        (true, None) => Ok(path),
-        (_, fail) => {
+    let result = match (status.success(), fail) {
+        (true, None) => Ok(()),
+        (_, fail) => Err(errors
+            .lines()
+            .last()
+            .map(str::to_owned)
+            .or(fail)
+            .unwrap_or_else(|| format!("the encoder said {status}"))),
+    };
+    let result = match (result, segments) {
+        (Ok(()), Some(segments)) if video != path => {
+            let muxed = if segments.is_empty() {
+                // No sound came: the picture alone.
+                std::fs::rename(&video, &path).map_err(|e| e.to_string())
+            } else {
+                media::mux(&settings.encoder, &video, &segments, &path)
+            };
+            for segment in &segments {
+                let _ = std::fs::remove_file(segment);
+            }
+            muxed
+        }
+        (result, segments) => {
+            for segment in segments.iter().flatten() {
+                let _ = std::fs::remove_file(segment);
+            }
+            result
+        }
+    };
+    if video != path {
+        let _ = std::fs::remove_file(&video);
+    }
+    match result {
+        Ok(()) => Ok(path),
+        Err(err) => {
             let _ = std::fs::remove_file(&path);
-            let why = errors.lines().last().map(str::to_owned);
-            Err(why
-                .or(fail)
-                .unwrap_or_else(|| format!("the encoder said {status}")))
+            Err(err)
         }
     }
+}
+
+/// A hidden file beside `path` for one of its parts.
+fn hidden_beside(path: &Path, part: &str) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!(".{name}.{part}"))
 }
 
 /// The video codec's arguments: the graphics card's when it encodes,
@@ -1036,6 +1458,33 @@ mod tests {
     }
 
     #[test]
+    fn combinations_show_but_typing_never_does() {
+        use smithay::input::keyboard::{Keysym, ModifiersState};
+        let ctrl = ModifiersState {
+            ctrl: true,
+            ..ModifiersState::default()
+        };
+        let shift = ModifiersState {
+            shift: true,
+            ..ModifiersState::default()
+        };
+        let none = ModifiersState::default();
+        let shown = |m: &ModifiersState, k| key_parts(m, k);
+        assert_eq!(
+            shown(&ctrl, Keysym::c),
+            Some(vec!["Ctrl".into(), "C".into()])
+        );
+        assert_eq!(shown(&none, Keysym::Return), Some(vec!["Enter".into()]));
+        assert_eq!(shown(&none, Keysym::F5), Some(vec!["F5".into()]));
+        // A password typed, capitals and spaces included: nothing.
+        assert_eq!(shown(&none, Keysym::a), None);
+        assert_eq!(shown(&shift, Keysym::A), None);
+        assert_eq!(shown(&none, Keysym::space), None);
+        assert_eq!(shown(&none, Keysym::_1), None);
+        assert_eq!(shown(&ctrl, Keysym::Control_L), None);
+    }
+
+    #[test]
     fn frames_fit_the_video() {
         let fitted = fit(grey(3, 3), (4, 2));
         assert_eq!((fitted.width, fitted.height), (4, 2));
@@ -1061,6 +1510,9 @@ mod encoder_tests {
             fps: 30,
             hardware: false,
             encoder: "ffmpeg".into(),
+            sound: None,
+            camera: None,
+            bubble: (0, 0),
         };
         let (feed, frames) = std::sync::mpsc::channel();
         let in_flight = AtomicUsize::new(0);
@@ -1083,5 +1535,123 @@ mod encoder_tests {
         .expect("sent");
         let path = encode(&settings, &frames, &in_flight).expect("encoded");
         assert!(std::fs::metadata(&path).expect("a file").len() > 0);
+    }
+
+    /// Each stream's kind and length, as ffprobe reads them.
+    fn streams(path: &Path) -> Vec<(String, f64)> {
+        let out = Command::new("ffprobe")
+            .args(["-v", "error", "-show_entries", "stream=codec_type,duration"])
+            .args(["-of", "csv=p=0"])
+            .arg(path)
+            .output()
+            .expect("ffprobe");
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| {
+                let (kind, length) = l.split_once(',')?;
+                Some((kind.to_owned(), length.parse().ok()?))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sound_paused_and_a_camera_make_one_file_as_long_as_its_picture() {
+        if Command::new("ffprobe").arg("-version").output().is_err() {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        }
+        let dir = tempfile::tempdir().expect("a directory");
+        let settings = Settings {
+            folder: dir.path().to_path_buf(),
+            name: "sound.mp4".into(),
+            size: (160, 120),
+            fps: 30,
+            hardware: false,
+            encoder: "ffmpeg".into(),
+            sound: Some(media::Sound {
+                format: "lavfi".into(),
+                devices: vec![
+                    "sine=frequency=440:sample_rate=48000".into(),
+                    "sine=frequency=660:sample_rate=48000".into(),
+                ],
+            }),
+            camera: Some(media::Camera {
+                input: "lavfi".into(),
+                device: "testsrc=size=320x240:rate=15".into(),
+                diameter: 48,
+            }),
+            bubble: (100, 60),
+        };
+        let (feed, frames) = std::sync::mpsc::channel();
+        let in_flight = AtomicUsize::new(1);
+        let frame = |at| Feed::Frame {
+            at,
+            pixels: Pixels {
+                width: 160,
+                height: 120,
+                rgba: [40, 80, 120, 255].repeat(160 * 120),
+            },
+            rings: Vec::new(),
+        };
+        let worker = std::thread::spawn(move || encode(&settings, &frames, &in_flight));
+        let send = |f: Feed| feed.send(f).expect("sent");
+        send(frame(Duration::ZERO));
+        std::thread::sleep(Duration::from_millis(300));
+        send(Feed::Keys {
+            at: Duration::from_millis(300),
+            caps: hocus_shell::recording::Overlay {
+                width: 20,
+                height: 10,
+                rgba: [255, 255, 255, 255].repeat(200),
+            },
+        });
+        send(Feed::Pause {
+            at: Duration::from_millis(300),
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        send(Feed::Resume);
+        std::thread::sleep(Duration::from_millis(300));
+        send(Feed::Stop {
+            at: Duration::from_millis(1500),
+        });
+        let path = worker.join().expect("the worker").expect("encoded");
+        let found = streams(&path);
+        let video = found
+            .iter()
+            .find(|(k, _)| k == "video")
+            .expect("a picture")
+            .1;
+        let audio = found.iter().find(|(k, _)| k == "audio").expect("sound").1;
+        assert!((video - 1.5).abs() < 0.1, "{found:?}");
+        assert!((audio - video).abs() < 0.1, "{found:?}");
+        // The bubble is in the picture, near the end: its square differs
+        // from the screen's colour.
+        let frame = Command::new("ffmpeg")
+            .args(["-v", "error", "-ss", "1.2", "-i"])
+            .arg(&path)
+            .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .output()
+            .expect("a frame")
+            .stdout;
+        assert_eq!(frame.len(), 160 * 120 * 3);
+        let mean_off = |x0: usize, y0: usize| {
+            let mut sum = 0u32;
+            for y in y0..y0 + 16 {
+                for x in x0..x0 + 16 {
+                    let p = (y * 160 + x) * 3;
+                    sum += frame[p..p + 3]
+                        .iter()
+                        .zip([40u8, 80, 120])
+                        .map(|(a, b)| u32::from(a.abs_diff(b)))
+                        .sum::<u32>();
+                }
+            }
+            sum / 256
+        };
+        assert!(mean_off(116, 76) > 30, "the bubble: {}", mean_off(116, 76));
+        assert!(mean_off(10, 10) < 15, "the screen: {}", mean_off(10, 10));
+        // Nothing but the file is left.
+        let left: Vec<_> = std::fs::read_dir(dir.path()).expect("listed").collect();
+        assert_eq!(left.len(), 1, "{left:?}");
     }
 }

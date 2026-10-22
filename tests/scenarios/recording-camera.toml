@@ -1,0 +1,71 @@
+description = "With the camera on, its bubble's place shows by what is recorded, outside the video, and the pointer moves it within the region"
+outputs = ["1280x800"]
+shell = true
+needs = ["ffmpeg", "ffprobe"]
+
+# A test pattern stands for the webcam.
+[[step]]
+config = """
+[recording]
+folder = "{runtime_dir}/videos"
+hardware = false
+countdown = 1
+camera = true
+camera_input = "lavfi"
+camera_device = "testsrc=size=320x240:rate=15"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+shift+19"
+
+[[step]]
+expect_ui = { label = "Camera", selected = true, disabled = false }
+
+[[step]]
+pointer_move = [180, 160]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [700, 480]
+
+[[step]]
+release = "left"
+
+[[step]]
+advance_ms = 1100
+
+# Bottom right of the region at first.
+[[step]]
+expect_ui = { label = "The camera's place in the video: drag it", inside = [590, 370, 110, 110] }
+
+[[step]]
+pointer_move = [644, 424]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [344, 274]
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_ui = { label = "The camera's place in the video: drag it", inside = [290, 220, 110, 110] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "recording-camera.png" }
+
+[[step]]
+click_ui = "Stop the recording"
+
+[[step]]
+expect_recording = { audio = false }

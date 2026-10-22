@@ -70,6 +70,7 @@ Steps, one per `[[step]]` table:
 | `expect_budget = { max_ms = 50 }` | every frame drawn so far took at most that long, and no loop handler went over its budget |
 | `expect_state_file = { name, contains? = […], lacks? = […] }` | a file of the compositor's state directory (notes, the saved session) holds these strings, once written |
 | `restart = true` | the compositor goes as a crash would, and a new one starts on the same configuration and state; clients go with it |
+| `expect_recording = { audio?, keys_at_ms? }` | the last recording saved, read by ffprobe and ffmpeg once done: with a sound track as long as the picture (or none); keys drawn near the bottom from this time in the video, the top unchanged |
 | `caldav = { dir, user, password }` | a CalDAV server on 127.0.0.1 serves the `.ics` files of `dir` (relative to the scenario); its calendar's address is `{caldav}` in later configuration, `type` and `calendar_password` steps |
 | `caldav_stop = true` | the CalDAV server goes, as the network would |
 | `calendar_password = { id, password }` | the settings keep this account's (`user@url`) password |

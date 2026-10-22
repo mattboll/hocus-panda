@@ -88,6 +88,8 @@ impl State {
                         *modifiers,
                     ));
                 }
+                // Shown in a recording, when asked; never while locked.
+                state.recording_key(modifiers, keysym.modified_sym());
                 // A window may hold the shortcuts back while it has the
                 // keyboard (keyboard-shortcuts-inhibit).
                 let combo = combo_of(modifiers, &keysym);
