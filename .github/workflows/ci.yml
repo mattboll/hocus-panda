@@ -33,13 +33,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # The packages downloaded, kept between runs: the Ubuntu mirror can
+      # take half an hour to serve them (#158). A run fetches only those
+      # that changed; the cache is saved again when this file changes.
+      - uses: actions/cache@v4
+        with:
+          path: ~/apt-cache
+          key: apt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ runner.os }}-${{ runner.arch }}-
       - name: Build dependencies
         run: |
+          mkdir -p ~/apt-cache/partial
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::Archives="$HOME/apt-cache" -o Acquire::Retries=3 \
             clang mold pkg-config gdb xwayland dbus libnotify-bin grim ffmpeg fontconfig fonts-ipafont-gothic fonts-noto-color-emoji \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev libpam0g-dev
+          # Versions no longer installable go; the cache keeps its size.
+          sudo apt-get autoclean -o Dir::Cache::Archives="$HOME/apt-cache"
+          sudo chown -R "$USER" ~/apt-cache
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
