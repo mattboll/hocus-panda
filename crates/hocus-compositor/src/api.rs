@@ -268,6 +268,24 @@ impl App {
                 state.install_updates();
                 Reply::Done
             }
+            Request::Phone => Reply::Phone(state.phone_info()),
+            Request::SendToPhone { paths } => {
+                let paths: Vec<std::path::PathBuf> =
+                    paths.into_iter().map(std::path::PathBuf::from).collect();
+                if let Some(p) = paths.iter().find(|p| !p.is_absolute()) {
+                    return Some(Err(ApiError::new(
+                        ErrorCode::BadRequest,
+                        format!("not an absolute path: {}", p.display()),
+                    )));
+                }
+                if !state.send_to_phone(paths) {
+                    return Some(Err(ApiError::new(
+                        ErrorCode::Failed,
+                        "no phone within reach".to_owned(),
+                    )));
+                }
+                Reply::Done
+            }
             Request::CopyPng { png_base64 } => {
                 match base64::engine::general_purpose::STANDARD.decode(&png_base64) {
                     Ok(png) => {

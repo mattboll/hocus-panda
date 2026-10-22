@@ -38,9 +38,11 @@ enum Handled {
 
 impl State {
     /// A panel that takes the keys is open: the launcher, quick settings,
-    /// a chooser, a card, polkit's dialog, the window switcher.
+    /// a chooser, a card, polkit's dialog, the window switcher, a reply
+    /// typed into a toast.
     pub fn modal_open(&self) -> bool {
         self.launcher_open()
+            || self.toast_replying()
             || self.share_open()
             || self.quick_open()
             || self.showcase_open()
@@ -225,6 +227,16 @@ impl State {
             }
             Some(Handled::Panel(sym, _)) if self.card_open() => {
                 self.card_key(sym);
+            }
+            // A reply typed into a toast has the keys, unless a panel
+            // opened over it.
+            Some(Handled::Panel(sym, modifiers))
+                if self.toast_replying()
+                    && !self.launcher_open()
+                    && !self.quick_open()
+                    && !self.showcase_open() =>
+            {
+                self.toast_key(sym, &modifiers);
             }
             Some(Handled::Panel(sym, modifiers))
                 if !self.showcase_key(sym) && !self.launcher_key(sym, &modifiers) =>

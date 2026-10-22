@@ -135,6 +135,13 @@ fn toast_of(n: hocus_platform::notifications::Notification) -> Toast {
 
 impl State {
     fn on_notification(&mut self, incoming: Incoming) {
+        // KDE Connect's own copy of a phone notification: the phone
+        // module shows it, with its reply.
+        if let Incoming::Notify(n) = &incoming
+            && self.phone_holds(n)
+        {
+            return;
+        }
         let now = self.clock.now();
         let dnd = self.dnd();
         // While the screen is shared, nothing private shows on it.
@@ -236,26 +243,93 @@ impl State {
         body: &str,
         actions: Vec<(String, String)>,
     ) -> Option<u32> {
+        self.shell_toast_as(None, "Hocuspanda", summary, body, actions)
+    }
+
+    /// A toast the shell shows for another (a phone's notification): a
+    /// new one, or the one of id `id` again in its place.
+    pub fn shell_toast_as(
+        &mut self,
+        id: Option<u32>,
+        app: &str,
+        summary: &str,
+        body: &str,
+        actions: Vec<(String, String)>,
+    ) -> Option<u32> {
         let panel = self.toasts.as_mut()?;
-        let id = panel.next_shell_id;
-        panel.next_shell_id = if id <= SHELL_IDS_END {
-            SHELL_IDS
-        } else {
-            id - 1
+        let id = match id {
+            Some(id) => id,
+            None => {
+                let id = panel.next_shell_id;
+                panel.next_shell_id = if id <= SHELL_IDS_END {
+                    SHELL_IDS
+                } else {
+                    id - 1
+                };
+                id
+            }
         };
         self.on_notification(Incoming::Notify(
             hocus_platform::notifications::Notification {
                 id,
-                app: "Hocuspanda".into(),
+                app: app.to_owned(),
                 summary: summary.to_owned(),
                 body: body.to_owned(),
                 actions,
                 urgency: Urgency::Normal,
                 expiry: Expiry::Default,
                 replaces: true,
+                kde_event: None,
             },
         ));
         Some(id)
+    }
+
+    /// Whether the shell's toast `id` is on the screen.
+    pub fn toast_shown(&self, id: u32) -> bool {
+        self.toasts
+            .as_ref()
+            .is_some_and(|p| p.toasts.shown().contains(&id))
+    }
+
+    /// Takes the shell's toast `id` away, as what it showed went.
+    pub fn close_shell_toast(&mut self, id: u32) {
+        if let Some(panel) = self.toasts.as_mut()
+            && panel.toasts.close(id)
+        {
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Whether a reply is typed into a toast: the keys are for it.
+    pub fn toast_replying(&self) -> bool {
+        self.toasts.as_ref().is_some_and(|p| p.toasts.replying())
+    }
+
+    /// A key for the reply typed into a toast.
+    pub fn toast_key(
+        &mut self,
+        sym: smithay::input::keyboard::Keysym,
+        modifiers: &smithay::input::keyboard::ModifiersState,
+    ) {
+        let Some(panel) = self.toasts.as_mut() else {
+            return;
+        };
+        let events = match crate::launcher::key_of(sym) {
+            Some(key) => panel.toasts.key(key),
+            None => {
+                if !modifiers.ctrl
+                    && !modifiers.alt
+                    && !modifiers.logo
+                    && let Some(c) = sym.key_char().filter(|c| !c.is_control())
+                {
+                    panel.toasts.text(c.encode_utf8(&mut [0; 4]));
+                }
+                Vec::new()
+            }
+        };
+        self.toast_events(events);
+        self.needs_redraw = true;
     }
 
     fn shell_notification(&mut self, id: u32, summary: String, body: String) {
@@ -269,6 +343,7 @@ impl State {
                 urgency: Urgency::Normal,
                 expiry: Expiry::Default,
                 replaces: true,
+                kde_event: None,
             },
         ));
     }
@@ -284,11 +359,19 @@ impl State {
     fn toast_events(&mut self, events: Vec<ToastEvent>) {
         // The shell's own toasts act here.
         for event in &events {
-            if let ToastEvent::Action(id, key) = event
-                && *id >= SHELL_IDS_END
-                && !self.calendar_action(*id, key)
-            {
-                self.screenshot_action(*id, key);
+            match event {
+                ToastEvent::Action(id, key)
+                    if *id >= SHELL_IDS_END && !self.calendar_action(*id, key) =>
+                {
+                    self.screenshot_action(*id, key);
+                }
+                ToastEvent::Replied(id, text) if *id >= SHELL_IDS_END => {
+                    self.phone_reply(*id, text);
+                }
+                ToastEvent::Expired(id) | ToastEvent::Dismissed(id) if *id >= SHELL_IDS_END => {
+                    self.phone_toast_gone(*id);
+                }
+                _ => {}
             }
         }
         let Some(server) = self.toasts.as_ref().and_then(|p| p.server.as_ref()) else {
@@ -296,7 +379,7 @@ impl State {
         };
         // The shell's own toasts are not the server's to report.
         for event in events.into_iter().filter(|e| {
-            !matches!(e, ToastEvent::Expired(id) | ToastEvent::Dismissed(id) | ToastEvent::Action(id, _) if *id >= SHELL_IDS_END)
+            !matches!(e, ToastEvent::Expired(id) | ToastEvent::Dismissed(id) | ToastEvent::Action(id, _) | ToastEvent::Replied(id, _) if *id >= SHELL_IDS_END)
         }) {
             match event {
                 ToastEvent::Expired(id) => server.closed(id, CloseReason::Expired),
@@ -305,6 +388,8 @@ impl State {
                     server.action_invoked(id, &key);
                     server.closed(id, CloseReason::Dismissed);
                 }
+                // The server offers no reply to its clients.
+                ToastEvent::Replied(id, _) => server.closed(id, CloseReason::Dismissed),
             }
         }
     }

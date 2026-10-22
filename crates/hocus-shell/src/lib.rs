@@ -20,6 +20,7 @@ pub mod launcher;
 pub mod leave;
 pub mod lock;
 pub mod panda;
+pub mod phone;
 pub mod picker;
 pub mod providers;
 pub mod quick;

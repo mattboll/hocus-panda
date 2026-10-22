@@ -177,6 +177,22 @@ configuration; an account taken out of the configuration takes its cache
 and its password with it. Accounts count only once the configuration is
 read, so a session starting never forgets one.
 
+The phone (#85) goes through KDE Connect's daemon on the session bus,
+followed on a worker thread and never started by us: the session starts it
+from its autostart entry, with the environment its clipboard needs to reach
+the compositor (ext-data-control). Without it, nothing shows and nothing is
+logged but at debug level; it is found when it appears. The worker reads
+the phones paired and within reach and their battery again whenever the
+daemon signals a change, and reads each notification a phone posts; the
+loop shows the first phone in the column and the notifications as toasts.
+A toast takes a reply typed into it (the keyboard goes to it while it is
+typed, and it waits), which goes back through the daemon. KDE Connect's own
+copy of a phone notification, sent to our notification server, is held
+(its `x-kde-appname` and `x-kde-eventId` hints say what it is). Ringing,
+sending the clipboard or files (`hocus msg send-to-phone`) and mounting
+its files each run on a thread of their own, so a phone slow to answer
+holds nothing.
+
 Notes (#79) are one Markdown file, read and written whole on worker
 threads (written to a new file, then renamed over the old one); lines the
 notes do not understand are kept as they were. The file is read again each
@@ -234,7 +250,8 @@ control API (`pick_share`, answered once the user chose): the shell shows
 the screens and the windows as pictures and answers `Monitor: NAME` or
 `Window: IDENTIFIER`. The configuration files are in `data/portal/`.
 While the screen is shared, the column says so with a stop that ends
-every capture, toasts are held, and one summarises them afterwards. Idle notification (#29) is served;
+every capture, toasts are held, and one summarises them afterwards (a
+tool that goes while it waits for the screen to change no longer counts). Idle notification (#29) is served;
 drm-lease, for VR headsets, waits for an issue of its own.
 
 ## Session
@@ -362,8 +379,10 @@ guarded by these rules (#134):
   test permission, given only on the command line.
 - **Agents and AI (#42)** speak over Unix sockets only, with the same peer
   check and permissions per connection; never TCP.
-- **The phone (#85)** is off by default; pairing needs a code confirmed on
-  screen, and talks over TLS.
+- **The phone (#85)** goes through KDE Connect, which pairs (a code
+  confirmed on both screens) and talks over TLS itself; the session only
+  uses phones already paired there, on the session's own bus. Wireless
+  adb, when it comes, is off by default and pairs the same way.
 - **Calendar passwords (#75)** live in the keyring, never in the
   configuration, and travel only over https (plain http is refused but to
   this machine); the cache of events is sealed.

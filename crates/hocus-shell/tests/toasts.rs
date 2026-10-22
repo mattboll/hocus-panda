@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use hocus_shell::{Lang, Toast, ToastEvent, Toasts};
-use hocus_ui::{Input, Point, Role, Theme};
+use hocus_shell::{Lang, Toast, ToastEvent, Toasts, toasts::REPLY};
+use hocus_ui::{Input, Key, Point, Role, Theme};
 
 mod common;
 
@@ -113,4 +113,64 @@ fn a_replacement_keeps_its_place() {
     toasts.show(toast(1, "a, updated"), MS(10));
     assert_eq!(toasts.shown(), vec![2, 1]);
     assert_eq!(toasts.history().count(), 2, "a replacement is not new");
+}
+
+#[test]
+fn a_reply_is_typed_into_the_toast_which_waits_for_it() -> anyhow::Result<()> {
+    let mut toasts = Toasts::new(Theme::default(), Lang::En, 700.0, 1.0);
+    toasts.show(
+        Toast {
+            actions: vec![(REPLY.into(), "Reply".into())],
+            ..toast(3, "Sam")
+        },
+        MS(0),
+    );
+    toasts.draw(MS(300));
+    assert!(!toasts.replying());
+    let at = button(&toasts, "Reply")?;
+    assert_eq!(click(&mut toasts, at), vec![]);
+    assert!(toasts.replying(), "the field has the keys");
+    toasts.draw(MS(400));
+    // The pointer leaves; the toast still waits.
+    toasts.input(Point::new(-50.0, -50.0), Input::PointerLeave);
+    assert_eq!(toasts.update(MS(60_000)), vec![]);
+    // Nothing typed: nothing sent.
+    assert_eq!(toasts.key(Key::Enter), vec![]);
+    toasts.text("On my");
+    toasts.text(" way ");
+    assert_eq!(
+        toasts.key(Key::Enter),
+        vec![ToastEvent::Replied(3, "On my way".into())]
+    );
+    assert!(toasts.is_empty());
+    assert!(!toasts.replying());
+    Ok(())
+}
+
+#[test]
+fn escape_dismisses_a_reply_and_send_sends_it() -> anyhow::Result<()> {
+    let mut toasts = Toasts::new(Theme::default(), Lang::En, 700.0, 1.0);
+    let with_reply = |id| Toast {
+        actions: vec![(REPLY.into(), "Reply".into())],
+        ..toast(id, "Sam")
+    };
+    toasts.show(with_reply(4), MS(0));
+    toasts.draw(MS(300));
+    let at = button(&toasts, "Reply")?;
+    click(&mut toasts, at);
+    assert_eq!(toasts.key(Key::Escape), vec![ToastEvent::Dismissed(4)]);
+    assert!(toasts.is_empty());
+
+    toasts.show(with_reply(5), MS(400));
+    toasts.draw(MS(700));
+    let at = button(&toasts, "Reply")?;
+    click(&mut toasts, at);
+    toasts.text("Yes");
+    toasts.draw(MS(800));
+    let at = button(&toasts, "Send")?;
+    assert_eq!(
+        click(&mut toasts, at),
+        vec![ToastEvent::Replied(5, "Yes".into())]
+    );
+    Ok(())
 }

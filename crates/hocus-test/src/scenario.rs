@@ -122,6 +122,20 @@ pub enum Step {
     TrayAttention(TrayAttention),
     /// A tray application was asked this (`activate`, `clicked 2`).
     ExpectTray(ExpectTray),
+    /// KDE Connect, a stand-in on the private bus, with a phone paired
+    /// and within reach: `{ name, battery, charging? }`; again, its
+    /// battery changes.
+    Phone(PhoneStep),
+    /// The phone posts a notification: `{ app, title, text, reply? }`.
+    PhoneNotification(PhoneNotificationStep),
+    /// The notification the phone posted `n`th (from 1) goes on the phone.
+    PhoneRemove(usize),
+    /// The phone was asked this: `ring`, `reply ID TEXT`, `clipboard
+    /// TEXT`, `share URL`, `browse` (`{runtime_dir}` as in `config`).
+    ExpectPhone(String),
+    /// KDE Connect as the session found it, once so: `absent`,
+    /// `stopped`, `running`, `off`.
+    ExpectPhoneState(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
     /// Writes the saved session file (TOML); `{test_client}` is the test
@@ -451,6 +465,26 @@ pub struct ExpectTray {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PhoneStep {
+    pub name: String,
+    pub battery: i32,
+    #[serde(default)]
+    pub charging: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhoneNotificationStep {
+    pub app: String,
+    pub title: String,
+    pub text: String,
+    /// Its application takes replies.
+    #[serde(default = "yes")]
+    pub reply: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NotifyStep {
     pub app: String,
     pub summary: String,
@@ -464,6 +498,9 @@ pub struct NotifyStep {
     /// -1 lets the server choose, 0 never expires.
     pub timeout_ms: Option<i32>,
     pub replaces: Option<u32>,
+    /// Hints of text: `{ "x-kde-appname" = "kdeconnect" }`.
+    #[serde(default)]
+    pub hints: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -700,6 +737,11 @@ impl fmt::Display for Step {
             Self::TrayApp(t) => write!(f, "tray_app {:?}", t.title),
             Self::TrayAttention(t) => write!(f, "tray_attention {:?} {}", t.title, t.attention),
             Self::ExpectTray(t) => write!(f, "expect_tray {:?} {:?}", t.title, t.asked),
+            Self::Phone(p) => write!(f, "phone {:?} {}", p.name, p.battery),
+            Self::PhoneNotification(n) => write!(f, "phone_notification {:?}", n.title),
+            Self::PhoneRemove(n) => write!(f, "phone_remove {n}"),
+            Self::ExpectPhone(asked) => write!(f, "expect_phone {asked:?}"),
+            Self::ExpectPhoneState(state) => write!(f, "expect_phone_state {state:?}"),
             Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
             Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
             Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
@@ -845,6 +887,8 @@ impl Scenario {
             lock_client: None,
             bus,
             tray_apps: Vec::new(),
+            phone: None,
+            phone_posted: Vec::new(),
             asking: None,
             events: Vec::new(),
             caldav: None,
@@ -879,6 +923,9 @@ struct Run<'a> {
     asking: Option<std::thread::JoinHandle<anyhow::Result<Option<String>>>>,
     /// Tray applications by title; before the bus, so they go first.
     tray_apps: Vec<(String, crate::tray::TrayApp)>,
+    /// KDE Connect's stand-in, and the notifications it posted.
+    phone: Option<crate::phone::FakePhone>,
+    phone_posted: Vec<String>,
     bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
@@ -907,6 +954,75 @@ impl Run<'_> {
                 Ok(())
             }
             Step::TrayAttention(t) => self.tray_app(&t.title)?.set_attention(t.attention),
+            Step::Phone(p) => match &self.phone {
+                Some(phone) => phone.set_battery(p.battery, p.charging),
+                None => {
+                    let mount = self.compositor.runtime_dir().join("phone-files");
+                    std::fs::create_dir_all(&mount)?;
+                    let phone = crate::phone::FakePhone::start(
+                        self.bus()?,
+                        &p.name,
+                        p.battery,
+                        p.charging,
+                        mount,
+                    )?;
+                    self.phone = Some(phone);
+                    Ok(())
+                }
+            },
+            Step::PhoneNotification(n) => {
+                let phone = self
+                    .phone
+                    .as_mut()
+                    .context("no phone: a `phone` step first")?;
+                let id = phone.post(&n.app, &n.title, &n.text, n.reply)?;
+                self.phone_posted.push(id);
+                Ok(())
+            }
+            Step::PhoneRemove(n) => {
+                let id = n
+                    .checked_sub(1)
+                    .and_then(|i| self.phone_posted.get(i))
+                    .with_context(|| format!("the phone posted no notification {n}"))?;
+                self.phone
+                    .as_ref()
+                    .context("no phone: a `phone` step first")?
+                    .remove(id)
+            }
+            Step::ExpectPhone(expected) => {
+                let runtime = self.compositor.runtime_dir().to_string_lossy().into_owned();
+                let expected = expected.replace("{runtime_dir}", &runtime);
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let asked = self
+                        .phone
+                        .as_ref()
+                        .context("no phone: a `phone` step first")?
+                        .asked();
+                    if asked.contains(&expected) {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("the phone was asked {asked:?}, not {expected:?}");
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
+            Step::ExpectPhoneState(expected) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let Reply::Phone(info) = self.request(Request::Phone)? else {
+                        anyhow::bail!("expected the phone");
+                    };
+                    if info.state == *expected {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("the phone is {:?}, not {expected:?}", info.state);
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
             Step::ExpectTray(t) => {
                 let deadline = Instant::now() + SETTLE_TIMEOUT;
                 loop {
@@ -1866,6 +1982,11 @@ impl Run<'_> {
             .iter()
             .flat_map(|[k, l]| [k.as_str(), l.as_str()])
             .collect();
+        let hints: Vec<(&str, &str)> = n
+            .hints
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
         crate::bus::notify(
             self.bus()?,
             &crate::bus::Note {
@@ -1876,6 +1997,7 @@ impl Run<'_> {
                 actions: &actions,
                 urgency,
                 timeout_ms: n.timeout_ms.unwrap_or(-1),
+                hints: &hints,
             },
         )?;
         Ok(())

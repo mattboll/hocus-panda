@@ -1,0 +1,83 @@
+description = "A phone notification with a reply action shows as a toast; the reply typed into it reaches the phone; KDE Connect's own copy is not shown twice, and a notification gone from the phone leaves the screen"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+phone = { name = "Pixel 8", battery = 82 }
+
+[[step]]
+expect_ui = { label = "Phone: Pixel 8, 82%" }
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+phone_notification = { app = "Messages", title = "Sam", text = "Are you coming tonight?" }
+
+[[step]]
+expect_ui = { label = "Reply" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-toast.png" }
+
+[[step]]
+click_ui = "Reply"
+
+[[step]]
+type = "On my way"
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-reply.png" }
+
+# Waiting while it is typed: it does not expire.
+[[step]]
+advance_ms = 10000
+
+[[step]]
+expect_ui = { label = "Send" }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_phone = "reply r1 On my way"
+
+[[step]]
+expect_ui = { label = "Dismiss: Sam", shown = false }
+
+# KDE Connect posts its own copy of a phone notification as a desktop
+# notification: held. One from another application, sent after it, shows.
+[[step]]
+notify = { app = "KDE Connect", summary = "Pixel 8: Messages", body = "Sam: See you", hints = { "x-kde-appname" = "kdeconnect", "x-kde-eventId" = "notification" } }
+
+[[step]]
+notify = { app = "Mail", summary = "Weekly report" }
+
+[[step]]
+expect_ui = { label = "Dismiss: Weekly report" }
+
+[[step]]
+expect_ui = { label = "Dismiss: Pixel 8: Messages", shown = false }
+
+# Without a reply action, none is offered; removed on the phone, it goes.
+[[step]]
+phone_notification = { app = "Calendar", title = "Dentist", text = "Tomorrow at 9:00", reply = false }
+
+[[step]]
+expect_ui = { label = "Dismiss: Dentist" }
+
+[[step]]
+expect_ui = { label = "Reply", shown = false }
+
+[[step]]
+phone_remove = 2
+
+[[step]]
+expect_ui = { label = "Dismiss: Dentist", shown = false }

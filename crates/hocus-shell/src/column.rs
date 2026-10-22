@@ -11,12 +11,12 @@
 use std::{sync::Arc, time::Duration};
 
 use hocus_ui::{
-    AccessNode, Align, Button, ButtonKind, Canvas, Direction, Draw, Event, Icon, Input, Insets,
-    Justify, Kind, Length, Look, NodeId, Paint, PixelRect, Point, Rect, Role, Size, Style, Surface,
-    TextStyle, Theme, Tree,
+    AccessNode, Align, Button, ButtonKind, Canvas, Color, Direction, Draw, Event, Icon, Input,
+    Insets, Justify, Kind, Length, Look, NodeId, Paint, PixelRect, Point, Rect, Role, Size, Style,
+    Surface, TextStyle, Theme, Tree,
 };
 
-use crate::{i18n::Lang, icons};
+use crate::{i18n::Lang, icons, phone};
 
 /// The column's width, from decision 0007.
 pub const WIDTH: f32 = 320.0;
@@ -79,6 +79,8 @@ pub struct ColumnState {
     pub todos: Vec<(usize, String)>,
     /// System updates waiting, and whether they are being installed.
     pub updates: Option<(usize, bool)>,
+    /// The phone within reach (#85).
+    pub phone: Option<PhoneLine>,
     /// The meeting going on or coming next (#75).
     pub meeting: Option<Meeting>,
     /// Calendars are set up: without a meeting, nothing else is planned.
@@ -96,6 +98,15 @@ pub struct Meeting {
     pub progress: u8,
     /// Join, when it has a call and starts soon; else Details.
     pub join: bool,
+}
+
+/// The phone's line: which, and its battery.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PhoneLine {
+    pub name: String,
+    /// Percent, when the phone shares it.
+    pub battery: Option<u8>,
+    pub charging: bool,
 }
 
 /// The agenda's month and today's events.
@@ -154,6 +165,13 @@ pub enum Action {
     /// The next meeting's call.
     JoinMeeting,
     InstallUpdates,
+    /// The phone rings, to be found.
+    RingPhone,
+    /// What was copied last goes to the phone: text to its clipboard,
+    /// files as files.
+    SendClipboardToPhone,
+    /// The phone's files open.
+    BrowsePhone,
     /// A tray application clicked.
     TrayActivate(String),
     /// A tray application's menu asked for.
@@ -284,6 +302,10 @@ struct Nodes {
     /// The updates' room, and its Install.
     updates: NodeId,
     install: Option<NodeId>,
+    /// The phone's room, its line (which opens its popover) and Ring.
+    phone: NodeId,
+    phone_line: Option<NodeId>,
+    phone_ring: Option<NodeId>,
     /// The clock and date, which open the agenda.
     time: NodeId,
     /// The meeting card, its ring, and its Join or Details.
@@ -299,6 +321,7 @@ enum PopoverKind {
     Tray,
     TrayMenu,
     Agenda,
+    Phone,
 }
 
 /// A popover: its own tree and pixels, placed by the column.
@@ -508,6 +531,20 @@ impl Column {
                 fill_updates(t, n.updates, &theme, lang, count, installing)
             });
         }
+        if all || old.phone != state.phone {
+            t.set_style(n.phone, tasks_room(state.phone.is_some()));
+            for child in t.children(n.phone) {
+                t.remove(child);
+            }
+            let theme = t.theme().clone();
+            (self.nodes.phone_line, self.nodes.phone_ring) = match &state.phone {
+                Some(p) => {
+                    let (line, ring) = fill_phone(t, n.phone, &theme, lang, p);
+                    (Some(line), Some(ring))
+                }
+                None => (None, None),
+            };
+        }
         if all || old.meeting != state.meeting || old.calendar_set != state.calendar_set {
             let progress = state.meeting.as_ref().map_or(0, |m| m.progress.min(100));
             t.set_draw(
@@ -653,6 +690,20 @@ impl Column {
         {
             self.open(PopoverKind::Agenda);
         }
+        // An open phone popover follows the phone; it closes when it goes.
+        if !all
+            && old.phone != state.phone
+            && self
+                .popover
+                .as_ref()
+                .is_some_and(|p| p.kind == PopoverKind::Phone)
+        {
+            if state.phone.is_none() {
+                self.close_popover();
+            } else {
+                self.open(PopoverKind::Phone);
+            }
+        }
         // An open tray follows its applications; it closes with the last.
         if !all
             && old.tray != state.tray
@@ -713,6 +764,10 @@ impl Column {
                 None => return,
             },
             PopoverKind::Agenda => self.nodes.meeting,
+            PopoverKind::Phone => match self.nodes.phone_line {
+                Some(line) => line,
+                None => return,
+            },
         };
         let anchor = self.tree.rect(anchor).unwrap_or_default();
         let (mut tree, targets) = match kind {
@@ -732,6 +787,10 @@ impl Column {
                 None => return,
             },
             PopoverKind::Agenda => agenda_popover(&theme, self.lang, &self.state, scale),
+            PopoverKind::Phone => match &self.state.phone {
+                Some(p) => phone_popover(&theme, self.lang, p, scale),
+                None => return,
+            },
         };
         let first = tree.update(self.now);
         let size = tree.size();
@@ -740,7 +799,8 @@ impl Column {
             PopoverKind::Desktops
             | PopoverKind::Tray
             | PopoverKind::TrayMenu
-            | PopoverKind::Agenda => anchor.y - SHADOW_ROOM,
+            | PopoverKind::Agenda
+            | PopoverKind::Phone => anchor.y - SHADOW_ROOM,
             PopoverKind::Account => anchor.bottom() + SHADOW_ROOM - size.h,
         };
         let y = y.clamp(-MARGIN, (self.tree.size().h + MARGIN - size.h).max(-MARGIN));
@@ -881,6 +941,10 @@ impl Column {
                 }
             } else if Some(id) == n.install {
                 actions.push(Action::InstallUpdates);
+            } else if Some(id) == n.phone_ring {
+                actions.push(Action::RingPhone);
+            } else if Some(id) == n.phone_line {
+                self.toggle(PopoverKind::Phone);
             } else if Some(id) == n.stop_sharing {
                 actions.push(Action::StopSharing);
             } else if n.tray.is_some_and(|(_, chip)| chip == id) {
@@ -1190,6 +1254,8 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
     // the latest notifications.
     let feed = add(tree, card, Style::default(), Kind::Box(Look::default()));
     let tasks = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
+    // Board D13: the phone, the updates, then the notifications.
+    let phone = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     let updates = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     let notes = add(
         tree,
@@ -1313,6 +1379,9 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         tasks,
         updates,
         install: None,
+        phone,
+        phone_line: None,
+        phone_ring: None,
         time,
         meeting,
         ring,
@@ -1519,6 +1588,160 @@ fn fill_updates(
         )
         .unwrap_or_else(missing)
     })
+}
+
+/// The phone's square, as board D13 colours it.
+const PHONE_COLOR: Color = Color::rgb(0x2f, 0x6f, 0xd6);
+
+/// The phone's line, as board D13 draws it: "Phone · 82 %", and Ring.
+/// The line opens the phone's popover; its line and Ring, returned.
+fn fill_phone(
+    tree: &mut Tree,
+    room: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    phone: &PhoneLine,
+) -> (NodeId, NodeId) {
+    let missing = || unreachable!("adding to a node of this tree");
+    let row = |gap| Style {
+        direction: hocus_ui::Direction::Row,
+        gap,
+        align: Align::Center,
+        ..Style::default()
+    };
+    let line = tree
+        .add(room, row(10.0), Kind::Box(Look::default()))
+        .unwrap_or_else(missing);
+    let open = tree
+        .add(
+            line,
+            Style {
+                width: Length::Fill,
+                height: Length::Px(36.0),
+                ..row(10.0)
+            },
+            Kind::Box(Look {
+                radius: theme.radii.small,
+                ..Look::default()
+            }),
+        )
+        .unwrap_or_else(missing);
+    tree.set_clickable(
+        open,
+        &lang.phone_name(&phone.name, phone.battery, phone.charging),
+    );
+    tree.add(
+        open,
+        Style {
+            width: Length::Px(22.0),
+            height: Length::Px(22.0),
+            ..Style::default()
+        },
+        Kind::Box(Look {
+            background: Some(Paint::Rgba(PHONE_COLOR)),
+            radius: 6.0,
+            ..Look::default()
+        }),
+    )
+    .unwrap_or_else(missing);
+    tree.add(
+        open,
+        Style {
+            width: Length::Fill,
+            ..Style::default()
+        },
+        Kind::text_line(lang.phone_line(phone.battery), theme.text.body),
+    )
+    .unwrap_or_else(missing);
+    let ring = tree
+        .add(
+            line,
+            Style {
+                height: Length::Px(36.0),
+                padding: Insets::symmetric(0.0, 10.0),
+                ..Style::default()
+            },
+            Kind::Button(Button::new(lang.ring_phone(), ButtonKind::Plain, theme)),
+        )
+        .unwrap_or_else(missing);
+    (open, ring)
+}
+
+/// The phone's popover: its name and battery, then what it can do.
+fn phone_popover(
+    theme: &Theme,
+    lang: Lang,
+    phone: &PhoneLine,
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    let items = [
+        (phone::RING, lang.ring_phone(), Action::RingPhone),
+        (
+            phone::SEND,
+            lang.send_clipboard(),
+            Action::SendClipboardToPhone,
+        ),
+        (phone::FOLDER, lang.browse_phone(), Action::BrowsePhone),
+    ];
+    // Padding, the name and battery lines, the buttons.
+    let height = 16.0 * 2.0 + 56.0 + items.len() as f32 * 44.0;
+    let (mut tree, card) = popover_tree(theme, 260.0, height, scale);
+    let missing = || unreachable!("adding to a node of this tree");
+    tree.set_style(
+        card,
+        Style {
+            height: Length::Fill,
+            padding: Insets::all(16.0),
+            gap: 2.0,
+            ..Style::default()
+        },
+    );
+    tree.add(
+        card,
+        Style {
+            padding: Insets {
+                left: 12.0,
+                ..Insets::default()
+            },
+            ..Style::default()
+        },
+        Kind::text_line(phone.name.as_str(), theme.text.title.with_weight(700)),
+    )
+    .unwrap_or_else(missing);
+    tree.add(
+        card,
+        Style {
+            padding: Insets {
+                bottom: 12.0,
+                left: 12.0,
+                ..Insets::default()
+            },
+            ..Style::default()
+        },
+        Kind::text_line(
+            lang.phone_battery(phone.battery, phone.charging),
+            theme.text.body.with_color(Paint::Muted),
+        ),
+    )
+    .unwrap_or_else(missing);
+    let mut targets = Vec::new();
+    for (path, label, action) in items {
+        let button = Button::new(label, ButtonKind::Ghost, theme)
+            .with_icon(stroked(path, 18.0))
+            .at_start();
+        let id = tree
+            .add(
+                card,
+                Style {
+                    height: Length::Px(44.0),
+                    ..Style::default()
+                },
+                Kind::Button(button),
+            )
+            .unwrap_or_else(missing);
+        targets.push((id, action));
+    }
+    (tree, targets)
 }
 
 /// The sharing line: said, with its stop.

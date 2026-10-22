@@ -96,6 +96,12 @@ pub enum Request {
     Updates,
     /// Installs them, through polkit.
     InstallUpdates,
+    /// The phone as the session knows it, through KDE Connect (#85).
+    Phone,
+    /// Sends files to the phone within reach, by absolute path.
+    SendToPhone {
+        paths: Vec<String>,
+    },
     /// Puts a PNG on the clipboard, kept by the compositor (the annotation
     /// window's Copy, #128).
     CopyPng {
@@ -219,6 +225,9 @@ impl Request {
             | Self::Updates
             // The system asks for the password itself.
             | Self::InstallUpdates
+            | Self::Phone
+            // Files of the user's own, to the user's own paired phone.
+            | Self::SendToPhone { .. }
             // A picture the user asked to copy.
             | Self::CopyPng { .. }
             | Self::Windows
@@ -306,6 +315,7 @@ pub enum Reply {
     /// What the user chose to share, or nothing.
     Shared(Option<String>),
     Updates(UpdatesInfo),
+    Phone(PhoneInfo),
     Calendars(CalendarsInfo),
     Windows(Vec<WindowInfo>),
     Scene(Scene),
@@ -514,6 +524,24 @@ pub struct UpdatesInfo {
     pub error: Option<String>,
 }
 
+/// The phone as the session knows it (#85).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PhoneInfo {
+    /// KDE Connect: `off` (the configuration), `looking`, `absent`,
+    /// `stopped` (installed, not running) or `running`.
+    pub state: String,
+    /// The phones paired and within reach; the first is the column's.
+    pub phones: Vec<PhoneDevice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhoneDevice {
+    pub id: String,
+    pub name: String,
+    pub battery: Option<u8>,
+    pub charging: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateInfo {
     pub name: String,
@@ -682,6 +710,12 @@ pub enum Event {
     Updates {
         count: usize,
         state: String,
+    },
+    /// KDE Connect came or went, or the phones within reach changed
+    /// (#85): its state, as [`PhoneInfo`] says it, and how many phones.
+    Phone {
+        state: String,
+        phones: usize,
     },
     /// A screen recording was saved (#70), with its size in pixels.
     Recording {

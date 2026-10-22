@@ -5,7 +5,7 @@ use std::time::Duration;
 use hocus_shell::{
     Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, TrayApp, TrayMenuEntry,
     WallTime,
-    column::{Agenda, Meeting},
+    column::{Agenda, Meeting, PhoneLine},
 };
 use hocus_ui::{Input, Point, Role, Theme};
 
@@ -19,6 +19,7 @@ fn state() -> ColumnState {
         sharing: false,
         todos: Vec::new(),
         updates: None,
+        phone: None,
         meeting: None,
         calendar_set: false,
         agenda: Default::default(),
@@ -307,5 +308,42 @@ fn without_a_window_the_controls_are_disabled() -> anyhow::Result<()> {
     let at = button(&column, "Close")?;
     assert_eq!(click(&mut column, at), vec![]);
     assert!(column.access().dump().contains("No window"));
+    Ok(())
+}
+
+#[test]
+fn the_phone_rings_and_its_popover_sends_and_browses() -> anyhow::Result<()> {
+    let mut column = column(Lang::En);
+    assert!(button(&column, "Ring").is_err(), "no phone, no line");
+    column.set_state(&ColumnState {
+        phone: Some(PhoneLine {
+            name: "Pixel 8".into(),
+            battery: Some(82),
+            charging: false,
+        }),
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    assert!(column.access().dump().contains("Phone · 82%"));
+    let at = button(&column, "Ring")?;
+    assert_eq!(click(&mut column, at), vec![Action::RingPhone]);
+    let at = button(&column, "Phone: Pixel 8, 82%")?;
+    assert_eq!(click(&mut column, at), vec![]);
+    column.draw(Duration::ZERO);
+    assert!(column.access().dump().contains("Battery 82%"));
+    let at = button(&column, "Send the clipboard")?;
+    assert_eq!(click(&mut column, at), vec![Action::SendClipboardToPhone]);
+    let at = button(&column, "Phone: Pixel 8, 82%")?;
+    click(&mut column, at);
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Browse its files")?;
+    assert_eq!(click(&mut column, at), vec![Action::BrowsePhone]);
+    // Out of reach, its line and popover go.
+    let at = button(&column, "Phone: Pixel 8, 82%")?;
+    click(&mut column, at);
+    column.set_state(&state());
+    column.draw(Duration::ZERO);
+    assert!(button(&column, "Browse its files").is_err());
+    assert!(button(&column, "Ring").is_err());
     Ok(())
 }

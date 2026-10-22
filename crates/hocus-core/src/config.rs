@@ -25,6 +25,7 @@ pub struct Config {
     pub recording: Recording,
     pub night_light: NightLight,
     pub updates: Updates,
+    pub phone: PhoneConfig,
     /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
     pub calendars: Vec<CalendarAccount>,
     pub dock: Dock,
@@ -604,6 +605,24 @@ impl Default for Updates {
             every_hours: 6,
             check: String::new(),
             install: String::new(),
+        }
+    }
+}
+
+/// The phone (#85), through KDE Connect when it runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PhoneConfig {
+    pub enabled: bool,
+    /// Its notifications as toasts, with a reply where it takes one.
+    pub notifications: bool,
+}
+
+impl Default for PhoneConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            notifications: true,
         }
     }
 }

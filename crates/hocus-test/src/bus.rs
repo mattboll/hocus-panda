@@ -87,6 +87,8 @@ pub struct Note<'a> {
     /// 0 low, 1 normal, 2 critical.
     pub urgency: u8,
     pub timeout_ms: i32,
+    /// Hints of text, besides the urgency (`x-kde-appname`…).
+    pub hints: &'a [(&'a str, &'a str)],
 }
 
 /// Sends `note` to the notification server on the bus at `address`, and
@@ -100,6 +102,9 @@ pub fn notify(address: &str, note: &Note<'_>) -> anyhow::Result<u32> {
 pub fn notify_on(connection: &zbus::Connection, note: &Note<'_>) -> anyhow::Result<u32> {
     let mut hints: std::collections::HashMap<&str, zbus::Variant<'_>> = Default::default();
     hints.insert("urgency", note.urgency.into());
+    for (key, value) in note.hints {
+        hints.insert(key, (*value).into());
+    }
     let reply = zbus::block_on(connection.call_method(
         Some("org.freedesktop.Notifications"),
         "/org/freedesktop/Notifications",

@@ -59,7 +59,7 @@ impl Lang {
             .map_or(Self::En, |l| Self::from_locale(&l))
     }
 
-    fn pick(self, en: &'static str, fr: &'static str) -> &'static str {
+    pub(crate) fn pick(self, en: &'static str, fr: &'static str) -> &'static str {
         match self {
             Self::En => en,
             Self::Fr => fr,

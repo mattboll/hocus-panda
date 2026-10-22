@@ -1,0 +1,75 @@
+description = "A phone paired in KDE Connect shows in the column with its battery and Ring; its popover sends what was copied and opens its files; its battery follows"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+# Browsing opens the phone's files with the stand-in, never a real file manager.
+child_env = { PATH = "{scenario_dir}/calendar/bin:/usr/bin:/bin" }
+
+[[step]]
+expect_phone_state = "absent"
+
+[[step]]
+phone = { name = "Pixel 8", battery = 82 }
+
+[[step]]
+expect_ui = { label = "Phone: Pixel 8, 82%" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-column.png" }
+
+[[step]]
+click_ui = "Ring"
+
+[[step]]
+expect_phone = "ring"
+
+# What was copied last goes to the phone's clipboard.
+[[step]]
+open = { app_id = "notes", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+copy = { app_id = "notes", text = "See you at six" }
+
+[[step]]
+click_ui = "Phone: Pixel 8, 82%"
+
+[[step]]
+expect_ui = { label = "Send the clipboard" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-popover.png" }
+
+[[step]]
+click_ui = "Send the clipboard"
+
+[[step]]
+expect_phone = "clipboard See you at six"
+
+[[step]]
+expect_ui = { label = "Dismiss: Sent to Pixel 8" }
+
+# Its files open where KDE Connect mounts them.
+[[step]]
+click_ui = "Phone: Pixel 8, 82%"
+
+[[step]]
+click_ui = "Browse its files"
+
+[[step]]
+expect_phone = "browse"
+
+[[step]]
+expect_runtime_file = { name = "opened", contains = ["phone-files"] }
+
+# The battery, as the phone says it changed.
+[[step]]
+phone = { name = "Pixel 8", battery = 15, charging = true }
+
+[[step]]
+expect_ui = { label = "Phone: Pixel 8, 15%, charging" }

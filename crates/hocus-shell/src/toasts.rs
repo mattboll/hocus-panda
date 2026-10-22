@@ -1,17 +1,20 @@
 //! Toasts: notifications shown at the top right of the screen being worked
 //! on, left of the column, newest on top. They slide in from the edge, the
 //! stack reflows with springs, a thin line counts down their time and stops
-//! while the pointer is over them; critical ones stay until dismissed.
+//! while the pointer is over them; critical ones stay until dismissed. A
+//! toast whose actions include [`REPLY`] takes a reply typed into it, and
+//! waits while it is typed.
 
 use std::{collections::VecDeque, time::Duration};
 
 use hocus_ui::{
     AccessNode, Align, Button, ButtonKind, Canvas, Color, Direction, Draw, Event, Input, Insets,
-    Kind, Length, Look, NodeId, Paint, PixelRect, Point, Property, Rect, Size, Style, Surface,
-    Theme, Tree,
+    Key, Kind, Length, Look, NodeId, Paint, PixelRect, Point, Property, Rect, Size, Style, Surface,
+    TextField, Theme, Tree,
     motion::{self, Curve, Easing, Spring},
 };
 
+pub use crate::phone::REPLY;
 use crate::{column::View, i18n::Lang, icons};
 
 /// A toast's width, from the design.
@@ -30,7 +33,8 @@ pub struct Toast {
     pub app: String,
     pub summary: String,
     pub body: String,
-    /// Keys and labels; `default` is a click on the toast itself.
+    /// Keys and labels; `default` is a click on the toast itself,
+    /// [`REPLY`] opens a field to reply in.
     pub actions: Vec<(String, String)>,
     /// Stays until dismissed, with the waiting colour.
     pub critical: bool,
@@ -45,6 +49,8 @@ pub enum ToastEvent {
     Dismissed(u32),
     /// The user chose an action, then the toast went away.
     Action(u32, String),
+    /// The user sent this reply, then the toast went away.
+    Replied(u32, String),
 }
 
 /// An entry of the history the column shows.
@@ -101,6 +107,10 @@ struct Card {
     card: NodeId,
     dismiss: NodeId,
     buttons: Vec<(NodeId, String)>,
+    /// The row of its actions, which a reply's field takes.
+    row: Option<NodeId>,
+    /// While a reply is typed: its field and its Send.
+    reply: Option<(NodeId, NodeId)>,
     countdown: Option<NodeId>,
     /// When it goes, unless the pointer is over it.
     deadline: Option<Duration>,
@@ -118,6 +128,8 @@ pub struct Toasts {
     cards: Vec<Card>,
     history: VecDeque<Past>,
     hovered: Option<u32>,
+    /// The toast a reply is typed in: it has the keyboard.
+    replying: Option<u32>,
     now: Duration,
 }
 
@@ -178,6 +190,7 @@ impl Toasts {
             cards: Vec::new(),
             history: VecDeque::new(),
             hovered: None,
+            replying: None,
             now: Duration::ZERO,
         }
     }
@@ -312,6 +325,9 @@ impl Toasts {
         if self.hovered == Some(card.toast.id) {
             self.hovered = None;
         }
+        if self.replying == Some(card.toast.id) {
+            self.replying = None;
+        }
         self.reflow(&before);
     }
 
@@ -414,13 +430,14 @@ impl Toasts {
             .unwrap_or_else(missing);
         }
         let mut buttons = Vec::new();
+        let mut row = None;
         let shown: Vec<_> = toast
             .actions
             .iter()
             .filter(|(k, _)| k != "default")
             .collect();
         if !shown.is_empty() {
-            let row = t
+            let actions = t
                 .add(
                     card,
                     Style {
@@ -443,7 +460,7 @@ impl Toasts {
                 };
                 let id = t
                     .add(
-                        row,
+                        actions,
                         Style {
                             height: Length::Px(40.0),
                             ..Style::default()
@@ -453,6 +470,7 @@ impl Toasts {
                     .unwrap_or_else(missing);
                 buttons.push((id, key.clone()));
             }
+            row = Some(actions);
         }
         let (deadline, total, countdown) = match toast.timeout {
             Some(total) => {
@@ -482,6 +500,8 @@ impl Toasts {
             card,
             dismiss,
             buttons,
+            row,
+            reply: None,
             countdown,
             deadline,
             total,
@@ -516,6 +536,10 @@ impl Toasts {
     }
 
     fn pause(&mut self, id: u32, paused: bool) {
+        // A reply being typed holds its toast until it is sent.
+        if !paused && self.replying == Some(id) {
+            return;
+        }
         let now = self.now;
         let Some(card) = self.cards.iter_mut().find(|c| c.toast.id == id) else {
             return;
@@ -524,6 +548,9 @@ impl Toasts {
             return;
         };
         let countdown = if paused {
+            if card.paused_left.is_some() {
+                return;
+            }
             let left = deadline.saturating_sub(now);
             card.paused_left = Some(left);
             let fraction = left.as_secs_f32() / card.total.as_secs_f32().max(f32::EPSILON);
@@ -583,7 +610,10 @@ impl Toasts {
                 continue;
             };
             let Some(i) = self.cards.iter().position(|c| {
-                c.card == node || c.dismiss == node || c.buttons.iter().any(|(b, _)| *b == node)
+                c.card == node
+                    || c.dismiss == node
+                    || c.buttons.iter().any(|(b, _)| *b == node)
+                    || c.reply.is_some_and(|(_, send)| send == node)
             }) else {
                 continue;
             };
@@ -591,14 +621,163 @@ impl Toasts {
             let id = card.toast.id;
             if node == card.dismiss {
                 events.push(ToastEvent::Dismissed(id));
+            } else if card.reply.is_some_and(|(_, send)| send == node) {
+                events.extend(self.send_reply(i));
+                continue;
             } else if node == card.card {
                 events.push(ToastEvent::Action(id, "default".into()));
             } else if let Some((_, key)) = card.buttons.iter().find(|(b, _)| *b == node) {
+                if key == REPLY {
+                    self.open_reply(i);
+                    continue;
+                }
                 events.push(ToastEvent::Action(id, key.clone()));
             }
             self.take(i);
         }
         events
+    }
+
+    // Replies.
+
+    /// Whether a reply is being typed: the keys are for it.
+    pub fn replying(&self) -> bool {
+        self.replying.is_some()
+    }
+
+    /// The card at `i` takes a reply: its actions make room for a field
+    /// with the keyboard, and it waits until the reply goes.
+    fn open_reply(&mut self, i: usize) {
+        // One reply at a time: one typed elsewhere is left as it was.
+        if self.replying.is_some() {
+            return;
+        }
+        let theme = self.tree.theme().clone();
+        let lang = self.lang;
+        let id = self.cards[i].toast.id;
+        let Some(row) = self.cards[i].row else {
+            return;
+        };
+        let t = &mut self.tree;
+        for child in t.children(row) {
+            t.remove(child);
+        }
+        let missing = || unreachable!("adding to a node of this tree");
+        let field_box = t
+            .add(
+                row,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(40.0),
+                    padding: Insets::symmetric(0.0, 12.0),
+                    align: Align::Center,
+                    direction: Direction::Row,
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    radius: 12.0,
+                    border: Some(Paint::Border),
+                    ..Look::default()
+                }),
+            )
+            .unwrap_or_else(missing);
+        let field = t
+            .add(
+                field_box,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(22.0),
+                    ..Style::default()
+                },
+                Kind::TextField(Box::new(TextField::new(
+                    lang.reply(),
+                    lang.reply_placeholder(),
+                    theme.text.body,
+                ))),
+            )
+            .unwrap_or_else(missing);
+        let send = t
+            .add(
+                row,
+                Style {
+                    height: Length::Px(40.0),
+                    ..Style::default()
+                },
+                Kind::button(lang.send(), ButtonKind::Primary, &theme),
+            )
+            .unwrap_or_else(missing);
+        t.set_focus(Some(field));
+        self.cards[i].buttons.clear();
+        self.cards[i].reply = Some((field, send));
+        self.pause(id, true);
+        self.replying = Some(id);
+    }
+
+    /// The reply goes, unless nothing was typed.
+    fn send_reply(&mut self, i: usize) -> Vec<ToastEvent> {
+        let Some((field, _)) = self.cards[i].reply else {
+            return Vec::new();
+        };
+        let text = self
+            .tree
+            .field_value(field)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        let id = self.cards[i].toast.id;
+        self.take(i);
+        vec![ToastEvent::Replied(id, text)]
+    }
+
+    /// Text typed into the reply.
+    pub fn text(&mut self, text: &str) {
+        let field = self
+            .cards
+            .iter()
+            .find(|c| Some(c.toast.id) == self.replying)
+            .and_then(|c| c.reply)
+            .map(|(field, _)| field);
+        if let Some(field) = field {
+            self.tree.set_focus(Some(field));
+            self.tree.text_input(text);
+        }
+    }
+
+    /// A key while a reply is typed: Enter sends it, Escape dismisses the
+    /// toast.
+    pub fn key(&mut self, key: Key) -> Vec<ToastEvent> {
+        let Some(i) = self
+            .cards
+            .iter()
+            .position(|c| Some(c.toast.id) == self.replying)
+        else {
+            return Vec::new();
+        };
+        match key {
+            Key::Enter => self.send_reply(i),
+            Key::Escape => {
+                let id = self.cards[i].toast.id;
+                self.take(i);
+                vec![ToastEvent::Dismissed(id)]
+            }
+            key => {
+                let mut events = Vec::new();
+                for event in self.tree.input(Input::Key(key)) {
+                    // Tab onto Send, then Space.
+                    if let Event::Activated(node) = event
+                        && self.cards[i].reply.is_some_and(|(_, send)| send == node)
+                    {
+                        events.extend(self.send_reply(i));
+                        break;
+                    }
+                }
+                events
+            }
+        }
     }
 
     // Drawing.

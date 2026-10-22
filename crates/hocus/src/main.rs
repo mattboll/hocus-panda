@@ -121,6 +121,14 @@ enum Message {
     Desktops,
     /// The shell's interface: roles, labels and places of its elements.
     Ui,
+    /// The phone, through KDE Connect: whether it runs, the phones within
+    /// reach and their battery.
+    Phone,
+    /// Send files to the phone within reach.
+    SendToPhone {
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
     /// Plug a headless output, WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS].
     Plug {
         spec: String,
@@ -304,6 +312,18 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             Ok(())
         }
         Message::Desktops => print(client.request(Request::Desktops)?),
+        Message::Phone => print(client.request(Request::Phone)?),
+        Message::SendToPhone { files } => {
+            let paths = files
+                .iter()
+                .map(|f| {
+                    std::path::absolute(f)
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .with_context(|| format!("{}", f.display()))
+                })
+                .collect::<anyhow::Result<_>>()?;
+            print(client.request(Request::SendToPhone { paths })?)
+        }
         Message::Ui => match client.request(Request::Ui)? {
             // One line per element, indented as the tree.
             Reply::Ui(nodes) => {
