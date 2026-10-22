@@ -85,6 +85,8 @@ pub struct State {
     pub quick: Option<crate::quick::QuickPanel>,
     /// Wallpapers, when the shell runs.
     pub wallpapers: Option<crate::wallpaper::Wallpapers>,
+    /// Title bars, when they are on.
+    pub bars: crate::bars::Bars,
     /// The drop-down terminal.
     pub dropdown: crate::dropdown::Dropdown,
     /// The theme the shell was last given.
@@ -178,6 +180,7 @@ impl State {
             wallpapers: None,
             applied_theme: None,
             dropdown: Default::default(),
+            bars: Default::default(),
             child_env: None,
             layout_index: 0,
             user: std::env::var("USER")

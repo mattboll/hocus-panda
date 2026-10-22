@@ -1,0 +1,82 @@
+description = "With title bars on, windows get a bar with their title: dragging it moves the window, a double click maximizes, and turning the option off takes every bar away"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[decorations]
+title_bars = true
+"""
+
+[[step]]
+open = { app_id = "notes", size = [500, 320], color = "#e8e4da" }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+# The frame is placed: the bar above the client.
+[[step]]
+expect_window = { app_id = "editor", geometry = [440, 267, 400, 300], focused = true }
+
+[[step]]
+expect_ui = { label = "editor", inside = [440, 233, 400, 34] }
+
+[[step]]
+expect_ui = { label = "notes" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "title-bars.png" }
+
+# Dragging the bar moves the window.
+[[step]]
+pointer_move = [640, 250]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [740, 300]
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [540, 317, 400, 300] }
+
+# A double click maximizes: the bar stays at the top of the work area.
+[[step]]
+pointer_move = [740, 300]
+
+[[step]]
+click = "left"
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 34, 1280, 766], state = "maximized" }
+
+# Its close button, at the right end of the bar, closes it.
+[[step]]
+pointer_move = [1262, 17]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_no_window = "editor"
+
+# Turned off: no bar, and the frame keeps its place.
+[[step]]
+config = """
+[decorations]
+title_bars = false
+"""
+
+[[step]]
+expect_ui = { label = "Close", shown = false }
+
+[[step]]
+expect_window = { app_id = "notes", geometry = [390, 223, 500, 354] }

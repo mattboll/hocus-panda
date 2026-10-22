@@ -416,8 +416,11 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let (Some(id), Some(initial)) = (model_id(window), self.space.element_geometry(window))
-        else {
+        // The frame, its bar included.
+        let Some(id) = model_id(window) else {
+            return;
+        };
+        let Some(initial) = self.current_rect(id) else {
             return;
         };
         if !matches!(
@@ -444,6 +447,7 @@ impl State {
     /// Asks the client for `rect`'s size and puts the window at its corner;
     /// `resizing` tells the client a resize is under way.
     pub fn resize_to(&mut self, id: WindowId, rect: Rectangle<i32, Logical>, resizing: bool) {
+        let rect = self.client_rect(id, rect);
         let Some(managed) = self.windows.get_mut(&id) else {
             return;
         };
@@ -464,9 +468,14 @@ impl State {
     /// window is the client's.
     pub fn frame_hit(&self, pos: Point<f64, Logical>) -> Option<(Window, FrameHit)> {
         for window in self.space.elements().rev() {
-            let Some(rect) = self.space.element_geometry(window) else {
+            let Some(mut rect) = self.space.element_geometry(window) else {
                 continue;
             };
+            // The bar is part of the frame.
+            if let Some(bar) = model_id(window).map(|id| self.bar_height(id)) {
+                rect.loc.y -= bar;
+                rect.size.h += bar;
+            }
             let outer = Rectangle::new(
                 rect.loc - Point::from((FRAME, FRAME)),
                 rect.size + Size::from((2 * FRAME, 2 * FRAME)),

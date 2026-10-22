@@ -253,6 +253,7 @@ impl State {
     pub fn refresh_shell(&mut self) {
         self.refresh_dropdown();
         self.refresh_appearance();
+        self.refresh_bars();
         self.refresh_toasts();
         self.refresh_launcher();
         self.refresh_quick();
@@ -462,14 +463,15 @@ impl State {
 
     /// The shell's interface for the control API, in global coordinates.
     pub fn shell_ui(&self) -> Vec<UiNode> {
+        let mut out = Vec::new();
+        self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
-            return Vec::new();
+            return out;
         };
         let Some((_, area, _)) = &shell.on else {
-            return Vec::new();
+            return out;
         };
         let origin = column_rect(*area).loc;
-        let mut out = Vec::new();
         flatten(&shell.column.access(), origin, 0, &mut out);
         self.toasts_ui(&mut out);
         self.launcher_ui(&mut out);
