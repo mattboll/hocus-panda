@@ -25,7 +25,9 @@ fn main() -> std::process::ExitCode {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let options = options.clone();
-                Trial::test(name, move || run(&file, &options))
+                // Without XWayland (FreeBSD CI), X11 scenarios are skipped.
+                let skip = Scenario::load(&file).is_ok_and(|s| s.xwayland) && !has_xwayland();
+                Trial::test(name, move || run(&file, &options)).with_ignored_flag(skip)
             })
             .collect(),
         Err(err) => vec![Trial::test("scenarios", move || {
@@ -42,6 +44,11 @@ fn scenario_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
         .collect();
     files.sort();
     Ok(files)
+}
+
+fn has_xwayland() -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("Xwayland").is_file()))
 }
 
 fn run(file: &Path, options: &RunOptions) -> Result<(), Failed> {

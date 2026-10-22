@@ -3,3 +3,4 @@
 pub mod client;
 pub mod image;
 pub mod scenario;
+pub mod x11;

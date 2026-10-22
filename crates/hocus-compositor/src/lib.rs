@@ -21,9 +21,11 @@ mod scene;
 mod socket;
 mod state;
 mod stats;
+mod surface;
 mod watchdog;
 mod window_mode;
 mod winit;
+mod xwayland;
 
 use std::{
     path::{Path, PathBuf},
@@ -76,6 +78,8 @@ pub struct Options {
     pub config: Option<PathBuf>,
     /// How often the configuration file is looked at.
     pub config_poll: Duration,
+    /// Runs X11 applications through XWayland.
+    pub xwayland: bool,
 }
 
 /// How often the configuration file is looked at by default.
@@ -178,6 +182,10 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     if let Some(config) = &options.watchdog {
         state.watchdog = Some(watchdog::start(&event_loop.handle(), config.clone())?);
     }
+    state.loop_handle = Some(event_loop.handle());
+    if options.xwayland {
+        xwayland::start(&event_loop.handle(), &mut state);
+    }
     if let Some(path) = &options.config {
         state.config_watch = Some(config_watch::start(
             &event_loop.handle(),
@@ -212,11 +220,22 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         mut app,
         runtime_dir,
     } = start(&options, Clock::monotonic())?;
+    if options.xwayland {
+        // Commands started with the session may be X11 ones.
+        let ready = std::time::Instant::now() + Duration::from_secs(5);
+        while app.state.xdisplay.is_none() && std::time::Instant::now() < ready {
+            event_loop.dispatch(Some(Duration::from_millis(20)), &mut app)?;
+            if let Err(err) = app.state.display_handle.flush_clients() {
+                tracing::warn!(%err, "flushing clients failed");
+            }
+        }
+    }
     let mut children = spawn(
         &options.spawn,
         runtime_dir.path(),
         &app.state.socket_path,
         app.state.api.path(),
+        app.state.xdisplay,
     );
 
     let handle = event_loop.handle();
@@ -236,18 +255,27 @@ pub fn run(options: Options) -> anyhow::Result<()> {
 }
 
 /// Starts each command through the shell, connected to this compositor only.
-fn spawn(commands: &[String], runtime_dir: &Path, socket: &Path, api: &Path) -> Vec<Child> {
+fn spawn(
+    commands: &[String],
+    runtime_dir: &Path,
+    socket: &Path,
+    api: &Path,
+    xdisplay: Option<u32>,
+) -> Vec<Child> {
     commands
         .iter()
         .filter_map(|command| {
-            Command::new("/bin/sh")
-                .arg("-c")
+            let mut cmd = Command::new("/bin/sh");
+            cmd.arg("-c")
                 .arg(command)
                 .env("XDG_RUNTIME_DIR", runtime_dir)
                 .env("WAYLAND_DISPLAY", socket)
                 .env(hocus_api::SOCKET_ENV, api)
-                .env_remove("DISPLAY")
-                .spawn()
+                .env_remove("DISPLAY");
+            if let Some(n) = xdisplay {
+                cmd.env("DISPLAY", format!(":{n}"));
+            }
+            cmd.spawn()
                 .inspect_err(|err| tracing::warn!(%err, command, "could not start"))
                 .ok()
         })

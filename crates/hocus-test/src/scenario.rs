@@ -23,12 +23,15 @@ use std::{
 
 use anyhow::Context;
 use hocus_api::{Button, Reply, Request, Target, WindowInfo, WindowState};
-use hocus_compositor::{FRAME, Headless, HeadlessConfig, OutputSpec, RendererChoice};
+use hocus_compositor::{
+    FRAME, HarnessOptions, Headless, HeadlessConfig, OutputSpec, RendererChoice,
+};
 use serde::Deserialize;
 
 use crate::{
     client::{SolidWindow, TestClient},
     image::{Difference, Image, Tolerance},
+    x11::{X11Client, X11Window},
 };
 
 /// How long a step may wait for a client, in real time.
@@ -45,6 +48,9 @@ pub struct Scenario {
     /// Output specs, `WIDTHxHEIGHT[@SCALE][+X+Y]`; one 1280×800 by default.
     #[serde(default)]
     pub outputs: Vec<String>,
+    /// Starts XWayland, for X11 test clients; skipped where it is missing.
+    #[serde(default)]
+    pub xwayland: bool,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
     /// The file's name without extension.
@@ -60,6 +66,12 @@ pub struct Scenario {
 pub enum Step {
     /// Starts a test client with a window.
     Open(OpenWindow),
+    /// Starts an X11 test client with a window, through XWayland.
+    OpenX11(OpenWindow),
+    /// The client of this app id, Wayland or X11, takes the clipboard.
+    Copy(Clipboard),
+    /// The client of this app id reads this text from the clipboard.
+    ExpectClipboard(Clipboard),
     /// Asks the window of this app id to close, and waits until it is gone.
     Close(String),
     PointerMove([f64; 2]),
@@ -145,6 +157,13 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Clipboard {
+    pub app_id: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -248,6 +267,9 @@ impl fmt::Display for Step {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Open(open) => write!(f, "open {}", open.app_id),
+            Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
+            Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
+            Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
             Self::Close(app_id) => write!(f, "close {app_id}"),
             Self::PointerMove([x, y]) => write!(f, "pointer_move {x},{y}"),
             Self::Click(button) => write!(f, "click {button:?}"),
@@ -335,16 +357,22 @@ impl Scenario {
                 .map(|s| s.parse())
                 .collect::<Result<_, _>>()?
         };
-        let compositor = Headless::start(HeadlessConfig {
-            outputs,
-            // The same pixels on every machine, for reference screenshots.
-            renderer: RendererChoice::Pixman,
+        let compositor = Headless::start_options(HarnessOptions {
+            headless: HeadlessConfig {
+                outputs,
+                // The same pixels on every machine, for reference screenshots.
+                renderer: RendererChoice::Pixman,
+            },
+            api_permission: hocus_api::Permission::Test,
+            watchdog: None,
+            xwayland: self.xwayland,
         })?;
         let mut run = Run {
             scenario: self,
             options,
             compositor,
             clients: Vec::new(),
+            x11_clients: Vec::new(),
             events: Vec::new(),
         };
         run.request(Request::Subscribe)?;
@@ -361,6 +389,7 @@ struct Run<'a> {
     options: &'a RunOptions,
     compositor: Headless,
     clients: Vec<TestClient>,
+    x11_clients: Vec<X11Client>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
 }
@@ -369,6 +398,9 @@ impl Run<'_> {
     fn step(&mut self, step: &Step) -> anyhow::Result<()> {
         match step {
             Step::Open(open) => self.open(open),
+            Step::OpenX11(open) => self.open_x11(open),
+            Step::Copy(copy) => self.copy(copy),
+            Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::Close(app_id) => self.close(app_id),
             Step::PointerMove([x, y]) => {
                 self.request(Request::PointerMove { x: *x, y: *y })?;
@@ -634,6 +666,90 @@ impl Run<'_> {
         self.compositor
             .dispatch_until(CLIENT_TIMEOUT, |c| c.window_count() > before)
             .context("the window did not appear")
+    }
+
+    fn open_x11(&mut self, open: &OpenWindow) -> anyhow::Result<()> {
+        self.x11_clients.retain(|c| !c.is_finished());
+        let display = self
+            .compositor
+            .x11_display()
+            .context("no XWayland: the scenario needs `xwayland = true`")?;
+        let argb = parse_color(&open.color)?;
+        let window = X11Window {
+            app_id: open.app_id.clone(),
+            width: u16::try_from(open.size[0])?,
+            height: u16::try_from(open.size[1])?,
+            rgb: argb & 0x00ff_ffff,
+        };
+        let before = self.compositor.window_count();
+        self.x11_clients.push(window.spawn(display)?);
+        self.compositor
+            .dispatch_until(CLIENT_TIMEOUT, |c| c.window_count() > before)
+            .context("the X11 window did not appear")
+    }
+
+    fn copy(&mut self, copy: &Clipboard) -> anyhow::Result<()> {
+        if let Some(client) = self.clients.iter().find(|c| c.spec.app_id == copy.app_id) {
+            client.copy(&copy.text)?;
+        } else if let Some(client) = self
+            .x11_clients
+            .iter()
+            .find(|c| c.spec.app_id == copy.app_id)
+        {
+            client.copy(&copy.text)?;
+        } else {
+            anyhow::bail!("no client {}", copy.app_id);
+        }
+        // The compositor hears of it before the next step.
+        self.compositor.dispatch(Duration::from_millis(50))?;
+        Ok(())
+    }
+
+    /// Reads the clipboard as the client sees it; it may take a few round
+    /// trips through the compositor and XWayland.
+    fn expect_clipboard(&mut self, expected: &Clipboard) -> anyhow::Result<()> {
+        let wayland = self
+            .clients
+            .iter()
+            .position(|c| c.spec.app_id == expected.app_id);
+        let x11 = self
+            .x11_clients
+            .iter()
+            .position(|c| c.spec.app_id == expected.app_id);
+        anyhow::ensure!(
+            wayland.is_some() || x11.is_some(),
+            "no client {}",
+            expected.app_id
+        );
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        let mut asked = Instant::now() - Duration::from_secs(1);
+        loop {
+            let got = match (wayland, x11) {
+                (Some(i), _) => self.clients[i].clipboard(),
+                (_, Some(i)) => {
+                    // Asked again now and then: the first request may come
+                    // before the clipboard reached X11.
+                    if asked.elapsed() > Duration::from_millis(200) {
+                        self.x11_clients[i].paste()?;
+                        asked = Instant::now();
+                    }
+                    self.x11_clients[i].pasted()
+                }
+                (None, None) => None,
+            };
+            if got.as_deref() == Some(expected.text.as_str()) {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                anyhow::bail!(
+                    "{} read {:?} from the clipboard, expected {:?}",
+                    expected.app_id,
+                    got,
+                    expected.text
+                );
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
     }
 
     fn close(&mut self, app_id: &str) -> anyhow::Result<()> {

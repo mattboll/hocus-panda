@@ -447,17 +447,12 @@ impl State {
         let Some(managed) = self.windows.get_mut(&id) else {
             return;
         };
-        if let Some(toplevel) = managed.window.toplevel() {
-            toplevel.with_pending_state(|pending| {
-                pending.size = Some(rect.size);
-                if resizing {
-                    pending.states.set(xdg_toplevel::State::Resizing);
-                } else {
-                    pending.states.unset(xdg_toplevel::State::Resizing);
-                }
-            });
-            toplevel.send_pending_configure();
-        }
+        crate::surface::request_size(
+            &managed.window,
+            rect,
+            crate::surface::Shown::Normal,
+            resizing,
+        );
         managed.location = rect.loc;
         let window = managed.window.clone();
         self.space.map_element(window, rect.loc, true);

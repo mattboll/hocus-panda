@@ -1,0 +1,44 @@
+description = "An X11 window is placed, focused and listed like a Wayland one"
+outputs = ["1280x800"]
+xwayland = true
+
+[[step]]
+open = { app_id = "wayland", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open_x11 = { app_id = "x11", size = [400, 300], color = "#f2a65a" }
+
+# Placed by the same rule: one step down and right of the first.
+[[step]]
+expect_window = { app_id = "x11", output = "HEADLESS-1", geometry = [472, 282, 400, 300], focused = true, state = "normal" }
+
+[[step]]
+expect_stack = ["wayland", "x11"]
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "xwayland-window.png" }
+
+# Snapping, maximizing and closing work as for Wayland windows.
+[[step]]
+keys = "super+left"
+
+[[step]]
+expect_window = { app_id = "x11", geometry = [0, 0, 640, 800], state = "snapped" }
+
+[[step]]
+set_state = { app_id = "x11", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "x11", geometry = [0, 0, 1280, 800], state = "maximized" }
+
+[[step]]
+close = "x11"
+
+[[step]]
+expect_no_window = "x11"
+
+[[step]]
+expect_focus = "wayland"

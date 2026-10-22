@@ -13,7 +13,6 @@ use smithay::{
     },
     desktop::Window,
     output::Output,
-    reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
     utils::{Logical, Point, Rectangle, Scale},
 };
 
@@ -156,9 +155,7 @@ impl State {
                     WindowMode::Normal | WindowMode::Snapped { .. } | WindowMode::Tiled { .. }
                 )
             });
-        let server_side = window
-            .toplevel()
-            .is_some_and(|t| t.current_state().decoration_mode == Some(DecorationMode::ServerSide));
+        let server_side = crate::surface::server_side(window);
         let own_shadow = window.bbox().size != window.geometry().size;
         normal && (server_side || !own_shadow)
     }

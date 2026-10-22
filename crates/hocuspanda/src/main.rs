@@ -64,6 +64,10 @@ struct Args {
     #[arg(long)]
     no_watchdog: bool,
 
+    /// Do not start XWayland: X11 applications will not run.
+    #[arg(long)]
+    no_xwayland: bool,
+
     /// Configuration file, watched and applied on change. Default:
     /// $XDG_CONFIG_HOME/hocuspanda/config.toml.
     #[arg(long, value_name = "FILE")]
@@ -122,6 +126,7 @@ fn main() -> anyhow::Result<()> {
         watchdog,
         config,
         config_poll: hocus_compositor::CONFIG_POLL,
+        xwayland: !args.no_xwayland,
         backend: match args.backend {
             BackendArg::Winit => Backend::Winit,
             BackendArg::Headless => Backend::Headless(HeadlessConfig {

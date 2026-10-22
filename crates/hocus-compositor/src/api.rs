@@ -436,18 +436,17 @@ impl App {
                 Reply::Done
             }
             Request::CloseWindow { window: wanted } => {
-                let toplevel = state
-                    .space
-                    .elements()
-                    .find(|w| window_id(w) == wanted)
-                    .and_then(|w| w.toplevel().cloned());
-                let Some(toplevel) = toplevel else {
+                let window = state
+                    .windows
+                    .get(&hocus_core::WindowId(wanted))
+                    .map(|m| m.window.clone());
+                let Some(window) = window else {
                     return Some(Err(ApiError::new(
                         ErrorCode::NotFound,
                         format!("no window with id {wanted}"),
                     )));
                 };
-                toplevel.send_close();
+                crate::surface::close(&window);
                 Reply::Done
             }
             Request::Screenshot { target, cursor } => {
