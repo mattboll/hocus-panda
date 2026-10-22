@@ -1,0 +1,44 @@
+description = "notify-send on the session bus shows a toast at the top right of the screen under the pointer, left of the column"
+outputs = ["1280x800", "1920x1080+1280+0"]
+shell = true
+dbus = true
+needs = ["notify-send"]
+
+# On the screen with the column: the toast stays left of it (x 944).
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+notify_send = ["--app-name=Mail", "Review of MR 42", "The pipeline is green."]
+
+[[step]]
+expect_ui = { label = "Review of MR 42", inside = [0, 0, 944, 800] }
+
+[[step]]
+expect_event = { type = "notification", has = "Review of MR 42" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "notification-toast.png" }
+
+# It goes after its time; the column keeps it in its history.
+[[step]]
+advance_ms = 6500
+
+[[step]]
+expect_ui = { label = "Review of MR 42", shown = false }
+
+[[step]]
+expect_ui = { label = "Mail · Review of MR 42" }
+
+# On the other screen, the next one shows there.
+[[step]]
+pointer_move = [2500, 500]
+
+[[step]]
+notify_send = ["--app-name=Chat", "Lunch at noon?"]
+
+[[step]]
+expect_ui = { label = "Lunch at noon?", inside = [1280, 0, 1920, 1080] }

@@ -31,6 +31,8 @@ pub struct HarnessOptions {
     pub xwayland: bool,
     /// Shows the widget column.
     pub shell: bool,
+    /// Serves notifications on this (private, test) bus.
+    pub session_bus: Option<String>,
 }
 
 /// A headless compositor in a private runtime directory, on a virtual clock.
@@ -105,6 +107,7 @@ impl Headless {
             watchdog: None,
             xwayland: false,
             shell: false,
+            session_bus: None,
         })
     }
 
@@ -124,6 +127,7 @@ impl Headless {
             config_poll: Duration::from_millis(20),
             xwayland: harness.xwayland,
             shell: harness.shell,
+            session_bus: harness.session_bus.clone(),
         };
         let Started {
             event_loop,

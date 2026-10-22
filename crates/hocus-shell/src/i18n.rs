@@ -176,6 +176,22 @@ impl Lang {
         }
     }
 
+    /// The name of a toast's close button.
+    pub fn dismiss(self, summary: &str) -> String {
+        match self {
+            Self::En => format!("Dismiss: {summary}"),
+            Self::Fr => format!("Ignorer\u{a0}: {summary}"),
+        }
+    }
+
+    pub fn notifications(self) -> &'static str {
+        self.pick("NOTIFICATIONS", "NOTIFICATIONS")
+    }
+
+    pub fn nothing_new(self) -> &'static str {
+        self.pick("Nothing new", "Rien de nouveau")
+    }
+
     pub fn lock(self) -> &'static str {
         self.pick("Lock", "Verrouiller")
     }

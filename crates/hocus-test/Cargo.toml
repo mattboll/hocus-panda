@@ -19,14 +19,15 @@ rustix = { version = "1.1.5", features = ["event"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 smithay-client-toolkit = { version = "0.19.2", default-features = false }
+tempfile = "3.27.0"
 toml = "1.1.8"
 wayland-client = "0.31.15"
 x11rb = "0.13.2"
+zbus = "6.0.0"
 
 [dev-dependencies]
 wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
 libtest-mimic = "0.8.2"
-tempfile = "3.27.0"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 

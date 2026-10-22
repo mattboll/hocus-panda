@@ -24,6 +24,7 @@ fn compositor(dump_dir: &std::path::Path, limit: Duration) -> anyhow::Result<Hea
         }),
         xwayland: false,
         shell: false,
+        session_bus: None,
     })
 }
 

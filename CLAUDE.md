@@ -30,6 +30,8 @@ a live session:
 ```sh
 # nested, in a window of the current session
 target/debug/hocuspanda --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
+# notifications: only on a bus given explicitly, never the live session's
+#   --session-bus "$(dbus-daemon --session --print-address --fork)"
 # headless: offscreen outputs, a private runtime directory by default
 target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 3440x1440 \
     --api-permission test --spawn foot

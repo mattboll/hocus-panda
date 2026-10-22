@@ -66,6 +66,8 @@ pub struct ColumnState {
     pub layout: String,
     pub layout_name: String,
     pub user: String,
+    /// The latest notifications, newest first: application and summary.
+    pub notifications: Vec<(String, String)>,
 }
 
 /// What the user asked for in the column.
@@ -163,6 +165,7 @@ struct Nodes {
     desktops: NodeId,
     desktops_text: NodeId,
     dots: NodeId,
+    history: NodeId,
     account: NodeId,
     initial: NodeId,
     user: NodeId,
@@ -316,6 +319,55 @@ impl Column {
         if all || old.layout != state.layout || old.layout_name != state.layout_name {
             t.set_text(n.layout, &state.layout);
             t.set_name(n.layout, &lang.keyboard_layout(&state.layout_name));
+        }
+        if all || old.notifications != state.notifications {
+            let rows = t.children(n.history);
+            for row in rows {
+                t.remove(row);
+            }
+            let theme = t.theme().clone();
+            if state.notifications.is_empty() {
+                let _ = t.add(
+                    n.history,
+                    Style::default(),
+                    Kind::text(lang.nothing_new(), theme.text.body.with_color(Paint::Muted)),
+                );
+            }
+            for (app, summary) in state.notifications.iter().take(3) {
+                let Some(row) = t.add(
+                    n.history,
+                    Style {
+                        direction: Direction::Row,
+                        gap: 10.0,
+                        align: Align::Center,
+                        ..Style::default()
+                    },
+                    Kind::Box(Look::default()),
+                ) else {
+                    continue;
+                };
+                let _ = t.add(
+                    row,
+                    Style {
+                        width: Length::Px(22.0),
+                        height: Length::Px(22.0),
+                        ..Style::default()
+                    },
+                    Kind::Box(Look {
+                        background: Some(Paint::Rgba(crate::toasts::app_color(app))),
+                        radius: 6.0,
+                        ..Look::default()
+                    }),
+                );
+                let _ = t.add(
+                    row,
+                    Style {
+                        width: Length::Fill,
+                        ..Style::default()
+                    },
+                    Kind::text_line(format!("{app} · {summary}"), theme.text.body),
+                );
+            }
         }
         if all || old.user != state.user {
             let initial: String = state
@@ -800,6 +852,32 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         },
     );
 
+    // The latest notifications.
+    let notes = add(
+        tree,
+        card,
+        Style {
+            gap: 8.0,
+            ..Style::default()
+        },
+        Kind::Box(Look::default()),
+    );
+    add(
+        tree,
+        notes,
+        Style::default(),
+        Kind::text(lang.notifications(), caption(theme)),
+    );
+    let history = add(
+        tree,
+        notes,
+        Style {
+            gap: 8.0,
+            ..Style::default()
+        },
+        Kind::Box(Look::default()),
+    );
+
     // What is left, then the account at the bottom.
     add(
         tree,
@@ -884,6 +962,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         desktops,
         desktops_text,
         dots,
+        history,
         account,
         initial,
         user,

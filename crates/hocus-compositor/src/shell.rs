@@ -73,6 +73,7 @@ impl Shell {
 pub fn start(
     handle: &smithay::reexports::calloop::LoopHandle<'static, crate::App>,
     state: &mut State,
+    session_bus: Option<&str>,
 ) {
     use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
     let (lang, wall) = match state.clock {
@@ -88,6 +89,7 @@ pub fn start(
     }
     let system = matches!(wall, WallClock::System(_));
     state.shell = Some(Shell::new(Theme::default(), lang, wall));
+    crate::notify::start(handle, state, session_bus, lang);
     if system {
         // Wakes the loop when the minute turns; the column reads the time
         // after each dispatch.
@@ -107,7 +109,7 @@ pub fn start(
 }
 
 /// Premultiplied RGBA is ABGR8888 in fourcc terms (little endian).
-fn buffer_for(view: &View<'_>) -> MemoryRenderBuffer {
+pub fn buffer_for(view: &View<'_>) -> MemoryRenderBuffer {
     MemoryRenderBuffer::from_slice(
         view.pixels,
         Fourcc::Abgr8888,
@@ -119,7 +121,7 @@ fn buffer_for(view: &View<'_>) -> MemoryRenderBuffer {
 }
 
 /// Copies the damaged rectangles of `view` into `buffer`.
-fn upload(buffer: &mut MemoryRenderBuffer, view: &View<'_>, damage: &[hocus_ui::PixelRect]) {
+pub fn upload(buffer: &mut MemoryRenderBuffer, view: &View<'_>, damage: &[hocus_ui::PixelRect]) {
     let stride = view.width as usize * 4;
     let mut ctx = buffer.render();
     let _ = ctx.draw(|mem| {
@@ -221,6 +223,7 @@ impl State {
             layout,
             layout_name,
             user: self.user.clone(),
+            notifications: self.notification_history(),
         }
     }
 
@@ -240,6 +243,7 @@ impl State {
     /// After each dispatch: follows the primary output, shows the current
     /// state and draws what changed. Nothing is drawn when nothing changed.
     pub fn refresh_shell(&mut self) {
+        self.refresh_toasts();
         if self.shell.is_none() {
             return;
         }
@@ -454,11 +458,12 @@ impl State {
         let origin = column_rect(*area).loc;
         let mut out = Vec::new();
         flatten(&shell.column.access(), origin, 0, &mut out);
+        self.toasts_ui(&mut out);
         out
     }
 }
 
-fn flatten(node: &AccessNode, origin: Point<i32, Logical>, depth: u32, out: &mut Vec<UiNode>) {
+pub fn flatten(node: &AccessNode, origin: Point<i32, Logical>, depth: u32, out: &mut Vec<UiNode>) {
     let r = node.rect;
     out.push(UiNode {
         role: node.role.name().into(),
