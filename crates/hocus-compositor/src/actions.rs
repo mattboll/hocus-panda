@@ -130,6 +130,7 @@ impl State {
                 }
             }
             Action::SwitchLayout => self.switch_layout(),
+            Action::Launcher => self.toggle_launcher(),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }
@@ -227,13 +228,26 @@ impl State {
     /// Starts a command through the shell; a thread waits for it, so the
     /// loop never does.
     fn spawn_command(&mut self, command: &str) {
-        let mut cmd = Command::new("/bin/sh");
-        cmd.arg("-c")
-            .arg(command)
-            .env("WAYLAND_DISPLAY", &self.socket_path)
+        self.launch("/bin/sh", &["-c".to_owned(), command.to_owned()]);
+    }
+
+    /// Starts a program for the user, in a clean environment: what the
+    /// session has (or a test gives), without what must not leak into
+    /// applications, with this compositor's sockets. A thread waits for it,
+    /// so the loop never does.
+    pub fn launch(&mut self, program: &str, args: &[String]) {
+        let mut cmd = Command::new(program);
+        cmd.args(args);
+        if let Some(env) = &self.child_env {
+            cmd.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
+        }
+        for leak in ["LD_PRELOAD", "LD_AUDIT", "WAYLAND_SOCKET", "DISPLAY"] {
+            cmd.env_remove(leak);
+        }
+        cmd.env("WAYLAND_DISPLAY", &self.socket_path)
             .env(hocus_api::SOCKET_ENV, self.api.path())
-            .env_remove("DISPLAY")
-            .env_remove("LD_PRELOAD");
+            .env("XDG_CURRENT_DESKTOP", hocus_platform::apps::DESKTOP)
+            .env("XDG_SESSION_TYPE", "wayland");
         if let Some(dir) = self.socket_path.parent() {
             cmd.env("XDG_RUNTIME_DIR", dir);
         }
@@ -248,10 +262,10 @@ impl State {
                         let _ = child.wait();
                     });
                 if let Err(err) = spawned {
-                    tracing::warn!(%err, "could not watch a started command");
+                    tracing::warn!(%err, "could not watch a started program");
                 }
             }
-            Err(err) => tracing::warn!(%err, command, "could not start"),
+            Err(err) => tracing::warn!(%err, program, "could not start"),
         }
     }
 

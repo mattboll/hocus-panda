@@ -33,6 +33,10 @@ pub struct HarnessOptions {
     pub shell: bool,
     /// Serves notifications on this (private, test) bus.
     pub session_bus: Option<String>,
+    /// Where the launcher reads desktop entries.
+    pub data_dirs: Option<Vec<std::path::PathBuf>>,
+    /// What started applications inherit.
+    pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
 }
 
 /// A headless compositor in a private runtime directory, on a virtual clock.
@@ -108,6 +112,8 @@ impl Headless {
             xwayland: false,
             shell: false,
             session_bus: None,
+            data_dirs: None,
+            child_env: None,
         })
     }
 
@@ -128,6 +134,8 @@ impl Headless {
             xwayland: harness.xwayland,
             shell: harness.shell,
             session_bus: harness.session_bus.clone(),
+            data_dirs: harness.data_dirs.clone(),
+            child_env: harness.child_env.clone(),
         };
         let Started {
             event_loop,

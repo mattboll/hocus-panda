@@ -20,6 +20,15 @@ use crate::{
     grabs::{BTN_LEFT, BTN_RIGHT, FrameHit},
 };
 
+/// What a key did, when the compositor kept it.
+enum Handled {
+    Shortcut(Action),
+    Launcher(
+        smithay::input::keyboard::Keysym,
+        smithay::input::keyboard::ModifiersState,
+    ),
+}
+
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
@@ -44,7 +53,7 @@ impl State {
         };
         let serial = SERIAL_COUNTER.next_serial();
         let pressed = state == KeyState::Pressed;
-        let action = keyboard.input::<Action, _>(
+        let handled = keyboard.input::<Handled, _>(
             self,
             code,
             state,
@@ -56,13 +65,28 @@ impl State {
                 if !pressed {
                     return FilterResult::Forward;
                 }
-                combo_of(modifiers, &keysym)
-                    .and_then(|combo| state.shortcuts.action(&combo).cloned())
-                    .map_or(FilterResult::Forward, FilterResult::Intercept)
+                let action = combo_of(modifiers, &keysym)
+                    .and_then(|combo| state.shortcuts.action(&combo).cloned());
+                match action {
+                    // The launcher's own shortcut closes it.
+                    Some(action) if !state.launcher_open() || action == Action::Launcher => {
+                        FilterResult::Intercept(Handled::Shortcut(action))
+                    }
+                    // While the launcher is open, keys are for it.
+                    _ if state.launcher_open() => FilterResult::Intercept(Handled::Launcher(
+                        keysym.modified_sym(),
+                        *modifiers,
+                    )),
+                    _ => FilterResult::Forward,
+                }
             },
         );
-        if let Some(action) = action {
-            self.run_action(&action, serial);
+        match handled {
+            Some(Handled::Shortcut(action)) => self.run_action(&action, serial),
+            Some(Handled::Launcher(sym, modifiers)) => {
+                self.launcher_key(sym, &modifiers);
+            }
+            None => {}
         }
     }
 
@@ -89,7 +113,9 @@ impl State {
         };
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.toasts_pointer_motion(location) || self.shell_pointer_motion(location));
+            && (self.launcher_pointer_motion(location)
+                || self.toasts_pointer_motion(location)
+                || self.shell_pointer_motion(location));
         let under = if over_shell {
             None
         } else {
@@ -123,7 +149,9 @@ impl State {
         let pressed = state == ButtonState::Pressed;
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && (self.toasts_pointer_button(at, pressed) || self.shell_pointer_button(at, pressed))
+            && (self.launcher_pointer_button(at, pressed)
+                || self.toasts_pointer_button(at, pressed)
+                || self.shell_pointer_button(at, pressed))
         {
             return;
         }

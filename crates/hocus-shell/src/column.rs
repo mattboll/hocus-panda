@@ -83,6 +83,8 @@ pub enum Action {
         desktop: usize,
     },
     LogOut,
+    /// The command field was clicked: the launcher opens.
+    OpenLauncher,
 }
 
 /// The ring of the meeting card: how close the next meeting is.
@@ -165,6 +167,7 @@ struct Nodes {
     desktops: NodeId,
     desktops_text: NodeId,
     dots: NodeId,
+    command: NodeId,
     history: NodeId,
     account: NodeId,
     initial: NodeId,
@@ -491,7 +494,10 @@ impl Column {
                 other => other,
             };
             if in_popover || matches!(forwarded, Input::PointerLeave) {
-                for Event::Activated(id) in p.tree.input(forwarded) {
+                for event in p.tree.input(forwarded) {
+                    let Event::Activated(id) = event else {
+                        continue;
+                    };
                     if let Some((_, action)) = p.targets.iter().find(|(t, _)| *t == id) {
                         actions.push(action.clone());
                     }
@@ -513,7 +519,10 @@ impl Column {
             other => other,
         };
         let n = self.nodes;
-        for Event::Activated(id) in self.tree.input(forwarded) {
+        for event in self.tree.input(forwarded) {
+            let Event::Activated(id) = event else {
+                continue;
+            };
             if id == n.minimize {
                 actions.push(Action::Minimize);
             } else if id == n.maximize {
@@ -522,6 +531,8 @@ impl Column {
                 actions.push(Action::Close);
             } else if id == n.layout {
                 actions.push(Action::SwitchLayout);
+            } else if id == n.command {
+                actions.push(Action::OpenLauncher);
             } else if id == n.desktops {
                 self.toggle(PopoverKind::Desktops);
             } else if id == n.account {
@@ -852,6 +863,46 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         },
     );
 
+    // The command field: it opens the launcher.
+    let command = add(
+        tree,
+        card,
+        Style {
+            height: Length::Px(52.0),
+            padding: Insets::symmetric(0.0, 14.0),
+            ..row(10.0)
+        },
+        Kind::Box(Look {
+            background: Some(Paint::SurfaceHover),
+            radius: 14.0,
+            border: Some(Paint::Border),
+            shadow: 0.0,
+        }),
+    );
+    tree.set_clickable(command, lang.command_field());
+    add(
+        tree,
+        command,
+        Style::default(),
+        Kind::Icon {
+            icon: stroked(icons::SEARCH, 18.0),
+            color: Paint::Muted,
+            label: None,
+        },
+    );
+    add(
+        tree,
+        command,
+        Style {
+            width: Length::Fill,
+            ..Style::default()
+        },
+        Kind::text_line(
+            lang.command_placeholder(),
+            theme.text.title.with_weight(500).with_color(Paint::Muted),
+        ),
+    );
+
     // The latest notifications.
     let notes = add(
         tree,
@@ -962,6 +1013,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         desktops,
         desktops_text,
         dots,
+        command,
         history,
         account,
         initial,

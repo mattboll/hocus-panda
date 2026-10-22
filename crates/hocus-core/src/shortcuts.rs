@@ -47,6 +47,8 @@ pub enum Action {
     Close,
     /// The next keyboard layout.
     SwitchLayout,
+    /// Opens the launcher, or closes it.
+    Launcher,
     /// Window switcher (#39): the windows of the output under the pointer,
     /// or of every output.
     SwitchWindows(Scope),
@@ -78,6 +80,7 @@ impl fmt::Display for Action {
             Self::Minimize => write!(f, "minimize"),
             Self::Close => write!(f, "close"),
             Self::SwitchLayout => write!(f, "switch-layout"),
+            Self::Launcher => write!(f, "launcher"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
             Self::Spawn(command) => write!(f, "spawn {command}"),
         }
@@ -135,6 +138,7 @@ impl FromStr for Action {
             "minimize" => bare(Self::Minimize),
             "close" => bare(Self::Close),
             "switch-layout" => bare(Self::SwitchLayout),
+            "launcher" => bare(Self::Launcher),
             "switch-windows" => scope().map(Self::SwitchWindows),
             "spawn" if !rest.is_empty() => Ok(Self::Spawn(rest.to_string())),
             "spawn" => Err("spawn: which command?".into()),
@@ -255,6 +259,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Shift+F", Action::ToggleFloating),
         ("Alt+F4", Action::Close),
         ("Super+Ctrl+Space", Action::SwitchLayout),
+        ("Super+Space", Action::Launcher),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),
         ("Super+Tab", Action::SwitchWindows(Scope::AllOutputs)),
     ]

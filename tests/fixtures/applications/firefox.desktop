@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Firefox
+GenericName=Web Browser
+Keywords=Internet;WWW;Browser;
+Exec=true %u

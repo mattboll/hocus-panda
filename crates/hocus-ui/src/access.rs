@@ -16,6 +16,8 @@ pub enum Role {
     Icon,
     /// A widget drawn by its own code, labelled by its author.
     Custom,
+    /// A text field.
+    Field,
 }
 
 impl Role {
@@ -27,6 +29,7 @@ impl Role {
             Self::Image => "image",
             Self::Icon => "icon",
             Self::Custom => "custom",
+            Self::Field => "field",
         }
     }
 }

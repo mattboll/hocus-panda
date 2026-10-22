@@ -95,8 +95,13 @@ impl State {
                 Kind::Unspecified,
             )));
         }
-        // Toasts, then the column, above windows; the column under a
-        // fullscreen one.
+        // The launcher over everything; toasts, then the column, above
+        // windows; the column under a fullscreen one.
+        elements.extend(
+            self.launcher_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         elements.extend(
             self.toast_elements(renderer, output)
                 .into_iter()

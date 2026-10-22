@@ -138,6 +138,8 @@ fn main() -> anyhow::Result<()> {
         xwayland: !args.no_xwayland,
         shell: !args.no_shell,
         session_bus: args.session_bus,
+        data_dirs: None,
+        child_env: None,
         backend: match args.backend {
             BackendArg::Winit => Backend::Winit,
             BackendArg::Headless => Backend::Headless(HeadlessConfig {

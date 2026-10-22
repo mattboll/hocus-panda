@@ -231,7 +231,9 @@ impl Gallery {
 
     fn input(&mut self, input: Input) {
         for event in self.tree.input(input) {
-            let Event::Activated(id) = event;
+            let Event::Activated(id) = event else {
+                continue;
+            };
             let target = if id == self.toggle {
                 self.right = !self.right;
                 if self.right { 264.0 } else { 0.0 }

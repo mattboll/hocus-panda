@@ -60,6 +60,12 @@ pub struct Scenario {
     /// Programs the scenario runs; it is skipped where one is missing.
     #[serde(default)]
     pub needs: Vec<String>,
+    /// Where the launcher reads desktop entries, relative to the scenario.
+    #[serde(default)]
+    pub data_dirs: Vec<PathBuf>,
+    /// What started applications inherit (`PATH` is added if missing),
+    /// instead of the test's own environment.
+    pub child_env: Option<std::collections::BTreeMap<String, String>>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
     /// The file's name without extension.
@@ -81,6 +87,11 @@ pub enum Step {
     Copy(Clipboard),
     /// The client of this app id reads this text from the clipboard.
     ExpectClipboard(Clipboard),
+    /// Types text, as on a US keyboard.
+    Type(String),
+    /// A file a started program wrote in the compositor's runtime
+    /// directory: `{ name, contains?, lacks? }`.
+    ExpectRuntimeFile(ExpectFile),
     /// Runs `notify-send` with these arguments on the private bus.
     NotifySend(Vec<String>),
     /// Sends a notification on the private bus.
@@ -178,6 +189,16 @@ pub struct OpenWindow {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ExpectFile {
+    pub name: String,
+    #[serde(default)]
+    pub contains: Vec<String>,
+    #[serde(default)]
+    pub lacks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NotifyStep {
     pub app: String,
     pub summary: String,
@@ -200,6 +221,8 @@ pub struct ExpectUi {
     pub disabled: Option<bool>,
     /// `[x, y, width, height]` the element lies within, global logical.
     pub inside: Option<[i32; 4]>,
+    /// The current choice in a list.
+    pub selected: Option<bool>,
     /// `false` checks that no element has this label.
     #[serde(default = "yes")]
     pub shown: bool,
@@ -315,6 +338,8 @@ impl fmt::Display for Step {
             Self::Open(open) => write!(f, "open {}", open.app_id),
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
+            Self::Type(text) => write!(f, "type {text:?}"),
+            Self::ExpectRuntimeFile(e) => write!(f, "expect_runtime_file {}", e.name),
             Self::NotifySend(args) => write!(f, "notify_send {args:?}"),
             Self::Notify(n) => write!(f, "notify {} {:?}", n.app, n.summary),
             Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
@@ -423,6 +448,14 @@ impl Scenario {
             xwayland: self.xwayland,
             shell: self.shell,
             session_bus: bus.as_ref().map(|b| b.address.clone()),
+            data_dirs: (!self.data_dirs.is_empty())
+                .then(|| self.data_dirs.iter().map(|d| self.dir.join(d)).collect()),
+            child_env: self.child_env.as_ref().map(|env| {
+                let mut env = env.clone();
+                env.entry("PATH".into())
+                    .or_insert_with(|| std::env::var("PATH").unwrap_or_default());
+                env.into_iter().map(|(k, v)| (k.into(), v.into())).collect()
+            }),
         })?;
         let mut run = Run {
             scenario: self,
@@ -461,6 +494,8 @@ impl Run<'_> {
             Step::Copy(copy) => self.copy(copy),
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
+            Step::Type(text) => self.type_text(text),
+            Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
             Step::NotifySend(args) => self.notify_send(args),
             Step::Notify(n) => self.notify(n),
             Step::ExpectUi(expected) => self.expect_ui(expected),
@@ -760,6 +795,65 @@ impl Run<'_> {
             .context("the X11 window did not appear")
     }
 
+    fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
+        const SHIFT: u32 = 42;
+        for c in text.chars() {
+            let (code, shift) = us_key(c).with_context(|| format!("no key types {c:?}"))?;
+            if shift {
+                self.request(Request::Key {
+                    code: SHIFT,
+                    pressed: true,
+                })?;
+            }
+            for pressed in [true, false] {
+                self.request(Request::Key { code, pressed })?;
+            }
+            if shift {
+                self.request(Request::Key {
+                    code: SHIFT,
+                    pressed: false,
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Started programs run in their own time: the file gets a moment.
+    fn expect_runtime_file(&mut self, expected: &ExpectFile) -> anyhow::Result<()> {
+        let dir = self
+            .compositor
+            .api_socket()
+            .parent()
+            .context("no runtime directory")?
+            .to_path_buf();
+        let path = dir.join(&expected.name);
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        let text = loop {
+            match std::fs::read_to_string(&path) {
+                Ok(text) if !text.is_empty() => break text,
+                _ if Instant::now() > deadline => {
+                    anyhow::bail!("no {} in the runtime directory", expected.name)
+                }
+                _ => self.compositor.dispatch(Duration::from_millis(10))?,
+            }
+        };
+        for wanted in &expected.contains {
+            anyhow::ensure!(
+                text.contains(wanted.as_str()),
+                "{} lacks {wanted:?}:\n{text}",
+                expected.name
+            );
+        }
+        for unwanted in &expected.lacks {
+            anyhow::ensure!(
+                !text.contains(unwanted.as_str()),
+                "{} has {unwanted:?}:\n{text}",
+                expected.name
+            );
+        }
+        Ok(())
+    }
+
     fn bus(&self) -> anyhow::Result<&str> {
         self.bus
             .as_ref()
@@ -867,7 +961,9 @@ impl Run<'_> {
             };
             let ok = match (found, expected.shown) {
                 (Some(n), true) => {
-                    expected.disabled.is_none_or(|d| d == n.disabled) && within(&n.rect)
+                    expected.disabled.is_none_or(|d| d == n.disabled)
+                        && expected.selected.is_none_or(|s| s == n.selected)
+                        && within(&n.rect)
                 }
                 (None, false) => true,
                 _ => false,
@@ -881,9 +977,10 @@ impl Run<'_> {
                     "{:?} {}; the interface shows {labels:?}",
                     expected.label,
                     match (found, expected.shown) {
-                        (Some(n), true) => {
-                            format!("has disabled = {} and is at {:?}", n.disabled, n.rect)
-                        }
+                        (Some(n), true) => format!(
+                            "has disabled = {}, selected = {} and is at {:?}",
+                            n.disabled, n.selected, n.rect
+                        ),
                         (Some(_), false) => "is shown".into(),
                         _ => "is not shown".into(),
                     }
@@ -1211,6 +1308,54 @@ fn parse_color(color: &str) -> anyhow::Result<u32> {
         .with_context(|| format!("colour {color}: expected #rrggbb"))?;
     let rgb = u32::from_str_radix(hex, 16).with_context(|| format!("colour {color}"))?;
     Ok(0xff00_0000 | rgb)
+}
+
+/// The evdev code typing `c` on a US keyboard, and whether with Shift.
+fn us_key(c: char) -> Option<(u32, bool)> {
+    const LETTERS: &str = "qwertyuiopasdfghjklzxcvbnm";
+    const LETTER_CODES: [u32; 26] = [
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 30, 31, 32, 33, 34, 35, 36, 37, 38, 44, 45, 46, 47,
+        48, 49, 50,
+    ];
+    if let Some(i) = LETTERS.find(c.to_ascii_lowercase()) {
+        return Some((LETTER_CODES[i], c.is_ascii_uppercase()));
+    }
+    let plain = |code| Some((code, false));
+    let shifted = |code| Some((code, true));
+    match c {
+        '1'..='9' => plain(2 + c as u32 - '1' as u32),
+        '0' => plain(11),
+        ' ' => plain(57),
+        '-' => plain(12),
+        '=' => plain(13),
+        '[' => plain(26),
+        ']' => plain(27),
+        ';' => plain(39),
+        '\'' => plain(40),
+        '`' => plain(41),
+        '\\' => plain(43),
+        ',' => plain(51),
+        '.' => plain(52),
+        '/' => plain(53),
+        '!' => shifted(2),
+        '@' => shifted(3),
+        '#' => shifted(4),
+        '$' => shifted(5),
+        '%' => shifted(6),
+        '^' => shifted(7),
+        '&' => shifted(8),
+        '*' => shifted(9),
+        '(' => shifted(10),
+        ')' => shifted(11),
+        '_' => shifted(12),
+        '+' => shifted(13),
+        ':' => shifted(39),
+        '"' => shifted(40),
+        '<' => shifted(51),
+        '>' => shifted(52),
+        '?' => shifted(53),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

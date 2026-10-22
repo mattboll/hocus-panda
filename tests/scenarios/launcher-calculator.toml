@@ -1,0 +1,25 @@
+description = "Arithmetic in the launcher shows its value first; Enter copies it"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "2*21"
+
+[[step]]
+expect_ui = { label = "= 42", selected = true }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "= 42", shown = false }
+
+# The keyboard is back with the window, which is offered the result.
+[[step]]
+expect_clipboard = { app_id = "editor", text = "42" }

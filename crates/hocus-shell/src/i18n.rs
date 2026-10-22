@@ -192,6 +192,30 @@ impl Lang {
         self.pick("Nothing new", "Rien de nouveau")
     }
 
+    pub fn command_field(self) -> &'static str {
+        self.pick("Command field", "Champ de commande")
+    }
+
+    pub fn command_placeholder(self) -> &'static str {
+        self.pick("Search, act, ask…", "Chercher, agir, demander…")
+    }
+
+    pub fn launcher_shortcut(self) -> &'static str {
+        self.pick("Super+Space", "Super+Espace")
+    }
+
+    pub fn nothing_found(self) -> &'static str {
+        self.pick("Nothing found", "Rien trouvé")
+    }
+
+    pub fn calculator(self) -> &'static str {
+        self.pick("Calculator", "Calculatrice")
+    }
+
+    pub fn application(self) -> &'static str {
+        self.pick("Application", "Application")
+    }
+
     pub fn lock(self) -> &'static str {
         self.pick("Lock", "Verrouiller")
     }

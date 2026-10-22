@@ -18,6 +18,11 @@ shell = false
 dbus = false
 # Programs the steps run: the scenario is skipped where one is missing
 needs = ["notify-send"]
+# Where the launcher reads desktop entries, relative to the scenario
+data_dirs = ["../fixtures"]
+# What started applications inherit instead of the test's environment
+# (PATH is added when missing)
+child_env = { LD_PRELOAD = "/tmp/not-a-library.so" }
 
 [[step]]
 open = { app_id = "back", size = [400, 300], color = "#3399ff" }
@@ -37,10 +42,12 @@ Steps, one per `[[step]]` table:
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
+| `type = "fir"` | types text as on a US keyboard |
+| `expect_runtime_file = { name, contains?, lacks? }` | a file a started program wrote in the compositor's runtime directory, with or without these strings |
 | `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
 | `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces? }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires) |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
-| `expect_ui = { label, disabled?, shown?, inside? }` | the shell shows an element with this label (disabled or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
+| `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
 | `click = "left"` | presses and releases a button (`left`, `right`, `middle`) |

@@ -235,6 +235,19 @@ impl XwmHandler for State {
         if selection != SelectionTarget::Clipboard {
             return;
         }
+        // Text the shell copied is written here; a client's goes through
+        // its own source.
+        let own = smithay::wayland::selection::data_device::current_data_device_selection_userdata(
+            &self.seat,
+        )
+        .and_then(|offer| match &*offer {
+            crate::launcher::Offer::Text(text) => Some(text.clone()),
+            crate::launcher::Offer::X11 => None,
+        });
+        if let Some(text) = own {
+            crate::launcher::send_text(text, fd);
+            return;
+        }
         if let Err(err) = request_data_device_client_selection(&self.seat, mime_type, fd) {
             tracing::debug!(?err, "no Wayland clipboard to give X11");
         }
@@ -243,7 +256,12 @@ impl XwmHandler for State {
     /// An X11 client took the selection: Wayland clients see it offered.
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         if selection == SelectionTarget::Clipboard {
-            set_data_device_selection(&self.display_handle, &self.seat, mime_types, ());
+            set_data_device_selection(
+                &self.display_handle,
+                &self.seat,
+                mime_types,
+                crate::launcher::Offer::X11,
+            );
         }
     }
 

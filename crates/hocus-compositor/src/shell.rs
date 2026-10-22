@@ -74,6 +74,7 @@ pub fn start(
     handle: &smithay::reexports::calloop::LoopHandle<'static, crate::App>,
     state: &mut State,
     session_bus: Option<&str>,
+    data_dirs: Option<Vec<std::path::PathBuf>>,
 ) {
     use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
     let (lang, wall) = match state.clock {
@@ -90,6 +91,7 @@ pub fn start(
     let system = matches!(wall, WallClock::System(_));
     state.shell = Some(Shell::new(Theme::default(), lang, wall));
     crate::notify::start(handle, state, session_bus, lang);
+    crate::launcher::start(handle, state, lang, data_dirs);
     if system {
         // Wakes the loop when the minute turns; the column reads the time
         // after each dispatch.
@@ -244,6 +246,7 @@ impl State {
     /// state and draws what changed. Nothing is drawn when nothing changed.
     pub fn refresh_shell(&mut self) {
         self.refresh_toasts();
+        self.refresh_launcher();
         if self.shell.is_none() {
             return;
         }
@@ -364,6 +367,7 @@ impl State {
             ShellAction::Close => self.run_action(&A::Close, serial),
             ShellAction::SwitchLayout => self.run_action(&A::SwitchLayout, serial),
             ShellAction::LogOut => self.run_action(&A::Quit, serial),
+            ShellAction::OpenLauncher => self.open_launcher(),
             ShellAction::ShowDesktop { output, desktop } => {
                 if let Some(output) = self.find_output(&output)
                     && let Err(err) = self.show_desktop(&output, desktop.saturating_sub(1), serial)
@@ -459,6 +463,7 @@ impl State {
         let mut out = Vec::new();
         flatten(&shell.column.access(), origin, 0, &mut out);
         self.toasts_ui(&mut out);
+        self.launcher_ui(&mut out);
         out
     }
 }

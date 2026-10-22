@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Environment Probe
+Comment=Writes the environment it was started with, for tests
+Exec=sh -c "env > \\$XDG_RUNTIME_DIR/launched-env"
