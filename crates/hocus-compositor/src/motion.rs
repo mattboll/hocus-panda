@@ -137,7 +137,9 @@ impl WindowMotion {
 impl crate::State {
     /// Whether any window is moving at `now`.
     pub fn animating(&self, now: Duration) -> bool {
-        self.windows.values().any(|m| m.motion.is_running(now)) || self.snapshots_moving(now)
+        self.windows.values().any(|m| m.motion.is_running(now))
+            || self.snapshots_moving(now)
+            || self.wobbles_moving()
     }
 
     /// How windows come and go in the theme configured.

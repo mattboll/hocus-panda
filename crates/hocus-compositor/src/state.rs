@@ -153,6 +153,8 @@ pub struct State {
     pub triggers: crate::corners::Triggers,
     /// Drawing on the screen (#86).
     pub ink: crate::ink::Inking,
+    /// Wobbly windows and flicks (#35).
+    pub wobbles: crate::wobble::Wobbles,
     pub pandas: crate::pandas::Pandas,
     /// Coding agents (#41).
     pub agents: crate::agents::Agents,
@@ -282,6 +284,7 @@ impl State {
             snapshots: Default::default(),
             triggers: Default::default(),
             ink: Default::default(),
+            wobbles: Default::default(),
             pandas: Default::default(),
             agents: Default::default(),
             first_run: Default::default(),

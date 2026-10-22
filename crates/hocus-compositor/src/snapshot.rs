@@ -390,49 +390,75 @@ impl Genie {
         R: Renderer,
         R::TextureId: Clone + Texture + 'static,
     {
-        let (picture, window, target) = (&self.picture, self.window, self.target);
-        let h = picture.size.h.max(1.0);
-        let strips = ((h / 3.0) as usize).clamp(16, 160);
-        let step = h / strips as f64;
-        let mut out = Vec::new();
-        for piece in picture.pieces.iter().rev() {
-            let (top, bottom) = (piece.at.y, piece.at.y + f64::from(piece.size.h));
-            let (u0, u1) = (
-                piece.at.x / picture.size.w.max(1.0),
-                (piece.at.x + f64::from(piece.size.w)) / picture.size.w.max(1.0),
-            );
-            // The rows the window's strips cut it at, its own ends too.
-            let mut cuts = vec![top];
-            let mut y = (top / step).floor() * step + step;
-            while y < bottom {
-                cuts.push(y);
-                y += step;
-            }
-            cuts.push(bottom);
-            for pair in cuts.windows(2) {
-                let (y0, y1) = (pair[0], pair[1]);
-                let (a, l0, r0) = genie_row(window, target, y0 / h, p);
-                let (b, l1, r1) = genie_row(window, target, y1 / h, p);
-                // A trapezoid, drawn as the rectangle at its middle.
-                let (l, r) = ((l0 + l1) / 2.0, (r0 + r1) / 2.0);
-                let dst = snap(
-                    l + u0 * (r - l) - origin.x,
-                    a - origin.y,
-                    l + u1 * (r - l) - origin.x,
-                    b - origin.y,
-                );
-                out.extend(piece_element(
-                    renderer,
-                    piece,
-                    Some((y0, y1)),
-                    dst,
-                    scale,
-                    alpha,
-                ));
-            }
-        }
-        out
+        let (window, target) = (self.window, self.target);
+        bent(
+            renderer,
+            &self.picture,
+            |v| genie_row(window, target, v, p),
+            origin,
+            scale,
+            alpha,
+        )
     }
+}
+
+/// `picture` bent row by row: `row(v)` says where the row at `v` of its
+/// height (0 its top, 1 its bottom) goes, as its top, left and right,
+/// global; drawn in strips, each the rectangle at its middle. `origin` is
+/// the output's corner, global.
+pub(crate) fn bent<R>(
+    renderer: &R,
+    picture: &Snapshot,
+    row: impl Fn(f64) -> (f64, f64, f64),
+    origin: Point<f64, Logical>,
+    scale: f64,
+    alpha: f32,
+) -> Vec<TextureRenderElement<R::TextureId>>
+where
+    R: Renderer,
+    R::TextureId: Clone + Texture + 'static,
+{
+    let h = picture.size.h.max(1.0);
+    let strips = ((h / 3.0) as usize).clamp(16, 160);
+    let step = h / strips as f64;
+    let mut out = Vec::new();
+    for piece in picture.pieces.iter().rev() {
+        let (top, bottom) = (piece.at.y, piece.at.y + f64::from(piece.size.h));
+        let (u0, u1) = (
+            piece.at.x / picture.size.w.max(1.0),
+            (piece.at.x + f64::from(piece.size.w)) / picture.size.w.max(1.0),
+        );
+        // The rows the window's strips cut it at, its own ends too.
+        let mut cuts = vec![top];
+        let mut y = (top / step).floor() * step + step;
+        while y < bottom {
+            cuts.push(y);
+            y += step;
+        }
+        cuts.push(bottom);
+        for pair in cuts.windows(2) {
+            let (y0, y1) = (pair[0], pair[1]);
+            let (a, l0, r0) = row(y0 / h);
+            let (b, l1, r1) = row(y1 / h);
+            // A trapezoid, drawn as the rectangle at its middle.
+            let (l, r) = ((l0 + l1) / 2.0, (r0 + r1) / 2.0);
+            let dst = snap(
+                l + u0 * (r - l) - origin.x,
+                a - origin.y,
+                l + u1 * (r - l) - origin.x,
+                b - origin.y,
+            );
+            out.extend(piece_element(
+                renderer,
+                piece,
+                Some((y0, y1)),
+                dst,
+                scale,
+                alpha,
+            ));
+        }
+    }
+    out
 }
 
 impl State {
@@ -446,7 +472,7 @@ impl State {
     }
 
     /// The window's surfaces as drawn last, if it was drawn.
-    fn picture_of(&self, window: &Window) -> Option<Snapshot> {
+    pub(crate) fn picture_of(&self, window: &Window) -> Option<Snapshot> {
         let grab = self.snapshots.grab.get()?;
         let surface = window.wl_surface()?;
         let geometry = window.geometry();
@@ -880,7 +906,7 @@ impl State {
 }
 
 /// No clip: the picture as it is.
-fn unclipped() -> Rectangle<i32, smithay::utils::Physical> {
+pub(crate) fn unclipped() -> Rectangle<i32, smithay::utils::Physical> {
     Rectangle::new(
         (i32::MIN / 4, i32::MIN / 4).into(),
         (i32::MAX / 2, i32::MAX / 2).into(),

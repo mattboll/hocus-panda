@@ -28,8 +28,8 @@ Motion is a first-class part of Hocuspanda, not decoration added at the end.
 |---|---|
 | Open | Fade + scale from 96 %, out-cubic 250 ms; themed variants (Matrix rain) |
 | Close | Dissolve; themed variants (Matrix glitch and rain collapse) |
-| Move | **Wobbly windows**: the window bends like jelly, lagging behind the pointer the farther from where it is held, settles with a small bounce; drawn on a spring mesh |
-| Flick | A thrown window keeps its momentum, glides and snaps (on the other screen if aimed there) |
+| Move | **Wobbly windows**: the window bends like jelly, lagging behind the pointer the farther from where it is held, settles with a small bounce (within 600 ms); a 4×4 grid of springs, drawn in strips of its picture as the genie is (its shadow and ring wait until it is still) |
+| Flick | Let go faster than 1100 px/s, a window keeps its momentum, glides (it travels its speed × 0.22 s, over 0.6 s) and lands inside the work area of the screen its middle is aimed at, on the desktop that screen shows |
 | Minimize | **Magic lamp** (genie) towards its dock icon, or the panel when the dock is hidden |
 | Restore | Reverse genie from where it went |
 | Maximize, fullscreen | Snapshot morph from the old to the new geometry, content crossfades |

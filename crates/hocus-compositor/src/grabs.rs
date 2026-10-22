@@ -182,6 +182,8 @@ pub struct MoveGrab {
     window: Window,
     initial_location: Point<i32, Logical>,
     hold: Hold,
+    /// The pointer's last places and when, for the speed it is let go at.
+    trail: Vec<(std::time::Duration, Point<f64, Logical>)>,
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -194,6 +196,10 @@ impl PointerGrab<State> for MoveGrab {
     ) {
         // No client has pointer focus while a window moves.
         handle.motion(state, None, event);
+        let now = state.clock.now();
+        self.trail
+            .retain(|(t, _)| now.saturating_sub(*t) <= std::time::Duration::from_millis(200));
+        self.trail.push((now, event.location));
         let delta = event.location - self.start_data.location;
         if self.hold == Hold::Maximized {
             if delta.x.hypot(delta.y) < TEAR_OFF {
@@ -233,7 +239,12 @@ impl PointerGrab<State> for MoveGrab {
             let (x, y) = magnet(me, area, &others, state.config.windows.gaps, MAGNET);
             location = (x, y).into();
         }
+        let before = state.space.element_location(&self.window);
         state.space.map_element(self.window.clone(), location, true);
+        // The jelly lags behind the move (#35).
+        if let (Some(id), Some(before)) = (model_id(&self.window), before) {
+            state.wobble_moved(id, location - before);
+        }
         state.needs_redraw = true;
     }
 
@@ -258,7 +269,16 @@ impl PointerGrab<State> for MoveGrab {
     fn unset(&mut self, state: &mut State) {
         if let (Some((_, zone)), Some(id)) = (state.snap_preview.take(), model_id(&self.window)) {
             state.needs_redraw = true;
+            if let Some(id) = model_id(&self.window) {
+                state.wobble_let_go(id, &self.window, None);
+            }
             state.snap(id, zone, SERIAL_COUNTER.next_serial());
+            return;
+        }
+        // Let go with speed, it is thrown: it lands where aimed.
+        if let Some(id) = model_id(&self.window)
+            && state.wobble_let_go(id, &self.window, crate::wobble::speed(&self.trail))
+        {
             return;
         }
         state.sync_desktops();
@@ -395,11 +415,15 @@ impl State {
             button,
             location: pointer.current_location(),
         });
+        if let Some(id) = model_id(window) {
+            self.wobble_held(id, window, start_data.location);
+        }
         let grab = MoveGrab {
             start_data,
             window: window.clone(),
             initial_location,
             hold,
+            trail: Vec::new(),
         };
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
