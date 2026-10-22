@@ -306,7 +306,8 @@ delegate_presentation!(State);
 impl State {
     /// Tells the windows on `output` that the frame drawn at `now` is on
     /// screen (presentation-time).
-    pub fn presented(&self, output: &smithay::output::Output, now: Duration, seq: u64) {
+    pub fn presented(&mut self, output: &smithay::output::Output, now: Duration, seq: u64) {
+        self.capture_frame_drawn(output);
         use smithay::{
             desktop::utils::OutputPresentationFeedback,
             reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind,

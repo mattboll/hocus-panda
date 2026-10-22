@@ -105,8 +105,18 @@ overlay above everything but the cursor; exclusive zones come off the work
 area, and a surface may take the keyboard always or when clicked. Clients
 started through a security context (Flatpak and other sandboxes) do not see
 layer-shell, the virtual keyboard, data control, the window list nor
-security contexts. Screen capture (#114), idle notification (#29) and
-drm-lease (#27) come with their issues.
+security contexts.
+
+Screenshot tools and screen sharing read the screen through
+ext-image-copy-capture (output and window sources) and wlr-screencopy
+(whole outputs and regions): requests are kept on the loop and served
+after each dispatch, where the renderer is, by drawing the output or
+window again offscreen into the client's shared-memory buffer; a copy
+that waits for damage is served once the output drew a new frame.
+xdg-desktop-portal-wlr works on them; the shell's own portal backend and
+picker come with #116. While the screen is shared, toasts are held and
+one summarises them afterwards. Idle notification (#29) and drm-lease
+(#27) come with their issues.
 
 ## Control API
 

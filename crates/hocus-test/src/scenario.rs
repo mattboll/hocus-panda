@@ -103,6 +103,11 @@ pub enum Step {
     ClickUi(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
+    /// A screen sharing tool starts copying the first output again and
+    /// again (wlr-screencopy with damage).
+    Share(bool),
+    /// It stops.
+    StopSharing(bool),
     /// Starts a layer-shell client: `{ namespace, layer, anchor?, size,
     /// exclusive_zone?, keyboard?, color }`; waits until it is shown.
     OpenLayer(crate::layer::LayerSpec),
@@ -400,6 +405,8 @@ impl fmt::Display for Step {
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
+            Self::Share(_) => write!(f, "share"),
+            Self::StopSharing(_) => write!(f, "stop_sharing"),
             Self::OpenLayer(spec) => write!(f, "open_layer {}", spec.namespace),
             Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
@@ -535,6 +542,7 @@ impl Scenario {
             x11_clients: Vec::new(),
             settings: None,
             layers: Vec::new(),
+            sharing: None,
             bus,
             events: Vec::new(),
         };
@@ -555,6 +563,10 @@ struct Run<'a> {
     x11_clients: Vec<X11Client>,
     settings: Option<hocus_settings::client::Running>,
     layers: Vec<crate::layer::LayerClient>,
+    sharing: Option<(
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::thread::JoinHandle<anyhow::Result<()>>,
+    )>,
     bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
@@ -569,6 +581,34 @@ impl Run<'_> {
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
             Step::OpenSettings(open) => self.open_settings(open),
+            Step::Share(_) => {
+                let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let socket = self.compositor.socket_path().to_path_buf();
+                let thread = std::thread::spawn({
+                    let stop = stop.clone();
+                    move || crate::screencopy::share(&socket, stop)
+                });
+                self.sharing = Some((stop, thread));
+                // Its first copy is asked for.
+                let until = Instant::now() + Duration::from_millis(100);
+                while Instant::now() < until {
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                Ok(())
+            }
+            Step::StopSharing(_) => {
+                let (stop, thread) = self.sharing.take().context("not sharing")?;
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !thread.is_finished() {
+                    anyhow::ensure!(Instant::now() < deadline, "the sharing tool never stopped");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                thread
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("the sharing tool panicked"))??;
+                Ok(())
+            }
             Step::OpenLayer(spec) => {
                 let argb = parse_color(&spec.color)?;
                 let client = spec.clone().spawn(self.compositor.socket_path(), argb)?;

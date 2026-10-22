@@ -5,4 +5,5 @@ pub mod client;
 pub mod image;
 pub mod layer;
 pub mod scenario;
+pub mod screencopy;
 pub mod x11;

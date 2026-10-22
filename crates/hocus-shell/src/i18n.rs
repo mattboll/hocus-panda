@@ -295,6 +295,23 @@ impl Lang {
         format!("Notifications · {n}")
     }
 
+    /// The toast after sharing the screen.
+    pub fn held_while_sharing(self, n: usize) -> String {
+        match (self, n) {
+            (Self::En, 1) => "1 notification while you were sharing".into(),
+            (Self::En, n) => format!("{n} notifications while you were sharing"),
+            (Self::Fr, 1) => "1 notification pendant le partage".into(),
+            (Self::Fr, n) => format!("{n} notifications pendant le partage"),
+        }
+    }
+
+    pub fn in_the_column(self) -> &'static str {
+        self.pick(
+            "They wait in the column.",
+            "Elles attendent dans la colonne.",
+        )
+    }
+
     pub fn clear_all(self) -> &'static str {
         self.pick("Clear all", "Tout effacer")
     }
