@@ -125,6 +125,7 @@ impl State {
         style.radius = d.radius;
         style.ring_width = d.ring_width;
         style.shadow_alpha = if d.shadow { 0.5 } else { 0.0 };
+        // A ring that follows the theme takes its accent with the theme.
         if let Some(accent) = config.accent() {
             style.accent = accent;
         }

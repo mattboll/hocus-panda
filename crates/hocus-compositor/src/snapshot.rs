@@ -6,7 +6,7 @@
 //! taken as the toplevel goes, before.
 //!
 //! - Close: the picture dissolves from where the window was, its opening
-//!   motion included.
+//!   motion included; in the Matrix theme it decomposes into glyphs.
 //! - Minimize: a magic lamp (genie) into its dock icon, or the column when
 //!   the dock is hidden; restoring plays it back from there.
 //! - Maximize and fullscreen: the picture morphs from the old place to the
@@ -35,7 +35,8 @@ use smithay::{
 use crate::{
     State,
     decoration::{Rounded, shadow_elements},
-    motion::WindowMotion,
+    matrix,
+    motion::{Look, WindowMotion},
     scene::SceneElement,
 };
 
@@ -70,7 +71,24 @@ struct Closing {
     frame: Rectangle<f64, Logical>,
     decorated: bool,
     opacity: f32,
-    motion: WindowMotion,
+    fade: Fade,
+}
+
+/// How a closing window goes.
+enum Fade {
+    /// It dissolves, shrinking back.
+    Plain(WindowMotion),
+    /// It decomposes into the Matrix theme's glyphs.
+    Matrix(Box<matrix::Close>),
+}
+
+impl Closing {
+    fn is_running(&self, now: std::time::Duration) -> bool {
+        match &self.fade {
+            Fade::Plain(motion) => motion.is_running(now),
+            Fade::Matrix(close) => close.is_running(now),
+        }
+    }
 }
 
 /// A window going into, or coming out of, its dock icon.
@@ -313,6 +331,48 @@ impl Snapshot {
             })
             .collect()
     }
+
+    /// The band of its pieces between `v0` and `v1` of its height (0 its
+    /// top, 1 its bottom), stretched into `into` as [`Self::stretched`]
+    /// does, and moved `dx` sideways.
+    fn band<R>(
+        &self,
+        renderer: &R,
+        into: Rectangle<f64, Logical>,
+        (v0, v1): (f64, f64),
+        dx: f64,
+        scale: f64,
+        alpha: f32,
+    ) -> Vec<TextureRenderElement<R::TextureId>>
+    where
+        R: Renderer,
+        R::TextureId: Clone + Texture + 'static,
+    {
+        let (kx, ky) = (
+            into.size.w / self.size.w.max(1.0),
+            into.size.h / self.size.h.max(1.0),
+        );
+        let (b0, b1) = (v0 * self.size.h, v1 * self.size.h);
+        self.pieces
+            .iter()
+            .rev()
+            .filter_map(|p| {
+                let top = p.at.y.max(b0);
+                let bottom = (p.at.y + f64::from(p.size.h)).min(b1);
+                if bottom <= top {
+                    return None;
+                }
+                let x0 = into.loc.x + p.at.x * kx + dx;
+                let dst = snap(
+                    x0,
+                    into.loc.y + top * ky,
+                    x0 + f64::from(p.size.w) * kx,
+                    into.loc.y + bottom * ky,
+                );
+                piece_element(renderer, p, Some((top, bottom)), dst, scale, alpha)
+            })
+            .collect()
+    }
 }
 
 impl Genie {
@@ -450,15 +510,23 @@ impl State {
             return;
         };
         let mut motion = managed.motion;
-        let opacity = managed.opacity;
-        motion.closing(self.clock.now(), self.reduced());
+        let mut opacity = managed.opacity;
+        let now = self.clock.now();
+        let fade = if self.look() == Look::Matrix && !self.reduced() {
+            // From what of it shows, were it still materializing.
+            opacity *= motion.at(now).0;
+            Fade::Matrix(Box::new(matrix::Close::new(now, frame.size)))
+        } else {
+            motion.closing(now, self.reduced());
+            Fade::Plain(motion)
+        };
         let decorated = self.decorated(&window);
         self.snapshots.closing.push(Closing {
             picture,
             frame,
             decorated,
             opacity,
-            motion,
+            fade,
         });
         self.needs_redraw = true;
     }
@@ -668,7 +736,7 @@ impl State {
     /// Whether a picture still moves at `now`.
     pub fn snapshots_moving(&self, now: std::time::Duration) -> bool {
         let s = &self.snapshots;
-        s.closing.iter().any(|c| c.motion.is_running(now))
+        s.closing.iter().any(|c| c.is_running(now))
             || s.genies.iter().any(|g| g.progress.is_running(now))
             || s.morphs.iter().any(|m| m.progress.is_running(now))
     }
@@ -677,7 +745,7 @@ impl State {
     pub fn settle_snapshots(&mut self) {
         let now = self.clock.now();
         let s = &mut self.snapshots;
-        s.closing.retain(|c| c.motion.is_running(now));
+        s.closing.retain(|c| c.is_running(now));
         s.genies.retain(|g| g.progress.is_running(now));
         s.morphs.retain(|m| m.progress.is_running(now));
         let windows = &self.windows;
@@ -717,7 +785,14 @@ impl State {
             if !closing.frame.overlaps(area.to_f64()) {
                 continue;
             }
-            let (alpha, grow) = closing.motion.at(now);
+            let motion = match &closing.fade {
+                Fade::Plain(motion) => motion,
+                Fade::Matrix(close) => {
+                    out.extend(self.matrix_closing(renderer, closing, close, origin, scale));
+                    continue;
+                }
+            };
+            let (alpha, grow) = motion.at(now);
             let grow = f64::from(grow);
             let middle = closing.frame.loc + closing.frame.size.to_point().downscale(2.0);
             let local = Rectangle::new(
@@ -744,6 +819,61 @@ impl State {
                         .map(SceneElement::Frame),
                 );
             }
+        }
+        out
+    }
+}
+
+impl State {
+    /// A closing window in the Matrix theme: its picture, glitching, under
+    /// the glyphs that take it, then the rain it drains off as.
+    fn matrix_closing<R>(
+        &self,
+        renderer: &mut R,
+        closing: &Closing,
+        close: &matrix::Close,
+        origin: Point<f64, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let now = self.clock.now();
+        let local = Rectangle::new(closing.frame.loc - origin, closing.frame.size);
+        let mut out = self.matrix_close_elements(renderer, close, local, scale);
+        let alpha = close.picture_alpha(now) * closing.opacity;
+        if alpha > 0.0 {
+            let radius = if closing.decorated {
+                (self.style.radius * scale).round() as i32
+            } else {
+                0
+            };
+            let clip = local.to_physical_precise_round(scale);
+            let picture = match close.bands(now) {
+                Some(bands) => bands
+                    .into_iter()
+                    .flat_map(|(v0, v1, dx)| {
+                        closing
+                            .picture
+                            .band(renderer, local, (v0, v1), dx, scale, alpha)
+                    })
+                    .collect(),
+                None => closing.picture.stretched(renderer, local, scale, alpha),
+            };
+            out.extend(
+                picture
+                    .into_iter()
+                    .map(|e| SceneElement::Snapshot(Rounded::new(e, clip, radius))),
+            );
+        }
+        if closing.decorated {
+            let alpha = close.shadow_alpha(now) * closing.opacity;
+            out.extend(
+                shadow_elements(renderer, &self.textures, &self.style, local, scale, alpha)
+                    .into_iter()
+                    .map(SceneElement::Frame),
+            );
         }
         out
     }

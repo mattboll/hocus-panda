@@ -33,6 +33,7 @@ mod input;
 mod launcher;
 mod leave;
 mod lock;
+mod matrix;
 mod media;
 mod mirror;
 mod motion;

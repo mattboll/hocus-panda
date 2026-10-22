@@ -25,7 +25,7 @@ numlock = true           # Num Lock on at start
 radius = 12        # window corners (0 to 32)
 shadow = true
 ring_width = 2     # focus ring
-accent = "#7bc47f"
+accent = "theme"   # the focus ring: theme (the accent in effect) or "#rrggbb"
 title_bars = false # a bar with the title and buttons above each window (decision 0006)
 buttons = "right"  # which side of the bar has minimize, maximize and close: right, left
 

@@ -1,0 +1,43 @@
+description = "In the Matrix theme a window materializes: a column of glyphs falls at its middle, rows of glyphs rush out to its edges, then the window shows under their fading green; sampled at each phase; at rest, nothing is drawn"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+advance_ms = 50
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-open-column.png" }
+
+[[step]]
+advance_ms = 90
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-open-rows.png" }
+
+[[step]]
+advance_ms = 180
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-open-shows.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [172, 200, 600, 400] }
+
+[[step]]
+expect_idle = { for_ms = 10000 }

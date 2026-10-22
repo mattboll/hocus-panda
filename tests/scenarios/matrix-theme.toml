@@ -1,0 +1,24 @@
+description = "In the Matrix theme the desktop is green rain on black and night blue: the wallpaper's still rain, the column in green monospace, and the focused window's ring in the theme's green"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "terminal", size = [600, 400], color = "#01040a" }
+
+[[step]]
+expect_accent = { hue = [135, 150] }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-theme.png" }

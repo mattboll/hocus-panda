@@ -68,6 +68,8 @@ pub struct State {
     /// How windows are decorated, and the textures that draws with.
     pub style: Style,
     pub textures: Textures,
+    /// The Matrix theme's glyphs, once per scale.
+    pub matrix_sheets: crate::matrix::Sheets,
     pub xdg_decoration_state: XdgDecorationState,
     /// The X11 window manager, once XWayland is ready, and its display.
     pub xwm: Option<smithay::xwayland::X11Wm>,
@@ -245,6 +247,7 @@ impl State {
             config_watch: None,
             style: Style::default(),
             textures: Textures::default(),
+            matrix_sheets: Default::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
             xwm: None,
             xdisplay: None,

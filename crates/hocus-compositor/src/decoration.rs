@@ -24,7 +24,8 @@ use smithay::{
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
-/// How windows are decorated; from the theme once themes exist (#22).
+/// How windows are decorated: from the configuration, the ring in the
+/// theme's accent unless it has a colour of its own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Style {
     /// Corner radius, logical pixels.
