@@ -4,6 +4,7 @@
 //! holds a reference to it (see docs/architecture.md).
 
 mod actions;
+mod agents;
 mod alt_tab;
 mod api;
 mod authorize;

@@ -1,0 +1,115 @@
+description = "An agent flickering between work and rest under two seconds does not make the column flicker; a rest that lasts shows, with every agent at rest a panda juggles, and without pandas none is drawn"
+outputs = ["1600x1000"]
+shell = true
+
+[[step]]
+herdr = { agents = [
+  { name = "refacto", status = "working" },
+  { name = "docs", status = "idle" },
+] }
+
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+"""
+
+[[step]]
+expect_ui = { label = "refacto · Works" }
+
+# Idle for half a second, twice: it keeps working in the column, and
+# nothing is drawn again.
+[[step]]
+herdr_status = { agent = "refacto", status = "idle" }
+
+[[step]]
+expect_ui = { label = "1 at work" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+herdr_status = { agent = "refacto", status = "working" }
+
+[[step]]
+herdr_status = { agent = "refacto", status = "idle" }
+
+[[step]]
+advance_ms = 1500
+
+[[step]]
+herdr_status = { agent = "refacto", status = "working" }
+
+[[step]]
+expect_idle = { for_ms = 3000 }
+
+[[step]]
+expect_ui = { label = "refacto · Works" }
+
+[[step]]
+expect_ui = { label = "Panda at work" }
+
+# A rest that lasts two seconds shows: every agent at rest, one panda
+# juggles.
+[[step]]
+herdr_status = { agent = "refacto", status = "idle" }
+
+[[step]]
+advance_ms = 1900
+
+[[step]]
+expect_ui = { label = "refacto · Works" }
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_ui = { label = "The 2 agents are at rest. The pandas make the most of it." }
+
+[[step]]
+expect_ui = { label = "2 at rest" }
+
+[[step]]
+expect_ui = { label = "Panda juggling" }
+
+[[step]]
+expect_ui = { label = "refacto · Works", shown = false }
+
+# The juggler moves a moment, then holds still.
+[[step]]
+advance_ms = 1500
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agents-juggling.png" }
+
+[[step]]
+advance_ms = 3000
+
+[[step]]
+expect_idle = { for_ms = 3000 }
+
+# Without pandas, words only.
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+
+[pandas]
+enabled = false
+"""
+
+[[step]]
+expect_ui = { label = "The 2 agents are at rest." }
+
+[[step]]
+expect_ui = { label = "Panda juggling", shown = false }
+
+# Pandas off, an agent asks: a dot of its colour, never a panda.
+[[step]]
+herdr_status = { agent = "refacto", status = "blocked" }
+
+[[step]]
+expect_ui = { label = "refacto · Waits for an answer" }
+
+[[step]]
+expect_ui = { label = "Panda waiting for an answer", shown = false }

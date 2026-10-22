@@ -143,6 +143,10 @@ pinned = [                 # desktop entries, in order; those not installed are 
 [pandas]                   # they show what happens; they move a moment when it changes, then hold still
 enabled = true             # false: no panda anywhere (also from quick settings, for the session)
 
+[agents]                   # coding agents in the column, from herdr; one waiting asks in a toast
+enabled = true
+herdr_socket = ""          # empty: $XDG_CONFIG_HOME/herdr/herdr.sock, looked for by the session only
+
 [language]
 interface = "auto"         # en or fr; auto follows the session's locale (LANG); changed at once
 

@@ -86,6 +86,8 @@ pub struct ColumnState {
     /// Calendars are set up: without a meeting, nothing else is planned.
     pub calendar_set: bool,
     pub agenda: Agenda,
+    /// Coding agents (#41); none without an agent manager.
+    pub agents: Option<crate::agents::AgentsView>,
 }
 
 /// The meeting card, as board Bureau draws it.
@@ -180,6 +182,11 @@ pub enum Action {
     TrayChosen {
         key: String,
         id: i32,
+    },
+    /// Something asked of a coding agent.
+    Agent {
+        key: String,
+        ask: crate::agents::AgentAsk,
     },
 }
 
@@ -312,6 +319,8 @@ struct Nodes {
     meeting: NodeId,
     ring: NodeId,
     meeting_button: Option<NodeId>,
+    /// The coding agents' room.
+    agents: NodeId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -377,6 +386,8 @@ pub struct Column {
     tray_menu: Option<(String, Vec<TrayMenuEntry>)>,
     /// The to-dos shown, and their places in the notes.
     todo_rows: Vec<(NodeId, usize)>,
+    /// The agents' rows and buttons.
+    agent_targets: Vec<(NodeId, Action)>,
     now: Duration,
 }
 
@@ -397,6 +408,7 @@ impl Column {
             closed_by_press: None,
             tray_menu: None,
             todo_rows: Vec::new(),
+            agent_targets: Vec::new(),
             now: Duration::ZERO,
         };
         column.apply(&ColumnState::default(), true);
@@ -520,6 +532,17 @@ impl Column {
                 let theme = t.theme().clone();
                 self.todo_rows = fill_tasks(t, n.tasks, &theme, lang, &state.todos);
             }
+        }
+        if all || old.agents != state.agents {
+            let shown = state.agents.as_ref();
+            t.set_style(n.agents, crate::agents::room(shown.is_some()));
+            for child in t.children(n.agents) {
+                t.remove(child);
+            }
+            let theme = t.theme().clone();
+            self.agent_targets = shown
+                .map(|view| crate::agents::fill(t, n.agents, &theme, lang, view))
+                .unwrap_or_default();
         }
         if all || old.updates != state.updates {
             t.set_style(n.updates, tasks_room(state.updates.is_some()));
@@ -931,6 +954,8 @@ impl Column {
                 self.toggle(PopoverKind::Account);
             } else if let Some((_, index)) = self.todo_rows.iter().find(|(row, _)| *row == id) {
                 actions.push(Action::TickTodo(*index));
+            } else if let Some((_, action)) = self.agent_targets.iter().find(|(t, _)| *t == id) {
+                actions.push(action.clone());
             } else if id == n.time {
                 self.toggle(PopoverKind::Agenda);
             } else if Some(id) == n.meeting_button {
@@ -1250,9 +1275,15 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         ),
     );
 
-    // The to-dos when there are some (they take no room otherwise), then
-    // the latest notifications.
+    // The coding agents and the to-dos when there are some (they take no
+    // room otherwise), then the latest notifications.
     let feed = add(tree, card, Style::default(), Kind::Box(Look::default()));
+    let agents = add(
+        tree,
+        feed,
+        crate::agents::room(false),
+        Kind::Box(Look::default()),
+    );
     let tasks = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     // Board D13: the phone, the updates, then the notifications.
     let phone = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
@@ -1386,6 +1417,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         meeting,
         ring,
         meeting_button: None,
+        agents,
     }
 }
 

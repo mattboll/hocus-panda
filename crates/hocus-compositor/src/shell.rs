@@ -92,6 +92,7 @@ pub fn start(
     crate::launcher::start(handle, state, lang, data_dirs);
     crate::quick::start(handle, state, lang);
     crate::wallpaper::start(handle, state);
+    crate::agents::start(handle, state);
     if system {
         // Wakes the loop when the minute turns; the column reads the time
         // after each dispatch.
@@ -238,6 +239,7 @@ impl State {
             meeting: self.meeting_card(),
             calendar_set: !self.config.calendars.is_empty(),
             agenda: self.agenda(),
+            agents: self.agents_view(),
         }
     }
 
@@ -277,6 +279,7 @@ impl State {
         self.refresh_corners();
         self.refresh_ink();
         self.refresh_pandas();
+        self.refresh_agents();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -443,6 +446,7 @@ impl State {
             ShellAction::TrayActivate(key) => self.tray_activate(key),
             ShellAction::TrayMenu(key) => self.tray_menu(key),
             ShellAction::TrayChosen { key, id } => self.tray_chosen(key, id),
+            ShellAction::Agent { key, ask } => self.agent_ask(&key, ask),
             ShellAction::ShowDesktop { output, desktop } => {
                 if let Some(output) = self.find_output(&output)
                     && let Err(err) = self.show_desktop(&output, desktop.saturating_sub(1), serial)

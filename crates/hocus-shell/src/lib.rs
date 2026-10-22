@@ -5,6 +5,7 @@
 //! input, shows the pixels and does the actions that come out.
 
 pub mod actions;
+pub mod agents;
 pub mod authorize;
 pub mod calc;
 pub mod checkbox;

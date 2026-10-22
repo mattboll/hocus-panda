@@ -292,6 +292,43 @@ impl State {
             .is_some_and(|p| p.toasts.shown().contains(&id))
     }
 
+    /// A toast from the shell that waits for the user (an agent asking):
+    /// it stays until answered, in the waiting colour; while not disturbed
+    /// or sharing the screen, it waits in the history as others do.
+    pub fn shell_toast_waiting(
+        &mut self,
+        app: &str,
+        summary: &str,
+        actions: Vec<(String, String)>,
+    ) -> Option<u32> {
+        let urgency = if self.dnd() || self.sharing() {
+            Urgency::Normal
+        } else {
+            Urgency::Critical
+        };
+        let panel = self.toasts.as_mut()?;
+        let id = panel.next_shell_id;
+        panel.next_shell_id = if id <= SHELL_IDS_END {
+            SHELL_IDS
+        } else {
+            id - 1
+        };
+        self.on_notification(Incoming::Notify(
+            hocus_platform::notifications::Notification {
+                id,
+                app: app.to_owned(),
+                summary: summary.to_owned(),
+                body: String::new(),
+                actions,
+                urgency,
+                expiry: Expiry::Never,
+                replaces: true,
+                kde_event: None,
+            },
+        ));
+        Some(id)
+    }
+
     /// Takes the shell's toast `id` away, as what it showed went.
     pub fn close_shell_toast(&mut self, id: u32) {
         if let Some(panel) = self.toasts.as_mut()
@@ -361,7 +398,9 @@ impl State {
         for event in &events {
             match event {
                 ToastEvent::Action(id, key)
-                    if *id >= SHELL_IDS_END && !self.calendar_action(*id, key) =>
+                    if *id >= SHELL_IDS_END
+                        && !self.calendar_action(*id, key)
+                        && !self.agent_toast_action(*id, key) =>
                 {
                     self.screenshot_action(*id, key);
                 }

@@ -5,6 +5,7 @@ use std::time::Duration;
 use hocus_shell::{
     Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, TrayApp, TrayMenuEntry,
     WallTime,
+    agents::{AgentAsk, AgentState, AgentsView, Board},
     column::{Agenda, Meeting, PhoneLine},
 };
 use hocus_ui::{Input, Point, Role, Theme};
@@ -23,6 +24,7 @@ fn state() -> ColumnState {
         meeting: None,
         calendar_set: false,
         agenda: Default::default(),
+        agents: None,
         time: WallTime {
             hour: 14,
             minute: 37,
@@ -87,6 +89,76 @@ fn the_column_matches_its_references() -> anyhow::Result<()> {
     common::expect_reference(&column.view(), "column-fr.png")?;
     let column = self::column(Lang::En);
     common::expect_reference(&column.view(), "column-en.png")?;
+    Ok(())
+}
+
+/// Two agents at work, one of them waiting for an answer, and eleven at
+/// rest, as board S3 shows them.
+fn agents(pandas: bool) -> AgentsView {
+    let mut board = Board::default();
+    let mut list = vec![
+        ("w1:p1".into(), "refacto".into(), AgentState::Work, None),
+        ("w1:p2".into(), "tests".into(), AgentState::Work, None),
+    ];
+    for i in 3..14 {
+        list.push((
+            format!("w1:p{i}"),
+            format!("agent-{i}"),
+            AgentState::Rest,
+            None,
+        ));
+    }
+    board.replace(list, Duration::ZERO);
+    let now = Duration::from_secs(180);
+    board.set(
+        "w1:p1",
+        AgentState::Wait,
+        Some("Push the branch?".into()),
+        now,
+    );
+    board
+        .view(now + Duration::from_secs(60), pandas, false)
+        .expect("agents")
+}
+
+#[test]
+fn the_agents_show_and_the_waiting_one_is_answered() -> anyhow::Result<()> {
+    let mut column = Column::new(Theme::default(), Lang::En, 900.0, 1.0);
+    let mut s = state();
+    s.agents = Some(agents(true));
+    column.set_state(&s);
+    // The panda that waits moved from minute 3 on; long after, it holds still.
+    column.draw(Duration::from_secs(600));
+    common::expect_reference(&column.view(), "column-agents.png")?;
+    for (name, ask) in [
+        ("Yes to refacto", AgentAsk::Yes),
+        ("No to refacto", AgentAsk::No),
+        ("Show refacto", AgentAsk::Show),
+    ] {
+        let at = button(&column, name)?;
+        assert_eq!(
+            click(&mut column, at),
+            vec![Action::Agent {
+                key: "w1:p1".into(),
+                ask
+            }]
+        );
+    }
+    let at = button(&column, "tests · Works · 4 min")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::Agent {
+            key: "w1:p2".into(),
+            ask: AgentAsk::Show
+        }]
+    );
+    // Without pandas, a dot of each one's colour.
+    s.agents = Some(agents(false));
+    column.set_state(&s);
+    column.draw(Duration::from_secs(601));
+    let access = column.access().dump();
+    assert!(!access.contains("Panda"), "{access}");
+    assert!(access.contains("11 others at rest in herdr"), "{access}");
     Ok(())
 }
 

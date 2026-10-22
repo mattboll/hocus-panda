@@ -30,6 +30,7 @@ pub struct Config {
     pub calendars: Vec<CalendarAccount>,
     pub dock: Dock,
     pub pandas: Pandas,
+    pub agents: Agents,
     pub language: Language,
     pub hot_corners: HotCorners,
     pub gestures: Gestures,
@@ -382,6 +383,26 @@ pub struct Pandas {
 impl Default for Pandas {
     fn default() -> Self {
         Self { enabled: true }
+    }
+}
+
+/// Coding agents (#41): the column's section, from an agent manager.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Agents {
+    pub enabled: bool,
+    /// herdr's API socket; empty: its default one
+    /// (`$XDG_CONFIG_HOME/herdr/herdr.sock`), which only the session
+    /// looks for.
+    pub herdr_socket: String,
+}
+
+impl Default for Agents {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            herdr_socket: String::new(),
+        }
     }
 }
 

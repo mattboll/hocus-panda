@@ -152,6 +152,8 @@ pub struct State {
     /// Drawing on the screen (#86).
     pub ink: crate::ink::Inking,
     pub pandas: crate::pandas::Pandas,
+    /// Coding agents (#41).
+    pub agents: crate::agents::Agents,
     /// The first session's welcome (#82).
     pub first_run: crate::first_run::FirstRun,
     /// Desktops sliding, screen by screen (#36).
@@ -278,6 +280,7 @@ impl State {
             triggers: Default::default(),
             ink: Default::default(),
             pandas: Default::default(),
+            agents: Default::default(),
             first_run: Default::default(),
             slides: Default::default(),
             alt_tab: Default::default(),

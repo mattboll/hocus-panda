@@ -4,6 +4,7 @@ pub mod bus;
 pub mod caldav;
 pub mod client;
 pub mod fuzz;
+pub mod herdr;
 pub mod image;
 pub mod layer;
 pub mod phone;
