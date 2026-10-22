@@ -114,6 +114,8 @@ pub struct State {
     /// The screenshot tool (#69).
     pub shots: crate::screenshot::Screenshots,
     pub recorder: crate::recording::Recorder,
+    /// The portal's chooser waiting for the user (#116).
+    pub share: Option<crate::share::Picking>,
     /// polkit's password requests and their dialog (#83).
     pub authorizer: crate::authorize::Authorizer,
     /// Leaving the session: its card, what the machine can do (#72).
@@ -236,6 +238,7 @@ impl State {
             authorizer: Default::default(),
             shots: Default::default(),
             recorder: Default::default(),
+            share: None,
             clipboard: Default::default(),
             tray: Default::default(),
             output_management: crate::handlers::output_management::OutputManagement::new(dh),

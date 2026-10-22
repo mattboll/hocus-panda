@@ -252,6 +252,11 @@ impl App {
                 compositor: env!("CARGO_PKG_VERSION").into(),
             }),
             Request::Screens => return Some(Ok(Reply::Screens(self.screens()))),
+            // Answered once the user chose.
+            Request::PickShare => {
+                self.open_share_picker(connection, id);
+                return None;
+            }
             Request::IdentifyOutputs => {
                 state.identify_outputs();
                 Reply::Done

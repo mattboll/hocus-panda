@@ -73,6 +73,8 @@ pub struct ColumnState {
     pub status: Status,
     /// The tray's applications, in the order they came.
     pub tray: Vec<TrayApp>,
+    /// The screen is being shared.
+    pub sharing: bool,
 }
 
 /// What the status row tells, once known.
@@ -109,6 +111,8 @@ pub enum Action {
     ShutDown,
     /// The command field was clicked: the launcher opens.
     OpenLauncher,
+    /// Every screen capture ends.
+    StopSharing,
     /// A tray application clicked.
     TrayActivate(String),
     /// A tray application's menu asked for.
@@ -231,6 +235,9 @@ struct Nodes {
     status_row: NodeId,
     /// The tray's ring and chip, when it has applications.
     tray: Option<(NodeId, NodeId)>,
+    /// The sharing line's room, and its stop while the screen is shared.
+    sharing: NodeId,
+    stop_sharing: Option<NodeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -398,6 +405,16 @@ impl Column {
             // Low: the waiting colour.
             let low = s.battery.is_some_and(|p| p <= 15);
             t.set_icon_paint(battery, if low { Paint::Waiting } else { Paint::Text });
+        }
+        if all || old.sharing != state.sharing {
+            t.set_style(n.sharing, sharing_room(state.sharing));
+            for child in t.children(n.sharing) {
+                t.remove(child);
+            }
+            let theme = t.theme().clone();
+            self.nodes.stop_sharing = state
+                .sharing
+                .then(|| fill_sharing(t, n.sharing, &theme, lang));
         }
         if all || old.time != state.time {
             t.set_text(
@@ -717,6 +734,8 @@ impl Column {
                 self.toggle(PopoverKind::Desktops);
             } else if id == n.account {
                 self.toggle(PopoverKind::Account);
+            } else if Some(id) == n.stop_sharing {
+                actions.push(Action::StopSharing);
             } else if n.tray.is_some_and(|(_, chip)| chip == id) {
                 self.toggle(PopoverKind::Tray);
             }
@@ -838,9 +857,12 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
 
     // Status row: the keyboard layout works; the others are placeholders
     // until their modules come (sound, network, power, battery).
+    // The status row, and under it the sharing line when there is one:
+    // hidden, it takes no room.
+    let top = add(tree, card, Style::default(), Kind::Box(Look::default()));
     let status = add(
         tree,
-        card,
+        top,
         Style {
             justify: Justify::SpaceBetween,
             ..row(6.0)
@@ -848,6 +870,9 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         Kind::Box(Look::default()),
     );
     let (tray, layout, status_icons) = fill_status(tree, status, theme, lang, false);
+
+    // While the screen is shared: said, with a way to stop it.
+    let room = add(tree, top, sharing_room(false), Kind::Box(Look::default()));
 
     // Clock and date.
     let time = add(
@@ -1154,10 +1179,93 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         status: status_icons,
         status_row: status,
         tray,
+        sharing: room,
+        stop_sharing: None,
     }
 }
 
 /// A popover's tree: a card with room around it for its shadow.
+/// The sharing line: said, with its stop.
+fn fill_sharing(tree: &mut Tree, room: NodeId, theme: &Theme, lang: Lang) -> NodeId {
+    let missing = || unreachable!("adding to a node of this tree");
+    let add = |tree: &mut Tree, parent, style, kind| {
+        tree.add(parent, style, kind).unwrap_or_else(missing)
+    };
+    let sharing = add(tree, room, sharing_style(), Kind::Box(sharing_look()));
+    add(
+        tree,
+        sharing,
+        Style {
+            width: Length::Px(10.0),
+            height: Length::Px(10.0),
+            ..Style::default()
+        },
+        Kind::Box(Look {
+            background: Some(Paint::Rgba(crate::recording::RED)),
+            radius: 5.0,
+            ..Look::default()
+        }),
+    );
+    add(
+        tree,
+        sharing,
+        Style {
+            width: Length::Fill,
+            ..Style::default()
+        },
+        Kind::text_line(lang.sharing_now(), theme.text.label.with_weight(600)),
+    );
+    add(
+        tree,
+        sharing,
+        Style {
+            height: Length::Px(34.0),
+            padding: Insets::symmetric(0.0, 12.0),
+            ..Style::default()
+        },
+        Kind::Button(
+            Button::new(lang.stop(), ButtonKind::Plain, theme).with_name(lang.stop_sharing()),
+        ),
+    )
+}
+
+/// The sharing line's room under the status row: some, or none.
+fn sharing_room(shown: bool) -> Style {
+    Style {
+        padding: Insets {
+            top: if shown { 10.0 } else { 0.0 },
+            ..Insets::default()
+        },
+        height: if shown { Length::Auto } else { Length::Px(0.0) },
+        clip: true,
+        ..Style::default()
+    }
+}
+
+fn sharing_style() -> Style {
+    Style {
+        direction: hocus_ui::Direction::Row,
+        align: Align::Center,
+        gap: 10.0,
+        padding: Insets {
+            left: 14.0,
+            right: 6.0,
+            top: 6.0,
+            bottom: 6.0,
+        },
+        ..Style::default()
+    }
+}
+
+fn sharing_look() -> Look {
+    Look {
+        background: Some(Paint::Rgba(crate::recording::RED.with_alpha(0x24))),
+        radius: 14.0,
+        border: Some(Paint::Rgba(crate::recording::RED.with_alpha(0x80))),
+        ..Look::default()
+    }
+}
+
 /// The status row's chips, the tray's first when there are applications
 /// in it; built again when that changes.
 fn fill_status(

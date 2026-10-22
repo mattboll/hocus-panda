@@ -1,0 +1,59 @@
+description = "A portal asks what to share: the shell shows the screens and the windows; the one clicked is the answer. While shared, the column says so; its stop ends the sharing and the held toasts come back"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+open = { app_id = "slides", size = [600, 400], color = "#e8e4da" }
+
+[[step]]
+ask_share = true
+
+[[step]]
+expect_ui = { label = "HEADLESS-1 · 1280×800" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "share-picker.png" }
+
+[[step]]
+click_ui = "HEADLESS-1 · 1280×800"
+
+[[step]]
+expect_shared = "Monitor: HEADLESS-1"
+
+# Shared: the column says so, toasts wait.
+[[step]]
+share = true
+
+[[step]]
+frames = 2
+
+[[step]]
+notify = { app = "Mail", summary = "Salary review" }
+
+[[step]]
+expect_ui = { label = "Stop sharing" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "share-stop.png" }
+
+[[step]]
+click_ui = "Stop sharing"
+
+[[step]]
+expect_sharing_ended = true
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_ui = { label = "Stop sharing", shown = false }
+
+[[step]]
+expect_ui = { label = "1 notification while you were sharing" }

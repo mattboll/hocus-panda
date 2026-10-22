@@ -88,6 +88,12 @@ impl State {
             elements.extend(ours.into_iter().map(SceneElement::Frame));
             return elements;
         }
+        // What to share, asked by a portal.
+        elements.extend(
+            self.share_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         // The system's password dialog, over everything but the cursor.
         elements.extend(
             self.auth_elements(renderer, output)

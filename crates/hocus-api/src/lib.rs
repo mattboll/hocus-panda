@@ -79,6 +79,10 @@ pub enum Request {
     Screens,
     /// Each screen shows its name on it for a few seconds.
     IdentifyOutputs,
+    /// The shell asks the user what to share (#116), for the screen-cast
+    /// portal's chooser; answered once chosen, as `Monitor: NAME`,
+    /// `Window: IDENTIFIER` (ext-foreign-toplevel-list) or nothing.
+    PickShare,
     Windows,
     /// The whole scene: outputs, their layers and windows, focus, pointer.
     Scene,
@@ -182,6 +186,7 @@ impl Request {
             | Self::Outputs
             | Self::Screens
             | Self::IdentifyOutputs
+            | Self::PickShare
             | Self::Windows
             | Self::Subscribe
             | Self::Stats
@@ -263,6 +268,8 @@ pub enum Reply {
     Version(VersionInfo),
     Outputs(Vec<OutputInfo>),
     Screens(Vec<ScreenInfo>),
+    /// What the user chose to share, or nothing.
+    Shared(Option<String>),
     Windows(Vec<WindowInfo>),
     Scene(Scene),
     Screenshot(Screenshot),

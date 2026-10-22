@@ -12,6 +12,7 @@
 
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::{
     output::Output,
     reexports::{
@@ -98,6 +99,12 @@ pub struct ScreenCapture {
     /// Notifications held while sharing.
     pub held: usize,
     pub was_sharing: bool,
+    /// ext sessions, to stop them all when the user says so.
+    sessions: Vec<ExtImageCopyCaptureSessionV1>,
+    /// wlr-screencopy clients copying as the screen changes, and those
+    /// told to stop: their frames fail from then on.
+    wlr_sharers: Vec<ClientId>,
+    stopped: Vec<ClientId>,
 }
 
 /// An ext source's target.
@@ -107,6 +114,8 @@ struct SourceData(Target);
 #[derive(Debug)]
 struct SessionData {
     target: Target,
+    /// Told to stop: its frames fail.
+    stopped: std::sync::atomic::AtomicBool,
     cursor: bool,
     /// The output frame of its last capture.
     last: Mutex<Option<u64>>,
@@ -195,6 +204,39 @@ impl State {
                 .screen_capture
                 .last_damage_copy
                 .is_some_and(|t| now.saturating_sub(t) < SHARING_LINGER)
+    }
+
+    /// The user stopped sharing: every session ends, tools copying as
+    /// the screen changes get no more frames, and held toasts come back.
+    pub fn stop_sharing(&mut self) {
+        let capture = &mut self.screen_capture;
+        for session in capture.sessions.drain(..) {
+            if !session.is_alive() {
+                continue;
+            }
+            if let Some(data) = session.data::<SessionData>() {
+                data.stopped
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                let shared = data.captures.lock().map(|c| *c > 1).unwrap_or(false);
+                if shared {
+                    capture.sharing_sessions = capture.sharing_sessions.saturating_sub(1);
+                    // It no longer counts when it goes.
+                    if let Ok(mut c) = data.captures.lock() {
+                        *c = 0;
+                    }
+                }
+            }
+            session.stopped();
+        }
+        capture.stopped.append(&mut capture.wlr_sharers);
+        for p in std::mem::take(&mut capture.pending) {
+            match p.reply {
+                Reply::Ext(frame) => frame.failed(FailureReason::Stopped),
+                Reply::Wlr(frame, _) => frame.failed(),
+            }
+        }
+        capture.last_damage_copy = None;
+        self.needs_redraw = true;
     }
 
     pub fn has_pending_captures(&self) -> bool {
@@ -504,11 +546,14 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for State {
                     session,
                     SessionData {
                         target,
+                        stopped: Default::default(),
                         cursor,
                         last: Mutex::new(None),
                         captures: Mutex::new(0),
                     },
                 );
+                state.screen_capture.sessions.retain(|s| s.is_alive());
+                state.screen_capture.sessions.push(session.clone());
                 match size {
                     Some((w, h)) => {
                         session.buffer_size(w as u32, h as u32);
@@ -544,6 +589,7 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, ()> for State {
                 session,
                 SessionData {
                     target: Target::Gone,
+                    stopped: Default::default(),
                     cursor: false,
                     last: Mutex::new(None),
                     captures: Mutex::new(0),
@@ -614,6 +660,10 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for State {
                     frame.failed(FailureReason::Stopped);
                     return;
                 };
+                if session.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                    frame.failed(FailureReason::Stopped);
+                    return;
+                }
                 // The first frame now, the next ones once something
                 // changed.
                 let after = match &session.target {
@@ -746,7 +796,7 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for State {
 impl Dispatch<ZwlrScreencopyFrameV1, WlrFrameData> for State {
     fn request(
         state: &mut Self,
-        _: &Client,
+        client: &Client,
         frame: &ZwlrScreencopyFrameV1,
         request: wlr_frame::Request,
         data: &WlrFrameData,
@@ -773,6 +823,13 @@ impl Dispatch<ZwlrScreencopyFrameV1, WlrFrameData> for State {
                 "the frame was already copied",
             );
             return;
+        }
+        if state.screen_capture.stopped.contains(&client.id()) {
+            frame.failed();
+            return;
+        }
+        if damage && !state.screen_capture.wlr_sharers.contains(&client.id()) {
+            state.screen_capture.wlr_sharers.push(client.id());
         }
         let after = damage.then(|| {
             state.screen_capture.last_damage_copy = Some(state.clock.now());
