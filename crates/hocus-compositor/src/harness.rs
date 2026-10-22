@@ -226,6 +226,11 @@ impl Headless {
         self.app.state.space.elements().count()
     }
 
+    /// The clipboard selections seen, and whether their reads have ended.
+    pub fn clipboard_quiet(&self) -> (u64, bool) {
+        self.app.state.clipboard_quiet()
+    }
+
     /// Handles what clients sent, waiting up to `timeout` of real time for
     /// something to arrive. The virtual clock does not move.
     pub fn dispatch(&mut self, timeout: Duration) -> anyhow::Result<()> {

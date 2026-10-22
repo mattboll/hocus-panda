@@ -1708,6 +1708,7 @@ impl Run<'_> {
     }
 
     fn copy(&mut self, copy: &Clipboard) -> anyhow::Result<()> {
+        let (before, _) = self.compositor.clipboard_quiet();
         if let Some(client) = self.clients.iter().find(|c| c.spec.app_id == copy.app_id) {
             if let Some(secret) = &copy.then_secret {
                 client.copy_then_secret(&copy.text, secret)?;
@@ -1725,9 +1726,14 @@ impl Run<'_> {
         } else {
             anyhow::bail!("no client {}", copy.app_id);
         }
-        // The compositor hears of it before the next step.
-        self.compositor.dispatch(Duration::from_millis(50))?;
-        Ok(())
+        // The compositor has the copy, read or set aside, before the next
+        // step: the read runs on a worker, slow on a loaded machine.
+        self.compositor
+            .dispatch_until(CLIENT_TIMEOUT, |c| {
+                let (seen, quiet) = c.clipboard_quiet();
+                seen > before && quiet
+            })
+            .map_err(|_| anyhow::anyhow!("the compositor never read the copy {:?}", copy.text))
     }
 
     /// Reads the clipboard as the client sees it; it may take a few round
