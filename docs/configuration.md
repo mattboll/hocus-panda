@@ -68,6 +68,14 @@ save = true                # into the folder
 copy = true                # onto the clipboard (as PNG)
 ocr = "tesseract"          # reads the text for "Copy the text", when installed
 
+[recording]                # Super+Shift+R
+folder = ""                # empty: Screencasts in the videos folder
+fps = 30                   # 10 to 60
+countdown = 3              # seconds before it starts, 0 to 10
+show_clicks = true         # rings in the video, never on the screen
+hardware = true            # VA-API encoding when the graphics card has it
+encoder = "ffmpeg"         # the encoder, run as a process of its own
+
 [settings]                 # the settings app (Super+Comma)
 command = "hocus-settings" # `--page <page>` is added for a page
 app_id = "hocus-settings"  # how its window is recognised
@@ -174,6 +182,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `clipboard-history` | the clipboard history in the launcher's card: newest first, Enter pastes into the focused application, Tab pins, Delete forgets |
 | `palette` | the action palette: every action with its keys and what it acts on, recent ones first; searched by name (English or French) or by keys, typed (`Maj+S`) or pressed; Enter runs it on the window that had the focus, Tab opens the settings to give it keys |
 | `emoji` | the emoji picker: searched in English and French, recent ones first, Tab changes the skin tone, Enter types it into the focused application |
+| `record` | records the screen: a region drawn, a window clicked, or Enter for the screen under the pointer; after a countdown, a red frame marks it and a bar shows the time, pause and stop; again to stop. Saved as MP4, then a toast offers to open or delete it |
 | `screenshot MODE [SECONDS]` | `screen` (under the pointer), `all` (every screen, each at its own pixel density), `window` (the one clicked next), `region` (drawn with the pointer, its size shown; Escape cancels), after a delay of up to 60 s: copied and saved, then a toast offers to open, delete or copy its text |
 | `suspend`, `hibernate` | sleeps now, locked first; hibernating only where the machine can |
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
@@ -208,6 +217,7 @@ Defaults:
 | Print | `screenshot screen` |
 | Super+Print | `screenshot all` |
 | Shift+Print, Super+Shift+S | `screenshot region` |
+| Super+Shift+R | `record` |
 | Ctrl+Print | `screenshot window` |
 | Super+A | `quick-settings` |
 | Super+Backtick | `dropdown` |

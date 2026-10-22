@@ -22,6 +22,7 @@ pub struct Config {
     pub idle: Idle,
     pub session: SessionConfig,
     pub screenshots: Screenshots,
+    pub recording: Recording,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -356,6 +357,38 @@ impl Default for Screenshots {
     }
 }
 
+/// Screen recordings (#70).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Recording {
+    /// The folder they are saved in; empty: `Screencasts` in the videos
+    /// folder.
+    pub folder: String,
+    /// Frames a second, 10 to 60.
+    pub fps: u32,
+    /// Seconds counted down before it starts, 0 to 10.
+    pub countdown: u32,
+    /// Clicks drawn as rings in the video, never on the screen.
+    pub show_clicks: bool,
+    /// The graphics card encodes when it can (VA-API).
+    pub hardware: bool,
+    /// The encoder, as ffmpeg takes its arguments.
+    pub encoder: String,
+}
+
+impl Default for Recording {
+    fn default() -> Self {
+        Self {
+            folder: String::new(),
+            fps: 30,
+            countdown: 3,
+            show_clicks: true,
+            hardware: true,
+            encoder: "ffmpeg".into(),
+        }
+    }
+}
+
 /// What happens when nobody uses the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -552,6 +585,14 @@ impl Config {
         if !["ask", "always", "never"].contains(&self.session.restore.as_str()) {
             let r = format!("{:?}", self.session.restore);
             return out_of_range("session.restore", r, "ask, always, never");
+        }
+        if !(10..=60).contains(&self.recording.fps) {
+            let f = self.recording.fps.to_string();
+            return out_of_range("recording.fps", f, "10 to 60");
+        }
+        if self.recording.countdown > 10 {
+            let c = self.recording.countdown.to_string();
+            return out_of_range("recording.countdown", c, "0 to 10");
         }
         if !(80..=150).contains(&self.appearance.text_size) {
             let s = self.appearance.text_size.to_string();

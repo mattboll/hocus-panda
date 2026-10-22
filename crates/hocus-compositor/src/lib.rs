@@ -30,6 +30,7 @@ mod notify;
 mod output_spec;
 mod outputs;
 mod quick;
+mod recording;
 mod scene;
 mod screen_capture;
 mod screenshot;
@@ -240,6 +241,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     lock::start(&event_loop.handle(), &mut state);
     leave::start(&event_loop.handle(), &mut state);
     screenshot::start(&event_loop.handle(), &mut state);
+    recording::start(&event_loop.handle(), &mut state);
     authorize::start(
         &event_loop.handle(),
         &mut state,
@@ -327,6 +329,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         app.state.refresh_shell();
         app.serve_captures();
         app.serve_screenshots();
+        app.serve_recording();
         app.settle_outputs();
         match &mut app.backend {
             BackendState::Winit(winit) => winit.after_dispatch(&mut app.state),

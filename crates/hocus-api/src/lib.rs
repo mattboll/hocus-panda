@@ -562,6 +562,12 @@ pub enum Event {
         width: u32,
         height: u32,
     },
+    /// A screen recording was saved (#70), with its size in pixels.
+    Recording {
+        path: Option<String>,
+        width: u32,
+        height: u32,
+    },
     /// Leaving the session (#72): `action` is `log-out`, `restart`,
     /// `shut-down`, `suspend` or `hibernate`; `stage` is `countdown`,
     /// `closing`, `cancelled` or `now`.

@@ -17,6 +17,8 @@ use crate::{column::View, i18n::Lang};
 pub enum PickMode {
     Region,
     Window,
+    /// What to record: a region drawn, a window clicked, or the screen.
+    Record,
 }
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
@@ -95,6 +97,7 @@ impl Picker {
             let hint = match self.mode {
                 PickMode::Region => self.lang.pick_region(),
                 PickMode::Window => self.lang.pick_window(),
+                PickMode::Record => self.lang.pick_record(),
             };
             let pill = t
                 .add(
@@ -151,7 +154,7 @@ impl Picker {
             }),
         )
         .unwrap_or_else(MISSING);
-        if self.mode == PickMode::Region {
+        if self.mode != PickMode::Window {
             // Its size in pixels, under it, or inside when there is no room.
             let text = format!(
                 "{} × {}",

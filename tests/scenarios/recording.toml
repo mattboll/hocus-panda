@@ -1,0 +1,57 @@
+description = "Super+Shift+R, a region drawn: after the countdown, a red frame marks it and a bar shows the time, pause and stop, neither in the video; stopping saves it"
+outputs = ["1280x800"]
+shell = true
+needs = ["ffmpeg"]
+
+[[step]]
+config = """
+[recording]
+folder = "{runtime_dir}/videos"
+hardware = false
+countdown = 2
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+shift+19"
+
+[[step]]
+expect_ui = { label = "Drag over a region, click a window, or Enter for the screen · Escape to cancel" }
+
+[[step]]
+pointer_move = [180, 160]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [700, 480]
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_ui = { label = "Recording in 2…" }
+
+[[step]]
+advance_ms = 2100
+
+[[step]]
+expect_ui = { label = "Stop the recording" }
+
+[[step]]
+advance_ms = 1300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "recording.png" }
+
+[[step]]
+click_ui = "Stop the recording"
+
+[[step]]
+expect_event = { type = "recording", has = "videos/Recording" }
+
+[[step]]
+expect_ui = { label = "Recording saved" }

@@ -631,6 +631,51 @@ impl Lang {
         )
     }
 
+    pub fn pick_record(self) -> &'static str {
+        self.pick(
+            "Drag over a region, click a window, or Enter for the screen · Escape to cancel",
+            "Tracer une zone, cliquer une fenêtre, ou Entrée pour l’écran · Échap pour annuler",
+        )
+    }
+
+    pub fn recording_in(self, seconds: u32) -> String {
+        match self {
+            Self::En => format!("Recording in {seconds}…"),
+            Self::Fr => format!("Enregistrement dans {seconds}…"),
+        }
+    }
+
+    pub fn recording_paused(self, time: &str) -> String {
+        match self {
+            Self::En => format!("{time} · paused"),
+            Self::Fr => format!("{time} · en pause"),
+        }
+    }
+
+    pub fn recording_pause(self) -> &'static str {
+        self.pick("Pause the recording", "Mettre l’enregistrement en pause")
+    }
+
+    pub fn recording_resume(self) -> &'static str {
+        self.pick("Resume the recording", "Reprendre l’enregistrement")
+    }
+
+    pub fn recording_stop(self) -> &'static str {
+        self.pick("Stop the recording", "Arrêter l’enregistrement")
+    }
+
+    pub fn recording_cancel(self) -> &'static str {
+        self.pick("Cancel the recording", "Annuler l’enregistrement")
+    }
+
+    pub fn recording_saved(self) -> &'static str {
+        self.pick("Recording saved", "Enregistrement sauvegardé")
+    }
+
+    pub fn recording_failed(self) -> &'static str {
+        self.pick("The recording failed", "L’enregistrement a échoué")
+    }
+
     pub fn pick_window(self) -> &'static str {
         self.pick(
             "Click a window · Escape to cancel",

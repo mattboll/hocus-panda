@@ -223,6 +223,14 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             EVERYWHERE,
         ),
         A::Emoji => (w("Emoji", "Emoji"), G::System, EVERYWHERE),
+        A::Record => (
+            w(
+                "Record the screen, or stop",
+                "Enregistrer l’écran, ou arrêter",
+            ),
+            G::Captures,
+            EVERYWHERE,
+        ),
         A::Palette => (
             w(
                 "Every action and its keys",
@@ -330,6 +338,7 @@ pub fn catalog() -> Vec<Action> {
         ]
         .map(Action::screenshot),
     );
+    all.push(A::Record);
     all.extend([
         A::Lock,
         A::Suspend,

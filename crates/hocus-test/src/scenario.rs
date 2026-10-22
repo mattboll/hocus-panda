@@ -1023,6 +1023,10 @@ impl Run<'_> {
                     .canonicalize()
                     .unwrap_or_else(|_| self.scenario.dir.clone());
                 let mut text = text.replace("{scenario_dir}", &dir.to_string_lossy());
+                // Files a scenario makes go to the compositor's own
+                // temporary directory, never the developer's.
+                let runtime = self.compositor.runtime_dir().to_string_lossy().into_owned();
+                text = text.replace("{runtime_dir}", &runtime);
                 if let Some(client) = &self.options.test_client {
                     text = text.replace("{test_client}", &client.to_string_lossy());
                 }

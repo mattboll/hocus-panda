@@ -154,6 +154,7 @@ impl State {
             }
             Action::Emoji => self.toggle_launcher_mode(hocus_shell::launcher::Mode::Emoji),
             Action::Palette => self.toggle_palette(),
+            Action::Record => self.toggle_recording(),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }
