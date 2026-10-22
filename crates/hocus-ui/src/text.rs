@@ -363,12 +363,16 @@ mod tests {
         system.install();
         let mut fonts = bundled;
         assert!(fonts.sync(), "trees made before take them");
-        let mut has = Collection::new(CollectionOptions::default());
-        let japanese = has
-            .fallback_families(FallbackKey::new(Script::from_bytes(*b"Hira"), None))
-            .next()
-            .is_some();
-        let emoji = has.generic_families(GenericFamily::Emoji).next().is_some();
+        // A fallback family is not a font that has the characters: ask
+        // fontconfig for one that does.
+        let covered = |pattern: &str| {
+            std::process::Command::new("fc-list")
+                .arg(pattern)
+                .output()
+                .is_ok_and(|o| o.status.success() && !o.stdout.is_empty())
+        };
+        let japanese = covered(":charset=3053");
+        let emoji = covered(":charset=1f43c");
         if !(has_system_fonts && japanese && emoji) {
             eprintln!("skipped: this system has no Japanese or emoji font");
             return;
