@@ -315,6 +315,7 @@ pub enum Setting {
     /// A screen, by its name.
     Screen(String),
     HotCorners,
+    InterfaceLanguage,
 }
 
 impl Setting {
@@ -330,6 +331,7 @@ impl Setting {
             Self::Layouts | Self::Shortcut(_) => Page::Keyboard,
             Self::Screen(_) => Page::Screens,
             Self::HotCorners => Page::Desktops,
+            Self::InterfaceLanguage => Page::Language,
         }
     }
 }
@@ -427,6 +429,29 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
             words::THEME_PER_DESKTOP.get(lang).to_owned(),
             both(words::THEME_PER_DESKTOP),
             words::NOT_YET.get(lang).to_owned(),
+        ),
+        (
+            Setting::InterfaceLanguage,
+            words::INTERFACE_LANGUAGE.get(lang).to_owned(),
+            [
+                both(words::INTERFACE_LANGUAGE),
+                vec![
+                    "language".into(),
+                    "langue".into(),
+                    "french".into(),
+                    "français".into(),
+                    "english".into(),
+                    "anglais".into(),
+                ],
+            ]
+            .concat(),
+            match ctx.config.language.interface {
+                hocus_core::config::InterfaceLanguage::Auto => words::LIKE_THE_SYSTEM,
+                hocus_core::config::InterfaceLanguage::En => words::ENGLISH,
+                hocus_core::config::InterfaceLanguage::Fr => words::FRENCH,
+            }
+            .get(lang)
+            .to_owned(),
         ),
         (
             Setting::HotCorners,

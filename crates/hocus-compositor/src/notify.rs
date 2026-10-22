@@ -48,6 +48,15 @@ pub struct ToastPanel {
 }
 
 impl ToastPanel {
+    pub fn set_lang(&mut self, lang: Lang) {
+        if lang != self.lang {
+            self.lang = lang;
+            self.toasts.set_lang(lang);
+        }
+    }
+}
+
+impl ToastPanel {
     pub fn set_theme(&mut self, theme: Theme) {
         self.toasts.set_theme(theme);
     }

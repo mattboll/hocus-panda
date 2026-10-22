@@ -204,6 +204,11 @@ impl Toasts {
         }
     }
 
+    /// Speaks `lang` for the toasts to come.
+    pub fn set_lang(&mut self, lang: Lang) {
+        self.lang = lang;
+    }
+
     pub fn set_theme(&mut self, theme: Theme) {
         self.tree.set_theme(theme);
     }

@@ -264,6 +264,8 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         ctx,
     );
     view.open(options.page);
+    // The language the file chose, once it is read.
+    window.set_title(crate::words::SETTINGS.get(view.lang()));
 
     let pool = SlotPool::new((SIZE.0 * SIZE.1 * 4) as usize, &shm)?;
     let mut app = App {
@@ -361,7 +363,13 @@ impl App {
                 FromApi::Context(what) => {
                     let (ctx, accent, file) = *what;
                     self.view.set_theme(theme(&ctx, accent.as_deref()));
+                    let before = self.view.lang();
                     self.view.set_context(ctx);
+                    // Its title in the language chosen, too.
+                    if self.view.lang() != before {
+                        self.window
+                            .set_title(crate::words::SETTINGS.get(self.view.lang()));
+                    }
                     self.accent = accent;
                     self.file = file;
                 }

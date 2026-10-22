@@ -49,6 +49,13 @@ impl QuickPanel {
     pub fn set_theme(&mut self, theme: Theme) {
         self.sheet.set_theme(theme);
     }
+
+    pub fn set_lang(&mut self, lang: Lang) {
+        if lang != self.lang {
+            self.lang = lang;
+            self.sheet.set_lang(lang);
+        }
+    }
 }
 
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, lang: Lang) {

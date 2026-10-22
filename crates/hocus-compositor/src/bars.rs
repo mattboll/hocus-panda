@@ -102,10 +102,35 @@ impl State {
     }
 
     /// The shell's language: English under the virtual clock of tests.
+    /// The interface's language: as set (#51), or the session's locale;
+    /// English in tests that set none.
     pub fn shell_lang(&self) -> Lang {
-        match self.clock {
-            crate::clock::Clock::Monotonic { .. } => Lang::from_env(),
-            crate::clock::Clock::Virtual { .. } => Lang::En,
+        use hocus_core::config::InterfaceLanguage;
+        match self.config.language.interface {
+            InterfaceLanguage::En => Lang::En,
+            InterfaceLanguage::Fr => Lang::Fr,
+            InterfaceLanguage::Auto => match self.clock {
+                crate::clock::Clock::Monotonic { .. } => Lang::from_env(),
+                crate::clock::Clock::Virtual { .. } => Lang::En,
+            },
+        }
+    }
+
+    /// After each dispatch: a language changed in the settings is spoken
+    /// at once, by the panels made at start too.
+    pub fn refresh_lang(&mut self) {
+        let lang = self.shell_lang();
+        if let Some(shell) = &mut self.shell {
+            shell.set_lang(lang);
+        }
+        if let Some(quick) = &mut self.quick {
+            quick.set_lang(lang);
+        }
+        if let Some(launcher) = &mut self.launcher {
+            launcher.set_lang(lang);
+        }
+        if let Some(toasts) = &mut self.toasts {
+            toasts.set_lang(lang);
         }
     }
 
