@@ -1,0 +1,86 @@
+description = "Picking what to record offers the microphone, the system's sound, the camera (unavailable without one) and the keys; with the microphone and the keys on, the video has sound as long as itself and Ctrl+C drawn in it, never on the screen"
+outputs = ["1280x800"]
+shell = true
+needs = ["ffmpeg", "ffprobe"]
+
+# A generated tone stands for the microphone; no camera here.
+[[step]]
+config = """
+[recording]
+folder = "{runtime_dir}/videos"
+hardware = false
+countdown = 1
+sound = "lavfi"
+microphone_device = "sine=frequency=440:sample_rate=48000"
+camera_device = "/nonexistent/video9"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+shift+19"
+
+[[step]]
+expect_ui = { label = "No camera", disabled = true }
+
+[[step]]
+expect_ui = { label = "Microphone", selected = false }
+
+[[step]]
+click_ui = "Microphone"
+
+[[step]]
+expect_ui = { label = "Microphone", selected = true }
+
+[[step]]
+click_ui = "Show keys"
+
+[[step]]
+expect_ui = { label = "Show keys", selected = true }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "recording-options.png" }
+
+[[step]]
+pointer_move = [180, 160]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [700, 480]
+
+[[step]]
+release = "left"
+
+[[step]]
+advance_ms = 1100
+
+[[step]]
+expect_ui = { label = "Stop the recording" }
+
+# A second in, Ctrl+C: in the video, not on the screen.
+[[step]]
+advance_ms = 1000
+
+[[step]]
+keys = "ctrl+46"
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "recording-keys-live.png" }
+
+[[step]]
+advance_ms = 700
+
+[[step]]
+click_ui = "Stop the recording"
+
+[[step]]
+expect_recording = { audio = true, keys_at_ms = 1000 }

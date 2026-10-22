@@ -28,6 +28,7 @@ mod input;
 mod launcher;
 mod leave;
 mod lock;
+mod media;
 mod notes;
 mod notify;
 mod output_spec;

@@ -259,6 +259,141 @@ impl RecordBar {
     }
 }
 
+/// A picture drawn for the video only: premultiplied RGBA.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Overlay {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// Keys pressed, drawn as caps for the video (#131), at `scale` pixels to
+/// the logical one; never shown on the screen.
+pub fn key_caps(theme: &Theme, keys: &[String], scale: f32) -> Overlay {
+    // Room for the longest combinations; the picture is cut to the caps.
+    let room = Size::new(1400.0, 90.0);
+    let mut tree = Tree::new(theme.clone(), room, scale);
+    let root = tree.root();
+    tree.set_look(root, Look::default());
+    let row = tree
+        .add(
+            root,
+            Style {
+                at: Some(Point::new(0.0, 0.0)),
+                direction: hocus_ui::Direction::Row,
+                align: Align::Center,
+                gap: 8.0,
+                padding: Insets::all(12.0),
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(MISSING);
+    for key in keys {
+        let cap = tree
+            .add(
+                row,
+                Style {
+                    padding: Insets::symmetric(10.0, 18.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::Surface),
+                    border: Some(Paint::Border),
+                    radius: 12.0,
+                    shadow: 10.0,
+                }),
+            )
+            .unwrap_or_else(MISSING);
+        tree.add(
+            cap,
+            Style::default(),
+            Kind::text_line(key.clone(), theme.text.title.with_weight(700)),
+        )
+        .unwrap_or_else(MISSING);
+    }
+    let mut surface = Surface::new(room, scale);
+    let damage = tree.update(Duration::ZERO);
+    surface.draw(&mut tree, &damage);
+    let r = tree.rect(row).unwrap_or_default();
+    let full = surface.width() as usize;
+    let width = ((r.w * scale).ceil() as u32).min(surface.width());
+    let height = ((r.h * scale).ceil() as u32).min(surface.height());
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height as usize {
+        let from = y * full * 4;
+        rgba.extend_from_slice(&surface.pixels()[from..from + width as usize * 4]);
+    }
+    Overlay {
+        width,
+        height,
+        rgba,
+    }
+}
+
+/// Where the webcam's bubble goes in the video (#131): a ring on the
+/// screen, outside the video, that the pointer moves.
+pub struct BubbleMark {
+    tree: Tree,
+    surface: Surface,
+}
+
+impl std::fmt::Debug for BubbleMark {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BubbleMark").finish_non_exhaustive()
+    }
+}
+
+impl BubbleMark {
+    /// A mark `diameter` logical pixels across.
+    pub fn new(theme: Theme, lang: Lang, diameter: f32, scale: f32) -> Self {
+        let size = Size::new(diameter, diameter);
+        let mut tree = Tree::new(theme, size, scale);
+        let root = tree.root();
+        tree.set_look(root, Look::default());
+        let ring = tree
+            .add(
+                root,
+                Style {
+                    width: Length::Px(diameter),
+                    height: Length::Px(diameter),
+                    align: Align::Center,
+                    justify: hocus_ui::Justify::Center,
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::Rgba(Color::rgba(0, 0, 0, 70))),
+                    border: Some(Paint::Accent),
+                    radius: diameter / 2.0,
+                    ..Look::default()
+                }),
+            )
+            .unwrap_or_else(MISSING);
+        tree.set_clickable(ring, lang.camera_bubble());
+        if let Some(icon) = Kind::icon(crate::icons::CAMERA, 28.0, Paint::Accent, None) {
+            tree.add(ring, Style::default(), icon)
+                .unwrap_or_else(MISSING);
+        }
+        let mut surface = Surface::new(size, scale);
+        let damage = tree.update(Duration::ZERO);
+        surface.draw(&mut tree, &damage);
+        Self { tree, surface }
+    }
+
+    pub fn view(&self) -> View<'_> {
+        View {
+            pixels: self.surface.pixels(),
+            width: self.surface.width(),
+            height: self.surface.height(),
+            at: Point::default(),
+        }
+    }
+
+    pub fn access(&self) -> AccessNode {
+        self.tree.access()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

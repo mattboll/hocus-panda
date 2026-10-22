@@ -893,6 +893,34 @@ impl Lang {
         )
     }
 
+    pub fn microphone(self) -> &'static str {
+        self.pick("Microphone", "Micro")
+    }
+
+    pub fn system_sound(self) -> &'static str {
+        self.pick("System sound", "Son du système")
+    }
+
+    pub fn camera(self) -> &'static str {
+        self.pick("Camera", "Caméra")
+    }
+
+    pub fn no_camera(self) -> &'static str {
+        self.pick("No camera", "Pas de caméra")
+    }
+
+    pub fn show_keys(self) -> &'static str {
+        self.pick("Show keys", "Montrer les touches")
+    }
+
+    /// The webcam bubble's mark on the screen.
+    pub fn camera_bubble(self) -> &'static str {
+        self.pick(
+            "The camera's place in the video: drag it",
+            "La place de la caméra dans la vidéo : faites-la glisser",
+        )
+    }
+
     pub fn recording_in(self, seconds: u32) -> String {
         match self {
             Self::En => format!("Recording in {seconds}…"),

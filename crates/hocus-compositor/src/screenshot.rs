@@ -16,7 +16,7 @@ use std::{
 
 use hocus_api::Event;
 use hocus_core::{ScreenshotMode, WindowId};
-use hocus_shell::picker::{PickMode, Picker};
+use hocus_shell::picker::{PickMode, Picker, RecordOption};
 use smithay::{
     backend::renderer::element::{Kind, solid::SolidColorRenderElement},
     output::Output,
@@ -55,6 +55,9 @@ struct Picking {
     panels: Vec<(String, Panel<Picker>)>,
     /// Where the region began, and on which output.
     from: Option<(Point<f64, Logical>, String)>,
+    /// The press was on one of the recording's options: its release is
+    /// not a choice.
+    on_option: bool,
 }
 
 /// What the workers send back.
@@ -158,6 +161,9 @@ impl State {
                     o.current_scale().fractional_scale() as f32,
                     mode,
                 );
+                if mode == PickMode::Record {
+                    picker.set_options(self.recorder.options);
+                }
                 picker.draw(self.clock.now());
                 let mut panel = Panel::new(picker);
                 panel.upload(&[]);
@@ -168,6 +174,7 @@ impl State {
             mode,
             panels,
             from: None,
+            on_option: false,
         });
         self.needs_redraw = true;
     }
@@ -215,14 +222,31 @@ impl State {
             }
             (PickMode::Window, Some(false)) => {}
             // Recording: a region drawn; a click alone takes the window
-            // under it, or the screen.
+            // under it, or the screen. The options' buttons toggle.
             (PickMode::Record, Some(true)) => {
+                if let Some(option) = self.picker_option_at(at) {
+                    self.toggle_record_option(option);
+                    let options = self.recorder.options;
+                    if let Some(picking) = &mut self.shots.picking {
+                        picking.on_option = true;
+                        for (_, panel) in &mut picking.panels {
+                            panel.view.set_options(options);
+                        }
+                    }
+                    self.needs_redraw = true;
+                    return true;
+                }
                 let output = self.space.output_under(at).next().map(Output::name);
                 if let (Some(output), Some(picking)) = (output, &mut self.shots.picking) {
                     picking.from = Some((at, output));
                 }
             }
             (PickMode::Record, Some(false)) => {
+                if let Some(picking) = &mut self.shots.picking
+                    && std::mem::take(&mut picking.on_option)
+                {
+                    return true;
+                }
                 let from = self.shots.picking.as_ref().and_then(|p| p.from.clone());
                 self.shots.picking = None;
                 let Some((from, output)) = from else {
@@ -277,6 +301,18 @@ impl State {
         }
         self.needs_redraw = true;
         true
+    }
+
+    /// The recording's option whose button is at `at`, if any.
+    fn picker_option_at(&self, at: Point<f64, Logical>) -> Option<RecordOption> {
+        let picking = self.shots.picking.as_ref()?;
+        let output = self.space.output_under(at).next()?;
+        let g = self.space.output_geometry(output)?;
+        let (_, panel) = picking.panels.iter().find(|(n, _)| *n == output.name())?;
+        let local = at - g.loc.to_f64();
+        panel
+            .view
+            .option_at(hocus_ui::Point::new(local.x as f32, local.y as f32))
     }
 
     /// The region from `from` to `to`, on `output`, in its local logical
