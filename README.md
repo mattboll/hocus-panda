@@ -39,6 +39,13 @@ show what your computer is doing.
 
 Not yet. See [Workflow](docs/workflow.md#tools) for the tools to install.
 
+## Installing
+
+The [Packages workflow](.github/workflows/packages.yml) builds a .deb
+(Debian 13, Ubuntu 24.04 and later) and an .rpm (Fedora); a FreeBSD port is
+in [packaging/](packaging/), which tells how to build each one. Once
+installed, display managers offer the "Hocuspanda" session.
+
 ## License
 
 [MIT](LICENSE).

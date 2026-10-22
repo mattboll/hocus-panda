@@ -1,0 +1,4 @@
+# The lock screen's password check: hocuspanda asks PAM as the user who
+# is logged in. Without this file it uses the `login` service.
+@include common-auth
+@include common-account

@@ -1,0 +1,128 @@
+name: Packages
+
+# Release builds take a while: on main, on tags, on demand, and on pull
+# requests that change the packaging.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/packages.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deb:
+    # Built on the oldest system it is meant for: Debian 13 and Ubuntu 24.04
+    # have its C library and its dependencies' names.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang mold pkg-config dpkg-dev \
+            libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
+            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev libpam0g-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Release build
+        run: cargo build --release --locked -p hocuspanda -p hocus -p hocus-settings
+      - name: Package
+        run: packaging/deb/build.sh dist
+      - name: Install it
+        run: |
+          sudo apt-get install -y ./dist/hocuspanda_*.deb
+          hocuspanda --version
+          hocus --version
+          test -f /usr/share/wayland-sessions/hocuspanda.desktop
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  rpm:
+    runs-on: ubuntu-latest
+    container: fedora:43
+    steps:
+      - name: Build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            git clang mold pkgconf-pkg-config rpm-build \
+            libseat-devel libinput-devel systemd-devel mesa-libgbm-devel libdrm-devel \
+            libxkbcommon-devel wayland-devel libglvnd-devel pixman-devel pam-devel
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Release build
+        run: cargo build --release --locked -p hocuspanda -p hocus -p hocus-settings
+      - name: Package
+        run: packaging/rpm/build.sh dist
+      - name: Install it
+        run: |
+          dnf install -y ./dist/hocuspanda-*.rpm
+          hocuspanda --version
+          hocus --version
+          test -f /usr/share/wayland-sessions/hocuspanda.desktop
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  freebsd:
+    # The port of packaging/freebsd, built in a ports tree as a porter would,
+    # from this commit's tarball on GitHub instead of a release's.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HP_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the port on FreeBSD 14
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14"
+          usesh: true
+          envs: HP_COMMIT
+          prepare: |
+            # The head of the ports tree goes with the packages built from it.
+            mkdir -p /usr/local/etc/pkg/repos
+            echo 'FreeBSD: { url: "pkg+https://pkg.FreeBSD.org/${ABI}/latest" }' \
+              > /usr/local/etc/pkg/repos/FreeBSD.conf
+            pkg install -y git-lite rust pkgconf wayland libxkbcommon pixman mesa-libs \
+              libglvnd libdrm libinput seatd libudev-devd fontconfig
+          run: |
+            set -e
+            git clone -q --depth 1 https://github.com/freebsd/freebsd-ports.git /usr/ports
+            cp -R packaging/freebsd/x11-wm/hocuspanda /usr/ports/x11-wm/
+            port() {
+              make -C /usr/ports/x11-wm/hocuspanda BATCH=yes DEVELOPER=yes HOCUSPANDA_COMMIT="$HP_COMMIT" "$@"
+            }
+            port makesum
+            port extract
+            port cargo-crates > /usr/ports/x11-wm/hocuspanda/Makefile.crates
+            port makesum
+            # Extracted again, with the crates this time.
+            port clean
+            # What it needs from packages, not built from the ports tree.
+            port install-missing-packages
+            port stage check-plist package
+            mkdir -p dist
+            cp /usr/ports/x11-wm/hocuspanda/work/pkg/*.pkg dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: freebsd
+          path: dist/*.pkg
+          if-no-files-found: error

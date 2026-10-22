@@ -81,6 +81,16 @@ scripts/vm/debian.sh down
 `--session-services` makes a headless hocuspanda use the machine's services
 as the session would: only in a VM, never next to a live session.
 
+Packages (see [packaging/](packaging/README.md)), from a release build:
+
+```sh
+cargo build --release --locked -p hocuspanda -p hocus -p hocus-settings
+packaging/deb/build.sh                 # target/packages/*.deb (dpkg-dev)
+packaging/rpm/build.sh                 # target/packages/*.rpm (rpm-build)
+# the .deb in the VM, logging in from a display manager (greetd)
+scripts/vm/display-manager.sh target/packages/hocuspanda_*.deb shot.png
+```
+
 Update this section as commands land.
 
 ## Hard rules
