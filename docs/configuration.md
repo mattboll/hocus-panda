@@ -134,6 +134,24 @@ pinned = [                 # desktop entries, in order; those not installed are 
   "org.gnome.Nautilus.desktop", "thunderbird.desktop",
 ]
 
+[hot_corners]              # the pointer resting in a screen's corner; one against another screen does nothing
+delay_ms = 150             # so that passing by does nothing
+top_left = "none"          # overview, launcher, show-desktop or none
+top_right = "none"
+bottom_left = "none"
+bottom_right = "none"
+
+[hot_corners.outputs."HDMI-A-1"]   # one screen's own, the others' otherwise
+top_left = "launcher"
+
+[gestures]                 # Super alone and the touchpad; overview, launcher, show-desktop or none
+super_alone = "overview"   # Super pressed and let go with nothing else between
+three_sideways = true      # three fingers sideways switch desktops
+three_up = "overview"
+three_down = "none"
+four_up = "launcher"
+four_down = "none"
+
 [[rules]]                  # windows matching app_id and title (globs: * and ?)
 app_id = "chat*"
 output = "eDP-1"           # opens there, when plugged
@@ -233,6 +251,8 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `dock` | shows the dock, or hides it again |
+| `overview` | every screen's windows in a grid, or closes it |
+| `show-desktop` | the desktop of the screen under the pointer, its windows out of the way, or back |
 | `spawn COMMAND` | runs a command through the shell |
 | `quit` | ends the session at once, without asking windows to close |
 | `none` | removes a default shortcut |

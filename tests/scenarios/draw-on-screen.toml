@@ -1,0 +1,56 @@
+description = "Super and a left drag draw a felt-tip line over everything, and the window under it gets no button; Super let go, the line fades and goes"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "board", size = [800, 500], color = "#f2f2f2" }
+
+[[step]]
+pointer_move = [400, 300]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [480, 340]
+
+[[step]]
+pointer_move = [560, 320]
+
+[[step]]
+pointer_move = [640, 380]
+
+[[step]]
+pointer_move = [760, 360]
+
+[[step]]
+release = "left"
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "draw-on-screen.png" }
+
+[[step]]
+expect_not_received = { app_id = "board", event = "button 272 pressed" }
+
+[[step]]
+key_up = "super"
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "draw-on-screen-fading.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [560, 320], color = "#f2f2f2", tolerance = 8 }
+
+[[step]]
+expect_idle = { for_ms = 5000 }

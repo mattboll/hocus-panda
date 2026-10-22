@@ -1,0 +1,46 @@
+description = "Super pressed and let go alone opens the overview; with another key, or a click, between, it does not"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+key_down = "super"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "editor" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "editor", shown = false }
+
+# Super and another key: a shortcut, or nothing, but not the overview.
+[[step]]
+key_down = "super"
+
+[[step]]
+key = 30
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "editor", shown = false }
+
+# Super and a scroll.
+[[step]]
+key_down = "super"
+
+[[step]]
+scroll = 15
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "editor", shown = false }

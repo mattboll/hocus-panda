@@ -1398,6 +1398,7 @@ impl SettingsView {
         let body = self.scrolled(main);
         match page {
             Page::Appearance => self.appearance(theme, body),
+            Page::Desktops => self.desktops(theme, body),
             Page::Keyboard => self.keyboard(theme, body),
             Page::Screens => self.screens(theme, body),
             Page::Account => self.account(theme, body),
@@ -1742,6 +1743,54 @@ impl SettingsView {
             );
             self.tree.set_focus(Some(id));
         }
+    }
+
+    /// Desktops: what each corner of a screen does (#86).
+    fn desktops(&mut self, theme: &Theme, body: NodeId) {
+        use hocus_core::config::Trigger;
+        let lang = self.lang;
+        let c = self.ctx.config.hot_corners.clone();
+        let section = self.section(theme, body, words::HOT_CORNERS);
+        self.add(
+            section,
+            fill_width(Style::default()),
+            Kind::text(
+                words::HOT_CORNERS_NOTE.get(lang),
+                theme.text.label.with_weight(500).with_color(Paint::Muted),
+            ),
+        );
+        for (key, name, current) in [
+            ("top_left", words::TOP_LEFT, c.top_left),
+            ("top_right", words::TOP_RIGHT, c.top_right),
+            ("bottom_left", words::BOTTOM_LEFT, c.bottom_left),
+            ("bottom_right", words::BOTTOM_RIGHT, c.bottom_right),
+        ] {
+            // The corner's name above its choices, which then fit.
+            let corner = self.add(section, column(8.0), Kind::Box(Look::default()));
+            self.line(corner, name.get(lang), theme.text.body.with_weight(600));
+            let line = self.add(corner, row(8.0), Kind::Box(Look::default()));
+            for trigger in Trigger::ALL {
+                let mut button =
+                    Button::new(words::trigger(trigger).get(lang), ButtonKind::Plain, theme);
+                button.selected = trigger == current;
+                let b = self.add(
+                    line,
+                    Style {
+                        height: Length::Px(40.0),
+                        padding: Insets::symmetric(0.0, 14.0),
+                        ..Style::default()
+                    },
+                    Kind::Button(button),
+                );
+                let label = format!("{}: {}", name.get(lang), words::trigger(trigger).get(lang));
+                self.tree.set_name(b, &label);
+                self.targets.insert(
+                    b,
+                    Target::Set(Change::new("hot_corners", key, trigger.as_str())),
+                );
+            }
+        }
+        self.highlighted(section, &Setting::HotCorners, Look::default());
     }
 
     fn appearance(&mut self, theme: &Theme, body: NodeId) {

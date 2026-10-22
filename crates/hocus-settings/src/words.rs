@@ -386,3 +386,28 @@ pub fn synced(events: usize, lang: Lang) -> String {
         (Lang::Fr, n) => format!("Synchronisé · {n} événements"),
     }
 }
+
+pub const HOT_CORNERS: Words = Words::new("Hot corners", "Coins actifs");
+pub const HOT_CORNERS_NOTE: Words = Words::new(
+    "Rest the pointer in a corner of a screen for it to act. A corner against another screen does nothing.",
+    "Laissez le pointeur dans un coin d’un écran pour qu’il agisse. Un coin contre un autre écran ne fait rien.",
+);
+pub const TOP_LEFT: Words = Words::new("Top left", "En haut à gauche");
+pub const TOP_RIGHT: Words = Words::new("Top right", "En haut à droite");
+pub const BOTTOM_LEFT: Words = Words::new("Bottom left", "En bas à gauche");
+pub const BOTTOM_RIGHT: Words = Words::new("Bottom right", "En bas à droite");
+pub const OVERVIEW: Words = Words::new("Overview", "Vue d’ensemble");
+pub const LAUNCHER: Words = Words::new("Launcher", "Lanceur");
+pub const SHOW_DESKTOP: Words = Words::new("Desktop", "Bureau");
+pub const NOTHING: Words = Words::new("Nothing", "Rien");
+
+/// What a hot corner does, as the settings name it.
+pub fn trigger(t: hocus_core::config::Trigger) -> Words {
+    use hocus_core::config::Trigger;
+    match t {
+        Trigger::Overview => OVERVIEW,
+        Trigger::Launcher => LAUNCHER,
+        Trigger::ShowDesktop => SHOW_DESKTOP,
+        Trigger::None => NOTHING,
+    }
+}

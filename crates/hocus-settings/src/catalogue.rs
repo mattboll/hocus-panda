@@ -314,6 +314,7 @@ pub enum Setting {
     Shortcut(String),
     /// A screen, by its name.
     Screen(String),
+    HotCorners,
 }
 
 impl Setting {
@@ -328,6 +329,7 @@ impl Setting {
             | Self::ThemePerDesktop => Page::Appearance,
             Self::Layouts | Self::Shortcut(_) => Page::Keyboard,
             Self::Screen(_) => Page::Screens,
+            Self::HotCorners => Page::Desktops,
         }
     }
 }
@@ -425,6 +427,32 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
             words::THEME_PER_DESKTOP.get(lang).to_owned(),
             both(words::THEME_PER_DESKTOP),
             words::NOT_YET.get(lang).to_owned(),
+        ),
+        (
+            Setting::HotCorners,
+            words::HOT_CORNERS.get(lang).to_owned(),
+            [
+                both(words::HOT_CORNERS),
+                vec![
+                    "corner".into(),
+                    "coin".into(),
+                    "overview".into(),
+                    "show desktop".into(),
+                ],
+            ]
+            .concat(),
+            {
+                let c = &ctx.config.hot_corners;
+                let set = [c.top_left, c.top_right, c.bottom_left, c.bottom_right]
+                    .into_iter()
+                    .filter(|t| *t != hocus_core::config::Trigger::None)
+                    .count();
+                if set == 0 {
+                    words::OFF.get(lang).to_owned()
+                } else {
+                    format!("{set}/4")
+                }
+            },
         ),
         (
             Setting::Layouts,

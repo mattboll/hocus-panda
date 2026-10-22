@@ -129,6 +129,8 @@ impl State {
                     .map(SceneElement::Cursor),
             );
         }
+        // Drawing on the screen (#86), over everything.
+        elements.extend(self.ink_elements(renderer, output));
         let Some(area) = self.space.output_geometry(output) else {
             return elements;
         };

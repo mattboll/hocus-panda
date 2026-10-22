@@ -28,6 +28,8 @@ pub struct Config {
     /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
     pub calendars: Vec<CalendarAccount>,
     pub dock: Dock,
+    pub hot_corners: HotCorners,
+    pub gestures: Gestures,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -389,6 +391,125 @@ impl Default for Dock {
             ]
             .map(String::from)
             .to_vec(),
+        }
+    }
+}
+
+/// What a hot corner, Super alone or a touchpad gesture does (#86).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Trigger {
+    /// Every screen's windows in a grid.
+    Overview,
+    Launcher,
+    /// The desktop, its windows out of the way until asked again.
+    ShowDesktop,
+    #[default]
+    None,
+}
+
+impl Trigger {
+    pub const ALL: [Trigger; 4] = [
+        Trigger::Overview,
+        Trigger::Launcher,
+        Trigger::ShowDesktop,
+        Trigger::None,
+    ];
+
+    /// As the file writes it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Overview => "overview",
+            Self::Launcher => "launcher",
+            Self::ShowDesktop => "show-desktop",
+            Self::None => "none",
+        }
+    }
+}
+
+/// A screen's four corners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Corners {
+    pub top_left: Trigger,
+    pub top_right: Trigger,
+    pub bottom_left: Trigger,
+    pub bottom_right: Trigger,
+}
+
+/// One screen's corners set apart from the others'.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CornersOverride {
+    pub top_left: Option<Trigger>,
+    pub top_right: Option<Trigger>,
+    pub bottom_left: Option<Trigger>,
+    pub bottom_right: Option<Trigger>,
+}
+
+/// Hot corners (#86): the pointer resting in a screen's corner, one that
+/// is not against another screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HotCorners {
+    /// How long the pointer rests there first, so passing by does nothing.
+    pub delay_ms: u32,
+    pub top_left: Trigger,
+    pub top_right: Trigger,
+    pub bottom_left: Trigger,
+    pub bottom_right: Trigger,
+    /// By output name: `[hot_corners.outputs."HDMI-A-1"]`.
+    pub outputs: std::collections::BTreeMap<String, CornersOverride>,
+}
+
+impl Default for HotCorners {
+    fn default() -> Self {
+        Self {
+            delay_ms: 150,
+            top_left: Trigger::None,
+            top_right: Trigger::None,
+            bottom_left: Trigger::None,
+            bottom_right: Trigger::None,
+            outputs: Default::default(),
+        }
+    }
+}
+
+impl HotCorners {
+    /// The corners of the output named so.
+    pub fn of(&self, output: &str) -> Corners {
+        let o = self.outputs.get(output).copied().unwrap_or_default();
+        Corners {
+            top_left: o.top_left.unwrap_or(self.top_left),
+            top_right: o.top_right.unwrap_or(self.top_right),
+            bottom_left: o.bottom_left.unwrap_or(self.bottom_left),
+            bottom_right: o.bottom_right.unwrap_or(self.bottom_right),
+        }
+    }
+}
+
+/// Super alone and touchpad gestures (#86).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Gestures {
+    /// Super pressed and let go with nothing else.
+    pub super_alone: Trigger,
+    /// Three fingers sideways switch desktops (#36).
+    pub three_sideways: bool,
+    pub three_up: Trigger,
+    pub three_down: Trigger,
+    pub four_up: Trigger,
+    pub four_down: Trigger,
+}
+
+impl Default for Gestures {
+    fn default() -> Self {
+        Self {
+            super_alone: Trigger::Overview,
+            three_sideways: true,
+            three_up: Trigger::Overview,
+            three_down: Trigger::None,
+            four_up: Trigger::Launcher,
+            four_down: Trigger::None,
         }
     }
 }
