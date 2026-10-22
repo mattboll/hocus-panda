@@ -103,6 +103,15 @@ pub enum Step {
     ClickUi(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
+    /// Writes the saved session file (TOML); `{test_client}` is the test
+    /// client program.
+    SessionFile(String),
+    /// Saves the session now.
+    SaveSession(bool),
+    /// Offers to put the saved session back, as at start.
+    OfferSession(bool),
+    /// The saved session file holds these strings.
+    ExpectSessionFile(ExpectConfigFile),
     /// A lock client locks the session with a surface of this colour on
     /// every output: `"#rrggbb"`; waits until it is locked.
     LockClient(String),
@@ -414,6 +423,10 @@ impl fmt::Display for Step {
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
             Self::Share(_) => write!(f, "share"),
             Self::LockClient(_) => write!(f, "lock_client"),
+            Self::SessionFile(_) => write!(f, "session_file"),
+            Self::SaveSession(_) => write!(f, "save_session"),
+            Self::OfferSession(_) => write!(f, "offer_session"),
+            Self::ExpectSessionFile(_) => write!(f, "expect_session_file"),
             Self::UnlockClient(_) => write!(f, "unlock_client"),
             Self::CrashLockClient(_) => write!(f, "crash_lock_client"),
             Self::StopSharing(_) => write!(f, "stop_sharing"),
@@ -594,6 +607,41 @@ impl Run<'_> {
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
             Step::OpenSettings(open) => self.open_settings(open),
+            Step::SessionFile(text) => {
+                let mut text = text.clone();
+                if let Some(client) = &self.options.test_client {
+                    text = text.replace("{test_client}", &client.to_string_lossy());
+                }
+                let dir = self.compositor.state_dir();
+                std::fs::create_dir_all(&dir)?;
+                std::fs::write(dir.join("session.toml"), text)?;
+                Ok(())
+            }
+            Step::SaveSession(_) => {
+                self.request(Request::SaveSession)?;
+                Ok(())
+            }
+            Step::OfferSession(_) => {
+                self.request(Request::OfferSession)?;
+                self.compositor.advance(FRAME)
+            }
+            Step::ExpectSessionFile(expected) => {
+                let path = self.compositor.state_dir().join("session.toml");
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                for wanted in &expected.contains {
+                    anyhow::ensure!(
+                        text.contains(wanted.as_str()),
+                        "the session file lacks {wanted:?}:\n{text}"
+                    );
+                }
+                for unwanted in &expected.lacks {
+                    anyhow::ensure!(
+                        !text.contains(unwanted.as_str()),
+                        "the session file has {unwanted:?}:\n{text}"
+                    );
+                }
+                Ok(())
+            }
             Step::LockClient(color) => {
                 let client = crate::session_lock::LockClient::spawn(
                     self.compositor.socket_path(),

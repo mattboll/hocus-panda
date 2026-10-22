@@ -144,6 +144,7 @@ fn main() -> anyhow::Result<()> {
         shell: !args.no_shell,
         session_bus: args.session_bus,
         system_bus: args.system_bus,
+        state_dir: None,
         data_dirs: None,
         child_env: None,
         backend: match args.backend {

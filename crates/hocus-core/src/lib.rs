@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod model;
+pub mod session;
 pub mod shortcuts;
 pub mod snap;
 pub mod tiling;

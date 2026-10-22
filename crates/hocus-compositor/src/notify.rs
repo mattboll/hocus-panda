@@ -37,6 +37,8 @@ const INSET: i32 = 8;
 pub struct ToastPanel {
     toasts: Toasts,
     lang: Lang,
+    /// The next id of the shell's own toasts.
+    next_shell_id: u32,
     server: Option<Notifications>,
     /// The output they are on, its work area and scale.
     on: Option<(String, Rectangle<i32, Logical>, f64)>,
@@ -53,6 +55,10 @@ impl ToastPanel {
 
 /// The id of the shell's own summary toast, out of the server's range.
 const SUMMARY: u32 = u32::MAX;
+/// The shell's own toasts count down from there; the server's ids never
+/// reach them.
+const SHELL_IDS: u32 = u32::MAX - 1;
+const SHELL_IDS_END: u32 = u32::MAX - 10_000;
 
 /// Serves notifications on the bus at `address`; toasts are shown even if
 /// the bus is not there (nothing then sends any).
@@ -65,6 +71,7 @@ pub fn start(
     let mut panel = ToastPanel {
         toasts: Toasts::new(Theme::default(), lang, 600.0, 1.0),
         lang,
+        next_shell_id: SHELL_IDS,
         server: None,
         on: None,
         buffer: None,
@@ -191,12 +198,34 @@ impl State {
         let Some(lang) = self.toasts.as_ref().map(|p| p.lang) else {
             return;
         };
+        self.shell_notification(
+            SUMMARY,
+            lang.held_while_sharing(held),
+            lang.in_the_column().into(),
+        );
+    }
+
+    /// A toast from the shell itself (a session not put back…).
+    pub fn shell_toast(&mut self, summary: &str, body: &str) {
+        let Some(panel) = self.toasts.as_mut() else {
+            return;
+        };
+        let id = panel.next_shell_id;
+        panel.next_shell_id = if id <= SHELL_IDS_END {
+            SHELL_IDS
+        } else {
+            id - 1
+        };
+        self.shell_notification(id, summary.to_owned(), body.to_owned());
+    }
+
+    fn shell_notification(&mut self, id: u32, summary: String, body: String) {
         self.on_notification(Incoming::Notify(
             hocus_platform::notifications::Notification {
-                id: SUMMARY,
+                id,
                 app: "Hocuspanda".into(),
-                summary: lang.held_while_sharing(held),
-                body: lang.in_the_column().into(),
+                summary,
+                body,
                 actions: Vec::new(),
                 urgency: Urgency::Normal,
                 expiry: Expiry::Default,
@@ -219,7 +248,7 @@ impl State {
         };
         // The shell's own toasts are not the server's to report.
         for event in events.into_iter().filter(|e| {
-            !matches!(e, ToastEvent::Expired(id) | ToastEvent::Dismissed(id) | ToastEvent::Action(id, _) if *id == SUMMARY)
+            !matches!(e, ToastEvent::Expired(id) | ToastEvent::Dismissed(id) | ToastEvent::Action(id, _) if *id >= SHELL_IDS_END)
         }) {
             match event {
                 ToastEvent::Expired(id) => server.closed(id, CloseReason::Expired),

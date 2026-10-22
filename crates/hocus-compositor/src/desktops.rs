@@ -290,6 +290,7 @@ impl State {
         }
         self.adopt_dropdown(id, app_id.as_deref(), serial);
         self.settings_arrived(app_id.as_deref());
+        self.place_restored(id, app_id.as_deref());
     }
 
     /// Where a new window of `size` goes on `output`: centred in its work

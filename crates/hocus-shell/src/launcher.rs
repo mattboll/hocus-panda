@@ -232,6 +232,16 @@ impl Launcher {
     }
 
     /// The applications to search; an open launcher searches them again.
+    /// The application whose windows have `app_id`: its desktop entry is
+    /// `<app id>.desktop`, or ends with `.<app id>.desktop`.
+    pub fn app_for(&self, app_id: &str) -> Option<&App> {
+        let wanted = app_id.to_lowercase();
+        self.apps.iter().find(|app| {
+            let id = app.id.trim_end_matches(".desktop").to_lowercase();
+            id == wanted || id.ends_with(&format!(".{wanted}"))
+        })
+    }
+
     pub fn set_apps(&mut self, apps: Vec<App>) {
         self.apps = apps;
         if self.open {

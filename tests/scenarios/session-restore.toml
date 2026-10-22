@@ -1,0 +1,88 @@
+description = "A saved session is offered at start; put back, foot opens on the external screen's desktop 2 where it was; an app that cannot start and one whose window never comes are reported, the others are put back"
+outputs = ["1280x800", "1920x1080+1280+0"]
+shell = true
+
+[[step]]
+session_file = """
+[[window]]
+app_id = "foot"
+title = "~"
+command = ["{test_client}", "--app-id", "foot", "--size", "600x400", "--color", "#2b2f36"]
+output = "HEADLESS-2"
+desktop = 2
+geometry = [1480, 200, 600, 400]
+state = "normal"
+
+[[window]]
+app_id = "editor"
+title = "notes.txt"
+command = ["{test_client}", "--app-id", "editor", "--size", "500x300", "--color", "#3399ff"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [100, 100, 500, 300]
+state = "maximized"
+
+[[window]]
+app_id = "broken"
+title = "gone"
+command = ["/nonexistent/broken"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [0, 0, 300, 200]
+state = "normal"
+
+[[window]]
+app_id = "sleepy"
+title = "never"
+command = ["/bin/sh", "-c", "exit 0"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [0, 0, 300, 200]
+state = "normal"
+"""
+
+[[step]]
+offer_session = true
+
+[[step]]
+expect_ui = { label = "Welcome back" }
+
+[[step]]
+expect_ui = { label = "4 windows were open." }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "session-welcome.png" }
+
+[[step]]
+click_ui = "Put everything back"
+
+[[step]]
+expect_ui = { label = "Welcome back", shown = false }
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-1", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "foot", visible = false }
+
+[[step]]
+expect_ui = { label = "broken was not put back" }
+
+# On the external screen's desktop 2, where it was.
+[[step]]
+pointer_move = [2000, 500]
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_window = { app_id = "foot", output = "HEADLESS-2", geometry = [1480, 200, 600, 400], visible = true }
+
+[[step]]
+advance_ms = 16000
+
+[[step]]
+expect_ui = { label = "sleepy was not put back" }

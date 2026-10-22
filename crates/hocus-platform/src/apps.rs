@@ -75,6 +75,58 @@ pub fn scan(dirs: &[PathBuf], lang: Option<&str>) -> Vec<Entry> {
     entries
 }
 
+/// Where autostart entries are: the user's configuration directory, then
+/// the system's (`$XDG_CONFIG_HOME`, `$XDG_CONFIG_DIRS`).
+pub fn config_dirs() -> Vec<PathBuf> {
+    let home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    let system = std::env::var("XDG_CONFIG_DIRS")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "/etc/xdg".into());
+    home.into_iter()
+        .chain(
+            system
+                .split(':')
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute()),
+        )
+        .collect()
+}
+
+/// The applications to start with the session, from `autostart/` in each
+/// of `dirs`; an entry of an earlier directory overrides, or hides, the same
+/// one in a later directory. Reads files: for a worker thread.
+pub fn autostart(dirs: &[PathBuf]) -> Vec<Entry> {
+    let mut by_id: BTreeMap<String, Option<Entry>> = BTreeMap::new();
+    for dir in dirs {
+        let Ok(read) = std::fs::read_dir(dir.join("autostart")) else {
+            continue;
+        };
+        let mut files: Vec<PathBuf> = read
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "desktop"))
+            .collect();
+        files.sort();
+        for file in files {
+            let Some(id) = file.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+                continue;
+            };
+            if by_id.contains_key(&id) {
+                continue;
+            }
+            let entry = std::fs::read_to_string(&file)
+                .ok()
+                .and_then(|text| parse_for(&id, &text, None, true));
+            by_id.insert(id, entry);
+        }
+    }
+    by_id.into_values().flatten().collect()
+}
+
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(read) = std::fs::read_dir(dir) else {
         return;
@@ -91,6 +143,12 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// An entry from a file's text; `None` for what the launcher must not show.
 pub fn parse(id: &str, text: &str, lang: Option<&str>) -> Option<Entry> {
+    parse_for(id, text, lang, false)
+}
+
+/// The same for autostart: `NoDisplay` does not matter there, and GNOME's
+/// `X-GNOME-Autostart-enabled=false` turns an entry off.
+fn parse_for(id: &str, text: &str, lang: Option<&str>, autostart: bool) -> Option<Entry> {
     let mut keys: BTreeMap<String, String> = BTreeMap::new();
     let mut in_entry = false;
     for line in text.lines() {
@@ -126,7 +184,11 @@ pub fn parse(id: &str, text: &str, lang: Option<&str>) -> Option<Entry> {
         })
         .unwrap_or_default()
     };
-    if get("Type").as_deref() != Some("Application") || yes("NoDisplay") || yes("Hidden") {
+    if get("Type").as_deref() != Some("Application")
+        || (yes("NoDisplay") && !autostart)
+        || yes("Hidden")
+        || (autostart && get("X-GNOME-Autostart-enabled").as_deref() == Some("false"))
+    {
         return None;
     }
     let only = list(get("OnlyShowIn"));
@@ -298,5 +360,40 @@ mod tests {
                 "env > $XDG_RUNTIME_DIR/env".into()
             ])
         );
+    }
+
+    #[test]
+    fn autostart_entries_are_overridden_and_hidden_by_the_user() {
+        let dir = std::env::temp_dir().join(format!("hocus-autostart-{}", std::process::id()));
+        let user = dir.join("user/autostart");
+        let system = dir.join("system/autostart");
+        std::fs::create_dir_all(&user).expect("dir");
+        std::fs::create_dir_all(&system).expect("dir");
+        let entry = |exec: &str, extra: &str| {
+            format!(
+                "[Desktop Entry]\nType=Application\nName=X\nExec={exec}\nNoDisplay=true\n{extra}"
+            )
+        };
+        std::fs::write(system.join("agent.desktop"), entry("agent", "")).expect("write");
+        std::fs::write(system.join("tray.desktop"), entry("tray", "")).expect("write");
+        std::fs::write(
+            system.join("gnome.desktop"),
+            entry("gnome", "X-GNOME-Autostart-enabled=false"),
+        )
+        .expect("write");
+        std::fs::write(user.join("tray.desktop"), entry("tray", "Hidden=true")).expect("write");
+        std::fs::write(user.join("mine.desktop"), entry("mine --quiet", "")).expect("write");
+        let found: Vec<Vec<String>> = autostart(&[dir.join("user"), dir.join("system")])
+            .into_iter()
+            .map(|e| e.exec)
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                vec!["agent".to_owned()],
+                vec!["mine".to_owned(), "--quiet".to_owned()]
+            ]
+        );
+        std::fs::remove_dir_all(&dir).expect("cleaned");
     }
 }

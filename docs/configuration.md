@@ -48,6 +48,10 @@ colour = "#0e0f12"         # around a fitted image, or the whole screen; the the
 output = "DP-1"
 image = "~/Pictures/wide.png"
 
+[session]                  # the last session, at start
+restore = "ask"            # ask (a card), always, never
+autostart = true           # start the XDG autostart entries
+
 [idle]                     # nobody at the keyboard
 curtain_after = 300        # seconds before the curtain dims the screens (0: never)
 lock_after = 30            # seconds of curtain before the session locks

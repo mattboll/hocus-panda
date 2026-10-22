@@ -139,6 +139,8 @@ impl Headless {
             shell: harness.shell,
             session_bus: harness.session_bus.clone(),
             system_bus: harness.system_bus.clone(),
+            // Private: tests never touch the developer's saved session.
+            state_dir: Some(config_dir.path().join("state")),
             data_dirs: harness.data_dirs.clone(),
             child_env: harness.child_env.clone(),
         };
@@ -188,6 +190,11 @@ impl Headless {
     /// The control socket.
     pub fn api_socket(&self) -> &Path {
         self.app.state.api.path()
+    }
+
+    /// Where the session is saved.
+    pub fn state_dir(&self) -> std::path::PathBuf {
+        self.config.with_file_name("state")
     }
 
     pub fn runtime_dir(&self) -> &Path {

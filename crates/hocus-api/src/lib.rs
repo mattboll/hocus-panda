@@ -112,6 +112,10 @@ pub enum Request {
     /// The shell's interface as screen readers see it: roles, labels and
     /// where each element is.
     Ui,
+    /// Saves the session now.
+    SaveSession,
+    /// Offers to put the saved session back, as at start.
+    OfferSession,
     /// Opens the settings app on a page (`hocus settings keyboard`), or
     /// brings it forward.
     OpenSettings {
@@ -187,7 +191,9 @@ impl Request {
             | Self::SendWindow { .. }
             | Self::PlugOutput { .. }
             | Self::UnplugOutput { .. }
-            | Self::SetPrimaryOutput { .. } => Permission::Test,
+            | Self::SetPrimaryOutput { .. }
+            | Self::SaveSession
+            | Self::OfferSession => Permission::Test,
         }
     }
 }
