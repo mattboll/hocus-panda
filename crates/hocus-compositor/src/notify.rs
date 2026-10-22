@@ -219,6 +219,36 @@ impl State {
         self.shell_notification(id, summary.to_owned(), body.to_owned());
     }
 
+    /// A toast from the shell with actions (`key`, label); its id, to know
+    /// which it is when an action is chosen.
+    pub fn shell_toast_with(
+        &mut self,
+        summary: &str,
+        body: &str,
+        actions: Vec<(String, String)>,
+    ) -> Option<u32> {
+        let panel = self.toasts.as_mut()?;
+        let id = panel.next_shell_id;
+        panel.next_shell_id = if id <= SHELL_IDS_END {
+            SHELL_IDS
+        } else {
+            id - 1
+        };
+        self.on_notification(Incoming::Notify(
+            hocus_platform::notifications::Notification {
+                id,
+                app: "Hocuspanda".into(),
+                summary: summary.to_owned(),
+                body: body.to_owned(),
+                actions,
+                urgency: Urgency::Normal,
+                expiry: Expiry::Default,
+                replaces: true,
+            },
+        ));
+        Some(id)
+    }
+
     fn shell_notification(&mut self, id: u32, summary: String, body: String) {
         self.on_notification(Incoming::Notify(
             hocus_platform::notifications::Notification {
@@ -243,6 +273,14 @@ impl State {
     }
 
     fn toast_events(&mut self, events: Vec<ToastEvent>) {
+        // The shell's own toasts act here.
+        for event in &events {
+            if let ToastEvent::Action(id, key) = event
+                && *id >= SHELL_IDS_END
+            {
+                self.screenshot_action(*id, key);
+            }
+        }
         let Some(server) = self.toasts.as_ref().and_then(|p| p.server.as_ref()) else {
             return;
         };

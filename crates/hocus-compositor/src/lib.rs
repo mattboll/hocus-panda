@@ -31,6 +31,7 @@ mod outputs;
 mod quick;
 mod scene;
 mod screen_capture;
+mod screenshot;
 mod session;
 mod settings;
 mod shell;
@@ -236,6 +237,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     state.is_session = options.session_services || matches!(options.backend, Backend::Tty);
     lock::start(&event_loop.handle(), &mut state);
     leave::start(&event_loop.handle(), &mut state);
+    screenshot::start(&event_loop.handle(), &mut state);
     authorize::start(
         &event_loop.handle(),
         &mut state,
@@ -321,6 +323,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     event_loop.run(None, &mut app, |app| {
         app.state.refresh_shell();
         app.serve_captures();
+        app.serve_screenshots();
         app.settle_outputs();
         match &mut app.backend {
             BackendState::Winit(winit) => winit.after_dispatch(&mut app.state),

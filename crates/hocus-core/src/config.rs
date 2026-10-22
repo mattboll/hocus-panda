@@ -21,6 +21,7 @@ pub struct Config {
     pub settings: Settings,
     pub idle: Idle,
     pub session: SessionConfig,
+    pub screenshots: Screenshots,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
@@ -301,6 +302,33 @@ impl Default for SessionConfig {
         Self {
             restore: "ask".into(),
             autostart: true,
+        }
+    }
+}
+
+/// Where screenshots go (#69).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Screenshots {
+    /// The folder they are saved in; empty: `Screenshots` in the pictures
+    /// folder.
+    pub folder: String,
+    /// Saved to the folder.
+    pub save: bool,
+    /// Put on the clipboard.
+    pub copy: bool,
+    /// The program that reads text in a picture, as tesseract does:
+    /// `PROGRAM IMAGE -` prints it.
+    pub ocr: String,
+}
+
+impl Default for Screenshots {
+    fn default() -> Self {
+        Self {
+            folder: String::new(),
+            save: true,
+            copy: true,
+            ocr: "tesseract".into(),
         }
     }
 }

@@ -984,18 +984,26 @@ impl Run<'_> {
                 Ok(())
             }
             Step::ExpectEvent(expected) => {
-                // Events arrive with replies: one request brings the latest.
-                self.request(Request::Version)?;
-                self.events.extend(self.compositor.take_events());
+                // Events arrive with replies: a request brings the latest;
+                // one a worker sends comes in its time.
                 let wanted_type = format!("\"type\":\"{}\"", expected.kind);
-                let found = self.events.iter().any(|e| {
-                    let json = serde_json::to_string(e).unwrap_or_default();
-                    json.contains(&wanted_type)
-                        && expected
-                            .has
-                            .as_ref()
-                            .is_none_or(|h| json.contains(h.as_str()))
-                });
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                let found = loop {
+                    self.request(Request::Version)?;
+                    self.events.extend(self.compositor.take_events());
+                    let found = self.events.iter().any(|e| {
+                        let json = serde_json::to_string(e).unwrap_or_default();
+                        json.contains(&wanted_type)
+                            && expected
+                                .has
+                                .as_ref()
+                                .is_none_or(|h| json.contains(h.as_str()))
+                    });
+                    if found || Instant::now() > deadline {
+                        break found;
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                };
                 anyhow::ensure!(
                     found,
                     "no {} event{}; events: {:?}",

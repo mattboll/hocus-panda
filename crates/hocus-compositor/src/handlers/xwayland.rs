@@ -241,12 +241,14 @@ impl XwmHandler for State {
             &self.seat,
         )
         .and_then(|offer| match &*offer {
-            crate::launcher::Offer::Text(text) => Some(text.clone()),
+            crate::launcher::Offer::Text(text) => Some(Ok(text.clone())),
+            crate::launcher::Offer::Png(png) => Some(Err(png.clone())),
             crate::launcher::Offer::X11 => None,
         });
-        if let Some(text) = own {
-            crate::launcher::send_text(text, fd);
-            return;
+        match own {
+            Some(Ok(text)) => return crate::launcher::send_text(text, fd),
+            Some(Err(png)) => return crate::launcher::send_bytes(png, fd),
+            None => {}
         }
         if let Err(err) = request_data_device_client_selection(&self.seat, mime_type, fd) {
             tracing::debug!(?err, "no Wayland clipboard to give X11");

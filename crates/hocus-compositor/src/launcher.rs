@@ -39,6 +39,8 @@ pub enum Offer {
     X11,
     /// Text the shell put there (a calculator result).
     Text(Arc<str>),
+    /// A picture the shell put there (a screenshot), as PNG.
+    Png(Arc<[u8]>),
 }
 
 /// The text formats the shell offers.
@@ -286,6 +288,25 @@ impl State {
     }
 
     /// Puts text on the clipboard, for Wayland and X11 clients.
+    /// Puts a PNG on the clipboard, for Wayland and X11 clients.
+    pub fn copy_png(&mut self, png: Arc<[u8]>) {
+        let mimes = vec!["image/png".to_owned()];
+        set_data_device_selection(
+            &self.display_handle,
+            &self.seat,
+            mimes.clone(),
+            Offer::Png(png),
+        );
+        if let Some(xwm) = self.xwm.as_mut()
+            && let Err(err) = xwm.new_selection(
+                smithay::wayland::selection::SelectionTarget::Clipboard,
+                Some(mimes),
+            )
+        {
+            tracing::warn!(?err, "could not offer the picture to X11");
+        }
+    }
+
     pub fn copy_text(&mut self, text: &str) {
         let mimes: Vec<String> = TEXT.iter().map(|m| (*m).to_owned()).collect();
         set_data_device_selection(
@@ -571,6 +592,20 @@ impl State {
 
 /// Writes a text offer into a client's pipe, off the loop: the reader may
 /// be slow.
+/// Writes a picture to a reader, from a thread.
+pub fn send_bytes(bytes: Arc<[u8]>, fd: OwnedFd) {
+    let written = std::thread::Builder::new()
+        .name("clipboard".into())
+        .spawn(move || {
+            use std::io::Write;
+            let mut file = std::fs::File::from(fd);
+            let _ = file.write_all(&bytes);
+        });
+    if let Err(err) = written {
+        tracing::warn!(%err, "could not give the clipboard");
+    }
+}
+
 pub fn send_text(text: Arc<str>, fd: OwnedFd) {
     let written = std::thread::Builder::new()
         .name("clipboard".into())

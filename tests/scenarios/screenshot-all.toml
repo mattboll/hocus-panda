@@ -1,0 +1,32 @@
+# Every screen (#69): two screens at different scales make one picture,
+# each at its own pixel density; Escape gives up a region.
+description = "All screens make one picture, each screen at its own pixel density"
+outputs = ["2560x1600@2", "1920x1080"]
+shell = true
+
+[[step]]
+config = """
+[screenshots]
+save = false
+"""
+
+[[step]]
+keys = "super+99"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_event = { type = "screenshot", has = "\"width\":4480,\"height\":1600" }
+
+[[step]]
+keys = "shift+99"
+
+[[step]]
+expect_ui = { label = "Drag over a region · Escape to cancel" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Drag over a region · Escape to cancel", shown = false }

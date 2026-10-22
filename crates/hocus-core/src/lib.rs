@@ -13,5 +13,5 @@ pub mod tiling;
 
 pub use config::{Config, ConfigError};
 pub use model::{Desktop, DesktopId, Model, ModelError, Output, OutputName, Rect, WindowId};
-pub use shortcuts::{Action, Combo, Key, Modifiers, Scope, Shortcuts};
+pub use shortcuts::{Action, Combo, Key, Modifiers, Scope, ScreenshotMode, Shortcuts};
 pub use snap::Zone;

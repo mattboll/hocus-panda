@@ -148,6 +148,7 @@ impl State {
                 self.sleep_now(hocus_platform::power::Power::Hibernate);
             }
             Action::Hibernate => tracing::info!("this machine does not hibernate"),
+            Action::Screenshot { mode, delay } => self.screenshot(*mode, *delay),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }

@@ -66,11 +66,63 @@ pub enum Action {
     /// Sleep at once, locked first.
     Suspend,
     Hibernate,
+    /// A screenshot (#69), after `delay` seconds.
+    Screenshot {
+        mode: ScreenshotMode,
+        delay: u32,
+    },
     /// Window switcher (#39): the windows of the output under the pointer,
     /// or of every output.
     SwitchWindows(Scope),
     /// Runs a command through the shell.
     Spawn(String),
+}
+
+/// What a screenshot takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ScreenshotMode {
+    /// The screen under the pointer.
+    Screen,
+    /// Every screen, as they are arranged.
+    All,
+    /// The window clicked next.
+    Window,
+    /// A region drawn with the pointer.
+    Region,
+}
+
+impl fmt::Display for ScreenshotMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Screen => "screen",
+            Self::All => "all",
+            Self::Window => "window",
+            Self::Region => "region",
+        })
+    }
+}
+
+impl std::str::FromStr for ScreenshotMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "screen" => Ok(Self::Screen),
+            "all" => Ok(Self::All),
+            "window" => Ok(Self::Window),
+            "region" => Ok(Self::Region),
+            other => Err(format!(
+                "screenshot: {other:?}: expected screen, all, window or region"
+            )),
+        }
+    }
+}
+
+impl Action {
+    /// A screenshot at once.
+    pub fn screenshot(mode: ScreenshotMode) -> Self {
+        Self::Screenshot { mode, delay: 0 }
+    }
 }
 
 impl fmt::Display for Action {
@@ -107,6 +159,8 @@ impl fmt::Display for Action {
             Self::ShutDown => write!(f, "shut-down"),
             Self::Suspend => write!(f, "suspend"),
             Self::Hibernate => write!(f, "hibernate"),
+            Self::Screenshot { mode, delay: 0 } => write!(f, "screenshot {mode}"),
+            Self::Screenshot { mode, delay } => write!(f, "screenshot {mode} {delay}"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
             Self::Spawn(command) => write!(f, "spawn {command}"),
         }
@@ -174,6 +228,17 @@ impl FromStr for Action {
             "shut-down" => bare(Self::ShutDown),
             "suspend" => bare(Self::Suspend),
             "hibernate" => bare(Self::Hibernate),
+            "screenshot" => {
+                let mut words = rest.split_whitespace();
+                let mode = words.next().unwrap_or("screen").parse()?;
+                let delay = match words.next() {
+                    Some(d) => d.parse::<u32>().ok().filter(|d| *d <= 60).ok_or_else(|| {
+                        format!("screenshot: delay {d:?}: expected 0 to 60 seconds")
+                    })?,
+                    None => 0,
+                };
+                Ok(Self::Screenshot { mode, delay })
+            }
             "switch-windows" => scope().map(Self::SwitchWindows),
             "spawn" if !rest.is_empty() => Ok(Self::Spawn(rest.to_string())),
             "spawn" => Err("spawn: which command?".into()),
@@ -301,6 +366,11 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Backtick", Action::Dropdown),
         ("Super+Comma", Action::Settings),
         ("Super+L", Action::Lock),
+        ("Print", Action::screenshot(ScreenshotMode::Screen)),
+        ("Super+Print", Action::screenshot(ScreenshotMode::All)),
+        ("Shift+Print", Action::screenshot(ScreenshotMode::Region)),
+        ("Ctrl+Print", Action::screenshot(ScreenshotMode::Window)),
+        ("Super+Shift+S", Action::screenshot(ScreenshotMode::Region)),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),
         ("Super+Tab", Action::SwitchWindows(Scope::AllOutputs)),
     ]

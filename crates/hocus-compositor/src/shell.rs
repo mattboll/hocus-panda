@@ -165,7 +165,19 @@ impl State {
 
     /// The user's time, as the column shows it.
     pub(crate) fn wall_time(&self) -> WallTime {
-        let civil = match &self.wall {
+        let civil = self.wall_civil();
+        WallTime {
+            hour: civil.hour() as u8,
+            minute: civil.minute() as u8,
+            weekday: civil.weekday().to_monday_zero_offset() as u8,
+            day: civil.day() as u8,
+            month: civil.month() as u8,
+        }
+    }
+
+    /// The user's date and time.
+    pub(crate) fn wall_civil(&self) -> jiff::civil::DateTime {
+        match &self.wall {
             WallClock::System(tz) => jiff::Timestamp::now().to_zoned(tz.clone()).datetime(),
             WallClock::Virtual => {
                 let (y, mo, d, h, mi) = VIRTUAL_START;
@@ -173,13 +185,6 @@ impl State {
                 let elapsed = jiff::SignedDuration::try_from(self.clock.now()).unwrap_or_default();
                 start.checked_add(elapsed).unwrap_or(start)
             }
-        };
-        WallTime {
-            hour: civil.hour() as u8,
-            minute: civil.minute() as u8,
-            weekday: civil.weekday().to_monday_zero_offset() as u8,
-            day: civil.day() as u8,
-            month: civil.month() as u8,
         }
     }
 
@@ -242,6 +247,7 @@ impl State {
         self.refresh_sessions();
         self.refresh_leaving();
         self.refresh_authorize();
+        self.refresh_screenshots();
         self.refresh_dropdown();
         self.refresh_appearance();
         self.refresh_bars();
@@ -470,6 +476,7 @@ impl State {
         self.identify_ui(&mut out);
         self.leave_ui(&mut out);
         self.auth_ui(&mut out);
+        self.picker_ui(&mut out);
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;
@@ -522,6 +529,12 @@ pub trait Pixels {
 }
 
 impl Pixels for hocus_shell::lock::Curtain {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+impl Pixels for hocus_shell::picker::Picker {
     fn pixels(&self) -> View<'_> {
         self.view()
     }
