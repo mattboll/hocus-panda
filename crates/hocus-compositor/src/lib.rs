@@ -17,6 +17,7 @@ mod config_watch;
 mod cursor;
 mod decoration;
 mod desktops;
+mod dock;
 mod dropdown;
 mod flip;
 mod fonts;

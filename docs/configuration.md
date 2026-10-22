@@ -127,6 +127,13 @@ search_engine = "https://duckduckgo.com/?q={}"
 large_type = true          # large <words>
 qr = true                  # qr <words>
 
+[dock]                     # Super+D; shown on an empty desktop or after resting at the bottom edge
+enabled = true             # false: neither the dock nor its hint
+pinned = [                 # desktop entries, in order; those not installed are left out
+  "org.codeberg.dnkl.foot.desktop", "firefox.desktop", "firefox-esr.desktop",
+  "org.gnome.Nautilus.desktop", "thunderbird.desktop",
+]
+
 [[rules]]                  # windows matching app_id and title (globs: * and ?)
 app_id = "chat*"
 output = "eDP-1"           # opens there, when plugged
@@ -225,6 +232,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `suspend`, `hibernate` | sleeps now, locked first; hibernating only where the machine can |
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
+| `dock` | shows the dock, or hides it again |
 | `spawn COMMAND` | runs a command through the shell |
 | `quit` | ends the session at once, without asking windows to close |
 | `none` | removes a default shortcut |
@@ -249,6 +257,7 @@ Defaults:
 | Alt+F4 | `close` |
 | Super+Ctrl+Space | `switch-layout` |
 | Super+Space | `launcher` |
+| Super+D | `dock` |
 | Super+V | `clipboard-history` |
 | Super+Period | `emoji` |
 | Super+P | `palette` |

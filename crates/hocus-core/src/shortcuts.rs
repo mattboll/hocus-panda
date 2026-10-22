@@ -83,6 +83,8 @@ pub enum Action {
     /// The magnifier, a step closer or further (#78).
     ZoomIn,
     ZoomOut,
+    /// Shows or hides the dock (#38).
+    Dock,
     /// A screenshot (#69), after `delay` seconds.
     Screenshot {
         mode: ScreenshotMode,
@@ -185,6 +187,7 @@ impl fmt::Display for Action {
             Self::NightLight => write!(f, "night-light"),
             Self::ZoomIn => write!(f, "zoom-in"),
             Self::ZoomOut => write!(f, "zoom-out"),
+            Self::Dock => write!(f, "dock"),
             Self::Screenshot { mode, delay: 0 } => write!(f, "screenshot {mode}"),
             Self::Screenshot { mode, delay } => write!(f, "screenshot {mode} {delay}"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
@@ -263,6 +266,7 @@ impl FromStr for Action {
             "night-light" => bare(Self::NightLight),
             "zoom-in" => bare(Self::ZoomIn),
             "zoom-out" => bare(Self::ZoomOut),
+            "dock" => bare(Self::Dock),
             "screenshot" => {
                 let mut words = rest.split_whitespace();
                 let mode = words.next().unwrap_or("screen").parse()?;
@@ -409,6 +413,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+F", Action::FocusMode),
         ("Super+Equal", Action::ZoomIn),
         ("Super+Minus", Action::ZoomOut),
+        ("Super+D", Action::Dock),
         ("Print", Action::screenshot(ScreenshotMode::Screen)),
         ("Super+Print", Action::screenshot(ScreenshotMode::All)),
         ("Shift+Print", Action::screenshot(ScreenshotMode::Region)),

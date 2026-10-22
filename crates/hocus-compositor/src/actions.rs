@@ -161,6 +161,7 @@ impl State {
             Action::ZoomIn => self.zoom_step(true),
             Action::ZoomOut => self.zoom_step(false),
             Action::SwitchWindows(scope) => self.switch_windows(*scope),
+            Action::Dock => self.toggle_dock(),
             Action::Spawn(command) => self.spawn_command(command),
         }
     }

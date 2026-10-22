@@ -238,6 +238,11 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
         ),
         A::NightLight => (w("Night light", "Lumière nocturne"), G::System, ALL_SCREENS),
         A::ZoomIn => (w("Zoom in", "Agrandir (loupe)"), G::Screens, POINTER_SCREEN),
+        A::Dock => (
+            w("Show or hide the dock", "Afficher ou masquer le dock"),
+            G::System,
+            EVERYWHERE,
+        ),
         A::ZoomOut => (w("Zoom out", "Réduire (loupe)"), G::Screens, POINTER_SCREEN),
         A::Record => (
             w(
@@ -355,7 +360,14 @@ pub fn catalog() -> Vec<Action> {
         .map(Action::screenshot),
     );
     all.push(A::Record);
-    all.extend([A::FocusMode, A::NightLight, A::ZoomIn, A::ZoomOut, A::Notes]);
+    all.extend([
+        A::FocusMode,
+        A::NightLight,
+        A::ZoomIn,
+        A::ZoomOut,
+        A::Notes,
+        A::Dock,
+    ]);
     all.extend([
         A::Lock,
         A::Suspend,

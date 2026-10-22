@@ -27,6 +27,7 @@ pub struct Config {
     pub updates: Updates,
     /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
     pub calendars: Vec<CalendarAccount>,
+    pub dock: Dock,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -360,6 +361,34 @@ impl Default for Screenshots {
             copy: true,
             ocr: "tesseract".into(),
             annotate: "hocus-annotate".into(),
+        }
+    }
+}
+
+/// The discreet dock (#38): hidden while working, shown on an empty
+/// desktop, at the bottom edge, or with its shortcut.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Dock {
+    pub enabled: bool,
+    /// Applications kept in it, by desktop entry (`firefox.desktop`);
+    /// open ones come after.
+    pub pinned: Vec<String>,
+}
+
+impl Default for Dock {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            pinned: [
+                "org.codeberg.dnkl.foot.desktop",
+                "firefox.desktop",
+                "firefox-esr.desktop",
+                "org.gnome.Nautilus.desktop",
+                "thunderbird.desktop",
+            ]
+            .map(String::from)
+            .to_vec(),
         }
     }
 }
