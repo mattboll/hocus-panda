@@ -34,6 +34,8 @@ pub struct State {
     pub bluetooth_device: Option<String>,
     pub airplane: bool,
     pub profile: Profile,
+    /// The profiles the machine offers (saver, balanced, performance).
+    pub profiles: [bool; 3],
     /// 0 to 100.
     pub volume: u8,
     pub muted: bool,
@@ -95,6 +97,7 @@ pub fn stub_state(screens: &[String]) -> State {
         bluetooth_device: None,
         airplane: false,
         profile: Profile::Balanced,
+        profiles: [true; 3],
         volume: 40,
         muted: false,
         output_device: String::new(),

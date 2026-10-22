@@ -15,6 +15,7 @@ fn state(lang: Lang) -> QuickState {
         )
     };
     QuickState {
+        profiles: [true; 3],
         tiles: hocus_shell::quick::tiles_in_order()
             .into_iter()
             .map(|t| {

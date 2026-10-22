@@ -25,7 +25,7 @@ pub struct Buses {
 #[derive(Debug, Clone, PartialEq)]
 enum Update {
     Battery(Option<Battery>),
-    Profile(Profile),
+    Profile(Profile, [bool; 3]),
     Network {
         wifi: bool,
         name: Option<String>,
@@ -77,9 +77,12 @@ impl System {
                 for message in received {
                     match message {
                         Message::Update(update) => apply(&mut state, update),
+                        // Shown once the system took it: a refused change
+                        // (polkit, a missing service) leaves what is true.
                         Message::Change(change) => {
-                            act(&actions, &change, backlight_for.as_deref());
-                            state.apply_change(change);
+                            if act(&actions, &change, backlight_for.as_deref()) {
+                                state.apply_change(change);
+                            }
                         }
                     }
                     sink(state.clone());
@@ -118,7 +121,10 @@ impl System {
 fn apply(state: &mut State, update: Update) {
     match update {
         Update::Battery(b) => state.battery = b,
-        Update::Profile(p) => state.profile = p,
+        Update::Profile(p, available) => {
+            state.profile = p;
+            state.profiles = available;
+        }
         Update::Network { wifi, name } => {
             state.wifi = wifi;
             state.network = name;
@@ -219,11 +225,25 @@ async fn profile(buses: Buses, tx: mpsc::Sender<Message>) -> zbus::Result<()> {
         }
         return follow(&conn, dest, path, &tx, || async {
             let active: String = proxy.get_property("ActiveProfile").await?;
-            Ok(Update::Profile(match active.as_str() {
-                "power-saver" => Profile::Saver,
-                "performance" => Profile::Performance,
-                _ => Profile::Balanced,
-            }))
+            // A machine without the hardware for it has no performance.
+            let listed: Vec<std::collections::HashMap<String, zbus::OwnedVariant>> =
+                proxy.get_property("Profiles").await.unwrap_or_default();
+            let has = |name: &str| {
+                listed.is_empty()
+                    || listed.iter().any(|p| {
+                        p.get("Profile")
+                            .and_then(|v| String::try_from(v.clone()).ok())
+                            .is_some_and(|n| n == name)
+                    })
+            };
+            Ok(Update::Profile(
+                match active.as_str() {
+                    "power-saver" => Profile::Saver,
+                    "performance" => Profile::Performance,
+                    _ => Profile::Balanced,
+                },
+                [has("power-saver"), has("balanced"), has("performance")],
+            ))
         })
         .await;
     }
@@ -354,8 +374,9 @@ fn backlight_dir() -> Option<PathBuf> {
         .map(|e| e.path())
 }
 
-/// Carries a change out on the system; failures are logged.
-fn act(buses: &Buses, change: &Change, _backlit: Option<&str>) {
+/// Carries a change out on the system; whether it was taken (failures are
+/// logged).
+fn act(buses: &Buses, change: &Change, _backlit: Option<&str>) -> bool {
     let result = match change {
         Change::Volume(v) => run_wpctl(&[
             "set-volume",
@@ -369,8 +390,12 @@ fn act(buses: &Buses, change: &Change, _backlit: Option<&str>) {
         ]),
         other => zbus::block_on(dbus_act(buses, other)).map_err(|e| e.to_string()),
     };
-    if let Err(err) = result {
-        tracing::warn!(?change, %err, "could not change the setting");
+    match result {
+        Ok(()) => true,
+        Err(err) => {
+            tracing::warn!(?change, %err, "could not change the setting");
+            false
+        }
     }
 }
 
