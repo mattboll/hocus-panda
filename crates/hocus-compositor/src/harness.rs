@@ -43,6 +43,9 @@ pub struct HarnessOptions {
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
     /// A stand-in for polkit's helper, with a system bus (#83).
     pub polkit_helper: Option<std::path::PathBuf>,
+    /// The first session's welcome opens (#82); otherwise the state
+    /// directory says it was already offered.
+    pub first_run: bool,
     /// Windows move as in a session (#33); otherwise they appear and go
     /// at once, so that a test that does not sample motion never catches
     /// one halfway.
@@ -52,6 +55,12 @@ pub struct HarnessOptions {
 /// Starts a compositor for `harness`, its configuration file at `config`
 /// and its state beside it.
 fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
+    let state_dir = config.with_file_name("state");
+    if !harness.first_run {
+        // As after the first session: the welcome was offered.
+        std::fs::create_dir_all(&state_dir)?;
+        std::fs::write(state_dir.join("welcomed"), b"1\n")?;
+    }
     let options = Options {
         backend: Backend::Headless(harness.headless.clone()),
         runtime_dir: None,
@@ -66,7 +75,7 @@ fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
         system_bus: harness.system_bus.clone(),
         session_services: false,
         // Private: tests never touch the developer's saved session.
-        state_dir: Some(config.with_file_name("state")),
+        state_dir: Some(state_dir),
         data_dirs: Some(harness.data_dirs.clone().unwrap_or_default()),
         child_env: harness.child_env.clone(),
         polkit_helper: harness.polkit_helper.clone(),
@@ -161,6 +170,7 @@ impl Headless {
             child_env: None,
             polkit_helper: None,
             motion: false,
+            first_run: false,
         })
     }
 

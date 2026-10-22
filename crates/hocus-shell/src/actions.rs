@@ -249,6 +249,16 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             G::Windows,
             ALL_SCREENS,
         ),
+        A::Welcome => (
+            w("Welcome to Hocuspanda", "Bienvenue dans Hocuspanda"),
+            G::System,
+            EVERYWHERE,
+        ),
+        A::About => (
+            w("About Hocuspanda", "À propos de Hocuspanda"),
+            G::System,
+            EVERYWHERE,
+        ),
         A::ShowDesktop => (
             w(
                 "Show the desktop, or the windows again",
@@ -382,6 +392,8 @@ pub fn catalog() -> Vec<Action> {
         A::Dock,
         A::Overview,
         A::ShowDesktop,
+        A::Welcome,
+        A::About,
     ]);
     all.extend([
         A::Lock,

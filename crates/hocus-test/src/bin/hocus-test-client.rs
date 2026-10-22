@@ -18,6 +18,9 @@ struct Args {
     /// `#rrggbb`.
     #[arg(long, default_value = "#33cc66")]
     color: String,
+    /// As the settings take it: written in the starts file.
+    #[arg(long)]
+    page: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -28,7 +31,10 @@ fn main() -> anyhow::Result<()> {
         .create(true)
         .append(true)
         .open(runtime.join(format!("{}.starts", args.app_id)))?;
-    writeln!(starts, "started {}", std::process::id())?;
+    match &args.page {
+        Some(page) => writeln!(starts, "started {} on {page}", std::process::id())?,
+        None => writeln!(starts, "started {}", std::process::id())?,
+    }
     let (w, h) = args.size.split_once('x').context("size is WIDTHxHEIGHT")?;
     let rgb = u32::from_str_radix(args.color.trim_start_matches('#'), 16)?;
     let client = SolidWindow {

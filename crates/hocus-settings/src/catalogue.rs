@@ -40,7 +40,12 @@ impl Family {
     }
 
     pub fn pages(self) -> impl Iterator<Item = Page> {
-        Page::ALL.into_iter().filter(move |p| p.family() == self)
+        // The welcome and About are reached on their own (the first
+        // session, the palette, the search), not from the lists: six pages
+        // a family, as board R1 draws them.
+        Page::ALL
+            .into_iter()
+            .filter(move |p| p.family() == self && !matches!(p, Page::Welcome | Page::About))
     }
 }
 
@@ -72,10 +77,13 @@ pub enum Page {
     Search,
     Accounts,
     Account,
+    About,
+    /// The first session's (#82): a few choices, and where to go next.
+    Welcome,
 }
 
 impl Page {
-    pub const ALL: [Page; 24] = [
+    pub const ALL: [Page; 26] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::ColumnDock,
@@ -100,6 +108,8 @@ impl Page {
         Self::Search,
         Self::Accounts,
         Self::Account,
+        Self::About,
+        Self::Welcome,
     ];
 
     pub fn family(self) -> Family {
@@ -110,7 +120,9 @@ impl Page {
             }
             Desktops | Windows | Keyboard | Mouse | Captures | Clipboard => Family::Work,
             Screens | Sound | Network | Bluetooth | Power | Lock => Family::Hardware,
-            Notifications | Apps | Agents | Search | Accounts | Account => Family::System,
+            Notifications | Apps | Agents | Search | Accounts | Account | About | Welcome => {
+                Family::System
+            }
         }
     }
 
@@ -118,7 +130,15 @@ impl Page {
     pub fn available(self) -> bool {
         matches!(
             self,
-            Self::Appearance | Self::Keyboard | Self::Screens | Self::Account | Self::Accounts
+            Self::Appearance
+                | Self::Keyboard
+                | Self::Screens
+                | Self::Account
+                | Self::Accounts
+                | Self::Desktops
+                | Self::Language
+                | Self::About
+                | Self::Welcome
         )
     }
 
@@ -150,6 +170,8 @@ impl Page {
             Search => "search",
             Accounts => "accounts",
             Account => "account",
+            About => "about",
+            Welcome => "welcome",
         }
     }
 
@@ -184,6 +206,8 @@ impl Page {
             Search => Words::new("Search", "Recherche"),
             Accounts => Words::new("Accounts and calendar", "Comptes et agenda"),
             Account => Words::new("Account and updates", "Compte et mises à jour"),
+            About => Words::new("About", "À propos"),
+            Welcome => Words::new("Welcome", "Bienvenue"),
         }
     }
 
@@ -244,6 +268,8 @@ impl Page {
             Search => "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
             Accounts => "M4 6h16v14H4zM4 10h16M8 3v5M16 3v5",
             Account => "M8 8a4 4 0 1 0 8 0 4 4 0 1 0-8 0M4 21c1-4 4-6 8-6s7 2 8 6",
+            About => "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5h0",
+            Welcome => "M12 3l2.4 5.8 6.1.6-4.6 4 1.4 6.1L12 16.3 6.7 19.5l1.4-6.1-4.6-4 6.1-.6z",
         }
     }
 
@@ -279,6 +305,14 @@ impl Page {
                     Lang::Fr => format!("{n} écrans"),
                 }
             }
+            Self::About => format!("Hocuspanda {}", env!("CARGO_PKG_VERSION")),
+            Self::Language => match ctx.config.language.interface {
+                hocus_core::config::InterfaceLanguage::Auto => words::LIKE_THE_SYSTEM,
+                hocus_core::config::InterfaceLanguage::En => words::ENGLISH,
+                hocus_core::config::InterfaceLanguage::Fr => words::FRENCH,
+            }
+            .get(lang)
+            .into(),
             _ => words::NOT_YET.get(lang).into(),
         }
     }

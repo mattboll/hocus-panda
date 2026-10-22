@@ -20,6 +20,7 @@ mod decoration;
 mod desktops;
 mod dock;
 mod dropdown;
+mod first_run;
 mod flip;
 mod fonts;
 mod grabs;
@@ -282,7 +283,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         state_dir.clone(),
         options.session_bus.as_deref(),
     );
-    state.start_sessions(state_dir);
+    state.start_sessions(state_dir.clone());
     if options.shell {
         state.child_env = options.child_env.clone();
         shell::start(
@@ -291,6 +292,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
             options.session_bus.as_deref(),
             options.data_dirs.clone(),
         );
+        first_run::start(&event_loop.handle(), &mut state, state_dir);
     }
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);

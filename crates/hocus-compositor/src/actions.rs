@@ -163,6 +163,8 @@ impl State {
             Action::SwitchWindows(scope) => self.switch_windows(*scope),
             Action::Dock => self.toggle_dock(),
             Action::Overview => self.toggle_overview(),
+            Action::Welcome => self.open_settings(Some("welcome".into())),
+            Action::About => self.open_settings(Some("about".into())),
             Action::ShowDesktop => self.toggle_show_desktop(),
             Action::Spawn(command) => self.spawn_command(command),
         }

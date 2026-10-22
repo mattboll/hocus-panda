@@ -1420,6 +1420,8 @@ impl SettingsView {
             Page::Appearance => self.appearance(theme, body),
             Page::Desktops => self.desktops(theme, body),
             Page::Language => self.language(theme, body),
+            Page::Welcome => self.welcome(theme, body),
+            Page::About => self.about(theme, body),
             Page::Keyboard => self.keyboard(theme, body),
             Page::Screens => self.screens(theme, body),
             Page::Account => self.account(theme, body),
@@ -1768,35 +1770,9 @@ impl SettingsView {
 
     /// Language: the interface's (#51), changed at once.
     fn language(&mut self, theme: &Theme, body: NodeId) {
-        use hocus_core::config::InterfaceLanguage;
         let lang = self.lang;
-        let current = self.ctx.config.language.interface;
         let section = self.section(theme, body, words::INTERFACE_LANGUAGE);
-        let line = self.add(section, row(8.0), Kind::Box(Look::default()));
-        for (value, name) in [
-            (InterfaceLanguage::Auto, words::LIKE_THE_SYSTEM),
-            (InterfaceLanguage::En, words::ENGLISH),
-            (InterfaceLanguage::Fr, words::FRENCH),
-        ] {
-            let mut button = Button::new(name.get(lang), ButtonKind::Plain, theme);
-            button.selected = value == current;
-            let b = self.add(
-                line,
-                Style {
-                    height: Length::Px(44.0),
-                    padding: Insets::symmetric(0.0, 16.0),
-                    ..Style::default()
-                },
-                Kind::Button(button),
-            );
-            let id = match value {
-                InterfaceLanguage::Auto => "auto",
-                InterfaceLanguage::En => "en",
-                InterfaceLanguage::Fr => "fr",
-            };
-            self.targets
-                .insert(b, Target::Set(Change::new("language", "interface", id)));
-        }
+        self.language_choices(theme, section);
         self.add(
             section,
             fill_width(Style::default()),
@@ -1806,6 +1782,235 @@ impl SettingsView {
             ),
         );
         self.highlighted(section, &Setting::InterfaceLanguage, Look::default());
+    }
+
+    /// Like the system, English, Français: the one in effect chosen.
+    fn language_choices(&mut self, theme: &Theme, parent: NodeId) {
+        use hocus_core::config::InterfaceLanguage;
+        let lang = self.lang;
+        let current = self.ctx.config.language.interface;
+        let line = self.add(parent, row(8.0), Kind::Box(Look::default()));
+        for (value, name, id) in [
+            (InterfaceLanguage::Auto, words::LIKE_THE_SYSTEM, "auto"),
+            (InterfaceLanguage::En, words::ENGLISH, "en"),
+            (InterfaceLanguage::Fr, words::FRENCH, "fr"),
+        ] {
+            let target = Target::Set(Change::new("language", "interface", id));
+            self.choice(theme, line, name.get(lang), value == current, target);
+        }
+    }
+
+    /// A button among others, the one in effect chosen.
+    fn choice(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        label: &str,
+        chosen: bool,
+        target: Target,
+    ) -> NodeId {
+        let mut button = Button::new(label, ButtonKind::Plain, theme);
+        button.selected = chosen;
+        let b = self.add(
+            parent,
+            Style {
+                height: Length::Px(44.0),
+                padding: Insets::symmetric(0.0, 16.0),
+                ..Style::default()
+            },
+            Kind::Button(button),
+        );
+        self.targets.insert(b, target);
+        b
+    }
+
+    /// The panda and two lines beside it: the welcome's and About's head.
+    fn hero(
+        &mut self,
+        theme: &Theme,
+        body: NodeId,
+        panda: hocus_shell::panda::Panda,
+        label: String,
+        title: &str,
+        line: &str,
+    ) {
+        let head = self.add(
+            body,
+            Style {
+                align: Align::Center,
+                ..row(28.0)
+            },
+            Kind::Box(Look::default()),
+        );
+        let frame = self.add(
+            head,
+            Style {
+                width: Length::Px(150.0),
+                height: Length::Px(150.0),
+                padding: Insets::all(14.0),
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 32.0,
+                ..Look::default()
+            }),
+        );
+        self.add(
+            frame,
+            Style {
+                width: Length::Fill,
+                height: Length::Fill,
+                ..Style::default()
+            },
+            Kind::Custom {
+                draw: Box::new(panda),
+                label: Some(label),
+            },
+        );
+        let words_box = self.add(
+            head,
+            Style {
+                width: Length::Fill,
+                ..column(8.0)
+            },
+            Kind::Box(Look::default()),
+        );
+        let title_style = hocus_ui::TextStyle {
+            size: 40.0,
+            ..theme.text.display.with_weight(600)
+        };
+        self.add(
+            words_box,
+            fill_width(Style::default()),
+            Kind::text(title, title_style),
+        );
+        self.add(
+            words_box,
+            fill_width(Style::default()),
+            Kind::text(line, theme.text.body.with_color(Paint::Muted)),
+        );
+    }
+
+    /// The page's sections, apart from one another.
+    fn sections(&mut self, body: NodeId) -> NodeId {
+        self.add(
+            body,
+            Style {
+                padding: Insets {
+                    top: 24.0,
+                    ..Insets::default()
+                },
+                ..fill_width(column(22.0))
+            },
+            Kind::Box(Look::default()),
+        )
+    }
+
+    /// The first session's (#82): a few choices, all to be changed later,
+    /// and where to go next.
+    fn welcome(&mut self, theme: &Theme, body: NodeId) {
+        let lang = self.lang;
+        // Still: this window draws on the wall clock, and the panda says
+        // hello without waving its arm off.
+        let mood = hocus_shell::panda::Mood::Wave;
+        self.hero(
+            theme,
+            body,
+            hocus_shell::panda::Panda::themed(
+                hocus_shell::panda::Character::Apprentice,
+                mood,
+                theme,
+            ),
+            mood.label(lang).to_owned(),
+            words::WELCOME_TITLE.get(lang),
+            words::WELCOME_LINE.get(lang),
+        );
+        let body = self.sections(body);
+        let section = self.section(theme, body, words::INTERFACE_LANGUAGE);
+        self.language_choices(theme, section);
+        // The keyboard: the layout chosen first, the others kept after it.
+        let section = self.section(theme, body, words::KEYBOARD_LAYOUT);
+        let line = self.add(section, row(8.0), Kind::Box(Look::default()));
+        let layouts = self.ctx.config.keyboard.layouts.clone();
+        let first = layouts.first().cloned().unwrap_or_else(|| "us".into());
+        for code in ["us", "fr", "gb", "de", "es", "it"] {
+            let mut list = vec![code.to_owned()];
+            list.extend(layouts.iter().filter(|l| *l != code).cloned());
+            let label = code.to_uppercase();
+            self.choice(
+                theme,
+                line,
+                &label,
+                first == code,
+                Target::Set(layouts_change(&list)),
+            );
+        }
+        // The look.
+        let a = self.ctx.config.appearance.clone();
+        let section = self.section(theme, body, words::THEME);
+        let line = self.add(section, row(8.0), Kind::Box(Look::default()));
+        for (id, name, _) in words::THEMES {
+            let target = Target::Set(Change::new("appearance", "theme", id));
+            self.choice(theme, line, name.get(lang), a.theme == id, target);
+        }
+        let section = self.section(theme, body, words::ACCENT);
+        let line = self.add(section, row(8.0), Kind::Box(Look::default()));
+        for (id, name) in words::ACCENTS {
+            let target = Target::Set(Change::new("appearance", "accent", id));
+            let b = self.choice(theme, line, name.get(lang), a.accent == id, target);
+            let label = format!("{} {}", words::ACCENT.get(lang), name.get(lang));
+            self.tree.set_name(b, &label);
+        }
+        // Next.
+        let section = self.section(theme, body, words::NEXT);
+        let line = self.add(section, row(8.0), Kind::Box(Look::default()));
+        for (name, target) in [
+            (words::WIFI, Target::Page(Page::Network)),
+            (Page::Appearance.label(), Target::Page(Page::Appearance)),
+            (words::AI, Target::Page(Page::Agents)),
+            (words::ALL_SETTINGS, Target::Home),
+        ] {
+            self.choice(theme, line, name.get(lang), false, target);
+        }
+        let mut start = Button::new(words::START.get(lang), ButtonKind::Primary, theme);
+        start.selected = false;
+        let b = self.add(
+            body,
+            Style {
+                height: Length::Px(48.0),
+                padding: Insets::symmetric(0.0, 28.0),
+                ..Style::default()
+            },
+            Kind::Button(start),
+        );
+        self.targets.insert(b, Target::Close);
+    }
+
+    /// About: the version, the licences, the credits.
+    fn about(&mut self, theme: &Theme, body: NodeId) {
+        let lang = self.lang;
+        let version = format!("{} {}", words::VERSION.get(lang), env!("CARGO_PKG_VERSION"));
+        self.hero(
+            theme,
+            body,
+            hocus_shell::panda::Panda::logo(theme),
+            lang.logo().to_owned(),
+            "Hocuspanda",
+            &version,
+        );
+        let body = self.sections(body);
+        for (title, text) in [
+            (words::LICENCES, words::LICENCES_TEXT),
+            (words::CREDITS, words::CREDITS_TEXT),
+        ] {
+            let section = self.section(theme, body, title);
+            self.add(
+                section,
+                fill_width(Style::default()),
+                Kind::text(text.get(lang), theme.text.body),
+            );
+        }
     }
 
     /// Desktops: what each corner of a screen does (#86).
