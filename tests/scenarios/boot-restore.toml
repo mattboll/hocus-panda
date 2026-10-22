@@ -1,0 +1,81 @@
+# The boot screen (#48): while a saved session is put back, the pandas set
+# the desktop up; it goes as soon as everything is back, without waiting
+# for its own time, and at most after a few seconds when an application
+# is slow.
+description = "The boot screen shows while windows come back and goes as soon as they are all there"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+session_file = """
+[[window]]
+app_id = "editor"
+title = "notes.txt"
+command = ["{test_client}", "--app-id", "editor", "--size", "500x300", "--color", "#3399ff"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [100, 100, 500, 300]
+state = "normal"
+
+[[window]]
+app_id = "sleepy"
+title = "never"
+command = ["/bin/sh", "-c", "exit 0"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [0, 0, 300, 200]
+state = "normal"
+"""
+
+[[step]]
+offer_session = true
+
+[[step]]
+click_ui = "Put everything back"
+
+[[step]]
+expect_ui = { label = "The pandas are putting your 2 windows back" }
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "boot-restore.png" }
+
+# The sleepy one never comes: the desktop is there after a few seconds.
+[[step]]
+advance_ms = 5100
+
+[[step]]
+expect_ui = { label = "The pandas are putting your 2 windows back", shown = false }
+
+# Everything back at once: it goes at once.
+[[step]]
+session_file = """
+[[window]]
+app_id = "notes"
+title = "notes"
+command = ["{test_client}", "--app-id", "notes", "--size", "400x300", "--color", "#7bc47f"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [700, 100, 400, 300]
+state = "normal"
+"""
+
+[[step]]
+offer_session = true
+
+[[step]]
+click_ui = "Put everything back"
+
+[[step]]
+expect_window = { app_id = "notes", visible = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_ui = { label = "The pandas are putting your window back", shown = false }

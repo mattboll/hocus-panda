@@ -538,6 +538,7 @@ impl State {
         if self.locked() {
             return out;
         }
+        self.boot_ui(&mut out);
         self.card_ui(&mut out);
         self.identify_ui(&mut out);
         self.leave_ui(&mut out);
@@ -624,6 +625,12 @@ impl Pixels for hocus_shell::leave::Leave {
 }
 
 impl Pixels for hocus_shell::identify::Identify {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+impl Pixels for hocus_shell::boot::Boot {
     fn pixels(&self) -> View<'_> {
         self.view()
     }
@@ -720,6 +727,43 @@ impl<V: Pixels> Panel<V> {
             Kind::Unspecified,
         )
         .inspect_err(|err| tracing::warn!(?err, "could not draw a panel"))
+        .ok()
+    }
+
+    /// Only `part` of it (logical, from its corner), drawn at `at`.
+    pub fn element_part<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        at: Point<i32, Logical>,
+        part: Rectangle<i32, Logical>,
+        alpha: Option<f32>,
+    ) -> Option<MemoryRenderBufferRenderElement<R>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let buffer = self.buffer.as_ref()?;
+        let scale = output.current_scale().fractional_scale();
+        let src = Rectangle::new(
+            (f64::from(part.loc.x) * scale, f64::from(part.loc.y) * scale).into(),
+            (
+                f64::from(part.size.w) * scale,
+                f64::from(part.size.h) * scale,
+            )
+                .into(),
+        );
+        let location = at.to_f64().to_physical(scale);
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            location,
+            buffer,
+            alpha,
+            Some(src),
+            Some(part.size),
+            Kind::Unspecified,
+        )
+        .inspect_err(|err| tracing::warn!(?err, "could not draw part of a panel"))
         .ok()
     }
 }
