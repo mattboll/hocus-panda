@@ -27,6 +27,7 @@ mod output_spec;
 mod quick;
 mod scene;
 mod screen_capture;
+mod session;
 mod settings;
 mod shell;
 mod socket;
@@ -99,6 +100,9 @@ pub struct Options {
     /// Reads the system's state (battery, network…) on this bus instead of
     /// the machine's system bus.
     pub system_bus: Option<String>,
+    /// Where the session is saved; the session itself uses
+    /// `$XDG_STATE_HOME/hocuspanda`, others save nothing unless given one.
+    pub state_dir: Option<PathBuf>,
     /// Where the launcher reads desktop entries (`applications/` below
     /// each); the XDG data directories if `None`.
     pub data_dirs: Option<Vec<std::path::PathBuf>>,
@@ -220,6 +224,11 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         &mut state,
         options.session_bus.as_deref(),
     );
+    let state_dir = options
+        .state_dir
+        .clone()
+        .or_else(|| state.is_session.then(session::default_dir).flatten());
+    state.start_sessions(state_dir);
     if options.shell {
         state.child_env = options.child_env.clone();
         shell::start(

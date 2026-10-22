@@ -286,6 +286,14 @@ impl App {
                     .as_ref()
                     .map(|p| p.to_string_lossy().into_owned()),
             }),
+            Request::SaveSession => {
+                state.save_session_now();
+                Reply::Done
+            }
+            Request::OfferSession => {
+                state.offer_session();
+                Reply::Done
+            }
             Request::OpenSettings { page } => {
                 state.open_settings(page);
                 Reply::Done

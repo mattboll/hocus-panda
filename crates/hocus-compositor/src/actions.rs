@@ -48,6 +48,7 @@ impl State {
         match action {
             Action::Quit => {
                 tracing::info!("quit requested");
+                self.save_session_now();
                 self.loop_signal.stop();
             }
             Action::Desktop(n) => {
@@ -244,6 +245,13 @@ impl State {
     /// applications, with this compositor's sockets. A thread waits for it,
     /// so the loop never does.
     pub fn launch(&mut self, program: &str, args: &[String]) {
+        if let Err(err) = self.try_launch(program, args) {
+            tracing::warn!(%err, program, "could not start");
+        }
+    }
+
+    /// As [`Self::launch`], saying whether it started.
+    pub fn try_launch(&mut self, program: &str, args: &[String]) -> std::io::Result<()> {
         let mut cmd = Command::new(program);
         cmd.args(args);
         if let Some(env) = &self.child_env {
@@ -262,19 +270,16 @@ impl State {
         if let Some(n) = self.xdisplay {
             cmd.env("DISPLAY", format!(":{n}"));
         }
-        match cmd.spawn() {
-            Ok(mut child) => {
-                let spawned = std::thread::Builder::new()
-                    .name("child".into())
-                    .spawn(move || {
-                        let _ = child.wait();
-                    });
-                if let Err(err) = spawned {
-                    tracing::warn!(%err, "could not watch a started program");
-                }
-            }
-            Err(err) => tracing::warn!(%err, program, "could not start"),
+        let mut child = cmd.spawn()?;
+        let spawned = std::thread::Builder::new()
+            .name("child".into())
+            .spawn(move || {
+                let _ = child.wait();
+            });
+        if let Err(err) = spawned {
+            tracing::warn!(%err, "could not watch a started program");
         }
+        Ok(())
     }
 
     /// Layouts, options and key repeat from the configuration; Num Lock on

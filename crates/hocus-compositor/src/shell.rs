@@ -238,6 +238,7 @@ impl State {
     /// state and draws what changed. Nothing is drawn when nothing changed.
     pub fn refresh_shell(&mut self) {
         self.refresh_lock();
+        self.refresh_sessions();
         self.refresh_dropdown();
         self.refresh_appearance();
         self.refresh_bars();
@@ -456,6 +457,7 @@ impl State {
         if self.locked() {
             return out;
         }
+        self.card_ui(&mut out);
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;
@@ -508,6 +510,12 @@ pub trait Pixels {
 }
 
 impl Pixels for hocus_shell::lock::Curtain {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+impl Pixels for hocus_shell::welcome::Welcome {
     fn pixels(&self) -> View<'_> {
         self.view()
     }

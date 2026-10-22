@@ -88,6 +88,12 @@ impl State {
             elements.extend(ours.into_iter().map(SceneElement::Frame));
             return elements;
         }
+        // The card asking what to put back.
+        elements.extend(
+            self.card_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         // The curtain over everything but the cursor.
         elements.extend(
             self.curtain_elements(renderer, output)

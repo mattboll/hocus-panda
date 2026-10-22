@@ -131,6 +131,12 @@ pub(crate) fn key_of(sym: Keysym) -> Option<Key> {
     })
 }
 
+impl LauncherPanel {
+    pub fn app_for(&self, app_id: &str) -> Option<&hocus_shell::App> {
+        self.launcher.app_for(app_id)
+    }
+}
+
 impl State {
     pub fn launcher_open(&self) -> bool {
         self.launcher.as_ref().is_some_and(|l| l.launcher.is_open())

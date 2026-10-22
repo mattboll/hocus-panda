@@ -1,0 +1,20 @@
+description = "Saving the session writes each window's app, output, desktop, place and state"
+outputs = ["1280x800", "1920x1080+1280+0"]
+
+[[step]]
+open = { app_id = "editor", size = [500, 300], color = "#3399ff" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+open = { app_id = "foot", size = [600, 400], color = "#2b2f36" }
+
+[[step]]
+send = { app_id = "foot", output = "HEADLESS-2", desktop = 2 }
+
+[[step]]
+save_session = true
+
+[[step]]
+expect_session_file = { contains = ["app_id = \"editor\"", "state = \"maximized\"", "app_id = \"foot\"", "output = \"HEADLESS-2\"", "desktop = 2"] }

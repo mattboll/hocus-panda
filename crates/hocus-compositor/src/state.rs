@@ -88,6 +88,8 @@ pub struct State {
     /// The user's clock: the system's, or a fixed one under the virtual
     /// clock of tests.
     pub wall: crate::shell::WallClock,
+    /// The session saved and put back (#31).
+    pub sessions: crate::session::Sessions,
     /// Idle, the curtain and the lock (#29).
     pub locking: crate::lock::Locking,
     /// Third-party idle notifications (ext-idle-notify).
@@ -228,6 +230,7 @@ impl State {
             protocols: crate::handlers::protocols::Protocols::new(dh),
             screen_capture: Default::default(),
             locking: crate::lock::Locking::new(dh),
+            sessions: Default::default(),
             wall: match clock {
                 Clock::Monotonic { .. } => {
                     crate::shell::WallClock::System(jiff::tz::TimeZone::system())

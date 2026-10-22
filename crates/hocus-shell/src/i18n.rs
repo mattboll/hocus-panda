@@ -331,6 +331,42 @@ impl Lang {
         format!("Notifications · {n}")
     }
 
+    pub fn welcome_back(self) -> &'static str {
+        self.pick("Welcome back", "Bon retour")
+    }
+
+    pub fn windows_were_open(self, n: usize) -> String {
+        match (self, n) {
+            (Self::En, 1) => "1 window was open.".into(),
+            (Self::En, n) => format!("{n} windows were open."),
+            (Self::Fr, 1) => "1 fenêtre était ouverte.".into(),
+            (Self::Fr, n) => format!("{n} fenêtres étaient ouvertes."),
+        }
+    }
+
+    pub fn put_everything_back(self) -> &'static str {
+        self.pick("Put everything back", "Tout remettre")
+    }
+
+    pub fn choose(self) -> &'static str {
+        self.pick("Choose", "Choisir")
+    }
+
+    pub fn start_fresh(self) -> &'static str {
+        self.pick("Start fresh", "Repartir de zéro")
+    }
+
+    pub fn put_these_back(self) -> &'static str {
+        self.pick("Put these back", "Remettre celles-ci")
+    }
+
+    pub fn not_restored(self, app: &str) -> String {
+        match self {
+            Self::En => format!("{app} was not put back"),
+            Self::Fr => format!("{app} n’a pas été remis en place"),
+        }
+    }
+
     /// The curtain's countdown.
     pub fn locking_in(self, seconds: u32) -> String {
         match self {

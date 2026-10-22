@@ -118,6 +118,19 @@ picker come with #116. While the screen is shared, toasts are held and
 one summarises them afterwards. Idle notification (#29) and drm-lease
 (#27) come with their issues.
 
+## Session
+
+What is open (each window's application, output, desktop, place and
+state) is saved every thirty seconds when it changed and when quitting, in
+`$XDG_STATE_HOME/hocuspanda/session.toml`, written on a worker thread. At
+the next start a card offers to put everything back, to choose which
+applications, or to start fresh (`[session] restore`); the applications
+start again and their windows go back where they were as they come; one
+that cannot start, or whose window never comes, is reported in a toast.
+XDG autostart entries start too. Only the session itself saves, restores
+and autostarts: nested or headless, the developer's session is never
+touched.
+
 ## Idle and lock
 
 Without input, the curtain dims every screen with a countdown, then the

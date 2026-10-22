@@ -20,6 +20,7 @@ pub struct Config {
     pub dropdown: Dropdown,
     pub settings: Settings,
     pub idle: Idle,
+    pub session: SessionConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
@@ -281,6 +282,25 @@ impl Wallpaper {
     }
 }
 
+/// Putting the last session back at start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SessionConfig {
+    /// `ask` (a card at start), `always` or `never`.
+    pub restore: String,
+    /// Starts the XDG autostart entries.
+    pub autostart: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            restore: "ask".into(),
+            autostart: true,
+        }
+    }
+}
+
 /// What happens when nobody uses the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -447,6 +467,10 @@ impl Config {
         if !["right", "left"].contains(&self.decorations.buttons.as_str()) {
             let b = format!("{:?}", self.decorations.buttons);
             return out_of_range("decorations.buttons", b, "right, left");
+        }
+        if !["ask", "always", "never"].contains(&self.session.restore.as_str()) {
+            let r = format!("{:?}", self.session.restore);
+            return out_of_range("session.restore", r, "ask, always, never");
         }
         if !(80..=150).contains(&self.appearance.text_size) {
             let s = self.appearance.text_size.to_string();

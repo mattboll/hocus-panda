@@ -18,6 +18,7 @@ pub mod titlebar;
 pub mod toasts;
 pub mod units;
 pub mod wallpaper;
+pub mod welcome;
 
 pub use column::{Action, ActiveWindow, Column, ColumnState, ScreenDesktops, WallTime};
 pub use i18n::Lang;
