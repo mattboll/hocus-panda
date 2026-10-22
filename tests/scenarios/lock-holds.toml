@@ -1,0 +1,33 @@
+description = "A fullscreen window keeps the session awake: nothing dims nor locks; the countdown starts once it leaves fullscreen"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[idle]
+curtain_after = 60
+lock_after = 30
+"""
+
+[[step]]
+open = { app_id = "video", size = [640, 360], color = "#101010" }
+
+[[step]]
+set_state = { app_id = "video", state = "fullscreen" }
+
+[[step]]
+advance_ms = 120000
+
+[[step]]
+expect_ui = { label = "Locking in 29 s", shown = false }
+
+[[step]]
+expect_ui = { label = "Password", shown = false }
+
+[[step]]
+set_state = { app_id = "video", state = "normal" }
+
+[[step]]
+advance_ms = 61500
+
+[[step]]
+expect_ui = { label = "Locking in 29 s" }

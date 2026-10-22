@@ -56,6 +56,8 @@ pub enum Action {
     Dropdown,
     /// Opens the settings app, or brings it forward.
     Settings,
+    /// Locks the session now.
+    Lock,
     /// Window switcher (#39): the windows of the output under the pointer,
     /// or of every output.
     SwitchWindows(Scope),
@@ -91,6 +93,7 @@ impl fmt::Display for Action {
             Self::QuickSettings => write!(f, "quick-settings"),
             Self::Dropdown => write!(f, "dropdown"),
             Self::Settings => write!(f, "settings"),
+            Self::Lock => write!(f, "lock"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
             Self::Spawn(command) => write!(f, "spawn {command}"),
         }
@@ -152,6 +155,7 @@ impl FromStr for Action {
             "quick-settings" => bare(Self::QuickSettings),
             "dropdown" => bare(Self::Dropdown),
             "settings" => bare(Self::Settings),
+            "lock" => bare(Self::Lock),
             "switch-windows" => scope().map(Self::SwitchWindows),
             "spawn" if !rest.is_empty() => Ok(Self::Spawn(rest.to_string())),
             "spawn" => Err("spawn: which command?".into()),
@@ -278,6 +282,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+A", Action::QuickSettings),
         ("Super+Backtick", Action::Dropdown),
         ("Super+Comma", Action::Settings),
+        ("Super+L", Action::Lock),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),
         ("Super+Tab", Action::SwitchWindows(Scope::AllOutputs)),
     ]

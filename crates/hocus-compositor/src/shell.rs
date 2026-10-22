@@ -47,7 +47,6 @@ pub struct Shell {
     on: Option<(String, Rectangle<i32, Logical>, f64)>,
     buffer: Option<MemoryRenderBuffer>,
     popover: Option<(MemoryRenderBuffer, UiPoint)>,
-    wall: WallClock,
     pointer_inside: bool,
     /// A press began in the shell: its release goes there too.
     pressed: bool,
@@ -58,13 +57,12 @@ impl Shell {
         self.column.set_theme(theme);
     }
 
-    pub fn new(theme: Theme, lang: Lang, wall: WallClock) -> Self {
+    pub fn new(theme: Theme, lang: Lang) -> Self {
         Self {
             column: Column::new(theme, lang, 600.0, 1.0),
             on: None,
             buffer: None,
             popover: None,
-            wall,
             pointer_inside: false,
             pressed: false,
         }
@@ -81,19 +79,9 @@ pub fn start(
     data_dirs: Option<Vec<std::path::PathBuf>>,
 ) {
     use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-    let (lang, wall) = match state.clock {
-        crate::clock::Clock::Monotonic { .. } => (
-            Lang::from_env(),
-            WallClock::System(jiff::tz::TimeZone::system()),
-        ),
-        crate::clock::Clock::Virtual { .. } => (Lang::En, WallClock::Virtual),
-    };
-    if matches!(wall, WallClock::Virtual) {
-        // Tests show the same name on every machine.
-        state.user = "Alex".into();
-    }
-    let system = matches!(wall, WallClock::System(_));
-    state.shell = Some(Shell::new(Theme::default(), lang, wall));
+    let lang = state.shell_lang();
+    let system = matches!(state.wall, WallClock::System(_));
+    state.shell = Some(Shell::new(Theme::default(), lang));
     crate::notify::start(handle, state, session_bus, lang);
     crate::launcher::start(handle, state, lang, data_dirs);
     crate::quick::start(handle, state, lang);
@@ -177,10 +165,7 @@ impl State {
 
     /// The user's time, as the column shows it.
     pub(crate) fn wall_time(&self) -> WallTime {
-        let Some(shell) = &self.shell else {
-            return WallTime::default();
-        };
-        let civil = match &shell.wall {
+        let civil = match &self.wall {
             WallClock::System(tz) => jiff::Timestamp::now().to_zoned(tz.clone()).datetime(),
             WallClock::Virtual => {
                 let (y, mo, d, h, mi) = VIRTUAL_START;
@@ -251,6 +236,7 @@ impl State {
     /// After each dispatch: follows the primary output, shows the current
     /// state and draws what changed. Nothing is drawn when nothing changed.
     pub fn refresh_shell(&mut self) {
+        self.refresh_lock();
         self.refresh_dropdown();
         self.refresh_appearance();
         self.refresh_bars();
@@ -464,6 +450,11 @@ impl State {
     /// The shell's interface for the control API, in global coordinates.
     pub fn shell_ui(&self) -> Vec<UiNode> {
         let mut out = Vec::new();
+        self.lock_ui(&mut out);
+        // Locked, nothing else is there.
+        if self.locked() {
+            return out;
+        }
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;
@@ -508,4 +499,89 @@ pub fn column_rect(area: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
         (area.loc.x + area.size.w - m - w, area.loc.y + m).into(),
         (w, (area.size.h - 2 * m).max(1)).into(),
     )
+}
+
+/// What a panel shows: a view of hocus-shell with its pixels.
+pub trait Pixels {
+    fn pixels(&self) -> View<'_>;
+}
+
+impl Pixels for hocus_shell::lock::Curtain {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+impl Pixels for hocus_shell::lock::LockScreen {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
+/// A view of the shell drawn over a whole output, and its texture.
+#[derive(Debug)]
+pub struct Panel<V> {
+    pub view: V,
+    buffer: Option<MemoryRenderBuffer>,
+    size: (u32, u32),
+}
+
+impl<V: Pixels> Panel<V> {
+    pub fn new(view: V) -> Self {
+        Self {
+            view,
+            buffer: None,
+            size: (0, 0),
+        }
+    }
+
+    /// Uploads what the view drew; whether the texture changed.
+    pub fn upload(&mut self, drawn: &[hocus_ui::PixelRect]) -> bool {
+        let view = self.view.pixels();
+        let size = (view.width, view.height);
+        match &mut self.buffer {
+            Some(buffer) if self.size == size => {
+                if drawn.is_empty() {
+                    return false;
+                }
+                upload(buffer, &view, drawn);
+            }
+            _ => {
+                self.buffer = Some(buffer_for(&view));
+                self.size = size;
+            }
+        }
+        true
+    }
+
+    /// Its element at `at` on `output`, logical pixels.
+    pub fn element<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        at: Point<i32, Logical>,
+    ) -> Option<MemoryRenderBufferRenderElement<R>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let buffer = self.buffer.as_ref()?;
+        let scale = output.current_scale().fractional_scale();
+        let (w, h) = self.size;
+        let all = Rectangle::from_size(Size::from((f64::from(w), f64::from(h))));
+        let size =
+            Size::<f64, Logical>::from((f64::from(w) / scale, f64::from(h) / scale)).to_i32_round();
+        let location = at.to_f64().to_physical(scale);
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            location,
+            buffer,
+            None,
+            Some(all),
+            Some(size),
+            Kind::Unspecified,
+        )
+        .inspect_err(|err| tracing::warn!(?err, "could not draw a panel"))
+        .ok()
+    }
 }

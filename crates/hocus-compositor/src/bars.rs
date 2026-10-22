@@ -101,7 +101,8 @@ impl State {
         )
     }
 
-    fn lang(&self) -> Lang {
+    /// The shell's language: English under the virtual clock of tests.
+    pub fn shell_lang(&self) -> Lang {
         match self.clock {
             crate::clock::Clock::Monotonic { .. } => Lang::from_env(),
             crate::clock::Clock::Virtual { .. } => Lang::En,
@@ -119,7 +120,7 @@ impl State {
             return;
         }
         let theme = self.theme();
-        let lang = self.lang();
+        let lang = self.shell_lang();
         let left = self.config.decorations.buttons == "left";
         let radius = self.style.radius as f32;
         let focused = self.model.focused();

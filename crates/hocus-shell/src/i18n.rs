@@ -295,6 +295,37 @@ impl Lang {
         format!("Notifications · {n}")
     }
 
+    /// The curtain's countdown.
+    pub fn locking_in(self, seconds: u32) -> String {
+        match self {
+            Self::En => format!("Locking in {seconds}\u{a0}s"),
+            Self::Fr => format!("Verrouillage dans {seconds}\u{a0}s"),
+        }
+    }
+
+    pub fn stay_hint(self) -> &'static str {
+        self.pick(
+            "Move the mouse or press a key to stay.",
+            "Bouge la souris ou touche une touche pour rester.",
+        )
+    }
+
+    pub fn password(self) -> &'static str {
+        self.pick("Password", "Mot de passe")
+    }
+
+    pub fn caps_lock_on(self) -> &'static str {
+        self.pick("Caps Lock is on", "Verr. Maj est activé")
+    }
+
+    pub fn wrong_password(self) -> &'static str {
+        self.pick("Wrong password", "Mot de passe incorrect")
+    }
+
+    pub fn checking(self) -> &'static str {
+        self.pick("Checking…", "Vérification…")
+    }
+
     /// The toast after sharing the screen.
     pub fn held_while_sharing(self, n: usize) -> String {
         match (self, n) {

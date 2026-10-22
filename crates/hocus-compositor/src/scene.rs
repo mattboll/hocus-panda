@@ -75,6 +75,25 @@ impl State {
             return elements;
         };
         let scale = output.current_scale().fractional_scale();
+        // Locked: the lock alone, whatever else there is.
+        if self.locked() {
+            let (client, ours) = self.lock_elements(renderer, output);
+            elements.extend(client.into_iter().map(|e| {
+                SceneElement::Window(Rounded::new(
+                    e,
+                    Rectangle::from_size((i32::MAX / 4, i32::MAX / 4).into()),
+                    0,
+                ))
+            }));
+            elements.extend(ours.into_iter().map(SceneElement::Frame));
+            return elements;
+        }
+        // The curtain over everything but the cursor.
+        elements.extend(
+            self.curtain_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         if let Some((preview_output, zone)) = &self.snap_preview
             && preview_output == output
         {

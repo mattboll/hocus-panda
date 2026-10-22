@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang mold pkg-config gdb xwayland dbus libnotify-bin grim fontconfig fonts-ipafont-gothic fonts-noto-color-emoji \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
-            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev
+            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev libpam0g-dev
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:

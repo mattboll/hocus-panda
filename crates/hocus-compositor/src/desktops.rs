@@ -496,9 +496,11 @@ impl State {
         {
             tracing::debug!(%err, "could not raise an X11 window");
         }
-        // A layer surface holding the keyboard keeps it (layer-shell).
+        // A layer surface holding the keyboard keeps it (layer-shell);
+        // locked, no window gets it.
         if let Some(keyboard) = self.seat.get_keyboard()
             && !self.protocols.layer_focus
+            && !self.locked()
         {
             keyboard.set_focus(self, surface, serial);
         }

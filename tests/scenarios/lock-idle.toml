@@ -1,0 +1,83 @@
+description = "Idle: the curtain falls with its countdown, the pointer lifts it and the countdown starts again; then the session locks, a wrong password is said, the right one unlocks"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[idle]
+curtain_after = 60
+lock_after = 30
+"""
+
+[[step]]
+open = { app_id = "editor", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+advance_ms = 61500
+
+[[step]]
+expect_ui = { label = "Locking in 29 s" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "lock-curtain.png" }
+
+[[step]]
+pointer_move = [400, 300]
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_ui = { label = "Locking in 29 s", shown = false }
+
+# The countdown started again at the pointer's move.
+[[step]]
+advance_ms = 59000
+
+[[step]]
+expect_ui = { label = "Locking in 30 s", shown = false }
+
+[[step]]
+advance_ms = 2500
+
+[[step]]
+expect_ui = { label = "Locking in 29 s" }
+
+[[step]]
+advance_ms = 30000
+
+[[step]]
+expect_ui = { label = "Password" }
+
+[[step]]
+expect_ui = { label = "editor", shown = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "lock-screen.png" }
+
+[[step]]
+type = "bamboo"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "Wrong password" }
+
+[[step]]
+type = "panda"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "Password", shown = false }
+
+[[step]]
+expect_focus = "editor"

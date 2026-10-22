@@ -113,7 +113,7 @@ fn shell_app(e: Entry) -> ShellApp {
 }
 
 /// A key while the launcher is open: what the toolkit understands.
-fn key_of(sym: Keysym) -> Option<Key> {
+pub(crate) fn key_of(sym: Keysym) -> Option<Key> {
     Some(match sym {
         Keysym::Escape => Key::Escape,
         Keysym::Return | Keysym::KP_Enter => Key::Enter,

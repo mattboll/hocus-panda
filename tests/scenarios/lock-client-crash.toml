@@ -1,0 +1,39 @@
+description = "A lock client locks the session and shows only its surface; when it crashes, our lock screen takes over and the session stays locked"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "mail", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+lock_client = "#7a2e8e"
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [640, 400], color = "#7a2e8e", tolerance = 4 }
+
+[[step]]
+crash_lock_client = true
+
+[[step]]
+expect_ui = { label = "Password" }
+
+[[step]]
+expect_ui = { label = "mail", shown = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "lock-client-crash.png" }
+
+# A new lock client may take over, and unlock.
+[[step]]
+lock_client = "#2e7a4f"
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [640, 400], color = "#2e7a4f", tolerance = 4 }
+
+[[step]]
+unlock_client = true
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [640, 400], color = "#3399ff", tolerance = 4 }
