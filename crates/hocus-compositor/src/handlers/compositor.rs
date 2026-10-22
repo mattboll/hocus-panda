@@ -1,6 +1,6 @@
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    delegate_compositor, delegate_shm,
+    delegate_compositor, delegate_dmabuf, delegate_shm,
     reexports::wayland_server::{
         Client,
         protocol::{wl_buffer, wl_surface::WlSurface},
@@ -67,3 +67,21 @@ impl ShmHandler for State {
 
 delegate_compositor!(State);
 delegate_shm!(State);
+
+impl smithay::wayland::dmabuf::DmabufHandler for State {
+    fn dmabuf_state(&mut self) -> &mut smithay::wayland::dmabuf::DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    // The renderer is the backend's: a buffer it cannot read fails when it
+    // is drawn, and only that surface shows nothing.
+    fn dmabuf_imported(
+        &mut self,
+        _global: &smithay::wayland::dmabuf::DmabufGlobal,
+        _dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+        notifier: smithay::wayland::dmabuf::ImportNotifier,
+    ) {
+        let _ = notifier.successful::<State>();
+    }
+}
+delegate_dmabuf!(State);

@@ -261,6 +261,7 @@ impl App {
                 BackendState::Headless(headless) => {
                     headless.capture_output(output, &self.state, cursor)
                 }
+                BackendState::Tty(tty) => tty.capture_output(output, &self.state, cursor),
             }
             .map_err(|_| CopyError::Render),
             Target::Window(id) => {
@@ -278,6 +279,7 @@ impl App {
                 match &mut self.backend {
                     BackendState::Winit(winit) => winit.capture_window(&window, scale),
                     BackendState::Headless(headless) => headless.capture_window(&window, scale),
+                    BackendState::Tty(tty) => tty.capture_window(&window, scale),
                 }
                 .map_err(|_| CopyError::Render)
             }

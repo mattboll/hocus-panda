@@ -20,9 +20,13 @@ A GPU driver can lose a page-flip event (typically after resume) and leave an
 output nearly frozen. A watchdog that measures the *start* of rendering sees
 nothing wrong.
 
-*Here:* frame health is measured on presented frames per output; recovering a
-stuck output is a designed path with a test; the DRM backend is exercised in a
-VM.
+*Here:* each output's frame is followed from the moment it is queued to its
+vblank. An output with a frame out is looked at once a second; when three
+looks in a row find the same frame still out, the lost flip counts as done,
+the CRTC is committed afresh with a full redraw, and `output_recovered` is
+said in the log and the event stream. Headless outputs can be stalled on
+purpose, which is how this path is tested (`output-stuck.toml`); the DRM
+backend itself runs in a VM (`scripts/vm/debian.sh`).
 
 ## 3. A UI toolkit doing a shell's job
 

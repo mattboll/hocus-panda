@@ -13,6 +13,7 @@ mod cursor;
 mod decoration;
 mod desktops;
 mod dropdown;
+mod flip;
 mod fonts;
 mod grabs;
 mod handlers;
@@ -34,6 +35,7 @@ mod socket;
 mod state;
 mod stats;
 mod surface;
+mod tty;
 mod wallpaper;
 mod watchdog;
 mod window_mode;
@@ -70,6 +72,9 @@ pub enum Backend {
     Winit,
     /// Nowhere: outputs are offscreen buffers.
     Headless(HeadlessConfig),
+    /// The session itself, on a virtual terminal: DRM/KMS, libinput,
+    /// libseat.
+    Tty,
 }
 
 /// How to start the compositor.
@@ -130,6 +135,7 @@ enum BackendState {
     // Its GLES renderer is large; there is one per compositor.
     Winit(Box<winit::WinitBackend>),
     Headless(headless::HeadlessBackend),
+    Tty(Box<tty::TtyBackend>),
 }
 
 /// The directory holding the Wayland socket; a private one is removed on drop.
@@ -145,7 +151,7 @@ impl RuntimeDir {
             return Ok(Self::Shared(dir.clone()));
         }
         match options.backend {
-            Backend::Winit => std::env::var_os("XDG_RUNTIME_DIR")
+            Backend::Winit | Backend::Tty => std::env::var_os("XDG_RUNTIME_DIR")
                 .map(|dir| Self::Shared(PathBuf::from(dir)))
                 .context("XDG_RUNTIME_DIR is not set; pass a runtime directory"),
             Backend::Headless(_) => Self::private(),
@@ -222,7 +228,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     }
     state.loop_handle = Some(event_loop.handle());
     state.system_bus = options.system_bus.clone();
-    state.is_session = options.session_services;
+    state.is_session = options.session_services || matches!(options.backend, Backend::Tty);
     lock::start(&event_loop.handle(), &mut state);
     lock::start_session(
         &event_loop.handle(),
@@ -260,6 +266,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
             BackendState::Winit(Box::new(winit::init(&event_loop.handle(), &mut state)?))
         }
         Backend::Headless(config) => BackendState::Headless(headless::init(config, &mut state)?),
+        Backend::Tty => BackendState::Tty(Box::new(tty::init(&event_loop.handle(), &mut state)?)),
     };
     tracing::info!(
         socket = %state.socket_path.display(),
@@ -306,6 +313,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         match &mut app.backend {
             BackendState::Winit(winit) => winit.after_dispatch(&mut app.state),
             BackendState::Headless(headless) => headless.after_dispatch(&handle, &app.state),
+            BackendState::Tty(tty) => tty.after_dispatch(&mut app.state),
         }
         if let Err(err) = app.state.display_handle.flush_clients() {
             tracing::warn!(%err, "flushing clients failed");
@@ -334,6 +342,8 @@ fn spawn(
                 .env("XDG_RUNTIME_DIR", runtime_dir)
                 .env("WAYLAND_DISPLAY", socket)
                 .env(hocus_api::SOCKET_ENV, api)
+                .env("XDG_CURRENT_DESKTOP", hocus_platform::apps::DESKTOP)
+                .env("XDG_SESSION_TYPE", "wayland")
                 .env_remove("DISPLAY");
             if let Some(n) = xdisplay {
                 cmd.env("DISPLAY", format!(":{n}"));

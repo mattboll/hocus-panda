@@ -259,6 +259,17 @@ impl State {
         true
     }
 
+    /// The lock client's surface on `output`, while one is shown.
+    pub fn lock_surface(
+        &self,
+        output: &Output,
+    ) -> Option<&smithay::reexports::wayland_server::protocol::wl_surface::WlSurface> {
+        self.locking
+            .lock_surfaces
+            .get(&output.name())
+            .map(LockSurface::wl_surface)
+    }
+
     /// The keyboard goes to the lock client's surface on the output under
     /// the pointer, or to nobody (our lock screen takes keys itself).
     fn lock_keyboard(&mut self) {

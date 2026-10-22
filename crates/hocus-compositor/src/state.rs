@@ -106,6 +106,10 @@ pub struct State {
     /// Running as the session itself (the DRM backend, #27), not nested
     /// nor headless: the machine's services are ours to use.
     pub is_session: bool,
+    /// Switches virtual terminals, on a TTY.
+    pub vt_switch: Option<smithay::backend::session::libseat::LibSeatSession>,
+    /// linux-dmabuf, whose global the TTY backend makes for its GPU.
+    pub dmabuf_state: smithay::wayland::dmabuf::DmabufState,
     /// The configuration file, when there is one.
     pub config_path: Option<std::path::PathBuf>,
     /// When the settings app was started, until its window comes.
@@ -209,6 +213,8 @@ impl State {
             config_path: None,
             system_bus: None,
             is_session: false,
+            vt_switch: None,
+            dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
             settings_started: None,
             child_env: None,
             layout_index: 0,

@@ -14,15 +14,12 @@ use smithay::{
         renderer::{
             Bind, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             damage::OutputDamageTracker,
-            element::{RenderElementStates, default_primary_scanout_output_compare},
+            element::RenderElementStates,
             gles::{GlesRenderer, GlesTexture},
             pixman::PixmanRenderer,
         },
     },
-    desktop::{
-        Window,
-        utils::{surface_primary_scanout_output, update_surface_primary_scanout_output},
-    },
+    desktop::Window,
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{
@@ -41,6 +38,7 @@ use hocus_core::OutputName;
 use crate::{
     App, BACKGROUND, State,
     capture::{self, Pixels},
+    flip::{Flip, Health},
     output_spec::{self, OutputSpec},
 };
 
@@ -122,6 +120,11 @@ struct CanvasOutput<T> {
     target: T,
     damage_tracker: OutputDamageTracker,
     frames: u64,
+    /// The frame drawn and not presented yet: presentation is immediate,
+    /// unless the output is stalled.
+    flip: Flip,
+    /// Simulates a stuck output: frames are never presented.
+    stalled: bool,
 }
 
 /// Creates the renderer and the outputs, and maps them in the space.
@@ -244,6 +247,8 @@ where
             position,
             target,
             frames: 0,
+            flip: Flip::Idle,
+            stalled: false,
         });
         Ok(())
     }
@@ -265,30 +270,23 @@ where
             renderer, outputs, ..
         } = self;
         for out in outputs {
+            // A frame still out: nothing more is drawn there, as on a screen.
+            if out.flip.is_queued() {
+                continue;
+            }
             let start = Instant::now();
             let Some((states, drawn)) = render_one(renderer, out, state) else {
                 continue;
             };
             if drawn {
                 state.measures.frame(&out.output.name(), start.elapsed());
+                out.flip.queued(now);
+                if out.stalled {
+                    continue;
+                }
+                out.flip.presented();
             }
-            for window in state.space.elements() {
-                window.with_surfaces(|surface, data| {
-                    update_surface_primary_scanout_output(
-                        surface,
-                        &out.output,
-                        data,
-                        &states,
-                        default_primary_scanout_output_compare,
-                    );
-                });
-                window.send_frame(
-                    &out.output,
-                    now,
-                    Some(Duration::ZERO),
-                    surface_primary_scanout_output,
-                );
-            }
+            state.send_frames(&out.output, now, Some(&states));
             if drawn {
                 state.presented(&out.output, now, out.frames);
             }
@@ -474,8 +472,43 @@ impl HeadlessBackend {
         }
     }
 
+    /// Stops presenting `name`'s frames until it is recovered.
+    pub fn stall(&mut self, name: &str) -> anyhow::Result<()> {
+        fn stall<R, T>(canvas: &mut Canvas<R, T>, name: &str) -> bool {
+            let out = canvas.outputs.iter_mut().find(|o| o.output.name() == name);
+            out.map(|o| o.stalled = true).is_some()
+        }
+        let found = match &mut self.renderers {
+            Renderers::Gles(canvas) => stall(canvas, name),
+            Renderers::Pixman(canvas) => stall(canvas, name),
+        };
+        anyhow::ensure!(found, "no output named {name}");
+        tracing::info!(output = name, "output stalled");
+        Ok(())
+    }
+
+    /// Looks at the outputs with a frame out, and recovers the stuck ones:
+    /// for a headless output, presenting again from a full redraw.
+    fn check_flips(&mut self, state: &mut State) {
+        fn check<R, T>(canvas: &mut Canvas<R, T>, state: &mut State) {
+            let now = state.clock.now();
+            for out in &mut canvas.outputs {
+                if let Health::Recover { missed } = out.flip.check(now) {
+                    out.stalled = false;
+                    out.damage_tracker = OutputDamageTracker::from_output(&out.output);
+                    state.output_recovered(&out.output, missed);
+                }
+            }
+        }
+        match &mut self.renderers {
+            Renderers::Gles(canvas) => check(canvas, state),
+            Renderers::Pixman(canvas) => check(canvas, state),
+        }
+    }
+
     /// Draws a frame if something changed since the last one.
     pub fn frame(&mut self, state: &mut State) {
+        self.check_flips(state);
         if !state.needs_redraw {
             return;
         }

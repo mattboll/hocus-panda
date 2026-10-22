@@ -167,6 +167,8 @@ pub enum Step {
     Plug(PlugOutput),
     /// Unplugs an output by name.
     Unplug(String),
+    /// The output stops presenting its frames, as a stuck screen would.
+    StallOutput(String),
     /// Maximizes, makes fullscreen, minimizes or restores (`normal`) a
     /// window: `{ app_id, state }`.
     SetState(SetState),
@@ -458,6 +460,7 @@ impl fmt::Display for Step {
             Self::Keys(keys) => write!(f, "keys {keys}"),
             Self::Plug(plug) => write!(f, "plug {}", plug.spec),
             Self::Unplug(name) => write!(f, "unplug {name}"),
+            Self::StallOutput(name) => write!(f, "stall output {name}"),
             Self::Config(_) => write!(f, "config"),
             Self::ExpectConfigError(e) => write!(f, "expect_config_error {e:?}"),
             Self::ExpectConfigWarning(e) => write!(f, "expect_config_warning {e:?}"),
@@ -945,6 +948,12 @@ impl Run<'_> {
             }
             Step::Unplug(name) => {
                 self.request(Request::UnplugOutput {
+                    output: name.clone(),
+                })?;
+                Ok(())
+            }
+            Step::StallOutput(name) => {
+                self.request(Request::StallOutput {
                     output: name.clone(),
                 })?;
                 Ok(())

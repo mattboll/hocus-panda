@@ -29,7 +29,7 @@ a live session:
 
 ```sh
 # nested, in a window of the current session
-target/debug/hocuspanda --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
+target/debug/hocuspanda --backend winit --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
 # notifications: only on a bus given explicitly, never the live session's
 #   --session-bus "$(dbus-daemon --session --print-address --fork)"
 # headless: offscreen outputs, a private runtime directory by default
@@ -60,15 +60,21 @@ cargo run -p hocus-ui --example gallery
 HOCUS_BLESS=1 cargo test -p hocus-ui --test spring
 ```
 
-Against a real system (logind, PAM, UPower, NetworkManager, power profiles,
-PipeWire, autostart, suspend), in a Debian testing VM (QEMU with KVM; the
-base image is cached in `$XDG_CACHE_HOME/hocuspanda-vm`):
+Against a real system (the session on a TTY with DRM/KMS and libinput,
+logind, PAM, UPower, NetworkManager, power profiles, PipeWire, autostart,
+suspend), in a Debian testing VM (QEMU with KVM; the base image is cached in
+`$XDG_CACHE_HOME/hocuspanda-vm`):
 
 ```sh
 scripts/vm/debian.sh up        # boot it, user alex / panda
 scripts/vm/debian.sh copy      # target/debug's programs into it
-scripts/vm/debian.sh ssh '~/hocus-vm start; ~/hocus-vm msg ui'
-scripts/vm/debian.sh monitor system_wakeup   # after `systemctl suspend` in it
+scripts/vm/debian.sh ssh '~/hocus-vm session'    # the session on its tty1
+scripts/vm/debian.sh keys e c h o ret            # its keyboard (QEMU key names)
+scripts/vm/debian.sh mouse 60 40; scripts/vm/debian.sh click
+scripts/vm/debian.sh screen shot.png             # what its screen shows
+scripts/vm/debian.sh ssh '~/hocus-vm msg ui'     # its control socket
+scripts/vm/debian.sh ssh '~/hocus-vm start'      # or headless, with --session-services
+scripts/vm/debian.sh monitor system_wakeup       # after `systemctl suspend` in it
 scripts/vm/debian.sh down
 ```
 

@@ -66,7 +66,8 @@ jobs:
           release: "14"
           usesh: true
           prepare: |
-            pkg install -y curl pkgconf wayland libxkbcommon pixman mesa-libs libdrm
+            pkg install -y curl pkgconf wayland libxkbcommon pixman mesa-libs libdrm \
+              libinput seatd libudev-devd
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
               | sh -s -- -y --profile minimal --default-toolchain none
           run: |

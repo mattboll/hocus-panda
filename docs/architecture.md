@@ -72,8 +72,16 @@ fast to compile and test, and lets the UI be developed in a plain window.
   Default for development: no session restart, no VT switch.
 - **headless**: no screen; outputs are offscreen buffers (GLES on a render
   node, or the pixman software renderer on CI). Used by every scenario test.
-- **udev/DRM + libinput through libseat**: the real session on a TTY, in a VM
-  first (QEMU virtio-gpu), then on hardware.
+- **tty**: the session itself on a virtual terminal (`--backend tty`, the
+  default when started outside a graphical session). libseat (logind or
+  seatd) gives the seat, its devices and the switches to other terminals
+  (Ctrl+Alt+F1…F12, which pause the session and draw everything again on
+  return). The primary GPU's display engine is driven through DRM/KMS
+  (smithay's `DrmOutputManager`), drawn with GLES on GBM (Mesa's software GL
+  in a VM without 3D); screens plugged and unplugged are followed through
+  udev; linux-dmabuf is offered for clients that draw on the GPU. libinput
+  reads keyboards and mice. Screens of other GPUs stay dark for now.
+  Tried in a QEMU VM on virtio-gpu, then on hardware.
 
 ## Rendering
 
@@ -115,8 +123,8 @@ window again offscreen into the client's shared-memory buffer; a copy
 that waits for damage is served once the output drew a new frame.
 xdg-desktop-portal-wlr works on them; the shell's own portal backend and
 picker come with #116. While the screen is shared, toasts are held and
-one summarises them afterwards. Idle notification (#29) and drm-lease
-(#27) come with their issues.
+one summarises them afterwards. Idle notification (#29) is served;
+drm-lease, for VR headsets, waits for an issue of its own.
 
 ## Session
 
@@ -211,10 +219,11 @@ private buses with services of their own.
 
 ## Testing
 
-A Debian testing VM (`scripts/vm/`) runs a headless hocuspanda with
-`--session-services` against real logind, PAM, UPower, NetworkManager,
-power-profiles-daemon and PipeWire, suspends and wakes; the DRM backend
-comes to it with #27.
+A Debian testing VM (`scripts/vm/`) runs hocuspanda as the session on its
+tty1 (virtio-gpu, Mesa's software GL), with keys and mouse motion sent
+through QEMU and its screen read back, against real logind, PAM, UPower,
+NetworkManager, power-profiles-daemon and PipeWire; it switches terminals,
+suspends and wakes.
 
 - **Unit tests** on `hocus-core` and `hocus-ui`: layout, snapping, desktops,
   springs, text layout.

@@ -349,7 +349,7 @@ impl Headless {
     fn backend(&self) -> Option<&HeadlessBackend> {
         match &self.app.backend {
             BackendState::Headless(headless) => Some(headless),
-            BackendState::Winit(_) => None,
+            BackendState::Winit(_) | BackendState::Tty(_) => None,
         }
     }
 }

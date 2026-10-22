@@ -1,12 +1,19 @@
 #!/bin/sh
 # A Debian testing VM (QEMU, KVM) to try hocuspanda against a real system:
-# logind, PAM, UPower, NetworkManager, power profiles, PipeWire, autostart.
-# Nothing of the host's session is used: the VM has its own user, buses and
-# services.
+# the session on a virtual terminal (DRM/KMS on virtio-gpu, drawn by Mesa's
+# software GL; libinput; logind), PAM, UPower, NetworkManager, power
+# profiles, PipeWire, autostart. Nothing of the host's session is used: the
+# VM has its own user, buses and services.
 #
 #   scripts/vm/debian.sh up            boot it (downloads the image once)
 #   scripts/vm/debian.sh copy          copy target/debug's programs into it
 #   scripts/vm/debian.sh ssh [cmd…]    a shell, or a command, as the test user
+#   scripts/vm/debian.sh screen FILE   save what the VM's screen shows (PNG)
+#   scripts/vm/debian.sh keys K…       press keys on its keyboard (QEMU names:
+#                                      ctrl-alt-f2, a, ret…)
+#   scripts/vm/debian.sh mouse DX DY   move its mouse by so many pixels
+#   scripts/vm/debian.sh click         click its mouse's left button
+#   scripts/vm/debian.sh monitor CMD   a QEMU monitor command
 #   scripts/vm/debian.sh down          stop it
 #
 # The base image is cached in $XDG_CACHE_HOME/hocuspanda-vm; each `up`
@@ -15,12 +22,19 @@ set -eu
 
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/hocuspanda-vm"
 WORK="$CACHE/debian"
-IMAGE_URL="https://cloud.debian.org/images/cloud/forky/daily/latest/debian-14-genericcloud-amd64-daily.qcow2"
-BASE="$CACHE/debian-14-genericcloud-amd64.qcow2"
+IMAGE_URL="https://cloud.debian.org/images/cloud/forky/daily/latest/debian-14-generic-amd64-daily.qcow2"
+BASE="$CACHE/debian-14-generic-amd64.qcow2"
 SSH_PORT="${HOCUS_VM_SSH_PORT:-2522}"
 HTTP_PORT="${HOCUS_VM_HTTP_PORT:-2580}"
 MEMORY="${HOCUS_VM_MEMORY:-4G}"
 CPUS="${HOCUS_VM_CPUS:-4}"
+
+# Input events to the VM's devices, as a person would make them (QMP: the
+# monitor's mouse_move reaches no device without a display).
+qmp() {
+    printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","arguments":{"events":[%s]}}\n' "$1" \
+        | socat -t 0.2 - UNIX-CONNECT:"$WORK/qmp" >/dev/null
+}
 
 ssh_vm() {
     ssh -q -i "$WORK/key" -p "$SSH_PORT" \
@@ -68,8 +82,21 @@ packages:
   - libgles2
   - fontconfig
   - fonts-noto-color-emoji
+  - libgl1-mesa-dri
+  - libegl-mesa0
+  - kbd
+write_files:
+  # alex logs in on tty1; the session starts there when asked (hocus-vm).
+  - path: /etc/systemd/system/getty@tty1.service.d/autologin.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin alex --noclear %I \$TERM
 runcmd:
   - [loginctl, enable-linger, alex]
+  - [sh, -c, "printf '[ \"\$(tty)\" = /dev/tty1 ] && [ -f ~/.hocus-session ] && exec ~/hocus-vm run\n' >> /home/alex/.bash_profile && chown alex:alex /home/alex/.bash_profile"]
+  - [systemctl, daemon-reload]
+  - [systemctl, restart, getty@tty1]
   - [touch, /var/lib/cloud/instance/hocuspanda-ready]
 EOF
 }
@@ -91,13 +118,14 @@ up() {
     # In a scope of its own, capped: it never takes the host's memory.
     systemd-run --user --scope --quiet --collect -p MemoryMax=6G -- \
         qemu-system-x86_64 -enable-kvm -cpu host -smp "$CPUS" -m "$MEMORY" \
-        -name hocuspanda-vm \
+        -name hocuspanda-vm -machine vmport=off \
         -drive file="$WORK/disk.qcow2",if=virtio \
         -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:"$SSH_PORT"-:22 \
         -smbios type=1,serial="ds=nocloud;s=http://10.0.2.2:$HTTP_PORT/" \
         -device virtio-vga -display none \
         -global PIIX4_PM.disable_s3=0 \
         -monitor unix:"$WORK/monitor",server,nowait \
+        -qmp unix:"$WORK/qmp",server,nowait \
         -serial file:"$WORK/serial.log" \
         -pidfile "$WORK/qemu.pid" -daemonize
     echo "booting; installing packages takes a few minutes"
@@ -117,7 +145,7 @@ copy() {
     for program in hocuspanda hocus hocus-settings hocus-test-client; do
         scp -q -i "$WORK/key" -P "$SSH_PORT" \
             -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "target/debug/$program" alex@127.0.0.1:bin/
+            "${CARGO_TARGET_DIR:-target}/debug/$program" alex@127.0.0.1:bin/
     done
     scp -q -i "$WORK/key" -P "$SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -127,7 +155,13 @@ copy() {
 
 down() {
     if [ -f "$WORK/qemu.pid" ]; then
-        kill "$(cat "$WORK/qemu.pid")" 2>/dev/null || true
+        pid=$(cat "$WORK/qemu.pid")
+        kill "$pid" 2>/dev/null || true
+        # Gone before its ports are taken again.
+        i=0
+        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
+            i=$((i + 1)); sleep 0.2
+        done
         rm -f "$WORK/qemu.pid"
     fi
     if [ -f "$WORK/http.pid" ]; then
@@ -144,5 +178,21 @@ case "${1:-}" in
     ssh) shift; ssh_vm "$@" ;;
     down) down ;;
     monitor) shift; printf '%s\n' "$*" | socat - UNIX-CONNECT:"$WORK/monitor" ;;
-    *) sed -n '2,15p' "$0"; exit 2 ;;
+    screen)
+        # QEMU writes the file itself: an absolute path.
+        file=$(realpath -m "$2")
+        printf 'screendump %s -f png\n' "$file" | socat - UNIX-CONNECT:"$WORK/monitor" >/dev/null
+        sleep 0.5
+        echo "$file" ;;
+    mouse) qmp "{\"type\":\"rel\",\"data\":{\"axis\":\"x\",\"value\":$2}},{\"type\":\"rel\",\"data\":{\"axis\":\"y\",\"value\":$3}}" ;;
+    click)
+        qmp '{"type":"btn","data":{"down":true,"button":"left"}}'
+        qmp '{"type":"btn","data":{"down":false,"button":"left"}}' ;;
+    keys)
+        shift
+        for key in "$@"; do
+            printf 'sendkey %s\n' "$key" | socat - UNIX-CONNECT:"$WORK/monitor" >/dev/null
+            sleep 0.05
+        done ;;
+    *) sed -n '2,20p' "$0"; exit 2 ;;
 esac

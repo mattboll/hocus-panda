@@ -3,10 +3,10 @@
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     input::{
-        keyboard::{FilterResult, Keycode},
+        keyboard::{FilterResult, Keycode, Keysym},
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
     utils::{Logical, Point, SERIAL_COUNTER},
@@ -23,6 +23,8 @@ use crate::{
 /// What a key did, when the compositor kept it.
 enum Handled {
     Shortcut(Action),
+    /// Ctrl+Alt+F1…F12: another virtual terminal.
+    Vt(i32),
     /// A key for the open launcher or quick settings.
     Panel(
         smithay::input::keyboard::Keysym,
@@ -37,6 +39,7 @@ impl State {
             InputEvent::PointerMotionAbsolute { event } => {
                 self.on_pointer_motion_absolute::<I>(event)
             }
+            InputEvent::PointerMotion { event } => self.on_pointer_motion::<I>(event),
             InputEvent::PointerButton { event } => self.on_pointer_button::<I>(event),
             InputEvent::PointerAxis { event } => self.on_pointer_axis::<I>(event),
             _ => {}
@@ -66,6 +69,14 @@ impl State {
                 // nor the release that follows it.
                 if !pressed {
                     return FilterResult::Forward;
+                }
+                // Always, even locked: the other terminal is not this
+                // session, and a stuck session must not hold the machine.
+                let sym = keysym.modified_sym().raw();
+                if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym)
+                {
+                    let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
+                    return FilterResult::Intercept(Handled::Vt(vt));
                 }
                 // Locked: no shortcut; our lock screen takes the keys, a
                 // lock client gets them as the surface with the keyboard.
@@ -101,6 +112,14 @@ impl State {
         );
         match handled {
             Some(Handled::Shortcut(action)) => self.run_action(&action, serial),
+            Some(Handled::Vt(vt)) => {
+                use smithay::backend::session::Session as _;
+                if let Some(session) = &mut self.vt_switch
+                    && let Err(err) = session.change_vt(vt)
+                {
+                    tracing::warn!(vt, %err, "could not switch terminal");
+                }
+            }
             Some(Handled::Panel(sym, modifiers)) if self.locked() => {
                 self.lock_key(sym, &modifiers);
             }
@@ -117,20 +136,58 @@ impl State {
         }
     }
 
+    /// A tablet, or a VM's pointer: its whole surface spans every output.
     fn on_pointer_motion_absolute<I: InputBackend>(
         &mut self,
         event: I::PointerMotionAbsoluteEvent,
     ) {
-        let Some(output_geo) = self
+        let Some(area) = self
             .space
             .outputs()
-            .next()
-            .and_then(|o| self.space.output_geometry(o))
+            .filter_map(|o| self.space.output_geometry(o))
+            .reduce(|a, b| a.merge(b))
         else {
             return;
         };
-        let location = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+        let location = event.position_transformed(area.size) + area.loc.to_f64();
         self.pointer_motion(location, event.time_msec());
+    }
+
+    /// A mouse or touchpad: the pointer moves by the motion, and stays on
+    /// the outputs.
+    fn on_pointer_motion<I: InputBackend>(&mut self, event: I::PointerMotionEvent) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let to = pointer.current_location() + event.delta();
+        let location = self.onto_outputs(to);
+        self.pointer_motion(location, event.time_msec());
+    }
+
+    /// The nearest point of the outputs to `to`.
+    fn onto_outputs(&self, to: Point<f64, Logical>) -> Point<f64, Logical> {
+        let areas: Vec<_> = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .collect();
+        if areas.iter().any(|a| a.to_f64().contains(to)) {
+            return to;
+        }
+        areas
+            .iter()
+            .map(|a| {
+                let x =
+                    to.x.clamp(f64::from(a.loc.x), f64::from(a.loc.x + a.size.w - 1));
+                let y =
+                    to.y.clamp(f64::from(a.loc.y), f64::from(a.loc.y + a.size.h - 1));
+                Point::from((x, y))
+            })
+            .min_by(|a: &Point<f64, Logical>, b| {
+                let d = |p: &Point<f64, Logical>| (p.x - to.x).powi(2) + (p.y - to.y).powi(2);
+                d(a).total_cmp(&d(b))
+            })
+            .unwrap_or(to)
     }
 
     /// Moves the pointer to `location` in the global logical space.

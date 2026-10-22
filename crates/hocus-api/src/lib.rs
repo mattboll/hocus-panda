@@ -144,6 +144,11 @@ pub enum Request {
     UnplugOutput {
         output: String,
     },
+    /// A headless output stops presenting its frames, as a stuck screen
+    /// would, until the compositor recovers it.
+    StallOutput {
+        output: String,
+    },
     /// The output that takes what an unplugged one showed.
     SetPrimaryOutput {
         output: String,
@@ -191,6 +196,7 @@ impl Request {
             | Self::SendWindow { .. }
             | Self::PlugOutput { .. }
             | Self::UnplugOutput { .. }
+            | Self::StallOutput { .. }
             | Self::SetPrimaryOutput { .. }
             | Self::SaveSession
             | Self::OfferSession => Permission::Test,
@@ -507,6 +513,12 @@ pub enum Event {
     },
     OutputRemoved {
         name: String,
+    },
+    /// An output stopped presenting its frames and was recovered.
+    OutputRecovered {
+        name: String,
+        /// Looks, a second apart, that found the same frame still out.
+        missed: u32,
     },
     /// The settings app is asked to show a page (`None`: its home).
     OpenSettings {
