@@ -54,6 +54,10 @@ pub struct Shell {
 }
 
 impl Shell {
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.column.set_theme(theme);
+    }
+
     pub fn new(theme: Theme, lang: Lang, wall: WallClock) -> Self {
         Self {
             column: Column::new(theme, lang, 600.0, 1.0),
@@ -93,6 +97,7 @@ pub fn start(
     crate::notify::start(handle, state, session_bus, lang);
     crate::launcher::start(handle, state, lang, data_dirs);
     crate::quick::start(handle, state, lang);
+    crate::wallpaper::start(handle, state);
     if system {
         // Wakes the loop when the minute turns; the column reads the time
         // after each dispatch.
@@ -171,7 +176,7 @@ impl State {
     }
 
     /// The user's time, as the column shows it.
-    fn wall_time(&self) -> WallTime {
+    pub(crate) fn wall_time(&self) -> WallTime {
         let Some(shell) = &self.shell else {
             return WallTime::default();
         };
@@ -246,6 +251,7 @@ impl State {
     /// After each dispatch: follows the primary output, shows the current
     /// state and draws what changed. Nothing is drawn when nothing changed.
     pub fn refresh_shell(&mut self) {
+        self.refresh_appearance();
         self.refresh_toasts();
         self.refresh_launcher();
         self.refresh_quick();

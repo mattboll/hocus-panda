@@ -1,0 +1,26 @@
+description = "Each screen shows its own wallpaper, scaled to its pixel size"
+outputs = ["1280x800", "1280x800@2+1280+0"]
+shell = true
+
+[[step]]
+config = """
+[wallpaper]
+kind = "image"
+image = "{scenario_dir}/../fixtures/wallpapers/blue.png"
+
+[[wallpaper.screens]]
+output = "HEADLESS-2"
+image = "{scenario_dir}/../fixtures/wallpapers/orange.png"
+"""
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [300, 400], color = "#1f5ba8", tolerance = 40 }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-2", at = [640, 400], color = "#e5803a", tolerance = 40 }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "wallpaper-screen-1.png" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "wallpaper-screen-2.png" }

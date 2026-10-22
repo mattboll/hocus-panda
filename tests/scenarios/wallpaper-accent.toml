@@ -1,0 +1,22 @@
+description = "With the accent taken from the wallpaper, a mostly orange picture gives a readable orange accent"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[appearance]
+accent = "wallpaper"
+
+[wallpaper]
+kind = "image"
+image = "{scenario_dir}/../fixtures/wallpapers/orange.png"
+"""
+
+[[step]]
+expect_accent = { hue = [15, 45] }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "wallpaper-accent.png" }

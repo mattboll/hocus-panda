@@ -280,6 +280,7 @@ impl App {
                 error: state.config_error.clone(),
                 warnings: state.config_warnings.clone(),
                 generation: state.config_generation,
+                accent: state.shell.is_some().then(|| state.accent_hex()),
             }),
             Request::PlugOutput { spec, name } => {
                 let spec: OutputSpec = match spec.parse() {

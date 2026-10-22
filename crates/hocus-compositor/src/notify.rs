@@ -44,6 +44,12 @@ pub struct ToastPanel {
     pressed: bool,
 }
 
+impl ToastPanel {
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.toasts.set_theme(theme);
+    }
+}
+
 /// Serves notifications on the bus at `address`; toasts are shown even if
 /// the bus is not there (nothing then sends any).
 pub fn start(

@@ -157,6 +157,10 @@ impl Sheet {
         self.open
     }
 
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.tree.set_theme(theme);
+    }
+
     pub fn resize(&mut self, height: f32, scale: f32) {
         let size = Size::new(WIDTH + ROOM, height);
         if size != self.tree.size() || scale != self.tree.scale() {

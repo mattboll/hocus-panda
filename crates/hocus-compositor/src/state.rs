@@ -83,6 +83,10 @@ pub struct State {
     pub launcher: Option<crate::launcher::LauncherPanel>,
     /// Quick settings, when the shell runs.
     pub quick: Option<crate::quick::QuickPanel>,
+    /// Wallpapers, when the shell runs.
+    pub wallpapers: Option<crate::wallpaper::Wallpapers>,
+    /// The theme the shell was last given.
+    pub applied_theme: Option<hocus_ui::Theme>,
     /// What started applications inherit, if not the compositor's own
     /// environment (tests).
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
@@ -169,6 +173,8 @@ impl State {
             toasts: None,
             launcher: None,
             quick: None,
+            wallpapers: None,
+            applied_theme: None,
             child_env: None,
             layout_index: 0,
             user: std::env::var("USER")
