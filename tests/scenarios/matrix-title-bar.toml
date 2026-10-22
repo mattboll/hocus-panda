@@ -1,0 +1,34 @@
+description = "In the Matrix theme with title bars, a window's title is typed in, character by character, as it materializes"
+outputs = ["1280x800"]
+motion = true
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+
+[decorations]
+title_bars = true
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+advance_ms = 275
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-title-typing.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "editor" }
+
+[[step]]
+expect_idle = { for_ms = 2000 }

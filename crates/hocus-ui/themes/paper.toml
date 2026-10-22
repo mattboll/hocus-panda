@@ -13,6 +13,7 @@ agent = "#6B46C1"
 waiting = "#8A4F0F"
 error = "#A8261E"
 shadow = "#2B262033"
+window_border = "#3C2D191F"
 
 [accents]
 default = "bamboo"

@@ -167,11 +167,20 @@ impl State {
                 .output_of(&managed.window)
                 .map_or(1.0, |o| o.current_scale().fractional_scale());
             let width = managed.window.geometry().size.w;
+            let mut title = title
+                .filter(|t| !t.is_empty())
+                .or(app_id)
+                .unwrap_or_default();
+            // Materializing in the Matrix theme, its title is typed in.
+            if let Some(open) = managed.motion.matrix(now) {
+                let len = title.chars().count();
+                let typed = crate::matrix_windows::typed(len, open.elapsed(now));
+                if typed < len {
+                    title = title.chars().take(typed).chain(['_']).collect();
+                }
+            }
             let shown = Shown {
-                title: title
-                    .filter(|t| !t.is_empty())
-                    .or(app_id)
-                    .unwrap_or_default(),
+                title,
                 focused: focused == Some(id),
                 maximized: matches!(managed.mode, WindowMode::Maximized { .. }),
             };
@@ -373,6 +382,7 @@ impl State {
         id: WindowId,
         client: Point<i32, Logical>,
         scale: f64,
+        alpha: f32,
     ) -> Option<MemoryRenderBufferRenderElement<R>>
     where
         R: Renderer + ImportMem,
@@ -391,7 +401,7 @@ impl State {
             renderer,
             location,
             buffer,
-            None,
+            (alpha < 1.0).then_some(alpha.clamp(0.0, 1.0)),
             Some(all),
             Some(size),
             Kind::Unspecified,

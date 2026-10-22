@@ -6,7 +6,9 @@
 //!
 //! Drawn in strips of its picture, as the genie is, so that pixman and the
 //! scenarios see it too. Nothing moves in tests that do not sample motion,
-//! nor with reduced motion: there a flick lands at once.
+//! nor with reduced motion: there a flick lands at once. In the Matrix
+//! theme a dragged window stays rigid and leaves a phosphor trail instead
+//! (`matrix_windows`); it still glides when thrown.
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -178,7 +180,7 @@ impl State {
 
     /// A drag begins, held at `at` (global).
     pub fn wobble_held(&mut self, id: WindowId, window: &Window, at: Point<f64, Logical>) {
-        if !self.wobbles_move() {
+        if !self.wobbles_move() || self.look() == crate::motion::Look::Matrix {
             return;
         }
         self.wobbles.flicks.remove(&id);
@@ -326,6 +328,7 @@ impl State {
                 if let Some(before) = before {
                     self.wobble_moved(id, now_at - before);
                 }
+                self.matrix_moved(id, now_at);
             }
         }
         self.needs_redraw = true;

@@ -42,16 +42,16 @@ const CLOSE_MS: f32 = 400.0;
 /// The green over a window as it shows, at its strongest (180 of 255).
 const TINT: f32 = 180.0 / 255.0;
 
-fn in_quad(t: f32) -> f32 {
+pub(crate) fn in_quad(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t
 }
 
-fn phase(t: f32, from: f32, to: f32) -> f32 {
+pub(crate) fn phase(t: f32, from: f32, to: f32) -> f32 {
     ((t - from) / (to - from)).clamp(0.0, 1.0)
 }
 
-fn millis(since: Duration, now: Duration) -> f32 {
+pub(crate) fn millis(since: Duration, now: Duration) -> f32 {
     now.saturating_sub(since).as_secs_f32() * 1000.0
 }
 
@@ -72,6 +72,11 @@ impl Open {
 
     pub fn is_running(&self, now: Duration) -> bool {
         millis(self.since, now) < OPEN_MS
+    }
+
+    /// Milliseconds since it started.
+    pub fn elapsed(&self, now: Duration) -> f32 {
+        millis(self.since, now)
     }
 
     /// How much of the window shows: nothing until its glyphs have filled
@@ -228,11 +233,11 @@ impl Sheets {
 }
 
 /// Collects an effect's elements, front first.
-struct Brush<'a, R: Renderer + ImportAll + ImportMem> {
-    renderer: &'a mut R,
+pub(crate) struct Brush<'a, R: Renderer + ImportAll + ImportMem> {
+    pub(crate) renderer: &'a mut R,
     sheet: SheetBuffer,
     scale: f64,
-    out: Vec<SceneElement<R>>,
+    pub(crate) out: Vec<SceneElement<R>>,
 }
 
 impl<R> Brush<'_, R>
@@ -319,7 +324,7 @@ where
     }
 
     /// One glyph; a head from the sheet's last row when `head`.
-    fn glyph(&mut self, at: Point<f64, Logical>, pick: u64, head: bool, alpha: f32) {
+    pub(crate) fn glyph(&mut self, at: Point<f64, Logical>, pick: u64, head: bool, alpha: f32) {
         let col = (pick % u64::from(SHEET_COLS)) as u32;
         let row = if head {
             SHEET_ROWS - 1
@@ -330,7 +335,7 @@ where
         self.cut(at, size, (col, row), alpha);
     }
 
-    fn solid(&mut self, rect: Rectangle<f64, Logical>, color: Color, alpha: f32) {
+    pub(crate) fn solid(&mut self, rect: Rectangle<f64, Logical>, color: Color, alpha: f32) {
         let geometry = rect.to_physical_precise_round(self.scale);
         if geometry.size.w <= 0 || geometry.size.h <= 0 || alpha <= 0.0 {
             return;
@@ -348,7 +353,13 @@ where
     }
 
     /// A glowing line `width` wide just outside `rect`.
-    fn outline(&mut self, rect: Rectangle<f64, Logical>, width: f64, color: Color, alpha: f32) {
+    pub(crate) fn outline(
+        &mut self,
+        rect: Rectangle<f64, Logical>,
+        width: f64,
+        color: Color,
+        alpha: f32,
+    ) {
         let (x, y, w, h) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
         for (rx, ry, rw, rh) in [
             (x - width, y - width, w + 2.0 * width, width),
@@ -371,7 +382,7 @@ fn pick(seed: u64, n: u32, salt: u64) -> u64 {
 }
 
 impl State {
-    fn brush<'a, R>(&self, renderer: &'a mut R, scale: f64) -> Brush<'a, R>
+    pub(crate) fn brush<'a, R>(&self, renderer: &'a mut R, scale: f64) -> Brush<'a, R>
     where
         R: Renderer + ImportAll + ImportMem,
     {

@@ -70,6 +70,8 @@ pub struct State {
     pub textures: Textures,
     /// The Matrix theme's glyphs, once per scale.
     pub matrix_sheets: crate::matrix::Sheets,
+    /// The Matrix theme's window motions after opening and closing (#154).
+    pub matrix_motions: crate::matrix_windows::Motions,
     /// Wallpapers that move, painted by shaders (#108).
     pub backdrops: crate::backdrop::Backdrops,
     /// Frosted glass behind panels, blurred by shaders (#37).
@@ -256,6 +258,7 @@ impl State {
             style: Style::default(),
             textures: Textures::default(),
             matrix_sheets: Default::default(),
+            matrix_motions: Default::default(),
             backdrops: Default::default(),
             blurs: Default::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),

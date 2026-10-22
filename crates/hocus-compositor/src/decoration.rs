@@ -1,11 +1,12 @@
 //! Windows without title bars still read as windows: rounded corners, a
-//! soft shadow and a ring in the accent colour on the focused one
+//! soft shadow, a hairline just inside their edge in the theme's tint, and
+//! a ring in the accent colour on the focused one
 //! (docs/decisions/0006-no-title-bars.md).
 //!
 //! Everything here works the same with every renderer, pixman included, so
 //! that scenarios can check it: corners are cut by leaving their outside out
-//! of what the window draws, and the shadow and the ring are textures drawn
-//! once per scale and stretched in nine slices.
+//! of what the window draws, and the shadow, the hairline and the ring are
+//! textures drawn once per scale and stretched in nine slices.
 
 use std::{collections::BTreeMap, sync::Mutex};
 
@@ -38,6 +39,8 @@ pub struct Style {
     /// The focus ring: width in logical pixels, colour as RGB.
     pub ring_width: f64,
     pub accent: [u8; 3],
+    /// The hairline inside the window's edge, as RGBA (the theme's).
+    pub border: [u8; 4],
 }
 
 impl Default for Style {
@@ -50,6 +53,7 @@ impl Default for Style {
             shadow_alpha: 0.5,
             ring_width: 2.0,
             accent: [0x7B, 0xC4, 0x7F],
+            border: [0xFF, 0xFF, 0xFF, 0x14],
         }
     }
 }
@@ -118,22 +122,27 @@ impl<E: Element> Rounded<E> {
     /// The clip and the radius where `dst` puts the element.
     fn clip_in(&self, dst: Rectangle<i32, Physical>) -> (Rectangle<i32, Physical>, i32) {
         match self.natural {
-            Some(n) if n.size != dst.size && n.size.w > 0 => {
-                let k = f64::from(dst.size.w) / f64::from(n.size.w);
-                let at = |v: i32, from: i32, to: i32| to + (f64::from(v - from) * k).round() as i32;
+            Some(n) if n.size != dst.size && n.size.w > 0 && n.size.h > 0 => {
+                // Stretched more one way than the other (a window changing
+                // place): each way by its own factor.
+                let kx = f64::from(dst.size.w) / f64::from(n.size.w);
+                let ky = f64::from(dst.size.h) / f64::from(n.size.h);
+                let at = |v: i32, from: i32, to: i32, k: f64| {
+                    to + (f64::from(v - from) * k).round() as i32
+                };
                 let clip = Rectangle::new(
                     (
-                        at(self.clip.loc.x, n.loc.x, dst.loc.x),
-                        at(self.clip.loc.y, n.loc.y, dst.loc.y),
+                        at(self.clip.loc.x, n.loc.x, dst.loc.x, kx),
+                        at(self.clip.loc.y, n.loc.y, dst.loc.y, ky),
                     )
                         .into(),
                     (
-                        (f64::from(self.clip.size.w) * k).round() as i32,
-                        (f64::from(self.clip.size.h) * k).round() as i32,
+                        (f64::from(self.clip.size.w) * kx).round() as i32,
+                        (f64::from(self.clip.size.h) * ky).round() as i32,
                     )
                         .into(),
                 );
-                (clip, (f64::from(self.radius) * k).round() as i32)
+                (clip, (f64::from(self.radius) * kx.min(ky)).round() as i32)
             }
             _ => (self.clip, self.radius),
         }
@@ -247,6 +256,7 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
 enum Piece {
     Shadow,
     Ring([u8; 3]),
+    Hairline([u8; 4]),
 }
 
 /// Textures drawn once per piece and scale.
@@ -267,6 +277,7 @@ impl Textures {
         let draw = || match piece {
             Piece::Shadow => shadow_texture(style, scale),
             Piece::Ring(rgb) => ring_texture(style, rgb, scale),
+            Piece::Hairline(rgba) => hairline_texture(style, rgba, scale),
         };
         match self.0.lock() {
             Ok(mut cache) => cache.entry(key).or_insert_with(draw).clone(),
@@ -385,6 +396,28 @@ fn ring_texture(style: &Style, rgb: [u8; 3], scale: f64) -> (MemoryRenderBuffer,
     (buffer(&pixels, side), corner)
 }
 
+/// A square holding a hairline one logical pixel wide just inside a
+/// rounded window's edge, which is the square's own edge: the window's
+/// content shows through it, tinted.
+fn hairline_texture(style: &Style, rgba: [u8; 4], scale: f64) -> (MemoryRenderBuffer, i32) {
+    let width = scale.max(1.0);
+    let r = style.radius * scale;
+    let corner = (r.ceil() as i32).max(width.ceil() as i32) + 1;
+    let side = 2 * corner + 1;
+    let n = side as usize;
+    let alpha = f64::from(rgba[3]) / 255.0;
+    let rgb = [rgba[0], rgba[1], rgba[2]];
+    let pixels: Vec<u8> = (0..n * n)
+        .flat_map(|i| {
+            let (x, y) = ((i % n) as f64 + 0.5, (i / n) as f64 + 0.5);
+            let outer = rounded_coverage(x, y, f64::from(side), 0.0, r);
+            let inner = rounded_coverage(x, y, f64::from(side), width, (r - width).max(0.0));
+            pixel(rgb, (outer - inner).max(0.0) * alpha)
+        })
+        .collect();
+    (buffer(&pixels, side), corner)
+}
+
 fn buffer(pixels: &[u8], side: i32) -> MemoryRenderBuffer {
     MemoryRenderBuffer::from_slice(
         pixels,
@@ -410,9 +443,48 @@ where
     R: Renderer + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
-    let (texture, corner) = textures.get(Piece::Ring(style.accent), style, scale);
+    ring_elements_in(renderer, textures, style, style.accent, rect, scale, alpha)
+}
+
+/// The same ring in another colour: the Matrix theme's glow while a window
+/// is resized.
+pub fn ring_elements_in<R>(
+    renderer: &mut R,
+    textures: &Textures,
+    style: &Style,
+    rgb: [u8; 3],
+    rect: Rectangle<f64, Logical>,
+    scale: f64,
+    alpha: f32,
+) -> Vec<MemoryRenderBufferRenderElement<R>>
+where
+    R: Renderer + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    let (texture, corner) = textures.get(Piece::Ring(rgb), style, scale);
     let inset = f64::from(corner) / scale - style.radius;
     nine_slice(renderer, &texture, corner, inset, rect, scale, alpha)
+}
+
+/// The hairline just inside a window at `rect`, over its content, `alpha`
+/// opaque; none where the theme has none.
+pub fn hairline_elements<R>(
+    renderer: &mut R,
+    textures: &Textures,
+    style: &Style,
+    rect: Rectangle<f64, Logical>,
+    scale: f64,
+    alpha: f32,
+) -> Vec<MemoryRenderBufferRenderElement<R>>
+where
+    R: Renderer + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    if style.border[3] == 0 || alpha <= 0.0 {
+        return Vec::new();
+    }
+    let (texture, corner) = textures.get(Piece::Hairline(style.border), style, scale);
+    nine_slice(renderer, &texture, corner, 0.0, rect, scale, alpha)
 }
 
 /// The shadow under a window at `rect`, `alpha` opaque.
@@ -511,6 +583,20 @@ mod tests {
         assert!(!cuts.iter().any(|c| c.contains((60, 20))));
         assert!(!cuts.iter().any(|c| c.contains((18, 28))));
         assert!(corner_cutouts(rect, 0).is_empty());
+    }
+
+    #[test]
+    fn the_hairline_is_one_pixel_inside_the_edge() {
+        let style = Style::default();
+        let r = style.radius;
+        let corner = f64::from(r.ceil() as i32 + 1);
+        let side = 2.0 * corner + 1.0;
+        let at = |y: f64| {
+            rounded_coverage(side / 2.0, y, side, 0.0, r)
+                - rounded_coverage(side / 2.0, y, side, 1.0, r - 1.0)
+        };
+        assert_eq!(at(0.5), 1.0, "the window's outermost row");
+        assert_eq!(at(1.5), 0.0, "the content inside");
     }
 
     #[test]

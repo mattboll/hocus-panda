@@ -1,0 +1,50 @@
+description = "In the Matrix theme a window being resized glows green and reads out its size beside the pointer, terminal style; let go, the glow flashes once and the focus ring comes back; then nothing is drawn"
+outputs = ["1280x800"]
+motion = true
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+advance_ms = 600
+
+# The band right of the right edge resizes.
+[[step]]
+pointer_move = [676, 400]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [776, 420]
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [272, 250, 500, 300] }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-resize-readout.png" }
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-resize-flash.png" }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_idle = { for_ms = 2000 }

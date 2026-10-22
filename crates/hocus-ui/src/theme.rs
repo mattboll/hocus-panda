@@ -176,6 +176,9 @@ pub struct Colors {
     pub waiting: Color,
     pub error: Color,
     pub shadow: Color,
+    /// The hairline just inside every decorated window's edge, as the
+    /// boards draw it: faint, in the theme's own tint.
+    pub window_border: Color,
     /// From the accent chosen; not in theme files.
     #[serde(skip, default)]
     pub accent: Color,
@@ -555,6 +558,7 @@ impl Theme {
         let c = &mut self.colors;
         c.muted = c.muted.mix(c.text, 0.6);
         c.border = c.border.mix(c.text, 0.5);
+        c.window_border = c.window_border.mix(c.text, 0.5);
         c.surface_hover = c.surface_hover.mix(c.text, 0.06);
         self.focus_ring = 3.0;
         self

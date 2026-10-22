@@ -27,6 +27,7 @@ pub mod phone;
 pub mod picker;
 pub mod providers;
 pub mod quick;
+pub mod readout;
 pub mod recording;
 pub mod share;
 pub mod showcase;

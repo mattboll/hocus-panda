@@ -161,6 +161,8 @@ impl State {
         } else {
             0.0
         };
+        let b = theme.colors.window_border;
+        style.border = [b.r, b.g, b.b, b.a];
         // A ring that follows the theme takes its accent with the theme.
         if let Some(accent) = config.accent() {
             style.accent = accent;

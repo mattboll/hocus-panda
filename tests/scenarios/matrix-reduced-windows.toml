@@ -1,0 +1,78 @@
+description = "In the Matrix theme with reduced motion, minimizing, maximizing and snapping play the plain short motions: the picture fades where the window was, briefly, with no glyphs, traces or grid lines; a snap is there at once"
+outputs = ["1280x800"]
+motion = true
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+reduced_motion = true
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [500, 340], color = "#3399ff" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+set_state = { app_id = "editor", state = "minimized" }
+
+[[step]]
+advance_ms = 66
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-reduced-minimize.png" }
+
+[[step]]
+advance_ms = 150
+
+[[step]]
+expect_window = { app_id = "editor", visible = false }
+
+[[step]]
+set_state = { app_id = "editor", state = "normal" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized" }
+
+# Back from maximized, its big picture fades where it was.
+[[step]]
+set_state = { app_id = "editor", state = "normal" }
+
+[[step]]
+advance_ms = 50
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-reduced-unmaximize.png" }
+
+[[step]]
+advance_ms = 150
+
+[[step]]
+keys = "super+right"
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [472, 0, 472, 800], state = "snapped" }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_idle = { for_ms = 2000 }

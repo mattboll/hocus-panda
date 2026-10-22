@@ -17,6 +17,14 @@
   final state.
 - **Performance budget**: effects run as GPU shaders in the compositor, under
   2 ms per frame at 1920×1080, and nothing is drawn when nothing moves.
+- **As built**: the window effects (§1 to §8) are drawn with the elements
+  every renderer has (the window's picture stretched, plain colours, rows
+  of glyphs from a sheet), so that pixman and the scenarios show them too.
+  What needs a shader is left for the GPU: true RGB channel separation,
+  bloom, scanlines and vignette; the phosphor glow is a faint wider line,
+  the green shift a tint. Sounds are not played yet.
+- **Window border**: every decorated window has a 1 px hairline inside its
+  edge, `rgba(0,240,96,0.22)` here (the boards' window border).
 
 ---
 
@@ -47,6 +55,10 @@ font.
 - Phase 1: Linear (constant rain speed, matching the wallpaper rain speed)
 - Phase 2: `easeOutCubic` for horizontal expansion
 - Phase 3: `easeInQuad` for green tint fadeout (slow start, fast finish)
+
+With title bars on (decision 0006: off by default), the title is typed in
+from Phase 3, up to 8 ms a character, a `_` cursor at its end, done within
+the effect; the theme's faces are all monospace already.
 
 ### Particle Effects
 - 8-12 matrix glyph particles scatter outward from window edges at Phase 2
@@ -124,6 +136,9 @@ horizontally toward the taskbar icon position, leaving a brief phosphor trail.
 ### Particle Effects
 - Phosphor persistence trail: The horizontal dash leaves a green afterglow
   along its path, 1px tall, decaying with an exponential decay table over 3-4 frames.
+
+The line and the flash are drawn over the dock, so that the flash shows on
+the icon; the crushed window is drawn with the windows.
 
 ### Sound Effects
 - CRT "zzzip" (60ms, descending sweep 6kHz to 200Hz, sawtooth wave).
@@ -236,6 +251,12 @@ window's averaged hue shifted toward green.
 Additionally, when the window crosses snap zones (screen edges, center), thin
 green guide lines flash momentarily (60ms) at the snap boundaries.
 
+The window stays rigid while dragged in this theme (no wobbly jelly), so
+that the trail reads as a CRT's persistence; thrown, it still glides. Its
+trail is its own picture under a green tint, at the places it was drawn
+17, 33 and 50 ms ago. The guide lines flash in the bright head green, to
+read over the zone's outline.
+
 ### Timing
 - **Trail persistence**: 3 frames (approximately 50ms at 60fps)
 - **Guide line flash**: 60ms per appearance
@@ -262,6 +283,9 @@ the current window dimensions in green-on-black terminal style:
 
 When resize completes (button release), the green border flashes brightly
 once (50ms) then returns to normal.
+
+The glow takes the place of the focus ring; the readout shows the window's
+size in logical pixels, as its client has it.
 
 ### Timing
 - **Border glow**: Continuous during resize
@@ -599,4 +623,9 @@ When reduced motion is on, ALL Matrix theme animations MUST:
 2. Skip rain/character effects
 3. Use instant state transitions (0ms)
 4. Apply only color changes (green accent borders) without animation
+
+As built, windows then move as in every theme with reduced motion: short
+fades where they are (opening, closing, minimizing, restoring, maximizing),
+a snap at once, no trail, no flashes. The resize glow and readout stay:
+they are colour and information, not motion.
 

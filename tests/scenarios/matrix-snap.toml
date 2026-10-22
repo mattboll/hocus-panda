@@ -1,0 +1,53 @@
+description = "In the Matrix theme a window snapped to the left half shows the dashed grid line it snaps apart from, springs into place, and the line fades; sampled at each phase; then it rests snapped and nothing is drawn"
+outputs = ["1280x800"]
+motion = true
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+
+[windows.gaps]
+inner = 8
+outer = 8
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+keys = "super+left"
+
+[[step]]
+advance_ms = 50
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-snap-grid.png" }
+
+[[step]]
+advance_ms = 130
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-snap-slide.png" }
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-snap-fades.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [8, 8, 460, 784], state = "snapped" }
+
+[[step]]
+expect_idle = { for_ms = 5000 }
