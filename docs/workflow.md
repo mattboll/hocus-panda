@@ -31,7 +31,9 @@ these rules make that safe and pleasant.
   - says `Closes #N`;
   - explains what changed and why, and **how it was tested** (scenarios,
     screenshots, manual check in nested mode);
-  - is green in CI;
+  - is green in CI (Linux: formatting, licenses, clippy, tests; FreeBSD
+    runs on `main` after each merge and every night, and a break there is
+    fixed first);
   - is reviewed and merged by the maintainer (rebase merge).
 - `main` is always releasable: it builds, its tests pass.
 
