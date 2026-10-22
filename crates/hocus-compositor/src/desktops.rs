@@ -277,6 +277,7 @@ impl State {
             Shown::Maximized => self.set_maximized(id, true, serial),
             Shown::Normal => {}
         }
+        self.adopt_dropdown(id, app_id.as_deref(), serial);
     }
 
     /// Where a new window of `size` goes on `output`: centred in its work

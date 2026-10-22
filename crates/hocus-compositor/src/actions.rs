@@ -17,6 +17,8 @@ use crate::{State, surface};
 const KEY_1: u32 = 2;
 const KEY_0: u32 = 11;
 const XKB_OFFSET: u32 = 8;
+/// The key left of 1: a physical key, like the digits.
+const KEY_GRAVE: u32 = 41;
 
 /// The combination a key press makes, as shortcuts name them: digits by
 /// position, other keys by their unshifted symbol in the active layout.
@@ -24,6 +26,8 @@ pub fn combo_of(modifiers: &ModifiersState, key: &KeysymHandle<'_>) -> Option<Co
     let evdev = key.raw_code().raw().checked_sub(XKB_OFFSET)?;
     let key = if (KEY_1..=KEY_0).contains(&evdev) {
         Key::Digit(((evdev - KEY_1 + 1) % 10) as u8)
+    } else if evdev == KEY_GRAVE {
+        Key::Named("grave".into())
     } else {
         let sym = key.raw_latin_sym_or_raw_current_sym()?;
         Key::Named(xkb::keysym_get_name(sym).to_ascii_lowercase())
@@ -132,6 +136,7 @@ impl State {
             Action::SwitchLayout => self.switch_layout(),
             Action::Launcher => self.toggle_launcher(),
             Action::QuickSettings => self.toggle_quick(),
+            Action::Dropdown => self.toggle_dropdown(),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }

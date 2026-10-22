@@ -251,6 +251,7 @@ impl State {
     /// After each dispatch: follows the primary output, shows the current
     /// state and draws what changed. Nothing is drawn when nothing changed.
     pub fn refresh_shell(&mut self) {
+        self.refresh_dropdown();
         self.refresh_appearance();
         self.refresh_toasts();
         self.refresh_launcher();

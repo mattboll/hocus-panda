@@ -1,0 +1,53 @@
+description = "Super+Backtick drops the terminal on the screen under the pointer, at its width; again hides it, and the same process comes back"
+outputs = ["1280x800", "1920x1080+1280+0"]
+
+[[step]]
+config = """
+[dropdown]
+command = "{test_client} --app-id hocus-dropdown --color '#2b2f36'"
+height = 0.4
+"""
+
+[[step]]
+open = { app_id = "editor", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+pointer_move = [2500, 500]
+
+[[step]]
+keys = "super+backtick"
+
+# Full width of the external screen, at its top, 40 % of its height.
+[[step]]
+expect_window = { app_id = "hocus-dropdown", output = "HEADLESS-2", geometry = [1280, 0, 1920, 432], focused = true, pinned = true }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "dropdown.png" }
+
+[[step]]
+keys = "super+backtick"
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "hocus-dropdown", state = "minimized", visible = false }
+
+[[step]]
+expect_focus = "editor"
+
+# Shown again on the first screen: the same window, started once.
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+backtick"
+
+[[step]]
+expect_window = { app_id = "hocus-dropdown", output = "HEADLESS-1", geometry = [0, 0, 1280, 320], focused = true }
+
+[[step]]
+expect_runtime_file = { name = "hocus-dropdown.starts", lines = 1 }

@@ -42,6 +42,11 @@ colour = "#0e0f12"         # around a fitted image, or the whole screen; the the
 output = "DP-1"
 image = "~/Pictures/wide.png"
 
+[dropdown]                 # the drop-down terminal (Super+Backtick)
+command = "foot --app-id=hocus-dropdown"
+app_id = "hocus-dropdown"  # how its window is recognised
+height = 0.45              # share of the screen's height (0.2 to 0.9)
+
 [launcher]                 # what the launcher offers besides applications
 calculator = true          # 2*21
 units = true               # 12 km in miles
@@ -80,7 +85,8 @@ A combination is modifiers (`Super`, `Ctrl`, `Alt`, `Shift`) and a key joined
 by `+`. Digits are the keys of the top row, whatever the layout (on AZERTY,
 `Super+2` is the `é` key); other keys go by their name in the active layout
 (`P`, `Right`, `Return`, `F4`, `Space`, `BackSpace`…). When the file binds the
-same keys twice, the first one wins and the second is reported.
+same keys twice, the first one wins and the second is reported. `Backtick`
+is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 
 | Action | Does |
 |---|---|
@@ -97,6 +103,7 @@ same keys twice, the first one wins and the second is reported.
 | `switch-layout` | the next keyboard layout |
 | `launcher` | opens the launcher (applications, calculator), or closes it |
 | `quick-settings` | opens quick settings on the screen under the pointer, or closes them |
+| `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `spawn COMMAND` | runs a command through the shell |
 | `quit` | ends the session |
@@ -123,5 +130,6 @@ Defaults:
 | Super+Ctrl+Space | `switch-layout` |
 | Super+Space | `launcher` |
 | Super+A | `quick-settings` |
+| Super+Backtick | `dropdown` |
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |
 | Ctrl+Alt+BackSpace | `quit` |

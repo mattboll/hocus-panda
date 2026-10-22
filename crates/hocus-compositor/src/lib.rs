@@ -11,6 +11,7 @@ mod config_watch;
 mod cursor;
 mod decoration;
 mod desktops;
+mod dropdown;
 mod grabs;
 mod handlers;
 mod harness;

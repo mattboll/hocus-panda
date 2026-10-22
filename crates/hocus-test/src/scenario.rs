@@ -200,6 +200,8 @@ pub struct ExpectAccent {
 #[serde(deny_unknown_fields)]
 pub struct ExpectFile {
     pub name: String,
+    /// How many lines it has.
+    pub lines: Option<usize>,
     #[serde(default)]
     pub contains: Vec<String>,
     #[serde(default)]
@@ -412,6 +414,8 @@ pub struct RunOptions {
     pub artifacts: PathBuf,
     /// Write the actual screenshots as references instead of comparing.
     pub bless: bool,
+    /// The test client program, `{test_client}` in configuration steps.
+    pub test_client: Option<PathBuf>,
 }
 
 impl Scenario {
@@ -642,7 +646,10 @@ impl Run<'_> {
                     .dir
                     .canonicalize()
                     .unwrap_or_else(|_| self.scenario.dir.clone());
-                let text = text.replace("{scenario_dir}", &dir.to_string_lossy());
+                let mut text = text.replace("{scenario_dir}", &dir.to_string_lossy());
+                if let Some(client) = &self.options.test_client {
+                    text = text.replace("{test_client}", &client.to_string_lossy());
+                }
                 self.compositor.write_config(&text)?;
                 Ok(())
             }
@@ -881,6 +888,14 @@ impl Run<'_> {
                 _ => self.compositor.dispatch(Duration::from_millis(10))?,
             }
         };
+        if let Some(lines) = expected.lines {
+            anyhow::ensure!(
+                text.lines().count() == lines,
+                "{} has {} lines, expected {lines}:\n{text}",
+                expected.name,
+                text.lines().count()
+            );
+        }
         for wanted in &expected.contains {
             anyhow::ensure!(
                 text.contains(wanted.as_str()),
@@ -1112,9 +1127,14 @@ impl Run<'_> {
     /// Clients resize in their own threads: the window gets a moment to
     /// match before the step fails.
     fn expect_window(&mut self, expected: &ExpectWindow) -> anyhow::Result<()> {
-        let deadline = Instant::now() + SETTLE_TIMEOUT;
+        // A program the compositor started may still be on its way.
+        let deadline = Instant::now() + SETTLE_TIMEOUT.max(CLIENT_TIMEOUT / 2);
         loop {
-            let wrong = self.window_differences(expected)?;
+            let wrong = match self.window_differences(expected) {
+                Ok(wrong) => wrong,
+                Err(missing) if Instant::now() <= deadline => vec![missing.to_string()],
+                Err(missing) => return Err(missing),
+            };
             if wrong.is_empty() {
                 return Ok(());
             }
@@ -1343,6 +1363,7 @@ fn key_code(name: &str) -> Option<u32> {
         "enter" => 28,
         "escape" | "esc" => 1,
         "tab" => 15,
+        "backtick" | "grave" => 41,
         "space" => 57,
         "backspace" => 14,
         "left" => 105,

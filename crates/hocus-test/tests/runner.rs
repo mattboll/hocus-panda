@@ -13,6 +13,7 @@ fn options(artifacts: &Path) -> RunOptions {
     RunOptions {
         artifacts: artifacts.to_path_buf(),
         bless: false,
+        test_client: None,
     }
 }
 
