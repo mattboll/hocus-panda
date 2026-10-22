@@ -35,6 +35,7 @@ fn texts(language: &str) -> anyhow::Result<BTreeSet<String>> {
         child_env: None,
         polkit_helper: None,
         motion: false,
+        first_run: false,
     })?;
     compositor.write_config(&format!("[language]\ninterface = \"{language}\"\n"))?;
     compositor.advance(FRAME * 4)?;

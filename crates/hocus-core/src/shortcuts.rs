@@ -90,6 +90,10 @@ pub enum Action {
     /// The desktop of the screen under the pointer, its windows out of the
     /// way, or back (#86).
     ShowDesktop,
+    /// The first session's welcome, again (#82).
+    Welcome,
+    /// The version, licences and credits (#82).
+    About,
     /// A screenshot (#69), after `delay` seconds.
     Screenshot {
         mode: ScreenshotMode,
@@ -195,6 +199,8 @@ impl fmt::Display for Action {
             Self::Dock => write!(f, "dock"),
             Self::Overview => write!(f, "overview"),
             Self::ShowDesktop => write!(f, "show-desktop"),
+            Self::Welcome => write!(f, "welcome"),
+            Self::About => write!(f, "about"),
             Self::Screenshot { mode, delay: 0 } => write!(f, "screenshot {mode}"),
             Self::Screenshot { mode, delay } => write!(f, "screenshot {mode} {delay}"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
@@ -276,6 +282,8 @@ impl FromStr for Action {
             "dock" => bare(Self::Dock),
             "overview" => bare(Self::Overview),
             "show-desktop" => bare(Self::ShowDesktop),
+            "welcome" => bare(Self::Welcome),
+            "about" => bare(Self::About),
             "screenshot" => {
                 let mut words = rest.split_whitespace();
                 let mode = words.next().unwrap_or("screen").parse()?;

@@ -1,0 +1,36 @@
+description = "The first session opens the settings on their welcome, once: after a restart it does not open again"
+outputs = ["1280x800"]
+shell = true
+first_run = true
+
+# The settings stand-in, before the welcome is due.
+[[step]]
+config = """
+[settings]
+command = "{test_client} --app-id hocus-settings --size 900x600 --color '#20242a'"
+"""
+
+[[step]]
+advance_ms = 2000
+
+[[step]]
+expect_window = { app_id = "hocus-settings" }
+
+[[step]]
+expect_runtime_file = { name = "hocus-settings.starts", lines = 1, contains = ["on welcome"] }
+
+[[step]]
+expect_state_file = { name = "welcomed" }
+
+[[step]]
+close = "hocus-settings"
+
+# Skipped: it does not come back.
+[[step]]
+restart = true
+
+[[step]]
+advance_ms = 3000
+
+[[step]]
+expect_no_window = "hocus-settings"

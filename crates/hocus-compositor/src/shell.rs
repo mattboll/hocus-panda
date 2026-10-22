@@ -269,6 +269,7 @@ impl State {
         self.refresh_slides();
         self.refresh_alt_tab();
         self.refresh_lang();
+        self.refresh_first_run();
         self.refresh_dock();
         self.refresh_corners();
         self.refresh_ink();

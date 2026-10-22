@@ -67,6 +67,9 @@ pub struct Scenario {
     /// otherwise they appear and go at once.
     #[serde(default)]
     pub motion: bool,
+    /// The first session: the welcome opens (#82).
+    #[serde(default)]
+    pub first_run: bool,
     /// What started applications inherit (`PATH` is added if missing),
     /// instead of the test's own environment; `{scenario_dir}` in values.
     pub child_env: Option<std::collections::BTreeMap<String, String>>,
@@ -826,6 +829,7 @@ impl Scenario {
             }),
             polkit_helper: None,
             motion: self.motion,
+            first_run: self.first_run,
         })?;
         let mut run = Run {
             scenario: self,

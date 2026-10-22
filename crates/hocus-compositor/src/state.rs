@@ -146,6 +146,8 @@ pub struct State {
     /// Drawing on the screen (#86).
     pub ink: crate::ink::Inking,
     pub pandas: crate::pandas::Pandas,
+    /// The first session's welcome (#82).
+    pub first_run: crate::first_run::FirstRun,
     /// Desktops sliding, screen by screen (#36).
     pub slides: crate::slide::Slides,
     /// The window switcher (#39).
@@ -268,6 +270,7 @@ impl State {
             triggers: Default::default(),
             ink: Default::default(),
             pandas: Default::default(),
+            first_run: Default::default(),
             slides: Default::default(),
             alt_tab: Default::default(),
             dock: Default::default(),

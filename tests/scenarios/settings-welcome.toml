@@ -1,0 +1,45 @@
+description = "The welcome: the waving panda, the language, keyboard, theme and accent chosen land in the configuration, then where to go next"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "welcome" }
+
+[[step]]
+expect_settings = { label = "Panda waving" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-welcome.png" }
+
+[[step]]
+click_settings = "FR"
+
+[[step]]
+expect_config_file = { contains = ["layouts = [\"fr\"]"] }
+
+[[step]]
+click_settings = "Light"
+
+[[step]]
+expect_config_file = { contains = ["theme = \"light\""] }
+
+[[step]]
+click_settings = "Accent Amber"
+
+[[step]]
+expect_config_file = { contains = ["accent = \"amber\""] }
+
+[[step]]
+click_settings = "Français"
+
+[[step]]
+expect_config_file = { contains = ["interface = \"fr\""] }
+
+[[step]]
+expect_settings = { label = "Commencer" }
+
+[[step]]
+click_settings = "Tous les réglages"
+
+[[step]]
+expect_settings = { label = "Apparence" }

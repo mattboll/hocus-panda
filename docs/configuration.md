@@ -259,6 +259,8 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `dock` | shows the dock, or hides it again |
 | `overview` | every screen's windows in a grid, or closes it |
 | `show-desktop` | the desktop of the screen under the pointer, its windows out of the way, or back |
+| `welcome` | the first session's welcome again: language, keyboard, theme, and where to go next |
+| `about` | Hocuspanda's version, licences and credits |
 | `spawn COMMAND` | runs a command through the shell |
 | `quit` | ends the session at once, without asking windows to close |
 | `none` | removes a default shortcut |

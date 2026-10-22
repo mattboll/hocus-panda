@@ -30,6 +30,7 @@ fn compositor(dump_dir: &std::path::Path, limit: Duration) -> anyhow::Result<Hea
         child_env: None,
         polkit_helper: None,
         motion: false,
+        first_run: false,
     })
 }
 

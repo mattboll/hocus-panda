@@ -421,3 +421,26 @@ pub const LIKE_THE_SYSTEM: Words = Words::new("Like the system", "Comme le syst�
 /// Language names are written in their own language.
 pub const ENGLISH: Words = Words::new("English", "English");
 pub const FRENCH: Words = Words::new("Français", "Français");
+
+pub const WELCOME_TITLE: Words = Words::new("Welcome to Hocuspanda", "Bienvenue dans Hocuspanda");
+pub const WELCOME_LINE: Words = Words::new(
+    "A fast, beautiful desktop, with pandas that show what is going on without ever interrupting. Choose a few things now: everything can be changed later in Settings.",
+    "Un bureau rapide et beau, avec des pandas qui montrent ce qui se passe, sans jamais interrompre. Choisissez quelques réglages maintenant : tout se change plus tard dans les Réglages.",
+);
+pub const KEYBOARD_LAYOUT: Words = Words::new("Keyboard", "Clavier");
+pub const NEXT: Words = Words::new("Next", "Ensuite");
+pub const WIFI: Words = Words::new("Wi-Fi", "Wi-Fi");
+pub const AI: Words = Words::new("AI and agents", "IA et agents");
+pub const ALL_SETTINGS: Words = Words::new("All settings", "Tous les réglages");
+pub const START: Words = Words::new("Start", "Commencer");
+pub const VERSION: Words = Words::new("Version", "Version");
+pub const LICENCES: Words = Words::new("Licences", "Licences");
+pub const LICENCES_TEXT: Words = Words::new(
+    "Hocuspanda's code is under the MIT licence. The pandas and the icons are drawn for Hocuspanda and come with the code, under the same licence. The fonts, Manrope, Fraunces, JetBrains Mono and Space Grotesk, are under the SIL Open Font License.",
+    "Le code de Hocuspanda est sous licence MIT. Les pandas et les icônes sont dessinés pour Hocuspanda et viennent avec le code, sous la même licence. Les polices, Manrope, Fraunces, JetBrains Mono et Space Grotesk, sont sous licence SIL Open Font License.",
+);
+pub const CREDITS: Words = Words::new("Credits", "Remerciements");
+pub const CREDITS_TEXT: Words = Words::new(
+    "Hocuspanda stands on smithay, calloop, vello, parley, zbus and many other free libraries: thank you to everyone who makes them.",
+    "Hocuspanda s’appuie sur smithay, calloop, vello, parley, zbus et bien d’autres bibliothèques libres : merci à toutes celles et ceux qui les font.",
+);

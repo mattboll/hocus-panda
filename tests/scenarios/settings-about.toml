@@ -1,0 +1,12 @@
+description = "About: the panda in its hat, the version, the licences of the code, the pandas and the fonts, and the credits; reached from the palette"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "about" }
+
+[[step]]
+expect_settings = { label = "LICENCES" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-about.png" }

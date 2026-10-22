@@ -67,6 +67,7 @@ fn compositor(bus: &PrivateBus) -> anyhow::Result<Headless> {
         child_env: None,
         polkit_helper: None,
         motion: false,
+        first_run: false,
     })
 }
 
