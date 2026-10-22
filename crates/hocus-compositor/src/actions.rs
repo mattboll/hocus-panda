@@ -155,6 +155,10 @@ impl State {
             Action::Emoji => self.toggle_launcher_mode(hocus_shell::launcher::Mode::Emoji),
             Action::Palette => self.toggle_palette(),
             Action::Record => self.toggle_recording(),
+            Action::FocusMode => self.toggle_focus_mode(),
+            Action::NightLight => self.toggle_night_light(),
+            Action::ZoomIn => self.zoom_step(true),
+            Action::ZoomOut => self.zoom_step(false),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }

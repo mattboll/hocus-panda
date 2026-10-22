@@ -419,6 +419,13 @@ pub struct OutputInfo {
     pub pixel_width: i32,
     pub pixel_height: i32,
     pub scale: f64,
+    /// Night light's colour temperature on it, kelvin; 6500 is daylight.
+    #[serde(default = "daylight")]
+    pub temperature: u32,
+}
+
+fn daylight() -> u32 {
+    6500
 }
 
 /// A connected screen, on or off.

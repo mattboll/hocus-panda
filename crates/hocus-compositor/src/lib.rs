@@ -10,6 +10,7 @@ mod bars;
 mod capture;
 mod clipboard;
 mod clock;
+mod comfort;
 mod config_watch;
 mod cursor;
 mod decoration;
@@ -332,6 +333,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         app.serve_captures();
         app.serve_screenshots();
         app.serve_recording();
+        app.apply_gamma();
         app.settle_outputs();
         match &mut app.backend {
             BackendState::Winit(winit) => winit.after_dispatch(&mut app.state),

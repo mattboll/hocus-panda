@@ -253,6 +253,7 @@ impl State {
         self.refresh_screenshots();
         self.refresh_recording();
         self.refresh_share();
+        self.refresh_night();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();

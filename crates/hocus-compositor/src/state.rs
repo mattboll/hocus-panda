@@ -114,6 +114,10 @@ pub struct State {
     /// The screenshot tool (#69).
     pub shots: crate::screenshot::Screenshots,
     pub recorder: crate::recording::Recorder,
+    /// Focus mode, the magnifier, night light (#78).
+    pub comfort: crate::comfort::Comfort,
+    /// Gamma each screen should get, for backends that set it.
+    pub gamma_wanted: Vec<(smithay::output::Output, [f32; 3])>,
     /// The portal's chooser waiting for the user (#116).
     pub share: Option<crate::share::Picking>,
     /// polkit's password requests and their dialog (#83).
@@ -238,6 +242,8 @@ impl State {
             authorizer: Default::default(),
             shots: Default::default(),
             recorder: Default::default(),
+            comfort: Default::default(),
+            gamma_wanted: Vec::new(),
             share: None,
             clipboard: Default::default(),
             tray: Default::default(),

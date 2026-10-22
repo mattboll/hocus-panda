@@ -1,0 +1,50 @@
+description = "Super+Equal magnifies around the pointer; the view follows it as it moves, within the frame budget; Super+Minus back to 1 turns it off"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "editor", size = [500, 360], color = "#3399ff" }
+
+[[step]]
+pointer_move = [400, 300]
+
+[[step]]
+keys = "super+13"
+
+[[step]]
+keys = "super+13"
+
+[[step]]
+keys = "super+13"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "magnifier.png" }
+
+[[step]]
+pointer_move = [900, 600]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "magnifier-moved.png" }
+
+[[step]]
+expect_budget = { max_ms = 100 }
+
+[[step]]
+keys = "super+12"
+
+[[step]]
+keys = "super+12"
+
+[[step]]
+keys = "super+12"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "magnifier-off.png" }

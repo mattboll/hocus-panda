@@ -90,6 +90,9 @@ pub struct Rounded<E> {
     /// space as the element's geometry.
     clip: Rectangle<i32, Physical>,
     radius: i32,
+    /// The element's own geometry when made: drawn elsewhere (magnified),
+    /// the corners follow.
+    natural: Option<Rectangle<i32, Physical>>,
 }
 
 impl<E> Rounded<E> {
@@ -98,6 +101,40 @@ impl<E> Rounded<E> {
             inner,
             clip,
             radius,
+            natural: None,
+        }
+    }
+}
+
+impl<E: Element> Rounded<E> {
+    /// Remembers the element's geometry at `scale`, for corners that follow
+    /// it when it is drawn larger.
+    pub fn at_scale(mut self, scale: Scale<f64>) -> Self {
+        self.natural = Some(self.inner.geometry(scale));
+        self
+    }
+
+    /// The clip and the radius where `dst` puts the element.
+    fn clip_in(&self, dst: Rectangle<i32, Physical>) -> (Rectangle<i32, Physical>, i32) {
+        match self.natural {
+            Some(n) if n.size != dst.size && n.size.w > 0 => {
+                let k = f64::from(dst.size.w) / f64::from(n.size.w);
+                let at = |v: i32, from: i32, to: i32| to + (f64::from(v - from) * k).round() as i32;
+                let clip = Rectangle::new(
+                    (
+                        at(self.clip.loc.x, n.loc.x, dst.loc.x),
+                        at(self.clip.loc.y, n.loc.y, dst.loc.y),
+                    )
+                        .into(),
+                    (
+                        (f64::from(self.clip.size.w) * k).round() as i32,
+                        (f64::from(self.clip.size.h) * k).round() as i32,
+                    )
+                        .into(),
+                );
+                (clip, (f64::from(self.radius) * k).round() as i32)
+            }
+            _ => (self.clip, self.radius),
         }
     }
 }
@@ -179,7 +216,8 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
         // Damage is relative to `dst`.
-        let cutouts: Vec<_> = corner_cutouts(self.clip, self.radius)
+        let (clip, radius) = self.clip_in(dst);
+        let cutouts: Vec<_> = corner_cutouts(clip, radius)
             .into_iter()
             .map(|mut r| {
                 r.loc -= dst.loc;

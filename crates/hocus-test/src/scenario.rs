@@ -240,6 +240,9 @@ pub enum Step {
     ExpectScreenshot(ExpectScreenshot),
     /// One pixel of an output's screenshot, in its pixels.
     ExpectPixel(ExpectPixel),
+    /// Every frame so far drawn within `max_ms`, and no loop handler over
+    /// its budget.
+    ExpectBudget(ExpectBudget),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -460,8 +463,17 @@ pub struct ExpectOutput {
     pub geometry: Option<[i32; 4]>,
     pub pixels: Option<[i32; 2]>,
     pub scale: Option<f64>,
+    /// Night light's temperature on it, kelvin, between these.
+    pub temperature: Option<[u32; 2]>,
     #[serde(default = "yes")]
     pub shown: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectBudget {
+    /// The longest frame any output drew, milliseconds.
+    pub max_ms: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -598,6 +610,7 @@ impl fmt::Display for Step {
             Self::ExpectFocus(app_id) => write!(f, "expect_focus {app_id}"),
             Self::ExpectStack(_) => write!(f, "expect_stack"),
             Self::ExpectReceived(e) => write!(f, "expect_received {} `{}`", e.app_id, e.event),
+            Self::ExpectBudget(e) => write!(f, "expect_budget {} ms", e.max_ms),
             Self::ExpectPixel(e) => write!(
                 f,
                 "expect_pixel {} {:?} {} {}",
@@ -1282,6 +1295,25 @@ impl Run<'_> {
             Step::ExpectReceived(expected) => self.expect_received(expected),
             Step::ExpectScreenshot(expected) => self.expect_screenshot(expected),
             Step::ExpectPixel(expected) => self.expect_pixel(expected),
+            Step::ExpectBudget(expected) => {
+                let Reply::Stats(stats) = self.request(Request::Stats)? else {
+                    anyhow::bail!("expected stats");
+                };
+                for o in &stats.outputs {
+                    anyhow::ensure!(
+                        o.max_ms <= expected.max_ms,
+                        "{} drew a frame in {:.1} ms",
+                        o.name,
+                        o.max_ms
+                    );
+                }
+                anyhow::ensure!(
+                    stats.slow_handlers.is_empty(),
+                    "slow loop handlers: {:?}",
+                    stats.slow_handlers
+                );
+                Ok(())
+            }
         }
     }
 
@@ -1677,8 +1709,27 @@ impl Run<'_> {
         Ok(())
     }
 
+    /// Waits until the window drew the same thing twice in a row: what is
+    /// clicked is where it shows.
+    fn settle_window(&mut self) -> anyhow::Result<()> {
+        let deadline = Instant::now() + SETTLE_TIMEOUT;
+        let mut last = None;
+        loop {
+            let until = Instant::now() + Duration::from_millis(40);
+            while Instant::now() < until {
+                self.compositor.dispatch(Duration::from_millis(5))?;
+            }
+            let (_, now) = self.settings_node("")?;
+            if last.as_ref() == Some(&now) || Instant::now() > deadline {
+                return Ok(());
+            }
+            last = Some(now);
+        }
+    }
+
     fn click_settings(&mut self, label: &str) -> anyhow::Result<()> {
         self.settings_caught_up()?;
+        self.settle_window()?;
         let (node, all) = self.settings_node(label)?;
         let node =
             node.with_context(|| format!("no {label:?}; the window shows:\n{}", all.dump()))?;
@@ -1730,6 +1781,14 @@ impl Run<'_> {
                 got == want,
                 "{} has {got:?} pixels, expected {want:?}",
                 expected.name
+            );
+        }
+        if let Some([low, high]) = expected.temperature {
+            anyhow::ensure!(
+                (low..=high).contains(&output.temperature),
+                "{} is at {} K, expected {low} to {high}",
+                expected.name,
+                output.temperature
             );
         }
         if let Some(want) = expected.scale {

@@ -163,7 +163,13 @@ impl State {
         let works = |t: Tile| {
             matches!(
                 t,
-                Tile::Wifi | Tile::Bluetooth | Tile::DoNotDisturb | Tile::Airplane
+                Tile::Wifi
+                    | Tile::Bluetooth
+                    | Tile::DoNotDisturb
+                    | Tile::Airplane
+                    | Tile::NightLight
+                    | Tile::Focus
+                    | Tile::Record
             )
         };
         let tiles = tiles_in_order()
@@ -174,6 +180,9 @@ impl State {
                     Tile::Bluetooth => p.bluetooth,
                     Tile::DoNotDisturb => panel.dnd,
                     Tile::Airplane => p.airplane,
+                    Tile::NightLight => self.night_on(),
+                    Tile::Focus => self.comfort.focus_mode,
+                    Tile::Record => self.recording(),
                     _ => false,
                 };
                 let detail = match t {
@@ -185,6 +194,10 @@ impl State {
                         .bluetooth_device
                         .clone()
                         .unwrap_or_else(|| lang.on_off(true).into()),
+                    Tile::NightLight if on => lang.night_until(&self.config.night_light.to),
+                    Tile::NightLight => lang.night_from(&self.config.night_light.from),
+                    Tile::Focus => lang.focus_detail().into(),
+                    Tile::Record => lang.record_detail().into(),
                     t if works(t) => lang.on_off(on).into(),
                     _ => lang.coming().into(),
                 };
@@ -246,6 +259,19 @@ impl State {
                     if let Some(panel) = self.quick.as_mut() {
                         panel.dnd = on;
                     }
+                    None
+                }
+                QuickAction::Toggle(Tile::NightLight, _) => {
+                    self.toggle_night_light();
+                    None
+                }
+                QuickAction::Toggle(Tile::Focus, _) => {
+                    self.toggle_focus_mode();
+                    None
+                }
+                QuickAction::Toggle(Tile::Record, _) => {
+                    self.close_quick();
+                    self.toggle_recording();
                     None
                 }
                 QuickAction::Toggle(..) => None,

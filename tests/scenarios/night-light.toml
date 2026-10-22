@@ -1,0 +1,43 @@
+description = "Night light scheduled from 14:38: when the wall clock passes it, the screen's colour warms over a few seconds; the quick settings' tile takes it back"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[night_light]
+enabled = true
+from = "14:38"
+to = "07:00"
+temperature = 3500
+"""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", temperature = [6500, 6500] }
+
+# The wall clock starts at 14:37:00.
+[[step]]
+advance_ms = 60100
+
+[[step]]
+advance_ms = 1500
+
+[[step]]
+expect_output = { name = "HEADLESS-1", temperature = [3600, 6400] }
+
+[[step]]
+advance_ms = 2000
+
+[[step]]
+expect_output = { name = "HEADLESS-1", temperature = [3500, 3500] }
+
+[[step]]
+keys = "super+30"
+
+[[step]]
+click_ui = "Night light"
+
+[[step]]
+advance_ms = 3500
+
+[[step]]
+expect_output = { name = "HEADLESS-1", temperature = [6500, 6500] }

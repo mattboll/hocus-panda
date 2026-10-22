@@ -1,0 +1,41 @@
+description = "Super+F: everything but the focused window dims, wallpaper and other windows alike; again, it lifts"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "notes", size = [400, 300], color = "#e8e4da" }
+
+[[step]]
+keys = "super+105"
+
+[[step]]
+open = { app_id = "editor", size = [500, 360], color = "#3399ff" }
+
+[[step]]
+keys = "super+106"
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+keys = "super+33"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [960, 400], color = "#3399ff" }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [320, 400], color = "#e8e4da", is = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "focus-mode.png" }
+
+[[step]]
+keys = "super+33"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [320, 400], color = "#e8e4da" }

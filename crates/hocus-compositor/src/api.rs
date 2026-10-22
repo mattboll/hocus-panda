@@ -47,6 +47,7 @@ impl State {
             pixel_width: pixels.w,
             pixel_height: pixels.h,
             scale: output.current_scale().fractional_scale(),
+            temperature: self.night_kelvin(&output.name()),
         }
     }
 

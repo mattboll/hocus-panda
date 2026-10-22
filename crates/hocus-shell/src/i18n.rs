@@ -321,6 +321,28 @@ impl Lang {
         }
     }
 
+    pub fn night_from(self, time: &str) -> String {
+        match self {
+            Self::En => format!("From {time}"),
+            Self::Fr => format!("Dès {time}"),
+        }
+    }
+
+    pub fn night_until(self, time: &str) -> String {
+        match self {
+            Self::En => format!("On until {time}"),
+            Self::Fr => format!("Jusqu’à {time}"),
+        }
+    }
+
+    pub fn focus_detail(self) -> &'static str {
+        self.pick("Everything else dims", "Tout s’assombrit autour")
+    }
+
+    pub fn record_detail(self) -> &'static str {
+        self.pick("Screen or window", "Écran ou fenêtre")
+    }
+
     pub fn coming(self) -> &'static str {
         self.pick("Not yet", "Pas encore")
     }

@@ -9,11 +9,12 @@ use smithay::{
         element::{
             AsRenderElements, Kind, memory::MemoryRenderBufferRenderElement, render_elements,
             solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement,
+            utils::RescaleRenderElement,
         },
     },
     desktop::Window,
     output::Output,
-    utils::{Logical, Point, Rectangle, Scale},
+    utils::{Logical, Physical, Point, Rectangle, Scale},
 };
 
 use crate::{
@@ -31,6 +32,13 @@ render_elements! {
     Window=Rounded<WaylandSurfaceRenderElement<R>>,
     Frame=MemoryRenderBufferRenderElement<R>,
     Solid=SolidColorRenderElement,
+}
+
+render_elements! {
+    /// What an output draws: the scene, or the scene magnified (#78).
+    pub OutputElement<R> where R: ImportAll + ImportMem;
+    Plain=SceneElement<R>,
+    Magnified=RescaleRenderElement<SceneElement<R>>,
 }
 
 impl State {
@@ -52,8 +60,42 @@ impl State {
         self.needs_redraw = true;
     }
 
-    /// Everything `output` shows, front first.
+    /// Everything `output` shows, front first; magnified around the
+    /// pointer when the magnifier is on.
     pub fn scene_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        cursor: bool,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let parts = self.scene_parts(renderer, output, cursor);
+        let zoom = self.comfort.zoom;
+        let area = self.space.output_geometry(output);
+        let pointer = self.seat.get_pointer().map(|p| p.current_location());
+        let origin = match (area, pointer) {
+            (Some(area), Some(at)) if zoom > 1.0 && area.to_f64().contains(at) => {
+                let scale = output.current_scale().fractional_scale();
+                Some((at - area.loc.to_f64()).to_physical(scale).to_i32_round())
+            }
+            _ => None,
+        };
+        match origin {
+            None => parts.into_iter().map(OutputElement::Plain).collect(),
+            Some(origin) => parts
+                .into_iter()
+                .map(|e| {
+                    OutputElement::Magnified(RescaleRenderElement::from_element(e, origin, zoom))
+                })
+                .collect(),
+        }
+    }
+
+    /// Everything `output` shows, front first.
+    fn scene_parts<R>(
         &self,
         renderer: &mut R,
         output: &Output,
@@ -195,6 +237,27 @@ impl State {
         }
         let focused = self.focused_window();
         let windows: Vec<&Window> = self.space.elements().collect();
+        // Focus mode: a veil over every window but the focused one, and
+        // over what is behind them.
+        let veil = |elements: &mut Vec<SceneElement<R>>| {
+            let mut buffer = self.comfort.veil.clone();
+            buffer.resize(area.size);
+            elements.push(SceneElement::Solid(SolidColorRenderElement::from_buffer(
+                &buffer,
+                Point::<i32, Physical>::default(),
+                scale,
+                1.0,
+                Kind::Unspecified,
+            )));
+        };
+        let mut veiled = !self.comfort.focus_mode;
+        let focused_here = focused
+            .as_ref()
+            .is_some_and(|f| windows.contains(&f) && self.output_of(f) == Some(output));
+        if !veiled && !focused_here {
+            veil(&mut elements);
+            veiled = true;
+        }
         for window in windows.into_iter().rev() {
             let Some(mut location) = self.space.element_location(window) else {
                 continue;
@@ -238,11 +301,9 @@ impl State {
                 .map_or(1.0, |m| m.opacity);
             let content: Vec<WaylandSurfaceRenderElement<R>> =
                 window.render_elements(renderer, origin, Scale::from(scale), opacity);
-            elements.extend(
-                content
-                    .into_iter()
-                    .map(|e| SceneElement::Window(Rounded::new(e, clip, radius))),
-            );
+            elements.extend(content.into_iter().map(|e| {
+                SceneElement::Window(Rounded::new(e, clip, radius).at_scale(Scale::from(scale)))
+            }));
             if bar > 0
                 && let Some(id) = id
             {
@@ -255,6 +316,10 @@ impl State {
                 let shadow =
                     shadow_elements(renderer, &self.textures, &self.style, frame.to_f64(), scale);
                 elements.extend(shadow.into_iter().map(SceneElement::Frame));
+            }
+            if !veiled && focused.as_ref() == Some(window) {
+                veil(&mut elements);
+                veiled = true;
             }
         }
         if fullscreen {

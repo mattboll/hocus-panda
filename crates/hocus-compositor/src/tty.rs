@@ -52,7 +52,6 @@ use crate::{
     flip::{self, Flip, Health},
     output_spec::DEFAULT_DESKTOPS,
     outputs::{Head, Setting},
-    scene::SceneElement,
 };
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
@@ -480,7 +479,7 @@ impl TtyBackend {
         let surface = self
             .gpu
             .outputs
-            .initialize_output::<_, SceneElement<GlesRenderer>>(
+            .initialize_output::<_, crate::scene::OutputElement<GlesRenderer>>(
                 crtc,
                 drm_mode,
                 &[info.handle()],
@@ -558,6 +557,35 @@ impl TtyBackend {
         }
         state.space.refresh();
         state.popups.cleanup();
+    }
+
+    /// Night light: `rgb` scales each channel of `output`'s gamma ramp.
+    pub fn set_gamma(&mut self, output: &Output, rgb: [f32; 3]) {
+        let device = self.gpu.outputs.device();
+        for (crtc, screen) in &self.gpu.screens {
+            if screen.output != *output {
+                continue;
+            }
+            let length = match device.get_crtc(*crtc) {
+                Ok(info) => info.gamma_length() as usize,
+                Err(err) => {
+                    tracing::warn!(%err, "no gamma for night light");
+                    continue;
+                }
+            };
+            if length < 2 {
+                continue;
+            }
+            let ramp = |scale: f32| -> Vec<u16> {
+                (0..length)
+                    .map(|i| (i as f32 / (length - 1) as f32 * 65535.0 * scale).round() as u16)
+                    .collect()
+            };
+            let (r, g, b) = (ramp(rgb[0]), ramp(rgb[1]), ramp(rgb[2]));
+            if let Err(err) = device.set_gamma(*crtc, &r, &g, &b) {
+                tracing::warn!(%err, output = output.name(), "night light: the gamma was refused");
+            }
+        }
     }
 
     pub fn capture_output(
@@ -664,7 +692,7 @@ impl TtyBackend {
                 .context("the screen has no such mode")?;
             screen
                 .surface
-                .use_mode::<_, SceneElement<GlesRenderer>>(
+                .use_mode::<_, crate::scene::OutputElement<GlesRenderer>>(
                     mode,
                     &mut self.gpu.renderer,
                     &DrmOutputRenderElements::default(),
