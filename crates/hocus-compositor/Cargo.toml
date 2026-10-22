@@ -17,7 +17,7 @@ hocus-core = { version = "0.1.0", path = "../hocus-core" }
 libloading = "0.8.9"
 png = "0.18.1"
 serde_json = "1.0.154"
-smithay = { version = "0.7", default-features = false, features = ["backend_winit", "backend_drm", "renderer_pixman", "wayland_frontend", "desktop"] }
+smithay = { version = "0.7", default-features = false, features = ["backend_winit", "backend_drm", "renderer_pixman", "wayland_frontend", "desktop", "xwayland"] }
 tempfile = "3.27.0"
 tracing = "0.1.44"
 

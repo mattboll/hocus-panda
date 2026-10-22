@@ -8,7 +8,11 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Serial},
 };
 
-use crate::{State, desktops::rect};
+use crate::{
+    State,
+    desktops::rect,
+    surface::{Shown, request_size},
+};
 
 /// A core rectangle as smithay's.
 pub fn rectangle(r: Rect) -> Rectangle<i32, Logical> {
@@ -355,22 +359,12 @@ impl State {
         let Some(managed) = self.windows.get_mut(&id) else {
             return;
         };
-        if let Some(toplevel) = managed.window.toplevel() {
-            toplevel.with_pending_state(|pending| {
-                pending.size = Some(rect.size);
-                for s in [
-                    xdg_toplevel::State::Maximized,
-                    xdg_toplevel::State::Fullscreen,
-                ] {
-                    if Some(s) == state {
-                        pending.states.set(s);
-                    } else {
-                        pending.states.unset(s);
-                    }
-                }
-            });
-            toplevel.send_configure();
-        }
+        let shown = match state {
+            Some(xdg_toplevel::State::Maximized) => Shown::Maximized,
+            Some(xdg_toplevel::State::Fullscreen) => Shown::Fullscreen,
+            _ => Shown::Normal,
+        };
+        request_size(&managed.window, rect, shown, false);
         managed.location = rect.loc;
         let window: Window = managed.window.clone();
         // Mapped again at its new place by the next sync.

@@ -9,15 +9,18 @@ use hocus_core::{DesktopId, ModelError, OutputName, Rect, WindowId};
 use smithay::{
     desktop::Window,
     output::Output,
-    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
-    wayland::{
-        compositor::with_states, foreign_toplevel_list::ForeignToplevelHandle,
-        shell::xdg::XdgToplevelSurfaceData,
-    },
+    wayland::foreign_toplevel_list::ForeignToplevelHandle,
+    wayland::seat::WaylandFocus as _,
 };
 
-use crate::{State, api, window_mode::WindowMode};
+use crate::{
+    State, api,
+    surface::{self, Shown},
+    window_mode::WindowMode,
+};
+
+pub use crate::surface::title_and_app_id;
 
 /// Window places per layout of outputs (see [`State::remember_places`]).
 pub type Places = BTreeMap<String, BTreeMap<WindowId, Point<i32, Logical>>>;
@@ -269,13 +272,10 @@ impl State {
             self.set_maximized(id, true, serial);
         }
         // Asked before its first buffer.
-        if let Some(toplevel) = window.toplevel() {
-            let wanted = toplevel.with_pending_state(|p| p.states.clone());
-            if wanted.contains(xdg_toplevel::State::Fullscreen) {
-                self.set_fullscreen(id, true, None, serial);
-            } else if wanted.contains(xdg_toplevel::State::Maximized) {
-                self.set_maximized(id, true, serial);
-            }
+        match surface::wanted(&window) {
+            Shown::Fullscreen => self.set_fullscreen(id, true, None, serial),
+            Shown::Maximized => self.set_maximized(id, true, serial),
+            Shown::Normal => {}
         }
     }
 
@@ -470,17 +470,19 @@ impl State {
             .map(|m| m.window.clone());
         let before = self.focused_window();
         for managed in self.windows.values() {
-            managed
-                .window
-                .set_activated(Some(&managed.window) == focused.as_ref());
-            if let Some(toplevel) = managed.window.toplevel() {
-                toplevel.send_pending_configure();
-            }
+            surface::activate(&managed.window, Some(&managed.window) == focused.as_ref());
         }
         let surface = focused
             .as_ref()
-            .and_then(|w| w.toplevel())
-            .map(|t| t.wl_surface().clone());
+            .and_then(|w| w.wl_surface())
+            .map(|s| s.into_owned());
+        // X11 clients see their own stacking order.
+        if let Some(xwm) = self.xwm.as_mut()
+            && let Some(x11) = focused.as_ref().and_then(|w| w.x11_surface())
+            && let Err(err) = xwm.raise_window(x11)
+        {
+            tracing::debug!(%err, "could not raise an X11 window");
+        }
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, surface, serial);
         }
@@ -502,23 +504,6 @@ impl State {
         managed.foreign.send_app_id(&app_id.unwrap_or_default());
         managed.foreign.send_done();
     }
-}
-
-/// What the client said its window is.
-pub fn title_and_app_id(window: &Window) -> (Option<String>, Option<String>) {
-    window
-        .toplevel()
-        .map(|toplevel| {
-            with_states(toplevel.wl_surface(), |states| {
-                states
-                    .data_map
-                    .get::<XdgToplevelSurfaceData>()
-                    .and_then(|data| data.lock().ok())
-                    .map(|data| (data.title.clone(), data.app_id.clone()))
-                    .unwrap_or_default()
-            })
-        })
-        .unwrap_or_default()
 }
 
 /// `location` moved so that a window of `size` lies inside `area` as much as

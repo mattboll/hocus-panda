@@ -3,6 +3,7 @@
 mod compositor;
 mod workspace;
 mod xdg_shell;
+mod xwayland;
 
 pub use workspace::WorkspaceState;
 
@@ -14,7 +15,7 @@ use smithay::{
         foreign_toplevel_list::{ForeignToplevelListHandler, ForeignToplevelListState},
         output::OutputHandler,
         selection::{
-            SelectionHandler,
+            SelectionHandler, SelectionSource, SelectionTarget,
             data_device::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
                 set_data_device_focus,
@@ -22,6 +23,8 @@ use smithay::{
         },
     },
 };
+
+use std::os::fd::OwnedFd;
 
 use crate::State;
 
@@ -48,7 +51,38 @@ impl SeatHandler for State {
 delegate_seat!(State);
 
 impl SelectionHandler for State {
+    /// Selections the compositor offers are X11 clients': nothing to carry.
     type SelectionUserData = ();
+
+    /// A Wayland client took the selection: X11 clients see it offered.
+    fn new_selection(
+        &mut self,
+        ty: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        if let Some(xwm) = self.xwm.as_mut()
+            && let Err(err) = xwm.new_selection(ty, source.map(|s| s.mime_types()))
+        {
+            tracing::warn!(?err, "could not offer the selection to X11");
+        }
+    }
+
+    /// A Wayland client reads what an X11 client offered.
+    fn send_selection(
+        &mut self,
+        ty: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        _user_data: &(),
+    ) {
+        if let (Some(xwm), Some(handle)) = (self.xwm.as_mut(), self.loop_handle.clone())
+            && let Err(err) = xwm.send_selection(ty, mime_type, fd, handle)
+        {
+            tracing::warn!(?err, "could not read the X11 selection");
+        }
+    }
 }
 
 impl DataDeviceHandler for State {

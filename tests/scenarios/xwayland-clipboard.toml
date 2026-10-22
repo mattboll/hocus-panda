@@ -1,0 +1,34 @@
+description = "Text copied in an X11 application pastes in a Wayland one, and back"
+outputs = ["1280x800"]
+xwayland = true
+
+[[step]]
+open = { app_id = "foot", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open_x11 = { app_id = "xterm", size = [400, 300], color = "#f2a65a" }
+
+[[step]]
+copy = { app_id = "xterm", text = "from X11" }
+
+# Focus back on the Wayland window, which is then offered the clipboard.
+[[step]]
+click = "left"
+
+[[step]]
+pointer_move = [450, 260]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_focus = "foot"
+
+[[step]]
+expect_clipboard = { app_id = "foot", text = "from X11" }
+
+[[step]]
+copy = { app_id = "foot", text = "from Wayland" }
+
+[[step]]
+expect_clipboard = { app_id = "xterm", text = "from Wayland" }

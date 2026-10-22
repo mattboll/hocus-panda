@@ -9,6 +9,8 @@ test per file; `hocus scenario run FILE…` runs some.
 description = "A click on a window behind another focuses it and raises it"
 # WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS]; default: one 1280x800 output with 4 desktops
 outputs = ["2560x1600@2/1", "1920x1080"]
+# Starts XWayland for `open_x11`; the scenario is skipped where Xwayland is missing
+xwayland = false
 
 [[step]]
 open = { app_id = "back", size = [400, 300], color = "#3399ff" }
@@ -25,6 +27,9 @@ Steps, one per `[[step]]` table:
 | Step | Does |
 |---|---|
 | `open = { app_id, size = [w, h], color = "#rrggbb" }` | starts a test client with a solid window, waits until it is shown |
+| `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
+| `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
+| `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
 | `click = "left"` | presses and releases a button (`left`, `right`, `middle`) |

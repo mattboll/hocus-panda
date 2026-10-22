@@ -22,6 +22,7 @@ fn compositor(dump_dir: &std::path::Path, limit: Duration) -> anyhow::Result<Hea
             interval: Duration::from_millis(20),
             dump_dir: dump_dir.to_path_buf(),
         }),
+        xwayland: false,
     })
 }
 

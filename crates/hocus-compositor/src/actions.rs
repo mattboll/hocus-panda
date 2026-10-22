@@ -11,7 +11,7 @@ use smithay::{
     utils::Serial,
 };
 
-use crate::State;
+use crate::{State, surface};
 
 /// Evdev codes of the top row's digits 1 to 9 then 0, and XKB's offset.
 const KEY_1: u32 = 2;
@@ -125,13 +125,8 @@ impl State {
                 }
             }
             Action::Close => {
-                let toplevel = self
-                    .model
-                    .focused()
-                    .and_then(|id| self.windows.get(&id))
-                    .and_then(|m| m.window.toplevel().cloned());
-                if let Some(toplevel) = toplevel {
-                    toplevel.send_close();
+                if let Some(managed) = self.model.focused().and_then(|id| self.windows.get(&id)) {
+                    surface::close(&managed.window);
                 }
             }
             Action::SwitchLayout => self.switch_layout(),
@@ -237,6 +232,9 @@ impl State {
             .env_remove("LD_PRELOAD");
         if let Some(dir) = self.socket_path.parent() {
             cmd.env("XDG_RUNTIME_DIR", dir);
+        }
+        if let Some(n) = self.xdisplay {
+            cmd.env("DISPLAY", format!(":{n}"));
         }
         match cmd.spawn() {
             Ok(mut child) => {

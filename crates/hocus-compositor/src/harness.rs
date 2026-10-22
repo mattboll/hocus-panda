@@ -27,6 +27,8 @@ pub struct HarnessOptions {
     /// The watchdog runs on real time: the harness must keep dispatching
     /// while it is on, or it takes the waits between steps for stalls.
     pub watchdog: Option<WatchdogConfig>,
+    /// Starts XWayland, for X11 test clients.
+    pub xwayland: bool,
 }
 
 /// A headless compositor in a private runtime directory, on a virtual clock.
@@ -99,6 +101,7 @@ impl Headless {
             headless: config,
             api_permission,
             watchdog: None,
+            xwayland: false,
         })
     }
 
@@ -116,6 +119,7 @@ impl Headless {
             watchdog: harness.watchdog,
             config: Some(config.clone()),
             config_poll: Duration::from_millis(20),
+            xwayland: harness.xwayland,
         };
         let Started {
             event_loop,
@@ -135,14 +139,23 @@ impl Headless {
             config,
             _config_dir: config_dir,
         };
-        // The defaults are read before the first test step.
+        // The defaults are read before the first test step, and XWayland
+        // is ready when asked for.
         headless.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.config_generation > 0)?;
+        if harness.xwayland {
+            headless.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.xdisplay.is_some())?;
+        }
         Ok(headless)
     }
 
     /// The Wayland socket, to connect clients with `WAYLAND_DISPLAY`.
     pub fn socket_path(&self) -> &Path {
         &self.app.state.socket_path
+    }
+
+    /// XWayland's display number, when it runs.
+    pub fn x11_display(&self) -> Option<u32> {
+        self.app.state.xdisplay
     }
 
     /// The control socket.

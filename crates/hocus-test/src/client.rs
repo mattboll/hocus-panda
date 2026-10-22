@@ -1,19 +1,30 @@
 //! A test client: one window filled with a solid colour, which records the
-//! events it receives.
+//! events it receives, and can copy text to the clipboard and read it.
 
 use std::{
     fmt,
+    io::{Read, Write},
     os::unix::net::UnixStream,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        mpsc::{Receiver, Sender, channel},
+    },
     thread::JoinHandle,
 };
 
 use anyhow::Context;
+use rustix::event::{PollFd, PollFlags, Timespec};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_output, delegate_registry, delegate_shm, delegate_xdg_shell,
-    delegate_xdg_window,
+    data_device_manager::{
+        DataDeviceManagerState, WritePipe,
+        data_device::{DataDevice, DataDeviceHandler},
+        data_offer::{DataOfferHandler, DragOffer},
+        data_source::{CopyPasteSource, DataSourceHandler},
+    },
+    delegate_compositor, delegate_data_device, delegate_output, delegate_registry, delegate_shm,
+    delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -29,8 +40,15 @@ use smithay_client_toolkit::{
 use wayland_client::{
     Connection, Dispatch, QueueHandle, WEnum,
     globals::registry_queue_init,
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+    protocol::{
+        wl_data_device::WlDataDevice, wl_data_device_manager::DndAction,
+        wl_data_source::WlDataSource, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm,
+        wl_surface,
+    },
 };
+
+/// The text formats the test client copies and reads.
+const TEXT: [&str; 2] = ["text/plain;charset=utf-8", "UTF8_STRING"];
 
 /// A window of `width`×`height` pixels filled with `argb`.
 #[derive(Debug, Clone)]
@@ -88,10 +106,25 @@ impl fmt::Display for ClientEvent {
 pub struct TestClient {
     pub spec: SolidWindow,
     events: Arc<Mutex<Vec<ClientEvent>>>,
+    clipboard: Arc<Mutex<Option<String>>>,
+    copies: Sender<String>,
     thread: JoinHandle<anyhow::Result<()>>,
 }
 
 impl TestClient {
+    /// Takes the clipboard with `text`, as Ctrl+C would.
+    pub fn copy(&self, text: &str) -> anyhow::Result<()> {
+        self.copies
+            .send(text.to_owned())
+            .context("the test client is gone")
+    }
+
+    /// The text of the clipboard as last offered to the client, read as
+    /// soon as it was offered.
+    pub fn clipboard(&self) -> Option<String> {
+        self.clipboard.lock().ok().and_then(|c| c.clone())
+    }
+
     /// What the client received so far.
     pub fn events(&self) -> Vec<ClientEvent> {
         self.events.lock().map(|e| e.clone()).unwrap_or_default()
@@ -111,27 +144,42 @@ impl SolidWindow {
             .with_context(|| format!("could not connect to {}", socket.display()))?;
         let conn = Connection::from_socket(stream)?;
         let events = Arc::new(Mutex::new(Vec::new()));
-        let recorded = events.clone();
+        let clipboard = Arc::new(Mutex::new(None));
+        let (copies, to_copy) = channel();
         let thread = std::thread::Builder::new()
             .name(format!("client {}", self.app_id))
             .spawn({
                 let spec = self.clone();
-                move || spec.run(conn, recorded)
+                let shared = Shared {
+                    events: events.clone(),
+                    clipboard: clipboard.clone(),
+                };
+                move || spec.run(conn, shared, to_copy)
             })?;
         Ok(TestClient {
             spec: self,
             events,
+            clipboard,
+            copies,
             thread,
         })
     }
 
-    fn run(self, conn: Connection, events: Arc<Mutex<Vec<ClientEvent>>>) -> anyhow::Result<()> {
+    fn run(
+        self,
+        conn: Connection,
+        shared: Shared,
+        to_copy: Receiver<String>,
+    ) -> anyhow::Result<()> {
         let (globals, mut queue) = registry_queue_init(&conn)?;
         let qh = queue.handle();
         let compositor = CompositorState::bind(&globals, &qh).context("no wl_compositor")?;
         let xdg_shell = XdgShell::bind(&globals, &qh).context("no xdg_wm_base")?;
         let shm = Shm::bind(&globals, &qh).context("no wl_shm")?;
-        let _seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).context("no wl_seat")?;
+        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).context("no wl_seat")?;
+        let data_devices =
+            DataDeviceManagerState::bind(&globals, &qh).context("no wl_data_device_manager")?;
+        let data_device = data_devices.get_data_device(&qh, &seat);
 
         let surface = compositor.create_surface(&qh);
         // Server-side decorations: the compositor draws corners, shadow and
@@ -149,15 +197,41 @@ impl SolidWindow {
             shm,
             pool,
             window,
-            events,
+            events: shared.events,
+            clipboard: shared.clipboard,
+            data_devices,
+            data_device,
+            copied: None,
+            serial: 0,
             drawn: None,
             closed: false,
         };
         while !client.closed {
-            queue.blocking_dispatch(&mut client)?;
+            while let Ok(text) = to_copy.try_recv() {
+                client.copy(text, &qh);
+            }
+            queue.flush()?;
+            queue.dispatch_pending(&mut client)?;
+            // Wakes up now and then for what the test asks.
+            if let Some(guard) = queue.prepare_read() {
+                let fd = guard.connection_fd();
+                let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+                let timeout = Timespec {
+                    tv_sec: 0,
+                    tv_nsec: 10_000_000,
+                };
+                if rustix::event::poll(&mut fds, Some(&timeout))? > 0 {
+                    guard.read()?;
+                }
+            }
         }
         Ok(())
     }
+}
+
+struct Shared {
+    events: Arc<Mutex<Vec<ClientEvent>>>,
+    clipboard: Arc<Mutex<Option<String>>>,
 }
 
 struct Client {
@@ -168,6 +242,13 @@ struct Client {
     pool: SlotPool,
     window: Window,
     events: Arc<Mutex<Vec<ClientEvent>>>,
+    clipboard: Arc<Mutex<Option<String>>>,
+    data_devices: DataDeviceManagerState,
+    data_device: DataDevice,
+    /// What the client offers as the clipboard, while it holds it.
+    copied: Option<(CopyPasteSource, String)>,
+    /// The last input serial, which taking the clipboard needs.
+    serial: u32,
     /// The size of the last buffer, if one was attached.
     drawn: Option<(u32, u32)>,
     closed: bool,
@@ -178,6 +259,12 @@ impl Client {
         if let Ok(mut events) = self.events.lock() {
             events.push(event);
         }
+    }
+
+    fn copy(&mut self, text: String, qh: &QueueHandle<Self>) {
+        let source = self.data_devices.create_copy_paste_source(qh, TEXT);
+        source.set_selection(&self.data_device, self.serial);
+        self.copied = Some((source, text));
     }
 
     fn draw(&mut self, (width, height): (u32, u32)) -> anyhow::Result<()> {
@@ -267,10 +354,18 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
         match event {
             wl_pointer::Event::Enter { .. } => client.record(ClientEvent::PointerEnter),
             wl_pointer::Event::Leave { .. } => client.record(ClientEvent::PointerLeave),
-            wl_pointer::Event::Button { button, state, .. } => client.record(ClientEvent::Button {
-                code: button,
-                pressed: state == WEnum::Value(wl_pointer::ButtonState::Pressed),
-            }),
+            wl_pointer::Event::Button {
+                button,
+                state,
+                serial,
+                ..
+            } => {
+                client.serial = serial;
+                client.record(ClientEvent::Button {
+                    code: button,
+                    pressed: state == WEnum::Value(wl_pointer::ButtonState::Pressed),
+                });
+            }
             _ => {}
         }
     }
@@ -288,7 +383,10 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         // The keymap's file descriptor is dropped with the event: codes are
         // enough for tests.
         match event {
-            wl_keyboard::Event::Enter { .. } => client.record(ClientEvent::KeyboardEnter),
+            wl_keyboard::Event::Enter { serial, .. } => {
+                client.serial = serial;
+                client.record(ClientEvent::KeyboardEnter);
+            }
             wl_keyboard::Event::Leave { .. } => client.record(ClientEvent::KeyboardLeave),
             wl_keyboard::Event::Key { key, state, .. } => client.record(ClientEvent::Key {
                 code: key,
@@ -365,6 +463,111 @@ impl ProvidesRegistryState for Client {
     registry_handlers![OutputState];
 }
 
+impl DataDeviceHandler for Client {
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataDevice,
+        _: f64,
+        _: f64,
+        _: &wl_surface::WlSurface,
+    ) {
+    }
+
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+
+    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64) {}
+
+    /// Reads every text clipboard offered, from a thread: the source may be
+    /// slow, and an X11 one goes through the compositor.
+    fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
+        if self.copied.is_some() {
+            // Its own: reading it would wait on itself.
+            return;
+        }
+        let Some(offer) = self.data_device.data().selection_offer() else {
+            return;
+        };
+        let Some(mime) = offer.with_mime_types(|mimes| {
+            TEXT.iter()
+                .find(|t| mimes.iter().any(|m| m == *t))
+                .map(|t| t.to_string())
+        }) else {
+            return;
+        };
+        let Ok(mut pipe) = offer.receive(mime) else {
+            return;
+        };
+        let clipboard = self.clipboard.clone();
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            if pipe.read_to_string(&mut text).is_ok()
+                && let Ok(mut clipboard) = clipboard.lock()
+            {
+                *clipboard = Some(text);
+            }
+        });
+    }
+
+    fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+}
+
+impl DataOfferHandler for Client {
+    fn source_actions(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
+
+    fn selected_action(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
+}
+
+impl DataSourceHandler for Client {
+    fn accept_mime(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataSource,
+        _: Option<String>,
+    ) {
+    }
+
+    fn send_request(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataSource,
+        _: String,
+        mut pipe: WritePipe,
+    ) {
+        if let Some((_, text)) = &self.copied {
+            let _ = pipe.write_all(text.as_bytes());
+        }
+    }
+
+    fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {
+        self.copied = None;
+    }
+
+    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+
+    fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+
+    fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
+}
+
+delegate_data_device!(Client);
 delegate_compositor!(Client);
 delegate_output!(Client);
 delegate_shm!(Client);

@@ -13,6 +13,7 @@ use smithay::{
         },
     },
     utils::{Logical, Point, Serial},
+    wayland::seat::WaylandFocus as _,
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         foreign_toplevel_list::ForeignToplevelListState,
@@ -66,6 +67,12 @@ pub struct State {
     pub style: Style,
     pub textures: Textures,
     pub xdg_decoration_state: XdgDecorationState,
+    /// The X11 window manager, once XWayland is ready, and its display.
+    pub xwm: Option<smithay::xwayland::X11Wm>,
+    pub xdisplay: Option<u32>,
+    pub xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState,
+    /// For what has to insert sources on the loop from a handler.
+    pub(crate) loop_handle: Option<smithay::reexports::calloop::LoopHandle<'static, crate::App>>,
     /// Where a dragged window would snap, shown while it is dragged.
     pub snap_preview: Option<(Output, Zone)>,
     pub snap_preview_buffer: SolidColorBuffer,
@@ -136,6 +143,12 @@ impl State {
             style: Style::default(),
             textures: Textures::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
+            xwm: None,
+            xdisplay: None,
+            xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState::new::<Self>(
+                dh,
+            ),
+            loop_handle: None,
             snap_preview: None,
             snap_preview_buffer: SolidColorBuffer::default(),
             cursor: CursorImageStatus::default_named(),
@@ -165,7 +178,7 @@ impl State {
             .values()
             .map(|m| &m.window)
             .chain(self.unplaced.iter())
-            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
     }
 
