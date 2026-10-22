@@ -17,6 +17,7 @@ pub struct Config {
     pub appearance: Appearance,
     pub wallpaper: Wallpaper,
     pub launcher: Launcher,
+    pub dropdown: Dropdown,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
@@ -261,6 +262,27 @@ impl Wallpaper {
     }
 }
 
+/// The drop-down terminal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Dropdown {
+    /// What starts it; its window must have `app_id`.
+    pub command: String,
+    pub app_id: String,
+    /// Its share of the screen's height, 0.2 to 0.9.
+    pub height: f64,
+}
+
+impl Default for Dropdown {
+    fn default() -> Self {
+        Self {
+            command: "foot --app-id=hocus-dropdown".into(),
+            app_id: "hocus-dropdown".into(),
+            height: 0.45,
+        }
+    }
+}
+
 /// What the launcher offers besides applications.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -400,6 +422,10 @@ impl Config {
                     "a colour like \"#0e0f12\"",
                 );
             }
+        }
+        if !(0.2..=0.9).contains(&self.dropdown.height) {
+            let h = self.dropdown.height.to_string();
+            return out_of_range("dropdown.height", h, "0.2 to 0.9");
         }
         let engine = &self.launcher.search_engine;
         if !(engine.starts_with("https://") || engine.starts_with("http://"))

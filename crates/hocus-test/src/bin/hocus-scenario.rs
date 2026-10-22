@@ -34,7 +34,16 @@ fn main() -> ExitCode {
         bless,
         artifacts,
     } = Args::parse().command;
-    let options = RunOptions { artifacts, bless };
+    // The test client sits next to this program.
+    let test_client = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("hocus-test-client")))
+        .filter(|p| p.is_file());
+    let options = RunOptions {
+        artifacts,
+        bless,
+        test_client,
+    };
     let mut failed = 0;
     for file in &files {
         match Scenario::load(file).and_then(|s| s.run(&options)) {

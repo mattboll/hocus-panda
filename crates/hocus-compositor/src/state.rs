@@ -85,6 +85,8 @@ pub struct State {
     pub quick: Option<crate::quick::QuickPanel>,
     /// Wallpapers, when the shell runs.
     pub wallpapers: Option<crate::wallpaper::Wallpapers>,
+    /// The drop-down terminal.
+    pub dropdown: crate::dropdown::Dropdown,
     /// The theme the shell was last given.
     pub applied_theme: Option<hocus_ui::Theme>,
     /// What started applications inherit, if not the compositor's own
@@ -175,6 +177,7 @@ impl State {
             quick: None,
             wallpapers: None,
             applied_theme: None,
+            dropdown: Default::default(),
             child_env: None,
             layout_index: 0,
             user: std::env::var("USER")

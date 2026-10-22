@@ -43,7 +43,7 @@ Steps, one per `[[step]]` table:
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
 | `type = "fir"` | types text as on a US keyboard |
-| `expect_runtime_file = { name, contains?, lacks? }` | a file a started program wrote in the compositor's runtime directory, with or without these strings |
+| `expect_runtime_file = { name, lines?, contains?, lacks? }` | a file a started program wrote in the compositor's runtime directory: so many lines, with or without these strings (the test client adds a line to `<app id>.starts` each time it starts) |
 | `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
 | `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces? }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires) |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
@@ -55,13 +55,13 @@ Steps, one per `[[step]]` table:
 | `scroll = 15` | scrolls the wheel, logical pixels (15 per notch, down positive) |
 | `key_down = "alt"`, `key_up = "alt"` | holds and lets go a key, for Alt+drag |
 | `key = 30` | presses and releases a key, by evdev code (`KEY_A` is 30) |
-| `keys = "super+shift+2"` | presses keys in order, releases them in reverse: `super`, `shift`, `ctrl`, `alt`, digits, letters (by position on a US keyboard), `enter`, `escape`, `tab`, `space`, `backspace`, arrows, or evdev codes |
+| `keys = "super+shift+2"` | presses keys in order, releases them in reverse: `super`, `shift`, `ctrl`, `alt`, digits, letters (by position on a US keyboard), `enter`, `escape`, `tab`, `space`, `backspace`, `backtick`, arrows, or evdev codes |
 | `send = { app_id, output, desktop? }` | sends a window to an output: its desktop `desktop` (from 1), or the shown one |
 | `plug = { spec = "1920x1080+1280+0", name? }` | plugs an output; `name` brings back one unplugged before |
 | `unplug = "HEADLESS-2"` | unplugs an output |
 | `set_state = { app_id, state = "maximized" }` | maximizes, makes fullscreen, minimizes or restores (`normal`) a window |
 | `expect_accent = { hue = [15, 45] }` | the shell's accent in effect has a hue in that range (degrees) |
-| `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it; `{scenario_dir}` is the scenario's directory, for fixtures |
+| `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it; `{scenario_dir}` is the scenario's directory, for fixtures, and `{test_client}` a test client program (`--app-id`, `--size`, `--color`) for what the compositor starts itself |
 | `expect_config_error = "line 2"` | checks the last file was refused with that in the message; `""` checks it was applied |
 | `expect_config_warning = "first one wins"` | checks what the configuration in effect left out |
 | `expect_event = { type = "keyboard_layout", has? = "French" }` | checks the compositor said it in its event stream since the start |

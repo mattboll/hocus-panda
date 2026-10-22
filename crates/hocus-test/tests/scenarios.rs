@@ -18,6 +18,7 @@ fn main() -> std::process::ExitCode {
     let options = RunOptions {
         artifacts: root.join("target/test-artifacts"),
         bless: std::env::var_os("HOCUS_BLESS").is_some_and(|v| v == "1"),
+        test_client: Some(PathBuf::from(env!("CARGO_BIN_EXE_hocus-test-client"))),
     };
     let trials = match scenario_files(&root.join("tests/scenarios")) {
         Ok(files) => files

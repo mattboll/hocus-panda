@@ -51,6 +51,9 @@ pub enum Action {
     Launcher,
     /// Opens quick settings on the screen under the pointer, or closes them.
     QuickSettings,
+    /// Shows the drop-down terminal on the screen under the pointer, or
+    /// hides it.
+    Dropdown,
     /// Window switcher (#39): the windows of the output under the pointer,
     /// or of every output.
     SwitchWindows(Scope),
@@ -84,6 +87,7 @@ impl fmt::Display for Action {
             Self::SwitchLayout => write!(f, "switch-layout"),
             Self::Launcher => write!(f, "launcher"),
             Self::QuickSettings => write!(f, "quick-settings"),
+            Self::Dropdown => write!(f, "dropdown"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
             Self::Spawn(command) => write!(f, "spawn {command}"),
         }
@@ -143,6 +147,7 @@ impl FromStr for Action {
             "switch-layout" => bare(Self::SwitchLayout),
             "launcher" => bare(Self::Launcher),
             "quick-settings" => bare(Self::QuickSettings),
+            "dropdown" => bare(Self::Dropdown),
             "switch-windows" => scope().map(Self::SwitchWindows),
             "spawn" if !rest.is_empty() => Ok(Self::Spawn(rest.to_string())),
             "spawn" => Err("spawn: which command?".into()),
@@ -205,6 +210,8 @@ impl FromStr for Combo {
             "esc" => Key::Named("escape".into()),
             "pageup" => Key::Named("prior".into()),
             "pagedown" => Key::Named("next".into()),
+            // The key left of 1, whatever the layout says it is.
+            "backtick" => Key::Named("grave".into()),
             other => Key::Named(other.to_string()),
         };
         Ok(Self { modifiers, key })
@@ -265,6 +272,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Ctrl+Space", Action::SwitchLayout),
         ("Super+Space", Action::Launcher),
         ("Super+A", Action::QuickSettings),
+        ("Super+Backtick", Action::Dropdown),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),
         ("Super+Tab", Action::SwitchWindows(Scope::AllOutputs)),
     ]

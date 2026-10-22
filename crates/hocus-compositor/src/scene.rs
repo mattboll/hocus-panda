@@ -119,9 +119,13 @@ impl State {
         let focused = self.focused_window();
         let windows: Vec<&Window> = self.space.elements().collect();
         for window in windows.into_iter().rev() {
-            let Some(location) = self.space.element_location(window) else {
+            let Some(mut location) = self.space.element_location(window) else {
                 continue;
             };
+            // The drop-down terminal slides from above its place.
+            if let Some(dy) = model_id(window).and_then(|id| self.dropdown_offset(id)) {
+                location.y += dy;
+            }
             let geometry = window.geometry();
             let rect = Rectangle::<i32, Logical>::new(location - area.loc, geometry.size);
             let bbox = Rectangle::new(
