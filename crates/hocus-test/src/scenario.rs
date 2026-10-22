@@ -51,6 +51,9 @@ pub struct Scenario {
     /// Starts XWayland, for X11 test clients; skipped where it is missing.
     #[serde(default)]
     pub xwayland: bool,
+    /// Shows the widget column on the primary output.
+    #[serde(default)]
+    pub shell: bool,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
     /// The file's name without extension.
@@ -72,6 +75,10 @@ pub enum Step {
     Copy(Clipboard),
     /// The client of this app id reads this text from the clipboard.
     ExpectClipboard(Clipboard),
+    /// Clicks the shell's button with this label (or accessible name).
+    ClickUi(String),
+    /// The shell shows an element with this label: `{ label, disabled? }`.
+    ExpectUi(ExpectUi),
     /// Asks the window of this app id to close, and waits until it is gone.
     Close(String),
     PointerMove([f64; 2]),
@@ -157,6 +164,16 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectUi {
+    pub label: String,
+    pub disabled: Option<bool>,
+    /// `false` checks that no element has this label.
+    #[serde(default = "yes")]
+    pub shown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -268,6 +285,8 @@ impl fmt::Display for Step {
         match self {
             Self::Open(open) => write!(f, "open {}", open.app_id),
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
+            Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
+            Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
             Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
             Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
             Self::Close(app_id) => write!(f, "close {app_id}"),
@@ -366,6 +385,7 @@ impl Scenario {
             api_permission: hocus_api::Permission::Test,
             watchdog: None,
             xwayland: self.xwayland,
+            shell: self.shell,
         })?;
         let mut run = Run {
             scenario: self,
@@ -401,6 +421,8 @@ impl Run<'_> {
             Step::OpenX11(open) => self.open_x11(open),
             Step::Copy(copy) => self.copy(copy),
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
+            Step::ClickUi(label) => self.click_ui(label),
+            Step::ExpectUi(expected) => self.expect_ui(expected),
             Step::Close(app_id) => self.close(app_id),
             Step::PointerMove([x, y]) => {
                 self.request(Request::PointerMove { x: *x, y: *y })?;
@@ -595,10 +617,19 @@ impl Run<'_> {
             Step::AdvanceMs(ms) => self.compositor.advance(Duration::from_millis(*ms)),
             Step::Frames(n) => self.compositor.advance(FRAME * *n),
             Step::ExpectWindow(expected) => self.expect_window(expected),
-            Step::ExpectNoWindow(app_id) => match self.find(app_id)? {
-                None => Ok(()),
-                Some(window) => anyhow::bail!("expected no window {app_id}, found {window:?}"),
-            },
+            // A client closing goes away in its own time.
+            Step::ExpectNoWindow(app_id) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    match self.find(app_id)? {
+                        None => return Ok(()),
+                        Some(window) if Instant::now() > deadline => {
+                            anyhow::bail!("expected no window {app_id}, found {window:?}")
+                        }
+                        Some(_) => self.compositor.dispatch(Duration::from_millis(10))?,
+                    }
+                }
+            }
             Step::ExpectFocus(app_id) => {
                 let focused = self.windows()?.into_iter().find(|w| w.focused);
                 let focused = focused.and_then(|w| w.app_id);
@@ -686,6 +717,73 @@ impl Run<'_> {
         self.compositor
             .dispatch_until(CLIENT_TIMEOUT, |c| c.window_count() > before)
             .context("the X11 window did not appear")
+    }
+
+    fn ui(&mut self) -> anyhow::Result<Vec<hocus_api::UiNode>> {
+        match self.request(Request::Ui)? {
+            Reply::Ui(nodes) => Ok(nodes),
+            other => anyhow::bail!("expected the interface, got {other:?}"),
+        }
+    }
+
+    fn click_ui(&mut self, label: &str) -> anyhow::Result<()> {
+        let nodes = self.ui()?;
+        let node = nodes
+            .iter()
+            .find(|n| n.role == "button" && n.label.as_deref() == Some(label))
+            .with_context(|| {
+                let buttons: Vec<_> = nodes
+                    .iter()
+                    .filter(|n| n.role == "button")
+                    .filter_map(|n| n.label.clone())
+                    .collect();
+                format!("no button {label:?}; there are {buttons:?}")
+            })?;
+        let r = node.rect;
+        let (x, y) = (
+            f64::from(r.x) + f64::from(r.width) / 2.0,
+            f64::from(r.y) + f64::from(r.height) / 2.0,
+        );
+        self.request(Request::PointerMove { x, y })?;
+        for pressed in [true, false] {
+            self.request(Request::PointerButton {
+                button: Button::Left,
+                pressed,
+            })?;
+        }
+        Ok(())
+    }
+
+    /// The shell redraws after each dispatch: it gets a moment.
+    fn expect_ui(&mut self, expected: &ExpectUi) -> anyhow::Result<()> {
+        let deadline = Instant::now() + SETTLE_TIMEOUT;
+        loop {
+            let nodes = self.ui()?;
+            let found = nodes
+                .iter()
+                .find(|n| n.label.as_deref() == Some(expected.label.as_str()));
+            let ok = match (found, expected.shown) {
+                (Some(n), true) => expected.disabled.is_none_or(|d| d == n.disabled),
+                (None, false) => true,
+                _ => false,
+            };
+            if ok {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                let labels: Vec<_> = nodes.iter().filter_map(|n| n.label.clone()).collect();
+                anyhow::bail!(
+                    "{:?} {}; the interface shows {labels:?}",
+                    expected.label,
+                    match (found, expected.shown) {
+                        (Some(n), true) => format!("has disabled = {}", n.disabled),
+                        (Some(_), false) => "is shown".into(),
+                        _ => "is not shown".into(),
+                    }
+                );
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
     }
 
     fn copy(&mut self, copy: &Clipboard) -> anyhow::Result<()> {

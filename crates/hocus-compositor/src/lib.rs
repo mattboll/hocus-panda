@@ -18,6 +18,7 @@ mod headless;
 mod input;
 mod output_spec;
 mod scene;
+mod shell;
 mod socket;
 mod state;
 mod stats;
@@ -80,6 +81,8 @@ pub struct Options {
     pub config_poll: Duration,
     /// Runs X11 applications through XWayland.
     pub xwayland: bool,
+    /// Shows the desktop's own interface: the widget column.
+    pub shell: bool,
 }
 
 /// How often the configuration file is looked at by default.
@@ -183,6 +186,9 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         state.watchdog = Some(watchdog::start(&event_loop.handle(), config.clone())?);
     }
     state.loop_handle = Some(event_loop.handle());
+    if options.shell {
+        shell::start(&event_loop.handle(), &mut state);
+    }
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
     }
@@ -240,6 +246,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
 
     let handle = event_loop.handle();
     event_loop.run(None, &mut app, |app| {
+        app.state.refresh_shell();
         match &mut app.backend {
             BackendState::Winit(winit) => winit.after_dispatch(&mut app.state),
             BackendState::Headless(headless) => headless.after_dispatch(&handle, &app.state),

@@ -79,6 +79,8 @@ enum Message {
     },
     /// Each output's desktops, their windows, and the one shown.
     Desktops,
+    /// The shell's interface: roles, labels and places of its elements.
+    Ui,
     /// Plug a headless output, WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS].
     Plug {
         spec: String,
@@ -220,6 +222,39 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             Ok(())
         }
         Message::Desktops => print(client.request(Request::Desktops)?),
+        Message::Ui => match client.request(Request::Ui)? {
+            // One line per element, indented as the tree.
+            Reply::Ui(nodes) => {
+                for n in nodes {
+                    let r = n.rect;
+                    let label = n
+                        .label
+                        .map(|l| format!(" \"{}\"", l.replace('"', "\\\"")))
+                        .unwrap_or_default();
+                    let states = [
+                        (n.focused, " focused"),
+                        (n.selected, " selected"),
+                        (n.disabled, " disabled"),
+                    ]
+                    .iter()
+                    .filter(|(on, _)| *on)
+                    .map(|(_, s)| *s)
+                    .collect::<String>();
+                    println!(
+                        "{:indent$}{}{label} {},{} {}x{}{states}",
+                        "",
+                        n.role,
+                        r.x,
+                        r.y,
+                        r.width,
+                        r.height,
+                        indent = n.depth as usize * 2
+                    );
+                }
+                Ok(())
+            }
+            other => print(other),
+        },
         Message::Plug { spec, name } => {
             client.request(Request::PlugOutput { spec, name })?;
             Ok(())

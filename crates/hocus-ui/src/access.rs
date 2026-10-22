@@ -37,6 +37,10 @@ pub struct AccessNode {
     pub label: Option<String>,
     pub rect: Rect,
     pub focused: bool,
+    /// Shown but not usable.
+    pub disabled: bool,
+    /// On, for toggles.
+    pub selected: bool,
     pub children: Vec<AccessNode>,
 }
 
@@ -63,8 +67,14 @@ impl AccessNode {
         }
         let r = self.rect;
         let _ = write!(out, " {},{} {}x{}", r.x, r.y, r.w, r.h);
-        if self.focused {
-            out.push_str(" focused");
+        for (on, state) in [
+            (self.focused, " focused"),
+            (self.selected, " selected"),
+            (self.disabled, " disabled"),
+        ] {
+            if on {
+                out.push_str(state);
+            }
         }
         out.push('\n');
         for child in &self.children {

@@ -87,7 +87,13 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let under = self.surface_under(location);
+        // Over the column, windows do not see the pointer.
+        let over_shell = !pointer.is_grabbed() && self.shell_pointer_motion(location);
+        let under = if over_shell {
+            None
+        } else {
+            self.surface_under(location)
+        };
         pointer.motion(
             self,
             under,
@@ -112,6 +118,12 @@ impl State {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
+        if button == BTN_LEFT
+            && !pointer.is_grabbed()
+            && self.shell_pointer_button(pointer.current_location(), state == ButtonState::Pressed)
+        {
+            return;
+        }
 
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
             let at = pointer.current_location();

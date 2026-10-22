@@ -95,6 +95,12 @@ impl State {
                 Kind::Unspecified,
             )));
         }
+        // The column, above windows but under a fullscreen one.
+        elements.extend(
+            self.shell_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         let focused = self.focused_window();
         let windows: Vec<&Window> = self.space.elements().collect();
         for window in windows.into_iter().rev() {

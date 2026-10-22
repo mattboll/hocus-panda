@@ -75,6 +75,12 @@ pub struct State {
     pub(crate) loop_handle: Option<smithay::reexports::calloop::LoopHandle<'static, crate::App>>,
     /// Where a dragged window would snap, shown while it is dragged.
     pub snap_preview: Option<(Output, Zone)>,
+    /// The widget column, when the shell runs.
+    pub shell: Option<crate::shell::Shell>,
+    /// The keyboard layout in use, by its place in the configuration.
+    pub layout_index: usize,
+    /// Who is logged in, as the column shows it.
+    pub user: String,
     pub snap_preview_buffer: SolidColorBuffer,
     /// What the pointer looks like, as clients set it.
     pub cursor: CursorImageStatus,
@@ -150,6 +156,11 @@ impl State {
             ),
             loop_handle: None,
             snap_preview: None,
+            shell: None,
+            layout_index: 0,
+            user: std::env::var("USER")
+                .or_else(|_| std::env::var("LOGNAME"))
+                .unwrap_or_default(),
             snap_preview_buffer: SolidColorBuffer::default(),
             cursor: CursorImageStatus::default_named(),
             arrows: Arrows::default(),

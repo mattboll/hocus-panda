@@ -7,7 +7,9 @@ use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::{
     Glyph, Image, ImageSource, Pixmap, RenderContext, Resources,
     color::{AlphaColor, Srgb},
-    kurbo::{Affine, Arc as KArc, BezPath, Cap, Rect as KRect, RoundedRect, Shape as _, Stroke},
+    kurbo::{
+        Affine, Arc as KArc, BezPath, Cap, Join, Rect as KRect, RoundedRect, Shape as _, Stroke,
+    },
     peniko::ImageSampler,
 };
 
@@ -165,6 +167,21 @@ impl Canvas {
         self.ctx.set_transform(self.transform() * fit);
         self.ctx.set_paint(paint(color));
         self.ctx.fill_path(path);
+    }
+
+    /// A path's outline in a `view`×`view` box, `width` in the box's units,
+    /// with round ends and joins.
+    pub fn stroke_path(&mut self, path: &BezPath, view: f32, r: Rect, width: f32, color: Color) {
+        let fit = Affine::translate((f64::from(r.x), f64::from(r.y)))
+            * Affine::scale_non_uniform(f64::from(r.w / view), f64::from(r.h / view));
+        self.ctx.set_transform(self.transform() * fit);
+        self.ctx.set_paint(paint(color));
+        self.ctx.set_stroke(
+            Stroke::new(f64::from(width))
+                .with_caps(Cap::Round)
+                .with_join(Join::Round),
+        );
+        self.ctx.stroke_path(path);
     }
 
     /// Premultiplied pixels stretched over `r`.

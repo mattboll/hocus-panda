@@ -35,7 +35,8 @@ target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 3440x14
     --api-permission test --spawn foot
 # talk to it: the socket is logged at start ("control=…")
 target/debug/hocus msg --socket <control socket> windows   # also: outputs, scene,
-    # events, pointer-move X Y, click, key CODE, screenshot --output NAME -o FILE
+    # events, pointer-move X Y, click, key CODE, screenshot --output NAME -o FILE,
+    # ui (the shell's buttons and texts with their places)
 ```
 
 Tests drive a headless compositor in-process on a virtual clock

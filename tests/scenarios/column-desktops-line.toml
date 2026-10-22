@@ -1,0 +1,43 @@
+description = "The column's desktops line follows its screen, and its popover shows every screen's desktops"
+# The external screen first: the primary one, where the column goes.
+outputs = ["1920x1080", "1280x800+1920+0/1"]
+shell = true
+
+[[step]]
+expect_ui = { label = "Desktop 1 of 4 on this screen" }
+
+[[step]]
+pointer_move = [900, 500]
+
+[[step]]
+keys = "super+3"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 3 }
+
+[[step]]
+expect_ui = { label = "Desktop 3 of 4 on this screen" }
+
+[[step]]
+click_ui = "Desktop 3 of 4 on this screen"
+
+[[step]]
+expect_ui = { label = "HEADLESS-2 · Desktop 1" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "column-desktops-line.png" }
+
+[[step]]
+click_ui = "HEADLESS-1 · Desktop 2"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+expect_ui = { label = "Desktop 2 of 4 on this screen" }
+
+[[step]]
+expect_ui = { label = "HEADLESS-2 · Desktop 1", shown = false }
