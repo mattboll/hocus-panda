@@ -6,6 +6,10 @@ dbus = true
 [[step]]
 open = { app_id = "slides", size = [600, 400], color = "#e8e4da" }
 
+# The screen's thumbnail shows the wallpaper: made first, on its worker.
+[[step]]
+wait_wallpapers = true
+
 [[step]]
 ask_share = true
 
