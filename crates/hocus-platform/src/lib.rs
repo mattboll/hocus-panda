@@ -4,6 +4,7 @@
 pub mod apps;
 pub mod auth;
 pub mod notifications;
+pub mod polkit;
 pub mod power;
 pub mod quick;
 pub mod session;

@@ -590,6 +590,7 @@ impl Scenario {
                     .or_insert_with(|| std::env::var("PATH").unwrap_or_default());
                 env.into_iter().map(|(k, v)| (k.into(), v.into())).collect()
             }),
+            polkit_helper: None,
         })?;
         let mut run = Run {
             scenario: self,

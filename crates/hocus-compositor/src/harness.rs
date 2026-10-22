@@ -40,6 +40,8 @@ pub struct HarnessOptions {
     pub data_dirs: Option<Vec<std::path::PathBuf>>,
     /// What started applications inherit.
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
+    /// A stand-in for polkit's helper, with a system bus (#83).
+    pub polkit_helper: Option<std::path::PathBuf>,
 }
 
 /// A headless compositor in a private runtime directory, on a virtual clock.
@@ -118,6 +120,7 @@ impl Headless {
             system_bus: None,
             data_dirs: None,
             child_env: None,
+            polkit_helper: None,
         })
     }
 
@@ -144,6 +147,7 @@ impl Headless {
             state_dir: Some(config_dir.path().join("state")),
             data_dirs: harness.data_dirs.clone(),
             child_env: harness.child_env.clone(),
+            polkit_helper: harness.polkit_helper.clone(),
         };
         let Started {
             event_loop,

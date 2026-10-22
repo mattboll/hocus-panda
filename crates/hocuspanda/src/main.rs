@@ -179,6 +179,7 @@ fn main() -> anyhow::Result<()> {
         session_services: args.session_services,
         data_dirs: None,
         child_env: None,
+        polkit_helper: None,
         backend: match backend {
             BackendArg::Tty => Backend::Tty,
             BackendArg::Winit => Backend::Winit,

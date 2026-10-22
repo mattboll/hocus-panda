@@ -37,6 +37,7 @@ fn a_large_image_keeps_the_loop_within_its_budget() -> anyhow::Result<()> {
         system_bus: None,
         data_dirs: None,
         child_env: None,
+        polkit_helper: None,
     })?;
     // Its accent tells when the picture has been made.
     let before = accent(&mut compositor)?;
