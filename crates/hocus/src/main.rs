@@ -1,5 +1,6 @@
 //! Command-line tool to control and test Hocuspanda.
 
+use std::io::Write as _;
 use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
 use anyhow::Context;
@@ -7,6 +8,19 @@ use clap::{Parser, Subcommand, ValueEnum};
 use hocus_api::{Button, Client, Reply, Request, Target, WindowState};
 
 /// Control and test Hocuspanda.
+/// `println!`, but a reader that went away (`hocus msg ui | head`) ends
+/// the command quietly instead of a panic.
+macro_rules! out {
+    ($($t:tt)*) => {
+        if let Err(err) = writeln!(std::io::stdout(), $($t)*) {
+            if err.kind() == std::io::ErrorKind::BrokenPipe {
+                return Ok(Default::default());
+            }
+            return Err(err.into());
+        }
+    };
+}
+
 #[derive(Debug, Parser)]
 #[command(version)]
 struct Args {
@@ -74,8 +88,15 @@ enum Message {
         #[arg(value_enum)]
         action: PressArg,
     },
-    /// Press and release a key, by evdev code (KEY_A is 30).
-    Key { code: u32 },
+    /// Press and release keys, by evdev code (KEY_A is 30): several are
+    /// pressed in order and released in reverse (`key 125 30` is Super+A);
+    /// `--action press` or `release` does only that.
+    Key {
+        #[arg(required = true)]
+        codes: Vec<u32>,
+        #[arg(long, value_enum)]
+        action: Option<PressArg>,
+    },
     /// Ask a window to close, by id.
     Close { window: u64 },
     /// Maximize, make fullscreen, minimize or restore a window.
@@ -208,7 +229,7 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
         Message::Events => {
             client.request(Request::Subscribe)?;
             loop {
-                println!("{}", serde_json::to_string(&client.next_event()?)?);
+                out!("{}", serde_json::to_string(&client.next_event()?)?);
             }
         }
         Message::PointerMove { x, y } => {
@@ -231,9 +252,24 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             })?;
             Ok(())
         }
-        Message::Key { code } => {
-            for pressed in [true, false] {
-                client.request(Request::Key { code, pressed })?;
+        Message::Key { codes, action } => {
+            let press = !matches!(action, Some(PressArg::Release));
+            let release = !matches!(action, Some(PressArg::Press));
+            if press {
+                for code in &codes {
+                    client.request(Request::Key {
+                        code: *code,
+                        pressed: true,
+                    })?;
+                }
+            }
+            if release {
+                for code in codes.iter().rev() {
+                    client.request(Request::Key {
+                        code: *code,
+                        pressed: false,
+                    })?;
+                }
             }
             Ok(())
         }
@@ -256,7 +292,7 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
                     .filter(|(on, _)| *on)
                     .map(|(_, s)| *s)
                     .collect::<String>();
-                    println!(
+                    out!(
                         "{:indent$}{}{label} {},{} {}x{}{states}",
                         "",
                         n.role,
@@ -333,7 +369,7 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             };
             std::fs::write(&file, shot.png()?)
                 .with_context(|| format!("could not write {}", file.display()))?;
-            println!("{}x{} → {}", shot.width, shot.height, file.display());
+            out!("{}x{} → {}", shot.width, shot.height, file.display());
             Ok(())
         }
     }
@@ -347,6 +383,6 @@ fn print(reply: Reply) -> anyhow::Result<()> {
         }
         other => other,
     };
-    println!("{}", serde_json::to_string_pretty(&value)?);
+    out!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
