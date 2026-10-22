@@ -29,8 +29,9 @@ const TEXT_MIMES: [&str; 3] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/
 /// What workers send back.
 #[derive(Debug)]
 enum News {
-    /// A copy read, by the order it was made in.
-    Copied(u64, String),
+    /// A copy read, by the order it was made in; `None` when there was
+    /// nothing to keep.
+    Copied(u64, Option<String>),
     Loaded(Vec<Entry>),
     Recents(Vec<String>),
 }
@@ -46,6 +47,8 @@ pub struct Clipboard {
     made: u64,
     /// The number of each copy read, to place one read late.
     read: Vec<(u64, String)>,
+    /// Copies whose read has ended, kept or not: `made` once all are in.
+    heard: u64,
     /// Clipboard selections seen: a read asked for one is dropped when a
     /// newer one came meanwhile, since it would read that one.
     selections: u64,
@@ -100,6 +103,10 @@ impl State {
     fn clipboard_news(&mut self, news: News) {
         match news {
             News::Copied(n, text) => {
+                self.clipboard.heard += 1;
+                let Some(text) = text else {
+                    return;
+                };
                 let clip = &mut self.clipboard;
                 clip.read.retain(|(_, t)| *t != text);
                 let newer = clip.read.iter().filter(|(m, _)| *m > n).count();
@@ -138,6 +145,13 @@ impl State {
         self.clipboard.selections
     }
 
+    /// The clipboard selections seen, and whether every read asked for has
+    /// ended: tests wait on it rather than on time.
+    pub fn clipboard_quiet(&self) -> (u64, bool) {
+        let clip = &self.clipboard;
+        (clip.selections, clip.heard == clip.made)
+    }
+
     /// Whether selection `n` is still the clipboard's.
     pub fn selection_is(&self, n: u64) -> bool {
         self.clipboard.selections == n
@@ -158,12 +172,10 @@ impl State {
         spawn("clipboard read", move || {
             let mut text = String::new();
             // Past the limit, it is not kept: reading a byte more says so.
-            if reader.take(limit + 1).read_to_string(&mut text).is_ok()
+            let kept = reader.take(limit + 1).read_to_string(&mut text).is_ok()
                 && !text.is_empty()
-                && text.len() as u64 <= limit
-            {
-                let _ = news.send(News::Copied(n, text));
-            }
+                && text.len() as u64 <= limit;
+            let _ = news.send(News::Copied(n, kept.then_some(text)));
         });
         Some((mime, OwnedFd::from(writer)))
     }
@@ -172,7 +184,7 @@ impl State {
     pub fn shell_copied(&mut self, text: &str) {
         self.clipboard.made += 1;
         let n = self.clipboard.made;
-        self.clipboard_news(News::Copied(n, text.to_owned()));
+        self.clipboard_news(News::Copied(n, Some(text.to_owned())));
     }
 
     fn history_changed(&mut self) {
