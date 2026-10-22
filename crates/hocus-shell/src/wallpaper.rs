@@ -25,9 +25,11 @@ pub enum Pattern {
     None,
     /// The HUD theme's grid.
     Grid,
-    /// The Matrix theme's rain, still, on night blue (an animated rain is
-    /// #108's).
+    /// The Matrix theme's rain, still, on night blue (the compositor makes
+    /// it fall where it can).
     Rain,
+    /// Stars on night blue, still (the compositor makes them drift).
+    Stars,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +84,7 @@ pub fn render(req: &Request) -> Result<Picture, String> {
     let image = match &req.source {
         Source::Colour => solid(w, h, req.colour),
         Source::Glow(Pattern::Rain) => rain(w, h, req.colour, req.hour, req.scale),
+        Source::Glow(Pattern::Stars) => stars(w, h, req.colour, req.hour, req.scale),
         Source::Glow(pattern) => glow(w, h, req.colour, req.hour, *pattern == Pattern::Grid),
         Source::Image(path) => place(&open(path)?, w, h, req.mode, req.colour),
         Source::Folder(dir) => {
@@ -163,7 +166,7 @@ fn place(src: &DynamicImage, w: u32, h: u32, mode: Mode, around: Color) -> RgbaI
 /// Where the sun is at `hour`, as fractions of the screen, and its light
 /// (low and warm in the morning and the evening, high at noon, night blue
 /// at night).
-fn sun(hour: f32) -> (f32, f32, Color) {
+pub fn sun(hour: f32) -> (f32, f32, Color) {
     let hour = hour.rem_euclid(24.0);
     let day = (6.0..20.0).contains(&hour);
     let (cx, cy, light) = if day {
@@ -202,25 +205,35 @@ fn glow(w: u32, h: u32, base: Color, hour: f32, grid: bool) -> RgbaImage {
     })
 }
 
-/// The Matrix theme's wallpaper (as in the boards): from the base colour
-/// at the top to night blue at the bottom, a night-blue light where the
-/// sun is whatever the hour, and the rain, still.
-fn rain(w: u32, h: u32, base: Color, hour: f32, scale: f32) -> RgbaImage {
+/// The night the Matrix rain and the stars fall on (as in the boards):
+/// from the base colour at the top to night blue at the bottom, with a
+/// night-blue light where the sun is, whatever the hour.
+fn night(w: u32, h: u32, base: Color, hour: f32) -> RgbaImage {
     let (cx, cy, _) = sun(hour);
-    let light = Color::rgb(0x1e, 0x3c, 0x8c);
     let (fw, fh) = (w as f32, h as f32);
-    // An ellipse about half the screen wide, gone at 70 % of it.
-    let (rx, ry) = (fw * 0.52, fh * 0.83);
-    let mut image = RgbaImage::from_fn(w, h, |x, y| {
-        let dx = (x as f32 - cx * fw) / rx;
-        let dy = (y as f32 - cy * fh) / ry;
-        let d = (dx * dx + dy * dy).sqrt();
-        let a = 0.18 * (1.0 - d / 0.7).clamp(0.0, 1.0);
+    RgbaImage::from_fn(w, h, |x, y| {
+        let (u, v) = (x as f32 / fw, y as f32 / fh.max(1.0));
         let c = base
-            .mix(crate::matrix::NIGHT, y as f32 / fh.max(1.0))
-            .mix(light, a);
+            .mix(crate::matrix::NIGHT, v)
+            .mix(NIGHT_LIGHT, night_light(u, v, cx, cy));
         image::Rgba([c.r, c.g, c.b, 255])
-    });
+    })
+}
+
+/// The night's light.
+pub const NIGHT_LIGHT: Color = Color::rgb(0x1e, 0x3c, 0x8c);
+
+/// How much of the night's light reaches `(u, v)` (fractions of the
+/// screen) from the sun at `(cx, cy)`: an ellipse about half the screen
+/// wide, gone at 70 % of it. The compositor's shaders do the same.
+pub fn night_light(u: f32, v: f32, cx: f32, cy: f32) -> f32 {
+    let (dx, dy) = ((u - cx) / 0.52, (v - cy) / 0.83);
+    0.18 * (1.0 - (dx * dx + dy * dy).sqrt() / 0.7).clamp(0.0, 1.0)
+}
+
+/// The Matrix theme's wallpaper: the rain, still, on the night.
+fn rain(w: u32, h: u32, base: Color, hour: f32, scale: f32) -> RgbaImage {
+    let mut image = night(w, h, base, hour);
     // The same rain for a screen of the same size.
     crate::matrix::draw_rain(
         &mut image,
@@ -228,6 +241,66 @@ fn rain(w: u32, h: u32, base: Color, hour: f32, scale: f32) -> RgbaImage {
         (u64::from(w) << 32) | u64::from(h),
     );
     image
+}
+
+/// Layers of stars, far to near: the side of the square each star has to
+/// itself, how fast the layer drifts left (logical pixels a second), and
+/// how bright and large its stars are, 0 to 1. The compositor's shader
+/// draws the same.
+pub const STAR_LAYERS: [(f32, f32, f32); 3] =
+    [(90.0, 3.0, 0.45), (150.0, 7.0, 0.7), (240.0, 14.0, 1.0)];
+/// One square in so many has a star.
+const STAR_CHANCE: f32 = 0.55;
+pub const STAR: Color = Color::rgb(0xdd, 0xe6, 0xff);
+
+/// Stars on the night, still: where they are when they start drifting.
+fn stars(w: u32, h: u32, base: Color, hour: f32, scale: f32) -> RgbaImage {
+    let mut image = night(w, h, base, hour);
+    let scale = scale.max(0.5);
+    let (lw, lh) = (w as f32 / scale, h as f32 / scale);
+    for (layer, &(side, _, strength)) in STAR_LAYERS.iter().enumerate() {
+        let (cols, rows) = ((lw / side).ceil() as u64, (lh / side).ceil() as u64);
+        for row in 0..rows {
+            for col in 0..cols {
+                let seed = crate::matrix::hash(&[layer as u64, col, row]);
+                let mut rng = crate::matrix::Rng::new(seed);
+                if rng.unit() > STAR_CHANCE {
+                    continue;
+                }
+                let radius = 0.5 + 1.1 * strength * rng.unit();
+                let margin = radius + 1.0;
+                let x = col as f32 * side + rng.range(margin, side - margin);
+                let y = row as f32 * side + rng.range(margin, side - margin);
+                let bright = strength * rng.range(0.5, 1.0);
+                dot(&mut image, x * scale, y * scale, radius * scale, bright);
+            }
+        }
+    }
+    image
+}
+
+/// A soft round star.
+fn dot(image: &mut RgbaImage, x: f32, y: f32, radius: f32, alpha: f32) {
+    let reach = radius + 1.0;
+    let (x0, x1) = (
+        (x - reach).floor().max(0.0) as u32,
+        (x + reach).ceil() as u32,
+    );
+    let (y0, y1) = (
+        (y - reach).floor().max(0.0) as u32,
+        (y + reach).ceil() as u32,
+    );
+    for py in y0..y1.min(image.height()) {
+        for px in x0..x1.min(image.width()) {
+            let d = (px as f32 + 0.5 - x).hypot(py as f32 + 0.5 - y);
+            let a = (radius + 0.5 - d).clamp(0.0, 1.0) * alpha;
+            if a > 0.0 {
+                let pixel = image.get_pixel_mut(px, py);
+                let c = Color::rgb(pixel.0[0], pixel.0[1], pixel.0[2]).mix(STAR, a);
+                pixel.0 = [c.r, c.g, c.b, 255];
+            }
+        }
+    }
 }
 
 /// The colour that stands out: the most common saturated hue, averaged.
@@ -349,5 +422,27 @@ mod tests {
         assert!(green > 200, "{green}");
         let again = render(&request(1.0)).map(|p| p.pixels);
         assert!(again.is_ok_and(|p| p == picture.pixels));
+    }
+
+    #[test]
+    fn stars_shine_on_the_night() {
+        let request = Request {
+            source: Source::Glow(Pattern::Stars),
+            mode: Mode::Fill,
+            colour: Color::rgb(0x02, 0x04, 0x0a),
+            width: 640,
+            height: 400,
+            scale: 1.0,
+            hour: 23.0,
+        };
+        let Ok(picture) = render(&request) else {
+            panic!("no stars");
+        };
+        let bright = picture
+            .pixels
+            .chunks(4)
+            .filter(|p| p[0] > 80 && p[2] > 90)
+            .count();
+        assert!(bright > 15, "{bright} bright pixels");
     }
 }

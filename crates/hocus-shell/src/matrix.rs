@@ -449,8 +449,11 @@ pub struct Drop {
 /// (the boards' rain: 20 px glyphs on 24 px lines, a column every 48 px).
 pub const RAIN_STEP: f32 = 48.0;
 pub const RAIN_LINE: f32 = 24.0;
-/// A rain glyph's box.
-const RAIN_GLYPH: (f32, f32) = (12.0, 17.0);
+/// A rain glyph's box, and the column it is centred in.
+pub const RAIN_GLYPH: (f32, f32) = (12.0, 17.0);
+pub const RAIN_COLUMN: f32 = 28.0;
+/// The rain's strokes, logical pixels.
+const RAIN_STROKE: f32 = 1.6;
 
 /// The still rain over a `width`×`height` logical screen: one drop per
 /// column, 8 to 30 glyphs long, anywhere from above the screen down.
@@ -479,14 +482,14 @@ pub fn draw_rain(image: &mut RgbaImage, scale: f32, seed: u64) {
         (RAIN_GLYPH.0 * scale).round().max(2.0) as u32,
         (RAIN_GLYPH.1 * scale).round().max(2.0) as u32,
     );
-    let stroke = (1.6 * scale).max(1.0);
+    let stroke = (RAIN_STROKE * scale).max(1.0);
     let mut masks: Vec<Option<Vec<f32>>> = vec![None; glyph_count()];
     for drop in rain(w as f32 / scale, h as f32 / scale, seed) {
         let n = drop.glyphs.len();
         for (j, &glyph) in drop.glyphs.iter().enumerate() {
             let top = drop.top + j as f32 * RAIN_LINE;
             let (x0, y0) = (
-                ((drop.x + (28.0 - RAIN_GLYPH.0) / 2.0) * scale).round() as i64,
+                ((drop.x + (RAIN_COLUMN - RAIN_GLYPH.0) / 2.0) * scale).round() as i64,
                 ((top + (RAIN_LINE - RAIN_GLYPH.1) / 2.0) * scale).round() as i64,
             );
             if y0 + i64::from(gh) < 0 || y0 >= i64::from(h) || x0 >= i64::from(w) {
@@ -521,6 +524,60 @@ pub fn draw_rain(image: &mut RgbaImage, scale: f32, seed: u64) {
                     pixel.0 = [c.r, c.g, c.b, 255];
                 }
             }
+        }
+    }
+}
+
+/// Every glyph of the rain, white, for a shader to look up: `cols`×`rows`
+/// cells of `cell` pixels, each glyph `glyph` pixels at the cell's corner
+/// plus one, so that sampling between pixels never reaches a neighbour.
+/// RGBA bytes, premultiplied.
+#[derive(Debug, Clone)]
+pub struct Atlas {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub cols: u32,
+    pub rows: u32,
+    pub cell: (u32, u32),
+    pub glyph: (u32, u32),
+}
+
+impl Atlas {
+    /// The rain's glyphs at `scale`.
+    pub fn new(scale: f32) -> Self {
+        let glyph = (
+            (RAIN_GLYPH.0 * scale).round().max(2.0) as u32,
+            (RAIN_GLYPH.1 * scale).round().max(2.0) as u32,
+        );
+        let cell = (glyph.0 + 2, glyph.1 + 2);
+        let cols = 10;
+        let rows = (glyph_count() as u32).div_ceil(cols);
+        let (width, height) = (cols * cell.0, rows * cell.1);
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        let stroke = (RAIN_STROKE * scale).max(1.0);
+        for i in 0..glyph_count() {
+            let mask = glyph_mask(i, glyph.0, glyph.1, stroke);
+            let (cx, cy) = (
+                (i as u32 % cols) * cell.0 + 1,
+                (i as u32 / cols) * cell.1 + 1,
+            );
+            for y in 0..glyph.1 {
+                for x in 0..glyph.0 {
+                    let a = (mask[(y * glyph.0 + x) as usize] * 255.0).round() as u8;
+                    let at = (((cy + y) * width + cx + x) * 4) as usize;
+                    pixels[at..at + 4].copy_from_slice(&[a, a, a, a]);
+                }
+            }
+        }
+        Self {
+            pixels,
+            width,
+            height,
+            cols,
+            rows,
+            cell,
+            glyph,
         }
     }
 }
@@ -576,6 +633,18 @@ mod tests {
         // Red is all but absent from the green, and strong in the heads.
         assert!(brightest(0) < 10, "{}", brightest(0));
         assert!(brightest(3) > 150, "{}", brightest(3));
+    }
+
+    #[test]
+    fn the_atlas_holds_every_glyph_apart() {
+        let atlas = Atlas::new(1.0);
+        assert_eq!(atlas.cols * atlas.rows, glyph_count() as u32);
+        // The cells' borders stay empty.
+        for y in 0..atlas.height {
+            for x in (0..atlas.width).step_by(atlas.cell.0 as usize) {
+                assert_eq!(atlas.pixels[((y * atlas.width + x) * 4 + 3) as usize], 0);
+            }
+        }
     }
 
     #[test]

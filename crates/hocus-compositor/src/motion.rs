@@ -167,7 +167,7 @@ impl crate::State {
     /// stop when it is still; pictures done moving go.
     pub fn refresh_motion(&mut self) {
         self.settle_snapshots();
-        if self.animating(self.clock.now()) {
+        if self.animating(self.clock.now()) || self.backdrops_moving() {
             self.needs_redraw = true;
         }
     }

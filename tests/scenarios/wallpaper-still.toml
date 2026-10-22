@@ -1,0 +1,45 @@
+description = "With reduced motion the Matrix rain wallpaper is a still frame, and so is the starfield: nothing is drawn while time passes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[wallpaper]
+kind = "rain"
+
+[appearance]
+reduced_motion = true
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "wallpaper-still-rain.png" }
+
+[[step]]
+expect_idle = { for_ms = 2000 }
+
+[[step]]
+config = """
+[wallpaper]
+kind = "stars"
+
+[appearance]
+reduced_motion = true
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "wallpaper-still-stars.png" }
+
+[[step]]
+expect_idle = { for_ms = 2000 }

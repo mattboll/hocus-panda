@@ -128,6 +128,15 @@ picture), evaluated in closed form at the clock's time, so that headless
 scenarios sample them. The glyphs are strokes of our own after
 half-width katakana: no bundled font has them. The theme's wallpaper is
 its still rain, drawn with the other wallpapers on their worker thread.
+Wallpapers that move (#108, `rain` and `stars`) are GLES shaders: before
+a GLES backend draws an output, the wallpaper is painted into a texture
+of the output's size at the clock's time (the rain looks its glyphs up in
+an atlas of them), and the scene shows that texture in place of the still
+picture. The still picture, made on the worker as any wallpaper, stays
+whenever nothing should move: reduced motion, the power saver, a
+fullscreen window or the lock over it, and the pixman renderer, which
+keeps scenarios deterministic. Only while a wallpaper moves does the loop
+ask for frames.
 The window switcher (#39) shows each card's window live: the window's own
 surfaces drawn again, scaled into the card (a rescale element: a surface
 element's size follows the output's scale, not the one it was made at), so

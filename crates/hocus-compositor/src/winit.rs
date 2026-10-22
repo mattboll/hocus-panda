@@ -186,6 +186,8 @@ impl WinitBackend {
 
     fn render(&mut self, state: &mut State) {
         let start = Instant::now();
+        // A wallpaper that moves, before the scene shows it.
+        state.paint_backdrop(self.backend.renderer(), &self.output);
         let damage = {
             // The host draws the cursor of the nested window.
             let elements = state.scene_elements(self.backend.renderer(), &self.output, false);

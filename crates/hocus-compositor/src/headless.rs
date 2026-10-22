@@ -643,7 +643,13 @@ impl HeadlessBackend {
             return;
         }
         match &mut self.renderers {
-            Renderers::Gles(canvas) => canvas.render(state),
+            Renderers::Gles(canvas) => {
+                // Wallpapers that move, before the outputs show them.
+                for out in &canvas.outputs {
+                    state.paint_backdrop(&mut canvas.renderer, &out.output);
+                }
+                canvas.render(state)
+            }
             Renderers::Pixman(canvas) => canvas.render(state),
         }
         state.space.refresh();

@@ -1,0 +1,52 @@
+description = "The Matrix rain wallpaper falls on the frame clock of its screen, and draws no frame while a fullscreen window covers it or with reduced motion"
+renderer = "gles"
+shell = true
+
+[[step]]
+config = """
+[wallpaper]
+kind = "rain"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_frames = { for_ms = 1000, at_least = 50 }
+
+[[step]]
+open = { app_id = "video", size = [600, 400], color = "#101010" }
+
+[[step]]
+set_state = { app_id = "video", state = "fullscreen" }
+
+[[step]]
+expect_window = { app_id = "video", geometry = [0, 0, 1280, 800] }
+
+# The window settles at its new size.
+[[step]]
+advance_ms = 500
+
+[[step]]
+expect_idle = { for_ms = 2000 }
+
+[[step]]
+set_state = { app_id = "video", state = "normal" }
+
+[[step]]
+expect_frames = { for_ms = 1000, at_least = 50 }
+
+[[step]]
+config = """
+[wallpaper]
+kind = "rain"
+
+[appearance]
+reduced_motion = true
+"""
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_idle = { for_ms = 2000 }

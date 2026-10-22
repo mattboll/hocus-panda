@@ -1,0 +1,27 @@
+description = "The Matrix theme's own wallpaper is its rain, falling; the dark theme's glow does not move"
+renderer = "gles"
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_frames = { for_ms = 1000, at_least = 50 }
+
+[[step]]
+config = """
+[appearance]
+theme = "dark"
+"""
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_idle = { for_ms = 2000 }

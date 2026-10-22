@@ -70,6 +70,8 @@ pub struct State {
     pub textures: Textures,
     /// The Matrix theme's glyphs, once per scale.
     pub matrix_sheets: crate::matrix::Sheets,
+    /// Wallpapers that move, painted by shaders (#108).
+    pub backdrops: crate::backdrop::Backdrops,
     pub xdg_decoration_state: XdgDecorationState,
     /// The X11 window manager, once XWayland is ready, and its display.
     pub xwm: Option<smithay::xwayland::X11Wm>,
@@ -248,6 +250,7 @@ impl State {
             style: Style::default(),
             textures: Textures::default(),
             matrix_sheets: Default::default(),
+            backdrops: Default::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
             xwm: None,
             xdisplay: None,
