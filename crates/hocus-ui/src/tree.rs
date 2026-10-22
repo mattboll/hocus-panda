@@ -1621,19 +1621,26 @@ impl Tree {
     // Accessibility.
 
     pub fn access(&self) -> AccessNode {
-        self.access_node(self.root).unwrap_or_else(|| AccessNode {
-            role: Role::Group,
-            label: None,
-            rect: Rect::default(),
-            focused: false,
-            disabled: false,
-            selected: false,
-            children: Vec::new(),
-        })
+        self.access_node(self.root, (0.0, 0.0))
+            .unwrap_or_else(|| AccessNode {
+                role: Role::Group,
+                label: None,
+                rect: Rect::default(),
+                focused: false,
+                disabled: false,
+                selected: false,
+                children: Vec::new(),
+            })
     }
 
-    fn access_node(&self, id: NodeId) -> Option<AccessNode> {
+    /// A node as screen readers get it: where it shows, scrolled or
+    /// moving with its parents.
+    fn access_node(&self, id: NodeId, offset: (f32, f32)) -> Option<AccessNode> {
         let node = self.node(id)?;
+        let offset = (
+            offset.0 + node.offset_x.value(self.now),
+            offset.1 + node.offset_y.value(self.now),
+        );
         let (role, label) = match &node.kind {
             Kind::Box(_) if node.clickable.is_some() => (Role::Button, node.clickable.clone()),
             Kind::Box(_) => (Role::Group, None),
@@ -1653,14 +1660,14 @@ impl Tree {
         Some(AccessNode {
             role,
             label,
-            rect: node.rect,
+            rect: node.rect.translate(offset.0, offset.1),
             focused: self.focused == Some(id),
             disabled: matches!(&node.kind, Kind::Button(b) if !b.enabled),
             selected: matches!(&node.kind, Kind::Button(b) if b.selected) || node.chosen,
             children: node
                 .children
                 .iter()
-                .filter_map(|c| self.access_node(*c))
+                .filter_map(|c| self.access_node(*c, offset))
                 .collect(),
         })
     }

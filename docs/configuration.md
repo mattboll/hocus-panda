@@ -112,7 +112,7 @@ name = "Home"
 outputs = ["eDP-1", "DP-1"]           # in effect when exactly these are connected
 positions = { DP-1 = [0, 0], eDP-1 = [320, 1440] }
 
-[shortcuts]
+[shortcuts]                # the Keyboard page's editor writes them
 "Super+Return" = "spawn foot"
 "Ctrl+Alt+Right" = "next-desktop all"
 "Alt+F4" = "none"            # removes a default

@@ -17,15 +17,17 @@ pub enum Group {
     Desktops,
     Screens,
     Launcher,
+    Captures,
     System,
 }
 
 impl Group {
-    pub const ALL: [Group; 5] = [
+    pub const ALL: [Group; 6] = [
         Self::Windows,
         Self::Desktops,
         Self::Screens,
         Self::Launcher,
+        Self::Captures,
         Self::System,
     ];
 
@@ -35,6 +37,7 @@ impl Group {
             Self::Desktops => ("Desktops", "Bureaux"),
             Self::Screens => ("Screens", "Écrans"),
             Self::Launcher => ("Launcher and AI", "Lanceur et IA"),
+            Self::Captures => ("Captures", "Captures"),
             Self::System => ("System", "Système"),
         };
         match lang {
@@ -243,7 +246,7 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
                     (Lang::Fr, d) => format!("{what} dans {d}\u{a0}s"),
                 }
             },
-            G::System,
+            G::Captures,
             EVERYWHERE,
         ),
         A::Hibernate => (
