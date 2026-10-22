@@ -48,6 +48,15 @@ HOCUS_BLESS=1 cargo nextest run -p hocus-test --test scenarios  # record referen
 target/debug/hocus scenario run tests/scenarios/click-to-focus.toml
 ```
 
+The shell's toolkit runs alone, in a window of any Wayland session (or of a
+nested or headless hocuspanda); its reference images are recorded the same
+way:
+
+```sh
+cargo run -p hocus-ui --example gallery
+HOCUS_BLESS=1 cargo test -p hocus-ui --test spring
+```
+
 Update this section as commands land (VM scripts).
 
 ## Hard rules
