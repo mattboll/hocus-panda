@@ -446,7 +446,7 @@ impl State {
     }
 
     /// Whether a fullscreen window is shown on `output`.
-    fn fullscreen_on(&self, output: &Output) -> bool {
+    pub(crate) fn fullscreen_on(&self, output: &Output) -> bool {
         let Some(shown) = self
             .model
             .output(&hocus_core::OutputName(output.name()))

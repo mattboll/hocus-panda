@@ -1,0 +1,49 @@
+description = "A third-party bar takes the top of the work area: a maximized window starts under it, and gets the space back when it closes; an overlay with exclusive keyboard gets the keys"
+outputs = ["1280x800"]
+
+[[step]]
+open_layer = { namespace = "bar", layer = "top", anchor = ["top", "left", "right"], size = [0, 30], exclusive_zone = 30, color = "#2f6fdf" }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#e8e4da" }
+
+[[step]]
+keys = "super+up"
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 30, 1280, 770], state = "maximized" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "layer-shell.png" }
+
+# An overlay that takes the keyboard.
+[[step]]
+open_layer = { namespace = "prompt", layer = "overlay", size = [300, 80], keyboard = "exclusive", color = "#222222" }
+
+[[step]]
+key = 30
+
+[[step]]
+expect_received = { app_id = "prompt", event = "key 30 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "key 30 pressed" }
+
+[[step]]
+close_layer = "prompt"
+
+[[step]]
+key = 48
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 48 pressed" }
+
+# The bar goes: the space comes back.
+[[step]]
+close_layer = "bar"
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 0, 1280, 800], state = "maximized" }

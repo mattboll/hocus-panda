@@ -92,6 +92,11 @@ pub struct Protocols {
     pub primary_selection: PrimarySelectionState,
     pub data_control: ExtDataControlState,
     pub security_context: SecurityContextState,
+    pub layer_shell: smithay::wayland::shell::wlr_layer::WlrLayerShellState,
+    /// What layer surfaces leave of each output, as last arranged.
+    pub zones: std::collections::HashMap<String, smithay::utils::Rectangle<i32, Logical>>,
+    /// A layer surface has the keyboard.
+    pub layer_focus: bool,
     _cursor_shape: CursorShapeManagerState,
     _viewporter: ViewporterState,
     _single_pixel: SinglePixelBufferState,
@@ -121,6 +126,12 @@ impl Protocols {
             primary_selection,
             data_control,
             security_context: SecurityContextState::new::<State, _>(dh, trusted),
+            layer_shell: smithay::wayland::shell::wlr_layer::WlrLayerShellState::new_with_filter::<
+                State,
+                _,
+            >(dh, trusted),
+            zones: Default::default(),
+            layer_focus: false,
             _cursor_shape: CursorShapeManagerState::new::<State>(dh),
             _viewporter: ViewporterState::new::<State>(dh),
             _single_pixel: SinglePixelBufferState::new::<State>(dh),

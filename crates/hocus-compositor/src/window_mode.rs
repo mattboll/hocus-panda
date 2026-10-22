@@ -62,6 +62,12 @@ impl State {
     /// shell reserves (nothing yet; the column will) and the outer gap.
     pub fn work_area(&self, output: &Output) -> Rectangle<i32, Logical> {
         let mut area = self.space.output_geometry(output).unwrap_or_default();
+        // What layer surfaces reserve (third-party bars).
+        if let Some(zone) = self.non_exclusive_zone(output)
+            && let Some(inside) = area.intersection(zone)
+        {
+            area = inside;
+        }
         // The widget column takes the right of its output.
         if let Some(column) = self.column_rect(output) {
             area.size.w = (column.loc.x - area.loc.x).max(1);

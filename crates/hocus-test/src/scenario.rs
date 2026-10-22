@@ -103,6 +103,11 @@ pub enum Step {
     ClickUi(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
+    /// Starts a layer-shell client: `{ namespace, layer, anchor?, size,
+    /// exclusive_zone?, keyboard?, color }`; waits until it is shown.
+    OpenLayer(crate::layer::LayerSpec),
+    /// Closes the layer client of this namespace.
+    CloseLayer(String),
     /// The client of this app id asks for its window to come forward,
     /// with an activation token of its own.
     Activate(String),
@@ -395,6 +400,8 @@ impl fmt::Display for Step {
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
+            Self::OpenLayer(spec) => write!(f, "open_layer {}", spec.namespace),
+            Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
             Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
             Self::ExpectConfigFile(_) => write!(f, "expect_config_file"),
@@ -527,6 +534,7 @@ impl Scenario {
             clients: Vec::new(),
             x11_clients: Vec::new(),
             settings: None,
+            layers: Vec::new(),
             bus,
             events: Vec::new(),
         };
@@ -546,6 +554,7 @@ struct Run<'a> {
     clients: Vec<TestClient>,
     x11_clients: Vec<X11Client>,
     settings: Option<hocus_settings::client::Running>,
+    layers: Vec<crate::layer::LayerClient>,
     bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
@@ -560,6 +569,37 @@ impl Run<'_> {
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
             Step::OpenSettings(open) => self.open_settings(open),
+            Step::OpenLayer(spec) => {
+                let argb = parse_color(&spec.color)?;
+                let client = spec.clone().spawn(self.compositor.socket_path(), argb)?;
+                self.layers.push(client);
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !self.layers.last().is_some_and(|l| l.is_drawn()) {
+                    anyhow::ensure!(Instant::now() < deadline, "the layer surface never showed");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                // Its buffer arrives after its configure.
+                self.compositor.advance(FRAME)
+            }
+            Step::CloseLayer(namespace) => {
+                let client = self
+                    .layers
+                    .iter()
+                    .find(|l| l.spec.namespace == *namespace)
+                    .with_context(|| format!("no layer {namespace}"))?;
+                client.close();
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !self
+                    .layers
+                    .iter()
+                    .all(|l| l.spec.namespace != *namespace || l.is_finished())
+                {
+                    anyhow::ensure!(Instant::now() < deadline, "the layer client never left");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                self.layers.retain(|l| l.spec.namespace != *namespace);
+                self.compositor.advance(FRAME)
+            }
             Step::Activate(app_id) => self
                 .clients
                 .iter()
@@ -609,13 +649,9 @@ impl Run<'_> {
                 Ok(())
             }
             Step::ExpectNotReceived(expected) => {
-                let client = self
-                    .clients
-                    .iter()
-                    .find(|c| c.spec.app_id == expected.app_id)
-                    .with_context(|| format!("no client {}", expected.app_id))?;
+                let events = self.events_of(&expected.app_id)?;
                 // What was sent has had time to arrive: earlier steps waited.
-                let got: Vec<String> = client.events().iter().map(ToString::to_string).collect();
+                let got: Vec<String> = events.iter().map(ToString::to_string).collect();
                 anyhow::ensure!(
                     !got.contains(&expected.event),
                     "{} received `{}`; it received: {}",
@@ -1405,16 +1441,24 @@ impl Run<'_> {
         Ok(wrong)
     }
 
-    fn expect_received(&mut self, expected: &ExpectReceived) -> anyhow::Result<()> {
-        let index = self
-            .clients
+    /// What the window client of `app_id`, or the layer client of that
+    /// namespace, received so far.
+    fn events_of(&self, app_id: &str) -> anyhow::Result<Vec<crate::client::ClientEvent>> {
+        if let Some(c) = self.clients.iter().find(|c| c.spec.app_id == app_id) {
+            return Ok(c.events());
+        }
+        self.layers
             .iter()
-            .position(|c| c.spec.app_id == expected.app_id)
-            .with_context(|| format!("no client {}", expected.app_id))?;
+            .find(|l| l.spec.namespace == app_id)
+            .map(|l| l.events())
+            .with_context(|| format!("no client {app_id}"))
+    }
+
+    fn expect_received(&mut self, expected: &ExpectReceived) -> anyhow::Result<()> {
         let deadline = Instant::now() + CLIENT_TIMEOUT;
         // The client reads its events in its own thread.
         loop {
-            let events = self.clients[index].events();
+            let events = self.events_of(&expected.app_id)?;
             if events.iter().any(|e| e.to_string() == expected.event) {
                 return Ok(());
             }

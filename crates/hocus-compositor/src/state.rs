@@ -236,13 +236,32 @@ impl State {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space
-            .element_under(pos)
-            .and_then(|(window, location)| {
-                window
-                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, p)| (s, (p + location).to_f64()))
+        use smithay::wayland::shell::wlr_layer::Layer;
+        let fullscreen = self
+            .space
+            .output_under(pos)
+            .next()
+            .is_some_and(|o| self.fullscreen_on(o));
+        let layer = |layers: &[Layer]| {
+            self.layer_surface_under(pos, layers)
+                .map(|(s, p, _)| (s, p))
+        };
+        let above: &[Layer] = if fullscreen {
+            &[Layer::Overlay]
+        } else {
+            &[Layer::Overlay, Layer::Top]
+        };
+        layer(above)
+            .or_else(|| {
+                self.space
+                    .element_under(pos)
+                    .and_then(|(window, location)| {
+                        window
+                            .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
+                            .map(|(s, p)| (s, (p + location).to_f64()))
+                    })
             })
+            .or_else(|| layer(&[Layer::Bottom, Layer::Background]))
     }
 
     /// Manages the windows that just got their first buffer, on the output

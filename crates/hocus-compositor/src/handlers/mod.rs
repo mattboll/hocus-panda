@@ -1,6 +1,7 @@
 //! smithay protocol handlers.
 
 mod compositor;
+pub mod layer_shell;
 pub mod protocols;
 mod workspace;
 mod xdg_shell;

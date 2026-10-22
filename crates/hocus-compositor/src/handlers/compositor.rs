@@ -47,7 +47,9 @@ impl CompositorHandler for State {
                 window.on_commit();
             }
         }
-        xdg_shell::handle_commit(self, surface);
+        if !self.layer_commit(surface) {
+            xdg_shell::handle_commit(self, surface);
+        }
         self.place_new_windows(SERIAL_COUNTER.next_serial());
         self.needs_redraw = true;
     }

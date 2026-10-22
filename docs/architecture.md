@@ -98,11 +98,15 @@ window has the keyboard), xdg-foreign, presentation-time, fractional-scale,
 viewporter, single-pixel-buffer, alpha-modifier, content-type, pointer
 constraints and relative pointer, pointer gestures, the virtual keyboard,
 the primary selection, ext-data-control for clipboard managers,
-ext-foreign-toplevel-list and security-context. Clients started through a
-security context (Flatpak and other sandboxes) do not see the virtual
-keyboard, data control, the window list nor security contexts. Layer-shell
-(#113), screen capture (#114), idle notification (#29) and drm-lease (#27)
-come with their issues.
+ext-foreign-toplevel-list, security-context, and wlr-layer-shell for
+third-party bars, launchers and wallpaper tools: background and bottom
+surfaces under the windows, top above them (under a fullscreen window),
+overlay above everything but the cursor; exclusive zones come off the work
+area, and a surface may take the keyboard always or when clicked. Clients
+started through a security context (Flatpak and other sandboxes) do not see
+layer-shell, the virtual keyboard, data control, the window list nor
+security contexts. Screen capture (#114), idle notification (#29) and
+drm-lease (#27) come with their issues.
 
 ## Control API
 

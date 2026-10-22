@@ -21,6 +21,7 @@ use crate::{
     cursor::CursorElement,
     decoration::{Rounded, ring_elements, shadow_elements},
     desktops::{model_id, rect},
+    handlers::layer_shell::LayerKind as Layer,
     window_mode::WindowMode,
 };
 
@@ -95,6 +96,21 @@ impl State {
                 Kind::Unspecified,
             )));
         }
+        // Layer surfaces as a frame: no corners.
+        let flat = |e| {
+            SceneElement::Window(Rounded::new(
+                e,
+                Rectangle::from_size((i32::MAX / 4, i32::MAX / 4).into()),
+                0,
+            ))
+        };
+        let fullscreen = self.fullscreen_on(output);
+        // Overlay surfaces (layer-shell) over everything but the cursor.
+        elements.extend(
+            self.layer_elements(renderer, output, &[Layer::Overlay])
+                .into_iter()
+                .map(flat),
+        );
         // The launcher over everything; quick settings over the screen
         // they dim; toasts, then the column, above windows; the column
         // under a fullscreen one.
@@ -116,6 +132,14 @@ impl State {
                 .into_iter()
                 .map(SceneElement::Frame),
         );
+        // Third-party bars above the windows, but under a fullscreen one.
+        if !fullscreen {
+            elements.extend(
+                self.layer_elements(renderer, output, &[Layer::Top])
+                    .into_iter()
+                    .map(flat),
+            );
+        }
         let focused = self.focused_window();
         let windows: Vec<&Window> = self.space.elements().collect();
         for window in windows.into_iter().rev() {
@@ -180,7 +204,20 @@ impl State {
                 elements.extend(shadow.into_iter().map(SceneElement::Frame));
             }
         }
-        // The wallpaper, at the very back.
+        if fullscreen {
+            elements.extend(
+                self.layer_elements(renderer, output, &[Layer::Top])
+                    .into_iter()
+                    .map(flat),
+            );
+        }
+        elements.extend(
+            self.layer_elements(renderer, output, &crate::handlers::layer_shell::BELOW)
+                .into_iter()
+                .map(flat),
+        );
+        // The wallpaper, at the very back: a third-party one (background
+        // layer) covers it.
         elements.extend(
             self.wallpaper_elements(renderer, output)
                 .into_iter()
