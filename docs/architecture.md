@@ -344,8 +344,22 @@ without unlocking leaves our lock screen: a crash never unlocks.
 - The same API serves the `hocus` tool, the MCP bridge for AI agents, and the
   test harness. Input injection and scene dumps require an explicit test or
   agent permission (`--api-permission test`; agents come with their seat).
-- Agents get their own seat (pointer and keyboard) through the API: see the
-  agent seat idea in [ideas](ideas.md).
+- `hocus mcp` (#42, [mcp](mcp.md)) is a Model Context Protocol server on
+  stdio, a program of its own: it blocks on its control client while it
+  waits for a state, never on the loop. Started with `--agent NAME`, it sends
+  `agent` first; the connection then makes only what agents may (windows,
+  outputs, desktops, `ui`, screenshots, events, `act`), whatever the
+  server's permission. `act` aims input at a window (a point relative to it,
+  the window brought forward first) or at a labelled element of the shell;
+  the compositor checks, at each action, the agent's rights in the
+  configuration in effect (`[[agents.mcp]]`: read or act, which app ids,
+  the shell or not), that the session is not locked nor a password dialog
+  open, and that nothing covers the point. Typed keys go straight to the
+  window with the keyboard, past the shortcuts, through the layout in
+  effect. Applications' own accessibility trees (AT-SPI) are not read yet.
+- Agents will get their own seat (pointer and keyboard) through the API:
+  see the agent seat idea in [ideas](ideas.md). Until then, acting moves the
+  session's pointer and keyboard focus.
 - The settings app ([decision 0010](decisions/0010-settings-as-a-client.md))
   reads what is in effect through it (`config`, `outputs`), follows the event
   stream, and is told which page to show by `open_settings`
@@ -432,7 +446,11 @@ guarded by these rules (#134):
   compositor's own user is closed unread. Injection and scene dumps need the
   test permission, given only on the command line.
 - **Agents and AI (#42)** speak over Unix sockets only, with the same peer
-  check and permissions per connection; never TCP.
+  check and permissions per connection; never TCP. An agent that names
+  itself is held to its `[[agents.mcp]]` entry by the compositor, not by
+  its own client: read-only unless it says `act`, only on the app ids it
+  lists, never while locked. The name scopes a cooperating agent; it is no
+  secret, as any program of the user's could edit the configuration too.
 - **The phone (#85)** goes through KDE Connect, which pairs (a code
   confirmed on both screens) and talks over TLS itself; the session only
   uses phones already paired there, on the session's own bus. Wireless

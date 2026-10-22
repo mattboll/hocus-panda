@@ -172,6 +172,12 @@ enabled = true             # false: no panda anywhere (also from quick settings,
 enabled = true
 herdr_socket = ""          # empty: $XDG_CONFIG_HOME/herdr/herdr.sock, looked for by the session only
 
+[[agents.mcp]]             # an AI agent using the desktop through `hocus mcp --agent NAME` (docs/mcp.md)
+name = "assistant"         # what it names itself; a name not listed here is refused
+access = "read"            # read: windows, the shell's interface, captures; act: also clicks, typing, scrolls
+apps = ["foot", "org.mozilla.*"]  # app ids (globs) whose windows it may act on; ["*"] for all
+shell = false              # true: it may also click the shell's own elements (never the lock nor a password dialog)
+
 [language]
 interface = "auto"         # en or fr; auto follows the session's locale (LANG); changed at once
 

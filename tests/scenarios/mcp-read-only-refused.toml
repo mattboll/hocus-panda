@@ -1,0 +1,61 @@
+description = "Given an agent with read-only permission, when it tries to click, then it is refused; an agent that may act clicks only its apps' windows"
+
+[[step]]
+config = """
+[[agents.mcp]]
+name = "reader"
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["back"]
+"""
+
+[[step]]
+open = { app_id = "back", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "front", size = [200, 100], color = "#ff6600" }
+
+[[step]]
+mcp = { agent = "reader", tool = "click", window = "back", arguments = { x = 10, y = 10 }, error = "refused: agent \"reader\" may only read" }
+
+[[step]]
+expect_focus = "front"
+
+[[step]]
+expect_not_received = { app_id = "back", event = "button 272 pressed" }
+
+# The compositor holds an agent to its apps, whatever its client says.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "front", error = "may not act on windows of \"front\"" }
+
+[[step]]
+expect_not_received = { app_id = "front", event = "button 272 pressed" }
+
+# Its own app's window comes forward and gets the click, at the point
+# asked, behind the front window's centre.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "back" }
+
+[[step]]
+expect_focus = "back"
+
+[[step]]
+expect_stack = ["front", "back"]
+
+[[step]]
+expect_received = { app_id = "back", event = "button 272 pressed" }
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "back", arguments = { x = 500, y = 10 }, error = "outside the window" }
+
+# Taken away in the configuration, the right goes at once.
+[[step]]
+config = """
+[[agents.mcp]]
+name = "helper"
+"""
+
+[[step]]
+mcp = { agent = "helper", tool = "scroll", window = "back", arguments = { dy = 15 }, error = "may only read" }

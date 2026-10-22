@@ -1,0 +1,47 @@
+description = "Given an MCP client, when it lists windows, then it receives ids, titles, outputs and geometry; it reads, captures and waits too"
+outputs = ["1280x800", "1920x1080+1280+0"]
+
+[[step]]
+config = """
+[[agents.mcp]]
+name = "reader"
+"""
+
+[[step]]
+open = { app_id = "notes", title = "Shopping list", size = [400, 300], color = "#3399ff" }
+
+# Centred on the first output.
+[[step]]
+mcp = { agent = "reader", tool = "list_windows", contains = [
+  '"id": ',
+  '"app_id": "notes"',
+  '"title": "Shopping list"',
+  '"output": "HEADLESS-1"',
+  '"x": 440',
+  '"y": 250',
+  '"width": 400',
+  '"height": 300',
+  '"focused": true',
+  '"name": "HEADLESS-2"',
+] }
+
+# Without naming itself an agent, a client reads as well.
+[[step]]
+mcp = { tool = "list_windows", contains = ['"title": "Shopping list"'] }
+
+[[step]]
+mcp = { agent = "reader", tool = "capture", window = "notes", contains = ["400×300 pixels for 400×300 logical"] }
+
+# An application's own tree is not read: the tool says so.
+[[step]]
+mcp = { agent = "reader", tool = "accessibility_tree", window = "notes", contains = ["AT-SPI", '"title": "Shopping list"'] }
+
+[[step]]
+mcp = { agent = "reader", tool = "wait_for", arguments = { app_id = "notes", title = "Shopping" }, contains = ['"app_id": "notes"'] }
+
+[[step]]
+mcp = { agent = "reader", tool = "wait_for", arguments = { app_id = "mail", timeout_ms = 200 }, error = "timed out after 200 ms" }
+
+# Agents read; they never reach what changes the session or its accounts.
+[[step]]
+mcp = { agent = "stranger", tool = "list_windows", error = "no agent named \"stranger\"" }

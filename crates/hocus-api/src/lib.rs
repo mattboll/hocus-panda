@@ -13,6 +13,7 @@
 //! ```
 
 pub mod client;
+pub mod mcp;
 pub mod server;
 
 use std::path::{Path, PathBuf};
@@ -209,6 +210,19 @@ pub enum Request {
     CloseWindow {
         window: u64,
     },
+    /// This connection is the MCP agent `name` of `[[agents.mcp]]` (#42):
+    /// from then on it makes only the requests agents may make, with the
+    /// rights the configuration gives that agent.
+    Agent {
+        name: String,
+    },
+    /// Input an agent aims at a window or at an element of the shell
+    /// (#42): the compositor brings the window forward, checks the point is
+    /// the window's, and checks the agent may act on it.
+    Act {
+        target: ActTarget,
+        action: Action,
+    },
 }
 
 impl Request {
@@ -256,8 +270,87 @@ impl Request {
             | Self::SetPrimaryOutput { .. }
             | Self::SaveSession
             | Self::OfferSession => Permission::Test,
+            // Naming itself only narrows what a connection may do.
+            Self::Agent { .. } => Permission::Observe,
+            // An agent's rights are checked by the compositor, per window;
+            // any other connection needs the test permission.
+            Self::Act { .. } => Permission::Test,
         }
     }
+
+    /// Whether a connection that named itself an agent may make it: reading
+    /// windows, outputs, the shell's interface and captures, and acting
+    /// through [`Request::Act`]. Nothing that changes the session's state,
+    /// reads its configuration or its accounts, or injects raw input.
+    pub fn agents_may(&self) -> bool {
+        matches!(
+            self,
+            Self::Version
+                | Self::Outputs
+                | Self::Windows
+                | Self::Desktops
+                | Self::Ui
+                | Self::Screenshot { .. }
+                | Self::Subscribe
+                | Self::Agent { .. }
+                | Self::Act { .. }
+        )
+    }
+}
+
+/// What an agent aims at.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActTarget {
+    /// A window by id, at a point relative to its top-left corner (logical
+    /// pixels); its centre when `at` is left out.
+    Window {
+        window: u64,
+        #[serde(default)]
+        at: Option<Point>,
+    },
+    /// The shell's element with this label (as `ui` lists it), at its
+    /// centre.
+    Element { label: String },
+}
+
+/// What an agent does there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Action {
+    /// Presses and releases `button`, `count` times (2: a double click).
+    Click { button: Button, count: u32 },
+    /// A wheel scroll in logical pixels, 15 per notch, down positive.
+    Scroll { dy: f64 },
+    /// Types text with the keyboard layout in effect; the window gets the
+    /// keyboard first. Never a shortcut of the compositor's.
+    Type { text: String },
+    /// Presses keys together and lets them go, as `Ctrl+A`, `Return`,
+    /// `Shift+Tab` say them (the shortcuts' names); never a shortcut of the
+    /// compositor's.
+    Keys { keys: String },
+}
+
+/// What an MCP agent may do (#42), as `[[agents.mcp]]` says it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Access {
+    /// Windows, the shell's interface and captures.
+    #[default]
+    Read,
+    /// Reading, and input aimed at the windows of the apps it is given.
+    Act,
+}
+
+/// An agent as the configuration in effect describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentInfo {
+    pub name: String,
+    pub access: Access,
+    /// App ids (globs) whose windows it may act on.
+    pub apps: Vec<String>,
+    /// Whether it may click the shell's own interface.
+    pub shell: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +417,8 @@ pub enum Reply {
     Desktops(Vec<OutputDesktops>),
     Config(ConfigInfo),
     Ui(Vec<UiNode>),
+    /// The agent this connection is now.
+    Agent(AgentInfo),
     /// The request was carried out.
     Done,
 }
@@ -878,6 +973,71 @@ mod tests {
             Permission::Test
         );
         assert_eq!(Request::Scene.permission(), Permission::Test);
+    }
+
+    #[test]
+    fn an_agent_acts_aimed_at_a_window_or_an_element() {
+        round_trip(
+            &RequestLine {
+                id: 5,
+                request: Request::Act {
+                    target: ActTarget::Window {
+                        window: 3,
+                        at: Some(Point { x: 10.0, y: 20.0 }),
+                    },
+                    action: Action::Click {
+                        button: Button::Left,
+                        count: 1,
+                    },
+                },
+            },
+            r#"{"id":5,"request":"act","target":{"window":{"window":3,"at":{"x":10.0,"y":20.0}}},"action":{"click":{"button":"left","count":1}}}"#,
+        );
+        round_trip(
+            &RequestLine {
+                id: 6,
+                request: Request::Agent {
+                    name: "helper".into(),
+                },
+            },
+            r#"{"id":6,"request":"agent","name":"helper"}"#,
+        );
+    }
+
+    #[test]
+    fn agents_read_and_act_but_never_drive_raw_input_or_change_the_session() {
+        assert!(Request::Windows.agents_may());
+        assert!(
+            Request::Act {
+                target: ActTarget::Element {
+                    label: "Close".into()
+                },
+                action: Action::Scroll { dy: 15.0 },
+            }
+            .agents_may()
+        );
+        for request in [
+            Request::PointerMove { x: 0.0, y: 0.0 },
+            Request::Key {
+                code: 30,
+                pressed: true,
+            },
+            Request::Config,
+            Request::Scene,
+            Request::Calendars,
+            Request::InstallUpdates,
+            Request::CloseWindow { window: 1 },
+            Request::CopyPng {
+                png_base64: String::new(),
+            },
+        ] {
+            assert!(!request.agents_may(), "{request:?}");
+        }
+        // Naming oneself is open; acting otherwise needs the test permission.
+        assert_eq!(
+            Request::Agent { name: "x".into() }.permission(),
+            Permission::Observe
+        );
     }
 
     #[test]

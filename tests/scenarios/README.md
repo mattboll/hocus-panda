@@ -49,7 +49,7 @@ Steps, one per `[[step]]` table:
 
 | Step | Does |
 |---|---|
-| `open = { app_id, size = [w, h], color = "#rrggbb", inhibit_shortcuts?, inhibit_idle? }` | starts a test client with a solid window, waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard; `inhibit_idle` keeps the session awake while it is shown, as a video player does |
+| `open = { app_id, size = [w, h], color = "#rrggbb", title?, inhibit_shortcuts?, inhibit_idle? }` | starts a test client with a solid window (titled `title`, untitled by default), waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard; `inhibit_idle` keeps the session awake while it is shown, as a video player does |
 | `open_layer = { namespace, layer, anchor?, size = [w, h], exclusive_zone?, keyboard?, color }` | starts a layer-shell client (`background`, `bottom`, `top`, `overlay`; anchors among `top`, `bottom`, `left`, `right`; 0 for a length anchored at both ends; keyboard `none`, `exclusive`, `on_demand`), waits until it is shown; `expect_received` reads it by its namespace |
 | `close_layer = "namespace"` | closes that layer client |
 | `session_file = """…"""` | writes the saved session file (TOML, `[[window]]` with `app_id`, `title`, `command`, `output`, `desktop`, `geometry`, `state`, `pinned`); `{test_client}` is the test client program |
@@ -74,6 +74,7 @@ Steps, one per `[[step]]` table:
 | `phone_remove = 1` | the notification it posted first (from 1) goes on the phone |
 | `expect_phone = "reply r1 On my way"` | the phone was asked this: `ring`, `reply ID TEXT`, `clipboard TEXT`, `share URL`, `browse` |
 | `expect_phone_state = "absent"` | KDE Connect as the session found it, once so: `absent`, `stopped`, `running`, `off` |
+| `mcp = { agent?, tool, window?, arguments? = { … }, contains? = […], error? }` | an MCP session (`hocus mcp`, #42) of its own, as agent `agent` of `[[agents.mcp]]` (or none), calls `tool` with `arguments`; `window` is an app id whose window's id goes in as the `window` argument; the result's text holds `contains`, or the tool fails with `error` in its message |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
 | `right_click_ui = "Chat"` | the same with the secondary button |
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |

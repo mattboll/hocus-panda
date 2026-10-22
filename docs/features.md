@@ -256,7 +256,7 @@ The column on the right of the screen is the chosen form (see
 - Keys in the keyring
 - The AI acts on the desktop, each action confirmed
 - Desktop tools shared between the AI and MCP: windows, desktops, screenshot, launch, notify, file search, agenda
-- MCP server
+- MCP server (`hocus mcp`): windows, the shell's accessibility tree, window captures, clicks, typing and scrolls aimed at a window or a labelled element, waiting for a state; per-agent rights (read or act, which apps), enforced by the compositor
 - Offline intents
 - Document search: text, HTML, PDF, office files, OCR of screenshots; words + meaning; secrets excluded (never index `~/.ssh`, keyrings, password stores…); paused on battery
 - AI answers inside the command field rather than in a separate window

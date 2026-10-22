@@ -54,6 +54,19 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         socket: Option<PathBuf>,
     },
+    /// A Model Context Protocol server on stdin and stdout, for AI agents:
+    /// windows, the shell's interface, captures, and clicks, typing and
+    /// scrolls aimed at windows, as `[[agents.mcp]]` allows the agent.
+    Mcp {
+        /// The agent of `[[agents.mcp]]` this server is; without it, it
+        /// only reads (acting needs a compositor started for tests).
+        #[arg(long, value_name = "NAME")]
+        agent: Option<String>,
+        /// Control socket. Default: $HOCUS_SOCKET, or the one next to
+        /// $WAYLAND_DISPLAY.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<PathBuf>,
+    },
     /// Run scenario files on headless compositors: `hocus scenario run FILE…`.
     ///
     /// Done by `hocus-scenario`, next to this program or in PATH, which keeps
@@ -200,6 +213,15 @@ fn main() -> anyhow::Result<ExitCode> {
     match Args::parse().command {
         Command::Msg { socket, message } => msg(socket, message).map(|()| ExitCode::SUCCESS),
         Command::Scenario { args } => scenario(&args),
+        Command::Mcp { agent, socket } => {
+            let socket = socket.or_else(hocus_api::default_socket).context(
+                "no control socket: set HOCUS_SOCKET or WAYLAND_DISPLAY, or pass --socket",
+            )?;
+            // Stdout carries the protocol alone; errors go to stderr.
+            hocus_api::mcp::Bridge::new(socket, agent)
+                .serve(std::io::stdin().lock(), std::io::stdout().lock())?;
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Settings { page, socket } => {
             let socket = socket.or_else(hocus_api::default_socket).context(
                 "no control socket: set HOCUS_SOCKET or WAYLAND_DISPLAY, or pass --socket",
