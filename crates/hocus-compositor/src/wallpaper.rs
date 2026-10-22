@@ -7,7 +7,10 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::mpsc};
 
 use hocus_core::config::WallpaperSpec;
-use hocus_shell::wallpaper::{self, Mode, Pattern, Picture, Request, Source};
+use hocus_shell::{
+    matrix,
+    wallpaper::{self, Mode, Pattern, Picture, Request, Source},
+};
 use hocus_ui::{Accent, Color, Theme, ThemeName};
 use smithay::{
     backend::{
@@ -180,15 +183,22 @@ impl State {
             papers.generation += 1;
             let generation = papers.generation;
             let s = &wanted.spec;
+            // The rain and the stars fall on their own night, whatever
+            // the theme; still here, they move where the renderer can
+            // (`backdrop`).
+            let night = matches!(s.kind.as_str(), "rain" | "stars");
+            let base = if night { matrix::BLACK } else { wanted.base };
             let colour = s
                 .colour
                 .as_deref()
                 .and_then(hocus_core::config::parse_hex)
-                .map_or(wanted.base, |[r, g, b]| Color::rgb(r, g, b));
+                .map_or(base, |[r, g, b]| Color::rgb(r, g, b));
             let source = match s.kind.as_str() {
                 "image" => s.image.as_deref().map(|p| Source::Image(expand(p))),
                 "folder" => s.folder.as_deref().map(|p| Source::Folder(expand(p))),
                 "colour" => Some(Source::Colour),
+                "rain" => Some(Source::Glow(Pattern::Rain)),
+                "stars" => Some(Source::Glow(Pattern::Stars)),
                 _ => None,
             }
             .unwrap_or(Source::Glow(pattern));
@@ -218,7 +228,7 @@ impl State {
     }
 
     /// Minutes since midnight, as the user reads the time.
-    fn wall_minutes(&self) -> u32 {
+    pub(crate) fn wall_minutes(&self) -> u32 {
         let t = self.wall_time();
         u32::from(t.hour) * 60 + u32::from(t.minute)
     }

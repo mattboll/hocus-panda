@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use hocus_test::{
     bus::installed,
-    scenario::{RunOptions, Scenario},
+    scenario::{RunOptions, Scenario, ScenarioRenderer},
 };
 use libtest_mimic::{Arguments, Failed, Trial};
 
@@ -34,6 +34,7 @@ fn main() -> std::process::ExitCode {
                 let skip = Scenario::load(&file).is_ok_and(|s| {
                     (s.xwayland && !installed("Xwayland"))
                         || (s.dbus && !installed("dbus-daemon"))
+                        || (s.renderer == ScenarioRenderer::Gles && !render_node())
                         || s.needs.iter().any(|n| !installed(n))
                 });
                 Trial::test(name, move || run(&file, &options)).with_ignored_flag(skip)
@@ -44,6 +45,15 @@ fn main() -> std::process::ExitCode {
         })],
     };
     libtest_mimic::run(&Arguments::from_args(), trials).exit_code()
+}
+
+/// A GPU to draw with off screen (CI machines have none).
+fn render_node() -> bool {
+    std::fs::read_dir("/dev/dri").is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with("renderD"))
+    })
 }
 
 fn scenario_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {

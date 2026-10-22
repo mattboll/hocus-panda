@@ -7,6 +7,7 @@ mod actions;
 mod alt_tab;
 mod api;
 mod authorize;
+mod backdrop;
 mod bars;
 mod calendar;
 mod capture;

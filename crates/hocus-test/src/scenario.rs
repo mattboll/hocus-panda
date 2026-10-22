@@ -70,6 +70,11 @@ pub struct Scenario {
     /// The first session: the welcome opens (#82).
     #[serde(default)]
     pub first_run: bool,
+    /// What draws: pixman, the same pixels everywhere, or GLES on a render
+    /// node, for shaders (skipped where there is none; its pixels are the
+    /// GPU's, so no screenshots).
+    #[serde(default)]
+    pub renderer: ScenarioRenderer,
     /// What started applications inherit (`PATH` is added if missing),
     /// instead of the test's own environment; `{scenario_dir}` in values.
     pub child_env: Option<std::collections::BTreeMap<String, String>>,
@@ -198,6 +203,9 @@ pub enum Step {
     /// Nothing is drawn while `for_ms` of virtual time pass: at rest, no
     /// frame.
     ExpectIdle(ExpectIdle),
+    /// Every output draws at least `at_least` frames while `for_ms` of
+    /// virtual time pass: something moves.
+    ExpectFrames(ExpectFrames),
     /// A touchpad swipe on the screen under the pointer: `{ fingers, by =
     /// [dx, dy], begin? = true, release? = true }`, moved in eight steps a
     /// frame apart; without `begin`, it goes on with the one held.
@@ -357,6 +365,21 @@ pub struct SwipeStep {
 #[serde(deny_unknown_fields)]
 pub struct ExpectIdle {
     pub for_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectFrames {
+    pub for_ms: u64,
+    pub at_least: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScenarioRenderer {
+    #[default]
+    Pixman,
+    Gles,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -712,6 +735,7 @@ impl fmt::Display for Step {
             Self::Restart(_) => write!(f, "restart"),
             Self::ExpectRecording(e) => write!(f, "expect_recording {e:?}"),
             Self::ExpectIdle(e) => write!(f, "expect_idle {} ms", e.for_ms),
+            Self::ExpectFrames(e) => write!(f, "expect_frames {} in {} ms", e.at_least, e.for_ms),
             Self::Swipe(s) => write!(f, "swipe {} by {:?}", s.fingers, s.by),
             Self::Caldav(c) => write!(f, "caldav {}", c.dir.display()),
             Self::CaldavStop(_) => write!(f, "caldav_stop"),
@@ -846,8 +870,12 @@ impl Scenario {
         let compositor = Headless::start_options(HarnessOptions {
             headless: HeadlessConfig {
                 outputs,
-                // The same pixels on every machine, for reference screenshots.
-                renderer: RendererChoice::Pixman,
+                // The same pixels on every machine, for reference
+                // screenshots, unless shaders are what is tested.
+                renderer: match self.renderer {
+                    ScenarioRenderer::Pixman => RendererChoice::Pixman,
+                    ScenarioRenderer::Gles => RendererChoice::Gles,
+                },
             },
             api_permission: hocus_api::Permission::Test,
             watchdog: None,
@@ -933,6 +961,18 @@ struct Run<'a> {
 }
 
 impl Run<'_> {
+    /// Frames drawn so far, per output.
+    fn frames(&mut self) -> anyhow::Result<Vec<(String, u64)>> {
+        let Reply::Stats(stats) = self.request(Request::Stats)? else {
+            anyhow::bail!("expected stats");
+        };
+        Ok(stats
+            .outputs
+            .into_iter()
+            .map(|o| (o.name, o.frames))
+            .collect())
+    }
+
     fn step(&mut self, step: &Step) -> anyhow::Result<()> {
         match step {
             Step::Open(open) => self.open(open),
@@ -1288,17 +1328,23 @@ impl Run<'_> {
                 }
                 Ok(())
             }
+            Step::ExpectFrames(expected) => {
+                let before = self.frames()?;
+                self.compositor
+                    .advance(Duration::from_millis(expected.for_ms))?;
+                let after = self.frames()?;
+                for ((name, b), (_, a)) in before.iter().zip(&after) {
+                    anyhow::ensure!(
+                        a - b >= expected.at_least,
+                        "{name} drew {} frames, expected at least {}",
+                        a - b,
+                        expected.at_least
+                    );
+                }
+                Ok(())
+            }
             Step::ExpectIdle(expected) => {
-                let frames = |run: &mut Self| -> anyhow::Result<Vec<(String, u64)>> {
-                    let Reply::Stats(stats) = run.request(Request::Stats)? else {
-                        anyhow::bail!("expected stats");
-                    };
-                    Ok(stats
-                        .outputs
-                        .into_iter()
-                        .map(|o| (o.name, o.frames))
-                        .collect())
-                };
+                let frames = |run: &mut Self| run.frames();
                 let before = frames(self)?;
                 self.compositor
                     .advance(Duration::from_millis(expected.for_ms))?;

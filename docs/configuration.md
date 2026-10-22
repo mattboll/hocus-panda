@@ -38,7 +38,9 @@ reduced_motion = false     # animations jump to their end
 transparency = true        # frosted glass behind panels (with blur, #37)
 
 [wallpaper]                # behind the windows of every screen
-kind = "glow"              # glow (soft light by the time of day), image, folder (its images through the day), colour
+kind = "glow"              # glow (soft light by the time of day; in the Matrix theme, its rain falling), image,
+                           #   folder (its images through the day), colour, rain (the Matrix rain), stars: these move,
+                           #   still with reduced motion, on the power saver, under a fullscreen window and without a GPU
 image = "~/Pictures/hills.jpg"
 folder = "~/Pictures/day"
 mode = "fill"              # fill, fit, stretch, center

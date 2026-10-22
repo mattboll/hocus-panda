@@ -19,6 +19,9 @@ dbus = false
 # Windows move as in a session, to sample motion at a virtual time;
 # otherwise they appear and go at once
 motion = false
+# pixman (the same pixels everywhere), or gles on a render node, for
+# shaders: skipped where there is none, and no screenshots (the GPU's pixels)
+renderer = "pixman"
 # Programs the steps run: the scenario is skipped where one is missing
 needs = ["notify-send"]
 # Where the launcher reads desktop entries, relative to the scenario
@@ -82,6 +85,7 @@ Steps, one per `[[step]]` table:
 | `expect_export = { name_has, length? = [from, to], max_bytes? }` | a file the editor exported beside the last recording, once the editor names it: its length in seconds (ffprobe) and its size |
 | `swipe = { fingers, by = [dx, dy], begin? = true, release? = true }` | a touchpad swipe on the screen under the pointer, moved in eight steps a frame apart; `begin = false` goes on with the one held |
 | `expect_idle = { for_ms }` | no output draws a frame while this much virtual time passes: at rest, nothing is redrawn |
+| `expect_frames = { for_ms, at_least }` | every output draws at least that many frames while this much virtual time passes: something moves |
 | `expect_recording = { audio?, keys_at_ms? }` | the last recording saved, read by ffprobe and ffmpeg once done: with a sound track as long as the picture (or none); keys drawn near the bottom from this time in the video, the top unchanged |
 | `caldav = { dir, user, password }` | a CalDAV server on 127.0.0.1 serves the `.ics` files of `dir` (relative to the scenario); its calendar's address is `{caldav}` in later configuration, `type` and `calendar_password` steps |
 | `caldav_stop = true` | the CalDAV server goes, as the network would |

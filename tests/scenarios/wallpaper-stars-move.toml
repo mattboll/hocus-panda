@@ -1,0 +1,30 @@
+description = "The starfield wallpaper drifts on the frame clock of its screen, and rests with reduced motion"
+renderer = "gles"
+shell = true
+
+[[step]]
+config = """
+[wallpaper]
+kind = "stars"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_frames = { for_ms = 1000, at_least = 50 }
+
+[[step]]
+config = """
+[wallpaper]
+kind = "stars"
+
+[appearance]
+reduced_motion = true
+"""
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_idle = { for_ms = 2000 }

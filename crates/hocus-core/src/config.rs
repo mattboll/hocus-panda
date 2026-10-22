@@ -224,7 +224,7 @@ impl Default for Appearance {
 
 pub const THEMES: [&str; 5] = ["dark", "light", "matrix", "hud", "paper"];
 pub const ACCENTS: [&str; 6] = ["theme", "bamboo", "amber", "blue", "pink", "wallpaper"];
-pub const WALLPAPER_KINDS: [&str; 4] = ["glow", "image", "folder", "colour"];
+pub const WALLPAPER_KINDS: [&str; 6] = ["glow", "image", "folder", "colour", "rain", "stars"];
 pub const WALLPAPER_MODES: [&str; 4] = ["fill", "fit", "stretch", "center"];
 
 /// What a screen shows behind its windows.
@@ -232,7 +232,8 @@ pub const WALLPAPER_MODES: [&str; 4] = ["fill", "fit", "stretch", "center"];
 #[serde(default, deny_unknown_fields)]
 pub struct Wallpaper {
     /// `glow` (the theme's soft light, placed by the time of day), `image`,
-    /// `folder` (its images through the day, in name order), `colour`.
+    /// `folder` (its images through the day, in name order), `colour`, or
+    /// one that moves: `rain` (the Matrix rain), `stars`.
     pub kind: String,
     pub image: Option<String>,
     pub folder: Option<String>,

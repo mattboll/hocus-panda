@@ -42,6 +42,8 @@ render_elements! {
     Snapshot=Rounded<TextureRenderElement<<R as RendererSuper>::TextureId>>,
     Frame=MemoryRenderBufferRenderElement<R>,
     Solid=SolidColorRenderElement,
+    /// A wallpaper that moves, painted by a shader (#108).
+    Backdrop=TextureRenderElement<<R as RendererSuper>::TextureId>,
 }
 
 render_elements! {
@@ -455,13 +457,16 @@ impl State {
                 .into_iter()
                 .map(flat),
         );
-        // The wallpaper, at the very back: a third-party one (background
-        // layer) covers it.
-        elements.extend(
-            self.wallpaper_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        // The wallpaper, at the very back, moving or still: a third-party
+        // one (background layer) covers it.
+        match self.backdrop_element(renderer, output) {
+            Some(moving) => elements.push(SceneElement::Backdrop(moving)),
+            None => elements.extend(
+                self.wallpaper_elements(renderer, output)
+                    .into_iter()
+                    .map(SceneElement::Frame),
+            ),
+        }
         elements
     }
 
