@@ -1,0 +1,68 @@
+# Desktops (#67): each screen's count and its desktops' names, written to
+# its [[outputs]] entry and in effect at once: the column says the shown
+# desktop's name.
+description = "The Desktops page gives the screen a fifth desktop and names the first: the column says it at once; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "desktops" }
+
+[[step]]
+expect_ui = { label = "Desktop 1 of 4 on this screen" }
+
+[[step]]
+click_settings = "One desktop more"
+
+[[step]]
+expect_config_file = { contains = ["[[outputs]]", "name = \"HEADLESS-1\"", "desktops = 5"] }
+
+[[step]]
+expect_ui = { label = "Desktop 1 of 5 on this screen" }
+
+[[step]]
+click_settings = "Name of desktop 1"
+
+[[step]]
+type = "Mail"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["desktop_names = [\"Mail\"]"] }
+
+[[step]]
+expect_ui = { label = "Mail · desktop 1 of 5" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-desktops.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[[outputs]]
+name = "HEADLESS-1"
+desktops = 3
+desktop_names = ["Mail", "", "Music"]
+"""
+
+[[step]]
+expect_ui = { label = "Mail · desktop 1 of 3" }
+
+[[step]]
+expect_settings = { label = "Name of desktop 3" }
+
+[[step]]
+expect_settings = { label = "Name of desktop 4", shown = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-desktops-light.png" }

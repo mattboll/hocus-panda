@@ -42,11 +42,13 @@ fn state() -> ColumnState {
                 output: "DP-1".into(),
                 count: 4,
                 shown: 1,
+                name: String::new(),
             },
             ScreenDesktops {
                 output: "eDP-1".into(),
                 count: 1,
                 shown: 1,
+                name: String::new(),
             },
         ],
         layout: "FR".into(),

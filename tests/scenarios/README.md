@@ -13,10 +13,14 @@ outputs = ["2560x1600@2/1", "1920x1080"]
 xwayland = false
 # Shows the widget column on the primary output (in English, at a fixed
 # Wednesday 21 October 14:37 UTC plus the virtual time, for user "Alex";
-# UTC is the system's time zone there, `[clock] time_zone` another)
+# UTC is the system's time zone there, unless a timedated stand-in says another)
 shell = false
 # A private D-Bus bus for the compositor (notifications); never the session's
 dbus = false
+# A stand-in for timedated in this time zone, on a private system bus the
+# compositor and the settings follow; never the machine's. Without it the
+# settings cannot change the time zone
+timedated = "UTC"
 # Windows move as in a session, to sample motion at a virtual time;
 # otherwise they appear and go at once
 motion = false
@@ -75,7 +79,7 @@ Steps, one per `[[step]]` table:
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |
 | `tray_attention = { title, attention }` | it asks for attention, or stops |
 | `expect_tray = { title, asked = "clicked 2" }` | it was asked this: `activate`, `clicked N` (menu entry N, from 1) |
-| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `keyboard`, `screens`…) or its home, and waits for its window |
+| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `desktops`, `windows`, `keyboard`, `mouse`, `captures`, `clipboard`, `screens`…) or its home, and waits for its window |
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
@@ -99,6 +103,9 @@ Steps, one per `[[step]]` table:
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |
 | `open_annotate = "{last_screenshot}"` | opens the annotation window on a capture (`{last_screenshot}` is the last one saved, `{runtime_dir}` the compositor's temporary directory), and waits for it |
 | `expect_annotate`, `click_annotate`, `drag_annotate` | as the settings steps, in the annotation window (its capture is labelled `Capture`) |
+| `expect_timedated = "SetTimezone Asia/Tokyo interactive"` | the timedated stand-in was asked this (`interactive`: polkit may ask) |
+| `timedated_zone = "America/New_York"` | the system's zone changes in the stand-in, as if set elsewhere |
+| `timedated_refuses = true` | the stand-in refuses to set the zone from now on, as polkit would (`false`: no longer) |
 | `expect_config_file = { contains?, lacks? }` | the configuration file holds these strings, or lacks them (the settings app writes it) |
 | `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |

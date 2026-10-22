@@ -1,0 +1,72 @@
+# Clipboard and emoji (#67): the history kept or not, how many copies, and
+# the keys of the history and the picker. With the history off, Super+V
+# lists nothing that was copied.
+description = "The Clipboard and emoji page keeps 50 copies, then no history, which Super+V then shows; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "clipboard" }
+
+[[step]]
+expect_settings = { label = "Copies kept: 100", selected = true }
+
+[[step]]
+click_settings = "Copies kept: 50"
+
+[[step]]
+expect_config_file = { contains = ["[clipboard]", "entries = 50"] }
+
+[[step]]
+click_settings = "Keep a history"
+
+[[step]]
+expect_config_file = { contains = ["history = false"] }
+
+[[step]]
+expect_settings = { label = "Keep a history", selected = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-clipboard.png" }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+copy = { app_id = "editor", text = "not kept" }
+
+[[step]]
+keys = "super+v"
+
+[[step]]
+expect_ui = { label = "not kept", shown = false }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+close = "editor"
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[clipboard]
+entries = 250
+"""
+
+[[step]]
+expect_settings = { label = "Copies kept: 250", selected = true }
+
+[[step]]
+expect_settings = { label = "Keep a history", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-clipboard-light.png" }

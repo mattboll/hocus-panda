@@ -180,7 +180,12 @@ impl State {
 
     /// A drag begins, held at `at` (global).
     pub fn wobble_held(&mut self, id: WindowId, window: &Window, at: Point<f64, Logical>) {
-        if !self.wobbles_move() || self.look() == crate::motion::Look::Matrix {
+        // Wobbly windows turned off, or the Matrix theme's rigid trail: it
+        // moves stiff, and still glides when thrown.
+        if !self.wobbles_move()
+            || !self.config.windows.wobbly
+            || self.look() == crate::motion::Look::Matrix
+        {
             return;
         }
         self.wobbles.flicks.remove(&id);

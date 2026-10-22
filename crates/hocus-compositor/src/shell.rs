@@ -47,39 +47,36 @@ pub enum WallSource {
     Virtual,
 }
 
-/// The user's clock: where its time comes from and the time zone it is
-/// read in. Time zones are read off the loop (the system's at start, the
-/// configuration's with the file), so that the loop never reads their
-/// files.
+/// The user's clock: where its time comes from and the system's time zone
+/// it is read in. A new zone is read off the loop (see [`crate::timezone`]),
+/// so that the loop never reads the database's files.
 #[derive(Debug)]
 pub struct WallClock {
     pub source: WallSource,
-    /// The system's time zone; UTC on the virtual clock.
-    system: jiff::tz::TimeZone,
-    /// `[clock] time_zone`, when set.
-    chosen: Option<jiff::tz::TimeZone>,
+    /// UTC on the virtual clock, until a stand-in for timedated says
+    /// another.
+    zone: jiff::tz::TimeZone,
 }
 
 impl WallClock {
     pub fn new(source: WallSource) -> Self {
         Self {
             source,
-            system: match source {
+            zone: match source {
                 WallSource::System => jiff::tz::TimeZone::system(),
                 WallSource::Virtual => jiff::tz::TimeZone::UTC,
             },
-            chosen: None,
         }
     }
 
     /// The time zone the user reads the time in.
     pub fn zone(&self) -> jiff::tz::TimeZone {
-        self.chosen.clone().unwrap_or_else(|| self.system.clone())
+        self.zone.clone()
     }
 
-    /// The configuration's time zone, or the system's again with `None`.
-    pub fn choose(&mut self, zone: Option<jiff::tz::TimeZone>) {
-        self.chosen = zone;
+    /// The system's zone changed.
+    pub fn set_zone(&mut self, zone: jiff::tz::TimeZone) {
+        self.zone = zone;
     }
 }
 
@@ -288,6 +285,7 @@ impl State {
                 output: o.name.0.clone(),
                 count: o.desktops.len(),
                 shown: o.desktops.iter().position(|d| *d == o.shown).unwrap_or(0) + 1,
+                name: self.desktop_name(o.shown).unwrap_or_default(),
             })
             .collect();
         screens.sort_by_key(|s| Some(&s.output) != first.as_ref());

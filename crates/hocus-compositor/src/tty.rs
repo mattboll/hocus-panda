@@ -20,6 +20,7 @@ use smithay::{
             output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
         },
         egl::{EGLContext, EGLDevice, EGLDisplay},
+        input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             ImportDma, ImportMemWl,
@@ -52,6 +53,7 @@ use crate::{
     flip::{self, Flip, Health},
     output_spec::DEFAULT_DESKTOPS,
     outputs::{Head, Setting},
+    pointing::PointingDevices,
 };
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
@@ -66,6 +68,8 @@ const COLOR_FORMATS: [Fourcc; 2] = [Fourcc::Argb8888, Fourcc::Abgr8888];
 pub struct TtyBackend {
     session: LibSeatSession,
     libinput: Libinput,
+    /// Mice and touchpads, set as the configuration says.
+    pointing: PointingDevices,
     gpu: Gpu,
     /// The session is in the foreground: its terminal is the one shown.
     active: bool,
@@ -150,7 +154,19 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         .insert_source(
             LibinputInputBackend::new(libinput.clone()),
             |event, _, app| {
-                app.timed("input", |app| app.state.process_input_event(event));
+                app.timed("input", |app| {
+                    let App { state, backend } = app;
+                    if let BackendState::Tty(tty) = backend {
+                        match &event {
+                            InputEvent::DeviceAdded { device } => {
+                                tty.pointing.added(device.clone(), &state.config);
+                            }
+                            InputEvent::DeviceRemoved { device } => tty.pointing.removed(device),
+                            _ => {}
+                        }
+                    }
+                    state.process_input_event(event);
+                });
             },
         )
         .map_err(|err| err.error)
@@ -175,6 +191,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
     let mut backend = TtyBackend {
         session,
         libinput,
+        pointing: PointingDevices::default(),
         gpu,
         active: true,
     };
@@ -535,6 +552,7 @@ impl TtyBackend {
 
     /// Draws the screens that changed and are free to take a frame.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        self.pointing.settle(&state.config);
         if !state.needs_redraw {
             return;
         }

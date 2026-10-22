@@ -1168,6 +1168,7 @@ dependencies = [
  "clap",
  "hocus-api",
  "hocus-core",
+ "hocus-platform",
  "hocus-shell",
  "hocus-ui",
  "png",

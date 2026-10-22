@@ -379,6 +379,11 @@ impl Model {
         Ok(())
     }
 
+    /// An output's own desktops, plugged or not, in order.
+    pub fn own_desktops(&self, name: &OutputName) -> Option<&[DesktopId]> {
+        self.homes.get(name).map(|h| h.desktops.as_slice())
+    }
+
     /// How many desktops of its own an output has, plugged or not.
     pub fn desktop_count(&self, name: &OutputName) -> Option<usize> {
         self.homes.get(name).map(|h| h.desktops.len())

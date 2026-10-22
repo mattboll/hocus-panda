@@ -49,7 +49,7 @@ use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::{
 };
 
 use crate::{
-    catalogue::{Context, Page},
+    catalogue::{Context, Page, SystemZone},
     edit,
     view::{Outcome, SettingsView},
 };
@@ -67,6 +67,61 @@ pub struct Options {
     pub page: Option<Page>,
     pub lang: Lang,
     pub app_id: String,
+    /// Where timedated is, for the system's time zone.
+    pub system_bus: SystemBus,
+}
+
+/// The system bus timedated is on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SystemBus {
+    /// The machine's.
+    Machine,
+    /// A private one (tests).
+    At(String),
+    /// None: the zone is not read nor set here (tests without one).
+    Off,
+}
+
+impl SystemBus {
+    /// The address to connect to, the machine's with `Some(None)`.
+    fn address(&self) -> Option<Option<String>> {
+        match self {
+            Self::Machine => Some(None),
+            Self::At(address) => Some(Some(address.clone())),
+            Self::Off => None,
+        }
+    }
+}
+
+/// Reads the system's zone, then follows it, on threads of their own.
+fn follow_zone(bus: &SystemBus, to_window: Sender<FromApi>) {
+    let Some(address) = bus.address() else {
+        let _ = to_window.send(FromApi::Zone(SystemZone::Absent("no system bus".into())));
+        return;
+    };
+    let spawned = std::thread::Builder::new()
+        .name("time zone".into())
+        .spawn(move || match hocus_platform::timedate::read(&address) {
+            Ok(zone) => {
+                let _ = to_window.send(FromApi::Zone(SystemZone::Known(zone)));
+                let tx = Mutex::new(to_window);
+                let followed = hocus_platform::timedate::follow(address, false, move |zone| {
+                    if let Ok(tx) = tx.lock() {
+                        let _ = tx.send(FromApi::Zone(SystemZone::Known(zone)));
+                    }
+                });
+                if let Err(err) = followed {
+                    tracing::warn!(%err, "the time zone will not be followed");
+                }
+            }
+            Err(why) => {
+                tracing::info!(why, "no timedated");
+                let _ = to_window.send(FromApi::Zone(SystemZone::Absent(why)));
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "the time zone will not be read");
+    }
 }
 
 /// The app running on a thread of its own (tests).
@@ -135,6 +190,10 @@ enum FromApi {
     Context(Box<(Context, Option<String>, Option<PathBuf>)>),
     Open(Option<String>),
     Gone(String),
+    /// The system's time zone, as timedated says.
+    Zone(SystemZone),
+    /// Whether timedated took the zone asked for.
+    ZoneSet(Result<String, String>),
 }
 
 fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
@@ -169,6 +228,8 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 updates,
                 calendars,
                 user: info.user.clone(),
+                // timedated says it, not the compositor.
+                zone: SystemZone::Unknown,
             };
             let path = info.path.map(PathBuf::from);
             let sent = to_window.send(FromApi::Context(Box::new((ctx, info.accent, path))));
@@ -239,6 +300,8 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     window.commit();
 
     let (to_window, from_api) = channel();
+    follow_zone(&options.system_bus, to_window.clone());
+    let zone_news = to_window.clone();
     std::thread::Builder::new()
         .name("settings api".into())
         .spawn({
@@ -247,9 +310,12 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         })?;
     // The first frame waits for what is in effect.
     let deadline = Instant::now() + Duration::from_secs(5);
+    let mut early_zone = None;
     let (ctx, accent, file) = loop {
         match from_api.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(FromApi::Context(what)) => break *what,
+            Ok(FromApi::Zone(zone)) => early_zone = Some(zone),
+            Ok(FromApi::ZoneSet(_)) => {}
             Ok(FromApi::Gone(err)) => anyhow::bail!("the compositor did not answer: {err}"),
             Ok(FromApi::Open(_)) => {}
             Err(_) => anyhow::bail!("the compositor did not answer in time"),
@@ -263,6 +329,9 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         1.0,
         ctx,
     );
+    if let Some(zone) = early_zone {
+        view.set_zone(zone);
+    }
     view.open(options.page);
     // The language the file chose, once it is read.
     window.set_title(crate::words::SETTINGS.get(view.lang()));
@@ -294,6 +363,8 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         shown,
         from_api,
         api: options.api.clone(),
+        system_bus: options.system_bus.clone(),
+        zone_news,
     };
     while !app.closed {
         app.take_api_news();
@@ -354,6 +425,9 @@ struct App {
     from_api: Receiver<FromApi>,
     /// The compositor's control socket, for one-off requests.
     api: PathBuf,
+    system_bus: SystemBus,
+    /// Where timedated's answers come back.
+    zone_news: Sender<FromApi>,
 }
 
 impl App {
@@ -380,6 +454,8 @@ impl App {
                     tracing::warn!(err, "the compositor went away");
                     self.closed = true;
                 }
+                FromApi::Zone(zone) => self.view.set_zone(zone),
+                FromApi::ZoneSet(result) => self.view.zone_set(result),
             }
             self.needs_draw = true;
         }
@@ -439,6 +515,25 @@ impl App {
                             });
                     if let Err(err) = spawned {
                         tracing::warn!(%err, "could not keep the calendar password");
+                    }
+                }
+                // Off the window's thread: polkit may ask for a password.
+                Outcome::SetTimeZone(zone) => {
+                    let tx = self.zone_news.clone();
+                    let Some(address) = self.system_bus.address() else {
+                        let _ = tx.send(FromApi::ZoneSet(Err("no system bus".into())));
+                        continue;
+                    };
+                    let spawned = std::thread::Builder::new()
+                        .name("set time zone".into())
+                        .spawn(move || {
+                            let result = hocus_platform::timedate::set(&address, &zone)
+                                .map(|()| zone)
+                                .inspect_err(|err| tracing::warn!(err, "the time zone stays"));
+                            let _ = tx.send(FromApi::ZoneSet(result));
+                        });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not set the time zone");
                     }
                 }
                 Outcome::Identify => {

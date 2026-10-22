@@ -31,6 +31,9 @@ pub enum Place {
     Calendar { url: String, user: String },
     /// The `[[wallpaper.screens]]` entry of this output, made when missing.
     WallpaperScreen(String),
+    /// The `[[rules]]` entry at this index, in file order; one past the
+    /// last makes a new one.
+    Rule(usize),
 }
 
 impl Change {
@@ -111,6 +114,24 @@ impl Change {
         }
     }
 
+    /// A key of the window rule at `index`; `None` takes it out.
+    pub fn rule(index: usize, key: &'static str, value: Option<Value>) -> Self {
+        Self {
+            place: Place::Rule(index),
+            key: key.into(),
+            value,
+        }
+    }
+
+    /// The window rule at `index` goes.
+    pub fn forget_rule(index: usize) -> Self {
+        Self {
+            place: Place::Rule(index),
+            key: String::new(),
+            value: None,
+        }
+    }
+
     /// The whole `[section]` goes: back to what it was before any.
     pub fn forget(section: &'static str) -> Self {
         Self {
@@ -152,6 +173,68 @@ fn entry<'a>(
         .ok_or_else(|| EditError::Invalid(format!("no entry in {array}")))
 }
 
+/// The table at a dotted path (`windows.gaps`), made when missing; one
+/// made only to hold another is not written: `[windows.gaps]` alone, no
+/// `[windows]` above it.
+fn made<'a>(doc: &'a mut Table, path: &str) -> Result<&'a mut dyn toml_edit::TableLike, EditError> {
+    let not = || EditError::Invalid(format!("{path} is not a section"));
+    let mut table = doc;
+    let mut parts = path.split('.').peekable();
+    while let Some(part) = parts.next() {
+        let last = parts.peek().is_none();
+        let item = table.entry(part).or_insert_with(|| {
+            let mut t = Table::new();
+            t.set_implicit(!last);
+            Item::Table(t)
+        });
+        if last {
+            if let Some(t) = item.as_table_mut() {
+                shown_above(t);
+            }
+            return item.as_table_like_mut().ok_or_else(not);
+        }
+        table = item.as_table_mut().ok_or_else(not)?;
+    }
+    Err(not())
+}
+
+/// A table that only held others (`[windows]` above `[windows.gaps]`)
+/// gets keys of its own: its header shows, where the first one it holds
+/// was, with a blank line before the next.
+fn shown_above(table: &mut Table) {
+    if !table.is_implicit() {
+        return;
+    }
+    table.set_implicit(false);
+    let mut moved = None;
+    for (_, item) in table.iter_mut() {
+        let Some(child) = item.as_table_mut() else {
+            continue;
+        };
+        let prefix = child
+            .decor()
+            .prefix()
+            .and_then(|p| p.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        if moved.is_none() {
+            moved = Some(prefix);
+            child.decor_mut().set_prefix("\n");
+        } else if prefix.is_empty() {
+            child.decor_mut().set_prefix("\n");
+        }
+    }
+    if let Some(prefix) = moved {
+        table.decor_mut().set_prefix(prefix);
+    }
+}
+
+/// The table at a dotted path, if there is one.
+fn within<'a>(doc: &'a mut Table, path: &str) -> Option<&'a mut Table> {
+    path.split('.')
+        .try_fold(doc, |table, part| table.get_mut(part)?.as_table_mut())
+}
+
 /// The screens of a layout, in order, as written.
 fn sorted(screens: &[String]) -> Vec<String> {
     let mut s = screens.to_vec();
@@ -188,7 +271,16 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
         .map_err(|e: toml_edit::TomlError| EditError::Unreadable(e.to_string()))?;
     if let (Place::Section(section), "", None) = (&change.place, change.key.as_str(), &change.value)
     {
-        doc.remove(section);
+        match section.rsplit_once('.') {
+            Some((parent, last)) => {
+                if let Some(t) = within(doc.as_table_mut(), parent) {
+                    t.remove(last);
+                }
+            }
+            None => {
+                doc.remove(section);
+            }
+        }
         let out = doc.to_string();
         hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
@@ -236,14 +328,21 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
         hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
-    let table: &mut dyn toml_edit::TableLike = match &change.place {
-        Place::Section(section) => {
-            let item = doc
-                .entry(section)
-                .or_insert_with(|| Item::Table(Table::new()));
-            item.as_table_like_mut()
-                .ok_or_else(|| EditError::Invalid(format!("{section} is not a section")))?
+    if let (Place::Rule(index), "", None) = (&change.place, change.key.as_str(), &change.value) {
+        if let Some(tables) = doc.get_mut("rules").and_then(Item::as_array_of_tables_mut) {
+            if *index < tables.len() {
+                tables.remove(*index);
+            }
+            if tables.is_empty() {
+                doc.remove("rules");
+            }
         }
+        let out = doc.to_string();
+        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        return Ok(out);
+    }
+    let table: &mut dyn toml_edit::TableLike = match &change.place {
+        Place::Section(section) => made(doc.as_table_mut(), section)?,
         Place::Output(name) => entry(
             doc.as_table_mut(),
             "outputs",
@@ -285,6 +384,20 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
                 }
             },
         )?,
+        Place::Rule(index) => {
+            let item = doc
+                .entry("rules")
+                .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()));
+            let tables = item
+                .as_array_of_tables_mut()
+                .ok_or_else(|| EditError::Invalid("rules is not a list of tables".into()))?;
+            if *index == tables.len() {
+                tables.push(Table::new());
+            }
+            tables
+                .get_mut(*index)
+                .ok_or_else(|| EditError::Invalid(format!("no rule {index}")))?
+        }
         Place::WallpaperScreen(output) => {
             let wallpaper = doc.entry("wallpaper").or_insert_with(|| {
                 // `[[wallpaper.screens]]` alone needs no `[wallpaper]` above.
@@ -457,6 +570,45 @@ mod tests {
         )
         .expect("applied");
         assert_eq!(out, "[wallpaper]\n");
+    }
+
+    #[test]
+    fn window_rules_are_made_changed_and_taken_out_by_place() {
+        let text =
+            "[windows]\nsnap = false  # mine\n\n[[rules]]\napp_id = \"chat*\"\ndesktop = 2\n";
+        let out = apply(text, &Change::rule(1, "app_id", Some("editor".into()))).expect("made");
+        let out = apply(&out, &Change::rule(1, "maximized", Some(true.into()))).expect("set");
+        let config = hocus_core::Config::parse(&out).expect("valid");
+        assert_eq!(config.rules.len(), 2, "{out}");
+        assert_eq!(config.rules[1].maximized, Some(true));
+        let out = apply(&out, &Change::rule(1, "maximized", None)).expect("taken out");
+        assert!(!out.contains("maximized"), "{out}");
+        let out = apply(&out, &Change::forget_rule(0)).expect("gone");
+        let config = hocus_core::Config::parse(&out).expect("valid");
+        assert_eq!(config.rules.len(), 1, "{out}");
+        assert_eq!(config.rules[0].app_id.as_deref(), Some("editor"));
+        let out = apply(&out, &Change::forget_rule(0)).expect("gone");
+        assert_eq!(out, "[windows]\nsnap = false  # mine\n");
+        // Past the end: refused, nothing made.
+        assert!(apply("", &Change::rule(3, "app_id", Some("x".into()))).is_err());
+    }
+
+    #[test]
+    fn a_dotted_section_is_one_table_in_another() {
+        let out = apply("", &Change::new("windows.gaps", "inner", 8)).expect("made");
+        assert_eq!(out, "[windows.gaps]\ninner = 8\n");
+        let out = apply(&out, &Change::new("windows", "snap", false)).expect("made");
+        assert_eq!(
+            out,
+            "[windows]\nsnap = false\n\n[windows.gaps]\ninner = 8\n"
+        );
+        let config = hocus_core::Config::parse(&out).expect("valid");
+        assert_eq!((config.windows.gaps.inner, config.windows.snap), (8, false));
+        let out = apply(&out, &Change::new("windows.gaps", "outer", 4)).expect("set");
+        assert_eq!(out.matches("[windows.gaps]").count(), 1, "{out}");
+        let out = apply(&out, &Change::forget("windows.gaps")).expect("gone");
+        assert!(!out.contains("gaps"), "{out}");
+        assert!(out.contains("snap = false"), "{out}");
     }
 
     #[test]

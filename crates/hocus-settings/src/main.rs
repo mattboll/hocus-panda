@@ -34,6 +34,7 @@ fn main() -> anyhow::Result<()> {
             page: args.page.as_deref().and_then(Page::from_slug),
             lang: hocus_shell::Lang::from_env(),
             app_id: "hocus-settings".into(),
+            system_bus: client::SystemBus::Machine,
         },
         None,
     )

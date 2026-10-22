@@ -1,0 +1,116 @@
+# Windows (#67): snapping, gaps, effects and rules, written to the file;
+# a rule added here applies to the next window of that app.
+description = "The Windows page turns snapping off, sets the gaps and adds a rule that maximizes an app, which its next window follows; in the dark and light themes"
+outputs = ["1280x800"]
+
+[[step]]
+open_settings = { page = "windows" }
+
+[[step]]
+expect_settings = { label = "Snap at the edges", selected = true }
+
+[[step]]
+expect_settings = { label = "Between windows: 0 px", selected = true }
+
+[[step]]
+click_settings = "Between windows: 8 px"
+
+[[step]]
+expect_config_file = { contains = ["[windows.gaps]", "inner = 8"] }
+
+[[step]]
+click_settings = "Snap at the edges"
+
+[[step]]
+expect_config_file = { contains = ["[windows]", "snap = false"] }
+
+[[step]]
+expect_settings = { label = "Snap at the edges", selected = false }
+
+[[step]]
+expect_settings = { label = "Between windows: 8 px", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-windows.png" }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 2000
+
+[[step]]
+expect_settings = { label = "No rule: windows open where the pointer is." }
+
+[[step]]
+click_settings = "App of a new rule"
+
+[[step]]
+type = "editor"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["[[rules]]", "app_id = \"editor\""] }
+
+[[step]]
+expect_settings = { label = "editor: Maximized", selected = false }
+
+[[step]]
+scroll = 2000
+
+[[step]]
+click_settings = "editor: Maximized"
+
+[[step]]
+expect_config_file = { contains = ["maximized = true"] }
+
+[[step]]
+expect_settings = { label = "editor: Maximized", selected = true }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized" }
+
+[[step]]
+close = "editor"
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[windows]
+snap = false
+
+[[rules]]
+app_id = "chat*"
+desktop = 2
+on_top = true
+
+[[rules]]
+app_id = "editor"
+maximized = true
+"""
+
+[[step]]
+expect_settings = { label = "chat*: Above the others", selected = true }
+
+[[step]]
+scroll = 2000
+
+# Off the chips: nothing hovered in the picture.
+[[step]]
+pointer_move = [700, 770]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-windows-light.png" }

@@ -1,0 +1,103 @@
+# Screenshots and recording (#67): where captures go and how recordings
+# start. A screenshot taken once saving is off is copied only; the
+# recording picker's options start as set here.
+description = "The Screenshots and recording page stops saving captures, names their folder and starts recordings with the keys shown, all in effect at once; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "captures" }
+
+[[step]]
+expect_settings = { label = "Save to a folder", selected = true }
+
+[[step]]
+click_settings = "Save to a folder"
+
+[[step]]
+expect_config_file = { contains = ["[screenshots]", "save = false"] }
+
+[[step]]
+click_settings = "Screenshots folder"
+
+[[step]]
+type = "/home/alex/Shots"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["folder = \"/home/alex/Shots\""] }
+
+[[step]]
+expect_settings = { label = "Save to a folder", selected = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-captures.png" }
+
+# Copied, not saved.
+[[step]]
+keys = "99"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_event = { type = "screenshot", has = "\"path\":null" }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 300
+
+[[step]]
+click_settings = "Frames a second: 60"
+
+[[step]]
+expect_config_file = { contains = ["[recording]", "fps = 60"] }
+
+[[step]]
+click_settings = "Show keys"
+
+[[step]]
+expect_config_file = { contains = ["show_keys = true"] }
+
+[[step]]
+keys = "super+shift+19"
+
+[[step]]
+expect_ui = { label = "Show keys", selected = true }
+
+[[step]]
+keys = "escape"
+
+# The capture's toast goes.
+[[step]]
+advance_ms = 10000
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[screenshots]
+save = false
+
+[recording]
+fps = 60
+countdown = 5
+show_keys = true
+"""
+
+[[step]]
+expect_settings = { label = "Countdown: 5 s", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-captures-light.png" }

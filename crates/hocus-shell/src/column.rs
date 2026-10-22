@@ -62,6 +62,8 @@ pub struct ScreenDesktops {
     pub count: usize,
     /// From 1.
     pub shown: usize,
+    /// The shown desktop's name, empty when it has none but its number.
+    pub name: String,
 }
 
 /// What the column shows.
@@ -629,8 +631,15 @@ impl Column {
             }
         }
         if all || old.screens.first() != state.screens.first() {
-            let (shown, count) = state.screens.first().map_or((1, 1), |s| (s.shown, s.count));
-            let line = lang.desktop_of(shown, count);
+            let (shown, count, name) = state
+                .screens
+                .first()
+                .map_or((1, 1, ""), |s| (s.shown, s.count, s.name.as_str()));
+            let line = if name.is_empty() {
+                lang.desktop_of(shown, count)
+            } else {
+                lang.desktop_named(name, shown, count)
+            };
             t.set_text(n.desktops_text, &line);
             t.set_name(n.desktops, &line);
             t.set_draw(n.dots, Box::new(Dots { count, shown }));

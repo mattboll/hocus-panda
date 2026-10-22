@@ -1,0 +1,110 @@
+# Mouse and touchpad (#67): the touchpad's and the mouse's settings
+# (libinput's, on a session of its own), the gestures and the hot corners;
+# three fingers up then open what was chosen.
+description = "The Mouse and touchpad page sets natural scrolling, tap to click and the mouse's speed, and three fingers up to the launcher, which they then open; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+enabled = false
+"""
+
+[[step]]
+open_settings = { page = "mouse" }
+
+[[step]]
+expect_settings = { label = "Touchpad: Natural scrolling", selected = false }
+
+[[step]]
+click_settings = "Touchpad: Natural scrolling"
+
+[[step]]
+expect_config_file = { contains = ["[touchpad]", "natural_scroll = true"] }
+
+[[step]]
+click_settings = "Touchpad: Tap to click"
+
+[[step]]
+expect_config_file = { contains = ["tap_to_click = true"] }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 300
+
+[[step]]
+click_settings = "Mouse: Speed: Fast"
+
+[[step]]
+expect_config_file = { contains = ["[mouse]", "speed = 0.3"] }
+
+[[step]]
+expect_config_error = ""
+
+[[step]]
+expect_settings = { label = "Mouse: Speed: Fast", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-mouse.png" }
+
+[[step]]
+scroll = 400
+
+[[step]]
+click_settings = "Three fingers up: Launcher"
+
+[[step]]
+expect_config_file = { contains = ["[gestures]", "three_up = \"launcher\""] }
+
+[[step]]
+swipe = { fingers = 3, by = [0, -200] }
+
+[[step]]
+type = "fir"
+
+[[step]]
+expect_ui = { label = "Firewall" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[dock]
+enabled = false
+
+[touchpad]
+natural_scroll = true
+tap_to_click = true
+
+[gestures]
+three_up = "launcher"
+
+[hot_corners]
+top_left = "overview"
+"""
+
+[[step]]
+expect_settings = { label = "Top left: Overview", selected = true }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 2000
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-mouse-light.png" }
