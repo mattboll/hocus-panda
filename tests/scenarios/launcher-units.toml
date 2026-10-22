@@ -1,0 +1,12 @@
+description = "The launcher converts units: 12 km in miles"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "12 km in miles"
+
+[[step]]
+expect_ui = { label = "= 7.46 miles", selected = true }

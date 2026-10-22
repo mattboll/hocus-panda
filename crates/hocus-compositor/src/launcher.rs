@@ -9,10 +9,12 @@ use std::{os::fd::OwnedFd, path::PathBuf, sync::Arc};
 use hocus_api::UiNode;
 use hocus_platform::apps::{self, Entry};
 use hocus_shell::{
-    App as ShellApp, Choice, Lang, Launcher, LauncherEvent,
+    App as ShellApp, Choice, Lang, Launcher, LauncherEvent, Showcase,
     launcher::{ROOM, WIDTH},
+    providers::Enabled,
+    showcase::Showcased,
 };
-use hocus_ui::{Input, Key, Point as UiPoint, Theme};
+use hocus_ui::{Input, Key, Point as UiPoint, Size as UiSize, Theme};
 use smithay::{
     backend::renderer::{
         ImportMem, Renderer,
@@ -51,6 +53,19 @@ pub struct LauncherPanel {
     dirs: Vec<PathBuf>,
     apps: Option<channel::Sender<Vec<Entry>>>,
     pressed: bool,
+    lang: Lang,
+    /// Large type or a QR code over a screen.
+    showcase: Option<Shown>,
+    /// The configuration generation the providers follow.
+    providers_from: u64,
+}
+
+/// Something shown over a whole screen.
+#[derive(Debug)]
+struct Shown {
+    showcased: Showcased,
+    on: (String, Rectangle<i32, Logical>, f64),
+    buffer: Option<MemoryRenderBuffer>,
 }
 
 pub fn start(
@@ -75,6 +90,9 @@ pub fn start(
         dirs: dirs.unwrap_or_else(apps::data_dirs),
         apps: Some(sender),
         pressed: false,
+        lang,
+        showcase: None,
+        providers_from: 0,
     });
 }
 
@@ -225,6 +243,15 @@ impl State {
                     self.close_launcher();
                     self.copy_text(&text);
                 }
+                LauncherEvent::Chosen(Choice::Open(url)) => {
+                    self.close_launcher();
+                    tracing::info!(url, "opening");
+                    self.launch("xdg-open", &[url]);
+                }
+                LauncherEvent::Chosen(Choice::Show(what)) => {
+                    self.close_launcher();
+                    self.show(what);
+                }
             }
         }
     }
@@ -304,12 +331,103 @@ impl State {
         true
     }
 
-    /// Draws what changed; called after each dispatch.
-    pub fn refresh_launcher(&mut self) {
-        let now = self.clock.now();
+    /// Shows large type or a QR code over the screen under the pointer.
+    fn show(&mut self, what: Showcase) {
+        let Some(output) = self.output_under_pointer() else {
+            return;
+        };
+        let Some(area) = self.space.output_geometry(&output) else {
+            return;
+        };
+        let scale = output.current_scale().fractional_scale();
         let Some(panel) = self.launcher.as_mut() else {
             return;
         };
+        let size = UiSize::new(area.size.w as f32, area.size.h as f32);
+        panel.showcase = Some(Shown {
+            showcased: Showcased::new(what, Theme::default(), panel.lang, size, scale as f32),
+            on: (output.name(), area, scale),
+            buffer: None,
+        });
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial());
+        }
+        self.needs_redraw = true;
+    }
+
+    pub fn showcase_open(&self) -> bool {
+        self.launcher.as_ref().is_some_and(|l| l.showcase.is_some())
+    }
+
+    pub fn close_showcase(&mut self) {
+        if let Some(panel) = self.launcher.as_mut()
+            && panel.showcase.take().is_some()
+        {
+            self.apply_focus(SERIAL_COUNTER.next_serial());
+            self.needs_redraw = true;
+        }
+    }
+
+    /// While something is shown, a key or a click closes it.
+    pub fn showcase_key(&mut self, sym: Keysym) -> bool {
+        if !self.showcase_open() {
+            return false;
+        }
+        if matches!(
+            sym,
+            Keysym::Escape | Keysym::Return | Keysym::KP_Enter | Keysym::space
+        ) {
+            self.close_showcase();
+        }
+        true
+    }
+
+    pub fn showcase_pointer(&mut self, pressed: Option<bool>) -> bool {
+        if !self.showcase_open() {
+            return false;
+        }
+        if pressed == Some(true) {
+            self.close_showcase();
+            if let Some(panel) = self.launcher.as_mut() {
+                // Its release goes nowhere else.
+                panel.pressed = true;
+            }
+        }
+        true
+    }
+
+    /// Draws what changed; called after each dispatch.
+    pub fn refresh_launcher(&mut self) {
+        let now = self.clock.now();
+        let generation = self.config_generation;
+        let enabled = Enabled {
+            calculator: self.config.launcher.calculator,
+            units: self.config.launcher.units,
+            urls: self.config.launcher.urls,
+            web_search: self.config.launcher.web_search,
+            search_engine: self.config.launcher.search_engine.clone(),
+            large_type: self.config.launcher.large_type,
+            qr: self.config.launcher.qr,
+        };
+        let Some(panel) = self.launcher.as_mut() else {
+            return;
+        };
+        if panel.providers_from != generation {
+            panel.launcher.set_providers(&enabled);
+            panel.providers_from = generation;
+        }
+        if let Some(shown) = panel.showcase.as_mut() {
+            let damage = shown.showcased.draw(now);
+            let view = shown.showcased.view();
+            match &mut shown.buffer {
+                Some(buffer) => crate::shell::upload(buffer, &view, &damage),
+                None => shown.buffer = Some(crate::shell::buffer_for(&view)),
+            }
+            if !damage.is_empty() {
+                self.needs_redraw = true;
+            }
+            return;
+        }
         if !panel.launcher.is_open() {
             return;
         }
@@ -328,7 +446,8 @@ impl State {
         }
     }
 
-    /// The launcher on `output`, above everything.
+    /// The launcher on `output`, above everything; what it shows over a
+    /// screen, above that.
     pub fn launcher_elements<R>(
         &self,
         renderer: &mut R,
@@ -341,6 +460,32 @@ impl State {
         let Some(panel) = &self.launcher else {
             return Vec::new();
         };
+        if let Some(shown) = &panel.showcase {
+            let (name, _, scale) = &shown.on;
+            let (Some(buffer), true) = (&shown.buffer, *name == output.name()) else {
+                return Vec::new();
+            };
+            let view = shown.showcased.view();
+            let all =
+                Rectangle::from_size(Size::from((f64::from(view.width), f64::from(view.height))));
+            let size = Size::<f64, Logical>::from((
+                f64::from(view.width) / scale,
+                f64::from(view.height) / scale,
+            ))
+            .to_i32_round();
+            return MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                Point::<f64, Physical>::from((0.0, 0.0)),
+                buffer,
+                None,
+                Some(all),
+                Some(size),
+                Kind::Unspecified,
+            )
+            .inspect_err(|err| tracing::warn!(?err, "could not draw the showcase"))
+            .map(|e| vec![e])
+            .unwrap_or_default();
+        }
         let (Some((name, _, scale)), Some(buffer), Some(origin)) =
             (&panel.on, &panel.buffer, self.launcher_origin())
         else {
@@ -379,6 +524,10 @@ impl State {
     }
 
     pub fn launcher_ui(&self, out: &mut Vec<UiNode>) {
+        if let Some(shown) = self.launcher.as_ref().and_then(|p| p.showcase.as_ref()) {
+            let (_, area, _) = &shown.on;
+            crate::shell::flatten(&shown.showcased.access(), area.loc, 0, out);
+        }
         let (Some(panel), Some(origin)) = (&self.launcher, self.launcher_origin()) else {
             return;
         };

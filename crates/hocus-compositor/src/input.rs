@@ -68,7 +68,7 @@ impl State {
                 }
                 let action = combo_of(modifiers, &keysym)
                     .and_then(|combo| state.shortcuts.action(&combo).cloned());
-                let modal = state.launcher_open() || state.quick_open();
+                let modal = state.launcher_open() || state.quick_open() || state.showcase_open();
                 match action {
                     // A panel's own shortcut closes it; others still work.
                     Some(action)
@@ -86,7 +86,9 @@ impl State {
         );
         match handled {
             Some(Handled::Shortcut(action)) => self.run_action(&action, serial),
-            Some(Handled::Panel(sym, modifiers)) if !self.launcher_key(sym, &modifiers) => {
+            Some(Handled::Panel(sym, modifiers))
+                if !self.showcase_key(sym) && !self.launcher_key(sym, &modifiers) =>
+            {
                 self.quick_key(sym);
             }
             Some(Handled::Panel(..)) => {}
@@ -117,7 +119,8 @@ impl State {
         };
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.quick_pointer_motion(location)
+            && (self.showcase_pointer(None)
+                || self.quick_pointer_motion(location)
                 || self.launcher_pointer_motion(location)
                 || self.toasts_pointer_motion(location)
                 || self.shell_pointer_motion(location));
@@ -154,7 +157,8 @@ impl State {
         let pressed = state == ButtonState::Pressed;
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && (self.quick_pointer_button(at, pressed)
+            && (self.showcase_pointer(Some(pressed))
+                || self.quick_pointer_button(at, pressed)
                 || self.launcher_pointer_button(at, pressed)
                 || self.toasts_pointer_button(at, pressed)
                 || self.shell_pointer_button(at, pressed))

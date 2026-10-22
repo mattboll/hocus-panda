@@ -14,6 +14,7 @@ pub struct Config {
     pub desktops: Desktops,
     pub keyboard: Keyboard,
     pub decorations: Decorations,
+    pub launcher: Launcher,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
@@ -160,6 +161,34 @@ impl Default for Decorations {
     }
 }
 
+/// What the launcher offers besides applications.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Launcher {
+    pub calculator: bool,
+    pub units: bool,
+    pub urls: bool,
+    pub web_search: bool,
+    /// The search's address, `{}` where the words go.
+    pub search_engine: String,
+    pub large_type: bool,
+    pub qr: bool,
+}
+
+impl Default for Launcher {
+    fn default() -> Self {
+        Self {
+            calculator: true,
+            units: true,
+            urls: true,
+            web_search: true,
+            search_engine: "https://duckduckgo.com/?q={}".into(),
+            large_type: true,
+            qr: true,
+        }
+    }
+}
+
 /// Why a configuration file was not applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigError(pub String);
@@ -221,6 +250,17 @@ impl Config {
             {
                 return out_of_range(&format!("rules[{i}].desktop"), d.to_string(), "1 to 8");
             }
+        }
+        let engine = &self.launcher.search_engine;
+        if !(engine.starts_with("https://") || engine.starts_with("http://"))
+            || !engine.contains("{}")
+        {
+            let e = format!("{engine:?}");
+            return out_of_range(
+                "launcher.search_engine",
+                e,
+                "an http(s) address with {} where the words go",
+            );
         }
         if self.accent().is_none() {
             let a = format!("{:?}", self.decorations.accent);

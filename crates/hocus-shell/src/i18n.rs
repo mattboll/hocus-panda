@@ -316,6 +316,49 @@ impl Lang {
         }
     }
 
+    pub fn conversion(self) -> &'static str {
+        self.pick("Conversion", "Conversion")
+    }
+
+    pub fn large_type(self, text: &str) -> String {
+        match self {
+            Self::En => format!("Show “{text}” in large type"),
+            Self::Fr => format!("Afficher «\u{202f}{text}\u{202f}» en grand"),
+        }
+    }
+
+    pub fn large_type_kind(self) -> &'static str {
+        self.pick("Large type", "En grand")
+    }
+
+    pub fn qr_of(self, text: &str) -> String {
+        match self {
+            Self::En => format!("Show a QR code of “{text}”"),
+            Self::Fr => format!("Afficher un code QR de «\u{202f}{text}\u{202f}»"),
+        }
+    }
+
+    pub fn open(self, url: &str) -> String {
+        match self {
+            Self::En => format!("Open {url}"),
+            Self::Fr => format!("Ouvrir {url}"),
+        }
+    }
+
+    pub fn search_web(self, query: &str) -> String {
+        match self {
+            Self::En => format!("Search the web for “{query}”"),
+            Self::Fr => format!("Chercher «\u{202f}{query}\u{202f}» sur le web"),
+        }
+    }
+
+    pub fn close_showcase(self) -> &'static str {
+        self.pick(
+            "Click or press Escape to close",
+            "Cliquer ou Échap pour fermer",
+        )
+    }
+
     pub fn lock(self) -> &'static str {
         self.pick("Lock", "Verrouiller")
     }

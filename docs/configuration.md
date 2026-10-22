@@ -27,6 +27,15 @@ shadow = true
 ring_width = 2     # focus ring
 accent = "#7bc47f"
 
+[launcher]                 # what the launcher offers besides applications
+calculator = true          # 2*21
+units = true               # 12 km in miles
+urls = true                # example.org
+web_search = true          # always last
+search_engine = "https://duckduckgo.com/?q={}"
+large_type = true          # large <words>
+qr = true                  # qr <words>
+
 [[rules]]                  # windows matching app_id and title (globs: * and ?)
 app_id = "chat*"
 output = "eDP-1"           # opens there, when plugged
