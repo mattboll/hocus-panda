@@ -20,10 +20,16 @@ use smithay::{
     wayland::seat::WaylandFocus,
 };
 
+use hocus_shell::boot::Boot;
+use hocus_ui::motion::{Animated, Curve, Easing, STANDARD};
+
 use crate::{State, desktops::title_and_app_id, window_mode::WindowMode};
 
 /// How long a restored application has to show its window.
 const PATIENCE: Duration = Duration::from_secs(15);
+/// The boot screen shows at most this long: an application slow to come
+/// back is reported, and the desktop is there meanwhile.
+const BOOT_AT_MOST: Duration = Duration::from_secs(5);
 
 /// What the writer gets: the file, the session, and the windows whose
 /// command comes from their process (index, pid).
@@ -45,6 +51,19 @@ pub struct Sessions {
     offered: bool,
     /// The card asking what to put back.
     card: Option<Card>,
+    /// The boot screen while windows come back (#48).
+    boot: Option<Booting>,
+}
+
+#[derive(Debug)]
+struct Booting {
+    /// Windows to put back, from the start.
+    total: usize,
+    since: Duration,
+    /// By output name.
+    panels: std::collections::BTreeMap<String, crate::shell::Panel<Boot>>,
+    /// Everything back (or it waited long enough): it fades.
+    leaving: Option<Animated>,
 }
 
 /// `$XDG_STATE_HOME/hocuspanda`, or `~/.local/state/hocuspanda`.
@@ -233,6 +252,113 @@ impl State {
                 }
             }
         }
+        if !self.sessions.pending.is_empty() {
+            self.sessions.boot = Some(Booting {
+                total: self.sessions.pending.len(),
+                since: now,
+                panels: Default::default(),
+                leaving: None,
+            });
+            self.needs_redraw = true;
+        }
+    }
+
+    /// The boot screen follows the windows coming back, and goes as soon
+    /// as they are all there, without waiting for its own time.
+    fn refresh_boot(&mut self) {
+        let now = self.clock.now();
+        let moves = !self.instant_motion && !self.config.appearance.reduced_motion;
+        let left = self.sessions.pending.len();
+        let Some(boot) = self.sessions.boot.as_mut() else {
+            return;
+        };
+        let done = left == 0 || now.saturating_sub(boot.since) >= BOOT_AT_MOST;
+        if done && boot.leaving.is_none() {
+            if !moves {
+                self.sessions.boot = None;
+                self.needs_redraw = true;
+                return;
+            }
+            let mut fade = Animated::new(1.0);
+            fade.set(0.0, Curve::Ease(Easing::InCubic, STANDARD), now);
+            boot.leaving = Some(fade);
+        }
+        if boot.leaving.as_ref().is_some_and(|f| !f.is_running(now)) {
+            self.sessions.boot = None;
+            self.needs_redraw = true;
+            return;
+        }
+        let theme = self.theme();
+        let lang = self.shell_lang();
+        let pandas = self.pandas_on();
+        let outputs: Vec<(String, hocus_ui::Size, f32)> = self
+            .space
+            .outputs()
+            .filter_map(|o| {
+                let g = self.space.output_geometry(o)?;
+                let scale = o.current_scale().fractional_scale() as f32;
+                Some((
+                    o.name(),
+                    hocus_ui::Size::new(g.size.w as f32, g.size.h as f32),
+                    scale,
+                ))
+            })
+            .collect();
+        let Some(boot) = self.sessions.boot.as_mut() else {
+            return;
+        };
+        let total = boot.total;
+        boot.panels
+            .retain(|name, _| outputs.iter().any(|(o, _, _)| o == name));
+        let mut redraw = boot.leaving.is_some();
+        for (name, size, scale) in outputs {
+            let panel = boot.panels.entry(name).or_insert_with(|| {
+                crate::shell::Panel::new(Boot::new(theme.clone(), lang, size, scale, total, pandas))
+            });
+            panel.view.set_progress(total - left.min(total), total);
+            let drawn = panel.view.draw(now);
+            redraw |= panel.upload(&drawn) || panel.view.is_moving(now);
+        }
+        if redraw {
+            self.needs_redraw = true;
+        }
+    }
+
+    pub fn boot_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &smithay::output::Output,
+    ) -> Vec<smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement<R>>
+    where
+        R: smithay::backend::renderer::Renderer + smithay::backend::renderer::ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let Some(boot) = &self.sessions.boot else {
+            return Vec::new();
+        };
+        let alpha = boot
+            .leaving
+            .as_ref()
+            .map(|f| f.value(self.clock.now()).clamp(0.0, 1.0));
+        boot.panels
+            .get(&output.name())
+            .and_then(|p| p.element_with(renderer, output, Default::default(), alpha))
+            .into_iter()
+            .collect()
+    }
+
+    pub fn boot_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
+        let Some(boot) = &self.sessions.boot else {
+            return;
+        };
+        for (name, panel) in &boot.panels {
+            if let Some(g) = self
+                .find_output(name)
+                .and_then(|o| self.space.output_geometry(&o))
+            {
+                crate::shell::flatten(&panel.view.access(), g.loc, 0, out);
+            }
+        }
     }
 
     /// A window just managed: put back where it was, if it was saved.
@@ -281,6 +407,7 @@ impl State {
     pub fn refresh_sessions(&mut self) {
         self.offer_when_ready();
         self.refresh_card();
+        self.refresh_boot();
         let now = self.clock.now();
         let late: Vec<String> = self
             .sessions

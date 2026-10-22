@@ -14,6 +14,7 @@ use hocus_ui::{
 use crate::{
     column::{View, WallTime},
     i18n::Lang,
+    panda::{Character, Mood, Panda},
 };
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
@@ -45,7 +46,9 @@ impl std::fmt::Debug for Curtain {
 }
 
 impl Curtain {
-    pub fn new(theme: Theme, lang: Lang, size: Size, scale: f32) -> Self {
+    /// `pandas`: since when the curtain falls, for the panda falling
+    /// asleep over it; `None` without pandas.
+    pub fn new(theme: Theme, lang: Lang, size: Size, scale: f32, pandas: Option<Duration>) -> Self {
         let mut tree = Tree::new(theme.clone(), size, scale);
         let root = tree.root();
         tree.set_look(
@@ -64,6 +67,24 @@ impl Curtain {
                 ..Style::default()
             },
         );
+        if let Some(since) = pandas {
+            let mood = Mood::Sleep;
+            tree.add(
+                root,
+                Style {
+                    width: Length::Px(140.0),
+                    height: Length::Px(140.0),
+                    ..Style::default()
+                },
+                Kind::Custom {
+                    draw: Box::new(
+                        Panda::themed(Character::Apprentice, mood, &theme).moving_from(since),
+                    ),
+                    label: Some(mood.label(lang).into()),
+                },
+            )
+            .unwrap_or_else(MISSING);
+        }
         let countdown = tree
             .add(
                 root,
@@ -157,6 +178,9 @@ pub struct LockScreen {
     time: Option<WallTime>,
     caps_lock: bool,
     check: Check,
+    /// The two asleep in the corner, when there are pandas.
+    pandas: Vec<NodeId>,
+    top: f32,
 }
 
 impl std::fmt::Debug for LockScreen {
@@ -168,8 +192,8 @@ impl std::fmt::Debug for LockScreen {
 }
 
 impl LockScreen {
-    /// For `user`, whose initial shows.
-    pub fn new(theme: Theme, lang: Lang, size: Size, scale: f32, user: &str) -> Self {
+    /// For `user`, whose initial shows; `pandas`, two asleep in a corner.
+    pub fn new(theme: Theme, lang: Lang, size: Size, scale: f32, user: &str, pandas: bool) -> Self {
         let mut tree = Tree::new(theme.clone(), size, scale);
         let root = tree.root();
         tree.set_look(
@@ -306,7 +330,24 @@ impl LockScreen {
             )
             .unwrap_or_else(MISSING);
         tree.set_focus(Some(field));
-        Self {
+        let mut sleepers = Vec::new();
+        if pandas {
+            for character in [Character::Apprentice, Character::Watcher] {
+                let mood = Mood::Sleep;
+                sleepers.push(
+                    tree.add(
+                        root,
+                        Style::default(),
+                        Kind::Custom {
+                            draw: Box::new(Panda::themed(character, mood, &theme)),
+                            label: Some(mood.label(lang).into()),
+                        },
+                    )
+                    .unwrap_or_else(MISSING),
+                );
+            }
+        }
+        let mut screen = Self {
             surface: Surface::new(size, scale),
             tree,
             lang,
@@ -317,6 +358,27 @@ impl LockScreen {
             time: None,
             caps_lock: false,
             check: Check::Typing,
+            pandas: sleepers,
+            top: (size.h * 0.12).round(),
+        };
+        screen.place_pandas(size);
+        screen
+    }
+
+    /// The pandas in the bottom right corner, the larger first.
+    fn place_pandas(&mut self, size: Size) {
+        let mut right = size.w - 18.0;
+        for (&id, side) in self.pandas.clone().iter().zip([96.0_f32, 72.0]).rev() {
+            right -= side;
+            self.tree.set_style(
+                id,
+                Style {
+                    at: Some(Point::new(right, size.h - 14.0 - side - self.top)),
+                    width: Length::Px(side),
+                    height: Length::Px(side),
+                    ..Style::default()
+                },
+            );
         }
     }
 
@@ -324,6 +386,7 @@ impl LockScreen {
         if size != self.tree.size() || scale != self.tree.scale() {
             self.tree.resize(size, scale);
             self.surface = Surface::new(size, scale);
+            self.place_pandas(size);
         }
     }
 
@@ -434,6 +497,7 @@ mod tests {
             Size::new(800.0, 600.0),
             1.0,
             "alex",
+            true,
         );
         s.set_time(WallTime {
             hour: 23,
@@ -475,7 +539,13 @@ mod tests {
 
     #[test]
     fn the_curtain_counts_down() {
-        let mut c = Curtain::new(Theme::default(), Lang::En, Size::new(800.0, 600.0), 1.0);
+        let mut c = Curtain::new(
+            Theme::default(),
+            Lang::En,
+            Size::new(800.0, 600.0),
+            1.0,
+            None,
+        );
         c.set_seconds(28);
         c.draw(Duration::ZERO);
         let dump = c.access().dump();

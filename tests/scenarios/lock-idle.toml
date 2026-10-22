@@ -55,6 +55,10 @@ expect_ui = { label = "Password" }
 [[step]]
 expect_ui = { label = "editor", shown = false }
 
+# Two pandas asleep in the lock screen's corner.
+[[step]]
+expect_ui = { label = "Panda asleep", inside = [1080, 600, 200, 200] }
+
 [[step]]
 frames = 1
 

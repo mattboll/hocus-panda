@@ -602,6 +602,16 @@ impl Lang {
         }
     }
 
+    /// The boot screen, while a saved session is put back.
+    pub fn putting_back(self, windows: usize) -> String {
+        match (self, windows) {
+            (Self::En, 1) => "The pandas are putting your window back".into(),
+            (Self::En, n) => format!("The pandas are putting your {n} windows back"),
+            (Self::Fr, 1) => "Les pandas remettent ta fenêtre en place".into(),
+            (Self::Fr, n) => format!("Les pandas remettent tes {n} fenêtres en place"),
+        }
+    }
+
     /// The curtain's countdown.
     pub fn locking_in(self, seconds: u32) -> String {
         match self {

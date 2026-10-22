@@ -89,9 +89,16 @@ of the moment: the client follows at its own pace.
 
 ## Session moments
 
-- Boot: the pandas set the desktop up while windows are restored
-- Curtain: the screen dims progressively before locking; any input lifts it
-- Lock and unlock: the lock screen fades in over a blurred snapshot; unlock reveals the desktop from the centre
+- Boot: while a saved session is put back, the boot screen shows the logo,
+  the name, how many windows are back and two pandas at work; it goes as soon
+  as they are all back (at most after 5 s, an application slow to come is
+  reported), fading out over `STANDARD`
+- Curtain: the screen dims progressively before locking, with a panda
+  falling asleep over the countdown; any input lifts it
+- Lock and unlock: our lock screen fades in over the desktop it hides
+  (`STANDARD`; over a blurred picture once there is blur, #37), two pandas
+  asleep in its corner; unlocked, it parts from the centre, its two halves
+  sliding apart over `LARGE`. A lock client's own screen is left as it draws it.
 
 ## Matrix theme
 

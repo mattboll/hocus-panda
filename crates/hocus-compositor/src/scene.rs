@@ -148,8 +148,23 @@ impl State {
                 ))
             }));
             elements.extend(ours.into_iter().map(SceneElement::Frame));
-            return elements;
+            // Our lock fading in shows the desktop under it a moment.
+            if !self.lock_entering() {
+                return elements;
+            }
         }
+        // Unlocked, our lock screen parts from the centre.
+        elements.extend(
+            self.parting_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
+        // The boot screen while the session is put back (#48).
+        elements.extend(
+            self.boot_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         // What to share, asked by a portal.
         elements.extend(
             self.share_elements(renderer, output)

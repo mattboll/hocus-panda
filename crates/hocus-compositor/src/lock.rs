@@ -16,7 +16,10 @@ use std::{collections::BTreeMap, time::Duration};
 use hocus_api::UiNode;
 use hocus_platform::auth::{Auth, Checker, Pam};
 use hocus_shell::lock::{Check, Curtain, LockScreen};
-use hocus_ui::{Key, Size as UiSize};
+use hocus_ui::{
+    Key, Size as UiSize,
+    motion::{Animated, Curve, Easing, LARGE, STANDARD},
+};
 use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, Texture,
@@ -96,6 +99,10 @@ pub struct Locking {
     timer: Option<(RegistrationToken, Duration)>,
     /// Writes and removes the locked marker, in order, off the loop.
     marker: Option<std::sync::mpsc::Sender<bool>>,
+    /// Our lock screen fading in over the desktop it hides (#48).
+    entering: Option<Animated>,
+    /// Unlocked: our lock screens parting from the centre, 0 to 1.
+    parting: Option<(Animated, BTreeMap<String, Panel<LockScreen>>)>,
 }
 
 impl std::fmt::Debug for Locking {
@@ -125,6 +132,8 @@ impl Locking {
             told_locked: false,
             timer: None,
             marker: None,
+            entering: None,
+            parting: None,
         }
     }
 }
@@ -218,6 +227,15 @@ impl State {
         tracing::info!("locking");
         self.locking.phase = Phase::Locked;
         self.locking.by = By::Us;
+        if self.lock_moves() {
+            let mut fade = Animated::new(0.0);
+            fade.set(
+                1.0,
+                Curve::Ease(Easing::OutCubic, STANDARD),
+                self.clock.now(),
+            );
+            self.locking.entering = Some(fade);
+        }
         self.lock_began();
     }
 
@@ -244,11 +262,23 @@ impl State {
         if let Some(marker) = &self.locking.marker {
             let _ = marker.send(false);
         }
+        let ours = self.locking.by == By::Us;
         self.locking.phase = Phase::Unlocked;
         self.locking.by = By::Us;
         self.locking.lock_surfaces.clear();
         self.locking.last_activity = self.clock.now();
-        self.locking.screens.clear();
+        self.locking.entering = None;
+        let screens = std::mem::take(&mut self.locking.screens);
+        // Ours parts from the centre on the desktop it hid.
+        if ours && self.lock_moves() && !screens.is_empty() {
+            let mut open = Animated::new(0.0);
+            open.set(
+                1.0,
+                Curve::Ease(Easing::InOutCubic, LARGE),
+                self.clock.now(),
+            );
+            self.locking.parting = Some((open, screens));
+        }
         self.apply_focus(SERIAL_COUNTER.next_serial());
         self.needs_redraw = true;
     }
@@ -454,6 +484,7 @@ impl State {
 
     /// The curtain's and the lock screens' contents, per output.
     fn refresh_lock_panels(&mut self) {
+        self.refresh_lock_moments();
         let now = self.clock.now();
         let theme = self.theme();
         let lang = self.shell_lang();
@@ -478,6 +509,12 @@ impl State {
             }
             _ => None,
         };
+        // The curtain's panda falls asleep from when it fell.
+        let pandas = self.pandas_on();
+        let sleepy = match self.locking.phase {
+            Phase::Curtain { since } if pandas => Some(since),
+            _ => None,
+        };
         match curtain {
             Some(seconds) => {
                 for (name, size, scale) in &outputs {
@@ -486,7 +523,7 @@ impl State {
                         .curtains
                         .entry(name.clone())
                         .or_insert_with(|| {
-                            Panel::new(Curtain::new(theme.clone(), lang, *size, *scale))
+                            Panel::new(Curtain::new(theme.clone(), lang, *size, *scale, sleepy))
                         });
                     panel.view.resize(*size, *scale);
                     panel.view.set_theme(theme.clone());
@@ -513,7 +550,14 @@ impl State {
                 .is_some_and(|k| k.modifier_state().caps_lock);
             for (name, size, scale) in &outputs {
                 let panel = self.locking.screens.entry(name.clone()).or_insert_with(|| {
-                    Panel::new(LockScreen::new(theme.clone(), lang, *size, *scale, &user))
+                    Panel::new(LockScreen::new(
+                        theme.clone(),
+                        lang,
+                        *size,
+                        *scale,
+                        &user,
+                        pandas,
+                    ))
                 });
                 panel.view.resize(*size, *scale);
                 panel.view.set_theme(theme.clone());
@@ -573,14 +617,91 @@ impl State {
             );
             return (elements, Vec::new());
         }
+        let alpha = self
+            .locking
+            .entering
+            .as_ref()
+            .map(|f| f.value(self.clock.now()).clamp(0.0, 1.0));
         let ours = self
             .locking
             .screens
             .get(&output.name())
-            .and_then(|p| p.element(renderer, output, Point::default()))
+            .and_then(|p| p.element_with(renderer, output, Point::default(), alpha))
             .into_iter()
             .collect();
         (Vec::new(), ours)
+    }
+
+    /// Whether the lock's moments move: not in tests that do not sample
+    /// motion, nor with reduced motion.
+    fn lock_moves(&self) -> bool {
+        !self.instant_motion && !self.config.appearance.reduced_motion
+    }
+
+    /// Our lock screen still fading in: the desktop shows under it.
+    pub fn lock_entering(&self) -> bool {
+        self.locking
+            .entering
+            .as_ref()
+            .is_some_and(|f| f.is_running(self.clock.now()))
+    }
+
+    /// After each dispatch: frames while the lock fades in or parts, and
+    /// the parted screens gone once open.
+    fn refresh_lock_moments(&mut self) {
+        let now = self.clock.now();
+        if let Some(fade) = &self.locking.entering {
+            if fade.is_running(now) {
+                self.needs_redraw = true;
+            } else {
+                self.locking.entering = None;
+                self.needs_redraw = true;
+            }
+        }
+        if let Some((open, _)) = &self.locking.parting {
+            if open.is_running(now) {
+                self.needs_redraw = true;
+            } else {
+                self.locking.parting = None;
+                self.needs_redraw = true;
+            }
+        }
+    }
+
+    /// The unlocked desktop showing through our lock screen as its two
+    /// halves part from the centre.
+    pub fn parting_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Vec<MemoryRenderBufferRenderElement<R>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let Some((open, screens)) = &self.locking.parting else {
+            return Vec::new();
+        };
+        let (Some(panel), Some(g)) = (
+            screens.get(&output.name()),
+            self.space.output_geometry(output),
+        ) else {
+            return Vec::new();
+        };
+        let t = open.value(self.clock.now()).clamp(0.0, 1.0);
+        let half = g.size.w / 2;
+        let shift = (f64::from(half) * f64::from(t)).round() as i32;
+        let alpha = 1.0 - 0.5 * t;
+        [
+            (0, Point::from((-shift, 0))),
+            (half, Point::from((half + shift, 0))),
+        ]
+        .into_iter()
+        .filter_map(|(from, at)| {
+            let part = smithay::utils::Rectangle::new((from, 0).into(), (half, g.size.h).into());
+            panel.element_part(renderer, output, at, part, Some(alpha))
+        })
+        .collect()
     }
 
     /// The lock and the curtain for the control API.

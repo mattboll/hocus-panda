@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod agents;
 pub mod authorize;
+pub mod boot;
 pub mod calc;
 pub mod checkbox;
 pub mod column;
