@@ -114,6 +114,8 @@ pub struct State {
     /// The screenshot tool (#69).
     pub shots: crate::screenshot::Screenshots,
     pub recorder: crate::recording::Recorder,
+    /// Notes and to-dos (#79).
+    pub notes: crate::notes::NotesState,
     /// Focus mode, the magnifier, night light (#78).
     pub comfort: crate::comfort::Comfort,
     /// Gamma each screen should get, for backends that set it.
@@ -243,6 +245,7 @@ impl State {
             shots: Default::default(),
             recorder: Default::default(),
             comfort: Default::default(),
+            notes: Default::default(),
             gamma_wanted: Vec::new(),
             share: None,
             clipboard: Default::default(),

@@ -7,6 +7,10 @@
 //! pins, Delete forgets) and the emoji picker (Super+Period: in English and
 //! French, recent ones first, Tab changes the skin tone).
 //!
+//! And notes (Super+N, #79): what is typed is added as a line, a to-do
+//! when it starts `- [ ]`; Enter on an empty field ticks the to-do chosen,
+//! Delete removes the line.
+//!
 //! And the action palette (Super+P, #68): every action, with its keys as
 //! caps and what it acts on, recent ones first; searched by name in either
 //! language, or by keys typed ("Maj+S") or pressed.
@@ -89,6 +93,22 @@ pub enum Choice {
     Run(Action),
     /// The settings' shortcuts, to give an action keys.
     SetShortcut,
+    /// A line typed in the notes: added.
+    AddNote(String),
+    /// The to-do at this place in the file: ticked, or not.
+    ToggleNote(usize),
+    /// The notes, opened from the command field.
+    OpenNotes,
+}
+
+/// A line of the notes, as the card shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteItem {
+    /// Its place in the file.
+    pub index: usize,
+    pub text: String,
+    /// A to-do, and whether it is done.
+    pub todo: Option<bool>,
 }
 
 /// What the card shows.
@@ -99,6 +119,7 @@ pub enum Mode {
     Clipboard,
     Emoji,
     Actions,
+    Notes,
 }
 
 /// What the command field can do to the session.
@@ -128,6 +149,8 @@ pub enum LauncherEvent {
     Pin(String),
     /// A history entry is forgotten.
     Forget(String),
+    /// The note at this place in the file goes.
+    RemoveNote(usize),
 }
 
 pub struct Launcher {
@@ -156,6 +179,8 @@ pub struct Launcher {
     shortcuts: Vec<(Combo, Action)>,
     /// Actions run from the palette lately, newest first.
     action_recents: Vec<Action>,
+    /// The notes, in the file's order.
+    notes: Vec<NoteItem>,
     /// The keys that open what the card shows, in the field's corner.
     chip_text: NodeId,
     /// The hint under the list in the history and the picker, and its box.
@@ -311,6 +336,7 @@ impl Launcher {
             tone: 0,
             shortcuts: Vec::new(),
             action_recents: Vec::new(),
+            notes: Vec::new(),
             chip_text,
             hint,
             hint_box,
@@ -384,10 +410,12 @@ impl Launcher {
             Mode::Clipboard => "Super+V",
             Mode::Emoji => "Super+.",
             Mode::Actions => "Super+P",
+            Mode::Notes => "Super+N",
         };
         self.tree.set_text(self.chip_text, keys);
         let placeholder = match mode {
             Mode::Actions => self.lang.palette_placeholder(),
+            Mode::Notes => self.lang.notes_placeholder(),
             _ => self.lang.command_placeholder(),
         };
         self.tree.set_placeholder(self.field, placeholder);
@@ -412,6 +440,19 @@ impl Launcher {
 
     pub fn set_recents(&mut self, recents: Vec<String>) {
         self.recents = recents;
+    }
+
+    /// The notes as they are now; an open card shows them again, the
+    /// chosen line kept.
+    pub fn set_notes(&mut self, notes: Vec<NoteItem>) {
+        self.notes = notes;
+        if self.open && self.mode == Mode::Notes {
+            let selected = self.selected;
+            let query = self.query().to_owned();
+            self.hits = self.hits(&query);
+            self.selected = selected.min(self.hits.len().saturating_sub(1));
+            self.render();
+        }
     }
 
     /// The bindings in effect, for the palette.
@@ -517,6 +558,7 @@ impl Launcher {
             Mode::Commands => String::new(),
             Mode::Actions => self.lang.palette_hint().to_owned(),
             Mode::Clipboard => self.lang.history_hint().to_owned(),
+            Mode::Notes => self.lang.notes_hint().to_owned(),
             Mode::Emoji => self.lang.emoji_hint(&self.tone_sample()),
         };
         self.tree
@@ -543,6 +585,22 @@ impl Launcher {
                     };
                     for provider in &self.providers {
                         provider.hits(query, &cx, &mut hits);
+                    }
+                    // Notes that say it open the notes.
+                    let q = crate::fuzzy::fold(query);
+                    if q.chars().count() >= 3 {
+                        hits.extend(
+                            self.notes
+                                .iter()
+                                .filter(|n| crate::fuzzy::fold(&n.text).contains(&q))
+                                .take(3)
+                                .map(|n| Hit {
+                                    title: n.text.clone(),
+                                    kind: self.lang.note_kind(n.todo.is_some()).into(),
+                                    color: Some(hocus_ui::Color::rgb(0x2E, 0x7D, 0x4F)),
+                                    choice: Choice::OpenNotes,
+                                }),
+                        );
                     }
                 }
                 hits
@@ -586,6 +644,21 @@ impl Launcher {
                 hits
             }
             Mode::Actions => self.action_hits(query),
+            // Newest first; what is typed is a new line, not a search.
+            Mode::Notes => self
+                .notes
+                .iter()
+                .rev()
+                .map(|n| Hit {
+                    title: n.text.clone(),
+                    kind: String::new(),
+                    color: None,
+                    choice: match n.todo {
+                        Some(_) => Choice::ToggleNote(n.index),
+                        None => Choice::Copy(n.text.clone()),
+                    },
+                })
+                .collect(),
             Mode::Emoji => {
                 let emoji: Vec<&crate::emoji::Emoji> = if query.is_empty() {
                     self.recents
@@ -624,7 +697,7 @@ impl Launcher {
         let query = self.query().trim().to_owned();
         self.hits = self.hits(&query);
         // Only the palette scrolls: it lists everything.
-        if self.mode != Mode::Actions {
+        if !matches!(self.mode, Mode::Actions | Mode::Notes) {
             self.hits.truncate(MAX_RESULTS);
         }
         self.selected = 0;
@@ -696,6 +769,27 @@ impl Launcher {
             self.tree.set_clickable(row, &said);
             // Applications and results have their colour; copies and emoji
             // speak for themselves.
+            // A to-do's box, ticked when done.
+            if let Choice::ToggleNote(index) = &hit.choice {
+                let done = self
+                    .notes
+                    .iter()
+                    .find(|n| n.index == *index)
+                    .and_then(|n| n.todo)
+                    .unwrap_or(false);
+                let _ = self.tree.add(
+                    row,
+                    Style {
+                        width: Length::Px(20.0),
+                        height: Length::Px(20.0),
+                        ..Style::default()
+                    },
+                    Kind::Custom {
+                        draw: Box::new(crate::checkbox::Checkbox(done)),
+                        label: None,
+                    },
+                );
+            }
             if self.mode == Mode::Commands {
                 let _ = self.tree.add(
                     row,
@@ -856,6 +950,28 @@ impl Launcher {
                 .map(LauncherEvent::Pin)
                 .into_iter()
                 .collect(),
+            // Notes: Enter adds what is typed; on an empty field, it ticks.
+            Key::Enter if self.mode == Mode::Notes && !self.query().trim().is_empty() => {
+                let typed = self.query().to_owned();
+                self.tree.set_field_value(self.field, "");
+                vec![LauncherEvent::Chosen(Choice::AddNote(typed))]
+            }
+            Key::Enter if self.mode == Mode::Notes => {
+                self.choose(self.selected).into_iter().collect()
+            }
+            Key::Delete if self.mode == Mode::Notes && self.query().is_empty() => {
+                match self.hits.get(self.selected).map(|h| &h.choice) {
+                    Some(Choice::ToggleNote(i)) => vec![LauncherEvent::RemoveNote(*i)],
+                    _ => self
+                        .notes
+                        .iter()
+                        .rev()
+                        .nth(self.selected)
+                        .map(|n| LauncherEvent::RemoveNote(n.index))
+                        .into_iter()
+                        .collect(),
+                }
+            }
             Key::Delete if self.mode == Mode::Clipboard => self
                 .selected_paste()
                 .map(LauncherEvent::Forget)
@@ -937,7 +1053,10 @@ impl Launcher {
             if let Some(i) = self.rows.iter().position(|r| *r == node)
                 && let Some(chosen) = self.choose(self.first + i)
             {
-                self.close();
+                // Ticking a to-do keeps the notes open.
+                if self.mode != Mode::Notes {
+                    self.close();
+                }
                 events.push(chosen);
             }
         }

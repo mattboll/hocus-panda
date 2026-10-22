@@ -75,6 +75,8 @@ pub struct ColumnState {
     pub tray: Vec<TrayApp>,
     /// The screen is being shared.
     pub sharing: bool,
+    /// To-dos not done, with their place in the notes, and how many.
+    pub todos: Vec<(usize, String)>,
 }
 
 /// What the status row tells, once known.
@@ -113,6 +115,8 @@ pub enum Action {
     OpenLauncher,
     /// Every screen capture ends.
     StopSharing,
+    /// The to-do at this place in the notes is ticked.
+    TickTodo(usize),
     /// A tray application clicked.
     TrayActivate(String),
     /// A tray application's menu asked for.
@@ -238,6 +242,8 @@ struct Nodes {
     /// The sharing line's room, and its stop while the screen is shared.
     sharing: NodeId,
     stop_sharing: Option<NodeId>,
+    /// The to-dos' room.
+    tasks: NodeId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,6 +302,8 @@ pub struct Column {
     popover_changed: bool,
     /// The menu last received, and whose.
     tray_menu: Option<(String, Vec<TrayMenuEntry>)>,
+    /// The to-dos shown, and their places in the notes.
+    todo_rows: Vec<(NodeId, usize)>,
     now: Duration,
 }
 
@@ -314,6 +322,7 @@ impl Column {
             popover: None,
             popover_changed: false,
             tray_menu: None,
+            todo_rows: Vec::new(),
             now: Duration::ZERO,
         };
         column.apply(&ColumnState::default(), true);
@@ -415,6 +424,17 @@ impl Column {
             self.nodes.stop_sharing = state
                 .sharing
                 .then(|| fill_sharing(t, n.sharing, &theme, lang));
+        }
+        if all || old.todos != state.todos {
+            t.set_style(n.tasks, tasks_room(!state.todos.is_empty()));
+            for child in t.children(n.tasks) {
+                t.remove(child);
+            }
+            self.todo_rows.clear();
+            if !state.todos.is_empty() {
+                let theme = t.theme().clone();
+                self.todo_rows = fill_tasks(t, n.tasks, &theme, lang, &state.todos);
+            }
         }
         if all || old.time != state.time {
             t.set_text(
@@ -734,6 +754,8 @@ impl Column {
                 self.toggle(PopoverKind::Desktops);
             } else if id == n.account {
                 self.toggle(PopoverKind::Account);
+            } else if let Some((_, index)) = self.todo_rows.iter().find(|(row, _)| *row == id) {
+                actions.push(Action::TickTodo(*index));
             } else if Some(id) == n.stop_sharing {
                 actions.push(Action::StopSharing);
             } else if n.tray.is_some_and(|(_, chip)| chip == id) {
@@ -1061,10 +1083,13 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         ),
     );
 
-    // The latest notifications.
+    // The to-dos when there are some (they take no room otherwise), then
+    // the latest notifications.
+    let feed = add(tree, card, Style::default(), Kind::Box(Look::default()));
+    let tasks = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     let notes = add(
         tree,
-        card,
+        feed,
         Style {
             gap: 8.0,
             ..Style::default()
@@ -1181,10 +1206,87 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         tray,
         sharing: room,
         stop_sharing: None,
+        tasks,
     }
 }
 
 /// A popover's tree: a card with room around it for its shadow.
+/// The to-dos' room above the notifications: some, or none.
+fn tasks_room(shown: bool) -> Style {
+    Style {
+        gap: 8.0,
+        padding: Insets {
+            bottom: if shown { 18.0 } else { 0.0 },
+            ..Insets::default()
+        },
+        height: if shown { Length::Auto } else { Length::Px(0.0) },
+        clip: true,
+        ..Style::default()
+    }
+}
+
+/// The to-dos not done, three at most, as board D13 shows them: each a
+/// box to tick.
+fn fill_tasks(
+    tree: &mut Tree,
+    room: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    todos: &[(usize, String)],
+) -> Vec<(NodeId, usize)> {
+    let missing = || unreachable!("adding to a node of this tree");
+    tree.add(
+        room,
+        Style::default(),
+        Kind::text(
+            lang.tasks_caption(todos.len()).to_uppercase(),
+            caption(theme),
+        ),
+    )
+    .unwrap_or_else(missing);
+    let mut rows = Vec::new();
+    for (index, text) in todos.iter().take(3) {
+        let row = tree
+            .add(
+                room,
+                Style {
+                    direction: hocus_ui::Direction::Row,
+                    gap: 10.0,
+                    align: Align::Center,
+                    height: Length::Px(28.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look::default()),
+            )
+            .unwrap_or_else(missing);
+        tree.set_clickable(row, text);
+        tree.add(
+            row,
+            Style {
+                width: Length::Px(18.0),
+                height: Length::Px(18.0),
+                ..Style::default()
+            },
+            Kind::Custom {
+                draw: Box::new(crate::checkbox::Checkbox(false)),
+                label: None,
+            },
+        )
+        .unwrap_or_else(missing);
+        tree.add(
+            row,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
+            Kind::text_line(text.clone(), theme.text.body),
+        )
+        .unwrap_or_else(missing);
+        rows.push((row, *index));
+    }
+    rows
+}
+
 /// The sharing line: said, with its stop.
 fn fill_sharing(tree: &mut Tree, room: NodeId, theme: &Theme, lang: Lang) -> NodeId {
     let missing = || unreachable!("adding to a node of this tree");

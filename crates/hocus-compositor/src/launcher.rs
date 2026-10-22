@@ -312,6 +312,13 @@ impl State {
                     self.close_launcher();
                     self.open_settings(None);
                 }
+                LauncherEvent::Chosen(Choice::AddNote(text)) => self.add_note(&text),
+                LauncherEvent::Chosen(Choice::ToggleNote(index)) => self.tick_note(index),
+                LauncherEvent::RemoveNote(index) => self.remove_note(index),
+                LauncherEvent::Chosen(Choice::OpenNotes) => {
+                    self.close_launcher();
+                    self.toggle_notes();
+                }
                 LauncherEvent::Chosen(Choice::SetShortcut) => {
                     self.close_launcher();
                     self.open_settings(Some("keyboard".into()));

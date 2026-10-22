@@ -27,6 +27,7 @@ mod input;
 mod launcher;
 mod leave;
 mod lock;
+mod notes;
 mod notify;
 mod output_spec;
 mod outputs;
@@ -259,6 +260,8 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         .clone()
         .or_else(|| state.is_session.then(session::default_dir).flatten());
     lock::persist(&mut state, state_dir.clone());
+    let notes_file = notes::file(state.is_session, state_dir.as_deref());
+    notes::start(&event_loop.handle(), &mut state, notes_file);
     clipboard::start(&event_loop.handle(), &mut state, state_dir.clone());
     state.start_sessions(state_dir);
     if options.shell {

@@ -126,6 +126,7 @@ impl State {
                                     | Action::ClipboardHistory
                                     | Action::Emoji
                                     | Action::Palette
+                                    | Action::Notes
                             ) =>
                     {
                         FilterResult::Intercept(Handled::Shortcut(action))

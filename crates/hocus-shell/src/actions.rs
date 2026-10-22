@@ -223,6 +223,11 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             EVERYWHERE,
         ),
         A::Emoji => (w("Emoji", "Emoji"), G::System, EVERYWHERE),
+        A::Notes => (
+            w("Notes and to-dos", "Notes et tâches"),
+            G::Launcher,
+            EVERYWHERE,
+        ),
         A::FocusMode => (
             w(
                 "Focus: dim everything else",
@@ -350,7 +355,7 @@ pub fn catalog() -> Vec<Action> {
         .map(Action::screenshot),
     );
     all.push(A::Record);
-    all.extend([A::FocusMode, A::NightLight, A::ZoomIn, A::ZoomOut]);
+    all.extend([A::FocusMode, A::NightLight, A::ZoomIn, A::ZoomOut, A::Notes]);
     all.extend([
         A::Lock,
         A::Suspend,

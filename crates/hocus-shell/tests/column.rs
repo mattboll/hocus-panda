@@ -16,6 +16,7 @@ fn state() -> ColumnState {
         status: Default::default(),
         tray: Vec::new(),
         sharing: false,
+        todos: Vec::new(),
         time: WallTime {
             hour: 14,
             minute: 37,

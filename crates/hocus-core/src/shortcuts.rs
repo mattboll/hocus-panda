@@ -74,6 +74,8 @@ pub enum Action {
     Palette,
     /// Starts a screen recording (#70), or stops it.
     Record,
+    /// Notes and to-dos (#79), or no longer.
+    Notes,
     /// Everything but the focused window dims (#78), or no longer.
     FocusMode,
     /// Night light on or off until the schedule says otherwise (#78).
@@ -178,6 +180,7 @@ impl fmt::Display for Action {
             Self::Emoji => write!(f, "emoji"),
             Self::Palette => write!(f, "palette"),
             Self::Record => write!(f, "record"),
+            Self::Notes => write!(f, "notes"),
             Self::FocusMode => write!(f, "focus-mode"),
             Self::NightLight => write!(f, "night-light"),
             Self::ZoomIn => write!(f, "zoom-in"),
@@ -255,6 +258,7 @@ impl FromStr for Action {
             "emoji" => bare(Self::Emoji),
             "palette" => bare(Self::Palette),
             "record" => bare(Self::Record),
+            "notes" => bare(Self::Notes),
             "focus-mode" => bare(Self::FocusMode),
             "night-light" => bare(Self::NightLight),
             "zoom-in" => bare(Self::ZoomIn),
@@ -401,6 +405,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Period", Action::Emoji),
         ("Super+P", Action::Palette),
         ("Super+Shift+R", Action::Record),
+        ("Super+N", Action::Notes),
         ("Super+F", Action::FocusMode),
         ("Super+Equal", Action::ZoomIn),
         ("Super+Minus", Action::ZoomOut),

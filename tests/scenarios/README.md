@@ -68,6 +68,7 @@ Steps, one per `[[step]]` table:
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
 | `expect_budget = { max_ms = 50 }` | every frame drawn so far took at most that long, and no loop handler went over its budget |
+| `expect_state_file = { name, contains? = […], lacks? = […] }` | a file of the compositor's state directory (notes, the saved session) holds these strings, once written |
 | `restart = true` | the compositor goes as a crash would, and a new one starts on the same configuration and state; clients go with it |
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |
 | `open_annotate = "{last_screenshot}"` | opens the annotation window on a capture (`{last_screenshot}` is the last one saved, `{runtime_dir}` the compositor's temporary directory), and waits for it |
