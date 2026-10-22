@@ -11,3 +11,4 @@ pub mod sealed;
 pub mod session;
 pub mod system;
 pub mod tray;
+pub mod updates;

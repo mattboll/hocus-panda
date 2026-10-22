@@ -114,6 +114,8 @@ pub struct State {
     /// The screenshot tool (#69).
     pub shots: crate::screenshot::Screenshots,
     pub recorder: crate::recording::Recorder,
+    /// System updates (#84).
+    pub updates: crate::updates::Updates,
     /// Notes and to-dos (#79).
     pub notes: crate::notes::NotesState,
     /// Focus mode, the magnifier, night light (#78).
@@ -246,6 +248,7 @@ impl State {
             recorder: Default::default(),
             comfort: Default::default(),
             notes: Default::default(),
+            updates: Default::default(),
             gamma_wanted: Vec::new(),
             share: None,
             clipboard: Default::default(),

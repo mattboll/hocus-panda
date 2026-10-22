@@ -155,6 +155,14 @@ impl State {
         self.needs_redraw = true;
     }
 
+    /// The power saver is on: background work waits.
+    pub fn power_saver(&self) -> bool {
+        self.quick
+            .as_ref()
+            .and_then(|q| q.platform.as_ref())
+            .is_some_and(|p| p.profile == Profile::Saver)
+    }
+
     /// What the sheet shows, from the service, the shell and the keyboard.
     fn quick_state(&self) -> Option<QuickState> {
         let panel = self.quick.as_ref()?;

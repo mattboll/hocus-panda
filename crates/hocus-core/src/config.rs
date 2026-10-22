@@ -24,6 +24,7 @@ pub struct Config {
     pub screenshots: Screenshots,
     pub recording: Recording,
     pub night_light: NightLight,
+    pub updates: Updates,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -361,6 +362,31 @@ impl Default for Screenshots {
     }
 }
 
+/// System updates (#84).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Updates {
+    pub enabled: bool,
+    /// Hours between looks, 1 to 168.
+    pub every_hours: u32,
+    /// A command of the user's own that prints `NAME VERSION` (or `NAME OLD
+    /// -> NEW`) per update; empty: the system's package manager.
+    pub check: String,
+    /// What installs them all; empty: the package manager through polkit.
+    pub install: String,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            every_hours: 6,
+            check: String::new(),
+            install: String::new(),
+        }
+    }
+}
+
 /// Night light (#78): warmer colours in the evening.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -630,6 +656,10 @@ impl Config {
         if !["ask", "always", "never"].contains(&self.session.restore.as_str()) {
             let r = format!("{:?}", self.session.restore);
             return out_of_range("session.restore", r, "ask, always, never");
+        }
+        if !(1..=168).contains(&self.updates.every_hours) {
+            let h = self.updates.every_hours.to_string();
+            return out_of_range("updates.every_hours", h, "1 to 168");
         }
         let n = &self.night_light;
         if !(1500..=6500).contains(&n.temperature) {

@@ -83,6 +83,11 @@ pub enum Request {
     /// portal's chooser; answered once chosen, as `Monitor: NAME`,
     /// `Window: IDENTIFIER` (ext-foreign-toplevel-list) or nothing.
     PickShare,
+    /// System updates waiting, and whether they are being looked for or
+    /// installed (#84).
+    Updates,
+    /// Installs them, through polkit.
+    InstallUpdates,
     /// Puts a PNG on the clipboard, kept by the compositor (the annotation
     /// window's Copy, #128).
     CopyPng {
@@ -192,6 +197,9 @@ impl Request {
             | Self::Screens
             | Self::IdentifyOutputs
             | Self::PickShare
+            | Self::Updates
+            // The system asks for the password itself.
+            | Self::InstallUpdates
             // A picture the user asked to copy.
             | Self::CopyPng { .. }
             | Self::Windows
@@ -277,6 +285,7 @@ pub enum Reply {
     Screens(Vec<ScreenInfo>),
     /// What the user chose to share, or nothing.
     Shared(Option<String>),
+    Updates(UpdatesInfo),
     Windows(Vec<WindowInfo>),
     Scene(Scene),
     Screenshot(Screenshot),
@@ -343,6 +352,9 @@ pub struct ConfigInfo {
     /// The file the configuration is read from, if any.
     #[serde(default)]
     pub path: Option<String>,
+    /// The account the session is, as it says it.
+    #[serde(default)]
+    pub user: String,
 }
 
 /// How well the compositor keeps up.
@@ -426,6 +438,24 @@ pub struct OutputInfo {
 
 fn daylight() -> u32 {
     6500
+}
+
+/// System updates as the session knows them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct UpdatesInfo {
+    pub updates: Vec<UpdateInfo>,
+    /// `idle`, `checking`, `installing`, or `unsupported` (no package
+    /// manager known).
+    pub state: String,
+    /// What the package manager said last went wrong.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub name: String,
+    pub from: Option<String>,
+    pub to: String,
 }
 
 /// A connected screen, on or off.
@@ -582,6 +612,11 @@ pub enum Event {
         path: Option<String>,
         width: u32,
         height: u32,
+    },
+    /// The updates waiting, or their state, changed (#84).
+    Updates {
+        count: usize,
+        state: String,
     },
     /// A screen recording was saved (#70), with its size in pixels.
     Recording {

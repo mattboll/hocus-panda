@@ -77,6 +77,8 @@ pub struct ColumnState {
     pub sharing: bool,
     /// To-dos not done, with their place in the notes, and how many.
     pub todos: Vec<(usize, String)>,
+    /// System updates waiting, and whether they are being installed.
+    pub updates: Option<(usize, bool)>,
 }
 
 /// What the status row tells, once known.
@@ -117,6 +119,7 @@ pub enum Action {
     StopSharing,
     /// The to-do at this place in the notes is ticked.
     TickTodo(usize),
+    InstallUpdates,
     /// A tray application clicked.
     TrayActivate(String),
     /// A tray application's menu asked for.
@@ -244,6 +247,9 @@ struct Nodes {
     stop_sharing: Option<NodeId>,
     /// The to-dos' room.
     tasks: NodeId,
+    /// The updates' room, and its Install.
+    updates: NodeId,
+    install: Option<NodeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -435,6 +441,16 @@ impl Column {
                 let theme = t.theme().clone();
                 self.todo_rows = fill_tasks(t, n.tasks, &theme, lang, &state.todos);
             }
+        }
+        if all || old.updates != state.updates {
+            t.set_style(n.updates, tasks_room(state.updates.is_some()));
+            for child in t.children(n.updates) {
+                t.remove(child);
+            }
+            let theme = t.theme().clone();
+            self.nodes.install = state.updates.and_then(|(count, installing)| {
+                fill_updates(t, n.updates, &theme, lang, count, installing)
+            });
         }
         if all || old.time != state.time {
             t.set_text(
@@ -756,6 +772,8 @@ impl Column {
                 self.toggle(PopoverKind::Account);
             } else if let Some((_, index)) = self.todo_rows.iter().find(|(row, _)| *row == id) {
                 actions.push(Action::TickTodo(*index));
+            } else if Some(id) == n.install {
+                actions.push(Action::InstallUpdates);
             } else if Some(id) == n.stop_sharing {
                 actions.push(Action::StopSharing);
             } else if n.tray.is_some_and(|(_, chip)| chip == id) {
@@ -1087,6 +1105,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
     // the latest notifications.
     let feed = add(tree, card, Style::default(), Kind::Box(Look::default()));
     let tasks = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
+    let updates = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     let notes = add(
         tree,
         feed,
@@ -1207,6 +1226,8 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         sharing: room,
         stop_sharing: None,
         tasks,
+        updates,
+        install: None,
     }
 }
 
@@ -1285,6 +1306,71 @@ fn fill_tasks(
         rows.push((row, *index));
     }
     rows
+}
+
+/// The updates' line, as board D13 draws it: how many, and Install;
+/// while they install, said so.
+fn fill_updates(
+    tree: &mut Tree,
+    room: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    count: usize,
+    installing: bool,
+) -> Option<NodeId> {
+    let missing = || unreachable!("adding to a node of this tree");
+    let line = tree
+        .add(
+            room,
+            Style {
+                direction: hocus_ui::Direction::Row,
+                gap: 10.0,
+                align: Align::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    tree.add(
+        line,
+        Style {
+            width: Length::Px(22.0),
+            height: Length::Px(22.0),
+            ..Style::default()
+        },
+        Kind::Box(Look {
+            background: Some(Paint::Accent),
+            radius: 6.0,
+            ..Look::default()
+        }),
+    )
+    .unwrap_or_else(missing);
+    let text = if installing {
+        lang.updates_installing().to_owned()
+    } else {
+        lang.updates_ready(count)
+    };
+    tree.add(
+        line,
+        Style {
+            width: Length::Fill,
+            ..Style::default()
+        },
+        Kind::text_line(text, theme.text.body),
+    )
+    .unwrap_or_else(missing);
+    (!installing).then(|| {
+        tree.add(
+            line,
+            Style {
+                height: Length::Px(36.0),
+                padding: Insets::symmetric(0.0, 10.0),
+                ..Style::default()
+            },
+            Kind::Button(Button::new(lang.install(), ButtonKind::Plain, theme)),
+        )
+        .unwrap_or_else(missing)
+    })
 }
 
 /// The sharing line: said, with its stop.

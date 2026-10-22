@@ -1,0 +1,44 @@
+description = "A package manager reporting 3 updates: the column says so with Install, the settings list them; installed, the count is cleared"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[updates]
+check = "{scenario_dir}/updates/check.sh {runtime_dir}"
+install = "{scenario_dir}/updates/install.sh {runtime_dir}"
+"""
+
+# The first look, half a minute after the start.
+[[step]]
+advance_ms = 31000
+
+[[step]]
+expect_ui = { label = "3 updates ready" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "updates-column.png" }
+
+[[step]]
+open_settings = { page = "account" }
+
+[[step]]
+expect_settings = { label = "3 updates ready" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "updates-settings.png" }
+
+[[step]]
+click_ui = "Install"
+
+[[step]]
+expect_ui = { label = "Updates installed" }
+
+[[step]]
+expect_ui = { label = "3 updates ready", shown = false }

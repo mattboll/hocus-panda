@@ -69,6 +69,12 @@ copy = true                # onto the clipboard (as PNG)
 ocr = "tesseract"          # reads the text for "Copy the text", when installed
 annotate = "hocus-annotate" # the toast's "Annotate", given the capture's file
 
+[updates]                  # the system's, shown in the column and the settings
+enabled = true
+every_hours = 6            # between looks, 1 to 168; never while fullscreen or on the power saver
+check = ""                 # a command printing NAME VERSION (or NAME OLD -> NEW) per update;
+install = ""               #   empty: apt, dnf, pacman or pkg, installed through polkit
+
 [night_light]              # warmer colours in the evening (quick settings' tile)
 enabled = false
 schedule = "fixed"         # or "sunset": from sunset to sunrise where you are

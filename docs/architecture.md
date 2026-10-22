@@ -114,6 +114,13 @@ owned, to a worker thread that feeds an encoder process (ffmpeg, VA-API when
 the card has it) at a steady rate and paints click rings into it. A frame
 the worker has no room for is dropped; the loop never waits for it.
 
+System updates (#84) are looked for on a worker thread every few hours,
+never while a window is fullscreen or on the power saver: apt, dnf, pacman
+(`checkupdates`) or pkg, read without root; installing goes through
+`pkexec`, so the session's own polkit dialog asks for the password. Only
+the session asks the system's manager; nested or in tests, only commands
+the configuration names run.
+
 Notes (#79) are one Markdown file, read and written whole on worker
 threads (written to a new file, then renamed over the old one); lines the
 notes do not understand are kept as they were. The file is read again each
