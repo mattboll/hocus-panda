@@ -2023,20 +2023,28 @@ impl Run<'_> {
             .with_context(|| format!("no tray application {title:?}"))
     }
 
+    /// What a button shows may come from a worker (a check, a scan): the
+    /// step waits a moment for it, as `expect_ui` does.
     fn click_ui(&mut self, label: &str, button: Button) -> anyhow::Result<()> {
-        let nodes = self.ui()?;
-        let node = nodes
-            .iter()
-            .find(|n| n.role == "button" && n.label.as_deref() == Some(label))
-            .with_context(|| {
+        let deadline = Instant::now() + SETTLE_TIMEOUT;
+        let r = loop {
+            let nodes = self.ui()?;
+            if let Some(node) = nodes
+                .iter()
+                .find(|n| n.role == "button" && n.label.as_deref() == Some(label))
+            {
+                break node.rect;
+            }
+            if Instant::now() > deadline {
                 let buttons: Vec<_> = nodes
                     .iter()
                     .filter(|n| n.role == "button")
                     .filter_map(|n| n.label.clone())
                     .collect();
-                format!("no button {label:?}; there are {buttons:?}")
-            })?;
-        let r = node.rect;
+                anyhow::bail!("no button {label:?}; there are {buttons:?}");
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        };
         let (x, y) = (
             f64::from(r.x) + f64::from(r.width) / 2.0,
             f64::from(r.y) + f64::from(r.height) / 2.0,
