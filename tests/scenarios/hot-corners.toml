@@ -1,0 +1,61 @@
+description = "A corner set to the overview opens it once the pointer rests there 150 ms, and only once; a corner against another screen does nothing"
+outputs = ["1280x800", "1920x1080+1280+0"]
+
+[[step]]
+config = """
+[hot_corners]
+top_left = "overview"
+top_right = "overview"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+# The first screen's top right corner is against the second screen: the
+# pointer goes on through it.
+[[step]]
+pointer_move = [1279, 0]
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_ui = { label = "editor", shown = false }
+
+[[step]]
+pointer_move = [0, 0]
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_ui = { label = "editor", shown = false }
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+expect_ui = { label = "editor" }
+
+# Resting on: it stays open, it does not close and open again.
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_ui = { label = "editor" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "hot-corners.png" }
+
+# The second screen's own top right corner is free.
+[[step]]
+keys = "escape"
+
+[[step]]
+pointer_move = [3199, 0]
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_ui = { label = "editor" }

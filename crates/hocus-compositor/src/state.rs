@@ -141,6 +141,10 @@ pub struct State {
     pub instant_motion: bool,
     /// Pictures of windows closing, minimizing, maximizing (#34).
     pub snapshots: crate::snapshot::Snapshots,
+    /// Hot corners, Super alone, gestures (#86).
+    pub triggers: crate::corners::Triggers,
+    /// Drawing on the screen (#86).
+    pub ink: crate::ink::Inking,
     /// Desktops sliding, screen by screen (#36).
     pub slides: crate::slide::Slides,
     /// The window switcher (#39).
@@ -260,6 +264,8 @@ impl State {
             mirrors: Vec::new(),
             instant_motion: false,
             snapshots: Default::default(),
+            triggers: Default::default(),
+            ink: Default::default(),
             slides: Default::default(),
             alt_tab: Default::default(),
             dock: Default::default(),

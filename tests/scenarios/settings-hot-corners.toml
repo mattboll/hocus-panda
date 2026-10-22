@@ -1,0 +1,21 @@
+description = "The Desktops page sets what each corner does: the top left one to the overview, written to the configuration and in effect"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "desktops" }
+
+[[step]]
+expect_settings = { label = "Top left: Nothing", selected = true }
+
+[[step]]
+click_settings = "Top left: Overview"
+
+[[step]]
+expect_config_file = { contains = ["[hot_corners]", "top_left = \"overview\""] }
+
+[[step]]
+expect_settings = { label = "Top left: Overview", selected = true }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-hot-corners.png" }

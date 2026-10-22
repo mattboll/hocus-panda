@@ -331,6 +331,17 @@ impl State {
         }
     }
 
+    /// The overview (#86): every screen's windows in a grid, open until a
+    /// pick or Escape; asked again, it closes.
+    pub fn toggle_overview(&mut self) {
+        if self.alt_tab.open.is_some() {
+            self.alt_tab.open = None;
+            self.needs_redraw = true;
+        } else {
+            self.open_alt_tab(Scope::AllOutputs, None);
+        }
+    }
+
     /// After each dispatch: the grids drawn, frames while the ring glides,
     /// and closed windows taken out.
     pub fn refresh_alt_tab(&mut self) {

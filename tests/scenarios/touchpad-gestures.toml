@@ -1,0 +1,56 @@
+description = "Three fingers up open the overview and close it again; four fingers up open the launcher; three sideways still switch desktops"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+enabled = false
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+swipe = { fingers = 3, by = [0, -200] }
+
+[[step]]
+expect_ui = { label = "editor", selected = true }
+
+[[step]]
+swipe = { fingers = 3, by = [0, -200] }
+
+[[step]]
+frames = 2
+
+# A small swipe up does nothing.
+[[step]]
+swipe = { fingers = 3, by = [0, -30] }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+[[step]]
+swipe = { fingers = 4, by = [0, -200] }
+
+[[step]]
+type = "fir"
+
+[[step]]
+expect_ui = { label = "Firewall" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+swipe = { fingers = 3, by = [-700, 0] }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }

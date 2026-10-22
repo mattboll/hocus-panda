@@ -162,6 +162,8 @@ impl State {
             Action::ZoomOut => self.zoom_step(false),
             Action::SwitchWindows(scope) => self.switch_windows(*scope),
             Action::Dock => self.toggle_dock(),
+            Action::Overview => self.toggle_overview(),
+            Action::ShowDesktop => self.toggle_show_desktop(),
             Action::Spawn(command) => self.spawn_command(command),
         }
     }
@@ -175,7 +177,7 @@ impl State {
     }
 
     /// Shows the next or previous desktop, round, on the outputs in scope.
-    fn step_desktop(&mut self, scope: Scope, step: isize, serial: Serial) {
+    pub(crate) fn step_desktop(&mut self, scope: Scope, step: isize, serial: Serial) {
         for output in self.outputs_in(scope) {
             let Some(out) = self.model.output(&hocus_core::OutputName(output.name())) else {
                 continue;

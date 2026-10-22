@@ -85,6 +85,11 @@ pub enum Action {
     ZoomOut,
     /// Shows or hides the dock (#38).
     Dock,
+    /// Every screen's windows in a grid, or closes it (#86).
+    Overview,
+    /// The desktop of the screen under the pointer, its windows out of the
+    /// way, or back (#86).
+    ShowDesktop,
     /// A screenshot (#69), after `delay` seconds.
     Screenshot {
         mode: ScreenshotMode,
@@ -188,6 +193,8 @@ impl fmt::Display for Action {
             Self::ZoomIn => write!(f, "zoom-in"),
             Self::ZoomOut => write!(f, "zoom-out"),
             Self::Dock => write!(f, "dock"),
+            Self::Overview => write!(f, "overview"),
+            Self::ShowDesktop => write!(f, "show-desktop"),
             Self::Screenshot { mode, delay: 0 } => write!(f, "screenshot {mode}"),
             Self::Screenshot { mode, delay } => write!(f, "screenshot {mode} {delay}"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
@@ -267,6 +274,8 @@ impl FromStr for Action {
             "zoom-in" => bare(Self::ZoomIn),
             "zoom-out" => bare(Self::ZoomOut),
             "dock" => bare(Self::Dock),
+            "overview" => bare(Self::Overview),
+            "show-desktop" => bare(Self::ShowDesktop),
             "screenshot" => {
                 let mut words = rest.split_whitespace();
                 let mode = words.next().unwrap_or("screen").parse()?;

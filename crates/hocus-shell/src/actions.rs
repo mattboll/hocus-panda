@@ -244,6 +244,19 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             EVERYWHERE,
         ),
         A::ZoomOut => (w("Zoom out", "Réduire (loupe)"), G::Screens, POINTER_SCREEN),
+        A::Overview => (
+            w("Overview of every window", "Vue d’ensemble des fenêtres"),
+            G::Windows,
+            ALL_SCREENS,
+        ),
+        A::ShowDesktop => (
+            w(
+                "Show the desktop, or the windows again",
+                "Afficher le bureau, ou les fenêtres à nouveau",
+            ),
+            G::Windows,
+            POINTER_SCREEN,
+        ),
         A::Record => (
             w(
                 "Record the screen, or stop",
@@ -367,6 +380,8 @@ pub fn catalog() -> Vec<Action> {
         A::ZoomOut,
         A::Notes,
         A::Dock,
+        A::Overview,
+        A::ShowDesktop,
     ]);
     all.extend([
         A::Lock,

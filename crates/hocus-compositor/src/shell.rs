@@ -265,6 +265,8 @@ impl State {
         self.refresh_slides();
         self.refresh_alt_tab();
         self.refresh_dock();
+        self.refresh_corners();
+        self.refresh_ink();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -668,6 +670,21 @@ impl<V: Pixels> Panel<V> {
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
+        self.element_with(renderer, output, at, None)
+    }
+
+    /// The same, see-through as `alpha` says.
+    pub fn element_with<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        at: Point<i32, Logical>,
+        alpha: Option<f32>,
+    ) -> Option<MemoryRenderBufferRenderElement<R>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
         let buffer = self.buffer.as_ref()?;
         let scale = output.current_scale().fractional_scale();
         let (w, h) = self.size;
@@ -679,7 +696,7 @@ impl<V: Pixels> Panel<V> {
             renderer,
             location,
             buffer,
-            None,
+            alpha,
             Some(all),
             Some(size),
             Kind::Unspecified,

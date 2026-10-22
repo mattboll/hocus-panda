@@ -60,18 +60,19 @@ impl State {
             InputEvent::PointerMotion { event } => self.on_pointer_motion::<I>(event),
             InputEvent::PointerButton { event } => self.on_pointer_button::<I>(event),
             InputEvent::PointerAxis { event } => self.on_pointer_axis::<I>(event),
-            // Three fingers swipe desktops (#36); others are not ours yet.
+            // Three fingers sideways swipe desktops (#36); three and four
+            // up and down act as set (#86).
             InputEvent::GestureSwipeBegin { event } => {
                 use smithay::backend::input::GestureBeginEvent;
-                self.swipe_begin(event.fingers());
+                self.gesture_begin(event.fingers());
             }
             InputEvent::GestureSwipeUpdate { event } => {
                 use smithay::backend::input::GestureSwipeUpdateEvent;
-                self.swipe_update(event.delta_x());
+                self.gesture_update(event.delta_x(), event.delta_y());
             }
             InputEvent::GestureSwipeEnd { event } => {
                 use smithay::backend::input::GestureEndEvent;
-                self.swipe_end(event.cancelled());
+                self.gesture_end(event.cancelled());
             }
             // A pinch closing in opens the window switcher (#39).
             InputEvent::GesturePinchBegin { event } => {
@@ -109,6 +110,17 @@ impl State {
             serial,
             time_msec,
             |state, modifiers, keysym| {
+                // Super alone (#86): acted on once the key is handled; let
+                // go, the drawing on the screen fades.
+                let is_super = matches!(keysym.modified_sym(), Keysym::Super_L | Keysym::Super_R);
+                state.super_key(
+                    pressed,
+                    is_super,
+                    modifiers.ctrl || modifiers.alt || modifiers.shift,
+                );
+                if !pressed && is_super {
+                    state.ink_lift();
+                }
                 // The window switcher picks when what held it is let go.
                 if !pressed && state.alt_tab_released(modifiers) {
                     return FilterResult::Intercept(Handled::AltTabDone);
@@ -180,6 +192,7 @@ impl State {
                 }
             },
         );
+        self.super_fired();
         match handled {
             Some(Handled::Shortcut(action)) => self.run_action(&action, serial),
             Some(Handled::PaletteKeys(combo)) => self.palette_keys(&combo),
@@ -305,6 +318,8 @@ impl State {
         // The motion asked for, even when the pointer stays still.
         let delta = location - from;
         let location = self.constrained(from, location);
+        self.corner_pointer(location);
+        self.ink_motion(location);
         if !pointer.is_grabbed() {
             let focus = pointer
                 .current_focus()
@@ -381,6 +396,13 @@ impl State {
                 );
                 pointer.frame(self);
             }
+            return;
+        }
+        // Super with a button is no longer Super alone (#86); with the
+        // left one it draws on the screen, and no client sees it.
+        self.super_spoiled();
+        if !pointer.is_grabbed() && self.ink_button(at, button, pressed) {
+            self.needs_redraw = true;
             return;
         }
         self.recording_click(at, pressed);
@@ -476,6 +498,7 @@ impl State {
                 .unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0)
         };
         self.activity();
+        self.super_spoiled();
         if self.opacity_wheel(amount(Axis::Vertical)) {
             return;
         }
@@ -502,6 +525,7 @@ impl State {
     /// from a device or injected through the control API.
     pub fn scroll(&mut self, dy: f64, time_msec: u32) {
         self.activity();
+        self.super_spoiled();
         if self.opacity_wheel(dy) {
             return;
         }

@@ -15,6 +15,7 @@ pub mod fuzzy;
 pub mod i18n;
 pub mod icons;
 pub mod identify;
+pub mod ink;
 pub mod launcher;
 pub mod leave;
 pub mod lock;
