@@ -267,6 +267,31 @@ Only the session itself uses the machine's services: nested or headless,
 quick settings show a stub and change nothing on the machine, and tests give
 private buses with services of their own.
 
+## Security
+
+What the session holds (an unlocked desktop, the clipboard, the screen) is
+guarded by these rules (#134):
+
+- **Locked means nothing else.** While locked, each screen's scene is the
+  lock alone: no window is drawn, on a screen plugged meanwhile either, and
+  captures (screencopy, ext-image-copy-capture, the control API) go through
+  the same scene. A lock client that dies leaves our own lock.
+- **A crash never unlocks.** While locked, `locked` in the state directory
+  says so; a session that starts and finds it (the compositor crashed or was
+  killed while locked, and an autologin started a new one) starts locked.
+- **Nothing listens on the network.** The Wayland and control sockets are
+  Unix sockets in `XDG_RUNTIME_DIR`. The control socket is mode 0600, and a
+  connection whose peer credentials (SO_PEERCRED, getpeereid) are not the
+  compositor's own user is closed unread. Injection and scene dumps need the
+  test permission, given only on the command line.
+- **Agents and AI (#42)** speak over Unix sockets only, with the same peer
+  check and permissions per connection; never TCP.
+- **The phone (#85)** is off by default; pairing needs a code confirmed on
+  screen, and talks over TLS.
+- **Parsers are fuzzed** on every build (`robustness` tests): the
+  configuration, the session file, shortcuts and actions, the control API's
+  lines through the real server.
+
 ## Testing
 
 A Debian testing VM (`scripts/vm/`) runs hocuspanda as the session on its

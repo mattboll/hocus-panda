@@ -5,6 +5,11 @@
 //! surfaces (ext-session-lock), or our own lock screen, which checks the
 //! password through PAM on a worker thread. A lock client that goes away
 //! without unlocking leaves our lock screen: a crash never unlocks.
+//!
+//! Nor does the compositor's own: while locked, a file in the state
+//! directory says so, and a session that starts and finds it (the last one
+//! crashed or was killed while locked, and an autologin started this one)
+//! starts locked.
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -89,6 +94,8 @@ pub struct Locking {
     told_locked: bool,
     /// The timer that wakes the loop at the next deadline, and when.
     timer: Option<(RegistrationToken, Duration)>,
+    /// Writes and removes the locked marker, in order, off the loop.
+    marker: Option<std::sync::mpsc::Sender<bool>>,
 }
 
 impl std::fmt::Debug for Locking {
@@ -117,6 +124,7 @@ impl Locking {
             dbus_inhibitors: 0,
             told_locked: false,
             timer: None,
+            marker: None,
         }
     }
 }
@@ -141,6 +149,42 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
     }) {
         Ok(auth) => state.locking.auth = Some(auth),
         Err(err) => tracing::warn!(%err, "no password checks"),
+    }
+}
+
+/// Keeps the locked state in `dir`, and locks now if the last session
+/// ended locked. Read once at start, before the first frame.
+pub fn persist(state: &mut State, dir: Option<std::path::PathBuf>) {
+    let Some(dir) = dir else {
+        return;
+    };
+    let path = dir.join("locked");
+    let was_locked = path.exists();
+    let (marker, wanted) = std::sync::mpsc::channel::<bool>();
+    let spawned = std::thread::Builder::new()
+        .name("lock marker".into())
+        .spawn(move || {
+            while let Ok(locked) = wanted.recv() {
+                let done = if locked {
+                    std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, b""))
+                } else {
+                    match std::fs::remove_file(&path) {
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                        other => other,
+                    }
+                };
+                if let Err(err) = done {
+                    tracing::warn!(%err, locked, "the locked state was not written");
+                }
+            }
+        });
+    match spawned {
+        Ok(_) => state.locking.marker = Some(marker),
+        Err(err) => tracing::warn!(%err, "the locked state will not survive a crash"),
+    }
+    if was_locked {
+        tracing::warn!("the last session ended locked: locking");
+        state.lock_now();
     }
 }
 
@@ -178,8 +222,11 @@ impl State {
     }
 
     /// What every lock does: no window keeps the keyboard or the pointer,
-    /// the shell's panels close.
+    /// the shell's panels close, and the lock is written down.
     fn lock_began(&mut self) {
+        if let Some(marker) = &self.locking.marker {
+            let _ = marker.send(true);
+        }
         self.close_launcher();
         self.close_quick();
         if let Some(keyboard) = self.seat.get_keyboard() {
@@ -194,6 +241,9 @@ impl State {
 
     fn unlock(&mut self) {
         tracing::info!("unlocked");
+        if let Some(marker) = &self.locking.marker {
+            let _ = marker.send(false);
+        }
         self.locking.phase = Phase::Unlocked;
         self.locking.by = By::Us;
         self.locking.lock_surfaces.clear();

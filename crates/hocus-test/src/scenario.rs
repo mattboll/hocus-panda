@@ -156,6 +156,9 @@ pub enum Step {
     ExpectSettings(ExpectSettings),
     /// Clicks the element of the settings window with this label.
     ClickSettings(String),
+    /// The compositor goes as a crash would, and a new one starts on the
+    /// same configuration and state; clients go with the old one.
+    Restart(bool),
     /// Waits until the wallpapers are made and drawn: before a capture
     /// the compositor takes itself.
     WaitWallpapers(bool),
@@ -545,6 +548,7 @@ impl fmt::Display for Step {
             Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
             Self::OpenAnnotate(file) => write!(f, "open_annotate {file:?}"),
             Self::WaitWallpapers(_) => write!(f, "wait_wallpapers"),
+            Self::Restart(_) => write!(f, "restart"),
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
             Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
             Self::DragAnnotate(d) => write!(f, "drag_annotate {:?}", d.label),
@@ -947,6 +951,17 @@ impl Run<'_> {
             Step::DragSettings(drag) => self.drag_settings(drag),
             Step::OpenAnnotate(file) => self.open_annotate(file),
             Step::WaitWallpapers(_) => self.wallpapers(),
+            Step::Restart(_) => {
+                self.clients.clear();
+                self.x11_clients.clear();
+                self.settings = None;
+                self.annotate = None;
+                self.layers.clear();
+                self.lock_client = None;
+                self.compositor.restart()?;
+                self.request(Request::Subscribe)?;
+                Ok(())
+            }
             Step::ExpectAnnotate(expected) => {
                 self.driving = Driving::Annotate;
                 let done = self.expect_settings(expected);

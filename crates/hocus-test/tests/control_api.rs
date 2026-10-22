@@ -290,3 +290,107 @@ fn decode(png: &[u8]) -> anyhow::Result<Image> {
         rgba,
     })
 }
+
+#[test]
+fn the_socket_is_the_users_alone_and_strangers_are_refused() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut compositor = Headless::start(HeadlessConfig {
+        renderer: RendererChoice::Pixman,
+        ..Default::default()
+    })?;
+    let socket = compositor.api_socket().to_path_buf();
+    let mode = std::fs::metadata(&socket)?.permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "mode {mode:o}");
+    // The owner is served.
+    assert!(matches!(
+        compositor.request(Request::Version)?,
+        Reply::Version(_)
+    ));
+    // As if this process were another user: closed unanswered.
+    let me = rustix::process::getuid().as_raw();
+    compositor.on_loop("stranger", move |state| state.api.serve_only(me + 1));
+    compositor.dispatch(Duration::from_millis(10))?;
+    let asking = std::thread::spawn(move || -> anyhow::Result<String> {
+        let mut stream = UnixStream::connect(&socket)?;
+        stream.set_read_timeout(Some(TIMEOUT))?;
+        let mut line = String::new();
+        // Closed unread: the end of the stream, or a reset.
+        let read = stream
+            .write_all(b"{\"id\":1,\"request\":\"version\"}\n")
+            .and_then(|()| BufReader::new(stream).read_line(&mut line));
+        match read {
+            Ok(_) => Ok(line),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+                ) =>
+            {
+                Ok(String::new())
+            }
+            Err(err) => Err(err.into()),
+        }
+    });
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while !asking.is_finished() {
+        anyhow::ensure!(std::time::Instant::now() < deadline, "no answer, no close");
+        compositor.dispatch(Duration::from_millis(10))?;
+    }
+    let answer = asking
+        .join()
+        .map_err(|_| anyhow::anyhow!("the client panicked"))??;
+    assert_eq!(answer, "", "a stranger got {answer:?}");
+    Ok(())
+}
+
+#[test]
+fn mangled_request_lines_are_refused_and_the_server_goes_on() -> anyhow::Result<()> {
+    use hocus_test::fuzz::{Rng, mangle};
+    let mut compositor = Headless::start(HeadlessConfig {
+        renderer: RendererChoice::Pixman,
+        ..Default::default()
+    })?;
+    let socket = compositor.api_socket().to_path_buf();
+    let sender = std::thread::spawn(move || -> anyhow::Result<()> {
+        let seeds = [
+            r#"{"id":1,"request":"version"}"#,
+            r#"{"id":2,"request":{"pointer_move":{"x":10.5,"y":-3}}}"#,
+            r#"{"id":3,"request":{"screenshot":{"target":{"output":"HEADLESS-1"},"cursor":true}}}"#,
+            r#"{"id":4,"request":{"copy_png":{"png_base64":"iVBORw0KGgo="}}}"#,
+            r#"{"id":5,"request":{"key":{"code":30,"pressed":true}}}"#,
+        ];
+        let mut rng = Rng(0xfeed_f00d);
+        let mut stream = UnixStream::connect(&socket)?;
+        stream.set_read_timeout(Some(Duration::from_millis(1)))?;
+        for i in 0..3000 {
+            let mut line = mangle(seeds[i % seeds.len()], &mut rng).replace('\n', " ");
+            line.push('\n');
+            if stream.write_all(line.as_bytes()).is_err() {
+                // Dropped for a bad line: a new connection goes on.
+                stream = UnixStream::connect(&socket)?;
+            }
+            // Bytes that are not text at all.
+            let raw: Vec<u8> = (0..rng.below(64)).map(|_| rng.draw() as u8).collect();
+            let _ = stream.write_all(&raw);
+            let _ = stream.write_all(b"\n");
+        }
+        Ok(())
+    });
+    let deadline = std::time::Instant::now() + TIMEOUT * 3;
+    while !sender.is_finished() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "the sender never finished"
+        );
+        compositor.dispatch(Duration::from_millis(5))?;
+    }
+    sender
+        .join()
+        .map_err(|_| anyhow::anyhow!("the sender panicked"))??;
+    // Still serving.
+    assert!(matches!(
+        compositor.request(Request::Version)?,
+        Reply::Version(_)
+    ));
+    Ok(())
+}

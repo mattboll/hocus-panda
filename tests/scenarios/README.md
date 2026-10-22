@@ -67,6 +67,7 @@ Steps, one per `[[step]]` table:
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
+| `restart = true` | the compositor goes as a crash would, and a new one starts on the same configuration and state; clients go with it |
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |
 | `open_annotate = "{last_screenshot}"` | opens the annotation window on a capture (`{last_screenshot}` is the last one saved, `{runtime_dir}` the compositor's temporary directory), and waits for it |
 | `expect_annotate`, `click_annotate`, `drag_annotate` | as the settings steps, in the annotation window (its capture is labelled `Capture`) |
