@@ -1381,7 +1381,43 @@ impl Run<'_> {
         }
     }
 
+    /// An open settings app first catches up with what is in effect (the
+    /// configuration and the screens), and the compositor takes its frame:
+    /// on a slow machine it may not have heard of the last change yet.
+    fn settings_caught_up(&mut self) -> anyhow::Result<()> {
+        if self.settings.is_none() {
+            return Ok(());
+        }
+        let Reply::Config(info) = self.request(Request::Config)? else {
+            anyhow::bail!("expected the configuration");
+        };
+        let Reply::Outputs(outputs) = self.request(Request::Outputs)? else {
+            anyhow::bail!("expected the outputs");
+        };
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            if self
+                .settings
+                .as_ref()
+                .is_some_and(|s| s.shows(&info.toml, &outputs))
+            {
+                break;
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "the settings never showed the configuration in effect"
+            );
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        let until = Instant::now() + Duration::from_millis(40);
+        while Instant::now() < until {
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        Ok(())
+    }
+
     fn click_settings(&mut self, label: &str) -> anyhow::Result<()> {
+        self.settings_caught_up()?;
         let (node, all) = self.settings_node(label)?;
         let node =
             node.with_context(|| format!("no {label:?}; the window shows:\n{}", all.dump()))?;
@@ -1813,6 +1849,7 @@ impl Run<'_> {
 
     fn expect_screenshot(&mut self, expected: &ExpectScreenshot) -> anyhow::Result<()> {
         self.wallpapers()?;
+        self.settings_caught_up()?;
         let reply = self.request(Request::Screenshot {
             target: Target::Output(expected.output.clone()),
             cursor: expected.cursor,
