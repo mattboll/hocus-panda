@@ -1,0 +1,22 @@
+description = "An install that fails says the package manager's own words, and the updates stay"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[updates]
+check = "{scenario_dir}/updates/check.sh {runtime_dir}"
+install = "{scenario_dir}/updates/install-fails.sh"
+"""
+
+[[step]]
+advance_ms = 31000
+
+[[step]]
+click_ui = "Install"
+
+[[step]]
+expect_ui = { label = "E: Could not get lock /var/lib/dpkg/lock-frontend" }
+
+[[step]]
+expect_ui = { label = "3 updates ready" }

@@ -258,6 +258,11 @@ impl App {
                 self.open_share_picker(connection, id);
                 return None;
             }
+            Request::Updates => Reply::Updates(state.updates_info()),
+            Request::InstallUpdates => {
+                state.install_updates();
+                Reply::Done
+            }
             Request::CopyPng { png_base64 } => {
                 match base64::engine::general_purpose::STANDARD.decode(&png_base64) {
                     Ok(png) => {
@@ -310,6 +315,7 @@ impl App {
                     .config_path
                     .as_ref()
                     .map(|p| p.to_string_lossy().into_owned()),
+                user: state.user.clone(),
             }),
             Request::SaveSession => {
                 state.save_session_now();

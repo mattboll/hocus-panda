@@ -35,6 +35,8 @@ pub enum Outcome {
     Close,
     /// Each screen shows its name.
     Identify,
+    /// The system's updates are installed, through polkit.
+    InstallUpdates,
     /// The compositor holds its own shortcuts back while keys are
     /// recorded (keyboard-shortcuts-inhibit), or no longer.
     Inhibit(bool),
@@ -73,6 +75,7 @@ enum Target {
     ListenNew,
     /// Asks, or stops asking, to go back to the original shortcuts.
     Reset,
+    InstallUpdates,
 }
 
 /// Which of a screen's choices are open.
@@ -663,6 +666,7 @@ impl SettingsView {
                         self.dirty = true;
                     }
                     Some(Target::ListenNew) => out.extend(self.listen_new()),
+                    Some(Target::InstallUpdates) => out.push(Outcome::InstallUpdates),
                     Some(Target::Reset) => {
                         self.keys.resetting = !self.keys.resetting;
                         self.dirty = true;
@@ -1342,7 +1346,140 @@ impl SettingsView {
             Page::Appearance => self.appearance(theme, body),
             Page::Keyboard => self.keyboard(theme, body),
             Page::Screens => self.screens(theme, body),
+            Page::Account => self.account(theme, body),
             _ => {}
+        }
+    }
+
+    /// Board R1's "Account and updates": who, which version, and the
+    /// system's updates with Install.
+    fn account(&mut self, theme: &Theme, body: NodeId) {
+        let lang = self.lang;
+        self.tree.set_style(body, fill_width(column(26.0)));
+        let who = self.section(theme, body, words::ACCOUNT);
+        let line = self.add(who, fill_width(row(14.0)), Kind::Box(Look::default()));
+        let initial: String = self
+            .ctx
+            .user
+            .chars()
+            .take(1)
+            .flat_map(char::to_uppercase)
+            .collect();
+        let avatar = self.add(
+            line,
+            Style {
+                width: Length::Px(44.0),
+                height: Length::Px(44.0),
+                align: Align::Center,
+                justify: Justify::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Accent),
+                radius: 22.0,
+                ..Look::default()
+            }),
+        );
+        self.line(
+            avatar,
+            &initial,
+            theme
+                .text
+                .title
+                .with_weight(700)
+                .with_color(Paint::OnAccent),
+        );
+        let names = self.add(line, column(2.0), Kind::Box(Look::default()));
+        let user = self.ctx.user.clone();
+        self.line(names, &user, theme.text.title.with_weight(700));
+        self.line(
+            names,
+            &words::version(env!("CARGO_PKG_VERSION"), lang),
+            theme.text.body.with_color(Paint::Muted),
+        );
+
+        let section = self.section(theme, body, words::UPDATES);
+        let updates = self.ctx.updates.clone();
+        let head = self.add(section, fill_width(row(12.0)), Kind::Box(Look::default()));
+        let (said, paint) = match (
+            updates.state.as_str(),
+            &updates.error,
+            updates.updates.len(),
+        ) {
+            ("unsupported", _, _) => (words::NO_MANAGER.get(lang).to_owned(), Paint::Muted),
+            ("checking", _, _) => (words::CHECKING.get(lang).to_owned(), Paint::Muted),
+            ("installing", _, n) => (words::installing(n, lang), Paint::Muted),
+            (_, Some(err), _) => (err.clone(), Paint::Waiting),
+            (_, None, 0) => (words::UP_TO_DATE.get(lang).to_owned(), Paint::Muted),
+            (_, None, n) => (words::updates_ready(n, lang), Paint::Text),
+        };
+        let text = self.add(
+            head,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        );
+        self.line(
+            text,
+            &said,
+            theme.text.body.with_weight(600).with_color(paint),
+        );
+        if updates.state == "idle" && !updates.updates.is_empty() {
+            let install = self.add(
+                head,
+                Style {
+                    height: Length::Px(40.0),
+                    padding: Insets::symmetric(0.0, 18.0),
+                    ..Style::default()
+                },
+                Kind::Button(Button::new(
+                    words::INSTALL_ALL.get(lang),
+                    ButtonKind::Primary,
+                    theme,
+                )),
+            );
+            self.targets.insert(install, Target::InstallUpdates);
+        }
+        if updates.updates.is_empty() {
+            return;
+        }
+        let list = self.add(
+            section,
+            Style {
+                padding: Insets::symmetric(6.0, 18.0),
+                ..fill_width(column(0.0))
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 16.0,
+                ..Look::default()
+            }),
+        );
+        for u in &updates.updates {
+            let line = self.add(
+                list,
+                Style {
+                    height: Length::Px(40.0),
+                    ..fill_width(row(16.0))
+                },
+                Kind::Box(Look::default()),
+            );
+            let name = self.add(
+                line,
+                Style {
+                    width: Length::Fill,
+                    ..Style::default()
+                },
+                Kind::Box(Look::default()),
+            );
+            self.line(name, &u.name, theme.text.body.with_weight(600));
+            let version = match &u.from {
+                Some(from) => format!("{from} → {}", u.to),
+                None => u.to.clone(),
+            };
+            self.line(line, &version, theme.text.label.with_color(Paint::Muted));
         }
     }
 

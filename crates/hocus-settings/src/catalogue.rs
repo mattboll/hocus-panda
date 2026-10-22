@@ -116,7 +116,10 @@ impl Page {
 
     /// Whether the page is built.
     pub fn available(self) -> bool {
-        matches!(self, Self::Appearance | Self::Keyboard | Self::Screens)
+        matches!(
+            self,
+            Self::Appearance | Self::Keyboard | Self::Screens | Self::Account
+        )
     }
 
     /// Its name in `hocus settings <page>`.
@@ -288,6 +291,10 @@ pub struct Context {
     pub outputs: Vec<OutputInfo>,
     /// Every connected screen, on or off, for the Screens page.
     pub screens: Vec<hocus_api::ScreenInfo>,
+    /// System updates, for the Account page.
+    pub updates: hocus_api::UpdatesInfo,
+    /// The account's name.
+    pub user: String,
 }
 
 /// A setting a search can lead to.

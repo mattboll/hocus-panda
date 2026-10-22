@@ -46,6 +46,7 @@ mod stats;
 mod surface;
 mod tray;
 mod tty;
+mod updates;
 mod wallpaper;
 mod watchdog;
 mod window_mode;
@@ -245,6 +246,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     leave::start(&event_loop.handle(), &mut state);
     screenshot::start(&event_loop.handle(), &mut state);
     recording::start(&event_loop.handle(), &mut state);
+    updates::start(&event_loop.handle(), &mut state);
     authorize::start(
         &event_loop.handle(),
         &mut state,

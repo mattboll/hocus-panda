@@ -228,6 +228,7 @@ impl State {
             tray: self.tray.apps.clone(),
             sharing: self.sharing(),
             todos: self.open_todos(),
+            updates: self.updates_line(),
         }
     }
 
@@ -255,6 +256,7 @@ impl State {
         self.refresh_recording();
         self.refresh_share();
         self.refresh_night();
+        self.refresh_updates();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -413,6 +415,7 @@ impl State {
             ShellAction::OpenLauncher => self.open_launcher(),
             ShellAction::StopSharing => self.stop_sharing(),
             ShellAction::TickTodo(index) => self.tick_note(index),
+            ShellAction::InstallUpdates => self.install_updates(),
             ShellAction::TrayActivate(key) => self.tray_activate(key),
             ShellAction::TrayMenu(key) => self.tray_menu(key),
             ShellAction::TrayChosen { key, id } => self.tray_chosen(key, id),

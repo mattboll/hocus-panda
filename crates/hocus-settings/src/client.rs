@@ -152,12 +152,18 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
             let Reply::Screens(screens) = requests.request(Request::Screens)? else {
                 anyhow::bail!("no screens");
             };
+            let updates = match requests.request(Request::Updates)? {
+                Reply::Updates(updates) => updates,
+                _ => Default::default(),
+            };
             let config = hocus_core::Config::parse(&info.toml)
                 .map_err(|e| anyhow::anyhow!("the configuration in effect: {e}"))?;
             let ctx = Context {
                 config,
                 outputs,
                 screens,
+                updates,
+                user: info.user.clone(),
             };
             let path = info.path.map(PathBuf::from);
             let sent = to_window.send(FromApi::Context(Box::new((ctx, info.accent, path))));
@@ -167,6 +173,7 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
         loop {
             match events.next_event()? {
                 Event::ConfigApplied
+                | Event::Updates { .. }
                 | Event::OutputAdded { .. }
                 | Event::OutputRemoved { .. }
                 | Event::OutputChanged { .. } => {
@@ -382,6 +389,22 @@ impl App {
                     }
                 }
                 // Off the window's thread: the compositor answers in its time.
+                Outcome::InstallUpdates => {
+                    let api = self.api.clone();
+                    let spawned =
+                        std::thread::Builder::new()
+                            .name("install".into())
+                            .spawn(move || {
+                                if let Err(err) = Api::connect(&api)
+                                    .and_then(|mut c| c.request(Request::InstallUpdates).map(drop))
+                                {
+                                    tracing::warn!(%err, "could not install the updates");
+                                }
+                            });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not install the updates");
+                    }
+                }
                 Outcome::Identify => {
                     let api = self.api.clone();
                     let spawned =

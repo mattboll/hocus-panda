@@ -77,6 +77,39 @@ pub const SHORTCUTS_NOTE: Words = Words::new(
 );
 pub const ACTION: Words = Words::new("Action", "Action");
 pub const KEYS: Words = Words::new("Keys", "Touches");
+pub const ACCOUNT: Words = Words::new("Account", "Compte");
+pub const UPDATES: Words = Words::new("Updates", "Mises à jour");
+pub const NO_MANAGER: Words = Words::new(
+    "No package manager known here: updates come as the system's do.",
+    "Aucun gestionnaire de paquets connu ici : les mises à jour viennent comme celles du système.",
+);
+pub const CHECKING: Words = Words::new("Looking for updates…", "Recherche de mises à jour…");
+pub const UP_TO_DATE: Words = Words::new("Everything is up to date.", "Tout est à jour.");
+pub const INSTALL_ALL: Words = Words::new("Install all", "Tout installer");
+
+pub fn version(version: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Hocuspanda {version}"),
+        Lang::Fr => format!("Hocuspanda {version}"),
+    }
+}
+
+pub fn updates_ready(count: usize, lang: Lang) -> String {
+    match (lang, count) {
+        (Lang::En, 1) => "1 update ready".into(),
+        (Lang::En, n) => format!("{n} updates ready"),
+        (Lang::Fr, 1) => "1 mise à jour prête".into(),
+        (Lang::Fr, n) => format!("{n} mises à jour prêtes"),
+    }
+}
+
+pub fn installing(count: usize, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Installing {count} updates…"),
+        Lang::Fr => format!("Installation de {count} mises à jour…"),
+    }
+}
+
 pub const CHANGE_HEADER: Words = Words::new("Change", "Modifier");
 pub const CHANGE: Words = Words::new("Change", "Changer");
 pub const CANCEL: Words = Words::new("Cancel", "Annuler");

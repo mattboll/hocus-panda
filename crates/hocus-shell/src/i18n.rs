@@ -343,6 +343,34 @@ impl Lang {
         self.pick("Screen or window", "Écran ou fenêtre")
     }
 
+    pub fn updates_installed(self) -> &'static str {
+        self.pick("Updates installed", "Mises à jour installées")
+    }
+
+    pub fn updates_failed(self) -> &'static str {
+        self.pick(
+            "The updates were not installed",
+            "Les mises à jour n’ont pas été installées",
+        )
+    }
+
+    pub fn updates_ready(self, count: usize) -> String {
+        match (self, count) {
+            (Self::En, 1) => "1 update ready".into(),
+            (Self::En, n) => format!("{n} updates ready"),
+            (Self::Fr, 1) => "1 mise à jour prête".into(),
+            (Self::Fr, n) => format!("{n} mises à jour prêtes"),
+        }
+    }
+
+    pub fn updates_installing(self) -> &'static str {
+        self.pick("Installing the updates…", "Installation des mises à jour…")
+    }
+
+    pub fn install(self) -> &'static str {
+        self.pick("Install", "Installer")
+    }
+
     pub fn notes_placeholder(self) -> &'static str {
         self.pick("A note, or - [ ] a to-do", "Une note, ou - [ ] une tâche")
     }
