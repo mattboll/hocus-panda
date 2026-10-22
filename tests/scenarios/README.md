@@ -47,6 +47,10 @@ Steps, one per `[[step]]` table:
 | `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
 | `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces? }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires) |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
+| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `keyboard`, `screens`) or its home, and waits for its window |
+| `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
+| `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
+| `expect_config_file = { contains?, lacks? }` | the configuration file holds these strings, or lacks them (the settings app writes it) |
 | `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
@@ -55,7 +59,7 @@ Steps, one per `[[step]]` table:
 | `scroll = 15` | scrolls the wheel, logical pixels (15 per notch, down positive) |
 | `key_down = "alt"`, `key_up = "alt"` | holds and lets go a key, for Alt+drag |
 | `key = 30` | presses and releases a key, by evdev code (`KEY_A` is 30) |
-| `keys = "super+shift+2"` | presses keys in order, releases them in reverse: `super`, `shift`, `ctrl`, `alt`, digits, letters (by position on a US keyboard), `enter`, `escape`, `tab`, `space`, `backspace`, `backtick`, arrows, or evdev codes |
+| `keys = "super+shift+2"` | presses keys in order, releases them in reverse: `super`, `shift`, `ctrl`, `alt`, digits, letters (by position on a US keyboard), `enter`, `escape`, `tab`, `space`, `backspace`, `backtick`, `comma`, arrows, or evdev codes |
 | `send = { app_id, output, desktop? }` | sends a window to an output: its desktop `desktop` (from 1), or the shown one |
 | `plug = { spec = "1920x1080+1280+0", name? }` | plugs an output; `name` brings back one unplugged before |
 | `unplug = "HEADLESS-2"` | unplugs an output |

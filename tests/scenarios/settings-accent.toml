@@ -1,0 +1,31 @@
+description = "On the Appearance page, choosing amber writes it to the file and the shell's accent turns amber without restart"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+# Mine.
+[appearance]
+theme = "dark"  # for the evening
+"""
+
+[[step]]
+open_settings = { page = "appearance" }
+
+[[step]]
+click_settings = "Accent Amber"
+
+[[step]]
+expect_config_file = { contains = ["# Mine.", "theme = \"dark\"  # for the evening", "accent = \"amber\""] }
+
+[[step]]
+expect_accent = { hue = [20, 45] }
+
+[[step]]
+expect_settings = { label = "Accent Amber", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-accent.png" }

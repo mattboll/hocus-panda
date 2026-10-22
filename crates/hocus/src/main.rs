@@ -26,6 +26,13 @@ enum Command {
         #[command(subcommand)]
         message: Message,
     },
+    /// Open the settings, on a page: `hocus settings keyboard`.
+    Settings {
+        /// `appearance`, `keyboard`, `screens`…; the home when left out.
+        page: Option<String>,
+        #[arg(long, value_name = "PATH")]
+        socket: Option<PathBuf>,
+    },
     /// Run scenario files on headless compositors: `hocus scenario run FILE…`.
     ///
     /// Done by `hocus-scenario`, next to this program or in PATH, which keeps
@@ -152,6 +159,15 @@ fn main() -> anyhow::Result<ExitCode> {
     match Args::parse().command {
         Command::Msg { socket, message } => msg(socket, message).map(|()| ExitCode::SUCCESS),
         Command::Scenario { args } => scenario(&args),
+        Command::Settings { page, socket } => {
+            let socket = socket.or_else(hocus_api::default_socket).context(
+                "no control socket: set HOCUS_SOCKET or WAYLAND_DISPLAY, or pass --socket",
+            )?;
+            let mut client = Client::connect(&socket)
+                .with_context(|| format!("could not connect to {}", socket.display()))?;
+            client.request(Request::OpenSettings { page })?;
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 

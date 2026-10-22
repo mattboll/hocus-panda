@@ -130,7 +130,12 @@ impl State {
         if let Ok(accent) = a.accent.parse::<Accent>() {
             theme = theme.with_accent(accent);
         }
+        if a.high_contrast {
+            theme = theme.with_high_contrast();
+        }
         theme
+            .with_text_size(a.text_size)
+            .with_reduced_motion(a.reduced_motion)
     }
 
     /// After each dispatch: asks for the wallpapers that changed, and gives

@@ -831,6 +831,10 @@ impl Tree {
 
     /// Moves a property to `to` from now, along `curve`.
     pub fn animate(&mut self, id: NodeId, property: Property, to: f32, curve: Curve) {
+        if self.theme.reduced_motion {
+            self.jump(id, property, to);
+            return;
+        }
         let now = self.now;
         if let Some(node) = self.node_mut(id) {
             let value = match property {

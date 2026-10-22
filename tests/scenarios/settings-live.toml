@@ -1,0 +1,29 @@
+description = "The settings follow the file: a theme written by hand shows on the open Appearance page"
+outputs = ["1280x800"]
+
+[[step]]
+config = ""
+
+[[step]]
+open_settings = { page = "appearance" }
+
+[[step]]
+expect_settings = { label = "Dark", selected = true }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+expect_settings = { label = "Light", selected = true }
+
+[[step]]
+expect_settings = { label = "Dark", selected = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-live.png" }

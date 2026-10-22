@@ -15,3 +15,4 @@ by silently editing the old one.
 | [0007](0007-widget-column-right.md) | The widget panel is a column on the right | Accepted |
 | [0008](0008-ai-testable-by-design.md) | Every feature is testable by an AI, without a screen | Accepted |
 | [0009](0009-ui-rendering-stack.md) | hocus-ui draws on the CPU with vello_cpu and parley | Accepted |
+| [0010](0010-settings-as-a-client.md) | The settings app is a Wayland client drawn with hocus-ui | Accepted |

@@ -24,6 +24,7 @@ mod notify;
 mod output_spec;
 mod quick;
 mod scene;
+mod settings;
 mod shell;
 mod socket;
 mod state;
@@ -216,6 +217,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
     }
+    state.config_path = options.config.clone();
     if let Some(path) = &options.config {
         state.config_watch = Some(config_watch::start(
             &event_loop.handle(),

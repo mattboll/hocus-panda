@@ -103,6 +103,16 @@ pub enum Step {
     ClickUi(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
+    /// Starts the settings app on a page (or its home), and waits for its
+    /// window: `{ page? }`.
+    OpenSettings(OpenSettings),
+    /// The settings window shows an element: `{ label, focused?,
+    /// selected?, shown? }`.
+    ExpectSettings(ExpectSettings),
+    /// Clicks the element of the settings window with this label.
+    ClickSettings(String),
+    /// The configuration file holds these strings, or lacks them.
+    ExpectConfigFile(ExpectConfigFile),
     /// Asks the window of this app id to close, and waits until it is gone.
     Close(String),
     PointerMove([f64; 2]),
@@ -241,6 +251,34 @@ pub struct ExpectUi {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct OpenSettings {
+    pub page: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectSettings {
+    pub label: String,
+    /// Has the keyboard.
+    pub focused: Option<bool>,
+    /// On, or the current choice.
+    pub selected: Option<bool>,
+    /// `false` checks that no element has this label.
+    #[serde(default = "yes")]
+    pub shown: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectConfigFile {
+    #[serde(default)]
+    pub contains: Vec<String>,
+    #[serde(default)]
+    pub lacks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Clipboard {
     pub app_id: String,
     pub text: String,
@@ -349,6 +387,10 @@ impl fmt::Display for Step {
             Self::Open(open) => write!(f, "open {}", open.app_id),
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
+            Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
+            Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
+            Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
+            Self::ExpectConfigFile(_) => write!(f, "expect_config_file"),
             Self::Type(text) => write!(f, "type {text:?}"),
             Self::ExpectAccent(e) => write!(f, "expect_accent {:?}", e.hue),
             Self::ExpectRuntimeFile(e) => write!(f, "expect_runtime_file {}", e.name),
@@ -477,6 +519,7 @@ impl Scenario {
             compositor,
             clients: Vec::new(),
             x11_clients: Vec::new(),
+            settings: None,
             bus,
             events: Vec::new(),
         };
@@ -495,6 +538,7 @@ struct Run<'a> {
     compositor: Headless,
     clients: Vec<TestClient>,
     x11_clients: Vec<X11Client>,
+    settings: Option<hocus_settings::client::Running>,
     bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
@@ -508,6 +552,10 @@ impl Run<'_> {
             Step::Copy(copy) => self.copy(copy),
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
+            Step::OpenSettings(open) => self.open_settings(open),
+            Step::ExpectSettings(expected) => self.expect_settings(expected),
+            Step::ClickSettings(label) => self.click_settings(label),
+            Step::ExpectConfigFile(expected) => self.expect_config_file(expected),
             Step::Type(text) => self.type_text(text),
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
             Step::NotifySend(args) => self.notify_send(args),
@@ -977,6 +1025,137 @@ impl Run<'_> {
         }
     }
 
+    fn open_settings(&mut self, open: &OpenSettings) -> anyhow::Result<()> {
+        let wayland = self.compositor.socket_path().to_path_buf();
+        let running = hocus_settings::client::spawn(hocus_settings::client::Options {
+            api: hocus_api::socket_for(&wayland),
+            wayland,
+            page: open
+                .page
+                .as_deref()
+                .map(|p| {
+                    hocus_settings::catalogue::Page::from_slug(p)
+                        .with_context(|| format!("no settings page {p}"))
+                })
+                .transpose()?,
+            lang: hocus_shell::Lang::En,
+            app_id: "hocus-settings".into(),
+        })?;
+        self.settings = Some(running);
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let shown = self.find("hocus-settings")?.is_some()
+                && self.settings.as_ref().is_some_and(|s| s.access().is_some());
+            if shown {
+                return Ok(());
+            }
+            if let Some(s) = self.settings.take_if(|s| s.is_finished()) {
+                return Err(s
+                    .join()
+                    .err()
+                    .unwrap_or_else(|| anyhow::anyhow!("the settings app stopped")));
+            }
+            anyhow::ensure!(Instant::now() < deadline, "the settings window never came");
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+    }
+
+    /// The settings window's element with `label`, and the window's corner.
+    fn settings_node(
+        &mut self,
+        label: &str,
+    ) -> anyhow::Result<(Option<hocus_ui::AccessNode>, hocus_ui::AccessNode)> {
+        fn find(node: &hocus_ui::AccessNode, label: &str) -> Option<hocus_ui::AccessNode> {
+            if node.label.as_deref() == Some(label) {
+                return Some(node.clone());
+            }
+            node.children.iter().find_map(|c| find(c, label))
+        }
+        let access = self
+            .settings
+            .as_ref()
+            .and_then(|s| s.access())
+            .context("no settings window; open_settings first")?;
+        Ok((find(&access, label), access))
+    }
+
+    /// The settings app redraws after each change: it gets a moment.
+    fn expect_settings(&mut self, expected: &ExpectSettings) -> anyhow::Result<()> {
+        let deadline = Instant::now() + SETTLE_TIMEOUT.max(Duration::from_secs(2));
+        loop {
+            let (node, all) = self.settings_node(&expected.label)?;
+            let wrong = match (&node, expected.shown) {
+                (None, true) => Some("not shown".to_owned()),
+                (Some(_), false) => Some("shown".to_owned()),
+                (None, false) => None,
+                (Some(n), true) => {
+                    let mut wrong = Vec::new();
+                    if expected.focused.is_some_and(|f| f != n.focused) {
+                        wrong.push(format!("focused {}", n.focused));
+                    }
+                    if expected.selected.is_some_and(|s| s != n.selected) {
+                        wrong.push(format!("selected {}", n.selected));
+                    }
+                    (!wrong.is_empty()).then(|| wrong.join(", "))
+                }
+            };
+            let Some(wrong) = wrong else {
+                return Ok(());
+            };
+            if Instant::now() > deadline {
+                anyhow::bail!(
+                    "{:?}: {wrong}; the window shows:\n{}",
+                    expected.label,
+                    all.dump()
+                );
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    fn click_settings(&mut self, label: &str) -> anyhow::Result<()> {
+        let (node, all) = self.settings_node(label)?;
+        let node =
+            node.with_context(|| format!("no {label:?}; the window shows:\n{}", all.dump()))?;
+        let window = self.find("hocus-settings")?.context("no settings window")?;
+        let g = window.geometry;
+        let (x, y) = (
+            f64::from(g.x) + f64::from(node.rect.x + node.rect.w / 2.0),
+            f64::from(g.y) + f64::from(node.rect.y + node.rect.h / 2.0),
+        );
+        self.request(Request::PointerMove { x, y })?;
+        for pressed in [true, false] {
+            self.request(Request::PointerButton {
+                button: Button::Left,
+                pressed,
+            })?;
+        }
+        // The app gets the click.
+        let until = Instant::now() + Duration::from_millis(100);
+        while Instant::now() < until {
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        Ok(())
+    }
+
+    /// The settings app writes the file from its own thread: it gets a
+    /// moment.
+    fn expect_config_file(&mut self, expected: &ExpectConfigFile) -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let text = std::fs::read_to_string(self.compositor.config_path()).unwrap_or_default();
+            let ok = expected.contains.iter().all(|c| text.contains(c.as_str()))
+                && expected.lacks.iter().all(|l| !text.contains(l.as_str()));
+            if ok {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                anyhow::bail!("the configuration file is:\n{text}");
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
     fn click_ui(&mut self, label: &str) -> anyhow::Result<()> {
         let nodes = self.ui()?;
         let node = nodes
@@ -1364,6 +1543,7 @@ fn key_code(name: &str) -> Option<u32> {
         "escape" | "esc" => 1,
         "tab" => 15,
         "backtick" | "grave" => 41,
+        "comma" => 51,
         "space" => 57,
         "backspace" => 14,
         "left" => 105,

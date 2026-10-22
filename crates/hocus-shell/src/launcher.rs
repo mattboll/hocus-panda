@@ -47,6 +47,8 @@ pub enum Choice {
     Open(String),
     /// Something to show over the whole screen.
     Show(Showcase),
+    /// The settings app.
+    Settings,
 }
 
 /// What the launcher can show over a whole screen.

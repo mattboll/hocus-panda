@@ -1,0 +1,36 @@
+description = "In the settings, typing contrast finds the High contrast switch; Enter opens Appearance with it focused, and switching it on writes the file and shows at once"
+outputs = ["1280x800"]
+
+[[step]]
+config = ""
+
+[[step]]
+open_settings = {}
+
+[[step]]
+type = "contrast"
+
+[[step]]
+expect_settings = { label = "High contrast" }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_settings = { label = "High contrast", focused = true, selected = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-search.png" }
+
+[[step]]
+click_settings = "High contrast"
+
+[[step]]
+expect_config_file = { contains = ["high_contrast = true"] }
+
+# Applied by the compositor, then shown by the app.
+[[step]]
+expect_settings = { label = "High contrast", selected = true }
