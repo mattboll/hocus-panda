@@ -212,6 +212,16 @@ pub enum Step {
     Swipe(SwipeStep),
     /// The CalDAV server goes, as the network would.
     CaldavStop(bool),
+    /// A herdr for the test (never the user's), its socket in the
+    /// compositor's runtime directory: `{ agents = [{ name, status }] }`;
+    /// the socket is `{herdr}` in later configuration.
+    Herdr(HerdrStep),
+    /// An agent's status changes in it, once the compositor follows that
+    /// agent: `{ agent, status, label? }`.
+    HerdrStatus(HerdrStatus),
+    /// It was asked this: `agent.focus refacto`, `agent.send_keys refacto
+    /// enter`.
+    ExpectHerdr(String),
     /// The settings keep a calendar account's password: `{ id, password }`.
     CalendarPassword(CalendarPassword),
     /// The calendars as the session knows them, once so: `{ events?,
@@ -481,6 +491,29 @@ pub struct TrayAttention {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct HerdrStep {
+    pub agents: Vec<HerdrAgent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HerdrAgent {
+    pub name: String,
+    /// `working`, `blocked`, `done`, `idle`.
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HerdrStatus {
+    pub agent: String,
+    pub status: String,
+    /// What its integration says with it: the question, while blocked.
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectTray {
     pub title: String,
     pub asked: String,
@@ -739,6 +772,9 @@ impl fmt::Display for Step {
             Self::Swipe(s) => write!(f, "swipe {} by {:?}", s.fingers, s.by),
             Self::Caldav(c) => write!(f, "caldav {}", c.dir.display()),
             Self::CaldavStop(_) => write!(f, "caldav_stop"),
+            Self::Herdr(h) => write!(f, "herdr with {} agents", h.agents.len()),
+            Self::HerdrStatus(h) => write!(f, "herdr_status {} {}", h.agent, h.status),
+            Self::ExpectHerdr(asked) => write!(f, "expect_herdr {asked:?}"),
             Self::CalendarPassword(p) => write!(f, "calendar_password {}", p.id),
             Self::ExpectCalendars(e) => write!(f, "expect_calendars {e:?}"),
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
@@ -920,6 +956,7 @@ impl Scenario {
             asking: None,
             events: Vec::new(),
             caldav: None,
+            herdr: None,
         };
         run.request(Request::Subscribe)?;
         for (n, step) in self.steps.iter().enumerate() {
@@ -958,6 +995,7 @@ struct Run<'a> {
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
     caldav: Option<crate::caldav::Server>,
+    herdr: Option<crate::herdr::Server>,
 }
 
 impl Run<'_> {
@@ -1287,6 +1325,50 @@ impl Run<'_> {
                 self.caldav = None;
                 Ok(())
             }
+            Step::Herdr(h) => {
+                let agents: Vec<_> = h
+                    .agents
+                    .iter()
+                    .map(|a| (a.name.clone(), a.status.clone()))
+                    .collect();
+                let dir = self.compositor.runtime_dir().to_path_buf();
+                self.herdr = Some(crate::herdr::Server::start(&dir, &agents)?);
+                Ok(())
+            }
+            Step::HerdrStatus(h) => {
+                let herdr = self.herdr.as_ref().context("no herdr step before")?;
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !herdr.followed(&h.agent) {
+                    anyhow::ensure!(
+                        Instant::now() < deadline,
+                        "the compositor never followed {:?}",
+                        h.agent
+                    );
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+                herdr.set_status(&h.agent, &h.status, h.label.as_deref())?;
+                // It reaches the loop before the next step, even on a
+                // loaded machine.
+                let until = Instant::now() + Duration::from_millis(200);
+                while Instant::now() < until {
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                Ok(())
+            }
+            Step::ExpectHerdr(wanted) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let asked = self.herdr.as_ref().context("no herdr step before")?.asked();
+                    if asked.contains(wanted) {
+                        return Ok(());
+                    }
+                    anyhow::ensure!(
+                        Instant::now() < deadline,
+                        "herdr was asked {asked:?}, not {wanted:?}"
+                    );
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
             Step::CalendarPassword(p) => {
                 let id = match &self.caldav {
                     Some(server) => p.id.replace("{caldav}", server.url()),
@@ -1564,6 +1646,9 @@ impl Run<'_> {
                 text = text.replace("{runtime_dir}", &runtime);
                 if let Some(server) = &self.caldav {
                     text = text.replace("{caldav}", server.url());
+                }
+                if let Some(herdr) = &self.herdr {
+                    text = text.replace("{herdr}", &herdr.path().to_string_lossy());
                 }
                 if let Some(client) = &self.options.test_client {
                     text = text.replace("{test_client}", &client.to_string_lossy());

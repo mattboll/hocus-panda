@@ -211,6 +211,19 @@ sending the clipboard or files (`hocus msg send-to-phone`) and mounting
 its files each run on a thread of their own, so a phone slow to answer
 holds nothing.
 
+Coding agents (#41) come from herdr's API socket (JSON lines): a worker
+thread lists the agents, follows each one's status through a subscription,
+and lists them again when panes come or go; another carries out focusing
+an agent and pressing keys in its terminal (Enter to accept what it asks,
+Escape to refuse), each request on a connection of its own. The column
+shows the active ones with a panda each and sums up the others; one
+waiting for an answer asks in a toast as well. A rest shorter than two
+seconds is held back on the loop's clock, so an agent flickering between
+work and rest does not make the column flicker. Showing an agent also
+brings forward the terminal herdr's client runs in, found by its
+processes. Only the session looks for herdr's default socket; nested or in
+tests, only a socket the configuration names is used.
+
 Notes (#79) are one Markdown file, read and written whole on worker
 threads (written to a new file, then renamed over the old one); lines the
 notes do not understand are kept as they were. The file is read again each

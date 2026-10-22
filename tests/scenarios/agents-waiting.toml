@@ -1,0 +1,97 @@
+description = "herdr's agents in the column: one switching to blocked shows waiting, its panda holding out its hat, and a toast offers replies that go back to herdr"
+outputs = ["1600x1000"]
+shell = true
+
+# A herdr of the test's own, never the user's.
+[[step]]
+herdr = { agents = [
+  { name = "refacto", status = "working" },
+  { name = "tests", status = "working" },
+  { name = "docs", status = "idle" },
+  { name = "release-notes", status = "idle" },
+  { name = "ci-cache", status = "idle" },
+] }
+
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+"""
+
+[[step]]
+expect_ui = { label = "refacto · Works" }
+
+[[step]]
+expect_ui = { label = "2 at work" }
+
+[[step]]
+expect_ui = { label = "3 others at rest in herdr" }
+
+# It asks: shown waiting at once, first, its panda holding out its hat.
+[[step]]
+herdr_status = { agent = "refacto", status = "blocked", label = "Push the branch to origin?" }
+
+[[step]]
+expect_ui = { label = "1 waits for an answer" }
+
+[[step]]
+expect_ui = { label = "refacto · Waits for an answer: “Push the branch to origin?”" }
+
+[[step]]
+expect_ui = { label = "Panda waiting for an answer" }
+
+[[step]]
+expect_ui = { label = "Yes to refacto" }
+
+# And a toast asks too, until answered.
+[[step]]
+expect_ui = { label = "herdr · refacto" }
+
+[[step]]
+expect_ui = { label = "Open in herdr" }
+
+# Once the panda has moved its moment and holds still.
+[[step]]
+advance_ms = 4500
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agents-waiting.png" }
+
+# Yes in the toast: Enter, as herdr names it, in its terminal.
+[[step]]
+click_ui = "Yes"
+
+[[step]]
+expect_herdr = "agent.send_keys refacto enter"
+
+[[step]]
+expect_ui = { label = "herdr · refacto", shown = false }
+
+[[step]]
+herdr_status = { agent = "refacto", status = "working" }
+
+[[step]]
+expect_ui = { label = "2 at work" }
+
+# It asks again; No from the column this time.
+[[step]]
+herdr_status = { agent = "refacto", status = "blocked" }
+
+[[step]]
+expect_ui = { label = "refacto · Waits for an answer" }
+
+[[step]]
+click_ui = "No to refacto"
+
+[[step]]
+expect_herdr = "agent.send_keys refacto esc"
+
+[[step]]
+expect_ui = { label = "herdr · refacto", shown = false }
+
+# A click on an agent shows it in herdr.
+[[step]]
+click_ui = "tests · Works"
+
+[[step]]
+expect_herdr = "agent.focus tests"

@@ -261,7 +261,7 @@ The column on the right of the screen is the chosen form (see
 - Document search: text, HTML, PDF, office files, OCR of screenshots; words + meaning; secrets excluded (never index `~/.ssh`, keyrings, password stores…); paused on battery
 - AI answers inside the command field rather than in a separate window
 - Better semantic search in French
-- Coding agents (agent managers such as herdr, any Claude Code session): list, preview, notifications with reply buttons, halo, jump to the agent that waits
+- Coding agents (agent managers such as herdr, any Claude Code session): list with a panda per agent, preview, notifications with reply buttons, halo, jump to the agent that waits
 
 ## 18. Calendar
 
