@@ -74,6 +74,13 @@ pub enum Action {
     Palette,
     /// Starts a screen recording (#70), or stops it.
     Record,
+    /// Everything but the focused window dims (#78), or no longer.
+    FocusMode,
+    /// Night light on or off until the schedule says otherwise (#78).
+    NightLight,
+    /// The magnifier, a step closer or further (#78).
+    ZoomIn,
+    ZoomOut,
     /// A screenshot (#69), after `delay` seconds.
     Screenshot {
         mode: ScreenshotMode,
@@ -171,6 +178,10 @@ impl fmt::Display for Action {
             Self::Emoji => write!(f, "emoji"),
             Self::Palette => write!(f, "palette"),
             Self::Record => write!(f, "record"),
+            Self::FocusMode => write!(f, "focus-mode"),
+            Self::NightLight => write!(f, "night-light"),
+            Self::ZoomIn => write!(f, "zoom-in"),
+            Self::ZoomOut => write!(f, "zoom-out"),
             Self::Screenshot { mode, delay: 0 } => write!(f, "screenshot {mode}"),
             Self::Screenshot { mode, delay } => write!(f, "screenshot {mode} {delay}"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
@@ -244,6 +255,10 @@ impl FromStr for Action {
             "emoji" => bare(Self::Emoji),
             "palette" => bare(Self::Palette),
             "record" => bare(Self::Record),
+            "focus-mode" => bare(Self::FocusMode),
+            "night-light" => bare(Self::NightLight),
+            "zoom-in" => bare(Self::ZoomIn),
+            "zoom-out" => bare(Self::ZoomOut),
             "screenshot" => {
                 let mut words = rest.split_whitespace();
                 let mode = words.next().unwrap_or("screen").parse()?;
@@ -386,6 +401,9 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Period", Action::Emoji),
         ("Super+P", Action::Palette),
         ("Super+Shift+R", Action::Record),
+        ("Super+F", Action::FocusMode),
+        ("Super+Equal", Action::ZoomIn),
+        ("Super+Minus", Action::ZoomOut),
         ("Print", Action::screenshot(ScreenshotMode::Screen)),
         ("Super+Print", Action::screenshot(ScreenshotMode::All)),
         ("Shift+Print", Action::screenshot(ScreenshotMode::Region)),

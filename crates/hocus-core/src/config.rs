@@ -23,6 +23,7 @@ pub struct Config {
     pub session: SessionConfig,
     pub screenshots: Screenshots,
     pub recording: Recording,
+    pub night_light: NightLight,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -360,6 +361,47 @@ impl Default for Screenshots {
     }
 }
 
+/// Night light (#78): warmer colours in the evening.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NightLight {
+    pub enabled: bool,
+    /// `fixed` (from `from` to `to`) or `sunset` (from sunset to sunrise
+    /// where `latitude` and `longitude` are, else as `fixed`).
+    pub schedule: String,
+    /// `HH:MM`, the user's time.
+    pub from: String,
+    pub to: String,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    /// Kelvin at night, 1500 to 6500.
+    pub temperature: u32,
+    /// Outputs it leaves alone, by name.
+    pub except: Vec<String>,
+}
+
+impl Default for NightLight {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            schedule: "fixed".into(),
+            from: "21:00".into(),
+            to: "07:00".into(),
+            latitude: None,
+            longitude: None,
+            temperature: 3500,
+            except: Vec::new(),
+        }
+    }
+}
+
+/// `HH:MM` as minutes after midnight.
+pub fn parse_clock(s: &str) -> Option<u32> {
+    let (h, m) = s.trim().split_once(':')?;
+    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60).then_some(h * 60 + m)
+}
+
 /// Screen recordings (#70).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -588,6 +630,20 @@ impl Config {
         if !["ask", "always", "never"].contains(&self.session.restore.as_str()) {
             let r = format!("{:?}", self.session.restore);
             return out_of_range("session.restore", r, "ask, always, never");
+        }
+        let n = &self.night_light;
+        if !(1500..=6500).contains(&n.temperature) {
+            let t = n.temperature.to_string();
+            return out_of_range("night_light.temperature", t, "1500 to 6500");
+        }
+        if !["fixed", "sunset"].contains(&n.schedule.as_str()) {
+            let s = format!("{:?}", n.schedule);
+            return out_of_range("night_light.schedule", s, "fixed, sunset");
+        }
+        for (key, value) in [("night_light.from", &n.from), ("night_light.to", &n.to)] {
+            if parse_clock(value).is_none() {
+                return out_of_range(key, format!("{value:?}"), "HH:MM");
+            }
         }
         if !(10..=60).contains(&self.recording.fps) {
             let f = self.recording.fps.to_string();

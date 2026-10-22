@@ -69,6 +69,16 @@ copy = true                # onto the clipboard (as PNG)
 ocr = "tesseract"          # reads the text for "Copy the text", when installed
 annotate = "hocus-annotate" # the toast's "Annotate", given the capture's file
 
+[night_light]              # warmer colours in the evening (quick settings' tile)
+enabled = false
+schedule = "fixed"         # or "sunset": from sunset to sunrise where you are
+from = "21:00"             # fixed hours, your time
+to = "07:00"
+latitude = 48.85           # for "sunset"
+longitude = 2.35
+temperature = 3500         # kelvin at night, 1500 to 6500
+except = []                # outputs it leaves alone, by name
+
 [recording]                # Super+Shift+R
 folder = ""                # empty: Screencasts in the videos folder
 fps = 30                   # 10 to 60
@@ -183,6 +193,9 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `clipboard-history` | the clipboard history in the launcher's card: newest first, Enter pastes into the focused application, Tab pins, Delete forgets |
 | `palette` | the action palette: every action with its keys and what it acts on, recent ones first; searched by name (English or French) or by keys, typed (`Maj+S`) or pressed; Enter runs it on the window that had the focus, Tab opens the settings to give it keys |
 | `emoji` | the emoji picker: searched in English and French, recent ones first, Tab changes the skin tone, Enter types it into the focused application |
+| `focus-mode` | everything but the focused window dims; again, it lifts |
+| `night-light` | night light on or off, until the schedule changes |
+| `zoom-in`, `zoom-out` | the magnifier, around the pointer, up to 8×; back to 1 it is off (also Super+Alt+wheel) |
 | `record` | records the screen: a region drawn, a window clicked, or Enter for the screen under the pointer; after a countdown, a red frame marks it and a bar shows the time, pause and stop; again to stop. Saved as MP4, then a toast offers to open or delete it |
 | `screenshot MODE [SECONDS]` | `screen` (under the pointer), `all` (every screen, each at its own pixel density), `window` (the one clicked next), `region` (drawn with the pointer, its size shown; Escape cancels), after a delay of up to 60 s: copied and saved, then a toast offers to open, delete or copy its text |
 | `suspend`, `hibernate` | sleeps now, locked first; hibernating only where the machine can |
@@ -219,6 +232,8 @@ Defaults:
 | Super+Print | `screenshot all` |
 | Shift+Print, Super+Shift+S | `screenshot region` |
 | Super+Shift+R | `record` |
+| Super+F | `focus-mode` |
+| Super+Equal, Super+Minus | `zoom-in`, `zoom-out` |
 | Ctrl+Print | `screenshot window` |
 | Super+A | `quick-settings` |
 | Super+Backtick | `dropdown` |

@@ -471,12 +471,19 @@ impl State {
         if self.locked() {
             return false;
         }
-        let logo = self
+        let (logo, alt) = self
             .seat
             .get_keyboard()
-            .is_some_and(|k| k.modifier_state().logo);
+            .map(|k| k.modifier_state())
+            .map_or((false, false), |m| (m.logo, m.alt));
         if !logo || dy == 0.0 {
             return false;
+        }
+        // Super+Alt+wheel: the magnifier, closer upwards.
+        if alt {
+            let notches = (-dy / 15.0).clamp(-4.0, 4.0);
+            self.set_zoom(self.comfort.zoom * 1.1f64.powf(notches));
+            return true;
         }
         let Some(pointer) = self.seat.get_pointer() else {
             return false;

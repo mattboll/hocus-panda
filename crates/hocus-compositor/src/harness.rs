@@ -275,6 +275,7 @@ impl Headless {
         self.app.serve_captures();
         self.app.serve_screenshots();
         self.app.serve_recording();
+        self.app.apply_gamma();
         self.app.settle_outputs();
         self.app.state.display_handle.flush_clients()?;
         Ok(())

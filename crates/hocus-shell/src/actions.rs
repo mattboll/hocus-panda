@@ -223,6 +223,17 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             EVERYWHERE,
         ),
         A::Emoji => (w("Emoji", "Emoji"), G::System, EVERYWHERE),
+        A::FocusMode => (
+            w(
+                "Focus: dim everything else",
+                "Concentration : assombrir le reste",
+            ),
+            G::Windows,
+            ACTIVE_WINDOW,
+        ),
+        A::NightLight => (w("Night light", "Lumière nocturne"), G::System, ALL_SCREENS),
+        A::ZoomIn => (w("Zoom in", "Agrandir (loupe)"), G::Screens, POINTER_SCREEN),
+        A::ZoomOut => (w("Zoom out", "Réduire (loupe)"), G::Screens, POINTER_SCREEN),
         A::Record => (
             w(
                 "Record the screen, or stop",
@@ -339,6 +350,7 @@ pub fn catalog() -> Vec<Action> {
         .map(Action::screenshot),
     );
     all.push(A::Record);
+    all.extend([A::FocusMode, A::NightLight, A::ZoomIn, A::ZoomOut]);
     all.extend([
         A::Lock,
         A::Suspend,

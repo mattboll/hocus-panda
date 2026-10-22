@@ -114,6 +114,14 @@ owned, to a worker thread that feeds an encoder process (ffmpeg, VA-API when
 the card has it) at a steady rate and paints click rings into it. A frame
 the worker has no room for is dropped; the loop never waits for it.
 
+Comfort over the whole screen (#78): focus mode puts a veil just under the
+focused window; the magnifier wraps every element of an output's scene in a
+rescale around the pointer, so the pointer's point stays put and input needs
+no change; night light warms each screen's gamma ramp (the display
+engine's colour pipeline, on a TTY), easing over three seconds, so pictures
+taken of the screen keep their true colours. Its schedule is fixed hours or
+sunset to sunrise (NOAA's approximation) where the user says they are.
+
 ## Rendering
 
 - Compositing: smithay's GLES renderer with damage tracking.

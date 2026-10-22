@@ -67,6 +67,7 @@ Steps, one per `[[step]]` table:
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
+| `expect_budget = { max_ms = 50 }` | every frame drawn so far took at most that long, and no loop handler went over its budget |
 | `restart = true` | the compositor goes as a crash would, and a new one starts on the same configuration and state; clients go with it |
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |
 | `open_annotate = "{last_screenshot}"` | opens the annotation window on a capture (`{last_screenshot}` is the last one saved, `{runtime_dir}` the compositor's temporary directory), and waits for it |
@@ -85,7 +86,7 @@ Steps, one per `[[step]]` table:
 | `plug = { spec = "1920x1080+1280+0", name? }` | plugs an output; `name` brings back one unplugged before |
 | `unplug = "HEADLESS-2"` | unplugs an output |
 | `randr = { output, enabled?, mode?, scale?, position? }` | sets a screen through wlr-output-management, as wlr-randr would (`mode` is `WIDTHxHEIGHT`), and checks it succeeded |
-| `expect_output = { name, geometry? = [x, y, w, h], pixels? = [w, h], scale?, shown? }` | checks an output's logical geometry, pixel size and scale; `shown = false` checks it is off or gone |
+| `expect_output = { name, geometry? = [x, y, w, h], pixels? = [w, h], scale?, temperature? = [low, high], shown? }` | checks an output's logical geometry, pixel size, scale and night light (kelvin); `shown = false` checks it is off or gone |
 | `stall_output = "HEADLESS-1"` | the output stops presenting its frames, as a stuck screen would, until the compositor recovers it |
 | `set_state = { app_id, state = "maximized" }` | maximizes, makes fullscreen, minimizes or restores (`normal`) a window |
 | `expect_accent = { hue = [15, 45] }` | the shell's accent in effect has a hue in that range (degrees) |
