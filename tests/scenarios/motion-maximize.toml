@@ -1,0 +1,27 @@
+description = "A window maximizing morphs from its place to the new one, its old picture fading over it, sampled partway; then it rests maximized"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+open = { app_id = "editor", size = [500, 340], color = "#3399ff" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+advance_ms = 80
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "motion-morph.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_idle = { for_ms = 5000 }

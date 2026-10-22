@@ -9,8 +9,10 @@ use std::time::Duration;
 
 use hocus_ui::motion::{Animated, Curve, Easing, SMALL, STANDARD};
 
-/// Where an opening window starts from.
+/// Where an opening window starts from, and where a closing one goes.
 const OPEN_SCALE: f32 = 0.96;
+/// A dialog appears from its parent with a shorter scale.
+const DIALOG_SCALE: f32 = 0.92;
 
 /// A window's opacity and scale, as they move.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,20 +40,43 @@ impl WindowMotion {
     /// out-cubic over the standard duration; with reduced motion, a short
     /// fade only.
     pub fn opening(now: Duration, reduced: bool) -> Self {
+        Self::appearing(now, reduced, OPEN_SCALE, STANDARD)
+    }
+
+    /// A dialog: from its parent, smaller and quicker.
+    pub fn dialog(now: Duration, reduced: bool) -> Self {
+        Self::appearing(now, reduced, DIALOG_SCALE, SMALL)
+    }
+
+    fn appearing(now: Duration, reduced: bool, from: f32, duration: Duration) -> Self {
         let mut motion = Self {
             opacity: Animated::new(0.0),
-            scale: Animated::new(if reduced { 1.0 } else { OPEN_SCALE }),
+            scale: Animated::new(if reduced { 1.0 } else { from }),
         };
         let (curve, duration) = if reduced {
             (Easing::Linear, SMALL)
         } else {
-            (Easing::OutCubic, STANDARD)
+            (Easing::OutCubic, duration)
         };
         motion.opacity.set(1.0, Curve::Ease(curve, duration), now);
         if !reduced {
             motion.scale.set(1.0, Curve::Ease(curve, duration), now);
         }
         motion
+    }
+
+    /// Closing (docs/design/motion.md): it dissolves, shrinking back to
+    /// 96 %, in-cubic, from wherever it is now; with reduced motion, a short
+    /// fade only.
+    pub fn closing(&mut self, now: Duration, reduced: bool) {
+        if reduced {
+            self.opacity
+                .set(0.0, Curve::Ease(Easing::Linear, SMALL), now);
+            return;
+        }
+        let curve = Curve::Ease(Easing::InCubic, STANDARD);
+        self.opacity.set(0.0, curve, now);
+        self.scale.set(OPEN_SCALE, curve, now);
     }
 
     /// Fades to `opacity` from wherever it is now.
@@ -73,21 +98,27 @@ impl WindowMotion {
 impl crate::State {
     /// Whether any window is moving at `now`.
     pub fn animating(&self, now: Duration) -> bool {
-        self.windows.values().any(|m| m.motion.is_running(now))
+        self.windows.values().any(|m| m.motion.is_running(now)) || self.snapshots_moving(now)
     }
 
-    /// A window's motion as it opens, or none in tests that ask for
-    /// instant motion.
-    pub fn opening_motion(&self) -> WindowMotion {
+    /// A window's motion as it opens (a dialog's when it has a parent), or
+    /// none in tests that ask for instant motion.
+    pub fn opening_motion(&self, dialog: bool) -> WindowMotion {
         if self.instant_motion {
             return WindowMotion::still();
         }
-        WindowMotion::opening(self.clock.now(), self.config.appearance.reduced_motion)
+        let (now, reduced) = (self.clock.now(), self.config.appearance.reduced_motion);
+        if dialog {
+            WindowMotion::dialog(now, reduced)
+        } else {
+            WindowMotion::opening(now, reduced)
+        }
     }
 
     /// After each dispatch: frames keep coming while something moves, and
-    /// stop when it is still.
+    /// stop when it is still; pictures done moving go.
     pub fn refresh_motion(&mut self) {
+        self.settle_snapshots();
         if self.animating(self.clock.now()) {
             self.needs_redraw = true;
         }
@@ -133,5 +164,24 @@ mod tests {
         );
         assert!(m.at(ms(200)).0 < before, "on its way back");
         assert_eq!(m.at(ms(375)).0, 0.0);
+    }
+
+    #[test]
+    fn closing_halfway_through_opening_dissolves_from_there() {
+        let mut m = WindowMotion::opening(ms(0), false);
+        let (alpha, scale) = m.at(ms(100));
+        m.closing(ms(100), false);
+        assert_eq!(m.at(ms(100)), (alpha, scale), "from where it was");
+        let (later, _) = m.at(ms(200));
+        assert!(later < alpha, "fading");
+        assert_eq!(m.at(ms(350)), (0.0, OPEN_SCALE));
+        assert!(!m.is_running(ms(350)));
+    }
+
+    #[test]
+    fn dialogs_open_quicker() {
+        let m = WindowMotion::dialog(ms(0), false);
+        assert_eq!(m.at(ms(0)).1, DIALOG_SCALE);
+        assert!(!m.is_running(ms(150)));
     }
 }

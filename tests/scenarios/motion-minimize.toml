@@ -1,0 +1,60 @@
+description = "A window minimizes into its dock icon as a magic lamp, sampled halfway; clicked in the dock, it comes back the same way"
+outputs = ["1280x800"]
+motion = true
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+"""
+
+[[step]]
+open = { app_id = "firefox", size = [700, 460], color = "#e8642c" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+keys = "super+d"
+
+[[step]]
+frames = 2
+
+[[step]]
+set_state = { app_id = "firefox", state = "minimized" }
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "motion-genie.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "firefox", visible = false }
+
+[[step]]
+click_ui = "Firefox"
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "motion-genie-back.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "firefox", visible = true, focused = true }
+
+# The icon under the pointer settles on its spring.
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_idle = { for_ms = 5000 }

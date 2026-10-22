@@ -275,7 +275,8 @@ impl State {
                 mode: WindowMode::Normal,
                 opacity,
                 on_top: rule.on_top == Some(true),
-                motion: self.opening_motion(),
+                motion: self
+                    .opening_motion(window.toplevel().is_some_and(|t| t.parent().is_some())),
             },
         );
         if rule.size.is_some() {
@@ -342,6 +343,7 @@ impl State {
         let Some(id) = model_id(window) else {
             return;
         };
+        self.window_closing(id);
         if let Some(managed) = self.windows.remove(&id) {
             self.foreign_toplevels.remove_toplevel(&managed.foreign);
         }
@@ -490,6 +492,7 @@ impl State {
             }
         }
         self.refresh_workspaces();
+        self.track_minimized();
         self.needs_redraw = true;
     }
 

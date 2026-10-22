@@ -1,0 +1,37 @@
+description = "A window closed while it opens dissolves from where its opening got to, shrinking back; then nothing is left and nothing is drawn"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+open = { app_id = "below", size = [900, 600], color = "#2e7d4f" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+# Halfway through its opening, it closes.
+[[step]]
+advance_ms = 100
+
+[[step]]
+close = "editor"
+
+[[step]]
+expect_no_window = "editor"
+
+[[step]]
+advance_ms = 80
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "motion-close.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "motion-close-done.png" }
+
+[[step]]
+expect_idle = { for_ms = 5000 }

@@ -139,6 +139,8 @@ pub struct State {
     pub mirrors: Vec<crate::mirror::Mirror>,
     /// Windows appear and go at once: tests that do not sample motion.
     pub instant_motion: bool,
+    /// Pictures of windows closing, minimizing, maximizing (#34).
+    pub snapshots: crate::snapshot::Snapshots,
     /// Desktops sliding, screen by screen (#36).
     pub slides: crate::slide::Slides,
     /// The window switcher (#39).
@@ -257,6 +259,7 @@ impl State {
             output_settings: Default::default(),
             mirrors: Vec::new(),
             instant_motion: false,
+            snapshots: Default::default(),
             slides: Default::default(),
             alt_tab: Default::default(),
             dock: Default::default(),

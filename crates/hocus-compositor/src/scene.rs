@@ -5,14 +5,15 @@
 use hocus_core::Zone;
 use smithay::{
     backend::renderer::{
-        ImportAll, ImportMem, Renderer, Texture,
+        ImportAll, ImportMem, Renderer, RendererSuper, Texture,
         element::{
             AsRenderElements, Kind,
             memory::MemoryRenderBufferRenderElement,
             render_elements,
             solid::SolidColorRenderElement,
             surface::WaylandSurfaceRenderElement,
-            utils::{RelocateRenderElement, RescaleRenderElement},
+            texture::TextureRenderElement,
+            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
         },
     },
     desktop::Window,
@@ -35,6 +36,10 @@ render_elements! {
     Window=Rounded<WaylandSurfaceRenderElement<R>>,
     /// A window drawn larger or smaller than it is: opening (#33).
     Scaled=RescaleRenderElement<Rounded<WaylandSurfaceRenderElement<R>>>,
+    /// A window between two places, stretched: maximizing (#34).
+    Morphed=RelocateRenderElement<RescaleRenderElement<Rounded<WaylandSurfaceRenderElement<R>>>>,
+    /// A window's picture: closing, minimizing, maximizing (#34).
+    Snapshot=Rounded<TextureRenderElement<<R as RendererSuper>::TextureId>>,
     Frame=MemoryRenderBufferRenderElement<R>,
     Solid=SolidColorRenderElement,
 }
@@ -115,6 +120,7 @@ impl State {
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        self.ready_snapshots(renderer);
         let mut elements = Vec::new();
         if cursor {
             elements.extend(
@@ -255,6 +261,8 @@ impl State {
                     .map(flat),
             );
         }
+        // Windows closing and minimizing (#34), over the others.
+        elements.extend(self.snapshot_elements(renderer, output));
         let focused = self.focused_window();
         // Switching desktops (#36): the shown desktop's windows move with
         // the strip, and those of the desktops passing by are drawn where
@@ -309,6 +317,10 @@ impl State {
                 continue;
             }
             let id = model_id(window);
+            // Coming back from the dock: its magic lamp shows it.
+            if id.is_some_and(|id| self.genie_hides(id)) {
+                continue;
+            }
             let bar = id.map_or(0, |id| self.bar_height(id));
             // The frame: the bar above the client.
             let frame = Rectangle::<i32, Logical>::new(
@@ -324,6 +336,20 @@ impl State {
             let about = |p: Point<f64, Logical>| middle + (p - middle).upscale(grow);
             let frame_now =
                 Rectangle::new(about(frame.to_f64().loc), frame.to_f64().size.upscale(grow));
+            // Maximizing (#34): drawn between its old place and its new one,
+            // output-local, its old picture fading over it.
+            let morph = id.and_then(|id| {
+                let live = Rectangle::new(location, geometry.size).to_f64();
+                let (r, fade) = self.morph_rect(id, live)?;
+                Some((id, Rectangle::new(r.loc - area.loc.to_f64(), r.size), fade))
+            });
+            let frame_now = match morph {
+                Some((_, r, _)) => Rectangle::new(
+                    (r.loc.x, r.loc.y - f64::from(bar)).into(),
+                    (r.size.w, r.size.h + f64::from(bar)).into(),
+                ),
+                None => frame_now,
+            };
             let decorated = self.decorated(window);
             if decorated && focused.as_ref() == Some(window) {
                 let ring = ring_elements(
@@ -350,9 +376,33 @@ impl State {
             // Drawn at its size, then scaled about its middle: an element's
             // size follows the output's scale, not the one it was made at.
             let centre = middle.to_physical_precise_round(scale);
+            if let Some((id, r, fade)) = morph {
+                let clip_now = r.to_physical_precise_round(scale);
+                elements.extend(
+                    self.morph_picture(renderer, id, r, fade * opacity, scale)
+                        .into_iter()
+                        .map(|e| SceneElement::Snapshot(Rounded::new(e, clip_now, radius))),
+                );
+            }
             elements.extend(content.into_iter().map(|e| {
                 let rounded = Rounded::new(e, clip, radius).at_scale(Scale::from(scale));
-                if grow == 1.0 {
+                if let Some((_, r, _)) = morph {
+                    let live = rect.to_f64();
+                    let k = Scale {
+                        x: r.size.w / live.size.w.max(1.0),
+                        y: r.size.h / live.size.h.max(1.0),
+                    };
+                    let shift = (r.loc - live.loc).to_physical_precise_round(scale);
+                    SceneElement::Morphed(RelocateRenderElement::from_element(
+                        RescaleRenderElement::from_element(
+                            rounded,
+                            rect.loc.to_physical_precise_round(scale),
+                            k,
+                        ),
+                        shift,
+                        Relocate::Relative,
+                    ))
+                } else if grow == 1.0 {
                     SceneElement::Window(rounded)
                 } else {
                     SceneElement::Scaled(RescaleRenderElement::from_element(
@@ -411,7 +461,7 @@ impl State {
     /// Whether the compositor draws the window's corners, shadow and ring:
     /// in normal or snapped mode, when the window has no shadow of its own (server-side
     /// decorations, or a buffer no larger than the window).
-    fn decorated(&self, window: &Window) -> bool {
+    pub(crate) fn decorated(&self, window: &Window) -> bool {
         let normal = model_id(window)
             .and_then(|id| self.windows.get(&id))
             .is_none_or(|m| {

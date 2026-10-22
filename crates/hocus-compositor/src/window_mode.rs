@@ -256,6 +256,8 @@ impl State {
         let Some(mode) = self.windows.get(&id).map(|m| m.mode) else {
             return;
         };
+        // Its picture where it is now, before it moves.
+        self.morph_from_here(id);
         let next = match (mode, on) {
             (WindowMode::Normal | WindowMode::Snapped { .. }, true) => {
                 let (Some(current), Some(output)) = (self.current_rect(id), self.output_for(id))
@@ -292,6 +294,7 @@ impl State {
         let Some(mode) = self.windows.get(&id).map(|m| m.mode) else {
             return;
         };
+        self.morph_from_here(id);
         let next = match (mode, on) {
             (
                 WindowMode::Fullscreen {
@@ -337,6 +340,9 @@ impl State {
     }
 
     pub fn minimize(&mut self, id: WindowId, serial: Serial) {
+        if !self.model.is_minimized(id) {
+            self.genie_minimize(id);
+        }
         if let Err(err) = self.model.minimize(id) {
             tracing::warn!(%err, "minimizing a window the model did not know");
             return;
@@ -363,6 +369,10 @@ impl State {
     }
 
     fn set_mode(&mut self, id: WindowId, mode: WindowMode, serial: Serial) {
+        if self.windows.get(&id).is_some_and(|m| m.mode == mode) {
+            // Nothing moves: no morph.
+            self.snapshots_unmorph(id);
+        }
         if let Some(managed) = self.windows.get_mut(&id) {
             managed.mode = mode;
         }
@@ -406,5 +416,6 @@ impl State {
         let window: Window = managed.window.clone();
         // Mapped again at its new place by the next sync.
         self.space.unmap_elem(&window);
+        self.morph_to(id, rect);
     }
 }
