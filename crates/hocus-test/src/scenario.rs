@@ -134,6 +134,12 @@ pub enum Step {
     Share(bool),
     /// It stops.
     StopSharing(bool),
+    /// The compositor ended it: the tool got no more frames.
+    ExpectSharingEnded(bool),
+    /// A screen-cast portal's chooser asks what to share, and waits.
+    AskShare(bool),
+    /// It was answered this (`Monitor: HEADLESS-1`); `""` for nothing.
+    ExpectShared(String),
     /// Starts a layer-shell client: `{ namespace, layer, anchor?, size,
     /// exclusive_zone?, keyboard?, color }`; waits until it is shown.
     OpenLayer(crate::layer::LayerSpec),
@@ -501,6 +507,9 @@ impl fmt::Display for Step {
             Self::UnlockClient(_) => write!(f, "unlock_client"),
             Self::CrashLockClient(_) => write!(f, "crash_lock_client"),
             Self::StopSharing(_) => write!(f, "stop_sharing"),
+            Self::ExpectSharingEnded(_) => write!(f, "expect_sharing_ended"),
+            Self::AskShare(_) => write!(f, "ask_share"),
+            Self::ExpectShared(a) => write!(f, "expect_shared {a:?}"),
             Self::OpenLayer(spec) => write!(f, "open_layer {}", spec.namespace),
             Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
@@ -650,6 +659,7 @@ impl Scenario {
             lock_client: None,
             bus,
             tray_apps: Vec::new(),
+            asking: None,
             events: Vec::new(),
         };
         run.request(Request::Subscribe)?;
@@ -674,6 +684,8 @@ struct Run<'a> {
         std::sync::Arc<std::sync::atomic::AtomicBool>,
         std::thread::JoinHandle<anyhow::Result<()>>,
     )>,
+    /// A chooser waiting for its answer.
+    asking: Option<std::thread::JoinHandle<anyhow::Result<Option<String>>>>,
     /// Tray applications by title; before the bus, so they go first.
     tray_apps: Vec<(String, crate::tray::TrayApp)>,
     bus: Option<crate::bus::PrivateBus>,
@@ -801,6 +813,44 @@ impl Run<'_> {
                 while Instant::now() < until {
                     self.compositor.dispatch(Duration::from_millis(5))?;
                 }
+                Ok(())
+            }
+            Step::AskShare(_) => {
+                let socket = self.compositor.api_socket().to_path_buf();
+                self.asking = Some(std::thread::spawn(move || {
+                    let mut client = hocus_api::Client::connect(&socket)?;
+                    client.set_timeout(None)?;
+                    match client.request(Request::PickShare)? {
+                        Reply::Shared(answer) => Ok(answer),
+                        other => anyhow::bail!("unexpected {other:?}"),
+                    }
+                }));
+                Ok(())
+            }
+            Step::ExpectShared(expected) => {
+                let asking = self.asking.take().context("nothing was asked")?;
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !asking.is_finished() {
+                    anyhow::ensure!(Instant::now() < deadline, "the chooser was never answered");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                let answer = asking
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("the chooser panicked"))??
+                    .unwrap_or_default();
+                anyhow::ensure!(answer == *expected, "answered {answer:?}");
+                Ok(())
+            }
+            Step::ExpectSharingEnded(_) => {
+                let (_, thread) = self.sharing.take().context("not sharing")?;
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !thread.is_finished() {
+                    anyhow::ensure!(Instant::now() < deadline, "the sharing never ended");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                thread
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("the sharing tool panicked"))??;
                 Ok(())
             }
             Step::StopSharing(_) => {

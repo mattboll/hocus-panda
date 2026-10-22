@@ -47,6 +47,9 @@ Steps, one per `[[step]]` table:
 | `lock_client = "#rrggbb"` | a lock client locks the session (ext-session-lock) with a surface of that colour on every output, waits until it is locked |
 | `unlock_client = true`, `crash_lock_client = true` | the lock client unlocks, or goes away without unlocking as a crash would |
 | `share = true`, `stop_sharing = true` | a screen sharing tool starts copying the first output again and again (wlr-screencopy with damage), then stops |
+| `expect_sharing_ended = true` | the compositor ended the sharing: the tool got no more frames |
+| `ask_share = true` | a screen-cast portal's chooser asks what to share (as `hocus share-pick`), and waits |
+| `expect_shared = "Monitor: HEADLESS-1"` | it was answered this; `""` for nothing |
 | `activate = "app_id"` | the client of that app id asks for its window to come forward, with an activation token of its own (xdg-activation) |
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |

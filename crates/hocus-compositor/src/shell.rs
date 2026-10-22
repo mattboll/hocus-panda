@@ -226,6 +226,7 @@ impl State {
             notifications: self.notification_history(),
             status: self.status(),
             tray: self.tray.apps.clone(),
+            sharing: self.sharing(),
         }
     }
 
@@ -251,6 +252,7 @@ impl State {
         self.refresh_authorize();
         self.refresh_screenshots();
         self.refresh_recording();
+        self.refresh_share();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -407,6 +409,7 @@ impl State {
             ShellAction::Restart => self.run_action(&A::Restart, serial),
             ShellAction::ShutDown => self.run_action(&A::ShutDown, serial),
             ShellAction::OpenLauncher => self.open_launcher(),
+            ShellAction::StopSharing => self.stop_sharing(),
             ShellAction::TrayActivate(key) => self.tray_activate(key),
             ShellAction::TrayMenu(key) => self.tray_menu(key),
             ShellAction::TrayChosen { key, id } => self.tray_chosen(key, id),
@@ -507,6 +510,7 @@ impl State {
         self.auth_ui(&mut out);
         self.picker_ui(&mut out);
         self.recording_ui(&mut out);
+        self.share_ui(&mut out);
         self.bars_ui(&mut out);
         let Some(shell) = &self.shell else {
             return out;

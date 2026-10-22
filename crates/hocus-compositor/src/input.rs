@@ -108,6 +108,7 @@ impl State {
                     .filter(|_| !state.shortcuts_inhibited())
                     .and_then(|combo| state.shortcuts.action(&combo).cloned());
                 let modal = state.launcher_open()
+                    || state.share_open()
                     || state.quick_open()
                     || state.showcase_open()
                     || state.card_open()
@@ -150,6 +151,9 @@ impl State {
             }
             Some(Handled::Panel(sym, modifiers)) if self.locked() => {
                 self.lock_key(sym, &modifiers);
+            }
+            Some(Handled::Panel(sym, _)) if self.share_open() => {
+                self.share_key(sym);
             }
             Some(Handled::Panel(sym, _)) if self.picking() => {
                 self.picker_key(sym);
@@ -271,7 +275,8 @@ impl State {
         }
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.recording_pointer(location, None)
+            && (self.share_pointer(location, None)
+                || self.recording_pointer(location, None)
                 || self.picker_pointer(location, None)
                 || self.auth_pointer(location, None)
                 || self.leave_pointer(location, None)
@@ -333,7 +338,8 @@ impl State {
         self.recording_click(at, pressed);
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && (self.recording_pointer(at, Some(pressed))
+            && (self.share_pointer(at, Some(pressed))
+                || self.recording_pointer(at, Some(pressed))
                 || self.picker_pointer(at, Some(pressed))
                 || self.auth_pointer(at, Some(pressed))
                 || self.leave_pointer(at, Some(pressed))

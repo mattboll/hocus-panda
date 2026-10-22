@@ -36,6 +36,7 @@ mod screen_capture;
 mod screenshot;
 mod session;
 mod settings;
+mod share;
 mod shell;
 mod socket;
 mod state;

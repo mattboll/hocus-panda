@@ -631,6 +631,41 @@ impl Lang {
         )
     }
 
+    pub fn share_title(self) -> &'static str {
+        self.pick("Share your screen", "Partager l’écran")
+    }
+
+    pub fn share_note(self) -> &'static str {
+        self.pick(
+            "An application asks to see the screen: choose what it sees.",
+            "Une application demande à voir l’écran : choisis ce qu’elle voit.",
+        )
+    }
+
+    pub fn share_screens(self) -> &'static str {
+        self.pick("Screens", "Écrans")
+    }
+
+    pub fn share_windows(self) -> &'static str {
+        self.pick("Windows", "Fenêtres")
+    }
+
+    pub fn share_cancel(self) -> &'static str {
+        self.pick("Share nothing", "Ne rien partager")
+    }
+
+    pub fn sharing_now(self) -> &'static str {
+        self.pick("Screen shared", "Écran partagé")
+    }
+
+    pub fn stop(self) -> &'static str {
+        self.pick("Stop", "Arrêter")
+    }
+
+    pub fn stop_sharing(self) -> &'static str {
+        self.pick("Stop sharing", "Arrêter le partage")
+    }
+
     pub fn pick_record(self) -> &'static str {
         self.pick(
             "Drag over a region, click a window, or Enter for the screen · Escape to cancel",

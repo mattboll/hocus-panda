@@ -15,6 +15,7 @@ fn state() -> ColumnState {
         can_hibernate: false,
         status: Default::default(),
         tray: Vec::new(),
+        sharing: false,
         time: WallTime {
             hour: 14,
             minute: 37,
@@ -206,6 +207,23 @@ fn the_tray_shows_its_applications_and_their_menus() -> anyhow::Result<()> {
     column.draw(Duration::ZERO);
     assert!(button(&column, "Tray: 2 applications").is_err());
     assert!(button(&column, "Keyboard layout: fr").is_ok());
+    Ok(())
+}
+
+#[test]
+fn while_sharing_the_column_says_so_and_stops_it() -> anyhow::Result<()> {
+    let mut column = column(Lang::En);
+    assert!(
+        button(&column, "Stop sharing").is_err(),
+        "hidden when not sharing"
+    );
+    column.set_state(&ColumnState {
+        sharing: true,
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Stop sharing")?;
+    assert_eq!(click(&mut column, at), vec![Action::StopSharing]);
     Ok(())
 }
 

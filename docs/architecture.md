@@ -151,9 +151,13 @@ ext-image-copy-capture (output and window sources) and wlr-screencopy
 after each dispatch, where the renderer is, by drawing the output or
 window again offscreen into the client's shared-memory buffer; a copy
 that waits for damage is served once the output drew a new frame.
-xdg-desktop-portal-wlr works on them; the shell's own portal backend and
-picker come with #116. While the screen is shared, toasts are held and
-one summarises them afterwards. Idle notification (#29) is served;
+xdg-desktop-portal-wlr works on them and streams through PipeWire; its
+chooser is `hocus share-pick` (#116), which asks the compositor over the
+control API (`pick_share`, answered once the user chose): the shell shows
+the screens and the windows as pictures and answers `Monitor: NAME` or
+`Window: IDENTIFIER`. The configuration files are in `data/portal/`.
+While the screen is shared, the column says so with a stop that ends
+every capture, toasts are held, and one summarises them afterwards. Idle notification (#29) is served;
 drm-lease, for VR headsets, waits for an issue of its own.
 
 ## Session

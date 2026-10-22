@@ -148,6 +148,10 @@ pub fn share(
         while copier.buffer.is_none() && !copier.failed {
             queue.blocking_dispatch(&mut copier)?;
         }
+        // Stopped by the compositor: the stream ends, as portals end it.
+        if copier.failed {
+            return Ok(());
+        }
         let (w, h, stride) = copier
             .buffer
             .ok_or_else(|| anyhow::anyhow!("no buffer offered"))?;
@@ -189,6 +193,9 @@ pub fn share(
         frame.destroy();
         buffer.destroy();
         pool.destroy();
+        if copier.failed {
+            return Ok(());
+        }
     }
     Ok(())
 }

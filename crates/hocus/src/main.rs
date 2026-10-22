@@ -47,6 +47,13 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         socket: Option<PathBuf>,
     },
+    /// The screen-cast portal's chooser (xdg-desktop-portal-wlr,
+    /// `chooser_type = simple`): the shell asks what to share; prints
+    /// `Monitor: NAME`, `Window: IDENTIFIER`, or nothing when declined.
+    SharePick {
+        #[arg(long, value_name = "PATH")]
+        socket: Option<PathBuf>,
+    },
     /// Run scenario files on headless compositors: `hocus scenario run FILE…`.
     ///
     /// Done by `hocus-scenario`, next to this program or in PATH, which keeps
@@ -192,6 +199,19 @@ fn main() -> anyhow::Result<ExitCode> {
             let mut client = Client::connect(&socket)
                 .with_context(|| format!("could not connect to {}", socket.display()))?;
             client.request(Request::OpenSettings { page })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::SharePick { socket } => {
+            let socket = socket.or_else(hocus_api::default_socket).context(
+                "no control socket: set HOCUS_SOCKET or WAYLAND_DISPLAY, or pass --socket",
+            )?;
+            let mut client = Client::connect(&socket)
+                .with_context(|| format!("could not connect to {}", socket.display()))?;
+            // The user takes the time they need.
+            client.set_timeout(None)?;
+            if let Reply::Shared(Some(answer)) = client.request(Request::PickShare)? {
+                println!("{answer}");
+            }
             Ok(ExitCode::SUCCESS)
         }
     }

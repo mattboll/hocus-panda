@@ -20,6 +20,7 @@ pub mod picker;
 pub mod providers;
 pub mod quick;
 pub mod recording;
+pub mod share;
 pub mod showcase;
 pub mod titlebar;
 pub mod toasts;
