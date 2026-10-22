@@ -64,7 +64,7 @@ pub struct Scenario {
     #[serde(default)]
     pub data_dirs: Vec<PathBuf>,
     /// What started applications inherit (`PATH` is added if missing),
-    /// instead of the test's own environment.
+    /// instead of the test's own environment; `{scenario_dir}` in values.
     pub child_env: Option<std::collections::BTreeMap<String, String>>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
@@ -90,7 +90,8 @@ pub enum Step {
     /// The shell's accent in effect has a hue within `hue = [from, to]`
     /// (degrees), and reads on the theme's surfaces.
     ExpectAccent(ExpectAccent),
-    /// Types text, as on a US keyboard.
+    /// Types text, as on a US keyboard; `{caldav}` is the test server's
+    /// calendar.
     Type(String),
     /// A file a started program wrote in the compositor's runtime
     /// directory: `{ name, contains?, lacks? }`.
@@ -165,6 +166,17 @@ pub enum Step {
     /// Waits until the wallpapers are made and drawn: before a capture
     /// the compositor takes itself.
     WaitWallpapers(bool),
+    /// A CalDAV server on 127.0.0.1 serves the `.ics` files of `dir`
+    /// (relative to the scenario) to `user` and `password`; its calendar's
+    /// address is `{caldav}` in later steps.
+    Caldav(CaldavStep),
+    /// The CalDAV server goes, as the network would.
+    CaldavStop(bool),
+    /// The settings keep a calendar account's password: `{ id, password }`.
+    CalendarPassword(CalendarPassword),
+    /// The calendars as the session knows them, once so: `{ events?,
+    /// secrets?, contains?, error? }`.
+    ExpectCalendars(ExpectCalendars),
     /// Opens the annotation window on a capture (`{runtime_dir}` is the
     /// compositor's temporary directory), and waits for it.
     OpenAnnotate(String),
@@ -283,6 +295,35 @@ pub struct OpenWindow {
 #[serde(deny_unknown_fields)]
 pub struct ExpectAccent {
     pub hue: [f32; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaldavStep {
+    pub dir: PathBuf,
+    pub user: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CalendarPassword {
+    pub id: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectCalendars {
+    /// Events from now on.
+    pub events: Option<usize>,
+    /// Passwords kept.
+    pub secrets: Option<usize>,
+    /// Events by title.
+    #[serde(default)]
+    pub contains: Vec<String>,
+    /// Whether an account failed its last sync.
+    pub error: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -564,6 +605,10 @@ impl fmt::Display for Step {
             Self::OpenAnnotate(file) => write!(f, "open_annotate {file:?}"),
             Self::WaitWallpapers(_) => write!(f, "wait_wallpapers"),
             Self::Restart(_) => write!(f, "restart"),
+            Self::Caldav(c) => write!(f, "caldav {}", c.dir.display()),
+            Self::CaldavStop(_) => write!(f, "caldav_stop"),
+            Self::CalendarPassword(p) => write!(f, "calendar_password {}", p.id),
+            Self::ExpectCalendars(e) => write!(f, "expect_calendars {e:?}"),
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
             Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
             Self::DragAnnotate(d) => write!(f, "drag_annotate {:?}", d.label),
@@ -695,7 +740,13 @@ impl Scenario {
             data_dirs: (!self.data_dirs.is_empty())
                 .then(|| self.data_dirs.iter().map(|d| self.dir.join(d)).collect()),
             child_env: self.child_env.as_ref().map(|env| {
-                let mut env = env.clone();
+                // Stand-ins for the user's programs live beside the scenario.
+                let dir = self.dir.canonicalize().unwrap_or_else(|_| self.dir.clone());
+                let dir = dir.to_string_lossy();
+                let mut env: std::collections::BTreeMap<String, String> = env
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.replace("{scenario_dir}", &dir)))
+                    .collect();
                 env.entry("PATH".into())
                     .or_insert_with(|| std::env::var("PATH").unwrap_or_default());
                 env.into_iter().map(|(k, v)| (k.into(), v.into())).collect()
@@ -718,6 +769,7 @@ impl Scenario {
             tray_apps: Vec::new(),
             asking: None,
             events: Vec::new(),
+            caldav: None,
         };
         run.request(Request::Subscribe)?;
         for (n, step) in self.steps.iter().enumerate() {
@@ -751,6 +803,7 @@ struct Run<'a> {
     bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
+    caldav: Option<crate::caldav::Server>,
 }
 
 impl Run<'_> {
@@ -968,6 +1021,27 @@ impl Run<'_> {
             Step::DragSettings(drag) => self.drag_settings(drag),
             Step::OpenAnnotate(file) => self.open_annotate(file),
             Step::WaitWallpapers(_) => self.wallpapers(),
+            Step::Caldav(c) => {
+                let dir = self.scenario.dir.join(&c.dir);
+                self.caldav = Some(crate::caldav::Server::start(dir, &c.user, &c.password)?);
+                Ok(())
+            }
+            Step::CaldavStop(_) => {
+                self.caldav = None;
+                Ok(())
+            }
+            Step::CalendarPassword(p) => {
+                let id = match &self.caldav {
+                    Some(server) => p.id.replace("{caldav}", server.url()),
+                    None => p.id.clone(),
+                };
+                self.request(Request::CalendarSecret {
+                    account: id,
+                    secret: p.password.clone(),
+                })?;
+                Ok(())
+            }
+            Step::ExpectCalendars(expected) => self.expect_calendars(expected),
             Step::Restart(_) => {
                 self.clients.clear();
                 self.x11_clients.clear();
@@ -998,7 +1072,13 @@ impl Run<'_> {
                 done
             }
             Step::ExpectConfigFile(expected) => self.expect_config_file(expected),
-            Step::Type(text) => self.type_text(text),
+            Step::Type(text) => {
+                let text = match &self.caldav {
+                    Some(server) => text.replace("{caldav}", server.url()),
+                    None => text.clone(),
+                };
+                self.type_text(&text)
+            }
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
             Step::ExpectStateFile(expected) => self.expect_state_file(expected),
             Step::NotifySend(args) => self.notify_send(args),
@@ -1169,6 +1249,9 @@ impl Run<'_> {
                 // temporary directory, never the developer's.
                 let runtime = self.compositor.runtime_dir().to_string_lossy().into_owned();
                 text = text.replace("{runtime_dir}", &runtime);
+                if let Some(server) = &self.caldav {
+                    text = text.replace("{caldav}", server.url());
+                }
                 if let Some(client) = &self.options.test_client {
                     text = text.replace("{test_client}", &client.to_string_lossy());
                 }
@@ -1435,6 +1518,29 @@ impl Run<'_> {
     /// Started programs run in their own time: the file gets a moment.
     /// A file of the state directory holds these strings, and lacks those,
     /// once its worker wrote it.
+    /// Syncs run on threads, against real sockets: waited for in real time.
+    fn expect_calendars(&mut self, expected: &ExpectCalendars) -> anyhow::Result<()> {
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let Reply::Calendars(info) = self.request(Request::Calendars)? else {
+                anyhow::bail!("expected the calendars");
+            };
+            let failed = info.accounts.iter().any(|a| a.error.is_some());
+            let ok = expected.events.is_none_or(|n| info.events.len() == n)
+                && expected.secrets.is_none_or(|n| info.secrets == n)
+                && expected.error.is_none_or(|e| e == failed)
+                && expected
+                    .contains
+                    .iter()
+                    .all(|t| info.events.iter().any(|e| e.summary == *t));
+            if ok {
+                return Ok(());
+            }
+            anyhow::ensure!(Instant::now() < deadline, "the calendars are {info:#?}");
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
     fn expect_state_file(&mut self, expected: &ExpectFile) -> anyhow::Result<()> {
         let path = self.compositor.state_dir().join(&expected.name);
         let deadline = Instant::now() + CLIENT_TIMEOUT;

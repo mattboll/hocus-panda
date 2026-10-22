@@ -1,5 +1,14 @@
 # Licenses and advisories, checked in CI (see docs/decisions/0002).
 
+# The systems the session runs on: what other targets pull (wasm's bundled
+# certificates) is not shipped.
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-freebsd",
+]
+
 [licenses]
 allow = [
     "MIT",

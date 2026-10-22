@@ -37,6 +37,11 @@ pub enum Outcome {
     Identify,
     /// The system's updates are installed, through polkit.
     InstallUpdates,
+    /// A calendar account's password, for the keyring.
+    CalendarPassword {
+        account: String,
+        password: String,
+    },
     /// The compositor holds its own shortcuts back while keys are
     /// recorded (keyboard-shortcuts-inhibit), or no longer.
     Inhibit(bool),
@@ -50,6 +55,8 @@ enum Target {
     Hit(usize),
     Close,
     Set(Change),
+    /// The calendar form's account is added.
+    AddCalendar,
     /// Several keys at once (the primary screen: on for one, off for the
     /// others).
     SetAll(Vec<Change>),
@@ -111,6 +118,23 @@ struct Drag {
     /// The arrangement as it was when the drag began.
     mapping: arrange::Mapping,
     moved: bool,
+}
+
+/// The calendar form between builds: name, address, user, password, and
+/// their fields.
+#[derive(Debug, Default)]
+struct AccountsPage {
+    values: [String; 4],
+    fields: [Option<NodeId>; 4],
+    /// The address was refused.
+    bad_url: bool,
+}
+
+impl AccountsPage {
+    fn index(&self, id: Option<NodeId>) -> Option<usize> {
+        let id = id?;
+        self.fields.iter().position(|f| *f == Some(id))
+    }
 }
 
 /// The keyboard page between builds.
@@ -284,6 +308,7 @@ pub struct SettingsView {
     pointer: Option<Point>,
     screens: ScreensPage,
     keys: KeyboardPage,
+    accounts: AccountsPage,
     dirty: bool,
     now: Duration,
 }
@@ -348,6 +373,7 @@ impl SettingsView {
             pointer: None,
             screens: ScreensPage::default(),
             keys: KeyboardPage::default(),
+            accounts: AccountsPage::default(),
             dirty: true,
             now: Duration::ZERO,
         }
@@ -487,6 +513,16 @@ impl SettingsView {
     }
 
     pub fn key(&mut self, key: Key) -> Vec<Outcome> {
+        // Enter in the calendar form: the next field, or Add from the last.
+        if key == Key::Enter
+            && let Some(i) = self.accounts.index(self.tree.focused())
+        {
+            if i + 1 < self.accounts.fields.len() {
+                self.tree.set_focus(self.accounts.fields[i + 1]);
+                return Vec::new();
+            }
+            return self.add_calendar();
+        }
         if key == Key::Escape && self.keys.editing.is_some() {
             return self.cancel_edit();
         }
@@ -570,6 +606,11 @@ impl SettingsView {
 
     /// Typed text goes to the search field.
     pub fn text(&mut self, text: &str) -> Vec<Outcome> {
+        // The calendar form's field that has the keyboard keeps it.
+        if self.accounts.index(self.tree.focused()).is_some() {
+            let events = self.tree.text_input(text);
+            return self.handle(events);
+        }
         let renaming = self.screens.renaming.as_ref().and_then(|(_, f)| *f);
         if let Some(field) = self.keys.new_field
             && self.keys.editing.is_none()
@@ -619,6 +660,14 @@ impl SettingsView {
                         ))));
                     }
                 }
+                Event::Changed(id) if self.accounts.index(Some(id)).is_some() => {
+                    if let Some(i) = self.accounts.index(Some(id)) {
+                        self.accounts.values[i] =
+                            self.tree.field_value(id).unwrap_or_default().to_owned();
+                    }
+                }
+                // A click in the form's fields: Enter is the key's to see.
+                Event::Activated(id) if self.accounts.index(Some(id)).is_some() => {}
                 Event::Activated(id) => match self.targets.get(&id).cloned() {
                     Some(Target::Home) => {
                         self.highlight = None;
@@ -667,6 +716,7 @@ impl SettingsView {
                     }
                     Some(Target::ListenNew) => out.extend(self.listen_new()),
                     Some(Target::InstallUpdates) => out.push(Outcome::InstallUpdates),
+                    Some(Target::AddCalendar) => out.extend(self.add_calendar()),
                     Some(Target::Reset) => {
                         self.keys.resetting = !self.keys.resetting;
                         self.dirty = true;
@@ -847,6 +897,8 @@ impl SettingsView {
 
     fn build(&mut self) {
         let theme = self.tree.theme().clone();
+        let typing_in_form = self.accounts.index(self.tree.focused());
+        self.accounts.fields = [None; 4];
         let root = self.tree.root();
         for child in self.tree.children(root) {
             self.tree.remove(child);
@@ -890,6 +942,8 @@ impl SettingsView {
         // hovered again.
         if let Some((_, Some(field))) = &self.screens.renaming {
             self.tree.set_focus(Some(*field));
+        } else if let Some(i) = typing_in_form.filter(|_| self.accounts.fields[0].is_some()) {
+            self.tree.set_focus(self.accounts.fields[i]);
         } else if self.typing {
             self.tree.set_focus(self.field);
         }
@@ -1347,8 +1401,194 @@ impl SettingsView {
             Page::Keyboard => self.keyboard(theme, body),
             Page::Screens => self.screens(theme, body),
             Page::Account => self.account(theme, body),
+            Page::Accounts => self.accounts(theme, body),
             _ => {}
         }
+    }
+
+    /// The calendar form's account goes to the configuration, its password
+    /// to the keyring; the form empties.
+    fn add_calendar(&mut self) -> Vec<Outcome> {
+        let [name, url, user, password] = self.accounts.values.clone().map(|v| v.trim().to_owned());
+        if name.is_empty() || url.is_empty() {
+            return Vec::new();
+        }
+        let account = hocus_core::config::CalendarAccount {
+            name: name.clone(),
+            kind: if user.is_empty() {
+                "subscription"
+            } else {
+                "caldav"
+            }
+            .into(),
+            url: url.clone(),
+            user: user.clone(),
+        };
+        self.dirty = true;
+        self.accounts.bad_url = !account.url_is_safe();
+        if self.accounts.bad_url {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        if !password.is_empty() {
+            out.push(Outcome::CalendarPassword {
+                account: account.id(),
+                password,
+            });
+        }
+        out.push(Outcome::Change(Box::new(Change::calendar(
+            &url, &user, "name", name,
+        ))));
+        if account.kind == "subscription" {
+            out.push(Outcome::Change(Box::new(Change::calendar(
+                &url,
+                &user,
+                "kind",
+                "subscription",
+            ))));
+        }
+        self.accounts = AccountsPage::default();
+        out
+    }
+
+    /// Board R1's "Accounts and calendar": the calendars with how they
+    /// synced and Remove, and a form to add one.
+    fn accounts(&mut self, theme: &Theme, body: NodeId) {
+        let lang = self.lang;
+        self.tree.set_style(body, fill_width(column(26.0)));
+        let section = self.section(theme, body, words::CALENDARS);
+        let accounts = self.ctx.config.calendars.clone();
+        if accounts.is_empty() {
+            self.line(
+                section,
+                words::NO_CALENDAR.get(lang),
+                theme.text.body.with_color(Paint::Muted),
+            );
+        }
+        for account in &accounts {
+            let id = account.id();
+            let status = self.ctx.calendars.accounts.iter().find(|s| s.id == id);
+            let (said, paint) = match status {
+                Some(s) if s.refused => {
+                    (words::WRONG_PASSWORD.get(lang).to_owned(), Paint::Waiting)
+                }
+                Some(s) if s.error.is_some() => {
+                    (words::UNREACHABLE.get(lang).to_owned(), Paint::Waiting)
+                }
+                Some(s) if s.synced => (words::synced(s.events, lang), Paint::Muted),
+                _ => (words::SYNCING.get(lang).to_owned(), Paint::Muted),
+            };
+            let line = self.add(
+                section,
+                Style {
+                    padding: Insets::symmetric(12.0, 18.0),
+                    ..fill_width(row(12.0))
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    radius: 16.0,
+                    ..Look::default()
+                }),
+            );
+            let text = self.add(
+                line,
+                Style {
+                    width: Length::Fill,
+                    ..column(2.0)
+                },
+                Kind::Box(Look::default()),
+            );
+            self.line(text, &account.name, theme.text.body.with_weight(600));
+            self.line(text, &said, theme.text.body.with_color(paint));
+            let remove = self.add(
+                line,
+                Style {
+                    height: Length::Px(40.0),
+                    padding: Insets::symmetric(0.0, 16.0),
+                    ..Style::default()
+                },
+                Kind::Button(Button::new(
+                    words::REMOVE.get(lang),
+                    ButtonKind::Plain,
+                    theme,
+                )),
+            );
+            self.targets.insert(
+                remove,
+                Target::Set(Change::forget_calendar(&account.url, &account.user)),
+            );
+        }
+
+        let section = self.section(theme, body, words::ADD_CALENDAR);
+        let form = self.add(
+            section,
+            fill_width(column(10.0)),
+            Kind::Box(Look::default()),
+        );
+        let fields = [
+            (words::CALENDAR_NAME, words::CALENDAR_NAME_HINT, false),
+            (words::CALENDAR_URL, words::CALENDAR_URL_HINT, false),
+            (words::CALENDAR_USER, words::CALENDAR_USER, false),
+            (words::CALENDAR_PASSWORD, words::CALENDAR_PASSWORD, true),
+        ];
+        for (i, (name, hint, secret)) in fields.into_iter().enumerate() {
+            let boxed = self.add(
+                form,
+                Style {
+                    height: Length::Px(44.0),
+                    padding: Insets::symmetric(0.0, 14.0),
+                    align: Align::Center,
+                    ..fill_width(row(0.0))
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    border: Some(Paint::Border),
+                    radius: 12.0,
+                    ..Look::default()
+                }),
+            );
+            let mut field = TextField::new(name.get(lang), hint.get(lang), theme.text.body);
+            if secret {
+                field = field.secret();
+            }
+            let field = self.add(
+                boxed,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(28.0),
+                    ..Style::default()
+                },
+                Kind::TextField(Box::new(field)),
+            );
+            let value = self.accounts.values[i].clone();
+            self.tree.set_field_value(field, &value);
+            self.accounts.fields[i] = Some(field);
+        }
+        let (note, paint) = if self.accounts.bad_url {
+            (words::CALENDAR_BAD_URL, Paint::Waiting)
+        } else {
+            (words::CALENDAR_NOTE, Paint::Muted)
+        };
+        self.add(
+            form,
+            fill_width(Style::default()),
+            Kind::text(note.get(lang), theme.text.body.with_color(paint)),
+        );
+        let buttons = self.add(form, row(10.0), Kind::Box(Look::default()));
+        let add = self.add(
+            buttons,
+            Style {
+                height: Length::Px(40.0),
+                padding: Insets::symmetric(0.0, 18.0),
+                ..Style::default()
+            },
+            Kind::Button(Button::new(
+                words::ADD.get(lang),
+                ButtonKind::Primary,
+                theme,
+            )),
+        );
+        self.targets.insert(add, Target::AddCalendar);
     }
 
     /// Board R1's "Account and updates": who, which version, and the

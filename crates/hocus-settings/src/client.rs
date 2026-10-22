@@ -156,6 +156,10 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 Reply::Updates(updates) => updates,
                 _ => Default::default(),
             };
+            let calendars = match requests.request(Request::Calendars)? {
+                Reply::Calendars(calendars) => calendars,
+                _ => Default::default(),
+            };
             let config = hocus_core::Config::parse(&info.toml)
                 .map_err(|e| anyhow::anyhow!("the configuration in effect: {e}"))?;
             let ctx = Context {
@@ -163,6 +167,7 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 outputs,
                 screens,
                 updates,
+                calendars,
                 user: info.user.clone(),
             };
             let path = info.path.map(PathBuf::from);
@@ -174,6 +179,7 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
             match events.next_event()? {
                 Event::ConfigApplied
                 | Event::Updates { .. }
+                | Event::Calendars
                 | Event::OutputAdded { .. }
                 | Event::OutputRemoved { .. }
                 | Event::OutputChanged { .. } => {
@@ -403,6 +409,28 @@ impl App {
                             });
                     if let Err(err) = spawned {
                         tracing::warn!(%err, "could not install the updates");
+                    }
+                }
+                // The password goes straight to the compositor's keyring,
+                // never into the configuration.
+                Outcome::CalendarPassword { account, password } => {
+                    let api = self.api.clone();
+                    let spawned =
+                        std::thread::Builder::new()
+                            .name("calendar".into())
+                            .spawn(move || {
+                                let request = Request::CalendarSecret {
+                                    account,
+                                    secret: password,
+                                };
+                                if let Err(err) = Api::connect(&api)
+                                    .and_then(|mut c| c.request(request).map(drop))
+                                {
+                                    tracing::warn!(%err, "could not keep the calendar password");
+                                }
+                            });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not keep the calendar password");
                     }
                 }
                 Outcome::Identify => {

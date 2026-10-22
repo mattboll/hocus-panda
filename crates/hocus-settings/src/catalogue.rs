@@ -118,7 +118,7 @@ impl Page {
     pub fn available(self) -> bool {
         matches!(
             self,
-            Self::Appearance | Self::Keyboard | Self::Screens | Self::Account
+            Self::Appearance | Self::Keyboard | Self::Screens | Self::Account | Self::Accounts
         )
     }
 
@@ -293,6 +293,8 @@ pub struct Context {
     pub screens: Vec<hocus_api::ScreenInfo>,
     /// System updates, for the Account page.
     pub updates: hocus_api::UpdatesInfo,
+    /// Calendar accounts, for the Accounts page.
+    pub calendars: hocus_api::CalendarsInfo,
     /// The account's name.
     pub user: String,
 }

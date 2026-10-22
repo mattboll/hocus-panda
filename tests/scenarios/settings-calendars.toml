@@ -1,0 +1,63 @@
+description = "A calendar added in the settings: its password goes to the keyring, never the configuration; it syncs, says so, and goes with Remove"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+caldav = { dir = "calendar/work", user = "alex", password = "panda" }
+
+[[step]]
+open_settings = { page = "accounts" }
+
+[[step]]
+expect_settings = { label = "No calendar yet: add a CalDAV account or a subscription link." }
+
+[[step]]
+click_settings = "Name"
+
+[[step]]
+type = "Work"
+
+[[step]]
+click_settings = "Address"
+
+[[step]]
+type = "{caldav}"
+
+[[step]]
+click_settings = "User name"
+
+[[step]]
+type = "alex"
+
+[[step]]
+click_settings = "Password"
+
+[[step]]
+type = "panda"
+
+[[step]]
+click_settings = "Add"
+
+[[step]]
+expect_calendars = { secrets = 1, contains = ["Weekly review"], error = false }
+
+[[step]]
+expect_state_file = { name = "../config.toml", contains = ["[[calendars]]", "name = \"Work\"", "user = \"alex\""], lacks = ["panda"] }
+
+[[step]]
+expect_settings = { label = "Synced · 10 events" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-calendars.png" }
+
+[[step]]
+click_settings = "Remove"
+
+[[step]]
+expect_calendars = { events = 0, secrets = 0 }
+
+[[step]]
+expect_settings = { label = "No calendar yet: add a CalDAV account or a subscription link." }

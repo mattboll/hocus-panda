@@ -55,6 +55,26 @@ const PIECES: &[&str] = &[
     "spawn ",
     "screenshot ",
     "desktop 0",
+    // Calendars: iCalendar and WebDAV.
+    ";",
+    ":",
+    "\r\n ",
+    "BEGIN:VEVENT\n",
+    "END:VEVENT\n",
+    "RRULE:FREQ=DAILY;INTERVAL=",
+    ";BYDAY=-128MO",
+    ";BYMONTHDAY=-31",
+    ";COUNT=",
+    ";UNTIL=99991231",
+    "DTSTART;TZID=Nowhere/Never:",
+    "VALUE=DATE",
+    "DURATION:P99999D",
+    "<",
+    ">",
+    "&amp;",
+    "&#1114112;",
+    "<![CDATA[",
+    "]]>",
 ];
 
 /// `seed` with a few random edits.

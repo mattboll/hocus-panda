@@ -75,6 +75,12 @@ every_hours = 6            # between looks, 1 to 168; never while fullscreen or 
 check = ""                 # a command printing NAME VERSION (or NAME OLD -> NEW) per update;
 install = ""               #   empty: apt, dnf, pacman or pkg, installed through polkit
 
+[[calendars]]              # one per account or subscription (Settings → Accounts and calendar)
+name = "Work"
+kind = "caldav"            # or "subscription": an ICS link, read as it is
+url = "https://dav.example.org/calendars/alex/"  # https (or webcal); plain http to this machine only
+user = "alex"              # the password is in the keyring, never here
+
 [night_light]              # warmer colours in the evening (quick settings' tile)
 enabled = false
 schedule = "fixed"         # or "sunset": from sunset to sunrise where you are

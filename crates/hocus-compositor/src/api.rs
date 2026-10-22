@@ -258,6 +258,11 @@ impl App {
                 self.open_share_picker(connection, id);
                 return None;
             }
+            Request::Calendars => Reply::Calendars(state.calendars_info()),
+            Request::CalendarSecret { account, secret } => {
+                state.calendar_secret(account, secret);
+                Reply::Done
+            }
             Request::Updates => Reply::Updates(state.updates_info()),
             Request::InstallUpdates => {
                 state.install_updates();

@@ -79,6 +79,38 @@ pub struct ColumnState {
     pub todos: Vec<(usize, String)>,
     /// System updates waiting, and whether they are being installed.
     pub updates: Option<(usize, bool)>,
+    /// The meeting going on or coming next (#75).
+    pub meeting: Option<Meeting>,
+    /// Calendars are set up: without a meeting, nothing else is planned.
+    pub calendar_set: bool,
+    pub agenda: Agenda,
+}
+
+/// The meeting card, as board Bureau draws it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Meeting {
+    pub title: String,
+    /// "In 12 min", "At 15:00", "In progress · 18 min".
+    pub when: String,
+    /// How close it is, in percent: the ring fills over the hour before.
+    pub progress: u8,
+    /// Join, when it has a call and starts soon; else Details.
+    pub join: bool,
+}
+
+/// The agenda's month and today's events.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Agenda {
+    pub year: i16,
+    /// The weekday of the month's first day, 0 for Monday.
+    pub first_weekday: u8,
+    pub days: u8,
+    /// The ISO week number of each of the month's rows.
+    pub weeks: Vec<u8>,
+    /// The month's days with events.
+    pub busy: Vec<u8>,
+    /// Today's events: time and title.
+    pub today: Vec<(String, String)>,
 }
 
 /// What the status row tells, once known.
@@ -119,6 +151,8 @@ pub enum Action {
     StopSharing,
     /// The to-do at this place in the notes is ticked.
     TickTodo(usize),
+    /// The next meeting's call.
+    JoinMeeting,
     InstallUpdates,
     /// A tray application clicked.
     TrayActivate(String),
@@ -250,6 +284,12 @@ struct Nodes {
     /// The updates' room, and its Install.
     updates: NodeId,
     install: Option<NodeId>,
+    /// The clock and date, which open the agenda.
+    time: NodeId,
+    /// The meeting card, its ring, and its Join or Details.
+    meeting: NodeId,
+    ring: NodeId,
+    meeting_button: Option<NodeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +298,7 @@ enum PopoverKind {
     Account,
     Tray,
     TrayMenu,
+    Agenda,
 }
 
 /// A popover: its own tree and pixels, placed by the column.
@@ -306,6 +347,9 @@ pub struct Column {
     state: ColumnState,
     popover: Option<Popover>,
     popover_changed: bool,
+    /// The popover a press outside closed: its own button, released, must
+    /// not open it again.
+    closed_by_press: Option<PopoverKind>,
     /// The menu last received, and whose.
     tray_menu: Option<(String, Vec<TrayMenuEntry>)>,
     /// The to-dos shown, and their places in the notes.
@@ -327,6 +371,7 @@ impl Column {
             state: ColumnState::default(),
             popover: None,
             popover_changed: false,
+            closed_by_press: None,
             tray_menu: None,
             todo_rows: Vec::new(),
             now: Duration::ZERO,
@@ -452,6 +497,29 @@ impl Column {
                 fill_updates(t, n.updates, &theme, lang, count, installing)
             });
         }
+        if all || old.meeting != state.meeting || old.calendar_set != state.calendar_set {
+            let progress = state.meeting.as_ref().map_or(0, |m| m.progress.min(100));
+            t.set_draw(
+                n.ring,
+                Box::new(Ring {
+                    progress: f32::from(progress) / 100.0,
+                }),
+            );
+            for child in t.children(n.meeting) {
+                if child != n.ring {
+                    t.remove(child);
+                }
+            }
+            let theme = t.theme().clone();
+            self.nodes.meeting_button = fill_meeting(
+                t,
+                n.meeting,
+                &theme,
+                lang,
+                state.meeting.as_ref(),
+                state.calendar_set,
+            );
+        }
         if all || old.time != state.time {
             t.set_text(
                 n.clock,
@@ -564,6 +632,16 @@ impl Column {
         {
             self.open(PopoverKind::Desktops);
         }
+        // An open agenda follows the calendar and the day.
+        if !all
+            && (old.agenda != state.agenda || old.time.day != state.time.day)
+            && self
+                .popover
+                .as_ref()
+                .is_some_and(|p| p.kind == PopoverKind::Agenda)
+        {
+            self.open(PopoverKind::Agenda);
+        }
         // An open tray follows its applications; it closes with the last.
         if !all
             && old.tray != state.tray
@@ -623,6 +701,7 @@ impl Column {
                 Some((ring, _)) => ring,
                 None => return,
             },
+            PopoverKind::Agenda => self.nodes.meeting,
         };
         let anchor = self.tree.rect(anchor).unwrap_or_default();
         let (mut tree, targets) = match kind {
@@ -641,14 +720,16 @@ impl Column {
                 Some((key, entries)) => tray_menu_popover(&theme, key, entries, scale),
                 None => return,
             },
+            PopoverKind::Agenda => agenda_popover(&theme, self.lang, &self.state, scale),
         };
         let first = tree.update(self.now);
         let size = tree.size();
         // Left of the column; level with the line, or above the account.
         let y = match kind {
-            PopoverKind::Desktops | PopoverKind::Tray | PopoverKind::TrayMenu => {
-                anchor.y - SHADOW_ROOM
-            }
+            PopoverKind::Desktops
+            | PopoverKind::Tray
+            | PopoverKind::TrayMenu
+            | PopoverKind::Agenda => anchor.y - SHADOW_ROOM,
             PopoverKind::Account => anchor.bottom() + SHADOW_ROOM - size.h,
         };
         let y = y.clamp(-MARGIN, (self.tree.size().h + MARGIN - size.h).max(-MARGIN));
@@ -672,6 +753,9 @@ impl Column {
     }
 
     fn toggle(&mut self, kind: PopoverKind) {
+        if self.closed_by_press.take() == Some(kind) {
+            return;
+        }
         if self.popover.as_ref().is_some_and(|p| p.kind == kind) {
             self.close_popover();
         } else {
@@ -718,6 +802,9 @@ impl Column {
     /// Pointer input at `at`, relative to the column's corner.
     pub fn input(&mut self, at: Point, input: Input) -> Vec<Action> {
         let mut actions = Vec::new();
+        if matches!(input, Input::PointerButton { pressed: true }) {
+            self.closed_by_press = None;
+        }
         let in_popover = self.in_popover(at);
         if let Some(p) = &mut self.popover {
             let local = Point::new(at.x - p.at.x, at.y - p.at.y);
@@ -743,6 +830,7 @@ impl Column {
                 return actions;
             }
             if matches!(input, Input::PointerButton { pressed: true }) {
+                self.closed_by_press = self.popover.as_ref().map(|p| p.kind);
                 self.close_popover();
             }
         }
@@ -772,6 +860,14 @@ impl Column {
                 self.toggle(PopoverKind::Account);
             } else if let Some((_, index)) = self.todo_rows.iter().find(|(row, _)| *row == id) {
                 actions.push(Action::TickTodo(*index));
+            } else if id == n.time {
+                self.toggle(PopoverKind::Agenda);
+            } else if Some(id) == n.meeting_button {
+                if self.state.meeting.as_ref().is_some_and(|m| m.join) {
+                    actions.push(Action::JoinMeeting);
+                } else {
+                    self.toggle(PopoverKind::Agenda);
+                }
             } else if Some(id) == n.install {
                 actions.push(Action::InstallUpdates);
             } else if Some(id) == n.stop_sharing {
@@ -924,6 +1020,8 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         },
         Kind::Box(Look::default()),
     );
+    // The month opens from the clock.
+    tree.set_clickable(time, lang.agenda());
     let clock = add(
         tree,
         time,
@@ -937,12 +1035,13 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         Kind::text("", theme.text.body.with_color(Paint::Muted)),
     );
 
-    // Next meeting: a placeholder until the calendar (#75).
+    // The next meeting: filled with the calendar's.
     let meeting = add(
         tree,
         card,
         Style {
             padding: Insets::all(14.0),
+            align: Align::Center,
             ..row(14.0)
         },
         Kind::Box(Look {
@@ -951,7 +1050,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
             ..Look::default()
         }),
     );
-    add(
+    let ring = add(
         tree,
         meeting,
         Style::default(),
@@ -959,31 +1058,6 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
             draw: Box::new(Ring { progress: 0.0 }),
             label: None,
         },
-    );
-    let meeting_text = add(
-        tree,
-        meeting,
-        Style {
-            width: Length::Fill,
-            gap: 2.0,
-            ..Style::default()
-        },
-        Kind::Box(Look::default()),
-    );
-    add(
-        tree,
-        meeting_text,
-        Style::default(),
-        Kind::text(lang.no_meeting(), theme.text.title.with_weight(700)),
-    );
-    add(
-        tree,
-        meeting_text,
-        Style::default(),
-        Kind::text(
-            lang.calendar_not_set(),
-            theme.text.body.with_color(Paint::Muted),
-        ),
     );
 
     // The active window and this screen's desktops.
@@ -1228,10 +1302,73 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         tasks,
         updates,
         install: None,
+        time,
+        meeting,
+        ring,
+        meeting_button: None,
     }
 }
 
-/// A popover's tree: a card with room around it for its shadow.
+/// The meeting card's words and button, after its ring.
+fn fill_meeting(
+    tree: &mut Tree,
+    card: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    meeting: Option<&Meeting>,
+    calendar_set: bool,
+) -> Option<NodeId> {
+    let missing = || unreachable!("adding to a node of this tree");
+    let words = tree
+        .add(
+            card,
+            Style {
+                width: Length::Fill,
+                gap: 2.0,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    let (title, when) = match meeting {
+        Some(m) => (m.title.as_str(), m.when.as_str()),
+        None if calendar_set => (lang.no_meeting(), lang.nothing_planned()),
+        None => (lang.no_meeting(), lang.calendar_not_set()),
+    };
+    // A meeting's title on one line, however long; the empty card's words
+    // wrap.
+    let style = theme.text.title.with_weight(700);
+    let title = if meeting.is_some() {
+        Kind::text_line(title, style)
+    } else {
+        Kind::text(title, style)
+    };
+    tree.add(words, Style::default(), title)
+        .unwrap_or_else(missing);
+    tree.add(
+        words,
+        Style::default(),
+        Kind::text_line(when, theme.text.body.with_color(Paint::Muted)),
+    )
+    .unwrap_or_else(missing);
+    if !calendar_set {
+        return None;
+    }
+    let (label, kind) = match meeting {
+        Some(m) if m.join => (lang.join(), ButtonKind::Primary),
+        _ => (lang.details(), ButtonKind::Plain),
+    };
+    tree.add(
+        card,
+        Style {
+            height: Length::Px(44.0),
+            padding: Insets::symmetric(0.0, 12.0),
+            ..Style::default()
+        },
+        Kind::Button(Button::new(label, kind, theme)),
+    )
+}
+
 /// The to-dos' room above the notifications: some, or none.
 fn tasks_room(shown: bool) -> Style {
     Style {
@@ -1767,6 +1904,196 @@ fn tray_menu_popover(
     (tree, targets)
 }
 
+/// The agenda: the month, its week numbers, and today's events.
+fn agenda_popover(
+    theme: &Theme,
+    lang: Lang,
+    state: &ColumnState,
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    const CELL: f32 = 34.0;
+    const ROW: f32 = 30.0;
+    const SHOWN: usize = 6;
+    let a = &state.agenda;
+    let events = a.today.len().clamp(1, SHOWN);
+    let height = 16.0 * 2.0
+        + 28.0
+        + 12.0
+        + ROW * (1 + a.weeks.len()) as f32
+        + 12.0
+        + 22.0
+        + 28.0 * events as f32;
+    let (mut tree, card) = popover_tree(theme, 8.0 * CELL + 32.0, height, scale);
+    let missing = || unreachable!("adding to a node of this tree");
+    let add = |tree: &mut Tree, parent, style, kind| {
+        tree.add(parent, style, kind).unwrap_or_else(missing)
+    };
+    add(
+        &mut tree,
+        card,
+        Style::default(),
+        Kind::text(
+            lang.month_year(state.time.month, a.year),
+            theme.text.title.with_weight(700),
+        ),
+    );
+    let grid = add(
+        &mut tree,
+        card,
+        Style::default(),
+        Kind::Box(Look::default()),
+    );
+    let cell = |justify| Style {
+        width: Length::Px(CELL),
+        height: Length::Px(ROW),
+        align: Align::Center,
+        justify,
+        ..Style::default()
+    };
+    let line = |tree: &mut Tree| {
+        add(
+            tree,
+            grid,
+            Style {
+                direction: Direction::Row,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+    };
+    // A word in the middle of its cell, over room for a day's dot: level
+    // with the days.
+    let dot_room = Style {
+        width: Length::Px(4.0),
+        height: Length::Px(4.0),
+        ..Style::default()
+    };
+    let centered = |tree: &mut Tree, row, kind| {
+        let style = Style {
+            gap: 1.0,
+            ..cell(Justify::Center)
+        };
+        let place = add(tree, row, style, Kind::Box(Look::default()));
+        add(tree, place, Style::default(), kind);
+        add(tree, place, dot_room, Kind::Box(Look::default()));
+    };
+    let small = theme.text.caption.with_color(Paint::Muted);
+    let heading = line(&mut tree);
+    centered(&mut tree, heading, Kind::text(lang.week_short(), small));
+    for letter in lang.weekday_letters() {
+        centered(
+            &mut tree,
+            heading,
+            Kind::text(letter, small.with_weight(700)),
+        );
+    }
+    for (row, week) in a.weeks.iter().enumerate() {
+        let days = line(&mut tree);
+        centered(&mut tree, days, Kind::text(week.to_string(), small));
+        for column in 0..7u8 {
+            let slot = row as i32 * 7 + i32::from(column) - i32::from(a.first_weekday) + 1;
+            let day = u8::try_from(slot).ok().filter(|d| (1..=a.days).contains(d));
+            let today = day == Some(state.time.day);
+            let look = Look {
+                background: today.then_some(Paint::Accent),
+                radius: ROW / 2.0,
+                ..Look::default()
+            };
+            let place = add(
+                &mut tree,
+                days,
+                Style {
+                    gap: 1.0,
+                    ..cell(Justify::Center)
+                },
+                Kind::Box(look),
+            );
+            let Some(day) = day else {
+                continue;
+            };
+            let busy = a.busy.contains(&day);
+            let ink = if today { Paint::OnAccent } else { Paint::Text };
+            let weight = if busy { 700 } else { 400 };
+            add(
+                &mut tree,
+                place,
+                Style::default(),
+                Kind::text(
+                    day.to_string(),
+                    theme.text.body.with_color(ink).with_weight(weight),
+                ),
+            );
+            // A day with events: a dot under it, in the day's ink on today.
+            let dot = if today {
+                Paint::OnAccent
+            } else {
+                Paint::Accent
+            };
+            add(
+                &mut tree,
+                place,
+                dot_room,
+                Kind::Box(Look {
+                    background: busy.then_some(dot),
+                    radius: 2.0,
+                    ..Look::default()
+                }),
+            );
+        }
+    }
+    add(
+        &mut tree,
+        card,
+        Style::default(),
+        Kind::text(lang.today_upper(), small.with_weight(700)),
+    );
+    if a.today.is_empty() {
+        add(
+            &mut tree,
+            card,
+            Style::default(),
+            Kind::text(
+                lang.nothing_today(),
+                theme.text.body.with_color(Paint::Muted),
+            ),
+        );
+    }
+    for (time, title) in a.today.iter().take(SHOWN) {
+        let row = add(
+            &mut tree,
+            card,
+            Style {
+                direction: Direction::Row,
+                gap: 10.0,
+                align: Align::Center,
+                height: Length::Px(24.0),
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        );
+        add(
+            &mut tree,
+            row,
+            Style {
+                width: Length::Px(64.0),
+                ..Style::default()
+            },
+            Kind::text_line(time.clone(), theme.text.body.with_color(Paint::Muted)),
+        );
+        add(
+            &mut tree,
+            row,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
+            Kind::text_line(title.clone(), theme.text.body),
+        );
+    }
+    (tree, Vec::new())
+}
+
+/// A popover's tree: a card with room around it for its shadow.
 fn popover_tree(theme: &Theme, width: f32, height: f32, scale: f32) -> (Tree, NodeId) {
     let size = Size::new(width + 2.0 * SHADOW_ROOM, height + 2.0 * SHADOW_ROOM);
     let mut tree = Tree::new(theme.clone(), size, scale);

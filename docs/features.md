@@ -265,11 +265,12 @@ The column on the right of the screen is the chosen form (see
 
 ## 18. Calendar
 
-- Multiple accounts, sync, local cache
+- Multiple accounts, sync, local cache (CalDAV and ICS subscriptions)
 - Google (GNOME online accounts `[linux]` or OAuth)
 - Reminders with "Join"
+- Month view with week numbers from the clock, today's agenda
 - Inline commands
-- CalDAV, Microsoft
+- Microsoft
 
 ## 19. Settings
 

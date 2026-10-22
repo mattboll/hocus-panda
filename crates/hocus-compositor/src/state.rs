@@ -62,6 +62,8 @@ pub struct State {
     pub shortcuts: Shortcuts,
     /// Counts configuration reads, applied or refused.
     pub config_generation: u64,
+    /// A configuration was read and applied: what it lists is known.
+    pub config_read: bool,
     pub config_watch: Option<ConfigWatch>,
     /// How windows are decorated, and the textures that draws with.
     pub style: Style,
@@ -116,6 +118,7 @@ pub struct State {
     pub recorder: crate::recording::Recorder,
     /// System updates (#84).
     pub updates: crate::updates::Updates,
+    pub calendar: crate::calendar::Calendar,
     /// Notes and to-dos (#79).
     pub notes: crate::notes::NotesState,
     /// Focus mode, the magnifier, night light (#78).
@@ -217,6 +220,7 @@ impl State {
             config_warnings: Vec::new(),
             shortcuts: Config::default().shortcuts(),
             config_generation: 0,
+            config_read: false,
             config_watch: None,
             style: Style::default(),
             textures: Textures::default(),
@@ -249,6 +253,7 @@ impl State {
             comfort: Default::default(),
             notes: Default::default(),
             updates: Default::default(),
+            calendar: Default::default(),
             gamma_wanted: Vec::new(),
             share: None,
             clipboard: Default::default(),

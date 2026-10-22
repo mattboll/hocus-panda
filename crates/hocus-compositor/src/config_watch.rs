@@ -104,6 +104,7 @@ impl State {
         match update {
             ConfigUpdate::Read(config) => {
                 self.config_error = None;
+                self.config_read = true;
                 self.apply_config(*config);
                 tracing::info!("configuration applied");
                 self.emit(|_| hocus_api::Event::ConfigApplied);

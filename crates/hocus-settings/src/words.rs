@@ -341,3 +341,47 @@ pub fn action(action: &hocus_core::Action, lang: Lang) -> (String, ShortcutGroup
     let d = hocus_shell::actions::describe(action, lang);
     (d.name, d.group, d.scope)
 }
+
+// Accounts and calendar.
+pub const CALENDARS: Words = Words::new("Calendars", "Agendas");
+pub const NO_CALENDAR: Words = Words::new(
+    "No calendar yet: add a CalDAV account or a subscription link.",
+    "Aucun agenda pour l’instant : ajoutez un compte CalDAV ou un lien d’abonnement.",
+);
+pub const ADD_CALENDAR: Words = Words::new("Add a calendar", "Ajouter un agenda");
+pub const CALENDAR_NAME: Words = Words::new("Name", "Nom");
+pub const CALENDAR_NAME_HINT: Words = Words::new("Work", "Travail");
+pub const CALENDAR_URL: Words = Words::new("Address", "Adresse");
+pub const CALENDAR_URL_HINT: Words = Words::new(
+    "https://… (CalDAV server or .ics link)",
+    "https://… (serveur CalDAV ou lien .ics)",
+);
+pub const CALENDAR_USER: Words = Words::new("User name", "Identifiant");
+pub const CALENDAR_PASSWORD: Words = Words::new("Password", "Mot de passe");
+pub const CALENDAR_NOTE: Words = Words::new(
+    "For a subscription link, leave the user name and password empty. The password stays in the keyring.",
+    "Pour un lien d’abonnement, laissez l’identifiant et le mot de passe vides. Le mot de passe reste dans le trousseau.",
+);
+pub const CALENDAR_BAD_URL: Words = Words::new(
+    "The address must start with https:// so that the password never travels in the clear.",
+    "L’adresse doit commencer par https:// pour que le mot de passe ne circule jamais en clair.",
+);
+pub const REMOVE: Words = Words::new("Remove", "Retirer");
+pub const SYNCING: Words = Words::new("Syncing…", "Synchronisation…");
+pub const WRONG_PASSWORD: Words = Words::new(
+    "The server refused the user name or password",
+    "Le serveur a refusé l’identifiant ou le mot de passe",
+);
+pub const UNREACHABLE: Words = Words::new(
+    "Not reached: showing what was saved",
+    "Injoignable : ce qui était enregistré reste affiché",
+);
+
+pub fn synced(events: usize, lang: Lang) -> String {
+    match (lang, events) {
+        (Lang::En, 1) => "Synced · 1 event".into(),
+        (Lang::En, n) => format!("Synced · {n} events"),
+        (Lang::Fr, 1) => "Synchronisé · 1 événement".into(),
+        (Lang::Fr, n) => format!("Synchronisé · {n} événements"),
+    }
+}

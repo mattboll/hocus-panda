@@ -10,6 +10,36 @@ pub enum Lang {
     Fr,
 }
 
+const MONTHS_EN: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+const MONTHS_FR: [&str; 12] = [
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+];
+
 impl Lang {
     /// From a POSIX locale such as `fr_FR.UTF-8`: French for `fr`, English
     /// otherwise.
@@ -50,34 +80,6 @@ impl Lang {
         const DAYS_FR: [&str; 7] = [
             "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
         ];
-        const MONTHS_EN: [&str; 12] = [
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-        ];
-        const MONTHS_FR: [&str; 12] = [
-            "janvier",
-            "février",
-            "mars",
-            "avril",
-            "mai",
-            "juin",
-            "juillet",
-            "août",
-            "septembre",
-            "octobre",
-            "novembre",
-            "décembre",
-        ];
         let w = usize::from(weekday % 7);
         let m = usize::from(month.clamp(1, 12) - 1);
         match self {
@@ -92,6 +94,94 @@ impl Lang {
 
     pub fn calendar_not_set(self) -> &'static str {
         self.pick("Calendar not set up", "Agenda non configuré")
+    }
+
+    pub fn nothing_planned(self) -> &'static str {
+        self.pick("Nothing else planned", "Rien d’autre de prévu")
+    }
+
+    /// The meeting going on, and the minutes it has left.
+    pub fn meeting_now(self, left: i64) -> String {
+        match self {
+            Self::En => format!("In progress · {left} min"),
+            Self::Fr => format!("En cours · {left} min"),
+        }
+    }
+
+    pub fn meeting_in(self, minutes: i64) -> String {
+        match self {
+            Self::En => format!("In {minutes} min"),
+            Self::Fr => format!("Dans {minutes} min"),
+        }
+    }
+
+    pub fn meeting_at(self, hour: u8, minute: u8) -> String {
+        match self {
+            Self::En => format!("At {hour:02}:{minute:02}"),
+            Self::Fr => format!("À {hour:02}:{minute:02}"),
+        }
+    }
+
+    pub fn meeting_tomorrow(self, hour: u8, minute: u8) -> String {
+        match self {
+            Self::En => format!("Tomorrow {hour:02}:{minute:02}"),
+            Self::Fr => format!("Demain {hour:02}:{minute:02}"),
+        }
+    }
+
+    /// A reminder's title.
+    pub fn starts_in(self, summary: &str, minutes: i64) -> String {
+        match (self, minutes) {
+            (Self::En, 1) => format!("{summary} starts in 1 minute"),
+            (Self::En, m) => format!("{summary} starts in {m} minutes"),
+            (Self::Fr, 1) => format!("{summary} commence dans 1 minute"),
+            (Self::Fr, m) => format!("{summary} commence dans {m} minutes"),
+        }
+    }
+
+    pub fn join(self) -> &'static str {
+        self.pick("Join", "Rejoindre")
+    }
+
+    pub fn details(self) -> &'static str {
+        self.pick("Details", "Détails")
+    }
+
+    pub fn all_day(self) -> &'static str {
+        self.pick("All day", "Journée")
+    }
+
+    pub fn today_upper(self) -> &'static str {
+        self.pick("TODAY", "AUJOURD’HUI")
+    }
+
+    pub fn nothing_today(self) -> &'static str {
+        self.pick("Nothing today", "Rien aujourd’hui")
+    }
+
+    pub fn month_year(self, month: u8, year: i16) -> String {
+        let i = usize::from(month.clamp(1, 12) - 1);
+        match self {
+            Self::En => format!("{} {year}", MONTHS_EN[i]),
+            Self::Fr => format!("{} {year}", MONTHS_FR[i]),
+        }
+    }
+
+    /// Monday first.
+    pub fn weekday_letters(self) -> [&'static str; 7] {
+        match self {
+            Self::En => ["M", "T", "W", "T", "F", "S", "S"],
+            Self::Fr => ["L", "M", "M", "J", "V", "S", "D"],
+        }
+    }
+
+    /// The week numbers' heading.
+    pub fn week_short(self) -> &'static str {
+        self.pick("Wk", "Sem.")
+    }
+
+    pub fn agenda(self) -> &'static str {
+        self.pick("Agenda", "Agenda")
     }
 
     pub fn active_window(self) -> &'static str {

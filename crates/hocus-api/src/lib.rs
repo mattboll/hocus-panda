@@ -83,6 +83,14 @@ pub enum Request {
     /// portal's chooser; answered once chosen, as `Monitor: NAME`,
     /// `Window: IDENTIFIER` (ext-foreign-toplevel-list) or nothing.
     PickShare,
+    /// Calendar accounts, how they synced, and the next events (#75).
+    Calendars,
+    /// The password of calendar account `account` (`user@url`), kept in
+    /// the keyring; the configuration names the account.
+    CalendarSecret {
+        account: String,
+        secret: String,
+    },
     /// System updates waiting, and whether they are being looked for or
     /// installed (#84).
     Updates,
@@ -197,6 +205,9 @@ impl Request {
             | Self::Screens
             | Self::IdentifyOutputs
             | Self::PickShare
+            | Self::Calendars
+            // The user's own account, typed in the settings.
+            | Self::CalendarSecret { .. }
             | Self::Updates
             // The system asks for the password itself.
             | Self::InstallUpdates
@@ -286,6 +297,7 @@ pub enum Reply {
     /// What the user chose to share, or nothing.
     Shared(Option<String>),
     Updates(UpdatesInfo),
+    Calendars(CalendarsInfo),
     Windows(Vec<WindowInfo>),
     Scene(Scene),
     Screenshot(Screenshot),
@@ -438,6 +450,38 @@ pub struct OutputInfo {
 
 fn daylight() -> u32 {
     6500
+}
+
+/// Calendars as the session knows them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct CalendarsInfo {
+    pub accounts: Vec<CalendarStatus>,
+    /// Passwords kept, all accounts together.
+    pub secrets: usize,
+    /// Events from now on, cached ones included.
+    pub events: Vec<EventInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarStatus {
+    pub id: String,
+    pub name: String,
+    /// Events of it in the agenda.
+    pub events: usize,
+    /// Why its last sync failed, if it did.
+    pub error: Option<String>,
+    /// It failed because the server refused the name or password.
+    #[serde(default)]
+    pub refused: bool,
+    pub synced: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventInfo {
+    pub summary: String,
+    /// RFC 3339.
+    pub start: String,
+    pub link: Option<String>,
 }
 
 /// System updates as the session knows them.
@@ -613,6 +657,8 @@ pub enum Event {
         width: u32,
         height: u32,
     },
+    /// The calendars synced, or their events changed (#75).
+    Calendars,
     /// The updates waiting, or their state, changed (#84).
     Updates {
         count: usize,
