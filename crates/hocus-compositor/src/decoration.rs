@@ -396,13 +396,14 @@ fn buffer(pixels: &[u8], side: i32) -> MemoryRenderBuffer {
 }
 
 /// The focus ring around a window at `rect` (logical, relative to the
-/// output).
+/// output), `alpha` opaque.
 pub fn ring_elements<R>(
     renderer: &mut R,
     textures: &Textures,
     style: &Style,
     rect: Rectangle<f64, Logical>,
     scale: f64,
+    alpha: f32,
 ) -> Vec<MemoryRenderBufferRenderElement<R>>
 where
     R: Renderer + ImportMem,
@@ -410,16 +411,17 @@ where
 {
     let (texture, corner) = textures.get(Piece::Ring(style.accent), style, scale);
     let inset = f64::from(corner) / scale - style.radius;
-    nine_slice(renderer, &texture, corner, inset, rect, scale)
+    nine_slice(renderer, &texture, corner, inset, rect, scale, alpha)
 }
 
-/// The shadow under a window at `rect`.
+/// The shadow under a window at `rect`, `alpha` opaque.
 pub fn shadow_elements<R>(
     renderer: &mut R,
     textures: &Textures,
     style: &Style,
     rect: Rectangle<f64, Logical>,
     scale: f64,
+    alpha: f32,
 ) -> Vec<MemoryRenderBufferRenderElement<R>>
 where
     R: Renderer + ImportMem,
@@ -429,7 +431,7 @@ where
     let inset = f64::from(corner) / scale - style.radius;
     let mut below = rect;
     below.loc.y += style.shadow_offset;
-    nine_slice(renderer, &texture, corner, inset, below, scale)
+    nine_slice(renderer, &texture, corner, inset, below, scale, alpha)
 }
 
 /// Eight pieces of a `2 × corner + 1` square texture around `rect`: corners
@@ -442,6 +444,7 @@ fn nine_slice<R>(
     inset: f64,
     rect: Rectangle<f64, Logical>,
     scale: f64,
+    alpha: f32,
 ) -> Vec<MemoryRenderBufferRenderElement<R>>
 where
     R: Renderer + ImportMem,
@@ -480,7 +483,7 @@ where
                 renderer,
                 at,
                 texture,
-                None,
+                (alpha < 1.0).then_some(alpha),
                 Some(src),
                 Some(size),
                 Kind::Unspecified,

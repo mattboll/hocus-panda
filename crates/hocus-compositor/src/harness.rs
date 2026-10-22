@@ -42,6 +42,10 @@ pub struct HarnessOptions {
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
     /// A stand-in for polkit's helper, with a system bus (#83).
     pub polkit_helper: Option<std::path::PathBuf>,
+    /// Windows move as in a session (#33); otherwise they appear and go
+    /// at once, so that a test that does not sample motion never catches
+    /// one halfway.
+    pub motion: bool,
 }
 
 /// Starts a compositor for `harness`, its configuration file at `config`
@@ -66,12 +70,14 @@ fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
         child_env: harness.child_env.clone(),
         polkit_helper: harness.polkit_helper.clone(),
     };
-    crate::start(
+    let mut started = crate::start(
         &options,
         Clock::Virtual {
             now: Duration::ZERO,
         },
-    )
+    )?;
+    started.app.state.instant_motion = !harness.motion;
+    Ok(started)
 }
 
 /// A headless compositor in a private runtime directory, on a virtual clock.
@@ -153,6 +159,7 @@ impl Headless {
             data_dirs: None,
             child_env: None,
             polkit_helper: None,
+            motion: false,
         })
     }
 

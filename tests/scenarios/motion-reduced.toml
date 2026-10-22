@@ -1,0 +1,24 @@
+description = "With reduced motion, a window opening only fades in, shortly, at its own size"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+config = """
+[appearance]
+reduced_motion = true
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+advance_ms = 66
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "motion-reduced.png" }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_idle = { for_ms = 2000 }

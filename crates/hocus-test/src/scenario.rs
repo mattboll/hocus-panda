@@ -63,6 +63,10 @@ pub struct Scenario {
     /// Where the launcher reads desktop entries, relative to the scenario.
     #[serde(default)]
     pub data_dirs: Vec<PathBuf>,
+    /// Windows move as in a session, for scenarios that sample motion;
+    /// otherwise they appear and go at once.
+    #[serde(default)]
+    pub motion: bool,
     /// What started applications inherit (`PATH` is added if missing),
     /// instead of the test's own environment; `{scenario_dir}` in values.
     pub child_env: Option<std::collections::BTreeMap<String, String>>,
@@ -174,6 +178,9 @@ pub enum Step {
     /// done: `{ audio?, keys_at_ms? }`: with a sound track as long as the
     /// picture; keys drawn near the bottom from this time in the video.
     ExpectRecording(ExpectRecording),
+    /// Nothing is drawn while `for_ms` of virtual time pass: at rest, no
+    /// frame.
+    ExpectIdle(ExpectIdle),
     /// The CalDAV server goes, as the network would.
     CaldavStop(bool),
     /// The settings keep a calendar account's password: `{ id, password }`.
@@ -309,6 +316,12 @@ pub struct OpenWindow {
 #[serde(deny_unknown_fields)]
 pub struct ExpectAccent {
     pub hue: [f32; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectIdle {
+    pub for_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -640,6 +653,7 @@ impl fmt::Display for Step {
             Self::WaitWallpapers(_) => write!(f, "wait_wallpapers"),
             Self::Restart(_) => write!(f, "restart"),
             Self::ExpectRecording(e) => write!(f, "expect_recording {e:?}"),
+            Self::ExpectIdle(e) => write!(f, "expect_idle {} ms", e.for_ms),
             Self::Caldav(c) => write!(f, "caldav {}", c.dir.display()),
             Self::CaldavStop(_) => write!(f, "caldav_stop"),
             Self::CalendarPassword(p) => write!(f, "calendar_password {}", p.id),
@@ -792,6 +806,7 @@ impl Scenario {
                 env.into_iter().map(|(k, v)| (k.into(), v.into())).collect()
             }),
             polkit_helper: None,
+            motion: self.motion,
         })?;
         let mut run = Run {
             scenario: self,
@@ -1106,6 +1121,27 @@ impl Run<'_> {
             }
             Step::ExpectCalendars(expected) => self.expect_calendars(expected),
             Step::ExpectRecording(expected) => self.expect_recording(expected),
+            Step::ExpectIdle(expected) => {
+                let frames = |run: &mut Self| -> anyhow::Result<Vec<(String, u64)>> {
+                    let Reply::Stats(stats) = run.request(Request::Stats)? else {
+                        anyhow::bail!("expected stats");
+                    };
+                    Ok(stats
+                        .outputs
+                        .into_iter()
+                        .map(|o| (o.name, o.frames))
+                        .collect())
+                };
+                let before = frames(self)?;
+                self.compositor
+                    .advance(Duration::from_millis(expected.for_ms))?;
+                let after = frames(self)?;
+                anyhow::ensure!(
+                    before == after,
+                    "frames were drawn at rest: {before:?} then {after:?}"
+                );
+                Ok(())
+            }
             Step::Restart(_) => {
                 self.clients.clear();
                 self.x11_clients.clear();

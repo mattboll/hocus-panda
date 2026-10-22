@@ -120,6 +120,7 @@ fn a_region_recorded_plays_at_its_size_with_clicks_ringed_in_it_only() -> anyhow
         data_dirs: None,
         child_env: None,
         polkit_helper: None,
+        motion: false,
     })?;
     compositor.request(Request::Subscribe)?;
     compositor.write_config(&format!(

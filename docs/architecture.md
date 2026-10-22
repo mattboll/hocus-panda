@@ -107,6 +107,14 @@ through text-input-v3, once it has the keyboard back; without an input
 method, the compositor sends the text itself, which the protocol has the
 client apply.
 
+Window motion (#33) uses the shell's vocabulary (`hocus_ui::motion`:
+durations, easings, springs, values retargeted from where they are), each
+window's opacity and scale evaluated in closed form at the clock's time when
+the scene is drawn. While a value moves the loop asks for frames, which each
+output's clock paces; at rest it asks for none, and nothing is queued per
+frame. Tests run on a virtual clock and sample motion at a given time;
+those that do not ask for it (`motion = true`) see windows appear at once.
+
 A mirroring screen (#125, `mirror` in its `[[outputs]]` entry) stays lit but
 leaves the layout as an unplugged one would: its windows wait on the
 primary screen and come back where they were when it shows its own desktops

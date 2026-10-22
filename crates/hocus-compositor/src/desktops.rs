@@ -38,6 +38,8 @@ pub struct Managed {
     pub opacity: f32,
     /// Stacked above the other windows.
     pub on_top: bool,
+    /// Its opacity and scale as they move (#33).
+    pub motion: crate::motion::WindowMotion,
 }
 
 /// The model's id of a window, kept in its user data.
@@ -273,6 +275,7 @@ impl State {
                 mode: WindowMode::Normal,
                 opacity,
                 on_top: rule.on_top == Some(true),
+                motion: self.opening_motion(),
             },
         );
         if rule.size.is_some() {

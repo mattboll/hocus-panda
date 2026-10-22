@@ -1,0 +1,18 @@
+description = "A window opens with a fade and a scale from 96 % over a quarter of a second, sampled halfway; then, at rest, ten seconds pass without a frame"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "motion-open.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_idle = { for_ms = 10000 }
