@@ -1,0 +1,41 @@
+description = "A session that crashed while locked comes back locked: only the password unlocks it; one that ended unlocked comes back unlocked"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "mail", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+38"
+
+[[step]]
+expect_ui = { label = "Password" }
+
+# Killed while locked: the next session starts locked.
+[[step]]
+restart = true
+
+[[step]]
+expect_ui = { label = "Password" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "lock-survives-crash.png" }
+
+[[step]]
+type = "panda"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Password", shown = false }
+
+# Unlocked, then killed: the next one starts unlocked.
+[[step]]
+restart = true
+
+[[step]]
+expect_ui = { label = "Password", shown = false }

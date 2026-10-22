@@ -257,6 +257,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         .state_dir
         .clone()
         .or_else(|| state.is_session.then(session::default_dir).flatten());
+    lock::persist(&mut state, state_dir.clone());
     clipboard::start(&event_loop.handle(), &mut state, state_dir.clone());
     state.start_sessions(state_dir);
     if options.shell {

@@ -42,6 +42,8 @@ pub trait Handler: Sized + 'static {
 pub struct Server {
     path: PathBuf,
     permission: Permission,
+    /// The only user whose connections are served: the compositor's own.
+    owner: u32,
     connections: HashMap<ConnectionId, Connection>,
     next_id: u64,
 }
@@ -69,6 +71,11 @@ impl Server {
             _ => {}
         }
         let listener = UnixListener::bind(path)?;
+        // The user's alone, whatever the directory around it allows.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
         listener.set_nonblocking(true)?;
         let accept_handle = handle.clone();
         handle
@@ -92,6 +99,7 @@ impl Server {
         Ok(Self {
             path: path.to_path_buf(),
             permission,
+            owner: rustix::process::getuid().as_raw(),
             connections: HashMap::new(),
             next_id: 0,
         })
@@ -99,6 +107,13 @@ impl Server {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Serves another user than this process's: tests see a stranger
+    /// refused.
+    #[doc(hidden)]
+    pub fn serve_only(&mut self, uid: u32) {
+        self.owner = uid;
     }
 
     pub fn permission(&self) -> Permission {
@@ -232,7 +247,41 @@ impl Drop for Server {
     }
 }
 
+/// The user at the other end, as the system tells it.
+fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        rustix::net::sockopt::socket_peercred(stream)
+            .map(|c| c.uid.as_raw())
+            .map_err(io::Error::from)
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        nix::unistd::getpeereid(stream)
+            .map(|(uid, _)| uid.as_raw())
+            .map_err(|e| io::Error::from_raw_os_error(e as i32))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "freebsd")))]
+    {
+        let _ = stream;
+        Err(io::Error::other("no peer credentials on this system"))
+    }
+}
+
 fn accept<D: Handler>(handle: &LoopHandle<'static, D>, data: &mut D, stream: UnixStream) {
+    // Another user's connection is closed unread.
+    let owner = data.server().owner;
+    match peer_uid(&stream) {
+        Ok(uid) if uid == owner => {}
+        Ok(uid) => {
+            tracing::warn!(uid, "refused a control connection from another user");
+            return;
+        }
+        Err(err) => {
+            tracing::warn!(%err, "refused a control connection: whose is it?");
+            return;
+        }
+    }
     let watched = match stream
         .set_nonblocking(true)
         .and_then(|()| stream.try_clone())

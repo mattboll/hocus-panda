@@ -44,6 +44,36 @@ pub struct HarnessOptions {
     pub polkit_helper: Option<std::path::PathBuf>,
 }
 
+/// Starts a compositor for `harness`, its configuration file at `config`
+/// and its state beside it.
+fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
+    let options = Options {
+        backend: Backend::Headless(harness.headless.clone()),
+        runtime_dir: None,
+        spawn: Vec::new(),
+        api_permission: harness.api_permission,
+        watchdog: harness.watchdog.clone(),
+        config: Some(config.to_path_buf()),
+        config_poll: Duration::from_millis(20),
+        xwayland: harness.xwayland,
+        shell: harness.shell,
+        session_bus: harness.session_bus.clone(),
+        system_bus: harness.system_bus.clone(),
+        session_services: false,
+        // Private: tests never touch the developer's saved session.
+        state_dir: Some(config.with_file_name("state")),
+        data_dirs: harness.data_dirs.clone(),
+        child_env: harness.child_env.clone(),
+        polkit_helper: harness.polkit_helper.clone(),
+    };
+    crate::start(
+        &options,
+        Clock::Virtual {
+            now: Duration::ZERO,
+        },
+    )
+}
+
 /// A headless compositor in a private runtime directory, on a virtual clock.
 #[derive(Debug)]
 pub struct Headless {
@@ -55,6 +85,8 @@ pub struct Headless {
     /// The compositor's configuration file, in a directory of its own.
     config: std::path::PathBuf,
     _config_dir: tempfile::TempDir,
+    /// What it was started with, to start again.
+    harness: HarnessOptions,
 }
 
 /// A control connection read without blocking, so that the harness can run
@@ -129,36 +161,34 @@ impl Headless {
         // exists once the compositor started: watched from the start, read
         // when a test writes it.
         let config_dir = tempfile::Builder::new().prefix("hocus-config-").tempdir()?;
-        let config = config_dir.path().join("config.toml");
-        let options = Options {
-            backend: Backend::Headless(harness.headless),
-            runtime_dir: None,
-            spawn: Vec::new(),
-            api_permission: harness.api_permission,
-            watchdog: harness.watchdog,
-            config: Some(config.clone()),
-            config_poll: Duration::from_millis(20),
-            xwayland: harness.xwayland,
-            shell: harness.shell,
-            session_bus: harness.session_bus.clone(),
-            system_bus: harness.system_bus.clone(),
-            session_services: false,
-            // Private: tests never touch the developer's saved session.
-            state_dir: Some(config_dir.path().join("state")),
-            data_dirs: harness.data_dirs.clone(),
-            child_env: harness.child_env.clone(),
-            polkit_helper: harness.polkit_helper.clone(),
-        };
+        Self::start_in(harness, config_dir)
+    }
+
+    /// The compositor goes as a crash would (nothing saved, nothing
+    /// unlocked) and a new one starts on the same configuration and state.
+    pub fn restart(&mut self) -> anyhow::Result<()> {
+        self.control = None;
         let Started {
             event_loop,
             app,
             runtime_dir,
-        } = crate::start(
-            &options,
-            Clock::Virtual {
-                now: Duration::ZERO,
-            },
-        )?;
+        } = launch(&self.harness, &self.config)?;
+        let old = (
+            std::mem::replace(&mut self.app, app),
+            std::mem::replace(&mut self.event_loop, event_loop),
+            std::mem::replace(&mut self.runtime_dir, runtime_dir),
+        );
+        drop(old);
+        self.ready()
+    }
+
+    fn start_in(harness: HarnessOptions, config_dir: tempfile::TempDir) -> anyhow::Result<Self> {
+        let config = config_dir.path().join("config.toml");
+        let Started {
+            event_loop,
+            app,
+            runtime_dir,
+        } = launch(&harness, &config)?;
         let mut headless = Self {
             event_loop,
             app,
@@ -166,14 +196,20 @@ impl Headless {
             control: None,
             config,
             _config_dir: config_dir,
+            harness,
         };
-        // The defaults are read before the first test step, and XWayland
-        // is ready when asked for.
-        headless.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.config_generation > 0)?;
-        if harness.xwayland {
-            headless.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.xdisplay.is_some())?;
-        }
+        headless.ready()?;
         Ok(headless)
+    }
+
+    /// The defaults are read before the first test step, and XWayland is
+    /// ready when asked for.
+    fn ready(&mut self) -> anyhow::Result<()> {
+        self.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.config_generation > 0)?;
+        if self.harness.xwayland {
+            self.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.xdisplay.is_some())?;
+        }
+        Ok(())
     }
 
     /// The Wayland socket, to connect clients with `WAYLAND_DISPLAY`.
