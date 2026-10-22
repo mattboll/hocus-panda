@@ -526,8 +526,12 @@ impl State {
         };
         match key {
             "open" => self.launch("xdg-open", &[path.display().to_string()]),
-            "annotate" => {
-                let command = self.config.screenshots.annotate.clone();
+            "annotate" | "trim" => {
+                let command = if key == "trim" {
+                    self.config.recording.editor.clone()
+                } else {
+                    self.config.screenshots.annotate.clone()
+                };
                 let mut words = command.split_whitespace();
                 if let Some(program) = words.next() {
                     let mut args: Vec<String> = words.map(str::to_owned).collect();

@@ -500,6 +500,8 @@ pub struct Recording {
     /// How the encoder reads the webcam: `v4l2` (Linux, FreeBSD's webcamd).
     pub camera_input: String,
     pub camera_device: String,
+    /// The recording toast's Trim (#132), given the file.
+    pub editor: String,
 }
 
 impl Default for Recording {
@@ -528,6 +530,7 @@ impl Default for Recording {
             system_device: "@DEFAULT_MONITOR@".into(),
             camera_input: "v4l2".into(),
             camera_device: "/dev/video0".into(),
+            editor: "hocus-trim".into(),
         }
     }
 }

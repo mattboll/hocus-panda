@@ -11,7 +11,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use hocus_api::{Client as Api, Request};
+use hocus_api::{Client as Api, Reply, Request};
 use hocus_shell::Lang;
 use hocus_ui::{AccessNode, Key, Point, Size, Theme};
 use smithay_client_toolkit::{
@@ -41,10 +41,7 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
 };
 
-use crate::{
-    scene::Picture,
-    view::{AnnotateView, Outcome},
-};
+use crate::editor::{self, Editor};
 
 /// The window's size before the compositor says otherwise.
 const SIZE: (u32, u32) = (1200, 820);
@@ -56,10 +53,45 @@ pub struct Options {
     pub wayland: PathBuf,
     /// Its control socket, to copy.
     pub api: Option<PathBuf>,
-    /// The capture.
+    /// The capture, or the recording.
     pub file: PathBuf,
     pub lang: Lang,
     pub theme: Theme,
+    pub editing: Editing,
+}
+
+/// Which editor the window holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Editing {
+    /// A screenshot's annotation (#128).
+    Annotate,
+    /// A recording's trim and export (#132).
+    Trim,
+}
+
+/// The theme in effect, read from the compositor; the default without it.
+pub fn theme_in_effect(api: Option<&PathBuf>) -> Theme {
+    use hocus_ui::{Accent, ThemeName};
+    let toml = api
+        .and_then(|path| Api::connect(path).ok())
+        .and_then(|mut c| match c.request(Request::Config).ok()? {
+            Reply::Config(info) => Some(info.toml),
+            _ => None,
+        });
+    let Some(config) = toml.and_then(|t| hocus_core::Config::parse(&t).ok()) else {
+        return Theme::default();
+    };
+    let a = &config.appearance;
+    let mut theme = Theme::builtin(a.theme.parse().unwrap_or(ThemeName::Dark));
+    if let Ok(named) = a.accent.parse::<Accent>() {
+        theme = theme.with_accent(named);
+    }
+    if a.high_contrast {
+        theme = theme.with_high_contrast();
+    }
+    theme
+        .with_text_size(a.text_size)
+        .with_reduced_motion(a.reduced_motion)
 }
 
 /// The window running on a thread of its own (tests).
@@ -144,9 +176,22 @@ pub fn save_beside(file: &Path, png: &[u8]) -> std::io::Result<PathBuf> {
 }
 
 pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow::Result<()> {
-    let png = std::fs::read(&options.file)
-        .with_context(|| format!("could not read {}", options.file.display()))?;
-    let picture = Picture::from_png(&png)?;
+    let size = Size::new(SIZE.0 as f32, SIZE.1 as f32);
+    let editor: Box<dyn Editor> = match options.editing {
+        Editing::Annotate => Box::new(editor::Annotate::new(
+            options.theme.clone(),
+            options.lang,
+            size,
+            &options.file,
+            options.api.clone(),
+        )?),
+        Editing::Trim => Box::new(editor::Trim::new(
+            options.theme.clone(),
+            options.lang,
+            size,
+            &options.file,
+        )),
+    };
     let stream = std::os::unix::net::UnixStream::connect(&options.wayland)
         .with_context(|| format!("could not connect to {}", options.wayland.display()))?;
     let conn = Connection::from_socket(stream)?;
@@ -159,18 +204,11 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     let surface = compositor.create_surface(&qh);
     // The compositor draws the corners, the shadow and the ring.
     let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
-    window.set_app_id("hocus-annotate");
-    window.set_title(options.lang.annotate());
+    window.set_app_id(editor.app_id());
+    window.set_title(editor.title());
     window.set_min_size(Some((640, 420)));
     window.commit();
 
-    let view = AnnotateView::new(
-        options.theme.clone(),
-        options.lang,
-        Size::new(SIZE.0 as f32, SIZE.1 as f32),
-        1.0,
-        picture,
-    );
     let pool = SlotPool::new((SIZE.0 * SIZE.1 * 4) as usize, &shm)?;
     let mut app = App {
         registry: RegistryState::new(&globals),
@@ -179,8 +217,7 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         shm,
         pool,
         window,
-        view,
-        options,
+        editor,
         size: None,
         scale: 1,
         configured: false,
@@ -193,6 +230,9 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         shown,
     };
     while !app.closed {
+        if app.editor.poll() {
+            app.needs_draw = true;
+        }
         if app.configured && app.needs_draw {
             app.draw()?;
         }
@@ -223,8 +263,7 @@ struct App {
     shm: Shm,
     pool: SlotPool,
     window: Window,
-    view: AnnotateView,
-    options: Options,
+    editor: Box<dyn Editor>,
     size: Option<(u32, u32)>,
     scale: i32,
     configured: bool,
@@ -238,52 +277,13 @@ struct App {
 }
 
 impl App {
-    fn outcomes(&mut self, outcomes: Vec<Outcome>) {
-        let lang = self.options.lang;
-        for outcome in outcomes {
-            match outcome {
-                Outcome::Close => self.closed = true,
-                Outcome::Save(png) => match save_beside(&self.options.file, &png) {
-                    Ok(path) => {
-                        let name = path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        self.view.set_note(Some(lang.annotate_saved(&name)));
-                    }
-                    Err(err) => {
-                        tracing::warn!(%err, "could not save the annotated capture");
-                        self.view.set_note(Some(err.to_string()));
-                    }
-                },
-                Outcome::Copy(png) => {
-                    let Some(api) = self.options.api.clone() else {
-                        continue;
-                    };
-                    let copied = Api::connect(&api).and_then(|mut c| {
-                        use base64::Engine;
-                        c.request(Request::CopyPng {
-                            png_base64: base64::engine::general_purpose::STANDARD.encode(&png),
-                        })
-                        .map(drop)
-                    });
-                    match copied {
-                        Ok(()) => self.view.set_note(Some(lang.annotate_copied().into())),
-                        Err(err) => tracing::warn!(%err, "could not copy the annotated capture"),
-                    }
-                }
-            }
-        }
-        self.needs_draw = true;
-    }
-
     fn draw(&mut self) -> anyhow::Result<()> {
         let (w, h) = self.size.unwrap_or(SIZE);
         let scale = self.scale.max(1);
-        self.view
+        self.editor
             .resize(Size::new(w as f32, h as f32), scale as f32);
-        let _ = self.view.draw(self.started.elapsed());
-        let (pw, ph) = self.view.pixel_size();
+        self.editor.draw(self.started.elapsed());
+        let (pw, ph) = self.editor.pixel_size();
         let (buffer, canvas) = self.pool.create_buffer(
             pw as i32,
             ph as i32,
@@ -295,7 +295,7 @@ impl App {
             .as_chunks_mut::<4>()
             .0
             .iter_mut()
-            .zip(self.view.pixels().as_chunks::<4>().0)
+            .zip(self.editor.pixels().as_chunks::<4>().0)
         {
             *out = [px[2], px[1], px[0], px[3]];
         }
@@ -308,9 +308,9 @@ impl App {
         if let Some(shown) = &self.shown
             && let Ok(mut slot) = shown.lock()
         {
-            let (pointer, drawing) = self.view.pointer();
+            let (pointer, drawing) = self.editor.pointer();
             *slot = Some(Shown {
-                access: self.view.access(),
+                access: self.editor.access(),
                 pointer,
                 drawing,
             });
@@ -327,6 +327,10 @@ fn key_of(keysym: Keysym) -> Option<Key> {
         Keysym::ISO_Left_Tab => Key::BackTab,
         Keysym::BackSpace => Key::Backspace,
         Keysym::Delete => Key::Delete,
+        Keysym::Left => Key::Left,
+        Keysym::Right => Key::Right,
+        Keysym::Up => Key::Up,
+        Keysym::Down => Key::Down,
         _ => return None,
     })
 }
@@ -473,17 +477,17 @@ impl PointerHandler for App {
             let at = Point::new(event.position.0 as f32, event.position.1 as f32);
             match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
-                    self.view.pointer_move(at);
+                    self.editor.pointer_move(at);
                     self.needs_draw = true;
                 }
                 PointerEventKind::Press { button, .. } if button == BTN_LEFT => {
-                    self.view.pointer_move(at);
-                    let out = self.view.pointer_button(true);
-                    self.outcomes(out);
+                    self.editor.pointer_move(at);
+                    self.closed |= self.editor.pointer_button(true);
+                    self.needs_draw = true;
                 }
                 PointerEventKind::Release { button, .. } if button == BTN_LEFT => {
-                    let out = self.view.pointer_button(false);
-                    self.outcomes(out);
+                    self.closed |= self.editor.pointer_button(false);
+                    self.needs_draw = true;
                 }
                 _ => {}
             }
@@ -525,23 +529,22 @@ impl KeyboardHandler for App {
         // Ctrl and a letter: undo, copy, save.
         if self.modifiers.ctrl {
             if let Some(letter) = event.keysym.key_char().filter(char::is_ascii_alphabetic) {
-                let out = self.view.shortcut(letter);
-                self.outcomes(out);
+                self.closed |= self.editor.shortcut(letter);
+                self.needs_draw = true;
             }
             return;
         }
-        let out = match key_of(event.keysym) {
-            Some(key) => self.view.key(key),
+        match key_of(event.keysym) {
+            Some(key) => self.closed |= self.editor.key(key),
             None => {
                 if let Some(text) = event.utf8.as_deref()
                     && text.chars().all(|c| !c.is_control())
                 {
-                    self.view.text(text);
+                    self.editor.text(text);
                 }
-                Vec::new()
             }
-        };
-        self.outcomes(out);
+        }
+        self.needs_draw = true;
     }
 
     fn release_key(

@@ -847,6 +847,68 @@ impl Lang {
         }
     }
 
+    /// The recording editor's title (#132).
+    pub fn trim(self) -> &'static str {
+        self.pick("Trim the recording", "Découper l’enregistrement")
+    }
+
+    pub fn trim_start(self) -> &'static str {
+        self.pick("Start of the cut", "Début de la coupe")
+    }
+
+    pub fn trim_end(self) -> &'static str {
+        self.pick("End of the cut", "Fin de la coupe")
+    }
+
+    pub fn play(self) -> &'static str {
+        self.pick("Play", "Lire")
+    }
+
+    pub fn pause(self) -> &'static str {
+        self.pick("Pause", "Pause")
+    }
+
+    pub fn size_limit(self) -> &'static str {
+        self.pick("Size limit, MB", "Taille maximale, Mo")
+    }
+
+    pub fn export(self) -> &'static str {
+        self.pick("Export", "Exporter")
+    }
+
+    pub fn exporting(self) -> &'static str {
+        self.pick("Exporting…", "Export en cours…")
+    }
+
+    pub fn exported(self, name: &str) -> String {
+        match self {
+            Self::En => format!("Saved as {name}"),
+            Self::Fr => format!("Enregistré sous {name}"),
+        }
+    }
+
+    pub fn export_failed(self, why: &str) -> String {
+        match self {
+            Self::En => format!("Not exported: {why}"),
+            Self::Fr => format!("Pas exporté : {why}"),
+        }
+    }
+
+    /// The cut's bounds and length: `0:02.0 – 0:06.0 · 4.0 s`.
+    pub fn cut(self, from: f64, to: f64) -> String {
+        let at = |s: f64| format!("{}:{:04.1}", (s / 60.0) as u32, s % 60.0);
+        let length = match self {
+            Self::En => format!("{:.1} s", to - from),
+            Self::Fr => format!("{:.1} s", to - from).replace('.', ","),
+        };
+        format!("{} – {} · {length}", at(from), at(to))
+    }
+
+    /// The recording toast's action that opens the editor.
+    pub fn trim_action(self) -> &'static str {
+        self.pick("Trim", "Découper")
+    }
+
     pub fn annotate_copied(self) -> &'static str {
         self.pick("Copied", "Copiée")
     }

@@ -1,0 +1,118 @@
+description = "A ten-second recording's toast offers Trim; cut to 2–6 s it exports as a four-second MP4, and as a GIF under 5 MB, while the compositor keeps its frame budget"
+outputs = ["1280x800"]
+shell = true
+needs = ["ffmpeg", "ffprobe"]
+
+[[step]]
+config = """
+[recording]
+folder = "{runtime_dir}/videos"
+hardware = false
+countdown = 1
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+shift+19"
+
+[[step]]
+pointer_move = [180, 160]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [700, 480]
+
+[[step]]
+release = "left"
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+advance_ms = 10000
+
+[[step]]
+click_ui = "Stop the recording"
+
+[[step]]
+expect_ui = { label = "Trim" }
+
+[[step]]
+open_trim = "{last_recording}"
+
+# Once read, the cut is the whole recording.
+[[step]]
+expect_trim = { label = "Start of the cut" }
+
+# The start two seconds later, the end four seconds earlier.
+[[step]]
+click_trim = "Start of the cut"
+
+[[step]]
+keys = "103"
+
+[[step]]
+keys = "103"
+
+[[step]]
+click_trim = "End of the cut"
+
+[[step]]
+keys = "108"
+
+[[step]]
+keys = "108"
+
+[[step]]
+keys = "108"
+
+[[step]]
+keys = "108"
+
+[[step]]
+expect_trim = { label = "0:02.0 – 0:06.0 · 4.0 s" }
+
+# The recording's toast has gone from over the editor's bar.
+[[step]]
+advance_ms = 8000
+
+[[step]]
+expect_ui = { label = "Trim", shown = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+# The frame and thumbnails come from a compressed video: a little leeway.
+expect_screenshot = { output = "HEADLESS-1", reference = "recording-trim.png", channel_tolerance = 24 }
+
+[[step]]
+click_trim = "Export"
+
+[[step]]
+expect_export = { name_has = "(trimmed).mp4", length = [3.85, 4.15] }
+
+[[step]]
+click_trim = "GIF"
+
+[[step]]
+click_trim = "Size limit, MB"
+
+[[step]]
+type = "5"
+
+[[step]]
+click_trim = "Export"
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+expect_budget = { max_ms = 100 }
+
+[[step]]
+expect_export = { name_has = "(trimmed).gif", max_bytes = 5000000 }

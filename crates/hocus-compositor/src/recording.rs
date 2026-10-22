@@ -526,6 +526,7 @@ impl State {
                     .unwrap_or_default();
                 let actions = vec![
                     ("open".to_owned(), lang.open_file().to_owned()),
+                    ("trim".to_owned(), lang.trim_action().to_owned()),
                     ("delete".to_owned(), lang.delete().to_owned()),
                 ];
                 if let Some(id) = self.shell_toast_with(lang.recording_saved(), &file, actions) {

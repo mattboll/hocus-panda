@@ -190,6 +190,16 @@ pub enum Step {
     ClickAnnotate(String),
     /// Drags from its element's middle by `by`, as `drag_settings`.
     DragAnnotate(DragSettings),
+    /// Opens the recording editor on a file (`{last_recording}` is the
+    /// last one saved), and waits for it.
+    OpenTrim(String),
+    /// The same three as the annotation window's, for the editor.
+    ExpectTrim(ExpectSettings),
+    ClickTrim(String),
+    DragTrim(DragSettings),
+    /// A file the editor exported beside the recording, once written:
+    /// `{ name_has, length = [from, to]?, max_bytes? }`, read by ffprobe.
+    ExpectExport(ExpectExport),
     /// Presses on the settings window's element with this label, moves by
     /// `by`, and lets go: a drag.
     DragSettings(DragSettings),
@@ -303,6 +313,15 @@ pub struct ExpectAccent {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ExpectExport {
+    pub name_has: String,
+    /// Seconds.
+    pub length: Option<[f64; 2]>,
+    pub max_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectRecording {
     pub audio: Option<bool>,
     pub keys_at_ms: Option<u64>,
@@ -354,17 +373,21 @@ pub struct ExpectFile {
 enum Driving {
     #[default]
     Settings,
-    Annotate,
+    /// The annotation window or the recording editor, by app id.
+    Editor(&'static str),
 }
 
 impl Driving {
     fn app_id(self) -> &'static str {
         match self {
             Self::Settings => "hocus-settings",
-            Self::Annotate => "hocus-annotate",
+            Self::Editor(app_id) => app_id,
         }
     }
 }
+
+const ANNOTATE: Driving = Driving::Editor("hocus-annotate");
+const TRIM: Driving = Driving::Editor("hocus-trim");
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -624,6 +647,11 @@ impl fmt::Display for Step {
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
             Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
             Self::DragAnnotate(d) => write!(f, "drag_annotate {:?}", d.label),
+            Self::OpenTrim(file) => write!(f, "open_trim {file:?}"),
+            Self::ExpectTrim(e) => write!(f, "expect_trim {:?}", e.label),
+            Self::ClickTrim(label) => write!(f, "click_trim {label:?}"),
+            Self::DragTrim(d) => write!(f, "drag_trim {:?}", d.label),
+            Self::ExpectExport(e) => write!(f, "expect_export {:?}", e.name_has),
             Self::DragSettings(d) => write!(f, "drag_settings {}", d.label),
             Self::ExpectConfigFile(_) => write!(f, "expect_config_file"),
             Self::Type(text) => write!(f, "type {text:?}"),
@@ -772,7 +800,7 @@ impl Scenario {
             clients: Vec::new(),
             x11_clients: Vec::new(),
             settings: None,
-            annotate: None,
+            editor: None,
             driving: Driving::Settings,
             layers: Vec::new(),
             sharing: None,
@@ -799,7 +827,8 @@ struct Run<'a> {
     clients: Vec<TestClient>,
     x11_clients: Vec<X11Client>,
     settings: Option<hocus_settings::client::Running>,
-    annotate: Option<hocus_annotate::client::Running>,
+    /// The annotation window or the recording editor.
+    editor: Option<hocus_annotate::client::Running>,
     /// Which of the two the settings steps drive.
     driving: Driving,
     layers: Vec<crate::layer::LayerClient>,
@@ -1031,7 +1060,29 @@ impl Run<'_> {
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
             Step::DragSettings(drag) => self.drag_settings(drag),
-            Step::OpenAnnotate(file) => self.open_annotate(file),
+            Step::OpenAnnotate(file) => {
+                self.open_editor(file, hocus_annotate::client::Editing::Annotate)
+            }
+            Step::OpenTrim(file) => self.open_editor(file, hocus_annotate::client::Editing::Trim),
+            Step::ExpectTrim(expected) => {
+                self.driving = TRIM;
+                let done = self.expect_settings(expected);
+                self.driving = Driving::Settings;
+                done
+            }
+            Step::ClickTrim(label) => {
+                self.driving = TRIM;
+                let done = self.click_settings(label);
+                self.driving = Driving::Settings;
+                done
+            }
+            Step::DragTrim(drag) => {
+                self.driving = TRIM;
+                let done = self.drag_settings(drag);
+                self.driving = Driving::Settings;
+                done
+            }
+            Step::ExpectExport(expected) => self.expect_export(expected),
             Step::WaitWallpapers(_) => self.wallpapers(),
             Step::Caldav(c) => {
                 let dir = self.scenario.dir.join(&c.dir);
@@ -1059,7 +1110,7 @@ impl Run<'_> {
                 self.clients.clear();
                 self.x11_clients.clear();
                 self.settings = None;
-                self.annotate = None;
+                self.editor = None;
                 self.layers.clear();
                 self.lock_client = None;
                 self.compositor.restart()?;
@@ -1067,19 +1118,19 @@ impl Run<'_> {
                 Ok(())
             }
             Step::ExpectAnnotate(expected) => {
-                self.driving = Driving::Annotate;
+                self.driving = ANNOTATE;
                 let done = self.expect_settings(expected);
                 self.driving = Driving::Settings;
                 done
             }
             Step::ClickAnnotate(label) => {
-                self.driving = Driving::Annotate;
+                self.driving = ANNOTATE;
                 let done = self.click_settings(label);
                 self.driving = Driving::Settings;
                 done
             }
             Step::DragAnnotate(drag) => {
-                self.driving = Driving::Annotate;
+                self.driving = ANNOTATE;
                 let done = self.drag_settings(drag);
                 self.driving = Driving::Settings;
                 done
@@ -1533,25 +1584,7 @@ impl Run<'_> {
     /// once its worker wrote it.
     /// The encoder finishes on its own threads: waited for in real time.
     fn expect_recording(&mut self, expected: &ExpectRecording) -> anyhow::Result<()> {
-        let deadline = Instant::now() + CLIENT_TIMEOUT * 2;
-        let path = loop {
-            // Events arrive with replies.
-            self.request(Request::Version)?;
-            self.events.extend(self.compositor.take_events());
-            let saved = self.events.iter().rev().find_map(|e| match e {
-                hocus_api::Event::Recording { path, .. } => path.clone(),
-                _ => None,
-            });
-            if let Some(path) = saved {
-                break path;
-            }
-            anyhow::ensure!(
-                Instant::now() < deadline,
-                "no recording saved; events: {:?}",
-                self.events
-            );
-            self.compositor.dispatch(Duration::from_millis(10))?;
-        };
+        let path = self.last_recording()?;
         let probe = std::process::Command::new("ffprobe")
             .args(["-v", "error", "-show_entries"])
             .args(["stream=codec_type,duration,width,height", "-of", "csv=p=0"])
@@ -1802,9 +1835,127 @@ impl Run<'_> {
         }
     }
 
-    fn open_annotate(&mut self, file: &str) -> anyhow::Result<()> {
+    /// The last recording saved, as its event said.
+    fn last_recording(&mut self) -> anyhow::Result<String> {
+        let deadline = Instant::now() + CLIENT_TIMEOUT * 2;
+        loop {
+            // Events arrive with replies.
+            self.request(Request::Version)?;
+            self.events.extend(self.compositor.take_events());
+            let saved = self.events.iter().rev().find_map(|e| match e {
+                hocus_api::Event::Recording { path, .. } => path.clone(),
+                _ => None,
+            });
+            if let Some(path) = saved {
+                return Ok(path);
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "no recording saved; events: {:?}",
+                self.events
+            );
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    /// An open editor has done what it was asked (a drag, a frame to
+    /// show), and the compositor has its last frame.
+    fn editor_caught_up(&mut self) -> anyhow::Result<()> {
+        if self.editor.is_none() {
+            return Ok(());
+        }
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        while self
+            .editor
+            .as_ref()
+            .and_then(|e| e.shown())
+            .is_none_or(|s| s.drawing)
+        {
+            anyhow::ensure!(Instant::now() < deadline, "the editor is still busy");
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        let until = Instant::now() + Duration::from_millis(40);
+        while Instant::now() < until {
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        Ok(())
+    }
+
+    /// A file the editor exported beside the last recording.
+    fn expect_export(&mut self, expected: &ExpectExport) -> anyhow::Result<()> {
+        let recording = PathBuf::from(self.last_recording()?);
+        let dir = recording.parent().context("the recording has no folder")?;
+        let deadline = Instant::now() + CLIENT_TIMEOUT * 4;
+        let path = loop {
+            let found = std::fs::read_dir(dir)?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .find(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().contains(&expected.name_has))
+                });
+            // Written whole: the editor names it once the encoder is done.
+            let said = self
+                .editor
+                .as_ref()
+                .and_then(|e| e.access())
+                .is_some_and(|a| {
+                    a.dump()
+                        .lines()
+                        .any(|l| l.contains("Saved as") && l.contains(&expected.name_has))
+                });
+            if let Some(path) = found.filter(|_| said) {
+                break path;
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "no {:?} beside {}; the editor shows:\n{}",
+                expected.name_has,
+                recording.display(),
+                self.editor
+                    .as_ref()
+                    .and_then(|e| e.access())
+                    .map(|a| a.dump())
+                    .unwrap_or_default()
+            );
+            self.compositor.dispatch(Duration::from_millis(20))?;
+        };
+        let size = std::fs::metadata(&path)?.len();
+        if let Some(max) = expected.max_bytes {
+            anyhow::ensure!(size <= max, "{}: {size} bytes", path.display());
+        }
+        if let Some([from, to]) = expected.length {
+            let probe = std::process::Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(&path)
+                .output()?;
+            let length: f64 = String::from_utf8_lossy(&probe.stdout).trim().parse()?;
+            anyhow::ensure!(
+                (from..=to).contains(&length),
+                "{}: {length} s",
+                path.display()
+            );
+        }
+        Ok(())
+    }
+
+    fn open_editor(
+        &mut self,
+        file: &str,
+        editing: hocus_annotate::client::Editing,
+    ) -> anyhow::Result<()> {
         let runtime = self.compositor.runtime_dir().to_string_lossy().into_owned();
         let mut file = file.replace("{runtime_dir}", &runtime);
+        if file.contains("{last_recording}") {
+            let last = self.last_recording()?;
+            file = file.replace("{last_recording}", &last);
+        }
         if file.contains("{last_screenshot}") {
             // The last capture saved, as its event said.
             self.request(Request::Stats)?;
@@ -1827,25 +1978,28 @@ impl Run<'_> {
             file: file.into(),
             lang: hocus_shell::Lang::En,
             theme: hocus_ui::Theme::default(),
+            editing,
         })?;
-        self.annotate = Some(running);
+        self.editor = Some(running);
+        let app_id = match editing {
+            hocus_annotate::client::Editing::Annotate => ANNOTATE,
+            hocus_annotate::client::Editing::Trim => TRIM,
+        }
+        .app_id();
         let deadline = Instant::now() + CLIENT_TIMEOUT;
         loop {
-            let shown = self.find("hocus-annotate")?.is_some()
-                && self.annotate.as_ref().is_some_and(|s| s.access().is_some());
+            let shown = self.find(app_id)?.is_some()
+                && self.editor.as_ref().is_some_and(|s| s.access().is_some());
             if shown {
                 return Ok(());
             }
-            if let Some(s) = self.annotate.take_if(|s| s.is_finished()) {
+            if let Some(s) = self.editor.take_if(|s| s.is_finished()) {
                 return Err(s
                     .join()
                     .err()
-                    .unwrap_or_else(|| anyhow::anyhow!("the annotation window stopped")));
+                    .unwrap_or_else(|| anyhow::anyhow!("the editor window stopped")));
             }
-            anyhow::ensure!(
-                Instant::now() < deadline,
-                "the annotation window never came"
-            );
+            anyhow::ensure!(Instant::now() < deadline, "the editor window never came");
             self.compositor.dispatch(Duration::from_millis(5))?;
         }
     }
@@ -1863,7 +2017,7 @@ impl Run<'_> {
         }
         let access = match self.driving {
             Driving::Settings => self.settings.as_ref().and_then(|s| s.access()),
-            Driving::Annotate => self.annotate.as_ref().and_then(|s| s.access()),
+            Driving::Editor(_) => self.editor.as_ref().and_then(|s| s.access()),
         }
         .context("no such window; open it first")?;
         Ok((find(&access, label), access))
@@ -2075,14 +2229,14 @@ impl Run<'_> {
         }
         // The annotation window draws the shape once it has the release:
         // on a slow machine, later than any fixed wait.
-        if matches!(self.driving, Driving::Annotate) {
+        if matches!(self.driving, Driving::Editor(_)) {
             let end = (
                 node.rect.x + node.rect.w / 2.0 + drag.by[0] as f32,
                 node.rect.y + node.rect.h / 2.0 + drag.by[1] as f32,
             );
             let deadline = Instant::now() + CLIENT_TIMEOUT;
             loop {
-                let shown = self.annotate.as_ref().and_then(|a| a.shown());
+                let shown = self.editor.as_ref().and_then(|a| a.shown());
                 let done = shown.is_some_and(|s| {
                     !s.drawing
                         && s.pointer
@@ -2452,6 +2606,7 @@ impl Run<'_> {
 
     fn expect_screenshot(&mut self, expected: &ExpectScreenshot) -> anyhow::Result<()> {
         self.wallpapers()?;
+        self.editor_caught_up()?;
         self.settings_caught_up()?;
         let reply = self.request(Request::Screenshot {
             target: Target::Output(expected.output.clone()),
