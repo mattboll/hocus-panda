@@ -1,0 +1,1 @@
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/vello_gpu: /home/mbollot/github/hocus-panda/prototypes/ui-render/src/bin/vello_gpu.rs /home/mbollot/github/hocus-panda/prototypes/ui-render/src/lib.rs /home/mbollot/github/hocus-panda/prototypes/ui-render/src/parley_text.rs

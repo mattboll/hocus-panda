@@ -1,0 +1,14 @@
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/deps/thiserror-94389d793367276e.d: /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/build/thiserror-aaf9c4c25eafafa8/out/private.rs
+
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/deps/libthiserror-94389d793367276e.rlib: /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/build/thiserror-aaf9c4c25eafafa8/out/private.rs
+
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/deps/libthiserror-94389d793367276e.rmeta: /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/build/thiserror-aaf9c4c25eafafa8/out/private.rs
+
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs:
+/home/mbollot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs:
+/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/build/thiserror-aaf9c4c25eafafa8/out/private.rs:
+
+# env-dep:OUT_DIR=/home/mbollot/github/hocus-panda/prototypes/ui-render/target/release/build/thiserror-aaf9c4c25eafafa8/out

@@ -153,13 +153,16 @@ fn a_blocked_loop_leaves_a_dump_of_every_thread() -> anyhow::Result<()> {
 
     compositor.on_loop("stuck", |_| std::thread::sleep(Duration::from_secs(3)));
     compositor.dispatch(Duration::ZERO)?;
-    // The watchdog's report comes back once the loop runs again.
-    compositor.dispatch_until(Duration::from_secs(30), |_| {
-        std::fs::read_dir(dumps.path()).is_ok_and(|d| d.count() > 0)
-    })?;
-    keep_running(&mut compositor, Duration::from_millis(200))?;
-
-    let stats = stats(&mut compositor)?;
+    // The watchdog reports once gdb is done writing the dump, which takes
+    // seconds on a slow machine; the file itself exists before that.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let stats = loop {
+        keep_running(&mut compositor, Duration::from_millis(50))?;
+        let stats = stats(&mut compositor)?;
+        if !stats.stalls.is_empty() || Instant::now() > deadline {
+            break stats;
+        }
+    };
     let [stall] = stats.stalls.as_slice() else {
         anyhow::bail!("expected one stall, got {:?}", stats.stalls);
     };

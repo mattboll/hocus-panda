@@ -1,0 +1,40 @@
+tiny-skia + cosmic-text @1x
+  full column        median 0.698 ms, p95 0.767 ms, max 0.914 ms
+  one widget (agent) median 0.109 ms, p95 0.119 ms, max 0.169 ms
+  shapes only        median 0.559 ms, p95 0.602 ms, max 0.684 ms
+  layer copy         median 0.002 ms, p95 0.002 ms, max 0.004 ms
+  peak memory        9388 KiB
+vello_cpu + parley @1x
+  full column        median 0.743 ms, p95 0.774 ms, max 1.252 ms
+  one widget (agent) median 0.063 ms, p95 0.071 ms, max 0.109 ms
+  shapes only        median 0.168 ms, p95 0.181 ms, max 0.223 ms
+  init               0.3 ms
+  peak memory        9968 KiB
+vello (GPU) + parley @1x
+  full column        median 1.424 ms, p95 2.089 ms, max 2.373 ms
+  one widget (agent) median 0.948 ms, p95 1.290 ms, max 2.059 ms
+  shapes only        median 0.958 ms, p95 1.143 ms, max 1.219 ms
+  encode only        median 0.002 ms, p95 0.003 ms, max 0.004 ms
+  layer read back    median 0.600 ms, p95 0.675 ms, max 0.749 ms
+  init               2061.5 ms
+  peak memory        256096 KiB
+tiny-skia + cosmic-text @2x
+  full column        median 2.649 ms, p95 3.646 ms, max 5.950 ms
+  one widget (agent) median 0.357 ms, p95 0.387 ms, max 0.564 ms
+  shapes only        median 2.227 ms, p95 2.373 ms, max 2.841 ms
+  layer copy         median 0.007 ms, p95 0.007 ms, max 0.014 ms
+  peak memory        15432 KiB
+vello_cpu + parley @2x
+  full column        median 1.498 ms, p95 1.593 ms, max 1.690 ms
+  one widget (agent) median 0.127 ms, p95 0.137 ms, max 0.194 ms
+  shapes only        median 0.473 ms, p95 0.493 ms, max 0.585 ms
+  init               0.4 ms
+  peak memory        16552 KiB
+vello (GPU) + parley @2x
+  full column        median 1.662 ms, p95 2.375 ms, max 2.708 ms
+  one widget (agent) median 0.952 ms, p95 1.091 ms, max 1.359 ms
+  shapes only        median 1.232 ms, p95 1.379 ms, max 1.609 ms
+  encode only        median 0.002 ms, p95 0.002 ms, max 0.006 ms
+  layer read back    median 1.134 ms, p95 1.281 ms, max 1.418 ms
+  init               124.4 ms
+  peak memory        259792 KiB
