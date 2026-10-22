@@ -27,6 +27,21 @@ shadow = true
 ring_width = 2     # focus ring
 accent = "#7bc47f"
 
+[appearance]
+theme = "dark"             # dark, light, matrix, hud, paper
+accent = "theme"           # theme, bamboo, amber, blue, pink, or wallpaper (taken from it, made readable)
+
+[wallpaper]                # behind the windows of every screen
+kind = "glow"              # glow (soft light by the time of day), image, folder (its images through the day), colour
+image = "~/Pictures/hills.jpg"
+folder = "~/Pictures/day"
+mode = "fill"              # fill, fit, stretch, center
+colour = "#0e0f12"         # around a fitted image, or the whole screen; the theme's background if not set
+
+[[wallpaper.screens]]      # one screen's own, over the settings above
+output = "DP-1"
+image = "~/Pictures/wide.png"
+
 [launcher]                 # what the launcher offers besides applications
 calculator = true          # 2*21
 units = true               # 12 km in miles

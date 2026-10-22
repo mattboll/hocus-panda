@@ -161,6 +161,12 @@ impl State {
                 elements.extend(shadow.into_iter().map(SceneElement::Frame));
             }
         }
+        // The wallpaper, at the very back.
+        elements.extend(
+            self.wallpaper_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         elements
     }
 

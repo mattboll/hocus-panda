@@ -45,6 +45,12 @@ pub struct QuickPanel {
     pressed: bool,
 }
 
+impl QuickPanel {
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.sheet.set_theme(theme);
+    }
+}
+
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, lang: Lang) {
     let (sender, receiver) = channel::channel::<quick::State>();
     let inserted = handle.insert_source(receiver, |event, _, app| {

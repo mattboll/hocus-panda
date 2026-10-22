@@ -169,6 +169,12 @@ impl Headless {
         &self.app.state.socket_path
     }
 
+    /// Whether every screen shows the wallpaper it asked for: pictures are
+    /// made off the loop.
+    pub fn wallpapers_ready(&self) -> bool {
+        self.app.state.wallpapers_ready()
+    }
+
     /// XWayland's display number, when it runs.
     pub fn x11_display(&self) -> Option<u32> {
         self.app.state.xdisplay

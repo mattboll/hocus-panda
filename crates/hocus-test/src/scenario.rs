@@ -87,6 +87,9 @@ pub enum Step {
     Copy(Clipboard),
     /// The client of this app id reads this text from the clipboard.
     ExpectClipboard(Clipboard),
+    /// The shell's accent in effect has a hue within `hue = [from, to]`
+    /// (degrees), and reads on the theme's surfaces.
+    ExpectAccent(ExpectAccent),
     /// Types text, as on a US keyboard.
     Type(String),
     /// A file a started program wrote in the compositor's runtime
@@ -185,6 +188,12 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectAccent {
+    pub hue: [f32; 2],
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -339,6 +348,7 @@ impl fmt::Display for Step {
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
             Self::Type(text) => write!(f, "type {text:?}"),
+            Self::ExpectAccent(e) => write!(f, "expect_accent {:?}", e.hue),
             Self::ExpectRuntimeFile(e) => write!(f, "expect_runtime_file {}", e.name),
             Self::NotifySend(args) => write!(f, "notify_send {args:?}"),
             Self::Notify(n) => write!(f, "notify {} {:?}", n.app, n.summary),
@@ -626,9 +636,17 @@ impl Run<'_> {
                 Ok(())
             }
             Step::Config(text) => {
-                self.compositor.write_config(text)?;
+                // Fixtures are found from the scenario's own directory.
+                let dir = self
+                    .scenario
+                    .dir
+                    .canonicalize()
+                    .unwrap_or_else(|_| self.scenario.dir.clone());
+                let text = text.replace("{scenario_dir}", &dir.to_string_lossy());
+                self.compositor.write_config(&text)?;
                 Ok(())
             }
+            Step::ExpectAccent(expected) => self.expect_accent(expected),
             Step::ExpectConfigError(expected) => {
                 let Reply::Config(info) = self.request(Request::Config)? else {
                     anyhow::bail!("expected the configuration");
@@ -793,6 +811,32 @@ impl Run<'_> {
         self.compositor
             .dispatch_until(CLIENT_TIMEOUT, |c| c.window_count() > before)
             .context("the X11 window did not appear")
+    }
+
+    /// The accent may wait on a wallpaper made off the loop.
+    fn expect_accent(&mut self, expected: &ExpectAccent) -> anyhow::Result<()> {
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let Reply::Config(info) = self.request(Request::Config)? else {
+                anyhow::bail!("expected the configuration");
+            };
+            let hue = info
+                .accent
+                .as_deref()
+                .and_then(hocus_ui::Color::hex)
+                .map(|c| c.hsl().0);
+            if hue.is_some_and(|h| (expected.hue[0]..=expected.hue[1]).contains(&h)) {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                anyhow::bail!(
+                    "accent {:?} (hue {hue:?}), expected a hue in {:?}",
+                    info.accent,
+                    expected.hue
+                );
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
     }
 
     fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
@@ -1164,35 +1208,55 @@ impl Run<'_> {
         }
     }
 
+    /// Some pixels are made off the loop (wallpapers): the step gets a
+    /// moment before it fails.
     fn expect_pixel(&mut self, expected: &ExpectPixel) -> anyhow::Result<()> {
-        let reply = self.request(Request::Screenshot {
-            target: Target::Output(expected.output.clone()),
-            cursor: false,
-        })?;
-        let Reply::Screenshot(shot) = reply else {
-            anyhow::bail!("expected a screenshot, got {reply:?}");
-        };
-        let image = Image::from_png(&shot.png()?)?;
-        let [x, y] = expected.at;
-        let got = image
-            .pixel(x, y)
-            .with_context(|| format!("{x},{y} is outside {}x{}", image.width, image.height))?;
-        let want = parse_color(&expected.color)?.to_be_bytes();
-        let tolerance = expected.tolerance.unwrap_or(24);
-        let close = (0..3).all(|i| got[i].abs_diff(want[i + 1]) <= tolerance);
-        anyhow::ensure!(
-            close == expected.is,
-            "pixel {x},{y} is #{:02x}{:02x}{:02x}, expected {}{}",
-            got[0],
-            got[1],
-            got[2],
-            if expected.is { "" } else { "anything but " },
-            expected.color
-        );
-        Ok(())
+        self.wallpapers()?;
+        let deadline = Instant::now() + SETTLE_TIMEOUT;
+        loop {
+            let reply = self.request(Request::Screenshot {
+                target: Target::Output(expected.output.clone()),
+                cursor: false,
+            })?;
+            let Reply::Screenshot(shot) = reply else {
+                anyhow::bail!("expected a screenshot, got {reply:?}");
+            };
+            let image = Image::from_png(&shot.png()?)?;
+            let [x, y] = expected.at;
+            let got = image
+                .pixel(x, y)
+                .with_context(|| format!("{x},{y} is outside {}x{}", image.width, image.height))?;
+            let want = parse_color(&expected.color)?.to_be_bytes();
+            let tolerance = expected.tolerance.unwrap_or(24);
+            let close = (0..3).all(|i| got[i].abs_diff(want[i + 1]) <= tolerance);
+            if close == expected.is {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                anyhow::bail!(
+                    "pixel {x},{y} is #{:02x}{:02x}{:02x}, expected {}{}",
+                    got[0],
+                    got[1],
+                    got[2],
+                    if expected.is { "" } else { "anything but " },
+                    expected.color
+                );
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    /// Wallpapers are made off the loop: pictures wait for them.
+    fn wallpapers(&mut self) -> anyhow::Result<()> {
+        self.compositor
+            .dispatch_until(CLIENT_TIMEOUT, |c| c.wallpapers_ready())
+            .context("the wallpapers never came")?;
+        // What arrived is drawn.
+        self.compositor.advance(FRAME)
     }
 
     fn expect_screenshot(&mut self, expected: &ExpectScreenshot) -> anyhow::Result<()> {
+        self.wallpapers()?;
         let reply = self.request(Request::Screenshot {
             target: Target::Output(expected.output.clone()),
             cursor: expected.cursor,

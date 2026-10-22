@@ -79,6 +79,46 @@ impl Color {
         0.2126 * channel(self.r) + 0.7152 * channel(self.g) + 0.0722 * channel(self.b)
     }
 
+    /// Hue (0 to 360), saturation and lightness (0 to 1).
+    pub fn hsl(self) -> (f32, f32, f32) {
+        let (r, g, b) = (
+            f32::from(self.r) / 255.0,
+            f32::from(self.g) / 255.0,
+            f32::from(self.b) / 255.0,
+        );
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let l = (max + min) / 2.0;
+        let d = max - min;
+        if d == 0.0 {
+            return (0.0, 0.0, l);
+        }
+        let s = d / (1.0 - (2.0 * l - 1.0).abs());
+        let h = if max == r {
+            60.0 * ((g - b) / d).rem_euclid(6.0)
+        } else if max == g {
+            60.0 * ((b - r) / d + 2.0)
+        } else {
+            60.0 * ((r - g) / d + 4.0)
+        };
+        (h, s.clamp(0.0, 1.0), l)
+    }
+
+    pub fn from_hsl(h: f32, s: f32, l: f32) -> Color {
+        let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+        let x = c * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
+        let m = l - c / 2.0;
+        let (r, g, b) = match h.rem_euclid(360.0) {
+            h if h < 60.0 => (c, x, 0.0),
+            h if h < 120.0 => (x, c, 0.0),
+            h if h < 180.0 => (0.0, c, x),
+            h if h < 240.0 => (0.0, x, c),
+            h if h < 300.0 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        let to = |v: f32| ((v + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+        Color::rgb(to(r), to(g), to(b))
+    }
+
     /// WCAG contrast ratio between two opaque colours, 1 to 21.
     pub fn contrast(self, other: Color) -> f32 {
         let (a, b) = (self.luminance(), other.luminance());
@@ -436,6 +476,34 @@ impl Theme {
         Ok(theme)
     }
 
+    /// The theme with an accent of its own colour (from a wallpaper): the
+    /// same hue, lighter or darker until it reads at 4.5:1 on the
+    /// background and the surfaces.
+    pub fn with_custom_accent(mut self, color: Color) -> Self {
+        let c = &self.colors;
+        let grounds = [
+            c.background,
+            c.surface.over(c.background),
+            c.surface_hover.over(c.background),
+        ];
+        let readable = |x: Color| grounds.iter().all(|g| x.contrast(*g) >= 4.5);
+        let (h, s, l) = color.hsl();
+        // Away from the background's own lightness.
+        let up = c.background.luminance() < 0.5;
+        let mut chosen = color.with_alpha(255);
+        let mut l = l;
+        while !readable(chosen) && (0.0..=1.0).contains(&l) {
+            l += if up { 0.01 } else { -0.01 };
+            chosen = Color::from_hsl(h, s, l.clamp(0.0, 1.0));
+        }
+        self.colors.accent = chosen;
+        self.colors.on_accent = [Color::WHITE, self.colors.background, self.colors.text]
+            .into_iter()
+            .max_by(|a, b| a.contrast(chosen).total_cmp(&b.contrast(chosen)))
+            .unwrap_or(Color::WHITE);
+        self
+    }
+
     /// The theme with another of its accents.
     pub fn with_accent(mut self, accent: Accent) -> Self {
         self.set_accent(accent);
@@ -561,6 +629,20 @@ mod tests {
         let text = ThemeName::Dark.file().replace("#0E0F12", "#0E0F1");
         let err = Theme::from_toml(&text).err().unwrap_or_default();
         assert!(err.contains("#0E0F1"), "{err}");
+    }
+
+    #[test]
+    fn a_custom_accent_is_made_readable() {
+        // A pale orange on the light theme, a dark one on the dark theme.
+        for (name, color) in [
+            (ThemeName::Light, Color::rgb(0xf8, 0xc0, 0x88)),
+            (ThemeName::Dark, Color::rgb(0x5a, 0x2a, 0x05)),
+        ] {
+            let theme = Theme::builtin(name).with_custom_accent(color);
+            assert_eq!(theme.contrast_failures(), vec![], "{theme}");
+            let (h, _, _) = theme.colors.accent.hsl();
+            assert!((20.0..45.0).contains(&h), "still orange: {h}");
+        }
     }
 
     #[test]

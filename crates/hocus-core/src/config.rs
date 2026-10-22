@@ -14,6 +14,8 @@ pub struct Config {
     pub desktops: Desktops,
     pub keyboard: Keyboard,
     pub decorations: Decorations,
+    pub appearance: Appearance,
+    pub wallpaper: Wallpaper,
     pub launcher: Launcher,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -161,6 +163,104 @@ impl Default for Decorations {
     }
 }
 
+/// The look of the shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Appearance {
+    /// `dark`, `light`, `matrix`, `hud` or `paper`.
+    pub theme: String,
+    /// `theme` (the theme's own), `bamboo`, `amber`, `blue`, `pink`, or
+    /// `wallpaper` (taken from it, made readable).
+    pub accent: String,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: "dark".into(),
+            accent: "theme".into(),
+        }
+    }
+}
+
+pub const THEMES: [&str; 5] = ["dark", "light", "matrix", "hud", "paper"];
+pub const ACCENTS: [&str; 6] = ["theme", "bamboo", "amber", "blue", "pink", "wallpaper"];
+pub const WALLPAPER_KINDS: [&str; 4] = ["glow", "image", "folder", "colour"];
+pub const WALLPAPER_MODES: [&str; 4] = ["fill", "fit", "stretch", "center"];
+
+/// What a screen shows behind its windows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Wallpaper {
+    /// `glow` (the theme's soft light, placed by the time of day), `image`,
+    /// `folder` (its images through the day, in name order), `colour`.
+    pub kind: String,
+    pub image: Option<String>,
+    pub folder: Option<String>,
+    /// How an image covers the screen: `fill`, `fit`, `stretch`, `center`.
+    pub mode: String,
+    /// Around a fitted or centred image, or the whole screen; the theme's
+    /// background if not set.
+    pub colour: Option<String>,
+    /// Per screen, by output name; what is not set comes from above.
+    pub screens: Vec<ScreenWallpaper>,
+}
+
+impl Default for Wallpaper {
+    fn default() -> Self {
+        Self {
+            kind: "glow".into(),
+            image: None,
+            folder: None,
+            mode: "fill".into(),
+            colour: None,
+            screens: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScreenWallpaper {
+    pub output: String,
+    pub kind: Option<String>,
+    pub image: Option<String>,
+    pub folder: Option<String>,
+    pub mode: Option<String>,
+    pub colour: Option<String>,
+}
+
+/// A screen's wallpaper with everything resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WallpaperSpec {
+    pub kind: String,
+    pub image: Option<String>,
+    pub folder: Option<String>,
+    pub mode: String,
+    pub colour: Option<String>,
+}
+
+impl Wallpaper {
+    /// What `output` shows: its own settings over the general ones.
+    pub fn for_output(&self, output: &str) -> WallpaperSpec {
+        let own = self.screens.iter().find(|s| s.output == output);
+        let pick = |own: Option<&Option<String>>, general: &Option<String>| {
+            own.and_then(|o| o.clone()).or_else(|| general.clone())
+        };
+        WallpaperSpec {
+            kind: own
+                .and_then(|s| s.kind.clone())
+                .unwrap_or_else(|| self.kind.clone()),
+            image: pick(own.map(|s| &s.image), &self.image),
+            folder: pick(own.map(|s| &s.folder), &self.folder),
+            mode: own
+                .and_then(|s| s.mode.clone())
+                .unwrap_or_else(|| self.mode.clone()),
+            colour: pick(own.map(|s| &s.colour), &self.colour),
+        }
+    }
+}
+
 /// What the launcher offers besides applications.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -187,6 +287,16 @@ impl Default for Launcher {
             qr: true,
         }
     }
+}
+
+/// `#rrggbb` as RGB.
+pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
+    let hex = s.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(hex, 16).ok()?;
+    Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
 }
 
 /// Why a configuration file was not applied.
@@ -251,6 +361,46 @@ impl Config {
                 return out_of_range(&format!("rules[{i}].desktop"), d.to_string(), "1 to 8");
             }
         }
+        if !THEMES.contains(&self.appearance.theme.as_str()) {
+            let t = format!("{:?}", self.appearance.theme);
+            return out_of_range("appearance.theme", t, &THEMES.join(", "));
+        }
+        if !ACCENTS.contains(&self.appearance.accent.as_str()) {
+            let a = format!("{:?}", self.appearance.accent);
+            return out_of_range("appearance.accent", a, &ACCENTS.join(", "));
+        }
+        let w = &self.wallpaper;
+        let kinds = std::iter::once(Some(&w.kind)).chain(w.screens.iter().map(|s| s.kind.as_ref()));
+        for kind in kinds.flatten() {
+            if !WALLPAPER_KINDS.contains(&kind.as_str()) {
+                return out_of_range(
+                    "wallpaper.kind",
+                    format!("{kind:?}"),
+                    &WALLPAPER_KINDS.join(", "),
+                );
+            }
+        }
+        let modes = std::iter::once(Some(&w.mode)).chain(w.screens.iter().map(|s| s.mode.as_ref()));
+        for mode in modes.flatten() {
+            if !WALLPAPER_MODES.contains(&mode.as_str()) {
+                return out_of_range(
+                    "wallpaper.mode",
+                    format!("{mode:?}"),
+                    &WALLPAPER_MODES.join(", "),
+                );
+            }
+        }
+        let colours =
+            std::iter::once(w.colour.as_ref()).chain(w.screens.iter().map(|s| s.colour.as_ref()));
+        for colour in colours.flatten() {
+            if parse_hex(colour).is_none() {
+                return out_of_range(
+                    "wallpaper.colour",
+                    format!("{colour:?}"),
+                    "a colour like \"#0e0f12\"",
+                );
+            }
+        }
         let engine = &self.launcher.search_engine;
         if !(engine.starts_with("https://") || engine.starts_with("http://"))
             || !engine.contains("{}")
@@ -299,12 +449,7 @@ impl Config {
 
     /// The accent as RGB.
     pub fn accent(&self) -> Option<[u8; 3]> {
-        let hex = self.decorations.accent.strip_prefix('#')?;
-        if hex.len() != 6 {
-            return None;
-        }
-        let v = u32::from_str_radix(hex, 16).ok()?;
-        Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+        parse_hex(&self.decorations.accent)
     }
 
     /// The whole configuration, defaults included, as TOML.
@@ -316,6 +461,26 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_screen_wallpaper_falls_back_on_the_general_one() -> Result<(), ConfigError> {
+        let c = Config::parse(
+            "[wallpaper]\nkind = \"image\"\nimage = \"/a.png\"\n[[wallpaper.screens]]\noutput = \"DP-1\"\nimage = \"/b.png\"\nmode = \"fit\"\n",
+        )?;
+        let dp = c.wallpaper.for_output("DP-1");
+        assert_eq!(
+            (dp.kind.as_str(), dp.image.as_deref(), dp.mode.as_str()),
+            ("image", Some("/b.png"), "fit")
+        );
+        let other = c.wallpaper.for_output("eDP-1");
+        assert_eq!(
+            (other.image.as_deref(), other.mode.as_str()),
+            (Some("/a.png"), "fill")
+        );
+        let bad = Config::parse("[wallpaper]\nmode = \"tile\"\n");
+        assert!(bad.is_err_and(|e| e.0.contains("wallpaper.mode")));
+        Ok(())
+    }
 
     #[test]
     fn an_empty_file_is_the_defaults() -> Result<(), ConfigError> {

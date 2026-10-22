@@ -15,6 +15,7 @@ pub mod quick;
 pub mod showcase;
 pub mod toasts;
 pub mod units;
+pub mod wallpaper;
 
 pub use column::{Action, ActiveWindow, Column, ColumnState, ScreenDesktops, WallTime};
 pub use i18n::Lang;

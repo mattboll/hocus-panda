@@ -60,7 +60,8 @@ Steps, one per `[[step]]` table:
 | `plug = { spec = "1920x1080+1280+0", name? }` | plugs an output; `name` brings back one unplugged before |
 | `unplug = "HEADLESS-2"` | unplugs an output |
 | `set_state = { app_id, state = "maximized" }` | maximizes, makes fullscreen, minimizes or restores (`normal`) a window |
-| `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it |
+| `expect_accent = { hue = [15, 45] }` | the shell's accent in effect has a hue in that range (degrees) |
+| `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it; `{scenario_dir}` is the scenario's directory, for fixtures |
 | `expect_config_error = "line 2"` | checks the last file was refused with that in the message; `""` checks it was applied |
 | `expect_config_warning = "first one wins"` | checks what the configuration in effect left out |
 | `expect_event = { type = "keyboard_layout", has? = "French" }` | checks the compositor said it in its event stream since the start |

@@ -294,6 +294,10 @@ pub struct ConfigInfo {
     pub warnings: Vec<String>,
     /// Counts reads of the file, applied or not.
     pub generation: u64,
+    /// The shell's accent in effect, `#rrggbb` (it may come from the
+    /// wallpaper).
+    #[serde(default)]
+    pub accent: Option<String>,
 }
 
 /// How well the compositor keeps up.

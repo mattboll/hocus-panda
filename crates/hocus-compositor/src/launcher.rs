@@ -68,6 +68,12 @@ struct Shown {
     buffer: Option<MemoryRenderBuffer>,
 }
 
+impl LauncherPanel {
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.launcher.set_theme(theme);
+    }
+}
+
 pub fn start(
     handle: &LoopHandle<'static, App>,
     state: &mut State,
@@ -340,12 +346,13 @@ impl State {
             return;
         };
         let scale = output.current_scale().fractional_scale();
+        let theme = self.theme();
         let Some(panel) = self.launcher.as_mut() else {
             return;
         };
         let size = UiSize::new(area.size.w as f32, area.size.h as f32);
         panel.showcase = Some(Shown {
-            showcased: Showcased::new(what, Theme::default(), panel.lang, size, scale as f32),
+            showcased: Showcased::new(what, theme, panel.lang, size, scale as f32),
             on: (output.name(), area, scale),
             buffer: None,
         });
