@@ -535,6 +535,7 @@ impl Scenario {
             xwayland: self.xwayland,
             shell: self.shell,
             session_bus: bus.as_ref().map(|b| b.address.clone()),
+            system_bus: None,
             data_dirs: (!self.data_dirs.is_empty())
                 .then(|| self.data_dirs.iter().map(|d| self.dir.join(d)).collect()),
             child_env: self.child_env.as_ref().map(|env| {

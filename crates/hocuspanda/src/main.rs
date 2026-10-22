@@ -77,6 +77,11 @@ struct Args {
     #[arg(long, value_name = "ADDRESS")]
     session_bus: Option<String>,
 
+    /// Read the battery, the network and other system state from services
+    /// on this D-Bus address instead of the system bus.
+    #[arg(long, value_name = "ADDRESS")]
+    system_bus: Option<String>,
+
     /// Configuration file, watched and applied on change. Default:
     /// $XDG_CONFIG_HOME/hocuspanda/config.toml.
     #[arg(long, value_name = "FILE")]
@@ -138,6 +143,7 @@ fn main() -> anyhow::Result<()> {
         xwayland: !args.no_xwayland,
         shell: !args.no_shell,
         session_bus: args.session_bus,
+        system_bus: args.system_bus,
         data_dirs: None,
         child_env: None,
         backend: match args.backend {

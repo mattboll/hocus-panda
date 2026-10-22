@@ -34,6 +34,7 @@ fn a_large_image_keeps_the_loop_within_its_budget() -> anyhow::Result<()> {
         xwayland: false,
         shell: true,
         session_bus: None,
+        system_bus: None,
         data_dirs: None,
         child_env: None,
     })?;

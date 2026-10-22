@@ -58,7 +58,8 @@ pub enum Change {
 }
 
 impl State {
-    fn apply(&mut self, change: Change) {
+    /// What a change does to what is shown, before the system confirms.
+    pub fn apply_change(&mut self, change: Change) {
         match change {
             Change::Wifi(on) => self.wifi = on,
             Change::Bluetooth(on) => self.bluetooth = on,
@@ -106,7 +107,13 @@ pub fn stub_state(screens: &[String]) -> State {
 /// The service: changes are sent here, states come back through `sink`.
 #[derive(Debug, Clone)]
 pub struct Quick {
-    changes: mpsc::Sender<Change>,
+    inner: Inner,
+}
+
+#[derive(Debug, Clone)]
+enum Inner {
+    Stub(mpsc::Sender<Change>),
+    System(crate::system::System),
 }
 
 impl Quick {
@@ -118,15 +125,33 @@ impl Quick {
             .spawn(move || {
                 sink(state.clone());
                 for change in received {
-                    state.apply(change);
+                    state.apply_change(change);
                     sink(state.clone());
                 }
             })?;
-        Ok(Self { changes })
+        Ok(Self {
+            inner: Inner::Stub(changes),
+        })
+    }
+
+    /// The system's services (UPower, NetworkManager, PipeWire…).
+    pub fn system(
+        buses: crate::system::Buses,
+        screens: &[String],
+        sink: impl Fn(State) + Send + 'static,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            inner: Inner::System(crate::system::System::start(buses, screens, sink)?),
+        })
     }
 
     pub fn change(&self, change: Change) {
-        let _ = self.changes.send(change);
+        match &self.inner {
+            Inner::Stub(changes) => {
+                let _ = changes.send(change);
+            }
+            Inner::System(system) => system.change(change),
+        }
     }
 }
 
@@ -138,9 +163,9 @@ mod tests {
     fn airplane_mode_turns_radios_off() {
         let mut s = stub_state(&["eDP-1".into()]);
         s.bluetooth = true;
-        s.apply(Change::Airplane(true));
+        s.apply_change(Change::Airplane(true));
         assert!(!s.wifi && !s.bluetooth);
-        s.apply(Change::Brightness("eDP-1".into(), 120));
+        s.apply_change(Change::Brightness("eDP-1".into(), 120));
         assert_eq!(s.brightness, vec![("eDP-1".into(), 100)]);
     }
 

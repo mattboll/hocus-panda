@@ -68,6 +68,20 @@ pub struct ColumnState {
     pub user: String,
     /// The latest notifications, newest first: application and summary.
     pub notifications: Vec<(String, String)>,
+    pub status: Status,
+}
+
+/// What the status row tells, once known.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Status {
+    /// 0 saver, 1 balanced, 2 performance.
+    pub profile: Option<usize>,
+    /// On, and the network joined.
+    pub network: Option<(bool, Option<String>)>,
+    /// Volume, and muted.
+    pub sound: Option<(u8, bool)>,
+    /// Percent.
+    pub battery: Option<u8>,
 }
 
 /// What the user asked for in the column.
@@ -172,6 +186,8 @@ struct Nodes {
     account: NodeId,
     initial: NodeId,
     user: NodeId,
+    /// Power profile, network, sound, battery.
+    status: [NodeId; 4],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,6 +297,33 @@ impl Column {
         let n = self.nodes;
         let old = std::mem::replace(&mut self.state, state.clone());
         let t = &mut self.tree;
+        if all || old.status != state.status {
+            let s = &state.status;
+            let [profile, network, sound, battery] = n.status;
+            let profile_name = s
+                .profile
+                .map_or_else(|| lang.power_profile().to_owned(), |p| lang.profile_name(p));
+            t.set_name(profile, &profile_name);
+            let (network_name, on) = match &s.network {
+                Some((wifi, name)) => (lang.network_name(*wifi, name.as_deref()), *wifi),
+                None => (lang.network().to_owned(), true),
+            };
+            t.set_name(network, &network_name);
+            t.set_icon_paint(network, if on { Paint::Text } else { Paint::Muted });
+            let (sound_name, audible) = match s.sound {
+                Some((volume, muted)) => (lang.sound_level(volume, muted), !muted),
+                None => (lang.sound().to_owned(), true),
+            };
+            t.set_name(sound, &sound_name);
+            t.set_icon_paint(sound, if audible { Paint::Text } else { Paint::Muted });
+            let battery_name = s
+                .battery
+                .map_or_else(|| lang.battery().to_owned(), |p| lang.battery_level(p));
+            t.set_name(battery, &battery_name);
+            // Low: the waiting colour.
+            let low = s.battery.is_some_and(|p| p <= 15);
+            t.set_icon_paint(battery, if low { Paint::Waiting } else { Paint::Text });
+        }
         if all || old.time != state.time {
             t.set_text(
                 n.clock,
@@ -682,6 +725,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
                 .with_style(theme.text.label.with_weight(700)),
         ),
     );
+    let mut status_icons = Vec::new();
     for (path, name) in [
         (icons::LEAF, lang.power_profile()),
         (icons::WIFI, lang.network()),
@@ -704,7 +748,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
                 ..Look::default()
             }),
         );
-        add(
+        status_icons.push(add(
             tree,
             holder,
             Style::default(),
@@ -713,8 +757,11 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
                 color: Paint::Text,
                 label: Some(name.to_owned()),
             },
-        );
+        ));
     }
+    let status_icons: [NodeId; 4] = status_icons
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("four status icons"));
 
     // Clock and date.
     let time = add(
@@ -1018,6 +1065,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         account,
         initial,
         user,
+        status: status_icons,
     }
 }
 

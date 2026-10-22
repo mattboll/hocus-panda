@@ -33,6 +33,9 @@ pub struct HarnessOptions {
     pub shell: bool,
     /// Serves notifications on this (private, test) bus.
     pub session_bus: Option<String>,
+    /// Reads battery, network… from services on this (private, test) bus;
+    /// without it, tests use a stub and never the machine's.
+    pub system_bus: Option<String>,
     /// Where the launcher reads desktop entries.
     pub data_dirs: Option<Vec<std::path::PathBuf>>,
     /// What started applications inherit.
@@ -112,6 +115,7 @@ impl Headless {
             xwayland: false,
             shell: false,
             session_bus: None,
+            system_bus: None,
             data_dirs: None,
             child_env: None,
         })
@@ -134,6 +138,7 @@ impl Headless {
             xwayland: harness.xwayland,
             shell: harness.shell,
             session_bus: harness.session_bus.clone(),
+            system_bus: harness.system_bus.clone(),
             data_dirs: harness.data_dirs.clone(),
             child_env: harness.child_env.clone(),
         };

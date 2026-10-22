@@ -9,6 +9,7 @@ mod common;
 
 fn state() -> ColumnState {
     ColumnState {
+        status: Default::default(),
         time: WallTime {
             hour: 14,
             minute: 37,

@@ -217,6 +217,7 @@ impl State {
             layout_name,
             user: self.user.clone(),
             notifications: self.notification_history(),
+            status: self.status(),
         }
     }
 

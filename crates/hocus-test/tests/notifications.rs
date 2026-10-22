@@ -24,6 +24,7 @@ fn a_flood_from_one_app_is_rate_limited_and_the_loop_keeps_its_budget() -> anyho
         xwayland: false,
         shell: true,
         session_bus: Some(bus.address.clone()),
+        system_bus: None,
         data_dirs: None,
         child_env: None,
     })?;
