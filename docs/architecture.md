@@ -80,11 +80,10 @@ fast to compile and test, and lets the UI be developed in a plain window.
 - Effects (blur, shadows, rounded corners, wobbly mesh, genie, depth of
   field, Matrix): GLES shaders in the compositor, reloadable at runtime in
   development builds.
-- Shell UI: widgets rasterised into textures and cached, redrawn only when
-  their content changes; text shaped and laid out by a Rust text stack.
-  Candidates (to settle with a decision record and measurements):
-  tiny-skia + cosmic-text (CPU, simple, permissive) to start; vello (GPU) if
-  measurements call for it.
+- Shell UI: widgets rasterised on the CPU into textures and cached, redrawn
+  only when their content changes: vello_cpu for drawing, parley for text,
+  behind `hocus-ui`'s own painting interface
+  ([decision 0009](decisions/0009-ui-rendering-stack.md)).
 - Frame pacing per output, driven by presentation feedback. Animations
   advance on that clock and never schedule work per tick.
 
