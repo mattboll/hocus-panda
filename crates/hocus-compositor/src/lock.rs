@@ -81,6 +81,12 @@ pub struct Locking {
     curtains: BTreeMap<String, Panel<Curtain>>,
     screens: BTreeMap<String, Panel<LockScreen>>,
     auth: Option<Auth>,
+    logind: Option<hocus_platform::session::Logind>,
+    screensaver: Option<hocus_platform::session::ScreenSaverService>,
+    /// Applications keeping the screen awake through D-Bus.
+    dbus_inhibitors: u32,
+    /// logind was told the lock shows.
+    told_locked: bool,
     /// The timer that wakes the loop at the next deadline, and when.
     timer: Option<(RegistrationToken, Duration)>,
 }
@@ -106,6 +112,10 @@ impl Locking {
             curtains: BTreeMap::new(),
             screens: BTreeMap::new(),
             auth: None,
+            logind: None,
+            screensaver: None,
+            dbus_inhibitors: 0,
+            told_locked: false,
             timer: None,
         }
     }
@@ -309,6 +319,7 @@ impl State {
             _ => {}
         }
         self.refresh_idle_notifications();
+        self.tell_session();
         self.refresh_lock_panels();
         self.schedule_lock_timer();
     }
@@ -326,6 +337,7 @@ impl State {
             .iter()
             .any(|s| s.is_alive() && shown(s))
             || self.space.outputs().any(|o| self.fullscreen_on(o))
+            || self.locking.dbus_inhibitors > 0
     }
 
     /// The next moment something happens without input: the curtain, the
@@ -592,5 +604,78 @@ impl State {
         let origin = self.space.output_geometry(output)?.loc.to_f64();
         let surface = self.locking.lock_surfaces.get(&output.name())?;
         Some((surface.wl_surface().clone(), origin))
+    }
+}
+
+/// logind and the ScreenSaver service: what the session asks of the lock.
+pub fn start_session(
+    handle: &LoopHandle<'static, App>,
+    state: &mut State,
+    session_bus: Option<&str>,
+) {
+    use hocus_platform::session::{Logind, Request, ScreenSaverService};
+    let (requests, received) = channel::channel::<Request>();
+    if let Err(err) = handle.insert_source(received, |event, _, app| {
+        if let channel::Event::Msg(request) = event {
+            app.timed("session", |app| app.state.session_request(request));
+        }
+    }) {
+        tracing::warn!(err = %err.error, "the session's requests will not be heard");
+        return;
+    }
+    // Only as the session itself: nested in a live session, logind's
+    // inhibitors are the developer's machine's.
+    if state.is_session || state.system_bus.is_some() {
+        let tx = std::sync::Mutex::new(requests.clone());
+        state.locking.logind = Logind::start(state.system_bus.clone(), move |r| {
+            if let Ok(tx) = tx.lock() {
+                let _ = tx.send(r);
+            }
+        })
+        .inspect_err(|err| tracing::warn!(%err, "no logind"))
+        .ok();
+    }
+    // Only on a bus given: nested in a live session, its own screensaver
+    // owns the name.
+    if let Some(bus) = session_bus {
+        let tx = std::sync::Mutex::new(requests);
+        state.locking.screensaver = ScreenSaverService::start(bus, move |r| {
+            if let Ok(tx) = tx.lock() {
+                let _ = tx.send(r);
+            }
+        })
+        .inspect_err(|err| tracing::warn!(err, "no ScreenSaver service"))
+        .ok();
+    }
+}
+
+impl State {
+    fn session_request(&mut self, request: hocus_platform::session::Request) {
+        use hocus_platform::session::Request;
+        match request {
+            Request::Lock => self.lock_now(),
+            // An administrator's unlock (loginctl unlock-session).
+            Request::Unlock if self.locked() => State::unlock(self),
+            Request::Unlock => {}
+            Request::Activity => self.activity(),
+            Request::Inhibitors(n) => self.locking.dbus_inhibitors = n,
+        }
+    }
+
+    /// Tells the session what shows: sleep may go on once locked, and the
+    /// ScreenSaver service says whether the screen saver is active.
+    fn tell_session(&mut self) {
+        let active = self.locking.phase != Phase::Unlocked;
+        if let Some(screensaver) = &self.locking.screensaver {
+            screensaver.set_active(active);
+        }
+        let locked = self.locked();
+        if locked
+            && !self.locking.told_locked
+            && let Some(logind) = &self.locking.logind
+        {
+            logind.locked();
+        }
+        self.locking.told_locked = locked;
     }
 }

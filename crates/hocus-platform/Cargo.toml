@@ -10,5 +10,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+futures-core = "0.3.32"
 tracing = "0.1.44"
 zbus = "6.0.0"

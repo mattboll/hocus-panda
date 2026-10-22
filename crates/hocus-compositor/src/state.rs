@@ -98,6 +98,12 @@ pub struct State {
     pub screen_capture: crate::screen_capture::ScreenCapture,
     /// The common batch of protocols (#32).
     pub protocols: crate::handlers::protocols::Protocols,
+    /// A system bus to read battery, network… from instead of the
+    /// machine's.
+    pub system_bus: Option<String>,
+    /// Running as the session itself (the DRM backend, #27), not nested
+    /// nor headless: the machine's services are ours to use.
+    pub is_session: bool,
     /// The configuration file, when there is one.
     pub config_path: Option<std::path::PathBuf>,
     /// When the settings app was started, until its window comes.
@@ -199,6 +205,8 @@ impl State {
             dropdown: Default::default(),
             bars: Default::default(),
             config_path: None,
+            system_bus: None,
+            is_session: false,
             settings_started: None,
             child_env: None,
             layout_index: 0,

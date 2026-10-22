@@ -779,11 +779,14 @@ impl Tree {
         }
     }
 
-    /// Changes what screen readers call a button or a clickable box.
+    /// Changes what screen readers call a button, an icon or a clickable
+    /// box.
     pub fn set_name(&mut self, id: NodeId, name: &str) {
         if let Some(node) = self.node_mut(id) {
             if let Kind::Button(b) = &mut node.kind {
                 b.name = Some(name.to_owned());
+            } else if let Kind::Icon { label, .. } = &mut node.kind {
+                *label = Some(name.to_owned());
             } else if node.clickable.is_some() {
                 node.clickable = Some(name.to_owned());
             }

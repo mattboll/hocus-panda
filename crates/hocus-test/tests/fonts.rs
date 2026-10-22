@@ -15,6 +15,7 @@ fn the_headless_compositor_keeps_the_bundled_fonts() -> anyhow::Result<()> {
         xwayland: false,
         shell: true,
         session_bus: None,
+        system_bus: None,
         data_dirs: None,
         child_env: None,
     })?;

@@ -68,11 +68,22 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, lang: Lang) {
     }
     let screens: Vec<String> = state.space.outputs().map(Output::name).collect();
     let sender = std::sync::Mutex::new(sender);
-    let service = Quick::stub(quick::stub_state(&screens), move |s| {
+    let sink = move |s| {
         if let Ok(sender) = sender.lock() {
             let _ = sender.send(s);
         }
-    })
+    };
+    // The machine's services only as the session itself: nested, quick
+    // settings would change the developer's sound and screens. Tests give
+    // a private bus, or get a stub.
+    let service = if state.is_session || state.system_bus.is_some() {
+        let buses = hocus_platform::system::Buses {
+            system: state.system_bus.clone(),
+        };
+        Quick::system(buses, &screens, sink)
+    } else {
+        Quick::stub(quick::stub_state(&screens), sink)
+    }
     .inspect_err(|err| tracing::warn!(%err, "no quick settings service"))
     .ok();
     state.quick = Some(QuickPanel {
@@ -457,5 +468,24 @@ impl State {
     /// Do not disturb: toasts are held.
     pub fn dnd(&self) -> bool {
         self.quick.as_ref().is_some_and(|q| q.dnd)
+    }
+}
+
+impl State {
+    /// What the column's status row tells: what the system services said.
+    pub fn status(&self) -> hocus_shell::column::Status {
+        let Some(p) = self.quick.as_ref().and_then(|q| q.platform.as_ref()) else {
+            return hocus_shell::column::Status::default();
+        };
+        hocus_shell::column::Status {
+            profile: Some(match p.profile {
+                Profile::Saver => 0,
+                Profile::Balanced => 1,
+                Profile::Performance => 2,
+            }),
+            network: Some((p.wifi, p.network.clone())),
+            sound: Some((p.volume, p.muted)),
+            battery: p.battery.as_ref().map(|b| b.percent),
+        }
     }
 }

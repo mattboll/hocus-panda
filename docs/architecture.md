@@ -184,6 +184,18 @@ Each service is a trait with a Linux and a FreeBSD implementation:
 CI builds on Linux and FreeBSD from the start, even when FreeBSD services are
 still stubs.
 
+On Linux, quick settings and the status row read UPower (battery),
+power-profiles-daemon, NetworkManager and BlueZ on the system bus, following
+their property changes, and PipeWire through `wpctl` and the backlight
+through sysfs every two seconds; changes go back the same ways (the
+backlight through logind). logind asks to lock and unlock, and a delay
+inhibitor holds sleep until the lock shows. The ScreenSaver service lets
+applications keep the screen awake and ask to lock. Each source runs on a
+thread of its own; a missing one leaves its part of the state as it was.
+Only the session itself uses the machine's services: nested or headless,
+quick settings show a stub and change nothing on the machine, and tests give
+private buses with services of their own.
+
 ## Testing
 
 - **Unit tests** on `hocus-core` and `hocus-ui`: layout, snapping, desktops,

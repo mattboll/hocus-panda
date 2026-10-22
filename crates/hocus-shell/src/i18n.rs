@@ -169,6 +169,42 @@ impl Lang {
         self.pick("Battery", "Batterie")
     }
 
+    /// The status row's battery, with its level.
+    pub fn battery_level(self, percent: u8) -> String {
+        match self {
+            Self::En => format!("Battery {percent}%"),
+            Self::Fr => format!("Batterie {percent}\u{202f}%"),
+        }
+    }
+
+    pub fn network_name(self, wifi: bool, name: Option<&str>) -> String {
+        match (self, wifi, name) {
+            (_, _, Some(name)) => format!("{}: {name}", self.network()),
+            (Self::En, true, None) => "Network: not connected".into(),
+            (Self::Fr, true, None) => "Réseau : non connecté".into(),
+            (Self::En, false, None) => "Network: off".into(),
+            (Self::Fr, false, None) => "Réseau : coupé".into(),
+        }
+    }
+
+    pub fn sound_level(self, volume: u8, muted: bool) -> String {
+        match (self, muted) {
+            (Self::En, true) => "Sound: muted".into(),
+            (Self::Fr, true) => "Son : coupé".into(),
+            (Self::En, false) => format!("Sound {volume}%"),
+            (Self::Fr, false) => format!("Son {volume}\u{202f}%"),
+        }
+    }
+
+    pub fn profile_name(self, profile: usize) -> String {
+        let names = self.profiles();
+        let name = names.get(profile).copied().unwrap_or(names[1]);
+        match self {
+            Self::En => format!("Power profile: {name}"),
+            Self::Fr => format!("Profil d’énergie : {name}"),
+        }
+    }
+
     pub fn account(self, name: &str) -> String {
         match self {
             Self::En => format!("Account: {name}"),

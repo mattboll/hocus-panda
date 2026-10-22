@@ -133,6 +133,7 @@ fn a_sandboxed_client_does_not_see_the_sensitive_protocols() -> anyhow::Result<(
         xwayland: false,
         shell: false,
         session_bus: None,
+        system_bus: None,
         data_dirs: None,
         child_env: None,
     })?;
@@ -258,6 +259,7 @@ fn idle_notifications_say_idled_then_resumed() -> anyhow::Result<()> {
         xwayland: false,
         shell: false,
         session_bus: None,
+        system_bus: None,
         data_dirs: None,
         child_env: None,
     })?;
