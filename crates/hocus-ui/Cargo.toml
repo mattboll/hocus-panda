@@ -10,7 +10,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-parley = { version = "0.12.0", default-features = false, features = ["std"] }
+# `system` for the fallback on the system's fonts (fontconfig, opened at
+# run time); `complex-scripts` shapes Arabic, Indic and other scripts.
+parley = { version = "0.12.0", default-features = false, features = ["std", "system", "complex-scripts"] }
+fontique = { version = "0.12.0", default-features = false, features = ["std", "system", "fontconfig-dlopen"] }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
 tracing = "0.1.44"

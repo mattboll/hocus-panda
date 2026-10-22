@@ -1115,6 +1115,13 @@ impl Tree {
     /// regions to draw again, in logical pixels.
     pub fn update(&mut self, now: Duration) -> Vec<Rect> {
         self.now = now;
+        // The system's fonts arrived: every text again.
+        if self.fonts.sync() {
+            self.relayout = true;
+            for node in self.nodes.iter_mut().filter_map(|s| s.node.as_mut()) {
+                node.changed = true;
+            }
+        }
         self.layout();
         let mut damage = std::mem::take(&mut self.removed);
         let root = self.root;

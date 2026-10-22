@@ -13,6 +13,7 @@ mod cursor;
 mod decoration;
 mod desktops;
 mod dropdown;
+mod fonts;
 mod grabs;
 mod handlers;
 mod harness;
@@ -196,6 +197,9 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         screenshots,
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
+    if matches!(state.clock, Clock::Monotonic { .. }) {
+        fonts::start(&event_loop.handle());
+    }
     if let Some(config) = &options.watchdog {
         state.watchdog = Some(watchdog::start(&event_loop.handle(), config.clone())?);
     }

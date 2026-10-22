@@ -46,6 +46,11 @@ line breaking that respects narrow no-break spaces (`23 %`, `« … »`,
 font by itself when a glyph is missing (`ᵉ` is not in Manrope): a fallback
 font has to be bundled whatever the choice.
 
+(Since #103: DejaVu Sans is bundled after the theme's face for symbols and
+Greek or Cyrillic; on a real session the system's fonts, read on a worker
+thread at start through fontique and fontconfig, cover emoji in colour and
+the other scripts. Tests keep the bundled fonts only.)
+
 ## Decision
 
 `hocus-ui` draws with **vello_cpu**, and lays out text with **parley**, on the

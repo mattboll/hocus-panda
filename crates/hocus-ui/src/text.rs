@@ -2,11 +2,15 @@
 //! land on whole pixels. A text box keeps its layout until its content,
 //! style or scale changes, and only breaks lines again when its width does.
 
-use std::{borrow::Cow, fmt, sync::Arc};
+use std::{borrow::Cow, cell::RefCell, fmt, sync::Arc};
 
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontFamily, FontWeight, Layout, LayoutContext,
-    LineHeight, StyleProperty, fontique::Blob,
+    LineHeight, StyleProperty,
+    fontique::{
+        Blob, Collection, CollectionOptions, FallbackKey, GenericFamily, Script, ScriptExt,
+        SourceCache,
+    },
 };
 
 use crate::{
@@ -14,14 +18,91 @@ use crate::{
     theme::{Face, Faces, TextStyle},
 };
 
-/// The bundled faces (SIL Open Font License, fonts/licenses/): what is
-/// drawn never depends on the fonts of the system.
-const FONTS: [&[u8]; 4] = [
+/// The bundled faces (fonts/licenses/): until the system's fonts are
+/// given, and always in tests, what is drawn depends on nothing else.
+const FONTS: [&[u8]; 5] = [
     include_bytes!("../fonts/Manrope.ttf"),
     include_bytes!("../fonts/Fraunces.ttf"),
     include_bytes!("../fonts/JetBrainsMono.ttf"),
     include_bytes!("../fonts/SpaceGrotesk.ttf"),
+    include_bytes!("../fonts/DejaVuSans.ttf"),
 ];
+
+/// After the theme's face: the bundled symbols (arrows, `ᵉ`, Greek,
+/// Cyrillic…), then colour emoji when the system has them. Other scripts
+/// fall back on the system's fonts by script.
+const FALLBACK: &str = "DejaVu Sans, emoji";
+
+thread_local! {
+    /// The system's fonts once given to this thread, and how many times
+    /// they were.
+    static SYSTEM: RefCell<(u64, Option<Collection>)> = const { RefCell::new((0, None)) };
+}
+
+fn bundled() -> Collection {
+    let mut collection = Collection::new(CollectionOptions {
+        shared: false,
+        system_fonts: false,
+    });
+    for data in FONTS {
+        collection.register_fonts(Blob::new(Arc::new(data)), None);
+    }
+    collection
+}
+
+/// The system's fonts behind the bundled ones, with the fallback of every
+/// script already looked up: reading them is slow, so it is done once on
+/// a worker thread, then given to the thread that draws.
+pub struct SystemFonts(Collection);
+
+impl fmt::Debug for SystemFonts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SystemFonts")
+    }
+}
+
+impl SystemFonts {
+    /// Blocks: reads the fonts the system has.
+    pub fn load() -> Self {
+        let mut collection = Collection::new(CollectionOptions {
+            shared: false,
+            system_fonts: true,
+        });
+        for data in FONTS {
+            collection.register_fonts(Blob::new(Arc::new(data)), None);
+        }
+        // Everything a layout may ask the system later, asked now.
+        let mut families = Vec::new();
+        for (script, _) in Script::all_samples() {
+            families.extend(collection.fallback_families(FallbackKey::new(*script, None)));
+        }
+        families.extend(collection.generic_families(GenericFamily::Emoji));
+        for id in families {
+            let _ = collection.family(id);
+        }
+        Self(collection)
+    }
+
+    /// How many families there are, the bundled ones included.
+    pub fn families(&mut self) -> usize {
+        self.0.family_names().count()
+    }
+
+    /// From now on, text on this thread falls back on these fonts; trees
+    /// lay their text out again on their next update.
+    pub fn install(self) {
+        SYSTEM.with(|s| {
+            let mut s = s.borrow_mut();
+            s.0 += 1;
+            s.1 = Some(self.0);
+        });
+    }
+}
+
+/// Whether text on this thread may use the system's fonts.
+pub fn system_fonts_installed() -> bool {
+    SYSTEM.with(|s| s.borrow().1.is_some())
+}
 
 /// Fonts and the scratch space of the layout engine, shared by a tree; the
 /// theme says which face plays which role.
@@ -29,6 +110,8 @@ pub struct Fonts {
     fonts: FontContext,
     layouts: LayoutContext<()>,
     faces: Faces,
+    /// Which system fonts these are, 0 for the bundled ones only.
+    generation: u64,
 }
 
 impl fmt::Debug for Fonts {
@@ -39,17 +122,37 @@ impl fmt::Debug for Fonts {
 
 impl Fonts {
     pub fn new(faces: Faces) -> Self {
-        let mut fonts = FontContext::new();
-        for data in FONTS {
-            fonts
-                .collection
-                .register_fonts(Blob::new(Arc::new(data)), None);
-        }
+        let (generation, collection) = SYSTEM.with(|s| {
+            let s = s.borrow();
+            (s.0, s.1.clone().unwrap_or_else(bundled))
+        });
         Self {
-            fonts,
+            fonts: FontContext {
+                collection,
+                source_cache: SourceCache::default(),
+            },
             layouts: LayoutContext::new(),
             faces,
+            generation,
         }
+    }
+
+    /// Takes the system's fonts given since: whether text must be laid out
+    /// again.
+    pub fn sync(&mut self) -> bool {
+        let newer = SYSTEM.with(|s| {
+            let s = s.borrow();
+            (s.0 != self.generation).then(|| (s.0, s.1.clone()))
+        });
+        let Some((generation, collection)) = newer else {
+            return false;
+        };
+        self.fonts = FontContext {
+            collection: collection.unwrap_or_else(bundled),
+            source_cache: SourceCache::default(),
+        };
+        self.generation = generation;
+        true
     }
 
     /// Text is laid out again in the new faces when it is next measured.
@@ -63,9 +166,10 @@ pub struct TextBox {
     text: String,
     style: TextStyle,
     layout: Option<Layout<()>>,
-    /// The scale and face the layout was built with.
+    /// The scale, face and fonts the layout was built with.
     scale: f32,
     face: Option<Face>,
+    generation: u64,
     /// The width lines were broken at, in logical pixels.
     broken_at: Option<Option<f32>>,
     /// One line, cut with an ellipsis when too long (window titles).
@@ -89,6 +193,7 @@ impl TextBox {
             layout: None,
             scale: 0.0,
             face: None,
+            generation: 0,
             broken_at: None,
             single_line: false,
         }
@@ -140,7 +245,10 @@ impl TextBox {
     /// The layout at `scale`, in physical pixels.
     pub fn layout(&mut self, fonts: &mut Fonts, max_width: Option<f32>, scale: f32) -> &Layout<()> {
         let face = fonts.faces.get(self.style.typeface);
-        let rebuild = self.layout.is_none() || self.scale != scale || self.face != Some(face);
+        let rebuild = self.layout.is_none()
+            || self.scale != scale
+            || self.face != Some(face)
+            || self.generation != fonts.generation;
         if rebuild || (self.single_line && self.broken_at != Some(max_width)) {
             let mut layout = self.build(fonts, &self.text, scale);
             if self.single_line
@@ -154,6 +262,7 @@ impl TextBox {
             self.layout = Some(layout);
             self.scale = scale;
             self.face = Some(face);
+            self.generation = fonts.generation;
             self.broken_at = None;
         }
         let layout = self.layout.get_or_insert_with(Layout::new);
@@ -171,9 +280,9 @@ impl TextBox {
         let mut builder = fonts
             .layouts
             .ranged_builder(&mut fonts.fonts, text, scale, true);
-        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-            Cow::Borrowed(face.family()),
-        )));
+        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(Cow::Owned(
+            format!("{}, {FALLBACK}", face.family()),
+        ))));
         builder.push_default(StyleProperty::FontSize(self.style.size));
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(f32::from(
             self.style.weight,
@@ -210,5 +319,60 @@ impl TextBox {
     /// The layout as last computed, for drawing.
     pub fn laid_out(&self) -> Option<&Layout<()>> {
         self.layout.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use parley::PositionedLayoutItem;
+
+    use super::*;
+    use crate::theme::Theme;
+
+    /// Glyphs the fonts had not: drawn as empty boxes.
+    fn missing(text: &str) -> usize {
+        let theme = Theme::default();
+        let mut fonts = Fonts::new(theme.faces);
+        let mut text = TextBox::new(text, theme.text.body);
+        let layout = text.layout(&mut fonts, None, 1.0);
+        layout
+            .lines()
+            .flat_map(|line| line.items().collect::<Vec<_>>())
+            .map(|item| match item {
+                PositionedLayoutItem::GlyphRun(run) => run.glyphs().filter(|g| g.id == 0).count(),
+                PositionedLayoutItem::InlineBox(_) => 0,
+            })
+            .sum()
+    }
+
+    #[test]
+    fn symbols_come_from_the_bundled_fonts() {
+        assert_eq!(missing("1ᵉʳ → ← ✓ ★ ≤ ∞ Ω Ж"), 0);
+    }
+
+    #[test]
+    fn other_scripts_and_emoji_come_from_the_system() {
+        fn send<T: Send>(_: &T) {}
+        let mut system = SystemFonts::load();
+        send(&system);
+        let text = "Réunion 🐼 こんにちは";
+        assert!(missing(text) > 0, "the bundled fonts alone lack them");
+        let bundled = Fonts::new(Theme::default().faces);
+        // Without fontconfig, the bundled fonts only, and nothing breaks.
+        let has_system_fonts = system.families() > FONTS.len();
+        system.install();
+        let mut fonts = bundled;
+        assert!(fonts.sync(), "trees made before take them");
+        let mut has = Collection::new(CollectionOptions::default());
+        let japanese = has
+            .fallback_families(FallbackKey::new(Script::from_bytes(*b"Hira"), None))
+            .next()
+            .is_some();
+        let emoji = has.generic_families(GenericFamily::Emoji).next().is_some();
+        if !(has_system_fonts && japanese && emoji) {
+            eprintln!("skipped: this system has no Japanese or emoji font");
+            return;
+        }
+        assert_eq!(missing(text), 0);
     }
 }
