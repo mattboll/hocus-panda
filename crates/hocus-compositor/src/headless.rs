@@ -40,6 +40,7 @@ use crate::{
     capture::{self, Pixels},
     flip::{Flip, Health},
     output_spec::{self, OutputSpec},
+    outputs::{Head, Setting},
 };
 
 /// Headless outputs refresh at a nominal 60 Hz.
@@ -114,7 +115,10 @@ struct Canvas<R, T> {
 
 struct CanvasOutput<T> {
     output: Output,
-    global: GlobalId,
+    /// `None` while the output is off.
+    global: Option<GlobalId>,
+    /// Dark through output-power: in the layout, nothing drawn.
+    dark: bool,
     spec: OutputSpec,
     position: (i32, i32),
     target: T,
@@ -242,7 +246,8 @@ where
         self.outputs.push(CanvasOutput {
             damage_tracker: OutputDamageTracker::from_output(&output),
             output,
-            global,
+            global: Some(global),
+            dark: false,
             spec: *spec,
             position,
             target,
@@ -258,8 +263,10 @@ where
             return false;
         };
         let out = self.outputs.remove(index);
-        state.unplug_output(&out.output);
-        state.display_handle.remove_global::<State>(out.global);
+        if let Some(global) = out.global {
+            state.unplug_output(&out.output);
+            state.retire_global(global);
+        }
         true
     }
 
@@ -270,8 +277,9 @@ where
             renderer, outputs, ..
         } = self;
         for out in outputs {
-            // A frame still out: nothing more is drawn there, as on a screen.
-            if out.flip.is_queued() {
+            // Off, dark, or a frame still out (as on a screen): nothing is
+            // drawn there.
+            if out.global.is_none() || out.dark || out.flip.is_queued() {
                 continue;
             }
             let start = Instant::now();
@@ -365,7 +373,129 @@ fn create_output(
     (output, global)
 }
 
+/// Sizes a headless output offers besides its own, all at 60 Hz.
+const MODES: [(i32, i32); 7] = [
+    (3840, 2160),
+    (2560, 1600),
+    (2560, 1440),
+    (1920, 1200),
+    (1920, 1080),
+    (1280, 800),
+    (1280, 720),
+];
+
+impl<R, T> Canvas<R, T>
+where
+    R: Renderer + ImportAll + ImportMem + Offscreen<T>,
+    R::TextureId: Send + Clone + Texture + 'static,
+    R::Error: Send + Sync + 'static,
+{
+    fn heads(&self, state: &State) -> Vec<Head> {
+        self.outputs
+            .iter()
+            .map(|o| {
+                let own = (o.spec.width, o.spec.height);
+                let modes = std::iter::once(own)
+                    .chain(MODES.into_iter().filter(|m| *m != own))
+                    .map(|(width, height)| hocus_core::outputs::Mode {
+                        width,
+                        height,
+                        refresh: REFRESH_MHZ,
+                    })
+                    .collect();
+                let position = state
+                    .space
+                    .output_geometry(&o.output)
+                    .map_or(o.position, |g| (g.loc.x, g.loc.y));
+                Head {
+                    name: o.output.name(),
+                    make: "Hocuspanda".into(),
+                    model: "Headless".into(),
+                    physical_size: (0, 0),
+                    modes,
+                    preferred: Some(0),
+                    vrr_capable: false,
+                    now: Setting::of(&o.output, position, o.global.is_some(), false),
+                }
+            })
+            .collect()
+    }
+
+    fn apply(&mut self, name: &str, setting: &Setting, state: &mut State) -> anyhow::Result<()> {
+        let Self {
+            renderer,
+            format,
+            outputs,
+        } = self;
+        let out = outputs
+            .iter_mut()
+            .find(|o| o.output.name() == name)
+            .with_context(|| format!("no output named {name}"))?;
+        if !setting.enabled {
+            if let Some(global) = out.global.take() {
+                state.disable_output(&out.output);
+                state.retire_global(global);
+            }
+            return Ok(());
+        }
+        let size = (setting.mode.width, setting.mode.height);
+        if size != (out.spec.width, out.spec.height) {
+            out.target = renderer
+                .create_buffer(*format, size.into())
+                .with_context(|| format!("could not create a {}x{} buffer", size.0, size.1))?;
+            out.spec.width = size.0;
+            out.spec.height = size.1;
+        }
+        if out.global.is_none() {
+            out.global = Some(out.output.create_global::<State>(&state.display_handle));
+            state.enable_output(&out.output, setting, out.spec.desktops);
+        } else {
+            state.set_output(&out.output, setting);
+        }
+        out.spec.scale = setting.scale;
+        out.position = setting.position;
+        out.damage_tracker = OutputDamageTracker::from_output(&out.output);
+        Ok(())
+    }
+}
+
 impl HeadlessBackend {
+    /// Every output, on and off, and what it can do.
+    pub fn heads(&self, state: &State) -> Vec<Head> {
+        match &self.renderers {
+            Renderers::Gles(canvas) => canvas.heads(state),
+            Renderers::Pixman(canvas) => canvas.heads(state),
+        }
+    }
+
+    /// Sets an output as asked: a mode is a buffer of that size.
+    pub fn apply(
+        &mut self,
+        name: &str,
+        setting: &Setting,
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        match &mut self.renderers {
+            Renderers::Gles(canvas) => canvas.apply(name, setting, state),
+            Renderers::Pixman(canvas) => canvas.apply(name, setting, state),
+        }
+    }
+
+    /// Turns an output's drawing off or on (output-power).
+    pub fn power(&mut self, name: &str, on: bool, state: &mut State) -> anyhow::Result<()> {
+        fn power<R, T>(canvas: &mut Canvas<R, T>, name: &str, on: bool) -> bool {
+            let out = canvas.outputs.iter_mut().find(|o| o.output.name() == name);
+            out.map(|o| o.dark = !on).is_some()
+        }
+        let found = match &mut self.renderers {
+            Renderers::Gles(canvas) => power(canvas, name, on),
+            Renderers::Pixman(canvas) => power(canvas, name, on),
+        };
+        anyhow::ensure!(found, "no output named {name}");
+        state.needs_redraw = true;
+        Ok(())
+    }
+
     pub fn renderer(&self) -> RendererKind {
         match self.renderers {
             Renderers::Gles(_) => RendererKind::Gles,

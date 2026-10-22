@@ -137,7 +137,11 @@ impl State {
         self.shortcuts = shortcuts;
         let first = self.config_generation <= 1;
         let keyboard_changed = first || self.config.keyboard != config.keyboard;
+        let outputs_changed = self.config.outputs != config.outputs;
         self.config = config;
+        if outputs_changed {
+            self.outputs_config_changed();
+        }
         if keyboard_changed {
             self.apply_keyboard_config(first);
         }

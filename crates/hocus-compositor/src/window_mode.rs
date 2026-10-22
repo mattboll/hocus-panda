@@ -84,8 +84,8 @@ impl State {
         }
     }
 
-    /// Lays maximized and snapped windows out again: the work area or the
-    /// gaps changed.
+    /// Lays maximized, snapped and fullscreen windows out again: the work
+    /// area, the gaps or the screen changed.
     pub fn relayout(&mut self) {
         let laid_out: Vec<(WindowId, WindowMode)> = self
             .windows
@@ -93,7 +93,9 @@ impl State {
             .filter(|(_, m)| {
                 matches!(
                     m.mode,
-                    WindowMode::Maximized { .. } | WindowMode::Snapped { .. }
+                    WindowMode::Maximized { .. }
+                        | WindowMode::Snapped { .. }
+                        | WindowMode::Fullscreen { .. }
                 )
             })
             .map(|(id, m)| (*id, m.mode))
@@ -107,6 +109,10 @@ impl State {
                 WindowMode::Snapped { zone, .. } => {
                     let rect = rectangle(zone.rect(rect(area), self.config.windows.gaps.inner));
                     self.configure(id, rect, None);
+                }
+                WindowMode::Fullscreen { .. } => {
+                    let full = self.space.output_geometry(&output).unwrap_or(area);
+                    self.configure(id, full, Some(xdg_toplevel::State::Fullscreen));
                 }
                 _ => self.configure(id, area, Some(xdg_toplevel::State::Maximized)),
             }

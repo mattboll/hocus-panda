@@ -85,6 +85,15 @@ opacity = 0.95             # 0.1 to 1
 pinned = true              # on every desktop of its output
 on_top = false             # above the other windows
 
+[[outputs]]                # a screen, by name (`hocus msg outputs`)
+name = "eDP-1"
+enabled = true             # false: off; its desktops and windows wait for it
+mode = "2560x1600@60"      # WIDTHxHEIGHT[@HZ]; the screen's preferred one otherwise
+scale = 1.5                # 0.5 to 4, rounded to 1/120
+transform = "normal"       # 90, 180, 270, flipped, flipped-90, flipped-180, flipped-270
+position = [0, 0]          # logical, top-left corner
+vrr = false                # adaptive sync, where the screen and GPU can
+
 [shortcuts]
 "Super+Return" = "spawn foot"
 "Ctrl+Alt+Right" = "next-desktop all"
@@ -97,6 +106,18 @@ Each `[[rules]]` applies to the windows whose `app_id` and `title` match its
 patterns (both optional); when several match, later rules override earlier
 ones, field by field. Super+wheel over a window changes its opacity, and the
 new opacity is remembered for that application.
+
+## Screens
+
+Each `[[outputs]]` sets one screen; what it does not set goes back to how the
+screen was lit (its preferred mode, scale 1, no rotation, to the right of the
+others). Changes apply at once and move nothing else: each window keeps its
+place on its screen, maximized and fullscreen ones fill it again, and a
+layout seen before puts every window back where it was. Screen tools
+(wlr-randr, kanshi, wdisplays) can change the same for the running session
+through wlr-output-management; the file wins again once it changes. Turning
+a screen's light off and on (output-power, as swayidle does) keeps it in the
+layout.
 
 ## Shortcuts
 

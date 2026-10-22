@@ -1,0 +1,36 @@
+# The configuration sets a screen's mode, scale, rotation and place, live;
+# what it no longer sets goes back to how the screen was lit (#28).
+description = "[[outputs]] sets mode, scale, rotation and place, live"
+outputs = ["2560x1600", "1920x1080"]
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+mode = "1920x1200"
+scale = 1.5
+
+[[outputs]]
+name = "HEADLESS-2"
+transform = "90"
+position = [1280, 0]
+"""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 1280, 800], pixels = [1920, 1200], scale = 1.5 }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", geometry = [1280, 0, 1080, 1920] }
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+mode = "640x480"
+"""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 2560, 1600], pixels = [2560, 1600], scale = 1.0 }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", geometry = [2560, 0, 1920, 1080] }

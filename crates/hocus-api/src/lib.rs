@@ -514,6 +514,10 @@ pub enum Event {
     OutputRemoved {
         name: String,
     },
+    /// An output's mode, scale, rotation or place changed.
+    OutputChanged {
+        output: OutputInfo,
+    },
     /// An output stopped presenting its frames and was recovered.
     OutputRecovered {
         name: String,

@@ -2,6 +2,7 @@
 
 mod compositor;
 pub mod layer_shell;
+pub mod output_management;
 pub mod protocols;
 mod workspace;
 mod xdg_shell;

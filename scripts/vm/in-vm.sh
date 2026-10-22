@@ -25,9 +25,11 @@ case "${1:-}" in
         touch ~/.hocus-session
         # The autologin on tty1 runs `hocus-vm run` (~/.bash_profile).
         sudo systemctl restart getty@tty1
-        # Its control socket, next to the Wayland one it picked.
+        # Its control socket, next to the Wayland one it picked: newer than
+        # the flag, not one a session before left.
         i=0
-        until f=$(ls -t "$XDG_RUNTIME_DIR"/*.api 2>/dev/null | head -n 1) && [ -S "$f" ]; do
+        until f=$(ls -t "$XDG_RUNTIME_DIR"/*.api 2>/dev/null | head -n 1) && [ -S "$f" ] \
+            && [ "$f" -nt ~/.hocus-session ]; do
             i=$((i + 1)); [ "$i" -lt 100 ] || { tail ~/hocus.log; exit 1; }
             sleep 0.2
         done

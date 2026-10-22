@@ -192,6 +192,11 @@ pub enum Step {
     ExpectFocus(String),
     /// The desktop an output shows, from 1.
     ExpectShown(ExpectShown),
+    /// Sets a screen through wlr-output-management, as wlr-randr would.
+    Randr(crate::randr::Change),
+    /// An output's logical geometry, pixel size and scale; or that it is
+    /// off (`shown = false`).
+    ExpectOutput(ExpectOutput),
     /// App ids of all windows, bottom to top.
     ExpectStack(Vec<String>),
     /// The client got this event, e.g. `"key 30 pressed"`.
@@ -357,6 +362,17 @@ pub struct ExpectShown {
     pub desktop: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectOutput {
+    pub name: String,
+    pub geometry: Option<[i32; 4]>,
+    pub pixels: Option<[i32; 2]>,
+    pub scale: Option<f64>,
+    #[serde(default = "yes")]
+    pub shown: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ButtonName {
@@ -468,6 +484,8 @@ impl fmt::Display for Step {
             Self::SetState(s) => write!(f, "set_state {} {:?}", s.app_id, s.state),
             Self::Send(send) => write!(f, "send {} to {}", send.app_id, send.output),
             Self::ExpectShown(e) => write!(f, "expect_shown {} {}", e.output, e.desktop),
+            Self::Randr(c) => write!(f, "randr {}", c.output),
+            Self::ExpectOutput(e) => write!(f, "expect_output {}", e.name),
             Self::AdvanceMs(ms) => write!(f, "advance {ms} ms"),
             Self::Frames(n) => write!(f, "frames {n}"),
             Self::ExpectWindow(e) => write!(f, "expect_window {}", e.app_id),
@@ -835,6 +853,63 @@ impl Run<'_> {
                     output: send.output.clone(),
                     desktop: send.desktop.map(|n| n.saturating_sub(1)),
                 })?;
+                Ok(())
+            }
+            Step::Randr(change) => {
+                let socket = self.compositor.socket_path().to_path_buf();
+                let thread = std::thread::spawn({
+                    let change = change.clone();
+                    move || crate::randr::apply(&socket, &change, false, false)
+                });
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                while !thread.is_finished() {
+                    anyhow::ensure!(Instant::now() < deadline, "the screen tool never finished");
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                let outcome = thread
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("the screen tool panicked"))??;
+                anyhow::ensure!(
+                    outcome == crate::randr::Outcome::Succeeded,
+                    "the configuration {outcome:?}"
+                );
+                Ok(())
+            }
+            Step::ExpectOutput(expected) => {
+                let Reply::Outputs(outputs) = self.request(Request::Outputs)? else {
+                    anyhow::bail!("expected outputs");
+                };
+                let found = outputs.iter().find(|o| o.name == expected.name);
+                let Some(output) = found else {
+                    anyhow::ensure!(!expected.shown, "no output {}", expected.name);
+                    return Ok(());
+                };
+                anyhow::ensure!(expected.shown, "{} is on", expected.name);
+                let g = &output.geometry;
+                if let Some(want) = expected.geometry {
+                    let got = [g.x, g.y, g.width, g.height];
+                    anyhow::ensure!(
+                        got == want,
+                        "{} is at {got:?}, expected {want:?}",
+                        expected.name
+                    );
+                }
+                if let Some(want) = expected.pixels {
+                    let got = [output.pixel_width, output.pixel_height];
+                    anyhow::ensure!(
+                        got == want,
+                        "{} has {got:?} pixels, expected {want:?}",
+                        expected.name
+                    );
+                }
+                if let Some(want) = expected.scale {
+                    anyhow::ensure!(
+                        (output.scale - want).abs() < 1e-6,
+                        "{} is at scale {}, expected {want}",
+                        expected.name,
+                        output.scale
+                    );
+                }
                 Ok(())
             }
             Step::ExpectShown(expected) => {

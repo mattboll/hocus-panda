@@ -23,6 +23,7 @@ use crate::{
     App, BACKGROUND, BackendState, State,
     capture::{self, Pixels},
     output_spec::DEFAULT_DESKTOPS,
+    outputs::{Head, Setting},
 };
 
 /// winit does not report the refresh rate; a nominal 60 Hz.
@@ -133,6 +134,41 @@ impl WinitBackend {
         if state.needs_redraw {
             self.backend.window().request_redraw();
         }
+    }
+
+    /// The window's output: its size is the window's.
+    pub fn heads(&self, state: &State) -> Vec<Head> {
+        let now = Setting::of(&self.output, (0, 0), true, false);
+        let _ = state;
+        vec![Head {
+            name: self.output.name(),
+            make: "Hocuspanda".into(),
+            model: "Nested".into(),
+            physical_size: (0, 0),
+            modes: vec![now.mode],
+            preferred: Some(0),
+            vrr_capable: false,
+            now,
+        }]
+    }
+
+    /// Scale and place; its size and power are the window's.
+    pub fn apply(
+        &mut self,
+        name: &str,
+        setting: &Setting,
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(name == self.output.name(), "no output named {name}");
+        anyhow::ensure!(setting.enabled, "the nested window cannot be turned off");
+        let now = Setting::of(&self.output, (0, 0), true, false);
+        anyhow::ensure!(
+            setting.mode == now.mode,
+            "the nested window's size is the window's"
+        );
+        // winit's GL surface is upside down: Wayland's rotation goes on top.
+        state.set_output(&self.output, setting);
+        Ok(())
     }
 
     pub fn capture_output(

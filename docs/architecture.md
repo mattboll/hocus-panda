@@ -80,8 +80,19 @@ fast to compile and test, and lets the UI be developed in a plain window.
   (smithay's `DrmOutputManager`), drawn with GLES on GBM (Mesa's software GL
   in a VM without 3D); screens plugged and unplugged are followed through
   udev; linux-dmabuf is offered for clients that draw on the GPU. libinput
-  reads keyboards and mice. Screens of other GPUs stay dark for now.
+  reads keyboards and mice. Screens of other GPUs stay dark for now (#123).
   Tried in a QEMU VM on virtio-gpu, then on hardware.
+
+Screens are set the same way on every backend (`outputs.rs`): the backend
+lists its screens, lit or off, with their modes, and carries a setting out
+on the hardware (a mode on the CRTC, adaptive sync, a buffer size headless);
+what follows on the desktop is common — the output's state, the model's
+geometry, windows kept in place, relayout, events. Wanted settings come from
+`[[outputs]]` or, for the session, from wlr-output-management; they are
+settled after the turn of the loop where something changed, and
+configurations are answered then. Output globals are retired in two steps
+(hidden, destroyed seconds later) so that a client binding one meanwhile is
+not cut off.
 
 ## Rendering
 
