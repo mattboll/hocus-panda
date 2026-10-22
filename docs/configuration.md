@@ -172,6 +172,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `lock` | locks the session now |
 | `log-out`, `restart`, `shut-down` | after a ten-second countdown (Escape cancels), or once the applications holding it back are dealt with: saves the session, asks windows to close, then leaves |
 | `clipboard-history` | the clipboard history in the launcher's card: newest first, Enter pastes into the focused application, Tab pins, Delete forgets |
+| `palette` | the action palette: every action with its keys and what it acts on, recent ones first; searched by name (English or French) or by keys, typed (`Maj+S`) or pressed; Enter runs it on the window that had the focus, Tab opens the settings to give it keys |
 | `emoji` | the emoji picker: searched in English and French, recent ones first, Tab changes the skin tone, Enter types it into the focused application |
 | `screenshot MODE [SECONDS]` | `screen` (under the pointer), `all` (every screen, each at its own pixel density), `window` (the one clicked next), `region` (drawn with the pointer, its size shown; Escape cancels), after a delay of up to 60 s: copied and saved, then a toast offers to open, delete or copy its text |
 | `suspend`, `hibernate` | sleeps now, locked first; hibernating only where the machine can |
@@ -203,6 +204,7 @@ Defaults:
 | Super+Space | `launcher` |
 | Super+V | `clipboard-history` |
 | Super+Period | `emoji` |
+| Super+P | `palette` |
 | Print | `screenshot screen` |
 | Super+Print | `screenshot all` |
 | Shift+Print, Super+Shift+S | `screenshot region` |

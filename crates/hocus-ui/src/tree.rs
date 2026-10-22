@@ -1608,6 +1608,16 @@ impl Tree {
         }
     }
 
+    /// What an empty field shows.
+    pub fn set_placeholder(&mut self, id: NodeId, text: &str) {
+        if let Some(Kind::TextField(field)) = self.node_mut(id).map(|n| &mut n.kind)
+            && field.placeholder.set_text(text)
+        {
+            self.mark(id);
+            self.relayout = true;
+        }
+    }
+
     // Accessibility.
 
     pub fn access(&self) -> AccessNode {

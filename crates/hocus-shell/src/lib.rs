@@ -4,6 +4,7 @@
 //! Nothing here knows about smithay: the compositor passes state in, routes
 //! input, shows the pixels and does the actions that come out.
 
+pub mod actions;
 pub mod authorize;
 pub mod calc;
 pub mod column;

@@ -25,6 +25,8 @@ enum Handled {
     Shortcut(Action),
     /// Ctrl+Alt+F1…F12: another virtual terminal.
     Vt(i32),
+    /// Keys pressed in the action palette: what it looks for.
+    PaletteKeys(hocus_core::shortcuts::Combo),
     /// A key for the open launcher or quick settings.
     Panel(
         smithay::input::keyboard::Keysym,
@@ -88,7 +90,21 @@ impl State {
                 }
                 // A window may hold the shortcuts back while it has the
                 // keyboard (keyboard-shortcuts-inhibit).
-                let action = combo_of(modifiers, &keysym)
+                let combo = combo_of(modifiers, &keysym);
+                // In the palette, a combination is a search: shortcuts and
+                // keys with Super, Ctrl or Alt; its own closes it.
+                if state.palette_open()
+                    && let Some(combo) = &combo
+                {
+                    let bound = state.shortcuts.action(combo).cloned();
+                    let m = combo.modifiers;
+                    if bound != Some(Action::Palette)
+                        && (bound.is_some() || m.logo || m.ctrl || m.alt)
+                    {
+                        return FilterResult::Intercept(Handled::PaletteKeys(combo.clone()));
+                    }
+                }
+                let action = combo
                     .filter(|_| !state.shortcuts_inhibited())
                     .and_then(|combo| state.shortcuts.action(&combo).cloned());
                 let modal = state.launcher_open()
@@ -108,6 +124,7 @@ impl State {
                                     | Action::QuickSettings
                                     | Action::ClipboardHistory
                                     | Action::Emoji
+                                    | Action::Palette
                             ) =>
                     {
                         FilterResult::Intercept(Handled::Shortcut(action))
@@ -122,6 +139,7 @@ impl State {
         );
         match handled {
             Some(Handled::Shortcut(action)) => self.run_action(&action, serial),
+            Some(Handled::PaletteKeys(combo)) => self.palette_keys(&combo),
             Some(Handled::Vt(vt)) => {
                 use smithay::backend::session::Session as _;
                 if let Some(session) = &mut self.vt_switch
