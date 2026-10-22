@@ -226,6 +226,7 @@ impl State {
         // The launcher over everything; quick settings over the screen
         // they dim; toasts, then the column, above windows; the column
         // under a fullscreen one.
+        elements.extend(self.alt_tab_elements(renderer, output));
         elements.extend(
             self.launcher_elements(renderer, output)
                 .into_iter()

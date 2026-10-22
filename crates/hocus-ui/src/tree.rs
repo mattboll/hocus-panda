@@ -897,6 +897,8 @@ impl Tree {
                 Property::OffsetY => &mut node.offset_y,
             };
             v.jump(value);
+            // An opacity that jumps moves nothing: drawn again all the same.
+            node.changed = true;
         }
     }
 

@@ -263,6 +263,7 @@ impl State {
         self.refresh_calendar();
         self.refresh_motion();
         self.refresh_slides();
+        self.refresh_alt_tab();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -522,6 +523,7 @@ impl State {
         self.leave_ui(&mut out);
         self.auth_ui(&mut out);
         self.picker_ui(&mut out);
+        self.alt_tab_ui(&mut out);
         self.recording_ui(&mut out);
         self.share_ui(&mut out);
         self.bars_ui(&mut out);

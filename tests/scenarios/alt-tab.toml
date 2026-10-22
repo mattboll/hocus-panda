@@ -1,0 +1,78 @@
+description = "Alt+Tab on the external screen lists its windows only, with live previews; letting Alt go picks the next one. Super+Tab lists every screen's, each on its own, and Tab moves the choice from the external screen's windows to the laptop's"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+open = { app_id = "mail", size = [600, 420], color = "#e5484d" }
+
+[[step]]
+open = { app_id = "editor", size = [640, 440], color = "#33cc66" }
+
+[[step]]
+pointer_move = [1900, 500]
+
+[[step]]
+open = { app_id = "browser", size = [900, 600], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "terminal", size = [700, 460], color = "#f2c94c" }
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+keys = "15"
+
+[[step]]
+expect_ui = { label = "browser", selected = true }
+
+[[step]]
+expect_ui = { label = "terminal", selected = false }
+
+[[step]]
+expect_ui = { label = "mail", shown = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "alt-tab.png" }
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "browser", focused = true }
+
+[[step]]
+expect_ui = { label = "browser", shown = false }
+
+# Every screen, each its own windows.
+[[step]]
+key_down = "super"
+
+[[step]]
+keys = "15"
+
+[[step]]
+expect_ui = { label = "terminal", selected = true }
+
+[[step]]
+expect_ui = { label = "mail", selected = false }
+
+[[step]]
+keys = "15"
+
+[[step]]
+expect_ui = { label = "editor", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "alt-tab-laptop.png" }
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_window = { app_id = "editor", focused = true }
