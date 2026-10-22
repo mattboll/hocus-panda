@@ -107,6 +107,13 @@ through text-input-v3, once it has the keyboard back; without an input
 method, the compositor sends the text itself, which the protocol has the
 client apply.
 
+A mirroring screen (#125, `mirror` in its `[[outputs]]` entry) stays lit but
+leaves the layout as an unplugged one would: its windows wait on the
+primary screen and come back where they were when it shows its own desktops
+again. It draws the source's scene, scaled to fit and centred, through the
+same elements as the source (no copy of the source's frame), so it follows
+the source's damage and shows its cursor.
+
 Screen recording (#70) takes a frame after the turn of the loop, at most
 `fps` a second and only when the screen drew something new (or a click's
 ring is growing), with the red frame and the bar left out; the frame goes,

@@ -7,9 +7,12 @@ use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, Texture,
         element::{
-            AsRenderElements, Kind, memory::MemoryRenderBufferRenderElement, render_elements,
-            solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement,
-            utils::RescaleRenderElement,
+            AsRenderElements, Kind,
+            memory::MemoryRenderBufferRenderElement,
+            render_elements,
+            solid::SolidColorRenderElement,
+            surface::WaylandSurfaceRenderElement,
+            utils::{RelocateRenderElement, RescaleRenderElement},
         },
     },
     desktop::Window,
@@ -35,10 +38,12 @@ render_elements! {
 }
 
 render_elements! {
-    /// What an output draws: the scene, or the scene magnified (#78).
+    /// What an output draws: the scene, the scene magnified (#78), or
+    /// another screen's scaled to fit (#125).
     pub OutputElement<R> where R: ImportAll + ImportMem;
     Plain=SceneElement<R>,
     Magnified=RescaleRenderElement<SceneElement<R>>,
+    Mirrored=RelocateRenderElement<RescaleRenderElement<SceneElement<R>>>,
 }
 
 impl State {
@@ -72,6 +77,9 @@ impl State {
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        if let Some(source) = self.mirror_source(output) {
+            return self.mirror_elements(renderer, output, &source, cursor);
+        }
         let parts = self.scene_parts(renderer, output, cursor);
         let zoom = self.comfort.zoom;
         let area = self.space.output_geometry(output);
@@ -95,7 +103,7 @@ impl State {
     }
 
     /// Everything `output` shows, front first.
-    fn scene_parts<R>(
+    pub(crate) fn scene_parts<R>(
         &self,
         renderer: &mut R,
         output: &Output,

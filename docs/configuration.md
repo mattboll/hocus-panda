@@ -147,6 +147,7 @@ position = [0, 0]          # logical, top-left corner
 vrr = false                # adaptive sync, where the screen and GPU can
 primary = true             # where unplugged screens' desktops and windows go
 desktops = 1               # its own desktops, 1 to 8 (desktops.per_output otherwise)
+mirror = "eDP-1"           # shows that screen's picture, scaled to fit; its own desktops wait
 
 [[layouts]]                # how a set of screens is placed (the Screens page writes them)
 name = "Home"

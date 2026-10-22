@@ -1,0 +1,32 @@
+description = "On the Screens page, Mirror the screens makes the other screen show the primary one, and Stop mirroring gives it its desktops back"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+open_settings = { page = "screens" }
+
+[[step]]
+click_settings = "Mirror the screens"
+
+[[step]]
+expect_config_file = { contains = ["[[outputs]]", "name = \"HEADLESS-2\"", "mirror = \"HEADLESS-1\""] }
+
+[[step]]
+expect_settings = { label = "Stop mirroring" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "settings-mirroring.png" }
+
+[[step]]
+click_settings = "Stop mirroring"
+
+[[step]]
+expect_config_file = { lacks = ["mirror"] }
+
+[[step]]
+expect_settings = { label = "Mirror the screens" }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", geometry = [1280, 0, 1920, 1080] }

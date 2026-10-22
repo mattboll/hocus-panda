@@ -1,0 +1,42 @@
+description = "A projector mirroring the laptop shows its picture scaled to fit, a window opened on the laptop included; mirroring stopped, the projector's own window is back where it was"
+outputs = ["1280x800", "1920x1080"]
+shell = true
+
+# A window of the projector's own.
+[[step]]
+pointer_move = [1900, 500]
+
+[[step]]
+open = { app_id = "notes", size = [500, 300], color = "#e5484d" }
+
+[[step]]
+expect_window = { app_id = "notes", output = "HEADLESS-2", geometry = [1990, 390, 500, 300] }
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-2"
+mirror = "HEADLESS-1"
+"""
+
+[[step]]
+pointer_move = [400, 300]
+
+[[step]]
+open = { app_id = "slides", size = [700, 450], color = "#3399ff" }
+
+[[step]]
+expect_window = { app_id = "slides", output = "HEADLESS-1" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "mirroring.png" }
+
+# Its own desktops again.
+[[step]]
+config = ""
+
+[[step]]
+expect_window = { app_id = "notes", output = "HEADLESS-2", geometry = [1990, 390, 500, 300] }

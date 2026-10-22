@@ -229,6 +229,7 @@ pub const DRAG_HINT: Words = Words::new(
 );
 pub const IDENTIFY: Words = Words::new("Identify", "Identifier");
 pub const MIRROR: Words = Words::new("Mirror the screens", "Dupliquer les écrans");
+pub const STOP_MIRROR: Words = Words::new("Stop mirroring", "Ne plus dupliquer");
 pub const RESOLUTION: Words = Words::new("Resolution", "Définition");
 pub const REFRESH: Words = Words::new("Refresh rate", "Fréquence");
 pub const DESKTOPS: Words = Words::new("Desktops", "Bureaux");

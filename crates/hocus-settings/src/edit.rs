@@ -48,6 +48,15 @@ impl Change {
         }
     }
 
+    /// A key of an `[[outputs]]` entry taken out.
+    pub fn output_unset(name: &str, key: &'static str) -> Self {
+        Self {
+            place: Place::Output(name.to_string()),
+            key: key.into(),
+            value: None,
+        }
+    }
+
     pub fn layout(screens: &[String], key: &'static str, value: impl Into<Value>) -> Self {
         Self {
             place: Place::Layout(screens.to_vec()),
