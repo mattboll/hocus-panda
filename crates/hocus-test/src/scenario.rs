@@ -101,6 +101,16 @@ pub enum Step {
     Notify(NotifyStep),
     /// Clicks the shell's button with this label (or accessible name).
     ClickUi(String),
+    /// The same with the secondary button.
+    RightClickUi(String),
+    /// A tray application registers on the private bus: `{ title, color,
+    /// menu?, delay_ms? }`; a menu entry `"-"` is a separator.
+    TrayApp(TrayAppStep),
+    /// A tray application asks for attention, or stops: `{ title,
+    /// attention }`.
+    TrayAttention(TrayAttention),
+    /// A tray application was asked this (`activate`, `clicked 2`).
+    ExpectTray(ExpectTray),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
     /// Writes the saved session file (TOML); `{test_client}` is the test
@@ -258,6 +268,32 @@ pub struct ExpectFile {
     pub contains: Vec<String>,
     #[serde(default)]
     pub lacks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrayAppStep {
+    pub title: String,
+    /// `"#rrggbb"`.
+    pub color: String,
+    #[serde(default)]
+    pub menu: Vec<String>,
+    #[serde(default)]
+    pub delay_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrayAttention {
+    pub title: String,
+    pub attention: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectTray {
+    pub title: String,
+    pub asked: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -476,6 +512,10 @@ impl fmt::Display for Step {
             Self::ExpectRuntimeFile(e) => write!(f, "expect_runtime_file {}", e.name),
             Self::NotifySend(args) => write!(f, "notify_send {args:?}"),
             Self::Notify(n) => write!(f, "notify {} {:?}", n.app, n.summary),
+            Self::RightClickUi(label) => write!(f, "right_click_ui {label:?}"),
+            Self::TrayApp(t) => write!(f, "tray_app {:?}", t.title),
+            Self::TrayAttention(t) => write!(f, "tray_attention {:?} {}", t.title, t.attention),
+            Self::ExpectTray(t) => write!(f, "expect_tray {:?} {:?}", t.title, t.asked),
             Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
             Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
             Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
@@ -609,6 +649,7 @@ impl Scenario {
             sharing: None,
             lock_client: None,
             bus,
+            tray_apps: Vec::new(),
             events: Vec::new(),
         };
         run.request(Request::Subscribe)?;
@@ -633,6 +674,8 @@ struct Run<'a> {
         std::sync::Arc<std::sync::atomic::AtomicBool>,
         std::thread::JoinHandle<anyhow::Result<()>>,
     )>,
+    /// Tray applications by title; before the bus, so they go first.
+    tray_apps: Vec<(String, crate::tray::TrayApp)>,
     bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
@@ -645,7 +688,34 @@ impl Run<'_> {
             Step::OpenX11(open) => self.open_x11(open),
             Step::Copy(copy) => self.copy(copy),
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
-            Step::ClickUi(label) => self.click_ui(label),
+            Step::ClickUi(label) => self.click_ui(label, Button::Left),
+            Step::RightClickUi(label) => self.click_ui(label, Button::Right),
+            Step::TrayApp(t) => {
+                let [_, r, g, b] = parse_color(&t.color)?.to_be_bytes();
+                let app = crate::tray::TrayApp::start(
+                    self.bus()?,
+                    &t.title,
+                    [r, g, b],
+                    &t.menu,
+                    Duration::from_millis(t.delay_ms),
+                )?;
+                self.tray_apps.push((t.title.clone(), app));
+                Ok(())
+            }
+            Step::TrayAttention(t) => self.tray_app(&t.title)?.set_attention(t.attention),
+            Step::ExpectTray(t) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let asked = self.tray_app(&t.title)?.asked();
+                    if asked.contains(&t.asked) {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("{:?} was asked {asked:?}, not {:?}", t.title, t.asked);
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
             Step::OpenSettings(open) => self.open_settings(open),
             Step::SessionFile(text) => {
                 let mut text = text.clone();
@@ -1556,7 +1626,15 @@ impl Run<'_> {
         }
     }
 
-    fn click_ui(&mut self, label: &str) -> anyhow::Result<()> {
+    fn tray_app(&self, title: &str) -> anyhow::Result<&crate::tray::TrayApp> {
+        self.tray_apps
+            .iter()
+            .find(|(t, _)| t == title)
+            .map(|(_, app)| app)
+            .with_context(|| format!("no tray application {title:?}"))
+    }
+
+    fn click_ui(&mut self, label: &str, button: Button) -> anyhow::Result<()> {
         let nodes = self.ui()?;
         let node = nodes
             .iter()
@@ -1576,10 +1654,7 @@ impl Run<'_> {
         );
         self.request(Request::PointerMove { x, y })?;
         for pressed in [true, false] {
-            self.request(Request::PointerButton {
-                button: Button::Left,
-                pressed,
-            })?;
+            self.request(Request::PointerButton { button, pressed })?;
         }
         Ok(())
     }

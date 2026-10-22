@@ -243,7 +243,11 @@ session is polkit's authentication agent (#83): a request shows a dialog
 drawn by the compositor over every window, with the keyboard and the
 system's label, so that no client can cover it or imitate it; the password
 goes to polkit's own helper (its socket, or the setuid binary of older
-versions), which tells polkit. Each source runs on a
+versions), which tells polkit. The tray (#73) serves the
+StatusNotifierWatcher on the session bus and reads each application's
+title, status and icon (its pixels, or a PNG or SVG of the icon themes) when
+it says they changed, and its dbusmenu menu when the user asks for it; an
+application slow to answer holds only its own thread. Each source runs on a
 thread of its own; a missing one leaves its part of the state as it was.
 Only the session itself uses the machine's services: nested or headless,
 quick settings show a stub and change nothing on the machine, and tests give

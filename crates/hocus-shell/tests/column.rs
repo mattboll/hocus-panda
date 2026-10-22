@@ -2,7 +2,10 @@
 
 use std::time::Duration;
 
-use hocus_shell::{Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, WallTime};
+use hocus_shell::{
+    Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, TrayApp, TrayMenuEntry,
+    WallTime,
+};
 use hocus_ui::{Input, Point, Role, Theme};
 
 mod common;
@@ -11,6 +14,7 @@ fn state() -> ColumnState {
     ColumnState {
         can_hibernate: false,
         status: Default::default(),
+        tray: Vec::new(),
         time: WallTime {
             hour: 14,
             minute: 37,
@@ -136,6 +140,72 @@ fn the_account_menu_logs_out() -> anyhow::Result<()> {
     assert!(!dump.contains("Hibernate"), "{dump}");
     let at = button(&column, "Log out")?;
     assert_eq!(click(&mut column, at), vec![Action::LogOut]);
+    Ok(())
+}
+
+#[test]
+fn the_tray_shows_its_applications_and_their_menus() -> anyhow::Result<()> {
+    let mut column = column(Lang::En);
+    assert!(
+        button(&column, "Tray: 1 application").is_err(),
+        "no chip when empty"
+    );
+    let app = |key: &str, title: &str, attention| TrayApp {
+        key: key.into(),
+        title: title.into(),
+        attention,
+        icon: Some((1, 1, vec![0x80, 0, 0, 0x80].into())),
+    };
+    column.set_state(&ColumnState {
+        tray: vec![app(":1.4/A", "Chat", true), app(":1.5/B", "Sync", false)],
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Tray: 2 applications, 1 waiting")?;
+    click(&mut column, at);
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Chat")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::TrayActivate(":1.4/A".into())]
+    );
+    // A right click on a line, or its menu button, asks for the menu.
+    let at = button(&column, "Tray: 2 applications, 1 waiting")?;
+    click(&mut column, at);
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Sync")?;
+    assert_eq!(
+        column.secondary_click(at),
+        vec![Action::TrayMenu(":1.5/B".into())]
+    );
+    let at = button(&column, "Chat’s menu")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::TrayMenu(":1.4/A".into())]
+    );
+    let entry = |id, label: &str| TrayMenuEntry {
+        id,
+        label: label.into(),
+        enabled: true,
+        separator: false,
+        toggle: None,
+        children: Vec::new(),
+    };
+    column.show_tray_menu(":1.4/A".into(), vec![entry(1, "Open"), entry(2, "Quit")]);
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Quit")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::TrayChosen {
+            key: ":1.4/A".into(),
+            id: 2
+        }]
+    );
+    // The chip goes with the last application.
+    column.set_state(&state());
+    column.draw(Duration::ZERO);
+    assert!(button(&column, "Tray: 2 applications").is_err());
+    assert!(button(&column, "Keyboard layout: fr").is_ok());
     Ok(())
 }
 

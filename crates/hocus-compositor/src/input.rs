@@ -325,6 +325,15 @@ impl State {
         {
             return;
         }
+        // Over the shell, the secondary button opens a tray menu or
+        // nothing.
+        if button == crate::grabs::BTN_RIGHT
+            && !pointer.is_grabbed()
+            && pressed
+            && self.shell_secondary_click(at)
+        {
+            return;
+        }
         // Title bars take any button.
         if !pointer.is_grabbed() && self.bars_pointer_button(at, button, pressed) {
             return;

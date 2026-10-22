@@ -153,6 +153,32 @@ impl Lang {
         }
     }
 
+    pub fn tray_title(self) -> &'static str {
+        self.pick("Tray", "Zone de notification")
+    }
+
+    /// The tray's chip: how many applications, how many waiting.
+    pub fn tray_count(self, count: usize, waiting: usize) -> String {
+        let apps = match (self, count) {
+            (Self::En, 1) => "Tray: 1 application".to_owned(),
+            (Self::En, n) => format!("Tray: {n} applications"),
+            (Self::Fr, 1) => "Zone de notification\u{a0}: 1 appli".to_owned(),
+            (Self::Fr, n) => format!("Zone de notification\u{a0}: {n} applis"),
+        };
+        match (self, waiting) {
+            (_, 0) => apps,
+            (Self::En, n) => format!("{apps}, {n} waiting"),
+            (Self::Fr, n) => format!("{apps}, {n} en attente"),
+        }
+    }
+
+    pub fn menu_of(self, title: &str) -> String {
+        match self {
+            Self::En => format!("{title}’s menu"),
+            Self::Fr => format!("Menu de {title}"),
+        }
+    }
+
     pub fn power_profile(self) -> &'static str {
         self.pick("Power profile", "Profil d’énergie")
     }

@@ -1,0 +1,97 @@
+description = "an application registering in the tray shows behind a chip of the column's status row; clicking it activates the application, a right click or its menu button shows its menu, and asking for attention rings it once, without blinking"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+tray_app = { title = "Chat", color = "#3b82f6", menu = ["Open Chat", "Do not disturb", "-", "Quit"] }
+
+[[step]]
+tray_app = { title = "Sync", color = "#22c55e" }
+
+[[step]]
+expect_ui = { label = "Tray: 2 applications" }
+
+[[step]]
+click_ui = "Tray: 2 applications"
+
+[[step]]
+expect_ui = { label = "Chat" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tray.png" }
+
+[[step]]
+click_ui = "Sync"
+
+[[step]]
+expect_tray = { title = "Sync", asked = "activate" }
+
+# The menu, by a right click.
+[[step]]
+click_ui = "Tray: 2 applications"
+
+[[step]]
+right_click_ui = "Chat"
+
+[[step]]
+expect_ui = { label = "Do not disturb" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tray-menu.png" }
+
+[[step]]
+click_ui = "Do not disturb"
+
+[[step]]
+expect_tray = { title = "Chat", asked = "clicked 2" }
+
+[[step]]
+expect_ui = { label = "Do not disturb", shown = false }
+
+# Attention: the chip rings in the waiting colour, and stays as it is;
+# the application rings in the tray.
+[[step]]
+tray_attention = { title = "Chat", attention = true }
+
+[[step]]
+expect_ui = { label = "Tray: 2 applications, 1 waiting" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tray-attention.png" }
+
+[[step]]
+advance_ms = 700
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tray-attention.png" }
+
+[[step]]
+click_ui = "Tray: 2 applications, 1 waiting"
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tray-attention-open.png" }
+
+[[step]]
+pointer_move = [300, 500]
+
+[[step]]
+click = "left"
+
+[[step]]
+tray_attention = { title = "Chat", attention = false }
+
+[[step]]
+expect_ui = { label = "Tray: 2 applications" }

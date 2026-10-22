@@ -8,7 +8,7 @@
 //! changes, routes the pointer to it when over it, and does the
 //! [`Action`]s that come back.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use hocus_ui::{
     AccessNode, Align, Button, ButtonKind, Canvas, Direction, Draw, Event, Icon, Input, Insets,
@@ -71,6 +71,8 @@ pub struct ColumnState {
     /// The latest notifications, newest first: application and summary.
     pub notifications: Vec<(String, String)>,
     pub status: Status,
+    /// The tray's applications, in the order they came.
+    pub tray: Vec<TrayApp>,
 }
 
 /// What the status row tells, once known.
@@ -107,6 +109,36 @@ pub enum Action {
     ShutDown,
     /// The command field was clicked: the launcher opens.
     OpenLauncher,
+    /// A tray application clicked.
+    TrayActivate(String),
+    /// A tray application's menu asked for.
+    TrayMenu(String),
+    /// An entry of its menu chosen.
+    TrayChosen {
+        key: String,
+        id: i32,
+    },
+}
+
+/// An application in the tray.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayApp {
+    pub key: String,
+    pub title: String,
+    pub attention: bool,
+    /// Width, height, premultiplied RGBA.
+    pub icon: Option<(u16, u16, Arc<[u8]>)>,
+}
+
+/// An entry of a tray application's menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayMenuEntry {
+    pub id: i32,
+    pub label: String,
+    pub enabled: bool,
+    pub separator: bool,
+    pub toggle: Option<bool>,
+    pub children: Vec<TrayMenuEntry>,
 }
 
 /// The ring of the meeting card: how close the next meeting is.
@@ -196,12 +228,17 @@ struct Nodes {
     user: NodeId,
     /// Power profile, network, sound, battery.
     status: [NodeId; 4],
+    status_row: NodeId,
+    /// The tray's ring and chip, when it has applications.
+    tray: Option<(NodeId, NodeId)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PopoverKind {
     Desktops,
     Account,
+    Tray,
+    TrayMenu,
 }
 
 /// A popover: its own tree and pixels, placed by the column.
@@ -250,6 +287,8 @@ pub struct Column {
     state: ColumnState,
     popover: Option<Popover>,
     popover_changed: bool,
+    /// The menu last received, and whose.
+    tray_menu: Option<(String, Vec<TrayMenuEntry>)>,
     now: Duration,
 }
 
@@ -267,6 +306,7 @@ impl Column {
             state: ColumnState::default(),
             popover: None,
             popover_changed: false,
+            tray_menu: None,
             now: Duration::ZERO,
         };
         column.apply(&ColumnState::default(), true);
@@ -302,10 +342,37 @@ impl Column {
 
     fn apply(&mut self, state: &ColumnState, all: bool) {
         let lang = self.lang;
-        let n = self.nodes;
         let old = std::mem::replace(&mut self.state, state.clone());
+        // The tray's chip comes and goes with its applications: the row is
+        // built again, and what it shows told again.
+        let rebuilt = !all && old.tray.is_empty() != state.tray.is_empty();
+        if rebuilt {
+            let theme = self.tree.theme().clone();
+            let (tray, layout, status) = fill_status(
+                &mut self.tree,
+                self.nodes.status_row,
+                &theme,
+                lang,
+                !state.tray.is_empty(),
+            );
+            self.nodes.tray = tray;
+            self.nodes.layout = layout;
+            self.nodes.status = status;
+        }
+        let all_status = all || rebuilt;
+        let n = self.nodes;
         let t = &mut self.tree;
-        if all || old.status != state.status {
+        if let Some((ring, chip)) = n.tray
+            && (all_status || old.tray != state.tray)
+        {
+            let count = state.tray.len();
+            let waiting = state.tray.iter().filter(|a| a.attention).count();
+            t.set_text(chip, &count.to_string());
+            t.set_name(chip, &lang.tray_count(count, waiting));
+            let theme = t.theme().clone();
+            t.set_look(ring, tray_ring(&theme, waiting > 0));
+        }
+        if all_status || old.status != state.status {
             let s = &state.status;
             let [profile, network, sound, battery] = n.status;
             let profile_name = s
@@ -370,7 +437,7 @@ impl Column {
             t.set_name(n.desktops, &line);
             t.set_draw(n.dots, Box::new(Dots { count, shown }));
         }
-        if all || old.layout != state.layout || old.layout_name != state.layout_name {
+        if all_status || old.layout != state.layout || old.layout_name != state.layout_name {
             t.set_text(n.layout, &state.layout);
             t.set_name(n.layout, &lang.keyboard_layout(&state.layout_name));
         }
@@ -444,6 +511,51 @@ impl Column {
         {
             self.open(PopoverKind::Desktops);
         }
+        // An open tray follows its applications; it closes with the last.
+        if !all
+            && old.tray != state.tray
+            && self
+                .popover
+                .as_ref()
+                .is_some_and(|p| p.kind == PopoverKind::Tray)
+        {
+            if state.tray.is_empty() {
+                self.close_popover();
+            } else {
+                self.open(PopoverKind::Tray);
+            }
+        }
+    }
+
+    /// A tray application's menu came: it shows where the tray was.
+    pub fn show_tray_menu(&mut self, key: String, entries: Vec<TrayMenuEntry>) {
+        if entries.is_empty() || self.nodes.tray.is_none() {
+            return;
+        }
+        self.tray_menu = Some((key, entries));
+        self.open(PopoverKind::TrayMenu);
+    }
+
+    /// The secondary button at `at`: over an application in the tray, its
+    /// menu.
+    pub fn secondary_click(&mut self, at: Point) -> Vec<Action> {
+        let Some(p) = &self.popover else {
+            return Vec::new();
+        };
+        if p.kind != PopoverKind::Tray || !self.in_popover(at) {
+            return Vec::new();
+        }
+        let local = Point::new(at.x - p.at.x, at.y - p.at.y);
+        p.targets
+            .iter()
+            .filter(|(id, _)| p.tree.rect(*id).is_some_and(|r| r.contains(local)))
+            .find_map(|(_, action)| match action {
+                Action::TrayActivate(key) | Action::TrayMenu(key) => {
+                    Some(vec![Action::TrayMenu(key.clone())])
+                }
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     // Popovers.
@@ -454,6 +566,10 @@ impl Column {
         let anchor = match kind {
             PopoverKind::Desktops => self.nodes.desktops,
             PopoverKind::Account => self.nodes.account,
+            PopoverKind::Tray | PopoverKind::TrayMenu => match self.nodes.tray {
+                Some((ring, _)) => ring,
+                None => return,
+            },
         };
         let anchor = self.tree.rect(anchor).unwrap_or_default();
         let (mut tree, targets) = match kind {
@@ -467,12 +583,19 @@ impl Column {
                 self.state.can_hibernate,
                 scale,
             ),
+            PopoverKind::Tray => tray_popover(&theme, self.lang, &self.state.tray, scale),
+            PopoverKind::TrayMenu => match &self.tray_menu {
+                Some((key, entries)) => tray_menu_popover(&theme, key, entries, scale),
+                None => return,
+            },
         };
         let first = tree.update(self.now);
         let size = tree.size();
         // Left of the column; level with the line, or above the account.
         let y = match kind {
-            PopoverKind::Desktops => anchor.y - SHADOW_ROOM,
+            PopoverKind::Desktops | PopoverKind::Tray | PopoverKind::TrayMenu => {
+                anchor.y - SHADOW_ROOM
+            }
             PopoverKind::Account => anchor.bottom() + SHADOW_ROOM - size.h,
         };
         let y = y.clamp(-MARGIN, (self.tree.size().h + MARGIN - size.h).max(-MARGIN));
@@ -594,6 +717,8 @@ impl Column {
                 self.toggle(PopoverKind::Desktops);
             } else if id == n.account {
                 self.toggle(PopoverKind::Account);
+            } else if n.tray.is_some_and(|(_, chip)| chip == id) {
+                self.toggle(PopoverKind::Tray);
             }
         }
         actions
@@ -722,60 +847,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         },
         Kind::Box(Look::default()),
     );
-    let chip = Style {
-        height: Length::Px(44.0),
-        ..Style::default()
-    };
-    let layout = add(
-        tree,
-        status,
-        Style {
-            width: Length::Px(64.0),
-            ..chip
-        },
-        Kind::Button(
-            Button::new("", ButtonKind::Chip, theme)
-                .with_icon(stroked(icons::KEYBOARD, 18.0))
-                .with_style(theme.text.label.with_weight(700)),
-        ),
-    );
-    let mut status_icons = Vec::new();
-    for (path, name) in [
-        (icons::LEAF, lang.power_profile()),
-        (icons::WIFI, lang.network()),
-        (icons::SOUND, lang.sound()),
-        (icons::BATTERY, lang.battery()),
-    ] {
-        let holder = add(
-            tree,
-            status,
-            Style {
-                width: Length::Px(44.0),
-                height: Length::Px(44.0),
-                align: Align::Center,
-                justify: Justify::Center,
-                ..Style::default()
-            },
-            Kind::Box(Look {
-                background: Some(Paint::SurfaceHover),
-                radius: theme.radii.medium,
-                ..Look::default()
-            }),
-        );
-        status_icons.push(add(
-            tree,
-            holder,
-            Style::default(),
-            Kind::Icon {
-                icon: stroked(path, 18.0),
-                color: Paint::Text,
-                label: Some(name.to_owned()),
-            },
-        ));
-    }
-    let status_icons: [NodeId; 4] = status_icons
-        .try_into()
-        .unwrap_or_else(|_| unreachable!("four status icons"));
+    let (tray, layout, status_icons) = fill_status(tree, status, theme, lang, false);
 
     // Clock and date.
     let time = add(
@@ -1080,10 +1152,325 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         initial,
         user,
         status: status_icons,
+        status_row: status,
+        tray,
     }
 }
 
 /// A popover's tree: a card with room around it for its shadow.
+/// The status row's chips, the tray's first when there are applications
+/// in it; built again when that changes.
+fn fill_status(
+    tree: &mut Tree,
+    status: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    with_tray: bool,
+) -> (Option<(NodeId, NodeId)>, NodeId, [NodeId; 4]) {
+    let missing = || unreachable!("adding to a node of this tree");
+    let add = |tree: &mut Tree, parent, style, kind| {
+        tree.add(parent, style, kind).unwrap_or_else(missing)
+    };
+    for child in tree.children(status) {
+        tree.remove(child);
+    }
+    let chip = Style {
+        height: Length::Px(44.0),
+        ..Style::default()
+    };
+    // The chip sits in a ring, drawn when an application waits.
+    let tray = with_tray.then(|| {
+        let ring = add(
+            tree,
+            status,
+            Style {
+                width: Length::Px(52.0),
+                height: Length::Px(44.0),
+                padding: Insets::all(1.5),
+                ..Style::default()
+            },
+            Kind::Box(tray_ring(theme, false)),
+        );
+        let chip = add(
+            tree,
+            ring,
+            Style {
+                width: Length::Fill,
+                height: Length::Fill,
+                ..Style::default()
+            },
+            Kind::Button(
+                Button::new("", ButtonKind::Chip, theme)
+                    .with_icon(stroked(icons::TRAY, 18.0))
+                    .with_style(theme.text.label.with_weight(700)),
+            ),
+        );
+        (ring, chip)
+    });
+    let layout = add(
+        tree,
+        status,
+        Style {
+            width: Length::Px(if with_tray { 56.0 } else { 64.0 }),
+            ..chip
+        },
+        Kind::Button(
+            Button::new("", ButtonKind::Chip, theme)
+                .with_icon(stroked(icons::KEYBOARD, 18.0))
+                .with_style(theme.text.label.with_weight(700)),
+        ),
+    );
+    let mut status_icons = Vec::new();
+    for (path, name) in [
+        (icons::LEAF, lang.power_profile()),
+        (icons::WIFI, lang.network()),
+        (icons::SOUND, lang.sound()),
+        (icons::BATTERY, lang.battery()),
+    ] {
+        let side = if with_tray { 38.0 } else { 44.0 };
+        let holder = add(
+            tree,
+            status,
+            Style {
+                width: Length::Px(side),
+                height: Length::Px(44.0),
+                align: Align::Center,
+                justify: Justify::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: theme.radii.medium,
+                ..Look::default()
+            }),
+        );
+        status_icons.push(add(
+            tree,
+            holder,
+            Style::default(),
+            Kind::Icon {
+                icon: stroked(path, 18.0),
+                color: Paint::Text,
+                label: Some(name.to_owned()),
+            },
+        ));
+    }
+    let status_icons: [NodeId; 4] = status_icons
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("four status icons"));
+    (tray, layout, status_icons)
+}
+
+fn tray_ring(theme: &Theme, waiting: bool) -> Look {
+    Look {
+        border: waiting.then_some(Paint::Waiting),
+        radius: theme.radii.medium + 1.5,
+        ..Look::default()
+    }
+}
+
+/// The tray's applications: each with its icon, Enter or a click
+/// activates it, its menu button (or a right click) shows its menu.
+fn tray_popover(
+    theme: &Theme,
+    lang: Lang,
+    apps: &[TrayApp],
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    let rows = apps.len().max(1) as f32;
+    let height = 16.0 * 2.0 + 30.0 + rows * 48.0;
+    let (mut tree, card) = popover_tree(theme, 300.0, height, scale);
+    let missing = || unreachable!("adding to a node of this tree");
+    tree.set_style(
+        card,
+        Style {
+            height: Length::Fill,
+            padding: Insets::all(16.0),
+            gap: 4.0,
+            ..Style::default()
+        },
+    );
+    tree.add(
+        card,
+        Style {
+            padding: Insets {
+                bottom: 8.0,
+                left: 8.0,
+                ..Insets::default()
+            },
+            ..Style::default()
+        },
+        Kind::text(lang.tray_title(), theme.text.title.with_weight(700)),
+    )
+    .unwrap_or_else(missing);
+    let mut targets = Vec::new();
+    for app in apps {
+        // Waiting for attention: a ring, drawn once, never blinking.
+        let line = tree
+            .add(
+                card,
+                Style {
+                    direction: hocus_ui::Direction::Row,
+                    height: Length::Px(44.0),
+                    gap: 6.0,
+                    align: Align::Center,
+                    padding: Insets {
+                        left: 8.0,
+                        ..Insets::default()
+                    },
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    border: app.attention.then_some(Paint::Waiting),
+                    radius: theme.radii.medium,
+                    ..Look::default()
+                }),
+            )
+            .unwrap_or_else(missing);
+        if let Some((w, h, pixels)) = &app.icon
+            && let Some(image) = Kind::image(*w, *h, pixels, &app.title)
+        {
+            tree.add(
+                line,
+                Style {
+                    width: Length::Px(24.0),
+                    height: Length::Px(24.0),
+                    ..Style::default()
+                },
+                image,
+            )
+            .unwrap_or_else(missing);
+        }
+        let button = Button::new(app.title.as_str(), ButtonKind::Ghost, theme)
+            .with_style(theme.text.body)
+            .at_start();
+        let row = tree
+            .add(
+                line,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(44.0),
+                    ..Style::default()
+                },
+                Kind::Button(button),
+            )
+            .unwrap_or_else(missing);
+        targets.push((row, Action::TrayActivate(app.key.clone())));
+        let menu = tree
+            .add(
+                line,
+                Style {
+                    width: Length::Px(36.0),
+                    height: Length::Px(36.0),
+                    ..Style::default()
+                },
+                Kind::icon_button(
+                    stroked(icons::MORE, 16.0),
+                    &lang.menu_of(&app.title),
+                    ButtonKind::Ghost,
+                    theme,
+                ),
+            )
+            .unwrap_or_else(missing);
+        targets.push((menu, Action::TrayMenu(app.key.clone())));
+    }
+    (tree, targets)
+}
+
+/// An application's menu, from its dbusmenu.
+fn tray_menu_popover(
+    theme: &Theme,
+    key: &str,
+    entries: &[TrayMenuEntry],
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    fn flat(entries: &[TrayMenuEntry], depth: usize, out: &mut Vec<(usize, TrayMenuEntry)>) {
+        for e in entries {
+            out.push((depth, e.clone()));
+            flat(&e.children, depth + 1, out);
+        }
+    }
+    let mut lines = Vec::new();
+    flat(entries, 0, &mut lines);
+    let height = 16.0 * 2.0
+        + lines
+            .iter()
+            .map(|(_, e)| if e.separator { 9.0 } else { 40.0 })
+            .sum::<f32>();
+    let (mut tree, card) = popover_tree(theme, 280.0, height, scale);
+    let missing = || unreachable!("adding to a node of this tree");
+    tree.set_style(
+        card,
+        Style {
+            height: Length::Fill,
+            padding: Insets::all(16.0),
+            gap: 1.0,
+            ..Style::default()
+        },
+    );
+    let mut targets = Vec::new();
+    for (depth, entry) in lines {
+        if entry.separator {
+            let room = tree
+                .add(
+                    card,
+                    Style {
+                        height: Length::Px(8.0),
+                        padding: Insets::symmetric(3.5, 8.0),
+                        ..Style::default()
+                    },
+                    Kind::Box(Look::default()),
+                )
+                .unwrap_or_else(missing);
+            tree.add(
+                room,
+                Style {
+                    width: Length::Fill,
+                    height: Length::Px(1.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::Border),
+                    ..Look::default()
+                }),
+            )
+            .unwrap_or_else(missing);
+            continue;
+        }
+        let label = match entry.toggle {
+            Some(true) => format!("✓ {}", entry.label),
+            Some(false) => format!("   {}", entry.label),
+            None => entry.label.clone(),
+        };
+        let mut button = Button::new(label, ButtonKind::Ghost, theme)
+            .with_style(theme.text.body)
+            .at_start();
+        button.enabled = entry.enabled && entry.children.is_empty();
+        let id = tree
+            .add(
+                card,
+                Style {
+                    height: Length::Px(39.0),
+                    padding: Insets {
+                        left: depth as f32 * 16.0,
+                        ..Insets::default()
+                    },
+                    ..Style::default()
+                },
+                Kind::Button(button),
+            )
+            .unwrap_or_else(missing);
+        targets.push((
+            id,
+            Action::TrayChosen {
+                key: key.to_owned(),
+                id: entry.id,
+            },
+        ));
+    }
+    (tree, targets)
+}
+
 fn popover_tree(theme: &Theme, width: f32, height: f32, scale: f32) -> (Tree, NodeId) {
     let size = Size::new(width + 2.0 * SHADOW_ROOM, height + 2.0 * SHADOW_ROOM);
     let mut tree = Tree::new(theme.clone(), size, scale);

@@ -40,6 +40,7 @@ mod socket;
 mod state;
 mod stats;
 mod surface;
+mod tray;
 mod tty;
 mod wallpaper;
 mod watchdog;
