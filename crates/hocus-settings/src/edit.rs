@@ -26,6 +26,9 @@ pub enum Place {
     /// The `[[layouts]]` entry for exactly these screens, made when missing
     /// and named after them.
     Layout(Vec<String>),
+    /// The `[[calendars]]` entry of this address and user, made when
+    /// missing.
+    Calendar { url: String, user: String },
 }
 
 impl Change {
@@ -50,6 +53,29 @@ impl Change {
             place: Place::Layout(screens.to_vec()),
             key: key.into(),
             value: Some(value.into()),
+        }
+    }
+
+    pub fn calendar(url: &str, user: &str, key: &'static str, value: impl Into<Value>) -> Self {
+        Self {
+            place: Place::Calendar {
+                url: url.to_owned(),
+                user: user.to_owned(),
+            },
+            key: key.into(),
+            value: Some(value.into()),
+        }
+    }
+
+    /// The calendar account goes.
+    pub fn forget_calendar(url: &str, user: &str) -> Self {
+        Self {
+            place: Place::Calendar {
+                url: url.to_owned(),
+                user: user.to_owned(),
+            },
+            key: String::new(),
+            value: None,
         }
     }
 
@@ -135,6 +161,26 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
         hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
+    let is_calendar = |t: &Table, url: &str, user: &str| {
+        t.get("url").and_then(Item::as_str) == Some(url)
+            && t.get("user").and_then(Item::as_str).unwrap_or("") == user
+    };
+    if let (Place::Calendar { url, user }, "", None) =
+        (&change.place, change.key.as_str(), &change.value)
+    {
+        if let Some(tables) = doc
+            .get_mut("calendars")
+            .and_then(Item::as_array_of_tables_mut)
+        {
+            tables.retain(|t| !is_calendar(t, url, user));
+            if tables.is_empty() {
+                doc.remove("calendars");
+            }
+        }
+        let out = doc.to_string();
+        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        return Ok(out);
+    }
     let table: &mut dyn toml_edit::TableLike = match &change.place {
         Place::Section(section) => {
             let item = doc
@@ -172,6 +218,18 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
                 },
             )?
         }
+        Place::Calendar { url, user } => entry(
+            &mut doc,
+            "calendars",
+            |t| t.as_table().is_some_and(|t| is_calendar(t, url, user)),
+            |t| {
+                t.insert("name", toml_edit::value(url.as_str()));
+                t.insert("url", toml_edit::value(url.as_str()));
+                if !user.is_empty() {
+                    t.insert("user", toml_edit::value(user.as_str()));
+                }
+            },
+        )?,
     };
     match (
         table.get_mut(&change.key).and_then(Item::as_value_mut),
@@ -215,6 +273,26 @@ pub fn write(path: &Path, change: &Change) -> Result<(), EditError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calendars_are_added_and_taken_out() {
+        let url = "https://dav.example.org/alex/";
+        let out = apply("# mine\n", &Change::calendar(url, "alex", "name", "Work")).expect("added");
+        let link = "webcal://example.org/holidays.ics";
+        let out = apply(&out, &Change::calendar(link, "", "name", "Holidays")).expect("added");
+        let out = apply(&out, &Change::calendar(link, "", "kind", "subscription")).expect("set");
+        let config = hocus_core::Config::parse(&out).expect("valid");
+        assert_eq!(config.calendars.len(), 2, "{out}");
+        assert_eq!(config.calendars[0].name, "Work");
+        assert_eq!(config.calendars[1].kind, "subscription");
+        let out = apply(&out, &Change::forget_calendar(url, "alex")).expect("taken out");
+        let config = hocus_core::Config::parse(&out).expect("valid");
+        assert_eq!(config.calendars.len(), 1, "{out}");
+        assert!(out.contains("# mine"), "the rest of the file stays: {out}");
+        // In the clear to another machine: refused.
+        let plain = Change::calendar("http://dav.example.org/", "alex", "name", "Work");
+        assert!(apply(&out, &plain).is_err());
+    }
 
     #[test]
     fn shortcuts_are_written_quoted_taken_out_and_forgotten() {

@@ -229,6 +229,9 @@ impl State {
             sharing: self.sharing(),
             todos: self.open_todos(),
             updates: self.updates_line(),
+            meeting: self.meeting_card(),
+            calendar_set: !self.config.calendars.is_empty(),
+            agenda: self.agenda(),
         }
     }
 
@@ -257,6 +260,7 @@ impl State {
         self.refresh_share();
         self.refresh_night();
         self.refresh_updates();
+        self.refresh_calendar();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -416,6 +420,7 @@ impl State {
             ShellAction::StopSharing => self.stop_sharing(),
             ShellAction::TickTodo(index) => self.tick_note(index),
             ShellAction::InstallUpdates => self.install_updates(),
+            ShellAction::JoinMeeting => self.join_meeting(),
             ShellAction::TrayActivate(key) => self.tray_activate(key),
             ShellAction::TrayMenu(key) => self.tray_menu(key),
             ShellAction::TrayChosen { key, id } => self.tray_chosen(key, id),

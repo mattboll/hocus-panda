@@ -21,7 +21,7 @@ needs = ["notify-send"]
 # Where the launcher reads desktop entries, relative to the scenario
 data_dirs = ["../fixtures"]
 # What started applications inherit instead of the test's environment
-# (PATH is added when missing)
+# (PATH is added when missing; {scenario_dir} for stand-in programs)
 child_env = { LD_PRELOAD = "/tmp/not-a-library.so" }
 
 [[step]]
@@ -70,6 +70,10 @@ Steps, one per `[[step]]` table:
 | `expect_budget = { max_ms = 50 }` | every frame drawn so far took at most that long, and no loop handler went over its budget |
 | `expect_state_file = { name, contains? = […], lacks? = […] }` | a file of the compositor's state directory (notes, the saved session) holds these strings, once written |
 | `restart = true` | the compositor goes as a crash would, and a new one starts on the same configuration and state; clients go with it |
+| `caldav = { dir, user, password }` | a CalDAV server on 127.0.0.1 serves the `.ics` files of `dir` (relative to the scenario); its calendar's address is `{caldav}` in later configuration, `type` and `calendar_password` steps |
+| `caldav_stop = true` | the CalDAV server goes, as the network would |
+| `calendar_password = { id, password }` | the settings keep this account's (`user@url`) password |
+| `expect_calendars = { events?, secrets?, contains? = […], error? }` | the calendars, once so: events from now on, passwords kept, events by title, whether an account failed its last sync |
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |
 | `open_annotate = "{last_screenshot}"` | opens the annotation window on a capture (`{last_screenshot}` is the last one saved, `{runtime_dir}` the compositor's temporary directory), and waits for it |
 | `expect_annotate`, `click_annotate`, `drag_annotate` | as the settings steps, in the annotation window (its capture is labelled `Capture`) |

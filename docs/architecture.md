@@ -121,6 +121,18 @@ never while a window is fullscreen or on the power saver: apt, dnf, pacman
 the session asks the system's manager; nested or in tests, only commands
 the configuration names run.
 
+Calendars (#75) are fetched on worker threads every ten minutes (CalDAV:
+PROPFIND to find the calendars, REPORT for the coming weeks; a
+subscription: one GET), kept in a sealed cache in the state directory for
+when the network is down, and expanded on the loop (recurrences, exceptions,
+time zones) into the coming weeks' events. Reminders come ten minutes and
+one minute before, with Join when the event has a call's link. Passwords go
+from the settings to the compositor over the control socket and into the
+keyring (the Secret Service; a sealed file without one), never into the
+configuration; an account taken out of the configuration takes its cache
+and its password with it. Accounts count only once the configuration is
+read, so a session starting never forgets one.
+
 Notes (#79) are one Markdown file, read and written whole on worker
 threads (written to a new file, then renamed over the old one); lines the
 notes do not understand are kept as they were. The file is read again each
@@ -308,6 +320,9 @@ guarded by these rules (#134):
   check and permissions per connection; never TCP.
 - **The phone (#85)** is off by default; pairing needs a code confirmed on
   screen, and talks over TLS.
+- **Calendar passwords (#75)** live in the keyring, never in the
+  configuration, and travel only over https (plain http is refused but to
+  this machine); the cache of events is sealed.
 - **Parsers are fuzzed** on every build (`robustness` tests): the
   configuration, the session file, shortcuts and actions, the control API's
   lines through the real server.

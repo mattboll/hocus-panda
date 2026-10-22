@@ -1,0 +1,72 @@
+description = "A CalDAV account: its next meeting shows in the column, the agenda lists today; ten minutes before, a reminder with Join opens the call"
+outputs = ["1280x800"]
+shell = true
+# Join opens the call with the stand-in, never a real browser.
+child_env = { PATH = "{scenario_dir}/calendar/bin:/usr/bin:/bin" }
+
+[[step]]
+caldav = { dir = "calendar/work", user = "alex", password = "panda" }
+
+[[step]]
+config = """
+[[calendars]]
+name = "Work"
+url = "{caldav}"
+user = "alex"
+"""
+
+[[step]]
+calendar_password = { id = "alex@{caldav}", password = "panda" }
+
+[[step]]
+expect_calendars = { secrets = 1, contains = ["Weekly review", "Design review & tea", "Release day"], error = false }
+
+# 14:37: the weekly review is in twelve minutes, too early to join.
+[[step]]
+expect_ui = { label = "Weekly review" }
+
+[[step]]
+expect_ui = { label = "In 12 min" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "calendar-column.png" }
+
+[[step]]
+click_ui = "Details"
+
+[[step]]
+expect_ui = { label = "October 2026" }
+
+[[step]]
+expect_ui = { label = "Design review & tea" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "calendar-agenda.png" }
+
+[[step]]
+click_ui = "Details"
+
+# 14:39: ten minutes before, the reminder.
+[[step]]
+advance_ms = 120000
+
+[[step]]
+expect_ui = { label = "Weekly review starts in 10 minutes" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "calendar-reminder.png" }
+
+[[step]]
+click_ui = "Join"
+
+[[step]]
+expect_runtime_file = { name = "opened", contains = ["https://meet.jit.si/hocuspanda-weekly"] }

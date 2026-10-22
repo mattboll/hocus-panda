@@ -25,6 +25,8 @@ pub struct Config {
     pub recording: Recording,
     pub night_light: NightLight,
     pub updates: Updates,
+    /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
+    pub calendars: Vec<CalendarAccount>,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -362,6 +364,43 @@ impl Default for Screenshots {
     }
 }
 
+/// A calendar account or subscription; its password is in the keyring.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CalendarAccount {
+    pub name: String,
+    /// `caldav` (an account on a server) or `subscription` (an ICS link).
+    #[serde(default = "caldav")]
+    pub kind: String,
+    pub url: String,
+    #[serde(default)]
+    pub user: String,
+}
+
+fn caldav() -> String {
+    "caldav".into()
+}
+
+impl CalendarAccount {
+    /// What names it, for its secret and its cache.
+    pub fn id(&self) -> String {
+        format!("{}@{}", self.user, self.url)
+    }
+
+    /// Passwords never travel in the clear: https, or plain http to this
+    /// machine only.
+    pub fn url_is_safe(&self) -> bool {
+        let local = ["http://localhost", "http://127.0.0.1", "http://[::1]"];
+        let secure = ["https://", "webcal://"];
+        secure.iter().any(|w| self.url.starts_with(w))
+            || local.iter().any(|w| {
+                self.url
+                    .strip_prefix(w)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
+            })
+    }
+}
+
 /// System updates (#84).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -660,6 +699,16 @@ impl Config {
         if !(1..=168).contains(&self.updates.every_hours) {
             let h = self.updates.every_hours.to_string();
             return out_of_range("updates.every_hours", h, "1 to 168");
+        }
+        for (i, c) in self.calendars.iter().enumerate() {
+            if !["caldav", "subscription"].contains(&c.kind.as_str()) {
+                let k = format!("{:?}", c.kind);
+                return out_of_range(&format!("calendars[{i}].kind"), k, "caldav, subscription");
+            }
+            if !c.url_is_safe() {
+                let u = format!("{:?}", c.url);
+                return out_of_range(&format!("calendars[{i}].url"), u, "an https:// address");
+            }
         }
         let n = &self.night_light;
         if !(1500..=6500).contains(&n.temperature) {

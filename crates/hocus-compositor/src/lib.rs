@@ -7,6 +7,7 @@ mod actions;
 mod api;
 mod authorize;
 mod bars;
+mod calendar;
 mod capture;
 mod clipboard;
 mod clock;
@@ -265,6 +266,12 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     let notes_file = notes::file(state.is_session, state_dir.as_deref());
     notes::start(&event_loop.handle(), &mut state, notes_file);
     clipboard::start(&event_loop.handle(), &mut state, state_dir.clone());
+    calendar::start(
+        &event_loop.handle(),
+        &mut state,
+        state_dir.clone(),
+        options.session_bus.as_deref(),
+    );
     state.start_sessions(state_dir);
     if options.shell {
         state.child_env = options.child_env.clone();

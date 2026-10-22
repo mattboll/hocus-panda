@@ -1,0 +1,52 @@
+description = "Synced once, the calendar stays when the network goes and the session restarts; an account taken out takes its events and its password"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+caldav = { dir = "calendar/work", user = "alex", password = "panda" }
+
+[[step]]
+config = """
+[[calendars]]
+name = "Work"
+url = "{caldav}"
+user = "alex"
+"""
+
+[[step]]
+calendar_password = { id = "alex@{caldav}", password = "panda" }
+
+[[step]]
+expect_calendars = { secrets = 1, contains = ["Weekly review"], error = false }
+
+# The network goes; the session restarts as after a crash.
+[[step]]
+caldav_stop = true
+
+[[step]]
+restart = true
+
+[[step]]
+advance_ms = 3000
+
+[[step]]
+expect_calendars = { secrets = 1, contains = ["Weekly review"], error = true }
+
+[[step]]
+expect_ui = { label = "Weekly review" }
+
+# Taken out of the configuration.
+[[step]]
+config = ""
+
+[[step]]
+expect_calendars = { events = 0, secrets = 0 }
+
+[[step]]
+expect_ui = { label = "Calendar not set up" }
+
+[[step]]
+restart = true
+
+[[step]]
+expect_calendars = { events = 0, secrets = 0 }

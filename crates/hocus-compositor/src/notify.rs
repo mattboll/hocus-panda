@@ -277,6 +277,7 @@ impl State {
         for event in &events {
             if let ToastEvent::Action(id, key) = event
                 && *id >= SHELL_IDS_END
+                && !self.calendar_action(*id, key)
             {
                 self.screenshot_action(*id, key);
             }

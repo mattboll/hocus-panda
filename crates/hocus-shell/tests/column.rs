@@ -5,6 +5,7 @@ use std::time::Duration;
 use hocus_shell::{
     Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, TrayApp, TrayMenuEntry,
     WallTime,
+    column::{Agenda, Meeting},
 };
 use hocus_ui::{Input, Point, Role, Theme};
 
@@ -18,6 +19,9 @@ fn state() -> ColumnState {
         sharing: false,
         todos: Vec::new(),
         updates: None,
+        meeting: None,
+        calendar_set: false,
+        agenda: Default::default(),
         time: WallTime {
             hour: 14,
             minute: 37,
@@ -123,6 +127,69 @@ fn the_desktops_line_follows_the_screen_and_opens_its_popover() -> anyhow::Resul
         }]
     );
     assert!(column.popover_view().is_none(), "an action closes it");
+    Ok(())
+}
+
+/// October 2026 begins on a Thursday, in week 40.
+fn agenda() -> Agenda {
+    Agenda {
+        year: 2026,
+        first_weekday: 3,
+        days: 31,
+        weeks: vec![40, 41, 42, 43, 44],
+        busy: vec![7, 14, 21, 23, 28],
+        today: vec![
+            ("14:49".into(), "Weekly review".into()),
+            ("16:00".into(), "Design review".into()),
+        ],
+    }
+}
+
+#[test]
+fn the_meeting_card_opens_the_agenda_then_joins() -> anyhow::Result<()> {
+    let mut column = column(Lang::En);
+    let mut s = state();
+    s.calendar_set = true;
+    s.agenda = agenda();
+    s.meeting = Some(Meeting {
+        title: "Weekly review".into(),
+        when: "In 12 min".into(),
+        progress: 80,
+        join: false,
+    });
+    column.set_state(&s);
+    column.draw(Duration::from_millis(16));
+    let at = button(&column, "Details")?;
+    assert_eq!(click(&mut column, at), vec![]);
+    column.draw(Duration::from_millis(32));
+    let popover = column
+        .popover_view()
+        .ok_or_else(|| anyhow::anyhow!("no agenda"))?;
+    common::expect_reference(&popover, "column-agenda.png")?;
+    // Its button again: closed, not opened anew.
+    let at = button(&column, "Details")?;
+    assert_eq!(click(&mut column, at), vec![]);
+    assert!(
+        column.popover_view().is_none(),
+        "the second click closes it"
+    );
+    // The clock opens it too.
+    let at = button(&column, "Agenda")?;
+    assert_eq!(click(&mut column, at), vec![]);
+    assert!(
+        column.popover_view().is_some(),
+        "the clock opens the agenda"
+    );
+    assert_eq!(click(&mut column, at), vec![]);
+    // Ten minutes before, Join.
+    if let Some(m) = &mut s.meeting {
+        m.when = "In 10 min".into();
+        m.join = true;
+    }
+    column.set_state(&s);
+    column.draw(Duration::from_millis(48));
+    let at = button(&column, "Join")?;
+    assert_eq!(click(&mut column, at), vec![Action::JoinMeeting]);
     Ok(())
 }
 
