@@ -134,6 +134,9 @@ pinned = [                 # desktop entries, in order; those not installed are 
   "org.gnome.Nautilus.desktop", "thunderbird.desktop",
 ]
 
+[pandas]                   # they show what happens; they move a moment when it changes, then hold still
+enabled = true             # false: no panda anywhere (also from quick settings, for the session)
+
 [language]
 interface = "auto"         # en or fr; auto follows the session's locale (LANG); changed at once
 

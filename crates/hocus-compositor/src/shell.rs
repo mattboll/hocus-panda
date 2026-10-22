@@ -272,6 +272,7 @@ impl State {
         self.refresh_dock();
         self.refresh_corners();
         self.refresh_ink();
+        self.refresh_pandas();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -533,6 +534,7 @@ impl State {
         self.picker_ui(&mut out);
         self.alt_tab_ui(&mut out);
         self.dock_ui(&mut out);
+        self.pandas_ui(&mut out);
         self.recording_ui(&mut out);
         self.share_ui(&mut out);
         self.bars_ui(&mut out);

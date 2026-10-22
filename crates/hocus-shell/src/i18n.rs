@@ -88,6 +88,32 @@ impl Lang {
         }
     }
 
+    /// What a panda shows, for screen readers.
+    pub fn panda(self, mood: crate::panda::Mood) -> &'static str {
+        use crate::panda::Mood::*;
+        match mood {
+            Rest => self.pick("Panda at rest", "Panda au repos"),
+            Work => self.pick("Panda at work", "Panda qui travaille"),
+            Wait => self.pick(
+                "Panda waiting for an answer",
+                "Panda qui attend une réponse",
+            ),
+            Done => self.pick("Panda done", "Panda qui a fini"),
+            Error => self.pick("Panda stuck", "Panda bloqué"),
+            Play => self.pick("Panda juggling", "Panda qui jongle"),
+            Popcorn => self.pick("Panda watching a video", "Panda qui regarde une vidéo"),
+            Sleep => self.pick("Panda asleep", "Panda qui dort"),
+            Wave => self.pick("Panda waving", "Panda qui salue"),
+        }
+    }
+
+    pub fn logo(self) -> &'static str {
+        self.pick(
+            "Hocuspanda: a panda with a magic ear",
+            "Hocuspanda : un panda à l’oreille magique",
+        )
+    }
+
     pub fn no_meeting(self) -> &'static str {
         self.pick("No meeting today", "Aucune réunion aujourd’hui")
     }

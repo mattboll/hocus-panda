@@ -41,7 +41,7 @@ Steps, one per `[[step]]` table:
 
 | Step | Does |
 |---|---|
-| `open = { app_id, size = [w, h], color = "#rrggbb", inhibit_shortcuts? }` | starts a test client with a solid window, waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard |
+| `open = { app_id, size = [w, h], color = "#rrggbb", inhibit_shortcuts?, inhibit_idle? }` | starts a test client with a solid window, waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard; `inhibit_idle` keeps the session awake while it is shown, as a video player does |
 | `open_layer = { namespace, layer, anchor?, size = [w, h], exclusive_zone?, keyboard?, color }` | starts a layer-shell client (`background`, `bottom`, `top`, `overlay`; anchors among `top`, `bottom`, `left`, `right`; 0 for a length anchored at both ends; keyboard `none`, `exclusive`, `on_demand`), waits until it is shown; `expect_received` reads it by its namespace |
 | `close_layer = "namespace"` | closes that layer client |
 | `session_file = """…"""` | writes the saved session file (TOML, `[[window]]` with `app_id`, `title`, `command`, `output`, `desktop`, `geometry`, `state`, `pinned`); `{test_client}` is the test client program |

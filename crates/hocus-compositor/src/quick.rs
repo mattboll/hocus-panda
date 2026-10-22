@@ -185,7 +185,7 @@ impl State {
                     | Tile::NightLight
                     | Tile::Focus
                     | Tile::Record
-            )
+            ) || (t == Tile::Pandas && self.config.pandas.enabled)
         };
         let tiles = tiles_in_order()
             .into_iter()
@@ -198,7 +198,7 @@ impl State {
                     Tile::NightLight => self.night_on(),
                     Tile::Focus => self.comfort.focus_mode,
                     Tile::Record => self.recording(),
-                    _ => false,
+                    Tile::Pandas => self.pandas_on(),
                 };
                 let detail = match t {
                     Tile::Wifi if p.wifi => p
@@ -289,7 +289,10 @@ impl State {
                     self.toggle_recording();
                     None
                 }
-                QuickAction::Toggle(..) => None,
+                QuickAction::Toggle(Tile::Pandas, _) => {
+                    self.toggle_pandas();
+                    None
+                }
                 QuickAction::Profile(i) => Some(Change::Profile(match i {
                     0 => Profile::Saver,
                     2 => Profile::Performance,
