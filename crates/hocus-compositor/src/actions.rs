@@ -75,6 +75,41 @@ impl State {
                     self.snap(window, *zone, serial);
                 }
             }
+            Action::ToggleTiling => {
+                if let Some(output) = self.output_under_pointer()
+                    && let Some(out) = self.model.output(&hocus_core::OutputName(output.name()))
+                {
+                    let desktop = out.shown;
+                    let on = !self.model.is_tiling(desktop);
+                    let _ = self.model.set_tiling(desktop, on);
+                    self.sync_desktops();
+                }
+            }
+            Action::MakeMaster => {
+                if let Some(window) = self.model.focused() {
+                    self.model.make_master(window);
+                    self.sync_desktops();
+                }
+            }
+            Action::GrowMaster | Action::ShrinkMaster => {
+                let desktop = self.model.focused().and_then(|w| self.model.desktop_of(w));
+                if let Some(desktop) = desktop {
+                    let by = if *action == Action::GrowMaster {
+                        0.05
+                    } else {
+                        -0.05
+                    };
+                    self.model.grow_master(desktop, by);
+                    self.sync_desktops();
+                }
+            }
+            Action::ToggleFloating => {
+                if let Some(window) = self.model.focused() {
+                    let floating = !self.model.is_floating(window);
+                    self.model.set_floating(window, floating);
+                    self.sync_desktops();
+                }
+            }
             Action::ToggleFullscreen => {
                 if let Some(window) = self.model.focused() {
                     let on = !matches!(

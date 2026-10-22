@@ -1,0 +1,42 @@
+description = "A window floated out of the tiling leaves its space to the others"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[windows.gaps]
+inner = 10
+"""
+
+[[step]]
+open = { app_id = "a", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "b", size = [400, 300], color = "#f2a65a" }
+
+[[step]]
+open = { app_id = "c", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+keys = "super+shift+t"
+
+[[step]]
+expect_window = { app_id = "c", state = "tiled", focused = true }
+
+[[step]]
+keys = "super+shift+f"
+
+[[step]]
+expect_window = { app_id = "c", geometry = [504, 314, 400, 300], state = "normal" }
+
+[[step]]
+expect_window = { app_id = "b", geometry = [0, 0, 699, 800], state = "tiled" }
+
+[[step]]
+expect_window = { app_id = "a", geometry = [709, 0, 571, 800], state = "tiled" }
+
+# Back in, as master.
+[[step]]
+keys = "super+shift+f"
+
+[[step]]
+expect_window = { app_id = "c", geometry = [0, 0, 699, 800], state = "tiled" }

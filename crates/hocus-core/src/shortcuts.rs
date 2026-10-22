@@ -35,6 +35,14 @@ pub enum Action {
     ToggleFullscreen,
     /// Snaps the focused window to a zone of its output.
     Snap(Zone),
+    /// Tiles the shown desktop of the output under the pointer, or not.
+    ToggleTiling,
+    /// Makes the focused window the master of its tiled desktop.
+    MakeMaster,
+    GrowMaster,
+    ShrinkMaster,
+    /// Takes the focused window out of the tiling, or back in.
+    ToggleFloating,
     Minimize,
     Close,
     /// The next keyboard layout.
@@ -61,6 +69,11 @@ impl fmt::Display for Action {
             Self::SendToOutputRight => write!(f, "send-to-output-right"),
             Self::ToggleMaximized => write!(f, "toggle-maximized"),
             Self::Snap(zone) => write!(f, "snap {}", zone.name()),
+            Self::ToggleTiling => write!(f, "toggle-tiling"),
+            Self::MakeMaster => write!(f, "make-master"),
+            Self::GrowMaster => write!(f, "grow-master"),
+            Self::ShrinkMaster => write!(f, "shrink-master"),
+            Self::ToggleFloating => write!(f, "toggle-floating"),
             Self::ToggleFullscreen => write!(f, "toggle-fullscreen"),
             Self::Minimize => write!(f, "minimize"),
             Self::Close => write!(f, "close"),
@@ -113,6 +126,11 @@ impl FromStr for Action {
                 .parse()
                 .map(Self::Snap)
                 .map_err(|e| format!("snap: {e}")),
+            "toggle-tiling" => bare(Self::ToggleTiling),
+            "make-master" => bare(Self::MakeMaster),
+            "grow-master" => bare(Self::GrowMaster),
+            "shrink-master" => bare(Self::ShrinkMaster),
+            "toggle-floating" => bare(Self::ToggleFloating),
             "toggle-fullscreen" => bare(Self::ToggleFullscreen),
             "minimize" => bare(Self::Minimize),
             "close" => bare(Self::Close),
@@ -229,7 +247,12 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Left", Action::Snap(Zone::Left)),
         ("Super+Right", Action::Snap(Zone::Right)),
         ("Super+Down", Action::Minimize),
-        ("Super+Shift+F", Action::ToggleFullscreen),
+        ("Super+F11", Action::ToggleFullscreen),
+        ("Super+Shift+T", Action::ToggleTiling),
+        ("Super+Shift+J", Action::MakeMaster),
+        ("Super+Shift+L", Action::GrowMaster),
+        ("Super+Shift+H", Action::ShrinkMaster),
+        ("Super+Shift+F", Action::ToggleFloating),
         ("Alt+F4", Action::Close),
         ("Super+Ctrl+Space", Action::SwitchLayout),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),

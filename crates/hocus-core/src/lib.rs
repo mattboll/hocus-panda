@@ -7,6 +7,7 @@ pub mod config;
 pub mod model;
 pub mod shortcuts;
 pub mod snap;
+pub mod tiling;
 
 pub use config::{Config, ConfigError};
 pub use model::{Desktop, DesktopId, Model, ModelError, Output, OutputName, Rect, WindowId};

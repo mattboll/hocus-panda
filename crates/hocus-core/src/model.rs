@@ -89,6 +89,14 @@ pub struct Output {
     pub shown: DesktopId,
 }
 
+/// A tiled desktop: its windows' order, master first, and the master's
+/// share of the width.
+#[derive(Debug, Clone, PartialEq)]
+struct Tiling {
+    order: Vec<WindowId>,
+    ratio: f64,
+}
+
 /// What an output's own desktops were, kept while it is unplugged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Home {
@@ -117,6 +125,10 @@ pub struct Model {
     minimized: BTreeSet<WindowId>,
     /// Shown on every desktop of the output hosting their own.
     pinned: BTreeSet<WindowId>,
+    /// Desktops laid out as master and stack.
+    tiling: BTreeMap<DesktopId, Tiling>,
+    /// Windows taken out of their desktop's tiling.
+    floating: BTreeSet<WindowId>,
     next_desktop: u32,
     next_window: u64,
 }
@@ -424,6 +436,10 @@ impl Model {
         if let Some(d) = self.desktops.get_mut(&desktop) {
             d.windows.push(id);
         }
+        // A new window becomes the master of a tiled desktop.
+        if let Some(t) = self.tiling.get_mut(&desktop) {
+            t.order.insert(0, id);
+        }
         self.focus(id)?;
         Ok(id)
     }
@@ -437,6 +453,10 @@ impl Model {
         self.returning.remove(&window);
         self.minimized.remove(&window);
         self.pinned.remove(&window);
+        self.floating.remove(&window);
+        if let Some(t) = self.tiling.get_mut(&desktop) {
+            t.order.retain(|w| *w != window);
+        }
         if let Some(d) = self.desktops.get_mut(&desktop) {
             d.windows.retain(|w| *w != window);
         }
@@ -524,6 +544,87 @@ impl Model {
         }
         if let Some(d) = self.desktops.get_mut(&desktop) {
             d.windows.push(window);
+        }
+        if let Some(t) = self.tiling.get_mut(&old) {
+            t.order.retain(|w| *w != window);
+        }
+        if let Some(t) = self.tiling.get_mut(&desktop) {
+            t.order.insert(0, window);
+        }
+    }
+
+    pub fn is_tiling(&self, desktop: DesktopId) -> bool {
+        self.tiling.contains_key(&desktop)
+    }
+
+    /// Lays a desktop out as master and stack, newest window as master, or
+    /// back to floating.
+    pub fn set_tiling(&mut self, desktop: DesktopId, on: bool) -> Result<(), ModelError> {
+        let d = self
+            .desktops
+            .get(&desktop)
+            .ok_or(ModelError::UnknownDesktop)?;
+        if on {
+            let order = d.windows.iter().rev().copied().collect();
+            self.tiling.entry(desktop).or_insert(Tiling {
+                order,
+                ratio: crate::tiling::DEFAULT_RATIO,
+            });
+        } else {
+            self.tiling.remove(&desktop);
+        }
+        Ok(())
+    }
+
+    /// The tiled windows of a desktop, master first: neither floating nor
+    /// minimized.
+    pub fn tiles(&self, desktop: DesktopId) -> Vec<WindowId> {
+        self.tiling
+            .get(&desktop)
+            .map(|t| {
+                t.order
+                    .iter()
+                    .copied()
+                    .filter(|w| !self.floating.contains(w) && !self.minimized.contains(w))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The master's share of a tiled desktop's width.
+    pub fn master_ratio(&self, desktop: DesktopId) -> f64 {
+        self.tiling
+            .get(&desktop)
+            .map_or(crate::tiling::DEFAULT_RATIO, |t| t.ratio)
+    }
+
+    pub fn grow_master(&mut self, desktop: DesktopId, by: f64) {
+        if let Some(t) = self.tiling.get_mut(&desktop) {
+            t.ratio = (t.ratio + by).clamp(crate::tiling::MIN_RATIO, crate::tiling::MAX_RATIO);
+        }
+    }
+
+    /// Makes a window the master of its tiled desktop.
+    pub fn make_master(&mut self, window: WindowId) {
+        let Some(desktop) = self.desktop_of(window) else {
+            return;
+        };
+        if let Some(t) = self.tiling.get_mut(&desktop) {
+            t.order.retain(|w| *w != window);
+            t.order.insert(0, window);
+        }
+    }
+
+    pub fn is_floating(&self, window: WindowId) -> bool {
+        self.floating.contains(&window)
+    }
+
+    /// Takes a window out of its desktop's tiling, or puts it back as master.
+    pub fn set_floating(&mut self, window: WindowId, floating: bool) {
+        if floating {
+            self.floating.insert(window);
+        } else if self.floating.remove(&window) {
+            self.make_master(window);
         }
     }
 
@@ -906,6 +1007,29 @@ mod tests {
         assert_eq!(model.visible_windows(&external()), [music]);
         assert!(model.is_visible(music));
         assert_eq!(model.visible_windows(&laptop()), []);
+        Ok(())
+    }
+
+    #[test]
+    fn a_tiled_desktop_keeps_its_order_newest_first() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let desktop = shown(&model, &laptop());
+        let a = model.open_window(&laptop())?;
+        let b = model.open_window(&laptop())?;
+        model.set_tiling(desktop, true)?;
+        assert_eq!(model.tiles(desktop), [b, a]);
+
+        let c = model.open_window(&laptop())?;
+        assert_eq!(model.tiles(desktop), [c, b, a]);
+
+        model.set_floating(b, true);
+        assert_eq!(model.tiles(desktop), [c, a]);
+        model.set_floating(b, false);
+        assert_eq!(model.tiles(desktop), [b, c, a]);
+
+        model.make_master(a);
+        model.close_window(c)?;
+        assert_eq!(model.tiles(desktop), [a, b]);
         Ok(())
     }
 
