@@ -21,6 +21,10 @@ use crate::{
     words::{self, ShortcutGroup},
 };
 
+mod personalise;
+
+use personalise::WallpaperPage;
+
 /// What the window shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -83,6 +87,8 @@ enum Target {
     /// Asks, or stops asking, to go back to the original shortcuts.
     Reset,
     InstallUpdates,
+    /// The wallpaper of this screen shows, or every screen's.
+    WallpaperScreen(Option<String>),
 }
 
 /// Which of a screen's choices are open.
@@ -311,6 +317,7 @@ pub struct SettingsView {
     screens: ScreensPage,
     keys: KeyboardPage,
     accounts: AccountsPage,
+    wallpaper: WallpaperPage,
     dirty: bool,
     now: Duration,
 }
@@ -387,6 +394,7 @@ impl SettingsView {
             screens: ScreensPage::default(),
             keys: KeyboardPage::default(),
             accounts: AccountsPage::default(),
+            wallpaper: WallpaperPage::default(),
             dirty: true,
             now: Duration::ZERO,
         }
@@ -405,6 +413,10 @@ impl SettingsView {
 
     /// What is in effect changed (the file, the screens).
     pub fn set_context(&mut self, ctx: Context) {
+        // What was typed in the wallpaper's fields is in the file now.
+        if ctx.config.wallpaper != self.ctx.config.wallpaper {
+            self.wallpaper.leave();
+        }
         self.ctx = ctx;
         // A language chosen here is spoken at once.
         self.lang = lang_of(&self.ctx.config, self.session_lang);
@@ -447,6 +459,7 @@ impl SettingsView {
         if screen != self.screen {
             self.scroll = 0.0;
             self.group = None;
+            self.wallpaper.leave();
         }
         self.screen = screen;
         self.typing = screen == Screen::Home;
@@ -533,6 +546,19 @@ impl SettingsView {
     }
 
     pub fn key(&mut self, key: Key) -> Vec<Outcome> {
+        // A path or colour typed: Enter writes it, Escape forgets it.
+        if let Some(entry) = self.wallpaper.entry_of(self.tree.focused()) {
+            match key {
+                Key::Enter => return self.commit(entry),
+                Key::Escape => {
+                    self.wallpaper.forget(entry);
+                    self.tree.set_focus(None);
+                    self.dirty = true;
+                    return Vec::new();
+                }
+                _ => {}
+            }
+        }
         // Enter in the calendar form: the next field, or Add from the last.
         if key == Key::Enter
             && let Some(i) = self.accounts.index(self.tree.focused())
@@ -626,8 +652,11 @@ impl SettingsView {
 
     /// Typed text goes to the search field.
     pub fn text(&mut self, text: &str) -> Vec<Outcome> {
-        // The calendar form's field that has the keyboard keeps it.
-        if self.accounts.index(self.tree.focused()).is_some() {
+        // The calendar form's or the wallpaper's field that has the
+        // keyboard keeps it.
+        if self.accounts.index(self.tree.focused()).is_some()
+            || self.wallpaper.entry_of(self.tree.focused()).is_some()
+        {
             let events = self.tree.text_input(text);
             return self.handle(events);
         }
@@ -686,8 +715,16 @@ impl SettingsView {
                             self.tree.field_value(id).unwrap_or_default().to_owned();
                     }
                 }
+                Event::Changed(id) if self.wallpaper.entry_of(Some(id)).is_some() => {
+                    if let Some(entry) = self.wallpaper.entry_of(Some(id)) {
+                        let typed = self.tree.field_value(id).unwrap_or_default().to_owned();
+                        self.wallpaper.type_into(entry, typed);
+                    }
+                }
                 // A click in the form's fields: Enter is the key's to see.
-                Event::Activated(id) if self.accounts.index(Some(id)).is_some() => {}
+                Event::Activated(id)
+                    if self.accounts.index(Some(id)).is_some()
+                        || self.wallpaper.entry_of(Some(id)).is_some() => {}
                 Event::Activated(id) => match self.targets.get(&id).cloned() {
                     Some(Target::Home) => {
                         self.highlight = None;
@@ -759,6 +796,10 @@ impl SettingsView {
                         self.dirty = true;
                     }
                     Some(Target::Identify) => out.push(Outcome::Identify),
+                    Some(Target::WallpaperScreen(screen)) => {
+                        self.wallpaper.show(screen);
+                        self.dirty = true;
+                    }
                     Some(Target::Group(group)) => {
                         self.group = group;
                         self.dirty = true;
@@ -919,6 +960,8 @@ impl SettingsView {
         let theme = self.tree.theme().clone();
         let typing_in_form = self.accounts.index(self.tree.focused());
         self.accounts.fields = [None; 4];
+        let typing_entry = self.wallpaper.entry_of(self.tree.focused());
+        self.wallpaper.fields.clear();
         let root = self.tree.root();
         for child in self.tree.children(root) {
             self.tree.remove(child);
@@ -964,6 +1007,8 @@ impl SettingsView {
             self.tree.set_focus(Some(*field));
         } else if let Some(i) = typing_in_form.filter(|_| self.accounts.fields[0].is_some()) {
             self.tree.set_focus(self.accounts.fields[i]);
+        } else if let Some(field) = typing_entry.and_then(|e| self.wallpaper.node(e)) {
+            self.tree.set_focus(Some(field));
         } else if self.typing {
             self.tree.set_focus(self.field);
         }
@@ -1418,6 +1463,10 @@ impl SettingsView {
         let body = self.scrolled(main);
         match page {
             Page::Appearance => self.appearance(theme, body),
+            Page::Wallpaper => self.wallpaper_page(theme, body),
+            Page::ColumnDock => self.column_dock(theme, body),
+            Page::Pandas => self.pandas(theme, body),
+            Page::Accessibility => self.accessibility(theme, body),
             Page::Desktops => self.desktops(theme, body),
             Page::Language => self.language(theme, body),
             Page::Welcome => self.welcome(theme, body),
@@ -1768,9 +1817,11 @@ impl SettingsView {
         }
     }
 
-    /// Language: the interface's (#51), changed at once.
+    /// Language and region: the interface's (#51), changed at once; the
+    /// clock and its time zone.
     fn language(&mut self, theme: &Theme, body: NodeId) {
         let lang = self.lang;
+        self.tree.set_style(body, fill_width(column(26.0)));
         let section = self.section(theme, body, words::INTERFACE_LANGUAGE);
         self.language_choices(theme, section);
         self.add(
@@ -1782,6 +1833,7 @@ impl SettingsView {
             ),
         );
         self.highlighted(section, &Setting::InterfaceLanguage, Look::default());
+        self.clock(theme, body);
     }
 
     /// Like the system, English, Français: the one in effect chosen.
@@ -2318,51 +2370,8 @@ impl SettingsView {
                 true,
             ),
         ] {
-            let look = Look {
-                background: Some(Paint::SurfaceHover),
-                radius: 16.0,
-                ..Look::default()
-            };
-            let card = self.add(
-                switches,
-                Style {
-                    height: Length::Px(68.0),
-                    padding: Insets::symmetric(10.0, 16.0),
-                    ..fill_width(row(14.0))
-                },
-                Kind::Box(look),
-            );
-            let ink = if works { Paint::Text } else { Paint::Muted };
-            if works {
-                self.tree.set_clickable(card, name.get(lang));
-                self.tree.set_selected_box(card, on);
-                self.targets
-                    .insert(card, Target::Set(Change::new("appearance", key, !on)));
-            }
-            let words_box = self.add(card, fill_width(column(1.0)), Kind::Box(Look::default()));
-            self.line(
-                words_box,
-                name.get(lang),
-                theme.text.title.with_weight(700).with_color(ink),
-            );
-            self.line(
-                words_box,
-                sub.get(lang),
-                theme.text.caption.with_weight(500).with_color(Paint::Muted),
-            );
-            self.add(
-                card,
-                Style {
-                    width: Length::Px(40.0),
-                    height: Length::Px(24.0),
-                    ..Style::default()
-                },
-                Kind::Custom {
-                    draw: Box::new(Switch(on)),
-                    label: None,
-                },
-            );
-            self.highlighted(card, &setting, look);
+            let change = works.then(|| Change::new("appearance", key, !on));
+            self.switch_card(theme, switches, (name, sub), on, change, Some(&setting));
         }
     }
 
@@ -3955,5 +3964,173 @@ mod tests {
         v.draw(Duration::ZERO);
         assert_eq!(v.screen(), Screen::Home);
         assert_eq!(v.key(Key::Escape).len(), 1, "Escape on the home closes");
+    }
+
+    fn page_view(toml: &str, page: Page, outputs: &[&str]) -> SettingsView {
+        let mut v = view(Lang::En);
+        let outputs = outputs
+            .iter()
+            .map(|name| hocus_api::OutputInfo {
+                name: (*name).into(),
+                geometry: hocus_api::Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1280,
+                    height: 800,
+                },
+                pixel_width: 1280,
+                pixel_height: 800,
+                scale: 1.0,
+                temperature: 6500,
+            })
+            .collect();
+        v.set_context(Context {
+            config: hocus_core::Config::parse(toml).expect("a configuration"),
+            outputs,
+            ..Context::default()
+        });
+        v.open(Some(page));
+        v.draw(Duration::ZERO);
+        v
+    }
+
+    fn places(out: &[Outcome]) -> Vec<crate::edit::Place> {
+        out.iter()
+            .filter_map(|o| match o {
+                Outcome::Change(c) => Some(c.place.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_screen_gets_its_own_wallpaper_and_a_colour_typed() {
+        let mut v = page_view("", Page::Wallpaper, &["HEADLESS-1", "HEADLESS-2"]);
+        assert!(find(&v.access(), "Glow").expect("glow").selected);
+        let out = click(&mut v, "Stars");
+        assert_eq!(changes(&out), [("kind".into(), Some("\"stars\"".into()))]);
+        assert_eq!(places(&out), [crate::edit::Place::Section("wallpaper")]);
+        click(&mut v, "HEADLESS-2");
+        let out = click(&mut v, "Colour");
+        assert_eq!(
+            places(&out),
+            [crate::edit::Place::WallpaperScreen("HEADLESS-2".into())]
+        );
+        // The file says so: the screen's colour shows, and its field.
+        v.set_context(Context {
+            config: hocus_core::Config::parse(
+                "[[wallpaper.screens]]\noutput = \"HEADLESS-2\"\nkind = \"colour\"\n",
+            )
+            .expect("valid"),
+            outputs: v.context().outputs.clone(),
+            ..Context::default()
+        });
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Colour").expect("colour").selected);
+        assert!(find(&v.access(), "This screen has its own wallpaper.").is_some());
+        click(&mut v, "Colour code");
+        v.text("not one");
+        let out = v.key(Key::Enter);
+        assert!(out.is_empty(), "{out:?}");
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Not a colour: write it like #0e0f12.").is_some());
+        click(&mut v, "Colour code");
+        for _ in 0.."not one".len() {
+            v.key(Key::Backspace);
+        }
+        v.text("203040");
+        let out = v.key(Key::Enter);
+        assert_eq!(
+            changes(&out),
+            [("colour".into(), Some("\"#203040\"".into()))]
+        );
+        let out = click(&mut v, "Like the other screens");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Change(c)] if c.key.is_empty() && c.value.is_none()),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn the_column_lines_and_the_dock_apps_change() {
+        let mut v = page_view("", Page::ColumnDock, &["HEADLESS-1"]);
+        let out = click(&mut v, "Coding agents");
+        assert_eq!(changes(&out), [("enabled".into(), Some("false".into()))]);
+        assert_eq!(places(&out), [crate::edit::Place::Section("agents")]);
+        let out = click(&mut v, "Remove Firefox");
+        let changed = changes(&out);
+        let [(key, Some(list))] = changed.as_slice() else {
+            panic!("{out:?}");
+        };
+        assert_eq!(key, "pinned");
+        assert!(!list.contains("\"firefox.desktop\""), "{list}");
+        assert!(list.contains("firefox-esr.desktop"), "{list}");
+        let out = click(&mut v, "Put Nautilus before");
+        assert!(
+            changes(&out)[0]
+                .1
+                .as_deref()
+                .is_some_and(|l| l.find("Nautilus") < l.find("firefox-esr")),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn pandas_and_accessibility_switch_and_lead_on() {
+        let mut v = page_view("", Page::Pandas, &["HEADLESS-1"]);
+        assert!(find(&v.access(), "Panda waiting for an answer").is_some());
+        let out = click(&mut v, "Show the pandas");
+        assert_eq!(changes(&out), [("enabled".into(), Some("false".into()))]);
+        let mut v = page_view(
+            "[appearance]\nreduced_motion = true\n",
+            Page::Accessibility,
+            &[],
+        );
+        assert!(
+            find(&v.access(), "Reduced motion")
+                .expect("motion")
+                .selected
+        );
+        let out = click(&mut v, "Reduced motion");
+        assert_eq!(
+            changes(&out),
+            [("reduced_motion".into(), Some("false".into()))]
+        );
+        click(&mut v, "Change the keys");
+        assert_eq!(v.screen(), Screen::Page(Page::Keyboard));
+    }
+
+    #[test]
+    fn the_clock_and_its_time_zone_are_chosen() {
+        let mut v = page_view("", Page::Language, &[]);
+        assert!(find(&v.access(), "24 hours · 14:37").expect("24").selected);
+        let out = click(&mut v, "12 hours · 2:37 PM");
+        assert_eq!(changes(&out), [("format".into(), Some("\"12h\"".into()))]);
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Tokyo");
+        assert_eq!(
+            changes(&out),
+            [("time_zone".into(), Some("\"Asia/Tokyo\"".into()))]
+        );
+        let mut v = page_view("[clock]\ntime_zone = \"Asia/Tokyo\"\n", Page::Language, &[]);
+        assert!(
+            !find(&v.access(), "Time zone: Like the system")
+                .expect("system")
+                .selected
+        );
+        let out = click(&mut v, "Time zone: Like the system");
+        assert_eq!(changes(&out), [("time_zone".into(), None)]);
+        // One the list does not offer shows, chosen.
+        let v = page_view(
+            "[clock]\ntime_zone = \"America/Halifax\"\n",
+            Page::Language,
+            &[],
+        );
+        assert!(
+            find(&v.access(), "America/Halifax")
+                .expect("its own")
+                .selected
+        );
     }
 }

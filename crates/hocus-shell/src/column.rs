@@ -38,6 +38,15 @@ pub struct WallTime {
     pub day: u8,
     /// From 1.
     pub month: u8,
+    /// 24 or 12 hours.
+    pub format: hocus_core::config::ClockFormat,
+}
+
+impl WallTime {
+    /// The time of day as the clock shows it.
+    pub fn text(&self) -> String {
+        self.format.time(self.hour, self.minute)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -592,10 +601,7 @@ impl Column {
             );
         }
         if all || old.time != state.time {
-            t.set_text(
-                n.clock,
-                &format!("{:02}:{:02}", state.time.hour, state.time.minute),
-            );
+            t.set_text(n.clock, &state.time.text());
             let w = state.time;
             t.set_text(n.date, &lang.date(w.weekday, w.day.max(1), w.month.max(1)));
         }

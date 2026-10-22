@@ -141,17 +141,18 @@ impl Lang {
         }
     }
 
-    pub fn meeting_at(self, hour: u8, minute: u8) -> String {
+    /// `time` as the clock writes it.
+    pub fn meeting_at(self, time: &str) -> String {
         match self {
-            Self::En => format!("At {hour:02}:{minute:02}"),
-            Self::Fr => format!("À {hour:02}:{minute:02}"),
+            Self::En => format!("At {time}"),
+            Self::Fr => format!("À {time}"),
         }
     }
 
-    pub fn meeting_tomorrow(self, hour: u8, minute: u8) -> String {
+    pub fn meeting_tomorrow(self, time: &str) -> String {
         match self {
-            Self::En => format!("Tomorrow {hour:02}:{minute:02}"),
-            Self::Fr => format!("Demain {hour:02}:{minute:02}"),
+            Self::En => format!("Tomorrow {time}"),
+            Self::Fr => format!("Demain {time}"),
         }
     }
 

@@ -39,13 +39,48 @@ use crate::{
 const VIRTUAL_START: (i16, i8, i8, i8, i8) = (2026, 10, 21, 14, 37);
 
 /// Where the user's time comes from.
-#[derive(Debug)]
-pub enum WallClock {
-    /// The system's clock in the time zone read at start, so that the loop
-    /// never reads time zone files.
-    System(jiff::tz::TimeZone),
-    /// [`VIRTUAL_START`] plus the compositor's virtual time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WallSource {
+    /// The system's clock.
+    System,
+    /// [`VIRTUAL_START`], in UTC, plus the compositor's virtual time.
     Virtual,
+}
+
+/// The user's clock: where its time comes from and the time zone it is
+/// read in. Time zones are read off the loop (the system's at start, the
+/// configuration's with the file), so that the loop never reads their
+/// files.
+#[derive(Debug)]
+pub struct WallClock {
+    pub source: WallSource,
+    /// The system's time zone; UTC on the virtual clock.
+    system: jiff::tz::TimeZone,
+    /// `[clock] time_zone`, when set.
+    chosen: Option<jiff::tz::TimeZone>,
+}
+
+impl WallClock {
+    pub fn new(source: WallSource) -> Self {
+        Self {
+            source,
+            system: match source {
+                WallSource::System => jiff::tz::TimeZone::system(),
+                WallSource::Virtual => jiff::tz::TimeZone::UTC,
+            },
+            chosen: None,
+        }
+    }
+
+    /// The time zone the user reads the time in.
+    pub fn zone(&self) -> jiff::tz::TimeZone {
+        self.chosen.clone().unwrap_or_else(|| self.system.clone())
+    }
+
+    /// The configuration's time zone, or the system's again with `None`.
+    pub fn choose(&mut self, zone: Option<jiff::tz::TimeZone>) {
+        self.chosen = zone;
+    }
 }
 
 #[derive(Debug)]
@@ -115,7 +150,7 @@ pub fn start(
 ) {
     use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
     let lang = state.shell_lang();
-    let system = matches!(state.wall, WallClock::System(_));
+    let system = state.wall.source == WallSource::System;
     state.shell = Some(Shell::new(Theme::default(), lang));
     crate::notify::start(handle, state, session_bus, lang);
     crate::tray::start(handle, state, session_bus);
@@ -210,18 +245,23 @@ impl State {
             weekday: civil.weekday().to_monday_zero_offset() as u8,
             day: civil.day() as u8,
             month: civil.month() as u8,
+            format: self.config.clock.format,
         }
     }
 
     /// The user's date and time.
     pub(crate) fn wall_civil(&self) -> jiff::civil::DateTime {
-        match &self.wall {
-            WallClock::System(tz) => jiff::Timestamp::now().to_zoned(tz.clone()).datetime(),
-            WallClock::Virtual => {
+        let zone = self.wall.zone();
+        match self.wall.source {
+            WallSource::System => jiff::Timestamp::now().to_zoned(zone).datetime(),
+            WallSource::Virtual => {
                 let (y, mo, d, h, mi) = VIRTUAL_START;
                 let start = jiff::civil::datetime(y, mo, d, h, mi, 0, 0);
                 let elapsed = jiff::SignedDuration::try_from(self.clock.now()).unwrap_or_default();
-                start.checked_add(elapsed).unwrap_or(start)
+                let civil = start.checked_add(elapsed).unwrap_or(start);
+                civil
+                    .to_zoned(jiff::tz::TimeZone::UTC)
+                    .map_or(civil, |utc| utc.with_time_zone(zone).datetime())
             }
         }
     }

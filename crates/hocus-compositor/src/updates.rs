@@ -204,7 +204,9 @@ impl State {
     /// The column's line: how many, and whether they are being installed.
     pub fn updates_line(&self) -> Option<(usize, bool)> {
         let installing = self.updates.phase == Phase::Installing;
-        (installing || !self.updates.list.is_empty())
+        // Turned off, the line goes with the looking; an installation
+        // under way still shows.
+        (installing || (self.config.updates.enabled && !self.updates.list.is_empty()))
             .then_some((self.updates.list.len(), installing))
     }
 }

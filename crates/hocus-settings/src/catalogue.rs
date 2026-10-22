@@ -131,6 +131,10 @@ impl Page {
         matches!(
             self,
             Self::Appearance
+                | Self::Wallpaper
+                | Self::ColumnDock
+                | Self::Pandas
+                | Self::Accessibility
                 | Self::Keyboard
                 | Self::Screens
                 | Self::Account
@@ -218,7 +222,41 @@ impl Page {
             Appearance => &[
                 "look", "colour", "color", "couleur", "dark", "sombre", "style",
             ],
-            Wallpaper => &["background", "fond", "image", "picture"],
+            Wallpaper => &[
+                "background",
+                "fond",
+                "image",
+                "picture",
+                "stars",
+                "étoiles",
+                "rain",
+                "pluie",
+                "glow",
+                "lueur",
+            ],
+            ColumnDock => &["column", "colonne", "dock", "panel", "panneau", "widgets"],
+            Pandas => &["panda", "mascot", "mascotte"],
+            Accessibility => &[
+                "a11y",
+                "magnifier",
+                "loupe",
+                "zoom",
+                "contrast",
+                "contraste",
+                "motion",
+                "mouvement",
+            ],
+            Language => &[
+                "langue",
+                "region",
+                "région",
+                "clock",
+                "horloge",
+                "time zone",
+                "fuseau",
+                "date",
+                "heure",
+            ],
             Screens => &[
                 "display",
                 "monitor",
@@ -306,16 +344,71 @@ impl Page {
                 }
             }
             Self::About => format!("Hocuspanda {}", env!("CARGO_PKG_VERSION")),
-            Self::Language => match ctx.config.language.interface {
-                hocus_core::config::InterfaceLanguage::Auto => words::LIKE_THE_SYSTEM,
-                hocus_core::config::InterfaceLanguage::En => words::ENGLISH,
-                hocus_core::config::InterfaceLanguage::Fr => words::FRENCH,
+            Self::Language => format!(
+                "{} · {}",
+                interface_name(ctx, lang),
+                words::clock_short(ctx.config.clock.format)
+            ),
+            Self::Wallpaper => words::wallpaper_name(&ctx.config.wallpaper.kind, lang),
+            Self::ColumnDock => {
+                let dock = &ctx.config.dock;
+                if dock.enabled {
+                    format!("{} · {}", words::DOCK.get(lang), dock.pinned.len())
+                } else {
+                    format!("{} · {}", words::DOCK.get(lang), words::OFF.get(lang))
+                }
             }
-            .get(lang)
-            .into(),
+            Self::Pandas => on_off(ctx.config.pandas.enabled, lang),
+            Self::Accessibility => {
+                let a = &ctx.config.appearance;
+                let mut said = vec![words::percent(a.text_size, lang)];
+                if a.high_contrast {
+                    said.push(words::HIGH_CONTRAST.get(lang).to_owned());
+                }
+                if a.reduced_motion {
+                    said.push(words::REDUCED_MOTION.get(lang).to_owned());
+                }
+                said.join(" · ")
+            }
             _ => words::NOT_YET.get(lang).into(),
         }
     }
+}
+
+fn on_off(on: bool, lang: Lang) -> String {
+    if on { words::ON } else { words::OFF }.get(lang).to_owned()
+}
+
+/// The magnifier's keys: zoom in, then out.
+pub fn zoom_keys(ctx: &Context, lang: Lang) -> String {
+    use hocus_core::Action;
+    let shortcuts = ctx.config.shortcuts();
+    let keys: Vec<String> = [Action::ZoomIn, Action::ZoomOut]
+        .iter()
+        .filter_map(|action| {
+            shortcuts
+                .bindings
+                .iter()
+                .find(|(_, a)| *a == action)
+                .map(|(combo, _)| combo.to_string())
+        })
+        .collect();
+    if keys.is_empty() {
+        words::NO_KEYS.get(lang).to_owned()
+    } else {
+        keys.join(", ")
+    }
+}
+
+/// The interface's language as set.
+fn interface_name(ctx: &Context, lang: Lang) -> String {
+    match ctx.config.language.interface {
+        hocus_core::config::InterfaceLanguage::Auto => words::LIKE_THE_SYSTEM,
+        hocus_core::config::InterfaceLanguage::En => words::ENGLISH,
+        hocus_core::config::InterfaceLanguage::Fr => words::FRENCH,
+    }
+    .get(lang)
+    .to_owned()
 }
 
 /// What the settings show: the configuration in effect and the screens.
@@ -350,6 +443,11 @@ pub enum Setting {
     Screen(String),
     HotCorners,
     InterfaceLanguage,
+    Clock,
+    TimeZone,
+    Dock,
+    Pandas,
+    Magnifier,
 }
 
 impl Setting {
@@ -365,7 +463,10 @@ impl Setting {
             Self::Layouts | Self::Shortcut(_) => Page::Keyboard,
             Self::Screen(_) => Page::Screens,
             Self::HotCorners => Page::Desktops,
-            Self::InterfaceLanguage => Page::Language,
+            Self::InterfaceLanguage | Self::Clock | Self::TimeZone => Page::Language,
+            Self::Dock => Page::ColumnDock,
+            Self::Pandas => Page::Pandas,
+            Self::Magnifier => Page::Accessibility,
         }
     }
 }
@@ -479,13 +580,65 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
                 ],
             ]
             .concat(),
-            match ctx.config.language.interface {
-                hocus_core::config::InterfaceLanguage::Auto => words::LIKE_THE_SYSTEM,
-                hocus_core::config::InterfaceLanguage::En => words::ENGLISH,
-                hocus_core::config::InterfaceLanguage::Fr => words::FRENCH,
-            }
-            .get(lang)
-            .to_owned(),
+            interface_name(ctx, lang),
+        ),
+        (
+            Setting::Clock,
+            words::CLOCK.get(lang).to_owned(),
+            [
+                both(words::CLOCK),
+                vec![
+                    "time".into(),
+                    "heure".into(),
+                    "12h".into(),
+                    "24h".into(),
+                    "am".into(),
+                    "pm".into(),
+                ],
+            ]
+            .concat(),
+            words::clock_short(ctx.config.clock.format).to_owned(),
+        ),
+        (
+            Setting::TimeZone,
+            words::TIME_ZONE.get(lang).to_owned(),
+            [
+                both(words::TIME_ZONE),
+                vec!["timezone".into(), "fuseau".into(), "utc".into()],
+            ]
+            .concat(),
+            words::zone_name(&ctx.config.clock.time_zone, lang),
+        ),
+        (
+            Setting::Dock,
+            words::DOCK.get(lang).to_owned(),
+            [
+                both(words::DOCK),
+                both(words::PINNED),
+                vec!["pinned".into(), "épinglé".into()],
+            ]
+            .concat(),
+            on_off(ctx.config.dock.enabled),
+        ),
+        (
+            Setting::Pandas,
+            words::SHOW_PANDAS.get(lang).to_owned(),
+            [
+                both(words::SHOW_PANDAS),
+                vec!["panda".into(), "mascot".into()],
+            ]
+            .concat(),
+            on_off(ctx.config.pandas.enabled),
+        ),
+        (
+            Setting::Magnifier,
+            words::MAGNIFIER.get(lang).to_owned(),
+            [
+                both(words::MAGNIFIER),
+                vec!["zoom".into(), "magnify".into()],
+            ]
+            .concat(),
+            zoom_keys(ctx, lang),
         ),
         (
             Setting::HotCorners,
@@ -653,6 +806,16 @@ mod tests {
         assert_eq!(hits[0].page, Page::Screens, "{hits:?}");
         let hits = search("wallpaper", &ctx(), Lang::En);
         assert_eq!(hits[0].page, Page::Wallpaper, "{hits:?}");
+    }
+
+    #[test]
+    fn the_clock_and_time_zone_are_found_in_either_language() {
+        let hits = search("fuseau", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::TimeZone), "{hits:?}");
+        let hits = search("12h", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::Clock), "{hits:?}");
+        let hits = search("loupe", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].page, Page::Accessibility, "{hits:?}");
     }
 
     #[test]

@@ -29,6 +29,8 @@ pub enum Place {
     /// The `[[calendars]]` entry of this address and user, made when
     /// missing.
     Calendar { url: String, user: String },
+    /// The `[[wallpaper.screens]]` entry of this output, made when missing.
+    WallpaperScreen(String),
 }
 
 impl Change {
@@ -88,6 +90,27 @@ impl Change {
         }
     }
 
+    /// A wallpaper setting: every screen's (`[wallpaper]`) with no
+    /// `output`, else that screen's own; `None` takes the key out.
+    pub fn wallpaper(output: Option<&str>, key: &'static str, value: Option<Value>) -> Self {
+        Self {
+            place: output.map_or(Place::Section("wallpaper"), |o| {
+                Place::WallpaperScreen(o.to_owned())
+            }),
+            key: key.into(),
+            value,
+        }
+    }
+
+    /// The screen's own wallpaper goes: it shows every screen's again.
+    pub fn forget_wallpaper(output: &str) -> Self {
+        Self {
+            place: Place::WallpaperScreen(output.to_owned()),
+            key: String::new(),
+            value: None,
+        }
+    }
+
     /// The whole `[section]` goes: back to what it was before any.
     pub fn forget(section: &'static str) -> Self {
         Self {
@@ -101,7 +124,7 @@ impl Change {
 /// The entry of `array` whose `key` holds what `matches` accepts, or a new
 /// one with `make` set.
 fn entry<'a>(
-    doc: &'a mut DocumentMut,
+    doc: &'a mut Table,
     array: &str,
     matches: impl Fn(&Item) -> bool,
     make: impl FnOnce(&mut Table),
@@ -190,6 +213,29 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
         hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
+    let is_screen =
+        |t: &Table, output: &str| t.get("output").and_then(Item::as_str) == Some(output);
+    if let (Place::WallpaperScreen(output), "", None) =
+        (&change.place, change.key.as_str(), &change.value)
+    {
+        if let Some(wallpaper) = doc.get_mut("wallpaper").and_then(Item::as_table_mut) {
+            if let Some(tables) = wallpaper
+                .get_mut("screens")
+                .and_then(Item::as_array_of_tables_mut)
+            {
+                tables.retain(|t| !is_screen(t, output));
+                if tables.is_empty() {
+                    wallpaper.remove("screens");
+                }
+            }
+            if wallpaper.is_empty() {
+                doc.remove("wallpaper");
+            }
+        }
+        let out = doc.to_string();
+        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        return Ok(out);
+    }
     let table: &mut dyn toml_edit::TableLike = match &change.place {
         Place::Section(section) => {
             let item = doc
@@ -199,7 +245,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
                 .ok_or_else(|| EditError::Invalid(format!("{section} is not a section")))?
         }
         Place::Output(name) => entry(
-            &mut doc,
+            doc.as_table_mut(),
             "outputs",
             |t| t.get("name").and_then(Item::as_str) == Some(name.as_str()),
             |t| {
@@ -209,7 +255,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
         Place::Layout(screens) => {
             let screens = sorted(screens);
             entry(
-                &mut doc,
+                doc.as_table_mut(),
                 "layouts",
                 |t| {
                     let listed: Option<Vec<String>> = t.get("outputs").and_then(|o| {
@@ -228,7 +274,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             )?
         }
         Place::Calendar { url, user } => entry(
-            &mut doc,
+            doc.as_table_mut(),
             "calendars",
             |t| t.as_table().is_some_and(|t| is_calendar(t, url, user)),
             |t| {
@@ -239,6 +285,25 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
                 }
             },
         )?,
+        Place::WallpaperScreen(output) => {
+            let wallpaper = doc.entry("wallpaper").or_insert_with(|| {
+                // `[[wallpaper.screens]]` alone needs no `[wallpaper]` above.
+                let mut table = Table::new();
+                table.set_implicit(true);
+                Item::Table(table)
+            });
+            let wallpaper = wallpaper
+                .as_table_mut()
+                .ok_or_else(|| EditError::Invalid("wallpaper is not a section".into()))?;
+            entry(
+                wallpaper,
+                "screens",
+                |t| t.as_table().is_some_and(|t| is_screen(t, output)),
+                |t| {
+                    t.insert("output", toml_edit::value(output.as_str()));
+                },
+            )?
+        }
     };
     match (
         table.get_mut(&change.key).and_then(Item::as_value_mut),
@@ -358,6 +423,40 @@ mod tests {
         let layout = config.layout_for(&["eDP-1", "DP-1"]).expect("found");
         assert_eq!(layout.name, "Home");
         assert_eq!(layout.positions.get("eDP-1"), Some(&[0, 1440]));
+    }
+
+    #[test]
+    fn a_screen_has_its_own_wallpaper_then_the_others_again() {
+        let text = "[wallpaper]\nkind = \"glow\"\n";
+        let mine = Change::wallpaper(Some("DP-1"), "kind", Some("colour".into()));
+        let out = apply(text, &mine).expect("applied");
+        let colour = Change::wallpaper(Some("DP-1"), "colour", Some("#203040".into()));
+        let out = apply(&out, &colour).expect("applied");
+        assert_eq!(out.matches("[[wallpaper.screens]]").count(), 1, "{out}");
+        let config = hocus_core::Config::parse(&out).expect("valid");
+        let spec = config.wallpaper.for_output("DP-1");
+        assert_eq!(
+            (spec.kind.as_str(), spec.colour.as_deref()),
+            ("colour", Some("#203040"))
+        );
+        assert_eq!(config.wallpaper.for_output("eDP-1").kind, "glow");
+        let out = apply(&out, &Change::forget_wallpaper("DP-1")).expect("applied");
+        assert_eq!(out, text);
+        // With no [wallpaper] at all, none is written above the screen's.
+        let out = apply("", &mine).expect("applied");
+        assert_eq!(
+            out,
+            "[[wallpaper.screens]]\noutput = \"DP-1\"\nkind = \"colour\"\n"
+        );
+        let out = apply(&out, &Change::forget_wallpaper("DP-1")).expect("applied");
+        assert_eq!(out, "");
+        // Every screen's colour taken out.
+        let out = apply(
+            "[wallpaper]\ncolour = \"#000000\"\n",
+            &Change::wallpaper(None, "colour", None),
+        )
+        .expect("applied");
+        assert_eq!(out, "[wallpaper]\n");
     }
 
     #[test]

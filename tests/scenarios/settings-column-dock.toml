@@ -1,0 +1,56 @@
+description = "The Column and dock page turns the dock off and takes an app out of it, written to the configuration; in the dark and light themes"
+outputs = ["1280x800"]
+
+[[step]]
+open_settings = { page = "column" }
+
+[[step]]
+expect_settings = { label = "Dock", selected = true }
+
+[[step]]
+expect_settings = { label = "Coding agents", selected = true }
+
+[[step]]
+click_settings = "Remove Thunderbird"
+
+[[step]]
+expect_config_file = { contains = ["[dock]", "pinned = ["], lacks = ["thunderbird"] }
+
+[[step]]
+click_settings = "Dock"
+
+[[step]]
+expect_config_file = { contains = ["enabled = false"] }
+
+[[step]]
+expect_settings = { label = "Dock", selected = false }
+
+[[step]]
+expect_settings = { label = "Remove Thunderbird", shown = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-column-dock.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[phone]
+enabled = false
+"""
+
+[[step]]
+expect_settings = { label = "Phone", selected = false }
+
+[[step]]
+expect_settings = { label = "Dock", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-column-dock-light.png" }

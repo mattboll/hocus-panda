@@ -18,8 +18,21 @@ use crate::{App, State};
 /// What the watcher found.
 #[derive(Debug)]
 pub enum ConfigUpdate {
-    Read(Box<Config>),
+    /// A configuration, with its time zone read from the system's
+    /// database: `None` for the system's own, or why it was not found.
+    Read(Box<Config>, Result<Option<jiff::tz::TimeZone>, String>),
     Invalid(String),
+}
+
+/// `[clock] time_zone` from the database, here off the loop.
+fn read_zone(config: &Config) -> Result<Option<jiff::tz::TimeZone>, String> {
+    let name = &config.clock.time_zone;
+    if name.is_empty() {
+        return Ok(None);
+    }
+    jiff::tz::TimeZone::get(name)
+        .map(Some)
+        .map_err(|err| format!("clock.time_zone = {name:?}: {err}; the system's is used"))
 }
 
 /// The running watcher; it stops when this is dropped.
@@ -68,10 +81,13 @@ pub fn start(
                     seen = Some(now);
                     let update = match now {
                         // No file: the defaults.
-                        None => ConfigUpdate::Read(Box::default()),
+                        None => ConfigUpdate::Read(Box::default(), Ok(None)),
                         Some(_) => match std::fs::read_to_string(&path) {
                             Ok(text) => match Config::parse(&text) {
-                                Ok(config) => ConfigUpdate::Read(Box::new(config)),
+                                Ok(config) => {
+                                    let zone = read_zone(&config);
+                                    ConfigUpdate::Read(Box::new(config), zone)
+                                }
                                 Err(err) => {
                                     ConfigUpdate::Invalid(format!("{}: {err}", path.display()))
                                 }
@@ -102,10 +118,18 @@ impl State {
     fn apply_config_update(&mut self, update: ConfigUpdate) {
         self.config_generation += 1;
         match update {
-            ConfigUpdate::Read(config) => {
+            ConfigUpdate::Read(config, zone) => {
                 self.config_error = None;
                 self.config_read = true;
                 self.apply_config(*config);
+                match zone {
+                    Ok(zone) => self.wall.choose(zone),
+                    Err(warning) => {
+                        tracing::warn!("configuration: {warning}");
+                        self.config_warnings.push(warning);
+                        self.wall.choose(None);
+                    }
+                }
                 tracing::info!("configuration applied");
                 self.emit(|_| hocus_api::Event::ConfigApplied);
             }

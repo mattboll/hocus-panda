@@ -398,8 +398,7 @@ impl LockScreen {
         if self.time == Some(time) {
             return;
         }
-        self.tree
-            .set_text(self.clock, &format!("{:02}:{:02}", time.hour, time.minute));
+        self.tree.set_text(self.clock, &time.text());
         self.tree.set_text(
             self.date,
             &self.lang.date(time.weekday, time.day, time.month),
@@ -505,6 +504,7 @@ mod tests {
             weekday: 2,
             day: 21,
             month: 10,
+            ..WallTime::default()
         });
         s.draw(Duration::ZERO);
         s

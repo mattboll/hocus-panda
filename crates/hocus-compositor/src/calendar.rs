@@ -133,12 +133,10 @@ pub fn start(
 }
 
 impl State {
-    /// The user's time zone; UTC on the virtual clock.
+    /// The user's time zone; UTC on the virtual clock, unless the
+    /// configuration chose one.
     fn wall_tz(&self) -> TimeZone {
-        match &self.wall {
-            crate::shell::WallClock::System(tz) => tz.clone(),
-            crate::shell::WallClock::Virtual => TimeZone::UTC,
-        }
+        self.wall.zone()
     }
 
     /// Now, by the user's clock (virtual in tests).
@@ -430,15 +428,19 @@ impl State {
         let o = self.next_meeting()?;
         let left = o.start.duration_since(now).as_secs();
         let at = o.start.to_zoned(tz.clone());
-        let (hour, minute) = (at.hour() as u8, at.minute() as u8);
+        let time = self
+            .config
+            .clock
+            .format
+            .time(at.hour() as u8, at.minute() as u8);
         let when = if left <= 0 {
             lang.meeting_now((o.end.duration_since(now).as_secs() + 59) / 60)
         } else if at.date() != now.to_zoned(tz).date() {
-            lang.meeting_tomorrow(hour, minute)
+            lang.meeting_tomorrow(&time)
         } else if left < 3600 {
             lang.meeting_in((left + 59) / 60)
         } else {
-            lang.meeting_at(hour, minute)
+            lang.meeting_at(&time)
         };
         // The ring fills over the hour before.
         let progress = (100 - left.clamp(0, 3600) * 100 / 3600) as u8;
@@ -487,7 +489,10 @@ impl State {
                     lang.all_day().to_owned()
                 } else {
                     let at = o.start.to_zoned(tz.clone());
-                    format!("{:02}:{:02}", at.hour(), at.minute())
+                    self.config
+                        .clock
+                        .format
+                        .time(at.hour() as u8, at.minute() as u8)
                 };
                 on_today.push((time, o.summary.clone()));
             }

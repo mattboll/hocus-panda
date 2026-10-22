@@ -12,7 +12,8 @@ outputs = ["2560x1600@2/1", "1920x1080"]
 # Starts XWayland for `open_x11`; the scenario is skipped where Xwayland is missing
 xwayland = false
 # Shows the widget column on the primary output (in English, at a fixed
-# Wednesday 21 October 14:37 plus the virtual time, for user "Alex")
+# Wednesday 21 October 14:37 UTC plus the virtual time, for user "Alex";
+# UTC is the system's time zone there, `[clock] time_zone` another)
 shell = false
 # A private D-Bus bus for the compositor (notifications); never the session's
 dbus = false
@@ -74,7 +75,7 @@ Steps, one per `[[step]]` table:
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |
 | `tray_attention = { title, attention }` | it asks for attention, or stops |
 | `expect_tray = { title, asked = "clicked 2" }` | it was asked this: `activate`, `clicked N` (menu entry N, from 1) |
-| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `keyboard`, `screens`) or its home, and waits for its window |
+| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `keyboard`, `screens`…) or its home, and waits for its window |
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
