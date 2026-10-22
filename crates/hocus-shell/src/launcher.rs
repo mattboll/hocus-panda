@@ -349,10 +349,16 @@ impl Launcher {
         })
     }
 
+    /// The applications, found on a worker thread: they may come while
+    /// the card is open. Only the command field lists them, and the line
+    /// chosen there stays chosen.
     pub fn set_apps(&mut self, apps: Vec<App>) {
         self.apps = apps;
-        if self.open {
+        if self.open && self.mode == Mode::Commands {
+            let selected = self.selected;
             self.search();
+            self.selected = selected.min(self.hits.len().saturating_sub(1));
+            self.show_selection();
         }
     }
 
@@ -984,6 +990,39 @@ mod tests {
         ]);
         l.open();
         l
+    }
+
+    #[test]
+    fn applications_found_late_leave_the_history_s_chosen_line_alone() {
+        let mut l = Launcher::new(Theme::default(), Lang::En, 1.0);
+        l.set_history(vec![
+            ("third copy".into(), false),
+            ("second copy".into(), false),
+            ("first copy".into(), false),
+        ]);
+        l.open_mode(Mode::Clipboard);
+        l.key(Key::Down);
+        // The worker's scan comes back now, on a loaded machine.
+        l.set_apps(vec![app("Files", None), app("Firefox", None)]);
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![LauncherEvent::Chosen(Choice::Paste("second copy".into()))]
+        );
+    }
+
+    #[test]
+    fn applications_found_late_keep_the_command_field_s_chosen_line() {
+        let mut l = launcher();
+        l.text("fi");
+        l.key(Key::Down);
+        let before = l.selected;
+        l.set_apps(vec![
+            app("Files", Some("File Manager")),
+            app("Firefox", Some("Web Browser")),
+            app("Fish", None),
+            app("Terminal", None),
+        ]);
+        assert_eq!(l.selected, before);
     }
 
     #[test]
