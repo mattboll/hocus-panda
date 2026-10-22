@@ -1,6 +1,6 @@
 //! The nested backend: the compositor runs in a window of the current session.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Context;
 use smithay::{
@@ -187,11 +187,7 @@ impl WinitBackend {
             self.presented += 1;
             state.presented(&self.output, elapsed, self.presented);
         }
-        for window in state.space.elements() {
-            window.send_frame(&self.output, elapsed, Some(Duration::ZERO), |_, _| {
-                Some(self.output.clone())
-            });
-        }
+        state.send_frames(&self.output, elapsed, None);
         state.space.refresh();
         state.popups.cleanup();
         state.needs_redraw = false;

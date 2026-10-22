@@ -1,0 +1,28 @@
+# An output whose frames stop being presented (a lost page flip) is looked
+# at once a second; after three looks it is recovered, the event said, and
+# it draws again (#27).
+description = "A stuck output is recovered after three seconds and draws again"
+
+[[step]]
+stall_output = "HEADLESS-1"
+
+[[step]]
+pointer_move = [200, 200]
+
+[[step]]
+advance_ms = 2500
+
+[[step]]
+open = { app_id = "late", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_event = { type = "output_recovered", has = "HEADLESS-1" }
+
+[[step]]
+expect_window = { app_id = "late", visible = true }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [640, 400], color = "#3366cc" }

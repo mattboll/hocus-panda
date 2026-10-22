@@ -23,12 +23,14 @@ use tracing_subscriber::{
 #[derive(Debug, Parser)]
 #[command(version)]
 struct Args {
-    /// Where to draw.
-    #[arg(long, value_enum, default_value_t = BackendArg::Winit)]
-    backend: BackendArg,
+    /// Where to draw. Default: in a window when started from a graphical
+    /// session, as the session itself on a virtual terminal otherwise.
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
 
     /// Directory of the Wayland socket. Default: $XDG_RUNTIME_DIR for the
-    /// nested backend, a fresh private directory for the headless one.
+    /// session and the nested backend, a fresh private directory for the
+    /// headless one.
     #[arg(long, value_name = "DIR")]
     runtime_dir: Option<PathBuf>,
 
@@ -50,8 +52,9 @@ struct Args {
     #[arg(long, value_enum, default_value_t = PermissionArg::Observe)]
     api_permission: PermissionArg,
 
-    /// Log file, besides the terminal. Default for the nested backend:
-    /// $XDG_STATE_HOME/hocuspanda/hocuspanda.log; none for the headless one.
+    /// Log file, besides the terminal. Default for the session and the
+    /// nested backend: $XDG_STATE_HOME/hocuspanda/hocuspanda.log; none for
+    /// the headless one.
     /// The previous log is kept with an `.old` suffix.
     #[arg(long, value_name = "FILE", conflicts_with = "no_log_file")]
     log_file: Option<PathBuf>,
@@ -72,7 +75,8 @@ struct Args {
     #[arg(long)]
     no_shell: bool,
 
-    /// Serve notifications on this D-Bus address. Nested in a live session,
+    /// Serve notifications on this D-Bus address. Default: the session's
+    /// own bus when hocuspanda is the session. Nested in a live session,
     /// never the session's own bus: its notification daemon owns the name.
     #[arg(long, value_name = "ADDRESS")]
     session_bus: Option<String>,
@@ -97,6 +101,9 @@ struct Args {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum BackendArg {
+    /// The session itself, on a virtual terminal: the screens, keyboards
+    /// and mice of the seat.
+    Tty,
     /// In a window of the current session.
     Winit,
     /// Without a screen, into offscreen buffers.
@@ -122,11 +129,23 @@ enum RendererArg {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    let backend = args.backend.unwrap_or_else(|| {
+        let graphical = ["WAYLAND_DISPLAY", "DISPLAY"]
+            .iter()
+            .any(|v| std::env::var_os(v).is_some_and(|v| !v.is_empty()));
+        if graphical {
+            BackendArg::Winit
+        } else {
+            BackendArg::Tty
+        }
+    });
     let state_dir = state_dir();
-    let log_file = match (&args.log_file, args.no_log_file, args.backend) {
+    let log_file = match (&args.log_file, args.no_log_file, backend) {
         (_, true, _) => None,
         (Some(path), false, _) => Some(path.clone()),
-        (None, false, BackendArg::Winit) => state_dir.as_ref().map(|d| d.join("hocuspanda.log")),
+        (None, false, BackendArg::Winit | BackendArg::Tty) => {
+            state_dir.as_ref().map(|d| d.join("hocuspanda.log"))
+        }
         (None, false, BackendArg::Headless) => None,
     };
     // Kept to the end: dropping it flushes the file.
@@ -143,19 +162,25 @@ fn main() -> anyhow::Result<()> {
             .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".config")))?;
         Some(base.join("hocuspanda/config.toml"))
     });
-    hocus_compositor::run(Options {
+    let result = hocus_compositor::run(Options {
         watchdog,
         config,
         config_poll: hocus_compositor::CONFIG_POLL,
         xwayland: !args.no_xwayland,
         shell: !args.no_shell,
-        session_bus: args.session_bus,
+        // The session itself owns its bus; nested, only one given.
+        session_bus: args.session_bus.or_else(|| {
+            matches!(backend, BackendArg::Tty)
+                .then(|| std::env::var("DBUS_SESSION_BUS_ADDRESS").ok())
+                .flatten()
+        }),
         system_bus: args.system_bus,
         state_dir: None,
         session_services: args.session_services,
         data_dirs: None,
         child_env: None,
-        backend: match args.backend {
+        backend: match backend {
+            BackendArg::Tty => Backend::Tty,
             BackendArg::Winit => Backend::Winit,
             BackendArg::Headless => Backend::Headless(HeadlessConfig {
                 outputs: args.outputs,
@@ -172,7 +197,12 @@ fn main() -> anyhow::Result<()> {
             PermissionArg::Observe => Permission::Observe,
             PermissionArg::Test => Permission::Test,
         },
-    })
+    });
+    // On a terminal, nobody may be reading stderr: the log says why.
+    if let Err(err) = &result {
+        tracing::error!("{err:#}");
+    }
+    result
 }
 
 /// `$XDG_STATE_HOME/hocuspanda`, or `~/.local/state/hocuspanda`.

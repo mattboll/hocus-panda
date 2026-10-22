@@ -72,6 +72,7 @@ Steps, one per `[[step]]` table:
 | `send = { app_id, output, desktop? }` | sends a window to an output: its desktop `desktop` (from 1), or the shown one |
 | `plug = { spec = "1920x1080+1280+0", name? }` | plugs an output; `name` brings back one unplugged before |
 | `unplug = "HEADLESS-2"` | unplugs an output |
+| `stall_output = "HEADLESS-1"` | the output stops presenting its frames, as a stuck screen would, until the compositor recovers it |
 | `set_state = { app_id, state = "maximized" }` | maximizes, makes fullscreen, minimizes or restores (`normal`) a window |
 | `expect_accent = { hue = [15, 45] }` | the shell's accent in effect has a hue in that range (degrees) |
 | `config = """…"""` | writes the configuration file (TOML) and waits until the compositor has read it; `{scenario_dir}` is the scenario's directory, for fixtures, and `{test_client}` a test client program (`--app-id`, `--size`, `--color`) for what the compositor starts itself |

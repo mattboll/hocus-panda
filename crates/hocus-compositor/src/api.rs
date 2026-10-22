@@ -328,6 +328,17 @@ impl App {
                         .map_err(|err| ApiError::new(ErrorCode::NotFound, format!("{err:#}"))),
                 );
             }
+            Request::StallOutput { output } => {
+                let BackendState::Headless(headless) = &mut self.backend else {
+                    return Some(Err(not_headless()));
+                };
+                return Some(
+                    headless
+                        .stall(&output)
+                        .map(|()| Reply::Done)
+                        .map_err(|err| ApiError::new(ErrorCode::NotFound, format!("{err:#}"))),
+                );
+            }
             Request::SetPrimaryOutput { output } => {
                 return Some(
                     state
@@ -500,6 +511,7 @@ impl App {
                     BackendState::Headless(headless) => {
                         headless.capture_output(&output, state, cursor)
                     }
+                    BackendState::Tty(tty) => tty.capture_output(&output, state, cursor),
                 }
             }
             Target::Window(id) => {
@@ -517,6 +529,7 @@ impl App {
                 match &mut self.backend {
                     BackendState::Winit(winit) => winit.capture_window(&window, scale),
                     BackendState::Headless(headless) => headless.capture_window(&window, scale),
+                    BackendState::Tty(tty) => tty.capture_window(&window, scale),
                 }
             }
         };

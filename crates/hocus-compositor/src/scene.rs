@@ -268,3 +268,61 @@ impl State {
         normal && (server_side || !own_shadow)
     }
 }
+
+impl State {
+    /// Tells the clients shown on `output` that a frame went out, so they
+    /// draw their next one: windows and their popups, layer surfaces, the
+    /// lock client and the cursor. `states` says which surfaces the frame
+    /// showed, when the backend knows; a surface is then only told by the
+    /// output it shows most on.
+    pub fn send_frames(
+        &self,
+        output: &Output,
+        now: std::time::Duration,
+        states: Option<&smithay::backend::renderer::element::RenderElementStates>,
+    ) {
+        use smithay::backend::renderer::element::default_primary_scanout_output_compare;
+        use smithay::{
+            desktop::{
+                layer_map_for_output,
+                utils::{
+                    send_frames_surface_tree, surface_primary_scanout_output,
+                    update_surface_primary_scanout_output,
+                },
+            },
+            input::pointer::CursorImageStatus,
+        };
+
+        // No throttling: frames are paced by the backend.
+        let throttle = Some(std::time::Duration::ZERO);
+        let primary = |surface: &_, data: &_| -> Option<Output> {
+            match states {
+                Some(_) => surface_primary_scanout_output(surface, data),
+                None => Some(output.clone()),
+            }
+        };
+        for window in self.space.elements() {
+            if let Some(states) = states {
+                window.with_surfaces(|surface, data| {
+                    update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        data,
+                        states,
+                        default_primary_scanout_output_compare,
+                    );
+                });
+            }
+            window.send_frame(output, now, throttle, primary);
+        }
+        for layer in layer_map_for_output(output).layers() {
+            layer.send_frame(output, now, throttle, |_, _| Some(output.clone()));
+        }
+        if let Some(lock) = self.lock_surface(output) {
+            send_frames_surface_tree(lock, output, now, throttle, |_, _| Some(output.clone()));
+        }
+        if let CursorImageStatus::Surface(cursor) = &self.cursor {
+            send_frames_surface_tree(cursor, output, now, throttle, |_, _| Some(output.clone()));
+        }
+    }
+}

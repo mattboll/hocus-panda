@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use hocus_api::{Event, Permission, Request};
 use hocus_compositor::{FRAME, Headless, HeadlessConfig, OutputSpec, RendererChoice, RendererKind};
 use hocus_test::client::SolidWindow;
 
@@ -128,5 +129,50 @@ fn the_automatic_renderer_draws() -> anyhow::Result<()> {
     compositor.advance(FRAME)?;
 
     assert_eq!(frames(&compositor), [1]);
+    Ok(())
+}
+
+/// A stuck output (#27): once a frame is out and never presented, nothing
+/// more is drawn there; three looks a second apart later it is recovered,
+/// said, and draws again.
+#[test]
+fn a_stuck_output_is_recovered_after_three_looks() -> anyhow::Result<()> {
+    let mut compositor = Headless::start_with(two_outputs(), Permission::Test)?;
+    compositor.request(Request::Subscribe)?;
+    compositor.advance(FRAME)?;
+    compositor.request(Request::StallOutput {
+        output: "HEADLESS-1".into(),
+    })?;
+    // The cursor moves: one frame drawn, never presented.
+    compositor.request(Request::PointerMove { x: 100.0, y: 100.0 })?;
+    compositor.advance(FRAME * 2)?;
+    let stuck = frames(&compositor)[0];
+
+    compositor.request(Request::PointerMove { x: 300.0, y: 100.0 })?;
+    compositor.advance(Duration::from_millis(2500))?;
+    assert_eq!(frames(&compositor)[0], stuck, "a stuck output drew on");
+    let recovered = |events: &[Event]| {
+        events
+            .iter()
+            .filter(
+                |e| matches!(e, Event::OutputRecovered { name, missed: 3 } if name == "HEADLESS-1"),
+            )
+            .count()
+    };
+    compositor.request(Request::Version)?;
+    assert_eq!(
+        recovered(&compositor.take_events()),
+        0,
+        "recovered too soon"
+    );
+
+    compositor.advance(Duration::from_millis(1000))?;
+    compositor.request(Request::Version)?;
+    assert_eq!(recovered(&compositor.take_events()), 1);
+    compositor.advance(FRAME * 2)?;
+    assert!(
+        frames(&compositor)[0] > stuck,
+        "the recovered output does not draw"
+    );
     Ok(())
 }
