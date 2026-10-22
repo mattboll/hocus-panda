@@ -123,6 +123,9 @@ impl State {
     /// Opens on the screen under the pointer; reads the applications again
     /// meanwhile, off the loop.
     pub fn open_launcher(&mut self) {
+        if self.quick_open() {
+            self.close_quick();
+        }
         let output = self.output_under_pointer();
         let place = output.as_ref().and_then(|o| {
             // Centred in the work area: beside the column, not over it.

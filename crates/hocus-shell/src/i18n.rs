@@ -216,6 +216,106 @@ impl Lang {
         self.pick("Application", "Application")
     }
 
+    pub fn quick_settings(self) -> &'static str {
+        self.pick("Quick settings", "Réglages rapides")
+    }
+
+    pub fn tile(self, tile: crate::quick::Tile) -> &'static str {
+        use crate::quick::Tile as T;
+        match tile {
+            T::Wifi => "Wi-Fi",
+            T::Bluetooth => "Bluetooth",
+            T::DoNotDisturb => self.pick("Do not disturb", "Ne pas déranger"),
+            T::NightLight => self.pick("Night light", "Lumière nocturne"),
+            T::Focus => self.pick("Focus", "Concentration"),
+            T::Record => self.pick("Record", "Enregistrer"),
+            T::Airplane => self.pick("Airplane mode", "Mode avion"),
+            T::Pandas => "Pandas",
+        }
+    }
+
+    pub fn on_off(self, on: bool) -> &'static str {
+        match on {
+            true => self.pick("On", "Activé"),
+            false => self.pick("Off", "Désactivé"),
+        }
+    }
+
+    pub fn coming(self) -> &'static str {
+        self.pick("Not yet", "Pas encore")
+    }
+
+    pub fn energy(self) -> &'static str {
+        self.pick("POWER", "ÉNERGIE")
+    }
+
+    pub fn profiles(self) -> [&'static str; 3] {
+        match self {
+            Self::En => ["Saver", "Balanced", "Performance"],
+            Self::Fr => ["Économie", "Équilibré", "Performance"],
+        }
+    }
+
+    pub fn sound_caption(self) -> &'static str {
+        self.pick("SOUND", "SON")
+    }
+
+    pub fn volume(self) -> &'static str {
+        self.pick("Volume", "Volume")
+    }
+
+    pub fn output_device(self, name: &str) -> String {
+        let name = if name.is_empty() {
+            self.pick("default", "par défaut")
+        } else {
+            name
+        };
+        match self {
+            Self::En => format!("Output: {name}"),
+            Self::Fr => format!("Sortie\u{a0}: {name}"),
+        }
+    }
+
+    pub fn brightness_caption(self) -> &'static str {
+        self.pick("BRIGHTNESS, PER SCREEN", "LUMINOSITÉ, PAR ÉCRAN")
+    }
+
+    pub fn brightness_of(self, screen: &str) -> String {
+        match self {
+            Self::En => format!("Brightness of {screen}"),
+            Self::Fr => format!("Luminosité de {screen}"),
+        }
+    }
+
+    pub fn keyboard(self) -> &'static str {
+        self.pick("Keyboard", "Clavier")
+    }
+
+    pub fn notifications_count(self, n: usize) -> String {
+        format!("Notifications · {n}")
+    }
+
+    pub fn clear_all(self) -> &'static str {
+        self.pick("Clear all", "Tout effacer")
+    }
+
+    pub fn battery_left(self, percent: u8, minutes: Option<u32>) -> String {
+        match (self, minutes) {
+            (Self::En, Some(m)) => format!(
+                "Battery {percent}\u{202f}% · about {} h {:02}",
+                m / 60,
+                m % 60
+            ),
+            (Self::Fr, Some(m)) => format!(
+                "Batterie {percent}\u{202f}% · environ {} h {:02}",
+                m / 60,
+                m % 60
+            ),
+            (Self::En, None) => format!("Battery {percent}\u{202f}%"),
+            (Self::Fr, None) => format!("Batterie {percent}\u{202f}%"),
+        }
+    }
+
     pub fn lock(self) -> &'static str {
         self.pick("Lock", "Verrouiller")
     }

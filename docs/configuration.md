@@ -72,6 +72,7 @@ same keys twice, the first one wins and the second is reported.
 | `snap ZONE` | snaps the focused window: `left`, `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right`, `top` (maximize) |
 | `switch-layout` | the next keyboard layout |
 | `launcher` | opens the launcher (applications, calculator), or closes it |
+| `quick-settings` | opens quick settings on the screen under the pointer, or closes them |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `spawn COMMAND` | runs a command through the shell |
 | `quit` | ends the session |
@@ -97,5 +98,6 @@ Defaults:
 | Alt+F4 | `close` |
 | Super+Ctrl+Space | `switch-layout` |
 | Super+Space | `launcher` |
+| Super+A | `quick-settings` |
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |
 | Ctrl+Alt+BackSpace | `quit` |

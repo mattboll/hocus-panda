@@ -10,9 +10,11 @@ pub mod fuzzy;
 pub mod i18n;
 pub mod icons;
 pub mod launcher;
+pub mod quick;
 pub mod toasts;
 
 pub use column::{Action, ActiveWindow, Column, ColumnState, ScreenDesktops, WallTime};
 pub use i18n::Lang;
 pub use launcher::{App, Choice, Launcher, LauncherEvent};
+pub use quick::{QuickAction, QuickState, Sheet, Tile};
 pub use toasts::{Toast, ToastEvent, Toasts};

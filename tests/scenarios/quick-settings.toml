@@ -1,0 +1,56 @@
+description = "Super+A opens quick settings on the screen under the pointer; Escape closes them and gives the keyboard back"
+outputs = ["1280x800", "1920x1080+1280+0"]
+shell = true
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+open = { app_id = "editor", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+expect_window = { app_id = "editor", focused = true }
+
+[[step]]
+pointer_move = [2500, 500]
+
+[[step]]
+keys = "super+a"
+
+[[step]]
+expect_ui = { label = "Quick settings", inside = [1280, 0, 1920, 1080] }
+
+# The window let go of the keyboard while the sheet is open.
+[[step]]
+expect_window = { app_id = "editor", focused = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "quick-settings.png" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Quick settings", shown = false }
+
+[[step]]
+expect_window = { app_id = "editor", focused = true }
+
+# A click outside closes it too.
+[[step]]
+keys = "super+a"
+
+[[step]]
+expect_ui = { label = "Quick settings" }
+
+[[step]]
+pointer_move = [1500, 500]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_ui = { label = "Quick settings", shown = false }

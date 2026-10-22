@@ -81,6 +81,8 @@ pub struct State {
     pub toasts: Option<crate::notify::ToastPanel>,
     /// The launcher, when the shell runs.
     pub launcher: Option<crate::launcher::LauncherPanel>,
+    /// Quick settings, when the shell runs.
+    pub quick: Option<crate::quick::QuickPanel>,
     /// What started applications inherit, if not the compositor's own
     /// environment (tests).
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
@@ -166,6 +168,7 @@ impl State {
             shell: None,
             toasts: None,
             launcher: None,
+            quick: None,
             child_env: None,
             layout_index: 0,
             user: std::env::var("USER")

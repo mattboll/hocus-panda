@@ -131,6 +131,7 @@ impl State {
             }
             Action::SwitchLayout => self.switch_layout(),
             Action::Launcher => self.toggle_launcher(),
+            Action::QuickSettings => self.toggle_quick(),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }
