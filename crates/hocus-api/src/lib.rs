@@ -88,6 +88,10 @@ pub enum Request {
         button: Button,
         pressed: bool,
     },
+    /// A wheel scroll in logical pixels, 15 per notch, down positive.
+    PointerScroll {
+        dy: f64,
+    },
     /// A key by its Linux evdev code (`KEY_A` is 30).
     Key {
         code: u32,
@@ -162,6 +166,7 @@ impl Request {
             Self::Scene
             | Self::PointerMove { .. }
             | Self::PointerButton { .. }
+            | Self::PointerScroll { .. }
             | Self::Key { .. }
             | Self::CloseWindow { .. }
             | Self::SetWindowState { .. }
@@ -358,6 +363,10 @@ pub struct WindowInfo {
     /// Whether its desktop is shown and it is not minimized.
     pub visible: bool,
     pub state: WindowState,
+    /// 0.1 to 1.
+    pub opacity: f64,
+    /// Shown on every desktop of its output.
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

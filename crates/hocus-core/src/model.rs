@@ -115,6 +115,8 @@ pub struct Model {
     /// output's desktop: the desktop they go back to on replug.
     returning: BTreeMap<WindowId, DesktopId>,
     minimized: BTreeSet<WindowId>,
+    /// Shown on every desktop of the output hosting their own.
+    pinned: BTreeSet<WindowId>,
     next_desktop: u32,
     next_window: u64,
 }
@@ -150,10 +152,32 @@ impl Model {
         self.outputs.iter().find(|o| o.desktops.contains(&desktop))
     }
 
-    /// The output showing a window, if its desktop is shown.
+    /// The output showing a window: the one showing its desktop, or, for
+    /// a pinned window, the one hosting it.
     pub fn output_showing(&self, window: WindowId) -> Option<&Output> {
         let desktop = self.desktop_of(window)?;
+        if self.pinned.contains(&window) {
+            return self.host_of(desktop);
+        }
         self.outputs.iter().find(|o| o.shown == desktop)
+    }
+
+    pub fn is_pinned(&self, window: WindowId) -> bool {
+        self.pinned.contains(&window)
+    }
+
+    /// Pins a window on every desktop of its output, or unpins it.
+    pub fn set_pinned(&mut self, window: WindowId, pinned: bool) -> Result<(), ModelError> {
+        if !self.windows.contains_key(&window) {
+            return Err(ModelError::UnknownWindow);
+        }
+        if pinned {
+            self.pinned.insert(window);
+        } else {
+            self.pinned.remove(&window);
+        }
+        self.refocus();
+        Ok(())
     }
 
     pub fn is_visible(&self, window: WindowId) -> bool {
@@ -164,18 +188,29 @@ impl Model {
         self.minimized.contains(&window)
     }
 
-    /// Windows shown on an output, bottom to top; minimized ones are not.
+    /// Windows shown on an output, bottom to top: its shown desktop's, then
+    /// those pinned on its other desktops; minimized ones are not.
     pub fn visible_windows(&self, output: &OutputName) -> Vec<WindowId> {
-        self.output(output)
-            .and_then(|o| self.desktops.get(&o.shown))
-            .map(|d| {
-                d.windows
-                    .iter()
-                    .copied()
-                    .filter(|w| !self.minimized.contains(w))
-                    .collect()
-            })
-            .unwrap_or_default()
+        let Some(out) = self.output(output) else {
+            return Vec::new();
+        };
+        let shown = self
+            .desktops
+            .get(&out.shown)
+            .map(|d| d.windows.clone())
+            .unwrap_or_default();
+        let pinned = out
+            .desktops
+            .iter()
+            .filter(|d| **d != out.shown)
+            .filter_map(|d| self.desktops.get(d))
+            .flat_map(|d| d.windows.iter().copied())
+            .filter(|w| self.pinned.contains(w));
+        shown
+            .into_iter()
+            .chain(pinned)
+            .filter(|w| !self.minimized.contains(w))
+            .collect()
     }
 
     /// Hides a window on its desktop; focus moves on. [`Model::focus`]
@@ -401,6 +436,7 @@ impl Model {
             .ok_or(ModelError::UnknownWindow)?;
         self.returning.remove(&window);
         self.minimized.remove(&window);
+        self.pinned.remove(&window);
         if let Some(d) = self.desktops.get_mut(&desktop) {
             d.windows.retain(|w| *w != window);
         }
@@ -856,6 +892,20 @@ mod tests {
 
         assert_eq!(model.visible_windows(&laptop()), [a, b]);
         assert_eq!(model.focused(), Some(b));
+        Ok(())
+    }
+
+    #[test]
+    fn a_pinned_window_stays_when_its_output_switches() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let music = model.open_window(&external())?;
+        model.set_pinned(music, true)?;
+
+        model.show_nth(&external(), 2)?;
+
+        assert_eq!(model.visible_windows(&external()), [music]);
+        assert!(model.is_visible(music));
+        assert_eq!(model.visible_windows(&laptop()), []);
         Ok(())
     }
 

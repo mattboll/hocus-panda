@@ -1,0 +1,38 @@
+description = "Super+wheel down over a window lowers its opacity, remembered for that app"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+scroll = 15
+
+[[step]]
+scroll = 15
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_window = { app_id = "doc", opacity = 0.9 }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "super-wheel-opacity.png" }
+
+[[step]]
+close = "doc"
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+expect_window = { app_id = "doc", opacity = 0.9 }

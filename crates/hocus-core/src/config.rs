@@ -16,6 +16,75 @@ pub struct Config {
     pub decorations: Decorations,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
+    /// Window rules, in file order: later rules override earlier ones.
+    pub rules: Vec<Rule>,
+}
+
+/// Where and how windows matching `app_id` and `title` (globs with `*` and
+/// `?`) open.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Rule {
+    pub app_id: Option<String>,
+    pub title: Option<String>,
+    pub output: Option<String>,
+    /// From 1.
+    pub desktop: Option<u32>,
+    /// Width and height, logical pixels.
+    pub size: Option<[i32; 2]>,
+    pub maximized: Option<bool>,
+    /// 0.1 to 1.
+    pub opacity: Option<f64>,
+    /// Shown on every desktop of its output.
+    pub pinned: Option<bool>,
+    /// Above the other windows.
+    pub on_top: Option<bool>,
+}
+
+impl Rule {
+    pub fn matches(&self, app_id: &str, title: &str) -> bool {
+        self.app_id.as_deref().is_none_or(|p| glob(p, app_id))
+            && self.title.as_deref().is_none_or(|p| glob(p, title))
+    }
+
+    /// `self` with what `later` sets over it.
+    fn merged(self, later: &Rule) -> Rule {
+        Rule {
+            app_id: self.app_id,
+            title: self.title,
+            output: later.output.clone().or(self.output),
+            desktop: later.desktop.or(self.desktop),
+            size: later.size.or(self.size),
+            maximized: later.maximized.or(self.maximized),
+            opacity: later.opacity.or(self.opacity),
+            pinned: later.pinned.or(self.pinned),
+            on_top: later.on_top.or(self.on_top),
+        }
+    }
+}
+
+/// `*` any run of characters, `?` one character; case-sensitive.
+pub fn glob(pattern: &str, text: &str) -> bool {
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star, mut mark) = (None, 0);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ti;
+            pi += 1;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            mark += 1;
+            ti = mark;
+        } else {
+            return false;
+        }
+    }
+    p[pi..].iter().all(|c| *c == '*')
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -141,11 +210,32 @@ impl Config {
             let r = self.decorations.radius.to_string();
             return out_of_range("decorations.radius", r, "0 to 32");
         }
+        for (i, rule) in self.rules.iter().enumerate() {
+            if let Some(o) = rule.opacity
+                && !(0.1..=1.0).contains(&o)
+            {
+                return out_of_range(&format!("rules[{i}].opacity"), o.to_string(), "0.1 to 1");
+            }
+            if let Some(d) = rule.desktop
+                && !(1..=8).contains(&d)
+            {
+                return out_of_range(&format!("rules[{i}].desktop"), d.to_string(), "1 to 8");
+            }
+        }
         if self.accent().is_none() {
             let a = format!("{:?}", self.decorations.accent);
             return out_of_range("decorations.accent", a, "a colour like \"#7bc47f\"");
         }
         Ok(())
+    }
+
+    /// What the rules say about a window, every matching rule merged in
+    /// file order.
+    pub fn rule_for(&self, app_id: &str, title: &str) -> Rule {
+        self.rules
+            .iter()
+            .filter(|r| r.matches(app_id, title))
+            .fold(Rule::default(), Rule::merged)
     }
 
     /// The shortcuts in effect: the defaults with the file's over them.
@@ -226,6 +316,29 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(error, "line 2: windows.gaps.outer = 100: expected 0 to 64");
         assert!(Config::parse("[decorations]\naccent = \"green\"\n").is_err());
+    }
+
+    #[test]
+    fn globs_match_like_shell_patterns() {
+        assert!(glob("org.mozilla.*", "org.mozilla.firefox"));
+        assert!(glob("*chat*", "my-chat-app"));
+        assert!(glob("fo?t", "foot"));
+        assert!(!glob("foot", "footclient"));
+        assert!(glob("*", ""));
+    }
+
+    #[test]
+    fn later_rules_override_earlier_ones() -> Result<(), ConfigError> {
+        let config = Config::parse(
+            "[[rules]]\napp_id = \"chat*\"\noutput = \"laptop\"\ndesktop = 1\n\n\
+             [[rules]]\napp_id = \"chat-work\"\ndesktop = 2\npinned = true\n",
+        )?;
+        let rule = config.rule_for("chat-work", "");
+        assert_eq!(rule.output.as_deref(), Some("laptop"));
+        assert_eq!(rule.desktop, Some(2));
+        assert_eq!(rule.pinned, Some(true));
+        assert_eq!(config.rule_for("editor", ""), Rule::default());
+        Ok(())
     }
 
     #[test]

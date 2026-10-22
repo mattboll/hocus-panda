@@ -68,6 +68,8 @@ pub enum Step {
     /// Presses a button and holds it (for drags).
     Press(ButtonName),
     Release(ButtonName),
+    /// Scrolls the wheel, in logical pixels: 15 per notch, down positive.
+    Scroll(f64),
     /// Holds a key down, by name or evdev code (for Alt+drag).
     KeyDown(String),
     KeyUp(String),
@@ -212,8 +214,10 @@ pub struct ExpectWindow {
     pub focused: Option<bool>,
     /// Whether its desktop is shown and it is not minimized.
     pub visible: Option<bool>,
-    /// `normal`, `maximized`, `fullscreen` or `minimized`.
+    /// `normal`, `maximized`, `fullscreen`, `minimized` or `snapped`.
     pub state: Option<WindowState>,
+    pub opacity: Option<f64>,
+    pub pinned: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -248,6 +252,7 @@ impl fmt::Display for Step {
             Self::PointerMove([x, y]) => write!(f, "pointer_move {x},{y}"),
             Self::Click(button) => write!(f, "click {button:?}"),
             Self::Press(button) => write!(f, "press {button:?}"),
+            Self::Scroll(dy) => write!(f, "scroll {dy}"),
             Self::Release(button) => write!(f, "release {button:?}"),
             Self::KeyDown(key) => write!(f, "key_down {key}"),
             Self::KeyUp(key) => write!(f, "key_up {key}"),
@@ -383,6 +388,10 @@ impl Run<'_> {
                     button: button.api(),
                     pressed: matches!(step, Step::Press(_)),
                 })?;
+                Ok(())
+            }
+            Step::Scroll(dy) => {
+                self.request(Request::PointerScroll { dy: *dy })?;
                 Ok(())
             }
             Step::KeyDown(key) | Step::KeyUp(key) => {
@@ -606,6 +615,8 @@ impl Run<'_> {
     }
 
     fn open(&mut self, open: &OpenWindow) -> anyhow::Result<()> {
+        // A closed client may come back under the same app id.
+        self.clients.retain(|c| !c.is_finished());
         anyhow::ensure!(
             self.clients.iter().all(|c| c.spec.app_id != open.app_id),
             "app id {} is already open",
@@ -687,6 +698,19 @@ impl Run<'_> {
                 "visible: expected {visible}, got {}",
                 window.visible
             ));
+        }
+        if let Some(opacity) = expected.opacity
+            && (window.opacity - opacity).abs() > 0.001
+        {
+            wrong.push(format!(
+                "opacity: expected {opacity}, got {}",
+                window.opacity
+            ));
+        }
+        if let Some(pinned) = expected.pinned
+            && window.pinned != pinned
+        {
+            wrong.push(format!("pinned: expected {pinned}, got {}", window.pinned));
         }
         if let Some(state) = expected.state
             && window.state != state

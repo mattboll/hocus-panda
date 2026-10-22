@@ -31,6 +31,10 @@ pub struct Managed {
     /// Its ext-foreign-toplevel-list handle.
     pub foreign: ForeignToplevelHandle,
     pub mode: WindowMode,
+    /// 0.1 to 1.
+    pub opacity: f32,
+    /// Stacked above the other windows.
+    pub on_top: bool,
 }
 
 /// The model's id of a window, kept in its user data.
@@ -189,6 +193,18 @@ impl State {
     /// Starts managing a window that has its size: on the shown desktop of
     /// `output`, centred, focused.
     pub fn manage(&mut self, window: Window, output: &Output, serial: Serial) {
+        let (title, app_id) = title_and_app_id(&window);
+        let rule = self.config.rule_for(
+            app_id.as_deref().unwrap_or(""),
+            title.as_deref().unwrap_or(""),
+        );
+        // A rule's output, when it is plugged.
+        let output = rule
+            .output
+            .as_deref()
+            .and_then(|name| self.find_output(name))
+            .unwrap_or_else(|| output.clone());
+        let output = &output;
         let name = OutputName(output.name());
         let id = match self.model.open_window(&name) {
             Ok(id) => id,
@@ -200,11 +216,36 @@ impl State {
         window
             .user_data()
             .insert_if_missing_threadsafe(|| ModelId(id));
-        let location = self.place(output, window.geometry().size);
-        let (title, app_id) = title_and_app_id(&window);
-        let foreign = self
-            .foreign_toplevels
-            .new_toplevel::<State>(title.unwrap_or_default(), app_id.unwrap_or_default());
+        if let Some(n) = rule.desktop
+            && let Some(desktop) = self
+                .model
+                .output(&name)
+                .and_then(|o| o.desktops.get(n as usize - 1).copied())
+            && let Err(err) = self.model.send_to_desktop(id, desktop)
+        {
+            tracing::warn!(%err, "a rule's desktop");
+        }
+        if rule.pinned == Some(true) {
+            let _ = self.model.set_pinned(id, true);
+        }
+        let size = rule
+            .size
+            .map(|[w, h]| Size::from((w, h)))
+            .unwrap_or(window.geometry().size);
+        let location = self.place(output, size);
+        let opacity = rule
+            .opacity
+            .map(|o| o as f32)
+            .or_else(|| {
+                app_id
+                    .as_ref()
+                    .and_then(|a| self.app_opacity.get(a).copied())
+            })
+            .unwrap_or(1.0);
+        let foreign = self.foreign_toplevels.new_toplevel::<State>(
+            title.clone().unwrap_or_default(),
+            app_id.clone().unwrap_or_default(),
+        );
         self.windows.insert(
             id,
             Managed {
@@ -212,13 +253,21 @@ impl State {
                 location,
                 foreign,
                 mode: WindowMode::Normal,
+                opacity,
+                on_top: rule.on_top == Some(true),
             },
         );
+        if rule.size.is_some() {
+            self.resize_to(id, Rectangle::new(location, size), false);
+        }
         self.sync_desktops();
         self.emit(|s| Event::WindowOpened {
             window: s.window_info(&window),
         });
         self.apply_focus(serial);
+        if rule.maximized == Some(true) {
+            self.set_maximized(id, true, serial);
+        }
         // Asked before its first buffer.
         if let Some(toplevel) = window.toplevel() {
             let wanted = toplevel.with_pending_state(|p| p.states.clone());
@@ -383,6 +432,9 @@ impl State {
                 self.space.unmap_elem(&managed.window);
             }
         }
+        // Always on top last, so above the others.
+        let mut shown = shown;
+        shown.sort_by_key(|id| self.windows.get(id).is_some_and(|m| m.on_top));
         for id in &shown {
             // A window never shows off its output: one that would is brought
             // inside it.

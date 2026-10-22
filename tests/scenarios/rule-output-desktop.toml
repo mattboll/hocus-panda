@@ -1,0 +1,28 @@
+description = "A rule opens a window on the laptop's desktop 1, wherever the pointer is"
+outputs = ["1280x800", "1920x1080"]
+
+[[step]]
+config = """
+[[rules]]
+app_id = "chat"
+output = "HEADLESS-1"
+desktop = 1
+"""
+
+[[step]]
+pointer_move = [1800, 500]
+
+[[step]]
+open = { app_id = "chat", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+expect_window = { app_id = "chat", output = "HEADLESS-1", visible = true }
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+open = { app_id = "other", size = [300, 200], color = "#f2a65a" }
+
+[[step]]
+expect_window = { app_id = "other", output = "HEADLESS-2" }

@@ -1,0 +1,35 @@
+description = "A pinned window stays visible when its output switches desktop"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[[rules]]
+app_id = "music"
+pinned = true
+on_top = true
+"""
+
+[[step]]
+open = { app_id = "music", size = [300, 120], color = "#f28db2" }
+
+[[step]]
+open = { app_id = "doc", size = [500, 400], color = "#33cc66" }
+
+[[step]]
+expect_window = { app_id = "music", pinned = true }
+
+# Always on top: above the window opened after it.
+[[step]]
+expect_stack = ["doc", "music"]
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+expect_window = { app_id = "music", visible = true }
+
+[[step]]
+expect_window = { app_id = "doc", visible = false }

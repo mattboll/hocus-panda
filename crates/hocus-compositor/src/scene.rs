@@ -125,8 +125,11 @@ impl State {
             let clip = rect.to_f64().to_physical_precise_round(scale);
             let origin: Point<i32, _> =
                 (location - geometry.loc - area.loc).to_physical_precise_round(scale);
+            let opacity = model_id(window)
+                .and_then(|id| self.windows.get(&id))
+                .map_or(1.0, |m| m.opacity);
             let content: Vec<WaylandSurfaceRenderElement<R>> =
-                window.render_elements(renderer, origin, Scale::from(scale), 1.0);
+                window.render_elements(renderer, origin, Scale::from(scale), opacity);
             elements.extend(
                 content
                     .into_iter()
