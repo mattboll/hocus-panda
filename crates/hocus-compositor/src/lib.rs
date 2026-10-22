@@ -68,6 +68,7 @@ mod wallpaper;
 mod watchdog;
 mod window_mode;
 mod winit;
+mod wobble;
 mod xwayland;
 
 use std::{

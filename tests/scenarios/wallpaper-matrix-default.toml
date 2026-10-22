@@ -20,6 +20,10 @@ config = """
 theme = "dark"
 """
 
+# The dark wallpaper made and drawn: what follows is at rest.
+[[step]]
+wait_wallpapers = true
+
 [[step]]
 frames = 2
 

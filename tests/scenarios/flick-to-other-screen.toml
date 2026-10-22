@@ -1,0 +1,73 @@
+# Flicks (#35): let go with speed, a window glides and lands; aimed at the
+# laptop's screen, it lands there, on the desktop that screen shows.
+description = "A window flicked towards the laptop lands on the laptop's shown desktop"
+outputs = ["1280x800", "1920x1080+1280+0"]
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+pointer_move = [2200, 500]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-2" }
+
+[[step]]
+pointer_move = [2240, 540]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [2180, 540]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [2120, 540]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [2060, 540]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [2000, 540]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [1940, 540]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [1880, 540]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-1", visible = true }
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }

@@ -424,6 +424,14 @@ impl State {
             if id.is_some_and(|id| self.genie_hides(id)) {
                 continue;
             }
+            // Dragged or just let go: it bends like jelly (#35).
+            if let Some(id) = id.filter(|id| self.wobbles(*id)) {
+                let global = Rectangle::new(location, geometry.size).to_f64();
+                let opacity = self.windows.get(&id).map_or(1.0, |m| m.opacity);
+                elements
+                    .extend(self.wobbly_elements(renderer, id, window, global, output, opacity));
+                continue;
+            }
             let bar = id.map_or(0, |id| self.bar_height(id));
             // The frame: the bar above the client.
             let frame = Rectangle::<i32, Logical>::new(

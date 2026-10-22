@@ -358,6 +358,7 @@ impl State {
         self.refresh_dock();
         self.refresh_corners();
         self.refresh_ink();
+        self.refresh_wobbles();
         self.refresh_pandas();
         self.refresh_agents();
         self.refresh_clipboard();

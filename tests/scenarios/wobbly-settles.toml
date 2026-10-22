@@ -1,0 +1,78 @@
+# Wobbly windows (#35): dragged, a window bends like jelly, its far side
+# lagging; let go, it settles with a small bounce within 600 ms.
+description = "A dragged window bends like jelly and settles within 600 ms once let go"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+pointer_move = [460, 270]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [470, 270]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [480, 272]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [490, 274]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [500, 276]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [510, 278]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [520, 280]
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "wobbly-drag.png" }
+
+# Held still a moment: not thrown.
+[[step]]
+advance_ms = 120
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_idle = { for_ms = 500 }
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [500, 260, 400, 300] }
