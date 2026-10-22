@@ -85,7 +85,7 @@ opacity = 0.95             # 0.1 to 1
 pinned = true              # on every desktop of its output
 on_top = false             # above the other windows
 
-[[outputs]]                # a screen, by name (`hocus msg outputs`)
+[[outputs]]                # a screen, by name (`hocus msg screens`)
 name = "eDP-1"
 enabled = true             # false: off; its desktops and windows wait for it
 mode = "2560x1600@60"      # WIDTHxHEIGHT[@HZ]; the screen's preferred one otherwise
@@ -93,6 +93,13 @@ scale = 1.5                # 0.5 to 4, rounded to 1/120
 transform = "normal"       # 90, 180, 270, flipped, flipped-90, flipped-180, flipped-270
 position = [0, 0]          # logical, top-left corner
 vrr = false                # adaptive sync, where the screen and GPU can
+primary = true             # where unplugged screens' desktops and windows go
+desktops = 1               # its own desktops, 1 to 8 (desktops.per_output otherwise)
+
+[[layouts]]                # how a set of screens is placed (the Screens page writes them)
+name = "Home"
+outputs = ["eDP-1", "DP-1"]           # in effect when exactly these are connected
+positions = { DP-1 = [0, 0], eDP-1 = [320, 1440] }
 
 [shortcuts]
 "Super+Return" = "spawn foot"
@@ -118,6 +125,13 @@ layout seen before puts every window back where it was. Screen tools
 through wlr-output-management; the file wins again once it changes. Turning
 a screen's light off and on (output-power, as swayidle does) keeps it in the
 layout.
+
+Where screens are depends on which are connected: each `[[layouts]]` places
+one set of screens, and wins over the `position` of `[[outputs]]` while
+exactly those screens are connected. The settings' Screens page writes one
+when a screen is dragged into place, named after its screens until renamed.
+Within a session, the windows' places are kept per layout too: plugging a
+set of screens again puts its windows back.
 
 ## Shortcuts
 

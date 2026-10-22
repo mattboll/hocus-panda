@@ -3,6 +3,7 @@
 //! effect through the control API and changes the configuration file,
 //! which the compositor applies live.
 
+pub mod arrange;
 pub mod catalogue;
 pub mod client;
 pub mod edit;

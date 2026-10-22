@@ -315,6 +315,75 @@ impl Model {
         Ok(())
     }
 
+    /// Gives a plugged output `n` desktops of its own (1 to 8). New ones
+    /// come after the others; when there are fewer, the windows of those
+    /// that go move to the last one kept, which is shown if a gone one was.
+    pub fn set_desktop_count(&mut self, name: &OutputName, n: usize) -> Result<(), ModelError> {
+        let n = n.clamp(1, 8);
+        self.output(name).ok_or(ModelError::UnknownOutput)?;
+        let own = self
+            .homes
+            .get(name)
+            .map(|h| h.desktops.clone())
+            .ok_or(ModelError::UnknownOutput)?;
+        if own.len() < n {
+            let added: Vec<DesktopId> = (own.len() + 1..=n)
+                .map(|i| self.new_desktop(i.to_string(), name))
+                .collect();
+            if let Some(home) = self.homes.get_mut(name) {
+                home.desktops.extend(&added);
+            }
+            if let Some(output) = self.outputs.iter_mut().find(|o| &o.name == name) {
+                // Its own desktops first, guests after.
+                let at = output
+                    .desktops
+                    .iter()
+                    .position(|d| !own.contains(d))
+                    .unwrap_or(output.desktops.len());
+                output.desktops.splice(at..at, added);
+            }
+        } else if own.len() > n {
+            let keep = own[n - 1];
+            let gone = &own[n..];
+            for desktop in gone {
+                let windows = self
+                    .desktops
+                    .get(desktop)
+                    .map(|d| d.windows.clone())
+                    .unwrap_or_default();
+                for window in windows {
+                    self.move_window(window, keep);
+                }
+                for origin in self.returning.values_mut() {
+                    if origin == desktop {
+                        *origin = keep;
+                    }
+                }
+                self.desktops.remove(desktop);
+                self.tiling.remove(desktop);
+            }
+            if let Some(home) = self.homes.get_mut(name) {
+                home.desktops.truncate(n);
+                if gone.contains(&home.shown) {
+                    home.shown = keep;
+                }
+            }
+            if let Some(output) = self.outputs.iter_mut().find(|o| &o.name == name) {
+                output.desktops.retain(|d| !gone.contains(d));
+                if gone.contains(&output.shown) {
+                    output.shown = keep;
+                }
+            }
+        }
+        self.refocus();
+        Ok(())
+    }
+
+    /// How many desktops of its own an output has, plugged or not.
+    pub fn desktop_count(&self, name: &OutputName) -> Option<usize> {
+        self.homes.get(name).map(|h| h.desktops.len())
+    }
+
     /// Windows that left an unplugged output and wait to go back to it.
     pub fn is_returning(&self, window: WindowId) -> bool {
         self.returning.contains_key(&window)
@@ -793,6 +862,36 @@ mod tests {
         assert_eq!(desktops(&model, &laptop()).len(), 1);
         assert_eq!(shown(&model, &external()), external_desktops[2]);
         assert_eq!(model.visible_windows(&external()), [window]);
+        Ok(())
+    }
+
+    #[test]
+    fn desktops_come_and_go_and_their_windows_stay() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let before = desktops(&model, &external());
+        model.show_nth(&external(), 3)?;
+        let window = model.open_window(&external())?;
+
+        model.set_desktop_count(&external(), 2)?;
+        let kept = desktops(&model, &external());
+        assert_eq!(kept, before[..2]);
+        // The window of a desktop gone is on the last one kept, in sight.
+        assert_eq!(model.desktop_of(window), Some(before[1]));
+        assert_eq!(shown(&model, &external()), before[1]);
+        assert_eq!(model.visible_windows(&external()), [window]);
+
+        model.set_desktop_count(&external(), 3)?;
+        let grown = desktops(&model, &external());
+        assert_eq!(grown.len(), 3);
+        assert_eq!(grown[..2], before[..2]);
+        assert_eq!(
+            model.desktop(grown[2]).map(|d| d.home.clone()),
+            Some(external())
+        );
+        assert_eq!(
+            model.set_desktop_count(&"nowhere".into(), 2),
+            Err(ModelError::UnknownOutput)
+        );
         Ok(())
     }
 

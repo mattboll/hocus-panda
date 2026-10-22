@@ -3,7 +3,7 @@
 //! the user chose; third-party tools (wlr-randr, kanshi) change the same for
 //! the running session through wlr-output-management.
 
-use std::{fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,45 @@ pub struct OutputConfig {
     pub position: Option<[i32; 2]>,
     /// Adaptive sync, where the screen and the GPU support it.
     pub vrr: Option<bool>,
+    /// Where unplugged screens' desktops and windows go.
+    pub primary: Option<bool>,
+    /// Desktops of its own, 1 to 8; `desktops.per_output` otherwise.
+    pub desktops: Option<u32>,
+}
+
+/// A set of screens and how they are placed: in effect when exactly these
+/// screens are connected. The settings app writes one when screens are
+/// dragged into place, named after them until renamed.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Layout {
+    pub name: String,
+    pub outputs: Vec<String>,
+    /// Logical position of each screen's top-left corner.
+    pub positions: BTreeMap<String, [i32; 2]>,
+}
+
+impl Layout {
+    /// Whether these are exactly its screens, in any order.
+    pub fn is_for(&self, connected: &[&str]) -> bool {
+        let mut mine: Vec<&str> = self.outputs.iter().map(String::as_str).collect();
+        let mut theirs = connected.to_vec();
+        mine.sort_unstable();
+        mine.dedup();
+        theirs.sort_unstable();
+        theirs.dedup();
+        mine == theirs
+    }
+
+    pub fn check(&self) -> Result<(), String> {
+        if self.outputs.is_empty() {
+            return Err("outputs: expected the names of its screens".into());
+        }
+        if let Some(stray) = self.positions.keys().find(|k| !self.outputs.contains(k)) {
+            return Err(format!("positions.{stray}: not one of its outputs"));
+        }
+        Ok(())
+    }
 }
 
 /// How a screen is turned, clockwise, and whether it is flipped.
@@ -155,6 +194,11 @@ impl OutputConfig {
         {
             return Err(format!("scale = {scale}: expected 0.5 to 4"));
         }
+        if let Some(n) = self.desktops
+            && !(1..=8).contains(&n)
+        {
+            return Err(format!("desktops = {n}: expected 1 to 8"));
+        }
         Ok(())
     }
 }
@@ -202,6 +246,24 @@ mod tests {
         assert_eq!(spec("2560x1440").pick(&modes), Some(1));
         assert_eq!(spec("1920x1080@75").pick(&modes), Some(2));
         assert_eq!(spec("1280x720").pick(&modes), None);
+    }
+
+    #[test]
+    fn a_layout_is_for_exactly_its_screens() {
+        let layout = Layout {
+            name: "Home".into(),
+            outputs: vec!["eDP-1".into(), "DP-1".into()],
+            positions: BTreeMap::from([("DP-1".into(), [0, 0]), ("eDP-1".into(), [0, 1440])]),
+        };
+        assert!(layout.is_for(&["DP-1", "eDP-1"]));
+        assert!(!layout.is_for(&["eDP-1"]));
+        assert!(!layout.is_for(&["eDP-1", "DP-1", "HDMI-A-1"]));
+        assert!(layout.check().is_ok());
+        let stray = Layout {
+            positions: BTreeMap::from([("HDMI-A-1".into(), [0, 0])]),
+            ..layout
+        };
+        assert!(stray.check().is_err_and(|e| e.contains("HDMI-A-1")));
     }
 
     #[test]

@@ -286,6 +286,8 @@ impl Page {
 pub struct Context {
     pub config: Config,
     pub outputs: Vec<OutputInfo>,
+    /// Every connected screen, on or off, for the Screens page.
+    pub screens: Vec<hocus_api::ScreenInfo>,
 }
 
 /// A setting a search can lead to.

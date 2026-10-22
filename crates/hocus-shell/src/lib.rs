@@ -9,6 +9,7 @@ pub mod column;
 pub mod fuzzy;
 pub mod i18n;
 pub mod icons;
+pub mod identify;
 pub mod launcher;
 pub mod lock;
 pub mod providers;

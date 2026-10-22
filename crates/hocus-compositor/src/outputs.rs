@@ -140,8 +140,9 @@ impl State {
     }
 
     /// What `head` should be set to: a tool's setting, else the file over
-    /// how the screen was first lit.
-    pub fn wanted(&self, head: &Head) -> Setting {
+    /// how the screen was first lit; the place from the layout of the
+    /// screens `connected`, if the file has one.
+    pub fn wanted(&self, head: &Head, connected: &[&str]) -> Setting {
         if let Some(setting) = self.output_settings.overrides.get(&head.name) {
             return *setting;
         }
@@ -151,8 +152,15 @@ impl State {
             .get(&head.name)
             .copied()
             .unwrap_or(head.now);
+        let placed = self
+            .config
+            .layout_for(connected)
+            .and_then(|l| l.positions.get(&head.name).copied());
         let Some(file) = self.config.output(&head.name) else {
-            return base;
+            return Setting {
+                position: placed.map_or(base.position, |[x, y]| (x, y)),
+                ..base
+            };
         };
         let mode = file.mode.as_deref().and_then(|m| {
             let spec: ModeSpec = m.parse().ok()?;
@@ -171,7 +179,9 @@ impl State {
             mode: mode.unwrap_or(base.mode),
             scale: file.scale.map_or(base.scale, round_scale),
             transform: file.transform.unwrap_or(base.transform),
-            position: file.position.map_or(base.position, |[x, y]| (x, y)),
+            position: placed
+                .or(file.position)
+                .map_or(base.position, |[x, y]| (x, y)),
             vrr: file.vrr.unwrap_or(false) && head.vrr_capable,
         }
     }
@@ -335,9 +345,11 @@ impl App {
         }
         self.state.output_settings.changed = false;
         let heads = self.heads();
+        let names: Vec<String> = heads.iter().map(|h| h.name.clone()).collect();
+        let connected: Vec<&str> = names.iter().map(String::as_str).collect();
         let mut lit = heads.iter().filter(|h| h.now.enabled).count();
         for head in heads {
-            let wanted = self.state.wanted(&head);
+            let wanted = self.state.wanted(&head, &connected);
             if wanted == head.now {
                 continue;
             }
@@ -358,6 +370,7 @@ impl App {
                 self.state.output_management.failed = true;
             }
         }
+        self.state.settle_desktops_and_primary();
         // Screens turned off or on through output-power.
         for (name, on) in std::mem::take(&mut self.state.output_management.power_wanted) {
             let App { state, backend } = self;
@@ -385,5 +398,184 @@ impl App {
         let heads = self.heads();
         self.state.refresh_output_management(&heads);
         self.state.answer_output_configurations();
+    }
+}
+
+impl State {
+    /// Each lit screen's own desktops and the primary one, as the file says.
+    fn settle_desktops_and_primary(&mut self) {
+        let lit: Vec<String> = self.space.outputs().map(Output::name).collect();
+        let mut changed = false;
+        for name in &lit {
+            let Some(file) = self.config.output(name) else {
+                continue;
+            };
+            let key = hocus_core::OutputName(name.clone());
+            if file.primary == Some(true)
+                && self.model.primary().map(|o| &o.name) != Some(&key)
+                && self.model.set_primary(&key).is_ok()
+            {
+                changed = true;
+            }
+            if let Some(n) = file.desktops {
+                let n = n as usize;
+                if self.model.desktop_count(&key) != Some(n) {
+                    if let Err(err) = self.model.set_desktop_count(&key, n) {
+                        tracing::warn!(output = name, %err, "could not change its desktops");
+                    }
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.sync_desktops();
+            self.apply_focus(smithay::utils::SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    /// Shows each lit screen's name on it for three seconds.
+    pub fn identify_outputs(&mut self) {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        let theme = self.theme();
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        self.identifying = outputs
+            .iter()
+            .map(|o| {
+                let props = o.physical_properties();
+                let mode = o.current_mode().map(|m| m.size).unwrap_or_default();
+                let detail = format!("{} {} · {} × {}", props.make, props.model, mode.w, mode.h);
+                let mut card = hocus_shell::identify::Identify::new(
+                    theme.clone(),
+                    o.current_scale().fractional_scale() as f32,
+                    &o.name(),
+                    &detail,
+                );
+                card.draw(self.clock.now());
+                let mut panel = crate::shell::Panel::new(card);
+                panel.upload(&[]);
+                (o.name(), panel)
+            })
+            .collect();
+        self.needs_redraw = true;
+        if let Some(handle) = &self.loop_handle {
+            let cleared = handle.insert_source(
+                Timer::from_duration(std::time::Duration::from_secs(3)),
+                |_, _, app| {
+                    app.state.identifying.clear();
+                    app.state.needs_redraw = true;
+                    TimeoutAction::Drop
+                },
+            );
+            if let Err(err) = cleared {
+                tracing::warn!(%err.error, "could not time the screens' names");
+            }
+        }
+    }
+
+    /// Where a screen's name card goes: its middle.
+    fn identify_at(&self, output: &Output) -> Option<Point<i32, Logical>> {
+        let g = self.space.output_geometry(output)?;
+        let size = hocus_shell::identify::SIZE;
+        Some(Point::from((
+            ((g.size.w as f32 - size.w) / 2.0) as i32,
+            ((g.size.h as f32 - size.h) / 2.0) as i32,
+        )))
+    }
+
+    pub fn identify_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Option<smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement<R>>
+    where
+        R: smithay::backend::renderer::Renderer + smithay::backend::renderer::ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let (_, panel) = self.identifying.iter().find(|(n, _)| *n == output.name())?;
+        panel.element(renderer, output, self.identify_at(output)?)
+    }
+
+    pub fn identify_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
+        for (name, panel) in &self.identifying {
+            let Some(output) = self.find_output(name) else {
+                continue;
+            };
+            let (Some(g), Some(at)) = (
+                self.space.output_geometry(&output),
+                self.identify_at(&output),
+            ) else {
+                continue;
+            };
+            crate::shell::flatten(&panel.view.access(), g.loc + at, 0, out);
+        }
+    }
+}
+
+impl App {
+    /// Every connected screen, for the settings' Screens page.
+    pub fn screens(&self) -> Vec<hocus_api::ScreenInfo> {
+        let heads = self.heads();
+        let names: Vec<&str> = heads.iter().map(|h| h.name.as_str()).collect();
+        let layout = self.state.config.layout_for(&names).map(|l| l.name.clone());
+        let state = &self.state;
+        heads
+            .iter()
+            .map(|head| {
+                let key = hocus_core::OutputName(head.name.clone());
+                let geometry = state
+                    .find_output(&head.name)
+                    .and_then(|o| state.space.output_geometry(&o))
+                    .map(crate::desktops::rect)
+                    .unwrap_or(hocus_core::Rect {
+                        x: head.now.position.0,
+                        y: head.now.position.1,
+                        width: head.now.mode.width,
+                        height: head.now.mode.height,
+                    });
+                hocus_api::ScreenInfo {
+                    name: head.name.clone(),
+                    make: head.make.clone(),
+                    model: head.model.clone(),
+                    enabled: head.now.enabled,
+                    modes: head
+                        .modes
+                        .iter()
+                        .map(|m| hocus_api::ModeInfo {
+                            width: m.width,
+                            height: m.height,
+                            refresh: m.refresh,
+                        })
+                        .collect(),
+                    current_mode: head.modes.iter().position(|m| *m == head.now.mode),
+                    preferred_mode: head.preferred,
+                    scale: head.now.scale,
+                    transform: transform_name(head.now.transform).into(),
+                    geometry: hocus_api::Rect {
+                        x: geometry.x,
+                        y: geometry.y,
+                        width: geometry.width,
+                        height: geometry.height,
+                    },
+                    vrr: head.now.vrr,
+                    vrr_capable: head.vrr_capable,
+                    primary: state.model.primary().is_some_and(|o| o.name == key),
+                    desktops: state.model.desktop_count(&key).unwrap_or(0) as u32,
+                    layout: layout.clone(),
+                }
+            })
+            .collect()
+    }
+}
+
+fn transform_name(t: Transform) -> &'static str {
+    match t {
+        Transform::Normal => "normal",
+        Transform::Rotate90 => "90",
+        Transform::Rotate180 => "180",
+        Transform::Rotate270 => "270",
+        Transform::Flipped => "flipped",
+        Transform::Flipped90 => "flipped-90",
+        Transform::Flipped180 => "flipped-180",
+        Transform::Flipped270 => "flipped-270",
     }
 }

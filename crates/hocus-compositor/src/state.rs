@@ -108,6 +108,8 @@ pub struct State {
     pub is_session: bool,
     /// Switches virtual terminals, on a TTY.
     pub vt_switch: Option<smithay::backend::session::libseat::LibSeatSession>,
+    /// Each screen's name card while "identify" shows them.
+    pub identifying: Vec<(String, crate::shell::Panel<hocus_shell::identify::Identify>)>,
     /// What screens are set to, and what was asked (#28).
     pub output_settings: crate::outputs::Settings,
     /// wlr-output-management and output-power, for third-party tools.
@@ -219,6 +221,7 @@ impl State {
             is_session: false,
             vt_switch: None,
             output_settings: Default::default(),
+            identifying: Vec::new(),
             output_management: crate::handlers::output_management::OutputManagement::new(dh),
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
             settings_started: None,

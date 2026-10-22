@@ -27,6 +27,8 @@ pub struct Config {
     pub rules: Vec<Rule>,
     /// Each screen's mode, scale, rotation, place: `[[outputs]]`.
     pub outputs: Vec<crate::outputs::OutputConfig>,
+    /// How each set of screens is placed: `[[layouts]]`.
+    pub layouts: Vec<crate::outputs::Layout>,
 }
 
 /// Where and how windows matching `app_id` and `title` (globs with `*` and
@@ -423,6 +425,11 @@ impl Config {
         self.outputs.iter().find(|o| o.name == name)
     }
 
+    /// The layout for exactly these connected screens; the first wins.
+    pub fn layout_for(&self, connected: &[&str]) -> Option<&crate::outputs::Layout> {
+        self.layouts.iter().find(|l| l.is_for(connected))
+    }
+
     /// Reads a configuration file's text: what it holds over the defaults.
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let config: Self = toml::from_str(text).map_err(|err| ConfigError(err.to_string()))?;
@@ -480,6 +487,11 @@ impl Config {
                     .map(|(at, _)| format!("line {}: ", text[..at].lines().count() + 1))
                     .unwrap_or_default();
                 return Err(ConfigError(format!("{line}outputs[{i}].{err}")));
+            }
+        }
+        for (i, layout) in self.layouts.iter().enumerate() {
+            if let Err(err) = layout.check() {
+                return Err(ConfigError(format!("layouts[{i}].{err}")));
             }
         }
         if !["right", "left"].contains(&self.decorations.buttons.as_str()) {

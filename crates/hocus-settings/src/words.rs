@@ -79,13 +79,57 @@ pub const ACTION: Words = Words::new("Action", "Action");
 pub const KEYS: Words = Words::new("Keys", "Touches");
 
 pub const SCREENS_NOTE: Words = Words::new(
-    "Arranging screens and changing their modes comes with #111.",
-    "Placer les écrans et changer leurs modes arrive avec #111.",
+    "Each set of screens keeps its own layout.",
+    "Chaque ensemble d’écrans garde sa disposition.",
 );
-pub const DESKTOPS_PER_SCREEN: Words =
-    Words::new("Desktops on a new screen", "Bureaux sur un nouvel écran");
 pub const PRIMARY: Words = Words::new("Primary", "Principal");
 pub const SCALE: Words = Words::new("Scale", "Échelle");
+pub const DRAG_HINT: Words = Words::new(
+    "Drag a screen to place it; they snap edge to edge.",
+    "Glisser un écran pour le placer ; ils s’aimantent bord à bord.",
+);
+pub const IDENTIFY: Words = Words::new("Identify", "Identifier");
+pub const MIRROR: Words = Words::new("Mirror the screens", "Dupliquer les écrans");
+pub const RESOLUTION: Words = Words::new("Resolution", "Définition");
+pub const REFRESH: Words = Words::new("Refresh rate", "Fréquence");
+pub const DESKTOPS: Words = Words::new("Desktops", "Bureaux");
+pub const FEWER_DESKTOPS: Words = Words::new("One desktop fewer", "Un bureau de moins");
+pub const MORE_DESKTOPS: Words = Words::new("One desktop more", "Un bureau de plus");
+pub const ONE_DESKTOP_NOTE: Words = Words::new(
+    "With one desktop, the screen never changes.",
+    "Avec un seul bureau, l’écran ne change jamais.",
+);
+pub const SCREEN_ON: Words = Words::new("On", "Allumé");
+pub const VRR: Words = Words::new("Variable refresh", "Fréquence variable");
+pub const LAYOUTS_KEPT: Words = Words::new("Remembered layouts", "Dispositions retenues");
+pub const LAYOUTS_NOTE: Words = Words::new(
+    "Each set of screens keeps its layout and the windows’ places; unplugging loses none.",
+    "Chaque ensemble d’écrans garde sa disposition et la place des fenêtres ; débrancher n’en perd aucune.",
+);
+pub const CURRENT: Words = Words::new("current", "en cours");
+pub const RENAME: Words = Words::new("Rename", "Renommer");
+pub const LAPTOP: Words = Words::new("Laptop", "Portable");
+pub const LAYOUT_NAME: Words = Words::new("Layout name", "Nom de la disposition");
+
+/// "Layout “Home” recognised: …" under the Screens page's title.
+pub fn layout_recognised(name: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Layout “{name}” recognised: the windows went back to their places."),
+        Lang::Fr => {
+            format!("Disposition « {name} » reconnue : les fenêtres ont repris leur place.")
+        }
+    }
+}
+
+/// "1 desktop", "4 desktops".
+pub fn desktops(n: u32, lang: Lang) -> String {
+    match (lang, n) {
+        (Lang::En, 1) => "1 desktop".into(),
+        (Lang::En, n) => format!("{n} desktops"),
+        (Lang::Fr, 1) => "1 bureau".into(),
+        (Lang::Fr, n) => format!("{n} bureaux"),
+    }
+}
 
 pub const THEMES: [(&str, Words, Words); 5] = [
     (

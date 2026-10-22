@@ -88,7 +88,8 @@ lists its screens, lit or off, with their modes, and carries a setting out
 on the hardware (a mode on the CRTC, adaptive sync, a buffer size headless);
 what follows on the desktop is common — the output's state, the model's
 geometry, windows kept in place, relayout, events. Wanted settings come from
-`[[outputs]]` or, for the session, from wlr-output-management; they are
+`[[outputs]]` and, for where screens are, the `[[layouts]]` entry for the set
+connected, or, for the session, from wlr-output-management; they are
 settled after the turn of the loop where something changed, and
 configurations are answered then. Output globals are retired in two steps
 (hidden, destroyed seconds later) so that a client binding one meanwhile is

@@ -64,6 +64,11 @@ enum Message {
     Version,
     /// Outputs with their logical geometry, pixel size and scale.
     Outputs,
+    /// Every connected screen, on or off: modes, scale, primary, desktops,
+    /// the layout in effect.
+    Screens,
+    /// Each screen shows its name on it for a few seconds.
+    Identify,
     /// Windows with their id, app id, output, geometry and focus.
     Windows,
     /// The whole scene (needs the test permission).
@@ -222,6 +227,11 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
     match message {
         Message::Version => print(client.request(Request::Version)?),
         Message::Outputs => print(client.request(Request::Outputs)?),
+        Message::Screens => print(client.request(Request::Screens)?),
+        Message::Identify => {
+            client.request(Request::IdentifyOutputs)?;
+            Ok(())
+        }
         Message::Windows => print(client.request(Request::Windows)?),
         Message::Scene => print(client.request(Request::Scene)?),
         Message::Stats => print(client.request(Request::Stats)?),
