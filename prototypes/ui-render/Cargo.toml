@@ -1,0 +1,23 @@
+# Throwaway prototypes for decision 0009 (rendering stack of hocus-ui): kept
+# out of the workspace so the product does not build or depend on them.
+[package]
+name = "ui-render-prototype"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dependencies]
+png = "0.18"
+tiny-skia = "0.12"
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+vello = "0.11"
+vello_cpu = "0.3"
+parley = { version = "0.12", default-features = false, features = ["std"] }
+pollster = "0.4"
+
+[profile.release]
+debug = false
+strip = true

@@ -14,3 +14,4 @@ by silently editing the old one.
 | [0006](0006-no-title-bars.md) | No title bars by default | Accepted |
 | [0007](0007-widget-column-right.md) | The widget panel is a column on the right | Accepted |
 | [0008](0008-ai-testable-by-design.md) | Every feature is testable by an AI, without a screen | Accepted |
+| [0009](0009-ui-rendering-stack.md) | hocus-ui draws on the CPU with vello_cpu and parley | Accepted |
