@@ -88,14 +88,15 @@ fn a_screenshot_beyond_tolerance_leaves_actual_expected_and_diff() -> anyhow::Re
         .map(|e| format!("{e:#}"))
         .unwrap_or_default();
 
-    // The window's 400 × 300, its rounded corners, ring and shadow.
+    // The window's 400 × 300, its rounded corners, ring and shadow (the
+    // afternoon's, 70 px wide and 36 px below).
     let differing: usize = error
         .split(" of 1024000 pixels differ")
         .next()
         .and_then(|head| head.rsplit(' ').next())
         .and_then(|n| n.parse().ok())
         .unwrap_or_default();
-    assert!((115_000..=140_000).contains(&differing), "{error}");
+    assert!((130_000..=160_000).contains(&differing), "{error}");
     for file in ["green.actual.png", "green.expected.png", "green.diff.png"] {
         let path = artifacts.join("colour").join(file);
         assert!(path.exists(), "{} is missing", path.display());

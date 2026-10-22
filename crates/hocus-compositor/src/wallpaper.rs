@@ -145,7 +145,9 @@ impl State {
         let look = output.and_then(|o| self.look_on(o));
         let name = look.and_then(|l| l.theme.as_deref()).unwrap_or(&a.theme);
         let accent = look.and_then(|l| l.accent.as_deref()).unwrap_or(&a.accent);
-        let mut theme = Theme::builtin(name.parse().unwrap_or(ThemeName::Dark));
+        let hour = self.wall_time().hour;
+        let mut theme = Theme::builtin(name.parse().unwrap_or(ThemeName::Dark))
+            .with_daylight(hocus_ui::Daylight::at(hour));
         if let Ok(accent) = accent.parse::<Accent>() {
             theme = theme.with_accent(accent);
         }
@@ -327,6 +329,31 @@ impl State {
     /// Gives every part of the shell the theme in effect, when it changed.
     fn apply_theme(&mut self) {
         let theme = self.theme();
+        // Windows cast the shadow of the hour, as panels do (#161).
+        let s = theme.shadow;
+        let alpha = if self.config.decorations.shadow {
+            f64::from(s.alpha)
+        } else {
+            0.0
+        };
+        let shape = (f64::from(s.dx), f64::from(s.dy), f64::from(s.blur), alpha);
+        let style = &mut self.style;
+        if (
+            style.shadow_dx,
+            style.shadow_dy,
+            style.shadow_blur,
+            style.shadow_alpha,
+        ) != shape
+        {
+            (
+                style.shadow_dx,
+                style.shadow_dy,
+                style.shadow_blur,
+                style.shadow_alpha,
+            ) = shape;
+            self.textures.clear();
+            self.needs_redraw = true;
+        }
         // The focus ring in the accent, unless it has a colour of its own.
         let a = theme.colors.accent;
         if self.config.decorations.accent == "theme" && self.style.accent != [a.r, a.g, a.b] {

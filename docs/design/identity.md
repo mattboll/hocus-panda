@@ -63,6 +63,21 @@ They **show the real state of the desktop**:
 Flat vector, drawn from shapes by the toolkit at any size. Artwork
 may get its own license (CC BY or CC0) next to the MIT code.
 
+## Light
+
+One light for windows and panels, turning with the day as the boards draw
+it (#161): shadows are black, as dark as the theme's `[effects]
+window_shadow`, offset and blurred by the hour.
+
+| Time | Offset x, y | Blur | |
+|---|---|---|---|
+| Morning, 6 to 12 | 26, 30 | 60 | the sun low on one side |
+| Afternoon, 12 to 18 | 0, 36 | 70 | high |
+| Evening, 18 to 22 | −32, 28 | 64 | low on the other side |
+| Night | 0, 22 | 60 | ×1.3 darker (at most 0.85) |
+
+Windows have 14 px corners.
+
 ## Colour
 
 The panda's black and white is the natural base of the dark and light themes,

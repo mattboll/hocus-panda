@@ -124,7 +124,8 @@ impl State {
         let d = &config.decorations;
         style.radius = d.radius;
         style.ring_width = d.ring_width;
-        // Windows' shadows as dark as the theme makes them.
+        // Windows' shadows follow the theme and the hour: given with the
+        // theme (`apply_theme`).
         let theme = hocus_ui::Theme::builtin(
             config
                 .appearance
@@ -132,11 +133,6 @@ impl State {
                 .parse()
                 .unwrap_or(hocus_ui::ThemeName::Dark),
         );
-        style.shadow_alpha = if d.shadow {
-            f64::from(theme.effects.window_shadow)
-        } else {
-            0.0
-        };
         let b = theme.colors.window_border;
         style.border = [b.r, b.g, b.b, b.a];
         // A ring that follows the theme takes its accent with the theme.

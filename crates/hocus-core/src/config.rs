@@ -321,7 +321,7 @@ pub struct Decorations {
 impl Default for Decorations {
     fn default() -> Self {
         Self {
-            radius: 12.0,
+            radius: 14.0,
             shadow: true,
             ring_width: 2.0,
             accent: "theme".into(),
