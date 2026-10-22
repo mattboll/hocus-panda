@@ -334,6 +334,13 @@ impl State {
             self.textures.clear();
             self.needs_redraw = true;
         }
+        // Windows' hairline in the theme's tint.
+        let b = theme.colors.window_border;
+        if self.style.border != [b.r, b.g, b.b, b.a] {
+            self.style.border = [b.r, b.g, b.b, b.a];
+            self.textures.clear();
+            self.needs_redraw = true;
+        }
         if self.applied_theme.as_ref() == Some(&theme) {
             return;
         }

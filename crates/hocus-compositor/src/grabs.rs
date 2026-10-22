@@ -241,9 +241,11 @@ impl PointerGrab<State> for MoveGrab {
         }
         let before = state.space.element_location(&self.window);
         state.space.map_element(self.window.clone(), location, true);
-        // The jelly lags behind the move (#35).
+        // The jelly lags behind the move (#35); in the Matrix theme, a
+        // phosphor trail (#154).
         if let (Some(id), Some(before)) = (model_id(&self.window), before) {
             state.wobble_moved(id, location - before);
+            state.matrix_moved(id, location);
         }
         state.needs_redraw = true;
     }
@@ -267,6 +269,9 @@ impl PointerGrab<State> for MoveGrab {
     }
 
     fn unset(&mut self, state: &mut State) {
+        if let Some(id) = model_id(&self.window) {
+            state.matrix_let_go(id);
+        }
         if let (Some((_, zone)), Some(id)) = (state.snap_preview.take(), model_id(&self.window)) {
             state.needs_redraw = true;
             if let Some(id) = model_id(&self.window) {
@@ -356,6 +361,7 @@ impl PointerGrab<State> for ResizeGrab {
         }
         self.last = rect;
         state.resize_to(self.id, rect, true);
+        state.matrix_resizing(self.id, event.location);
     }
 
     fn button(
@@ -378,6 +384,7 @@ impl PointerGrab<State> for ResizeGrab {
 
     fn unset(&mut self, state: &mut State) {
         state.resize_to(self.id, self.last, false);
+        state.matrix_resized(self.id);
     }
 }
 
@@ -417,6 +424,7 @@ impl State {
         });
         if let Some(id) = model_id(window) {
             self.wobble_held(id, window, start_data.location);
+            self.matrix_held(id, initial_location);
         }
         let grab = MoveGrab {
             start_data,

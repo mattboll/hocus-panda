@@ -141,6 +141,9 @@ impl State {
             rect(self.work_area(&output)),
             self.config.windows.gaps.inner,
         ));
+        // In the Matrix theme it springs in under the grid line (#154).
+        self.snap_from_here(id);
+        self.matrix_guide(&output, zone, crate::matrix_windows::GuideKind::Snap);
         self.configure(id, target, None);
         self.set_mode(id, WindowMode::Snapped { zone, restore }, serial);
     }

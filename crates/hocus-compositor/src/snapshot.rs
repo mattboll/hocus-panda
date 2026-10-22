@@ -8,14 +8,19 @@
 //! - Close: the picture dissolves from where the window was, its opening
 //!   motion included; in the Matrix theme it decomposes into glyphs.
 //! - Minimize: a magic lamp (genie) into its dock icon, or the column when
-//!   the dock is hidden; restoring plays it back from there.
+//!   the dock is hidden; restoring plays it back from there. In the Matrix
+//!   theme a CRT switching off and on (`matrix_windows`).
 //! - Maximize and fullscreen: the picture morphs from the old place to the
-//!   new one and fades, the window drawn stretched beneath it.
+//!   new one and fades, the window drawn stretched beneath it. In the Matrix
+//!   theme it springs there behind circuit traces, and snapping moves it so
+//!   too.
+//! - With reduced motion, each is a short fade where the window was.
 
 use std::{any::Any, cell::OnceCell, collections::BTreeMap, collections::BTreeSet, rc::Rc};
 
 use hocus_core::WindowId;
-use hocus_ui::motion::{Animated, Curve, Easing, LARGE, STANDARD};
+use hocus_shell::matrix::hash;
+use hocus_ui::motion::{Animated, Curve, Easing, LARGE, SMALL, STANDARD};
 use smithay::{
     backend::renderer::{
         ContextId, ImportAll, ImportMem, Renderer, Texture,
@@ -34,8 +39,9 @@ use smithay::{
 
 use crate::{
     State,
-    decoration::{Rounded, shadow_elements},
+    decoration::{Rounded, hairline_elements, shadow_elements},
     matrix,
+    matrix_windows::{Layer, SWITCH, Shift, Switch},
     motion::{Look, WindowMotion},
     scene::SceneElement,
 };
@@ -91,6 +97,17 @@ impl Closing {
     }
 }
 
+/// How a window goes into its dock icon and comes back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Away {
+    /// The magic lamp.
+    Lamp,
+    /// The Matrix theme's CRT switching off and on.
+    Crt,
+    /// A short fade where it is: reduced motion.
+    Fade,
+}
+
 /// A window going into, or coming out of, its dock icon.
 struct Genie {
     id: WindowId,
@@ -100,9 +117,24 @@ struct Genie {
     /// 0 the window, 1 in the target.
     progress: Animated,
     restoring: bool,
+    away: Away,
+    decorated: bool,
 }
 
-/// A window between two places: maximized, fullscreen, back.
+/// How a window changes place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    /// Its picture morphs into the new place, fading.
+    Morph,
+    /// In the Matrix theme's way.
+    Matrix(Shift),
+    /// At its new place at once, its old picture fading where it was:
+    /// reduced motion.
+    Fade,
+}
+
+/// A window between two places: maximized, fullscreen, back; snapped in
+/// the Matrix theme.
 struct Morph {
     id: WindowId,
     picture: Snapshot,
@@ -111,6 +143,47 @@ struct Morph {
     /// follow, the motion does not wait.
     to: Option<Rectangle<f64, Logical>>,
     progress: Animated,
+    change: Change,
+    seed: u64,
+}
+
+/// Where a window changing place is drawn now, global, and its old
+/// picture over it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MorphView {
+    pub window: Rectangle<f64, Logical>,
+    pub picture: Rectangle<f64, Logical>,
+    pub alpha: f32,
+}
+
+impl Morph {
+    fn view(&self, live: Rectangle<f64, Logical>, now: std::time::Duration) -> MorphView {
+        let p = self.progress.value(now);
+        let to = self.to.unwrap_or(live);
+        match self.change {
+            Change::Morph => {
+                let r = lerp_rect(self.from, to, f64::from(p));
+                MorphView {
+                    window: r,
+                    picture: r,
+                    alpha: 1.0 - p,
+                }
+            }
+            Change::Matrix(shift) => {
+                let r = lerp_rect(self.from, to, f64::from(shift.geometry(p)));
+                MorphView {
+                    window: r,
+                    picture: r,
+                    alpha: shift.picture_alpha(p),
+                }
+            }
+            Change::Fade => MorphView {
+                window: live,
+                picture: self.from,
+                alpha: 1.0 - p,
+            },
+        }
+    }
 }
 
 #[derive(Default)]
@@ -300,7 +373,7 @@ fn snap(x0: f64, y0: f64, x1: f64, y1: f64) -> Rectangle<i32, Logical> {
 
 impl Snapshot {
     /// Its pieces stretched into `into` (output-local), front first.
-    fn stretched<R>(
+    pub(crate) fn stretched<R>(
         &self,
         renderer: &R,
         into: Rectangle<f64, Logical>,
@@ -585,9 +658,21 @@ impl State {
         )
     }
 
+    /// How windows go into the dock and come back now, and how long it
+    /// takes.
+    fn away(&self) -> (Away, std::time::Duration) {
+        if self.reduced() {
+            (Away::Fade, SMALL)
+        } else if self.look() == Look::Matrix {
+            (Away::Crt, SWITCH)
+        } else {
+            (Away::Lamp, LARGE)
+        }
+    }
+
     /// Before a window minimizes: its picture, and where it goes.
     pub fn genie_minimize(&mut self, id: WindowId) {
-        if !self.moving() || self.reduced() {
+        if !self.moving() {
             return;
         }
         let Some(window) = self.windows.get(&id).map(|m| m.window.clone()) else {
@@ -599,8 +684,10 @@ impl State {
         };
         let target = self.genie_target(id, &window);
         let now = self.clock.now();
+        let (away, duration) = self.away();
         let mut progress = Animated::new(0.0);
-        progress.set(1.0, Curve::Ease(Easing::Linear, LARGE), now);
+        progress.set(1.0, Curve::Ease(Easing::Linear, duration), now);
+        let decorated = self.decorated(&window);
         self.snapshots.genies.retain(|g| g.id != id);
         self.snapshots.away.insert(id, (picture.clone(), target));
         self.snapshots.genies.push(Genie {
@@ -610,6 +697,8 @@ impl State {
             target,
             progress,
             restoring: false,
+            away,
+            decorated,
         });
         self.needs_redraw = true;
     }
@@ -641,14 +730,18 @@ impl State {
                 continue;
             };
             let now = self.clock.now();
+            let (away, duration) = self.away();
+            // The lamp turns back from where it is; the others come back
+            // from the start, as nothing of the window shows on the way.
             let current = self
                 .snapshots
                 .genies
                 .iter()
-                .find(|g| g.id == id)
+                .find(|g| g.id == id && away == Away::Lamp)
                 .map_or(1.0, |g| g.progress.value(now));
             let mut progress = Animated::new(current);
-            progress.set(0.0, Curve::Ease(Easing::Linear, LARGE), now);
+            progress.set(0.0, Curve::Ease(Easing::Linear, duration), now);
+            let decorated = self.decorated(&window);
             self.snapshots.genies.retain(|g| g.id != id);
             self.snapshots.genies.push(Genie {
                 id,
@@ -657,6 +750,8 @@ impl State {
                 target,
                 progress,
                 restoring: true,
+                away,
+                decorated,
             });
             self.needs_redraw = true;
         }
@@ -664,7 +759,26 @@ impl State {
 
     /// Before a window changes place by maximizing or going fullscreen.
     pub fn morph_from_here(&mut self, id: WindowId) {
-        if !self.moving() || self.reduced() {
+        let change = if self.reduced() {
+            Change::Fade
+        } else if self.look() == Look::Matrix {
+            Change::Matrix(Shift::Maximize)
+        } else {
+            Change::Morph
+        };
+        self.change_from_here(id, change);
+    }
+
+    /// Before a window snaps: in the Matrix theme it springs into place;
+    /// elsewhere it is there at once.
+    pub fn snap_from_here(&mut self, id: WindowId) {
+        if self.matrix_moves() {
+            self.change_from_here(id, Change::Matrix(Shift::Snap));
+        }
+    }
+
+    fn change_from_here(&mut self, id: WindowId, change: Change) {
+        if !self.moving() {
             return;
         }
         let Some(window) = self.windows.get(&id).map(|m| m.window.clone()) else {
@@ -680,13 +794,15 @@ impl State {
             .morphs
             .iter()
             .find(|m| m.id == id)
-            .and_then(|m| {
-                let to = m.to.or_else(|| self.shown_rect(&window))?;
-                Some(lerp_rect(m.from, to, f64::from(m.progress.value(now))))
-            })
+            .and_then(|m| Some(m.view(self.shown_rect(&window)?, now).window))
             .unwrap_or(from);
+        let curve = match change {
+            Change::Morph => Curve::Ease(Easing::OutCubic, STANDARD),
+            Change::Matrix(shift) => Curve::Ease(Easing::Linear, shift.duration()),
+            Change::Fade => Curve::Ease(Easing::Linear, SMALL),
+        };
         let mut progress = Animated::new(0.0);
-        progress.set(1.0, Curve::Ease(Easing::OutCubic, STANDARD), now);
+        progress.set(1.0, curve, now);
         self.snapshots.morphs.retain(|m| m.id != id);
         self.snapshots.morphs.push(Morph {
             id,
@@ -694,6 +810,8 @@ impl State {
             from,
             to: None,
             progress,
+            change,
+            seed: hash(&[now.as_nanos() as u64, id.0]),
         });
         self.needs_redraw = true;
     }
@@ -719,23 +837,16 @@ impl State {
             .any(|g| g.id == id && g.restoring && g.progress.is_running(now))
     }
 
-    /// Where a window morphing is drawn now, and its picture's opacity.
-    pub fn morph_rect(
-        &self,
-        id: WindowId,
-        live: Rectangle<f64, Logical>,
-    ) -> Option<(Rectangle<f64, Logical>, f32)> {
+    /// Where a window changing place is drawn now, and its old picture;
+    /// `live` is where it is shown, global.
+    pub fn morph_view(&self, id: WindowId, live: Rectangle<f64, Logical>) -> Option<MorphView> {
         let now = self.clock.now();
         let m = self
             .snapshots
             .morphs
             .iter()
             .find(|m| m.id == id && m.progress.is_running(now))?;
-        let p = m.progress.value(now);
-        Some((
-            lerp_rect(m.from, m.to.unwrap_or(live), f64::from(p)),
-            1.0 - p,
-        ))
+        Some(m.view(live, now))
     }
 
     /// The morphing window's old picture over it, fading.
@@ -798,14 +909,36 @@ impl State {
             if !bounds.overlaps(area.to_f64()) {
                 continue;
             }
-            // It thins out as it reaches the icon.
-            let alpha = 1.0 - smoothstep((p - 0.75) / 0.25) as f32;
-            out.extend(
-                genie
-                    .elements(renderer, p, origin, scale, alpha)
-                    .into_iter()
-                    .map(|e| SceneElement::Snapshot(Rounded::new(e, unclipped(), 0))),
-            );
+            let radius = if genie.decorated {
+                self.style.radius
+            } else {
+                0.0
+            };
+            match genie.away {
+                Away::Lamp => {
+                    // It thins out as it reaches the icon.
+                    let alpha = 1.0 - smoothstep((p - 0.75) / 0.25) as f32;
+                    out.extend(
+                        genie
+                            .elements(renderer, p, origin, scale, alpha)
+                            .into_iter()
+                            .map(|e| SceneElement::Snapshot(Rounded::new(e, unclipped(), 0))),
+                    );
+                }
+                Away::Crt => out.extend(self.crt(renderer, genie, Layer::Picture, origin, scale)),
+                Away::Fade => {
+                    let local = Rectangle::new(genie.window.loc - origin, genie.window.size);
+                    let clip = local.to_physical_precise_round(scale);
+                    let radius = (radius * scale).round() as i32;
+                    out.extend(
+                        genie
+                            .picture
+                            .stretched(renderer, local, scale, 1.0 - p as f32)
+                            .into_iter()
+                            .map(|e| SceneElement::Snapshot(Rounded::new(e, clip, radius))),
+                    );
+                }
+            }
         }
         for closing in self.snapshots.closing.iter().rev() {
             if !closing.frame.overlaps(area.to_f64()) {
@@ -831,6 +964,20 @@ impl State {
                 0
             };
             let clip = local.to_physical_precise_round(scale);
+            if closing.decorated {
+                out.extend(
+                    hairline_elements(
+                        renderer,
+                        &self.textures,
+                        &self.style,
+                        local,
+                        scale,
+                        alpha * closing.opacity,
+                    )
+                    .into_iter()
+                    .map(SceneElement::Frame),
+                );
+            }
             out.extend(
                 closing
                     .picture
@@ -851,6 +998,90 @@ impl State {
 }
 
 impl State {
+    /// A window going into the dock or coming out in the Matrix theme.
+    fn crt<R>(
+        &self,
+        renderer: &mut R,
+        genie: &Genie,
+        layer: Layer,
+        origin: Point<f64, Logical>,
+        scale: f64,
+    ) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let switch = Switch {
+            picture: &genie.picture,
+            window: genie.window,
+            target: genie.target,
+            radius: if genie.decorated {
+                self.style.radius
+            } else {
+                0.0
+            },
+        };
+        // Restoring runs its own course as the progress goes back to 0.
+        let p = genie.progress.value(self.clock.now());
+        let along = if genie.restoring { 1.0 - p } else { p };
+        let t = along * SWITCH.as_secs_f32() * 1000.0;
+        self.matrix_switch_elements(
+            renderer,
+            &switch,
+            (t, genie.restoring),
+            layer,
+            origin,
+            scale,
+        )
+    }
+
+    /// What shines over the panels as windows change place in the Matrix
+    /// theme: the CRT's line and flash at the dock, and the circuit traces
+    /// of windows maximizing. Front first.
+    pub fn snapshot_lights<R>(&self, renderer: &mut R, output: &Output) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let Some(area) = self.space.output_geometry(output) else {
+            return Vec::new();
+        };
+        let (origin, area) = (area.loc.to_f64(), area.to_f64());
+        let scale = output.current_scale().fractional_scale();
+        let now = self.clock.now();
+        let mut out = Vec::new();
+        for genie in &self.snapshots.genies {
+            if genie.away == Away::Crt && genie.window.merge(genie.target).overlaps(area) {
+                out.extend(self.crt(renderer, genie, Layer::Light, origin, scale));
+            }
+        }
+        for m in &self.snapshots.morphs {
+            let Change::Matrix(Shift::Maximize) = m.change else {
+                continue;
+            };
+            let live = self
+                .windows
+                .get(&m.id)
+                .and_then(|w| self.shown_rect(&w.window));
+            let Some(to) = m.to.or(live) else {
+                continue;
+            };
+            if !m.progress.is_running(now) || !m.from.merge(to).overlaps(area) {
+                continue;
+            }
+            let p = m.progress.value(now);
+            out.extend(self.matrix_shift_elements(
+                renderer,
+                (m.from, to),
+                p,
+                m.seed,
+                origin,
+                scale,
+            ));
+        }
+        out
+    }
+
     /// A closing window in the Matrix theme: its picture, glitching, under
     /// the glyphs that take it, then the rain it drains off as.
     fn matrix_closing<R>(
@@ -887,6 +1118,13 @@ impl State {
                     .collect(),
                 None => closing.picture.stretched(renderer, local, scale, alpha),
             };
+            if closing.decorated {
+                out.extend(
+                    hairline_elements(renderer, &self.textures, &self.style, local, scale, alpha)
+                        .into_iter()
+                        .map(SceneElement::Frame),
+                );
+            }
             out.extend(
                 picture
                     .into_iter()

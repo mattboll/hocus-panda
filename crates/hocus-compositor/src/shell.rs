@@ -732,6 +732,12 @@ impl Pixels for hocus_shell::leave::Leave {
     }
 }
 
+impl Pixels for hocus_shell::readout::Readout {
+    fn pixels(&self) -> View<'_> {
+        self.view()
+    }
+}
+
 impl Pixels for hocus_shell::identify::Identify {
     fn pixels(&self) -> View<'_> {
         self.view()

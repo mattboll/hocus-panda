@@ -25,7 +25,7 @@ use crate::{
     State,
     blur::{Pane, Spot},
     cursor::CursorElement,
-    decoration::{Rounded, ring_elements, shadow_elements},
+    decoration::{Rounded, hairline_elements, ring_elements, ring_elements_in, shadow_elements},
     desktops::{model_id, rect},
     handlers::layer_shell::LayerKind as Layer,
     window_mode::WindowMode,
@@ -44,6 +44,8 @@ render_elements! {
     Snapshot=Rounded<TextureRenderElement<<R as RendererSuper>::TextureId>>,
     Frame=MemoryRenderBufferRenderElement<R>,
     Solid=SolidColorRenderElement,
+    /// A plain colour over a window's picture, its corners cut (#154).
+    Tint=Rounded<SolidColorRenderElement>,
     /// A wallpaper that moves, painted by a shader (#108).
     Backdrop=TextureRenderElement<<R as RendererSuper>::TextureId>,
 }
@@ -76,6 +78,8 @@ impl State {
             return;
         }
         if let Some((output, zone)) = &preview {
+            // Dragged into a zone in the Matrix theme, its guides flash.
+            self.matrix_guide(output, *zone, crate::matrix_windows::GuideKind::Flash);
             let target = zone.rect(rect(self.work_area(output)), self.config.windows.gaps.inner);
             let [r, g, b] = self.style.accent;
             // The accent, see-through, premultiplied.
@@ -264,6 +268,10 @@ impl State {
                 .into_iter()
                 .map(SceneElement::Frame),
         );
+        // The Matrix theme's guides, size readout, and the lights of
+        // windows going into the dock or maximizing, over the panels (#154).
+        elements.extend(self.matrix_overlay_elements(renderer, output));
+        elements.extend(self.snapshot_lights(renderer, output));
         if let Some((preview_output, zone)) = &self.snap_preview
             && preview_output == output
         {
@@ -451,18 +459,35 @@ impl State {
             // output-local, its old picture fading over it.
             let morph = id.and_then(|id| {
                 let live = Rectangle::new(location, geometry.size).to_f64();
-                let (r, fade) = self.morph_rect(id, live)?;
-                Some((id, Rectangle::new(r.loc - area.loc.to_f64(), r.size), fade))
+                let view = self.morph_view(id, live)?;
+                let local =
+                    |r: Rectangle<f64, Logical>| Rectangle::new(r.loc - area.loc.to_f64(), r.size);
+                Some((id, local(view.window), local(view.picture), view.alpha))
             });
             let frame_now = match morph {
-                Some((_, r, _)) => Rectangle::new(
+                Some((_, r, _, _)) => Rectangle::new(
                     (r.loc.x, r.loc.y - f64::from(bar)).into(),
                     (r.size.w, r.size.h + f64::from(bar)).into(),
                 ),
                 None => frame_now,
             };
             let decorated = self.decorated(window);
-            if decorated && focused.as_ref() == Some(window) {
+            // Resized in the Matrix theme: a glow, then a flash (#154).
+            let glow = id.and_then(|id| self.matrix_ring(id));
+            if decorated && let Some((rgb, a)) = glow {
+                let ring = ring_elements_in(
+                    renderer,
+                    &self.textures,
+                    &self.style,
+                    rgb,
+                    frame_now,
+                    scale,
+                    alpha * a,
+                );
+                elements.extend(ring.into_iter().map(SceneElement::Frame));
+            }
+            let resizing = glow.is_some_and(|(_, a)| a >= 1.0);
+            if decorated && focused.as_ref() == Some(window) && !resizing {
                 let ring = ring_elements(
                     renderer,
                     &self.textures,
@@ -491,7 +516,19 @@ impl State {
             if let Some(open) = managed.and_then(|m| m.motion.matrix(self.clock.now())) {
                 elements.extend(self.matrix_open_elements(renderer, open, frame_now, scale));
             }
-            if let Some((id, r, fade)) = morph {
+            // The hairline inside its edge, over what it shows.
+            if decorated {
+                let hairline = hairline_elements(
+                    renderer,
+                    &self.textures,
+                    &self.style,
+                    frame_now,
+                    scale,
+                    opacity,
+                );
+                elements.extend(hairline.into_iter().map(SceneElement::Frame));
+            }
+            if let Some((id, _, r, fade)) = morph {
                 let clip_now = r.to_physical_precise_round(scale);
                 elements.extend(
                     self.morph_picture(renderer, id, r, fade * opacity, scale)
@@ -501,7 +538,7 @@ impl State {
             }
             elements.extend(content.into_iter().map(|e| {
                 let rounded = Rounded::new(e, clip, radius).at_scale(Scale::from(scale));
-                if let Some((_, r, _)) = morph {
+                if let Some((_, r, _, _)) = morph {
                     let live = rect.to_f64();
                     let k = Scale {
                         x: r.size.w / live.size.w.max(1.0),
@@ -531,7 +568,7 @@ impl State {
                 && let Some(id) = id
             {
                 elements.extend(
-                    self.bar_element(renderer, id, rect.loc, scale)
+                    self.bar_element(renderer, id, rect.loc, scale, opacity)
                         .map(SceneElement::Frame),
                 );
             }
@@ -553,6 +590,18 @@ impl State {
                     alpha,
                 );
                 elements.extend(shadow.into_iter().map(SceneElement::Frame));
+            }
+            // Dragged in the Matrix theme: its phosphor trail, behind it.
+            if let Some(id) = id {
+                let radius = if decorated { self.style.radius } else { 0.0 };
+                elements.extend(self.matrix_trail_elements(
+                    renderer,
+                    id,
+                    window,
+                    area.loc.to_f64(),
+                    radius,
+                    scale,
+                ));
             }
             if !veiled && focused.as_ref() == Some(window) {
                 veil(&mut elements);

@@ -37,6 +37,7 @@ mod launcher;
 mod leave;
 mod lock;
 mod matrix;
+mod matrix_windows;
 mod media;
 mod mirror;
 mod motion;

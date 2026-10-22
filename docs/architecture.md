@@ -126,7 +126,15 @@ drawn with the elements every renderer has (rows and columns cut from a
 sheet of glyphs drawn once per scale, plain colours, the window's
 picture), evaluated in closed form at the clock's time, so that headless
 scenarios sample them. The glyphs are strokes of our own after
-half-width katakana: no bundled font has them. The theme's wallpaper is
+half-width katakana: no bundled font has them. The theme's other window
+motions (#154) are drawn the same way: a window minimizing switches off
+as a CRT into its dock icon and comes back on from there, one maximizing
+races circuit traces to its new place and springs there, one snapping
+springs in under the grid line of its zone; a dragged window leaves a
+phosphor trail of where it was drawn lately (positions kept as it moves,
+not per frame), a resized one glows and reads out its size. What shines
+over the dock (the CRT's line and flash, the traces) is drawn over the
+panels, the window's own picture with the windows. The theme's wallpaper is
 its still rain, drawn with the other wallpapers on their worker thread.
 Wallpapers that move (#108, `rain` and `stars`) are GLES shaders: before
 a GLES backend draws an output, the wallpaper is painted into a texture

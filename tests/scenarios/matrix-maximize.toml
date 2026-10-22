@@ -1,0 +1,43 @@
+description = "In the Matrix theme a window maximizing races circuit traces from its corners to where it goes, springs there, and its new edges flash as sparks fly from the corners; sampled at each phase; then it rests maximized and nothing is drawn"
+outputs = ["1280x800"]
+motion = true
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [500, 340], color = "#3399ff" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+advance_ms = 140
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-maximize-traces.png" }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-maximize-flash.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_idle = { for_ms = 5000 }

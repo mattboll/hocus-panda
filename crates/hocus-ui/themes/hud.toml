@@ -13,6 +13,7 @@ agent = "#B48CFF"
 waiting = "#F2A65A"
 error = "#F28B7D"
 shadow = "#00000099"
+window_border = "#38D9F559"
 
 [accents]
 default = "blue"

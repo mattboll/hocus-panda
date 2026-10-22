@@ -1,0 +1,84 @@
+description = "In the Matrix theme a window minimizes as a CRT switching off: crushed to a bright line at its bottom, the line dashes into its dock icon leaving a phosphor trail, and flashes there; clicked in the dock, it powers back on from a dot, the line opening into the window under a sweeping scanline; sampled at each phase; then nothing is drawn"
+outputs = ["1280x800"]
+motion = true
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "firefox", size = [700, 460], color = "#e8642c" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+keys = "super+d"
+
+[[step]]
+frames = 2
+
+[[step]]
+set_state = { app_id = "firefox", state = "minimized" }
+
+[[step]]
+advance_ms = 140
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-minimize-crush.png" }
+
+[[step]]
+advance_ms = 90
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-minimize-dash.png" }
+
+[[step]]
+advance_ms = 90
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-minimize-flash.png" }
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_window = { app_id = "firefox", visible = false }
+
+[[step]]
+click_ui = "Firefox"
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-restore-line.png" }
+
+[[step]]
+advance_ms = 95
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-restore-opens.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_window = { app_id = "firefox", visible = true, focused = true }
+
+# The icon under the pointer settles on its spring.
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_idle = { for_ms = 5000 }

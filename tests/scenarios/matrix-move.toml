@@ -1,0 +1,83 @@
+description = "In the Matrix theme a dragged window stays rigid and leaves a short green phosphor trail; dragged into the top left corner's zone, the zone's guide lines flash; let go there, it snaps; then nothing is drawn"
+outputs = ["1280x800"]
+motion = true
+shell = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [610, 404]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [580, 408]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [550, 412]
+
+[[step]]
+advance_ms = 16
+
+[[step]]
+pointer_move = [520, 416]
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-move-trail.png" }
+
+# Held still, the trail is gone.
+[[step]]
+pointer_move = [40, 60]
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+pointer_move = [2, 2]
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-move-guide.png" }
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [0, 0, 472, 400], state = "snapped" }
+
+[[step]]
+expect_idle = { for_ms = 2000 }

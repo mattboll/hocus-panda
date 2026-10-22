@@ -13,6 +13,7 @@ agent = "#B48CFF"
 waiting = "#F2A65A"
 error = "#F28B7D"
 shadow = "#00000066"
+window_border = "#FFFFFF14"
 
 # Accent options, tuned for this theme's contrast.
 [accents]
