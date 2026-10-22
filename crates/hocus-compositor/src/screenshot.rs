@@ -446,6 +446,7 @@ impl State {
                 let mut actions = Vec::new();
                 if path.is_some() {
                     actions.push(("open".to_owned(), lang.open_file().to_owned()));
+                    actions.push(("annotate".to_owned(), lang.annotate().to_owned()));
                     if ocr {
                         actions.push(("text".to_owned(), lang.copy_text().to_owned()));
                     }
@@ -489,6 +490,15 @@ impl State {
         };
         match key {
             "open" => self.launch("xdg-open", &[path.display().to_string()]),
+            "annotate" => {
+                let command = self.config.screenshots.annotate.clone();
+                let mut words = command.split_whitespace();
+                if let Some(program) = words.next() {
+                    let mut args: Vec<String> = words.map(str::to_owned).collect();
+                    args.push(path.display().to_string());
+                    self.launch(program, &args);
+                }
+            }
             "delete" => {
                 self.shots.toasts.remove(&id);
                 spawn("screenshot delete", move || {
@@ -552,11 +562,13 @@ impl App {
                     .output_geometry(&output)
                     .unwrap_or_default()
                     .size;
+                // The flash after the picture: never in it.
+                let pixels = self.capture_output(&output);
                 self.state
                     .shots
                     .flashes
                     .push((name.clone(), Rectangle::from_size(size), now));
-                self.capture_output(&output)
+                pixels
             }
             Shot::Region { output, rect } => {
                 let o = self
@@ -564,8 +576,8 @@ impl App {
                     .find_output(output)
                     .ok_or_else(|| anyhow::anyhow!("no output {output}"))?;
                 let scale = o.current_scale().fractional_scale();
-                self.state.shots.flashes.push((output.clone(), *rect, now));
                 let whole = self.capture_output(&o)?;
+                self.state.shots.flashes.push((output.clone(), *rect, now));
                 let p = rect.to_f64().to_physical(scale);
                 Ok(crop(
                     &whole,
@@ -606,11 +618,14 @@ impl App {
                 let mut parts = Vec::new();
                 for o in &outputs {
                     let g = self.state.space.output_geometry(o).unwrap_or_default();
+                    parts.push((g, self.capture_output(o)?));
+                }
+                for o in &outputs {
+                    let g = self.state.space.output_geometry(o).unwrap_or_default();
                     self.state
                         .shots
                         .flashes
                         .push((o.name(), Rectangle::from_size(g.size), now));
-                    parts.push((g, self.capture_output(o)?));
                 }
                 Ok(arrange(&parts))
             }

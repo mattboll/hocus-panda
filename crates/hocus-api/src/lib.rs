@@ -83,6 +83,11 @@ pub enum Request {
     /// portal's chooser; answered once chosen, as `Monitor: NAME`,
     /// `Window: IDENTIFIER` (ext-foreign-toplevel-list) or nothing.
     PickShare,
+    /// Puts a PNG on the clipboard, kept by the compositor (the annotation
+    /// window's Copy, #128).
+    CopyPng {
+        png_base64: String,
+    },
     Windows,
     /// The whole scene: outputs, their layers and windows, focus, pointer.
     Scene,
@@ -187,6 +192,8 @@ impl Request {
             | Self::Screens
             | Self::IdentifyOutputs
             | Self::PickShare
+            // A picture the user asked to copy.
+            | Self::CopyPng { .. }
             | Self::Windows
             | Self::Subscribe
             | Self::Stats

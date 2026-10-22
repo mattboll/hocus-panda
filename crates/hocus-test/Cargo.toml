@@ -16,6 +16,7 @@ hocus-api = { version = "0.1.0", path = "../hocus-api" }
 hocus-platform = { version = "0.1.0", path = "../hocus-platform" }
 hocus-compositor = { version = "0.1.0", path = "../hocus-compositor" }
 hocus-settings = { version = "0.1.0", path = "../hocus-settings" }
+hocus-annotate = { version = "0.1.0", path = "../hocus-annotate" }
 hocus-shell = { version = "0.1.0", path = "../hocus-shell" }
 hocus-ui = { version = "0.1.0", path = "../hocus-ui" }
 png = "0.18.1"

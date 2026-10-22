@@ -1,0 +1,28 @@
+[package]
+name = "hocus-annotate"
+description = "The screenshot annotation view: a Wayland client drawn with hocus-ui."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.22.1"
+clap = { version = "4.6.7", features = ["derive"] }
+hocus-api = { version = "0.1.0", path = "../hocus-api" }
+hocus-core = { version = "0.1.0", path = "../hocus-core" }
+hocus-shell = { version = "0.1.0", path = "../hocus-shell" }
+hocus-ui = { version = "0.1.0", path = "../hocus-ui" }
+png = "0.18.1"
+rustix = { version = "1.1.5", features = ["event"] }
+smithay-client-toolkit = "0.19.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+wayland-client = "0.31.15"
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -156,6 +156,18 @@ pub enum Step {
     ExpectSettings(ExpectSettings),
     /// Clicks the element of the settings window with this label.
     ClickSettings(String),
+    /// Waits until the wallpapers are made and drawn: before a capture
+    /// the compositor takes itself.
+    WaitWallpapers(bool),
+    /// Opens the annotation window on a capture (`{runtime_dir}` is the
+    /// compositor's temporary directory), and waits for it.
+    OpenAnnotate(String),
+    /// The annotation window shows an element, as `expect_settings`.
+    ExpectAnnotate(ExpectSettings),
+    /// Clicks its element with this label.
+    ClickAnnotate(String),
+    /// Drags from its element's middle by `by`, as `drag_settings`.
+    DragAnnotate(DragSettings),
     /// Presses on the settings window's element with this label, moves by
     /// `by`, and lets go: a drag.
     DragSettings(DragSettings),
@@ -274,6 +286,23 @@ pub struct ExpectFile {
     pub contains: Vec<String>,
     #[serde(default)]
     pub lacks: Vec<String>,
+}
+
+/// Which client window the settings steps drive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Driving {
+    #[default]
+    Settings,
+    Annotate,
+}
+
+impl Driving {
+    fn app_id(self) -> &'static str {
+        match self {
+            Self::Settings => "hocus-settings",
+            Self::Annotate => "hocus-annotate",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -514,6 +543,11 @@ impl fmt::Display for Step {
             Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
             Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
+            Self::OpenAnnotate(file) => write!(f, "open_annotate {file:?}"),
+            Self::WaitWallpapers(_) => write!(f, "wait_wallpapers"),
+            Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
+            Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
+            Self::DragAnnotate(d) => write!(f, "drag_annotate {:?}", d.label),
             Self::DragSettings(d) => write!(f, "drag_settings {}", d.label),
             Self::ExpectConfigFile(_) => write!(f, "expect_config_file"),
             Self::Type(text) => write!(f, "type {text:?}"),
@@ -654,6 +688,8 @@ impl Scenario {
             clients: Vec::new(),
             x11_clients: Vec::new(),
             settings: None,
+            annotate: None,
+            driving: Driving::Settings,
             layers: Vec::new(),
             sharing: None,
             lock_client: None,
@@ -678,6 +714,9 @@ struct Run<'a> {
     clients: Vec<TestClient>,
     x11_clients: Vec<X11Client>,
     settings: Option<hocus_settings::client::Running>,
+    annotate: Option<hocus_annotate::client::Running>,
+    /// Which of the two the settings steps drive.
+    driving: Driving,
     layers: Vec<crate::layer::LayerClient>,
     lock_client: Option<crate::session_lock::LockClient>,
     sharing: Option<(
@@ -906,6 +945,26 @@ impl Run<'_> {
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
             Step::DragSettings(drag) => self.drag_settings(drag),
+            Step::OpenAnnotate(file) => self.open_annotate(file),
+            Step::WaitWallpapers(_) => self.wallpapers(),
+            Step::ExpectAnnotate(expected) => {
+                self.driving = Driving::Annotate;
+                let done = self.expect_settings(expected);
+                self.driving = Driving::Settings;
+                done
+            }
+            Step::ClickAnnotate(label) => {
+                self.driving = Driving::Annotate;
+                let done = self.click_settings(label);
+                self.driving = Driving::Settings;
+                done
+            }
+            Step::DragAnnotate(drag) => {
+                self.driving = Driving::Annotate;
+                let done = self.drag_settings(drag);
+                self.driving = Driving::Settings;
+                done
+            }
             Step::ExpectConfigFile(expected) => self.expect_config_file(expected),
             Step::Type(text) => self.type_text(text),
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
@@ -1467,6 +1526,54 @@ impl Run<'_> {
         }
     }
 
+    fn open_annotate(&mut self, file: &str) -> anyhow::Result<()> {
+        let runtime = self.compositor.runtime_dir().to_string_lossy().into_owned();
+        let mut file = file.replace("{runtime_dir}", &runtime);
+        if file.contains("{last_screenshot}") {
+            // The last capture saved, as its event said.
+            self.request(Request::Stats)?;
+            self.events.extend(self.compositor.take_events());
+            let last = self
+                .events
+                .iter()
+                .rev()
+                .find_map(|e| match e {
+                    hocus_api::Event::Screenshot { path, .. } => path.clone(),
+                    _ => None,
+                })
+                .context("no screenshot saved yet")?;
+            file = file.replace("{last_screenshot}", &last);
+        }
+        let wayland = self.compositor.socket_path().to_path_buf();
+        let running = hocus_annotate::client::spawn(hocus_annotate::client::Options {
+            api: Some(hocus_api::socket_for(&wayland)),
+            wayland,
+            file: file.into(),
+            lang: hocus_shell::Lang::En,
+            theme: hocus_ui::Theme::default(),
+        })?;
+        self.annotate = Some(running);
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let shown = self.find("hocus-annotate")?.is_some()
+                && self.annotate.as_ref().is_some_and(|s| s.access().is_some());
+            if shown {
+                return Ok(());
+            }
+            if let Some(s) = self.annotate.take_if(|s| s.is_finished()) {
+                return Err(s
+                    .join()
+                    .err()
+                    .unwrap_or_else(|| anyhow::anyhow!("the annotation window stopped")));
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "the annotation window never came"
+            );
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+    }
+
     /// The settings window's element with `label`, and the window's corner.
     fn settings_node(
         &mut self,
@@ -1478,11 +1585,11 @@ impl Run<'_> {
             }
             node.children.iter().find_map(|c| find(c, label))
         }
-        let access = self
-            .settings
-            .as_ref()
-            .and_then(|s| s.access())
-            .context("no settings window; open_settings first")?;
+        let access = match self.driving {
+            Driving::Settings => self.settings.as_ref().and_then(|s| s.access()),
+            Driving::Annotate => self.annotate.as_ref().and_then(|s| s.access()),
+        }
+        .context("no such window; open it first")?;
         Ok((find(&access, label), access))
     }
 
@@ -1560,7 +1667,9 @@ impl Run<'_> {
         let (node, all) = self.settings_node(label)?;
         let node =
             node.with_context(|| format!("no {label:?}; the window shows:\n{}", all.dump()))?;
-        let window = self.find("hocus-settings")?.context("no settings window")?;
+        let window = self
+            .find(self.driving.app_id())?
+            .context("no such window")?;
         let g = window.geometry;
         let (x, y) = (
             f64::from(g.x) + f64::from(node.rect.x + node.rect.w / 2.0),
@@ -1623,7 +1732,9 @@ impl Run<'_> {
         let (node, all) = self.settings_node(&drag.label)?;
         let node = node
             .with_context(|| format!("no {:?}; the window shows:\n{}", drag.label, all.dump()))?;
-        let window = self.find("hocus-settings")?.context("no settings window")?;
+        let window = self
+            .find(self.driving.app_id())?
+            .context("no such window")?;
         let g = window.geometry;
         let (x, y) = (
             f64::from(g.x) + f64::from(node.rect.x + node.rect.w / 2.0),

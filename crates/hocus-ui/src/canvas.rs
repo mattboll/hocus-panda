@@ -184,6 +184,27 @@ impl Canvas {
         self.ctx.stroke_path(path);
     }
 
+    /// Lines through `points`, with round ends and joins: arrows, marks.
+    pub fn polyline(&mut self, points: &[Point], width: f32, color: Color) {
+        let mut path = BezPath::new();
+        for (i, p) in points.iter().enumerate() {
+            let p = (f64::from(p.x), f64::from(p.y));
+            if i == 0 {
+                path.move_to(p);
+            } else {
+                path.line_to(p);
+            }
+        }
+        self.ctx.set_transform(self.transform());
+        self.ctx.set_paint(paint(color));
+        self.ctx.set_stroke(
+            Stroke::new(f64::from(width))
+                .with_caps(Cap::Round)
+                .with_join(Join::Round),
+        );
+        self.ctx.stroke_path(&path);
+    }
+
     /// Premultiplied pixels stretched over `r`.
     pub fn image(&mut self, pixmap: &Arc<Pixmap>, r: Rect) {
         let sx = f64::from(r.w) / f64::from(pixmap.width());
