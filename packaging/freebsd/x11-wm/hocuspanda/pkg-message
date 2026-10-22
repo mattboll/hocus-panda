@@ -1,0 +1,17 @@
+[
+{ type: install
+  message: <<EOM
+Hocuspanda takes the screens, keyboards and mice through seatd. To start it
+from a virtual terminal or a display manager, run seatd and let your user
+use it:
+
+  # sysrc seatd_enable=YES
+  # service seatd start
+  # pw groupmod video -m <user>
+
+Display managers offer the "Hocuspanda" session; from a virtual terminal,
+run `hocuspanda`. The lock screen checks passwords through the PAM service
+in ${PREFIX}/etc/pam.d/hocuspanda.
+EOM
+}
+]

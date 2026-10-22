@@ -1,0 +1,7 @@
+Hocuspanda is a Wayland compositor and its whole shell (widget column,
+launcher, notifications, quick settings, lock screen) in a single Rust
+process, built on smithay. Display managers offer it as the "Hocuspanda"
+session; it also starts from a virtual terminal with `hocuspanda`.
+
+The package holds the desktop (hocuspanda), its command-line tool (hocus)
+and its settings app (hocus-settings).

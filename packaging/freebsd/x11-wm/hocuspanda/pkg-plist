@@ -1,0 +1,5 @@
+bin/hocus
+bin/hocus-settings
+bin/hocuspanda
+@sample etc/pam.d/hocuspanda.sample
+share/wayland-sessions/hocuspanda.desktop

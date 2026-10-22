@@ -7,6 +7,7 @@
 #
 #   scripts/vm/debian.sh up            boot it (downloads the image once)
 #   scripts/vm/debian.sh copy          copy target/debug's programs into it
+#   scripts/vm/debian.sh install DEB   install a .deb (packaging/deb/build.sh)
 #   scripts/vm/debian.sh ssh [cmd…]    a shell, or a command, as the test user
 #   scripts/vm/debian.sh screen FILE   save what the VM's screen shows (PNG)
 #   scripts/vm/debian.sh keys K…       press keys on its keyboard (QEMU names:
@@ -153,6 +154,15 @@ copy() {
     echo "copied to ~/bin, and ~/hocus-vm to drive it"
 }
 
+# A package built by packaging/deb/build.sh, with what it depends on.
+install_deb() {
+    scp -q -i "$WORK/key" -P "$SSH_PORT" \
+        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        "$1" alex@127.0.0.1:/tmp/
+    ssh_vm sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+        /tmp/"$(basename "$1")"
+}
+
 down() {
     if [ -f "$WORK/qemu.pid" ]; then
         pid=$(cat "$WORK/qemu.pid")
@@ -175,6 +185,7 @@ down() {
 case "${1:-}" in
     up) up ;;
     copy) copy ;;
+    install) install_deb "$2" ;;
     ssh) shift; ssh_vm "$@" ;;
     down) down ;;
     monitor) shift; printf '%s\n' "$*" | socat - UNIX-CONNECT:"$WORK/monitor" ;;
@@ -194,5 +205,5 @@ case "${1:-}" in
             printf 'sendkey %s\n' "$key" | socat - UNIX-CONNECT:"$WORK/monitor" >/dev/null
             sleep 0.05
         done ;;
-    *) sed -n '2,20p' "$0"; exit 2 ;;
+    *) sed -n '2,21p' "$0"; exit 2 ;;
 esac

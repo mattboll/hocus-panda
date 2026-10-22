@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Hocuspanda
+Comment=A Wayland desktop: the compositor and its shell in one
+Comment[fr]=Un bureau Wayland : le compositeur et son interface en un
+# The session itself on the seat's screens: display managers start it on a
+# virtual terminal of its own, outside any graphical session.
+Exec=hocuspanda --backend tty
+TryExec=hocuspanda
+DesktopNames=Hocuspanda
