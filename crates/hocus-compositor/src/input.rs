@@ -44,6 +44,19 @@ impl State {
             InputEvent::PointerMotion { event } => self.on_pointer_motion::<I>(event),
             InputEvent::PointerButton { event } => self.on_pointer_button::<I>(event),
             InputEvent::PointerAxis { event } => self.on_pointer_axis::<I>(event),
+            // Three fingers swipe desktops (#36); others are not ours yet.
+            InputEvent::GestureSwipeBegin { event } => {
+                use smithay::backend::input::GestureBeginEvent;
+                self.swipe_begin(event.fingers());
+            }
+            InputEvent::GestureSwipeUpdate { event } => {
+                use smithay::backend::input::GestureSwipeUpdateEvent;
+                self.swipe_update(event.delta_x());
+            }
+            InputEvent::GestureSwipeEnd { event } => {
+                use smithay::backend::input::GestureEndEvent;
+                self.swipe_end(event.cancelled());
+            }
             _ => {}
         }
     }

@@ -181,6 +181,10 @@ pub enum Step {
     /// Nothing is drawn while `for_ms` of virtual time pass: at rest, no
     /// frame.
     ExpectIdle(ExpectIdle),
+    /// A touchpad swipe on the screen under the pointer: `{ fingers, by =
+    /// [dx, dy], begin? = true, release? = true }`, moved in eight steps a
+    /// frame apart; without `begin`, it goes on with the one held.
+    Swipe(SwipeStep),
     /// The CalDAV server goes, as the network would.
     CaldavStop(bool),
     /// The settings keep a calendar account's password: `{ id, password }`.
@@ -316,6 +320,17 @@ pub struct OpenWindow {
 #[serde(deny_unknown_fields)]
 pub struct ExpectAccent {
     pub hue: [f32; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SwipeStep {
+    pub fingers: u32,
+    pub by: [f64; 2],
+    #[serde(default = "yes")]
+    pub begin: bool,
+    #[serde(default = "yes")]
+    pub release: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -654,6 +669,7 @@ impl fmt::Display for Step {
             Self::Restart(_) => write!(f, "restart"),
             Self::ExpectRecording(e) => write!(f, "expect_recording {e:?}"),
             Self::ExpectIdle(e) => write!(f, "expect_idle {} ms", e.for_ms),
+            Self::Swipe(s) => write!(f, "swipe {} by {:?}", s.fingers, s.by),
             Self::Caldav(c) => write!(f, "caldav {}", c.dir.display()),
             Self::CaldavStop(_) => write!(f, "caldav_stop"),
             Self::CalendarPassword(p) => write!(f, "calendar_password {}", p.id),
@@ -1121,6 +1137,34 @@ impl Run<'_> {
             }
             Step::ExpectCalendars(expected) => self.expect_calendars(expected),
             Step::ExpectRecording(expected) => self.expect_recording(expected),
+            Step::Swipe(swipe) => {
+                use hocus_api::SwipePhase;
+                let send = |run: &mut Self, phase, dx, dy| {
+                    run.request(Request::Swipe {
+                        phase,
+                        fingers: swipe.fingers,
+                        dx,
+                        dy,
+                    })
+                    .map(drop)
+                };
+                if swipe.begin {
+                    send(self, SwipePhase::Begin, 0.0, 0.0)?;
+                }
+                for _ in 0..8 {
+                    send(
+                        self,
+                        SwipePhase::Update,
+                        swipe.by[0] / 8.0,
+                        swipe.by[1] / 8.0,
+                    )?;
+                    self.compositor.advance(Duration::from_millis(16))?;
+                }
+                if swipe.release {
+                    send(self, SwipePhase::End, 0.0, 0.0)?;
+                }
+                Ok(())
+            }
             Step::ExpectIdle(expected) => {
                 let frames = |run: &mut Self| -> anyhow::Result<Vec<(String, u64)>> {
                     let Reply::Stats(stats) = run.request(Request::Stats)? else {

@@ -422,6 +422,20 @@ impl App {
                 state.pointer_motion((x, y).into(), state.time_msec());
                 Reply::Done
             }
+            Request::Swipe {
+                phase,
+                fingers,
+                dx,
+                dy: _,
+            } => {
+                match phase {
+                    hocus_api::SwipePhase::Begin => state.swipe_begin(fingers),
+                    hocus_api::SwipePhase::Update => state.swipe_update(dx),
+                    hocus_api::SwipePhase::End => state.swipe_end(false),
+                    hocus_api::SwipePhase::Cancel => state.swipe_end(true),
+                };
+                Reply::Done
+            }
             Request::PointerButton { button, pressed } => {
                 let button_state = if pressed {
                     ButtonState::Pressed

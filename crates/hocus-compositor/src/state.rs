@@ -139,6 +139,8 @@ pub struct State {
     pub mirrors: Vec<crate::mirror::Mirror>,
     /// Windows appear and go at once: tests that do not sample motion.
     pub instant_motion: bool,
+    /// Desktops sliding, screen by screen (#36).
+    pub slides: crate::slide::Slides,
     /// wlr-output-management and output-power, for third-party tools.
     pub output_management: crate::handlers::output_management::OutputManagement,
     /// linux-dmabuf, whose global the TTY backend makes for its GPU.
@@ -251,6 +253,7 @@ impl State {
             output_settings: Default::default(),
             mirrors: Vec::new(),
             instant_motion: false,
+            slides: Default::default(),
             identifying: Vec::new(),
             leaver: Default::default(),
             authorizer: Default::default(),

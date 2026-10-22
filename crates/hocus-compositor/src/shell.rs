@@ -262,6 +262,7 @@ impl State {
         self.refresh_updates();
         self.refresh_calendar();
         self.refresh_motion();
+        self.refresh_slides();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
