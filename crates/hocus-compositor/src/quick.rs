@@ -373,6 +373,18 @@ impl State {
         )))
     }
 
+    /// The sheet's panels on glass, output-local (#37).
+    pub(crate) fn quick_glass(&self) -> Vec<crate::blur::Spot> {
+        let (Some(panel), Some(origin)) = (&self.quick, self.quick_origin()) else {
+            return Vec::new();
+        };
+        let Some((_, area, _)) = &panel.on else {
+            return Vec::new();
+        };
+        let origin = origin - area.loc.to_f64();
+        crate::blur::spots(crate::blur::Surface::Quick, origin, &panel.sheet.glass())
+    }
+
     fn quick_local(&self, location: Point<f64, Logical>) -> Option<UiPoint> {
         let origin = self.quick_origin()?;
         Some(UiPoint::new(

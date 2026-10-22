@@ -155,6 +155,8 @@ impl State {
         theme
             .with_text_size(a.text_size)
             .with_reduced_motion(a.reduced_motion)
+            // See-through panels where what is behind them is blurred.
+            .with_glass(self.glass_on())
     }
 
     /// After each dispatch: asks for the wallpapers that changed, and gives

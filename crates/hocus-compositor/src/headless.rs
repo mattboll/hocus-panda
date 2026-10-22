@@ -644,9 +644,11 @@ impl HeadlessBackend {
         }
         match &mut self.renderers {
             Renderers::Gles(canvas) => {
-                // Wallpapers that move, before the outputs show them.
+                // Wallpapers that move, then the blur behind panels (over
+                // them), before the outputs show them.
                 for out in &canvas.outputs {
                     state.paint_backdrop(&mut canvas.renderer, &out.output);
+                    state.paint_glass(&mut canvas.renderer, &out.output);
                 }
                 canvas.render(state)
             }

@@ -318,6 +318,16 @@ pub enum Step {
     /// Every frame so far drawn within `max_ms`, and no loop handler over
     /// its budget.
     ExpectBudget(ExpectBudget),
+    /// The blur behind panels was computed so many times since the last
+    /// such step, or the start: `{ at_least?, at_most? }`.
+    ExpectBlur(ExpectBlur),
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectBlur {
+    pub at_least: Option<u64>,
+    pub at_most: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -838,6 +848,7 @@ impl fmt::Display for Step {
             Self::ExpectStack(_) => write!(f, "expect_stack"),
             Self::ExpectReceived(e) => write!(f, "expect_received {} `{}`", e.app_id, e.event),
             Self::ExpectBudget(e) => write!(f, "expect_budget {} ms", e.max_ms),
+            Self::ExpectBlur(e) => write!(f, "expect_blur {:?} to {:?}", e.at_least, e.at_most),
             Self::ExpectPixel(e) => write!(
                 f,
                 "expect_pixel {} {:?} {} {}",
@@ -957,6 +968,7 @@ impl Scenario {
             events: Vec::new(),
             caldav: None,
             herdr: None,
+            blurs: 0,
         };
         run.request(Request::Subscribe)?;
         for (n, step) in self.steps.iter().enumerate() {
@@ -996,6 +1008,8 @@ struct Run<'a> {
     events: Vec<hocus_api::Event>,
     caldav: Option<crate::caldav::Server>,
     herdr: Option<crate::herdr::Server>,
+    /// Blurs computed at the last `expect_blur`.
+    blurs: u64,
 }
 
 impl Run<'_> {
@@ -1795,6 +1809,28 @@ impl Run<'_> {
                 }
                 let held = crate::held_the_loop(&stats);
                 anyhow::ensure!(held.is_empty(), "the loop was held: {held:?}");
+                Ok(())
+            }
+            Step::ExpectBlur(expected) => {
+                let Reply::Stats(stats) = self.request(Request::Stats)? else {
+                    anyhow::bail!("expected stats");
+                };
+                let now: u64 = stats.outputs.iter().map(|o| o.blurs).sum();
+                // A restart counts from zero again.
+                let done = now.checked_sub(self.blurs).unwrap_or(now);
+                self.blurs = now;
+                if let Some(least) = expected.at_least {
+                    anyhow::ensure!(
+                        done >= least,
+                        "blurred {done} times, at least {least} expected"
+                    );
+                }
+                if let Some(most) = expected.at_most {
+                    anyhow::ensure!(
+                        done <= most,
+                        "blurred {done} times, at most {most} expected"
+                    );
+                }
                 Ok(())
             }
         }

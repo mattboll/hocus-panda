@@ -442,6 +442,23 @@ impl State {
         Some(Point::from((x, y)))
     }
 
+    /// The launcher's card on glass, output-local (#37); the showcase has
+    /// none.
+    pub(crate) fn launcher_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+        let (Some(panel), Some(origin)) = (&self.launcher, self.launcher_origin()) else {
+            return Vec::new();
+        };
+        let (Some(area), None) = (self.space.output_geometry(output), &panel.showcase) else {
+            return Vec::new();
+        };
+        let origin = origin - area.loc.to_f64();
+        crate::blur::spots(
+            crate::blur::Surface::Launcher,
+            origin,
+            &panel.launcher.glass(),
+        )
+    }
+
     fn launcher_local(&self, location: Point<f64, Logical>) -> Option<UiPoint> {
         let origin = self.launcher_origin()?;
         Some(UiPoint::new(

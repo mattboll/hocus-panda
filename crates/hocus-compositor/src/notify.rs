@@ -511,6 +511,18 @@ impl State {
         Some(Point::from((f64::from(x), f64::from(y))))
     }
 
+    /// The toasts on glass, output-local (#37).
+    pub(crate) fn toasts_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+        let (Some(panel), Some(origin)) = (&self.toasts, self.toasts_origin()) else {
+            return Vec::new();
+        };
+        let Some(area) = self.space.output_geometry(output) else {
+            return Vec::new();
+        };
+        let origin = origin - area.loc.to_f64();
+        crate::blur::spots(crate::blur::Surface::Toasts, origin, &panel.toasts.glass())
+    }
+
     fn toasts_local(&self, location: Point<f64, Logical>) -> Option<UiPoint> {
         let origin = self.toasts_origin()?;
         Some(UiPoint::new(

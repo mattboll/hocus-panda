@@ -124,7 +124,19 @@ impl State {
         let d = &config.decorations;
         style.radius = d.radius;
         style.ring_width = d.ring_width;
-        style.shadow_alpha = if d.shadow { 0.5 } else { 0.0 };
+        // Windows' shadows as dark as the theme makes them.
+        let theme = hocus_ui::Theme::builtin(
+            config
+                .appearance
+                .theme
+                .parse()
+                .unwrap_or(hocus_ui::ThemeName::Dark),
+        );
+        style.shadow_alpha = if d.shadow {
+            f64::from(theme.effects.window_shadow)
+        } else {
+            0.0
+        };
         // A ring that follows the theme takes its accent with the theme.
         if let Some(accent) = config.accent() {
             style.accent = accent;

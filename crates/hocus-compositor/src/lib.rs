@@ -10,6 +10,7 @@ mod api;
 mod authorize;
 mod backdrop;
 mod bars;
+mod blur;
 mod calendar;
 mod capture;
 mod clipboard;

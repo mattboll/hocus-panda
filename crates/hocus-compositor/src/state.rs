@@ -72,6 +72,8 @@ pub struct State {
     pub matrix_sheets: crate::matrix::Sheets,
     /// Wallpapers that move, painted by shaders (#108).
     pub backdrops: crate::backdrop::Backdrops,
+    /// Frosted glass behind panels, blurred by shaders (#37).
+    pub blurs: crate::blur::Blurs,
     pub xdg_decoration_state: XdgDecorationState,
     /// The X11 window manager, once XWayland is ready, and its display.
     pub xwm: Option<smithay::xwayland::X11Wm>,
@@ -253,6 +255,7 @@ impl State {
             textures: Textures::default(),
             matrix_sheets: Default::default(),
             backdrops: Default::default(),
+            blurs: Default::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
             xwm: None,
             xdisplay: None,

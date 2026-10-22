@@ -23,6 +23,7 @@ use smithay::{
 
 use crate::{
     State,
+    blur::{Pane, Spot},
     cursor::CursorElement,
     decoration::{Rounded, ring_elements, shadow_elements},
     desktops::{model_id, rect},
@@ -38,12 +39,25 @@ render_elements! {
     Scaled=RescaleRenderElement<Rounded<WaylandSurfaceRenderElement<R>>>,
     /// A window between two places, stretched: maximizing (#34).
     Morphed=RelocateRenderElement<RescaleRenderElement<Rounded<WaylandSurfaceRenderElement<R>>>>,
-    /// A window's picture: closing, minimizing, maximizing (#34).
+    /// A window's picture: closing, minimizing, maximizing (#34); the
+    /// blur behind a pane of glass (#37).
     Snapshot=Rounded<TextureRenderElement<<R as RendererSuper>::TextureId>>,
     Frame=MemoryRenderBufferRenderElement<R>,
     Solid=SolidColorRenderElement,
     /// A wallpaper that moves, painted by a shader (#108).
     Backdrop=TextureRenderElement<<R as RendererSuper>::TextureId>,
+}
+
+/// What a scene is built for.
+#[derive(Debug)]
+pub(crate) enum Build {
+    /// To be drawn.
+    Draw,
+    /// To list its panes of glass, front first (#37).
+    Panes(Vec<Spot>),
+    /// To draw what is behind one pane of glass: what is in front of it is
+    /// left out; `found` once it is.
+    Behind { pane: Pane, found: bool },
 }
 
 render_elements! {
@@ -117,6 +131,51 @@ impl State {
         renderer: &mut R,
         output: &Output,
         cursor: bool,
+    ) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        self.scene_build(renderer, output, cursor, &mut Build::Draw)
+    }
+
+    /// The blur behind each of `spots` (#37), as `build` asks: listed,
+    /// drawn, or where what is behind a pane starts.
+    fn glass<R>(
+        &self,
+        elements: &mut Vec<SceneElement<R>>,
+        renderer: &R,
+        output: &Output,
+        spots: Vec<Spot>,
+        build: &mut Build,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        for spot in spots {
+            match build {
+                Build::Panes(panes) => panes.push(spot),
+                Build::Behind { pane, found } if *pane == spot.pane => {
+                    elements.clear();
+                    *found = true;
+                    continue;
+                }
+                Build::Behind { .. } | Build::Draw => {}
+            }
+            elements.extend(
+                self.glass_element(renderer, output, &spot)
+                    .map(SceneElement::Snapshot),
+            );
+        }
+    }
+
+    /// Everything `output` shows, front first, for `build`.
+    pub(crate) fn scene_build<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        cursor: bool,
+        build: &mut Build,
     ) -> Vec<SceneElement<R>>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -250,26 +309,50 @@ impl State {
         );
         // The launcher over everything; quick settings over the screen
         // they dim; toasts, then the column, above windows; the column
-        // under a fullscreen one.
+        // under a fullscreen one. Each panel over the blur of what is
+        // behind it (#37).
         elements.extend(self.alt_tab_elements(renderer, output));
-        elements.extend(
-            self.launcher_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        let launcher = self.launcher_elements(renderer, output);
+        if !launcher.is_empty() {
+            elements.extend(launcher.into_iter().map(SceneElement::Frame));
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.launcher_glass(output),
+                build,
+            );
+        }
         let (sheet, dim) = self.quick_elements(renderer, output);
-        elements.extend(sheet.into_iter().map(SceneElement::Frame));
+        if !sheet.is_empty() {
+            elements.extend(sheet.into_iter().map(SceneElement::Frame));
+            self.glass(&mut elements, renderer, output, self.quick_glass(), build);
+        }
         elements.extend(dim.map(SceneElement::Solid));
-        elements.extend(
-            self.toast_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
-        elements.extend(
-            self.shell_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        let toasts = self.toast_elements(renderer, output);
+        if !toasts.is_empty() {
+            elements.extend(toasts.into_iter().map(SceneElement::Frame));
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.toasts_glass(output),
+                build,
+            );
+        }
+        let (popover, fading, column) = self.shell_elements(renderer, output);
+        let (popover_glass, column_glass) = self.shell_glass(output);
+        if let Some(popover) = popover {
+            elements.push(SceneElement::Frame(popover));
+            self.glass(&mut elements, renderer, output, popover_glass, build);
+        }
+        if let Some(fading) = fading {
+            elements.push(SceneElement::Frame(fading));
+        }
+        if let Some(column) = column {
+            elements.push(SceneElement::Frame(column));
+            self.glass(&mut elements, renderer, output, column_glass, build);
+        }
         elements.extend(self.switcher_elements(renderer, output));
         elements.extend(self.dock_elements(renderer, output));
         elements.extend(self.panda_elements(renderer, output));
@@ -443,6 +526,14 @@ impl State {
                     self.bar_element(renderer, id, rect.loc, scale)
                         .map(SceneElement::Frame),
                 );
+            }
+            // A see-through window over the blur of what is behind it, when
+            // a rule asks (#37).
+            if let Some(spot) = id.and_then(|id| {
+                let radius = if decorated { self.style.radius } else { 0.0 };
+                self.window_glass(id, window, frame_now, radius, alpha)
+            }) {
+                self.glass(&mut elements, renderer, output, vec![spot], build);
             }
             if decorated {
                 let shadow = shadow_elements(

@@ -64,8 +64,8 @@ pub const HIGH_CONTRAST_SUB: Words =
     Words::new("Sharp edges, plainer text", "Bords nets, texte plus franc");
 pub const TRANSPARENCY: Words = Words::new("Transparency", "Transparences");
 pub const TRANSPARENCY_SUB: Words = Words::new(
-    "Frosted glass of the panels, with blur (#37)",
-    "Verre dépoli des panneaux, avec le flou (#37)",
+    "Frosted glass behind the panels",
+    "Verre dépoli derrière les panneaux",
 );
 
 pub const LAYOUTS: Words = Words::new("Layouts", "Dispositions");

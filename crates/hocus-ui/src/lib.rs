@@ -27,6 +27,6 @@ pub use geom::{Insets, PixelRect, Point, Rect, Size};
 pub use shape::{Shape, Transform};
 pub use theme::{Accent, Color, Face, Paint, TextStyle, Theme, ThemeName, Typeface};
 pub use tree::{
-    Align, Button, ButtonKind, Direction, Draw, Event, Icon, Input, Justify, Key, Kind, Length,
-    Look, NodeId, Property, Style, Surface, TextField, Tree,
+    Align, Button, ButtonKind, Direction, Draw, Event, Glass, Icon, Input, Justify, Key, Kind,
+    Length, Look, NodeId, Property, Style, Surface, TextField, Tree,
 };

@@ -42,7 +42,8 @@ accent = "theme"           # theme, bamboo, amber, blue, pink, or wallpaper (tak
 text_size = 100            # percent of the theme's text size, 80 to 150
 high_contrast = false      # borders and muted text closer to the text colour
 reduced_motion = false     # animations jump to their end
-transparency = true        # frosted glass behind panels (with blur, #37)
+transparency = true        # frosted glass behind panels: see-through over a blur of what is behind them, where the
+                           #   GPU can blur (not with pixman), unless high contrast, reduced motion or the power saver is on
 
 [wallpaper]                # behind the windows of every screen
 kind = "glow"              # glow (soft light by the time of day; in the Matrix theme, its rain falling), image,
@@ -184,6 +185,7 @@ maximized = false
 opacity = 0.95             # 0.1 to 1
 pinned = true              # on every desktop of its output
 on_top = false             # above the other windows
+blur = true                # what is behind it blurred, for a see-through window (with opacity), where panels blur
 
 [[outputs]]                # a screen, by name (`hocus msg screens`)
 name = "eDP-1"

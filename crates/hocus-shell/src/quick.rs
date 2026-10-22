@@ -247,7 +247,7 @@ impl Sheet {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(Paint::Surface),
+                    background: Some(Paint::Glass),
                     radius: 26.0,
                     border: Some(Paint::Border),
                     shadow: 30.0,
@@ -792,6 +792,12 @@ impl Sheet {
             height: self.surface.height(),
             at: Point::default(),
         }
+    }
+
+    /// Its see-through panels, from its corner, for the compositor to blur
+    /// what is behind them (#37).
+    pub fn glass(&self) -> Vec<hocus_ui::Glass> {
+        self.tree.glass()
     }
 
     pub fn access(&self) -> AccessNode {

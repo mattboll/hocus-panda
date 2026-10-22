@@ -98,6 +98,17 @@ impl Default for Style {
     }
 }
 
+/// A see-through panel of a tree, as drawn now: the compositor blurs what
+/// is behind it (#37).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Glass {
+    /// Its box, offsets included, logical pixels from the surface's corner.
+    pub rect: Rect,
+    pub radius: f32,
+    /// Its own opacity and its parents', 0 to 1.
+    pub opacity: f32,
+}
+
 /// How a box looks; children draw on top.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Look {
@@ -934,6 +945,42 @@ impl Tree {
         self.node(id).map(|n| n.rect)
     }
 
+    /// The boxes on [`Paint::Glass`] while the theme has glass on, front
+    /// last, as drawn at the last update.
+    pub fn glass(&self) -> Vec<Glass> {
+        let mut out = Vec::new();
+        if self.theme.has_glass() {
+            self.glass_of(self.root, (0.0, 0.0), 1.0, &mut out);
+        }
+        out
+    }
+
+    fn glass_of(&self, id: NodeId, offset: (f32, f32), opacity: f32, out: &mut Vec<Glass>) {
+        let Some(node) = self.node(id) else {
+            return;
+        };
+        let offset = (
+            offset.0 + node.offset_x.value(self.now),
+            offset.1 + node.offset_y.value(self.now),
+        );
+        let opacity = opacity * node.opacity.value(self.now);
+        if opacity <= 0.0 {
+            return;
+        }
+        if let Kind::Box(look) = &node.kind
+            && look.background == Some(Paint::Glass)
+        {
+            out.push(Glass {
+                rect: node.rect.translate(offset.0, offset.1),
+                radius: look.radius,
+                opacity: opacity.min(1.0),
+            });
+        }
+        for child in &node.children {
+            self.glass_of(*child, offset, opacity, out);
+        }
+    }
+
     pub fn focused(&self) -> Option<NodeId> {
         self.focused
     }
@@ -1694,14 +1741,31 @@ fn draw_kind(
                 (false, true) => Some(theme.colors.surface_hover),
                 _ => None,
             };
+            // A see-through panel: its shadow stays outside, and its hover
+            // as see-through as its surface.
+            let glass = look.background == Some(Paint::Glass) && theme.has_glass();
             if look.shadow > 0.0 {
-                canvas.shadow(
-                    rect.translate(0.0, look.shadow / 3.0),
-                    look.radius,
-                    look.shadow,
-                    theme.colors.shadow,
-                );
+                let under = rect.translate(0.0, look.shadow / 3.0);
+                let color = theme.colors.shadow;
+                if glass {
+                    canvas.shadow_outside(
+                        under,
+                        look.radius,
+                        look.shadow,
+                        color,
+                        (rect, look.radius),
+                    );
+                } else {
+                    canvas.shadow(under, look.radius, look.shadow, color);
+                }
             }
+            let tint = tint.map(|t| {
+                if glass {
+                    t.with_alpha(theme.colors.glass.a)
+                } else {
+                    t
+                }
+            });
             if let Some(bg) = tint.or(look.background.map(|bg| theme.color(bg))) {
                 canvas.fill_rect(rect, look.radius, bg);
             }

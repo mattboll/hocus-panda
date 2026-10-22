@@ -155,6 +155,9 @@ pub enum Paint {
     Waiting,
     Error,
     Shadow,
+    /// A panel's own surface: the surface, see-through over the blur behind
+    /// the panel when the theme has glass on (#37).
+    Glass,
     /// A colour that is not the theme's (content: a picture, a user's colour).
     Rgba(Color),
 }
@@ -178,6 +181,9 @@ pub struct Colors {
     pub accent: Color,
     #[serde(skip, default)]
     pub on_accent: Color,
+    /// The surface, see-through while there is glass; not in theme files.
+    #[serde(skip, default)]
+    pub glass: Color,
 }
 
 impl Colors {
@@ -196,6 +202,7 @@ impl Colors {
             Paint::Waiting => self.waiting,
             Paint::Error => self.error,
             Paint::Shadow => self.shadow,
+            Paint::Glass => self.glass,
             Paint::Rgba(c) => c,
         }
     }
@@ -414,6 +421,29 @@ impl FromStr for ThemeName {
     }
 }
 
+/// Depth: frosted glass behind panels and shadows under windows (#37).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Effects {
+    /// How opaque a panel's surface is over the blur behind it, 0 to 1.
+    pub glass: f32,
+    /// How far the blur behind panels reaches, logical pixels.
+    pub blur: f32,
+    /// Windows' shadows at their darkest, 0 to 1 (their colour is black).
+    pub window_shadow: f32,
+}
+
+impl Default for Effects {
+    /// The dark theme's.
+    fn default() -> Self {
+        Self {
+            glass: 0.84,
+            blur: 32.0,
+            window_shadow: 0.5,
+        }
+    }
+}
+
 /// A theme file.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -422,6 +452,8 @@ struct File {
     colors: Colors,
     accents: Accents,
     fonts: Faces,
+    #[serde(default)]
+    effects: Effects,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -431,6 +463,7 @@ pub struct Theme {
     pub accents: Accents,
     pub accent: Accent,
     pub faces: Faces,
+    pub effects: Effects,
     pub radii: Radii,
     pub spacing: Spacing,
     pub text: TypeScale,
@@ -459,6 +492,7 @@ impl Theme {
             accents: file.accents,
             accent: file.accents.default,
             faces: file.fonts,
+            effects: file.effects,
             radii: Radii {
                 small: 8.0,
                 medium: 12.0,
@@ -476,7 +510,26 @@ impl Theme {
             reduced_motion: false,
         };
         theme.set_accent(theme.accent);
+        theme.colors.glass = theme.colors.surface;
         Ok(theme)
+    }
+
+    /// Panels see-through over a blur of what is behind them, or as solid
+    /// as their surface: the compositor turns glass on where it can blur.
+    pub fn with_glass(mut self, on: bool) -> Self {
+        let surface = self.colors.surface;
+        self.colors.glass = if on {
+            let alpha = f32::from(surface.a) * self.effects.glass.clamp(0.0, 1.0);
+            surface.with_alpha(alpha.round() as u8)
+        } else {
+            surface
+        };
+        self
+    }
+
+    /// Whether panels are see-through: glass is on.
+    pub fn has_glass(&self) -> bool {
+        self.colors.glass.a < self.colors.surface.a
     }
 
     /// Text `percent` of its size, 80 to 150.
@@ -687,5 +740,34 @@ mod tests {
         let light = Theme::builtin(ThemeName::Light).with_accent(Accent::Amber);
         assert_eq!(dark.color(Paint::Accent), Color::rgb(0xf2, 0xa6, 0x5a));
         assert_eq!(light.color(Paint::Accent), Color::rgb(0x8f, 0x54, 0x10));
+    }
+
+    #[test]
+    fn glass_is_the_surface_until_turned_on() {
+        for name in ThemeName::ALL {
+            let theme = Theme::builtin(name);
+            assert_eq!(theme.color(Paint::Glass), theme.colors.surface);
+            assert!(!theme.has_glass());
+            let glass = theme.with_glass(true);
+            assert!(glass.has_glass(), "{glass}");
+            assert_eq!(glass.colors.glass.with_alpha(255), glass.colors.surface);
+            assert!(!glass.with_glass(false).has_glass());
+        }
+    }
+
+    #[test]
+    fn text_reads_on_glass_whatever_is_behind() {
+        for name in ThemeName::ALL {
+            let theme = Theme::builtin(name).with_glass(true);
+            let c = &theme.colors;
+            for behind in [Color::BLACK, Color::WHITE, c.background] {
+                let ground = c.glass.over(behind);
+                let ratio = c.text.contrast(ground);
+                assert!(
+                    ratio >= 4.5,
+                    "{theme}: text at {ratio:.2}:1 over {behind:?}"
+                );
+            }
+        }
     }
 }
