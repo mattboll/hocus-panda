@@ -1312,11 +1312,8 @@ impl Run<'_> {
                         o.max_ms
                     );
                 }
-                anyhow::ensure!(
-                    stats.slow_handlers.is_empty(),
-                    "slow loop handlers: {:?}",
-                    stats.slow_handlers
-                );
+                let held = crate::held_the_loop(&stats);
+                anyhow::ensure!(held.is_empty(), "the loop was held: {held:?}");
                 Ok(())
             }
         }
