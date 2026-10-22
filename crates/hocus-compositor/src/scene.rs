@@ -33,6 +33,8 @@ render_elements! {
     pub SceneElement<R> where R: ImportAll + ImportMem;
     Cursor=CursorElement<R>,
     Window=Rounded<WaylandSurfaceRenderElement<R>>,
+    /// A window drawn larger or smaller than it is: opening (#33).
+    Scaled=RescaleRenderElement<Rounded<WaylandSurfaceRenderElement<R>>>,
     Frame=MemoryRenderBufferRenderElement<R>,
     Solid=SolidColorRenderElement,
 }
@@ -187,9 +189,16 @@ impl State {
                 (target.width, target.height).into(),
             );
             elements.extend(
-                ring_elements(renderer, &self.textures, &self.style, local.to_f64(), scale)
-                    .into_iter()
-                    .map(SceneElement::Frame),
+                ring_elements(
+                    renderer,
+                    &self.textures,
+                    &self.style,
+                    local.to_f64(),
+                    scale,
+                    1.0,
+                )
+                .into_iter()
+                .map(SceneElement::Frame),
             );
             elements.push(SceneElement::Solid(SolidColorRenderElement::from_buffer(
                 &self.snap_preview_buffer,
@@ -290,10 +299,25 @@ impl State {
                 rect.loc - Point::from((0, bar)),
                 (rect.size.w, rect.size.h + bar).into(),
             );
+            // Its motion (#33): the window, its ring and its shadow fade
+            // and scale about its middle.
+            let managed = id.and_then(|id| self.windows.get(&id));
+            let (alpha, grow) = managed.map_or((1.0, 1.0), |m| m.motion.at(self.clock.now()));
+            let grow = f64::from(grow);
+            let middle = frame.to_f64().loc + frame.to_f64().size.to_point().downscale(2.0);
+            let about = |p: Point<f64, Logical>| middle + (p - middle).upscale(grow);
+            let frame_now =
+                Rectangle::new(about(frame.to_f64().loc), frame.to_f64().size.upscale(grow));
             let decorated = self.decorated(window);
             if decorated && focused.as_ref() == Some(window) {
-                let ring =
-                    ring_elements(renderer, &self.textures, &self.style, frame.to_f64(), scale);
+                let ring = ring_elements(
+                    renderer,
+                    &self.textures,
+                    &self.style,
+                    frame_now,
+                    scale,
+                    alpha,
+                );
                 elements.extend(ring.into_iter().map(SceneElement::Frame));
             }
             let radius = if decorated {
@@ -304,13 +328,23 @@ impl State {
             let clip = frame.to_f64().to_physical_precise_round(scale);
             let origin: Point<i32, _> =
                 (location - geometry.loc - area.loc).to_physical_precise_round(scale);
-            let opacity = model_id(window)
-                .and_then(|id| self.windows.get(&id))
-                .map_or(1.0, |m| m.opacity);
+            let opacity = managed.map_or(1.0, |m| m.opacity) * alpha;
             let content: Vec<WaylandSurfaceRenderElement<R>> =
                 window.render_elements(renderer, origin, Scale::from(scale), opacity);
+            // Drawn at its size, then scaled about its middle: an element's
+            // size follows the output's scale, not the one it was made at.
+            let centre = middle.to_physical_precise_round(scale);
             elements.extend(content.into_iter().map(|e| {
-                SceneElement::Window(Rounded::new(e, clip, radius).at_scale(Scale::from(scale)))
+                let rounded = Rounded::new(e, clip, radius).at_scale(Scale::from(scale));
+                if grow == 1.0 {
+                    SceneElement::Window(rounded)
+                } else {
+                    SceneElement::Scaled(RescaleRenderElement::from_element(
+                        rounded,
+                        centre,
+                        Scale::from(grow),
+                    ))
+                }
             }));
             if bar > 0
                 && let Some(id) = id
@@ -321,8 +355,14 @@ impl State {
                 );
             }
             if decorated {
-                let shadow =
-                    shadow_elements(renderer, &self.textures, &self.style, frame.to_f64(), scale);
+                let shadow = shadow_elements(
+                    renderer,
+                    &self.textures,
+                    &self.style,
+                    frame_now,
+                    scale,
+                    alpha,
+                );
                 elements.extend(shadow.into_iter().map(SceneElement::Frame));
             }
             if !veiled && focused.as_ref() == Some(window) {

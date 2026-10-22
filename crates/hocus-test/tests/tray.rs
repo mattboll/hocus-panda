@@ -31,6 +31,7 @@ fn a_slow_tray_application_never_holds_the_loop() -> anyhow::Result<()> {
         data_dirs: None,
         child_env: None,
         polkit_helper: None,
+        motion: false,
     })?;
     // Wait for the watcher, then register an application that takes
     // 300 ms for each of its properties (a second or more for all).

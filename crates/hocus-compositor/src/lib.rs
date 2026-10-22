@@ -30,6 +30,7 @@ mod leave;
 mod lock;
 mod media;
 mod mirror;
+mod motion;
 mod notes;
 mod notify;
 mod output_spec;
