@@ -258,6 +258,13 @@ impl XwmHandler for State {
     /// An X11 client took the selection: Wayland clients see it offered.
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         if selection == SelectionTarget::Clipboard {
+            // Kept in the history, read off the loop.
+            if let Some((mime, fd)) = self.clipboard_reader(&mime_types)
+                && let (Some(xwm), Some(handle)) = (self.xwm.as_mut(), self.loop_handle.clone())
+                && let Err(err) = xwm.send_selection(selection, mime.to_owned(), fd, handle)
+            {
+                tracing::debug!(?err, "could not read the X11 clipboard");
+            }
             set_data_device_selection(
                 &self.display_handle,
                 &self.seat,

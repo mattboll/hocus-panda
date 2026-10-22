@@ -149,6 +149,10 @@ impl State {
             }
             Action::Hibernate => tracing::info!("this machine does not hibernate"),
             Action::Screenshot { mode, delay } => self.screenshot(*mode, *delay),
+            Action::ClipboardHistory => {
+                self.toggle_launcher_mode(hocus_shell::launcher::Mode::Clipboard);
+            }
+            Action::Emoji => self.toggle_launcher_mode(hocus_shell::launcher::Mode::Emoji),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }

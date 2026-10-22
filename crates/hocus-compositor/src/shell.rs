@@ -248,6 +248,7 @@ impl State {
         self.refresh_leaving();
         self.refresh_authorize();
         self.refresh_screenshots();
+        self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
         self.refresh_bars();

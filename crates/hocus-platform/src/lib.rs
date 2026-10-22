@@ -7,5 +7,6 @@ pub mod notifications;
 pub mod polkit;
 pub mod power;
 pub mod quick;
+pub mod sealed;
 pub mod session;
 pub mod system;

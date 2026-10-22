@@ -2,6 +2,10 @@
 //! results from providers as it is typed. Version 0: the calculator, then
 //! applications by fuzzy match. Up and Down choose, Enter goes, Escape
 //! closes.
+//!
+//! The same card shows the clipboard history (Super+V: newest first, Tab
+//! pins, Delete forgets) and the emoji picker (Super+Period: in English and
+//! French, recent ones first, Tab changes the skin tone).
 
 use std::time::Duration;
 
@@ -16,6 +20,25 @@ use crate::{
     icons,
     providers::{Context, Enabled, Hit, Provider, providers},
 };
+
+/// The hint's box: room under the list, or none.
+fn hint_style(shown: bool) -> Style {
+    Style {
+        padding: if shown {
+            Insets {
+                top: 0.0,
+                right: 28.0,
+                bottom: 14.0,
+                left: 28.0,
+            }
+        } else {
+            Insets::default()
+        },
+        height: if shown { Length::Auto } else { Length::Px(0.0) },
+        clip: true,
+        ..Style::default()
+    }
+}
 
 /// The card's width, from the design.
 pub const WIDTH: f32 = 860.0;
@@ -51,6 +74,21 @@ pub enum Choice {
     Settings,
     /// Locking, sleeping or leaving the session.
     Session(SessionAction),
+    /// A copy from the history, to paste into the focused application.
+    Paste(String),
+    /// Text to type into the focused application (an emoji).
+    Insert(String),
+    /// Forgets the history, but what is pinned.
+    ClearHistory,
+}
+
+/// What the card shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    #[default]
+    Commands,
+    Clipboard,
+    Emoji,
 }
 
 /// What the command field can do to the session.
@@ -76,6 +114,10 @@ pub enum Showcase {
 pub enum LauncherEvent {
     Chosen(Choice),
     Closed,
+    /// A history entry is pinned or unpinned.
+    Pin(String),
+    /// A history entry is forgotten.
+    Forget(String),
 }
 
 pub struct Launcher {
@@ -89,6 +131,16 @@ pub struct Launcher {
     providers: Vec<Box<dyn Provider>>,
     selected: usize,
     open: bool,
+    mode: Mode,
+    /// The clipboard history: text, pinned.
+    history: Vec<(String, bool)>,
+    /// Emoji chosen lately, newest first.
+    recents: Vec<String>,
+    /// 0 none, 1 light to 5 dark.
+    tone: u8,
+    /// The hint under the list in the history and the picker, and its box.
+    hint: NodeId,
+    hint_box: NodeId,
     now: Duration,
 }
 
@@ -208,6 +260,17 @@ impl Launcher {
                 Kind::Box(Look::default()),
             )
             .unwrap_or_else(missing);
+        // Only in the history and the picker: commands have no hint.
+        let hint_box = tree
+            .add(card, hint_style(false), Kind::Box(Look::default()))
+            .unwrap_or_else(missing);
+        let hint = tree
+            .add(
+                hint_box,
+                Style::default(),
+                Kind::text("", theme.text.label.with_color(Paint::Muted)),
+            )
+            .unwrap_or_else(missing);
         Self {
             lang,
             tree,
@@ -219,6 +282,12 @@ impl Launcher {
             providers: providers(&Enabled::default()),
             selected: 0,
             open: false,
+            mode: Mode::Commands,
+            history: Vec::new(),
+            recents: Vec::new(),
+            tone: 0,
+            hint,
+            hint_box,
             now: Duration::ZERO,
         }
     }
@@ -268,10 +337,134 @@ impl Launcher {
 
     /// Opens on an empty field.
     pub fn open(&mut self) {
+        self.open_mode(Mode::Commands);
+    }
+
+    /// Opens on an empty field, showing commands, the clipboard history or
+    /// emoji.
+    pub fn open_mode(&mut self, mode: Mode) {
         self.open = true;
+        self.mode = mode;
         self.tree.set_field_value(self.field, "");
         self.tree.set_focus(Some(self.field));
+        self.show_hint();
         self.search();
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// The clipboard history, as it is shown: text and pinned.
+    pub fn set_history(&mut self, history: Vec<(String, bool)>) {
+        self.history = history;
+        if self.open && self.mode == Mode::Clipboard {
+            let selected = self.selected;
+            self.search();
+            self.selected = selected.min(self.rows.len().saturating_sub(1));
+            self.show_selection();
+        }
+    }
+
+    pub fn set_recents(&mut self, recents: Vec<String>) {
+        self.recents = recents;
+    }
+
+    fn show_hint(&mut self) {
+        let hint = match self.mode {
+            Mode::Commands => String::new(),
+            Mode::Clipboard => self.lang.history_hint().to_owned(),
+            Mode::Emoji => self.lang.emoji_hint(&self.tone_sample()),
+        };
+        self.tree
+            .set_style(self.hint_box, hint_style(!hint.is_empty()));
+        self.tree.set_text(self.hint, &hint);
+    }
+
+    fn tone_sample(&self) -> String {
+        crate::emoji::search("thumbs up")
+            .first()
+            .map(|e| e.with_tone(self.tone))
+            .unwrap_or_default()
+    }
+
+    /// What to list for the query, by mode.
+    fn hits(&self, query: &str) -> Vec<Hit> {
+        match self.mode {
+            Mode::Commands => {
+                let mut hits = Vec::new();
+                if !query.is_empty() {
+                    let cx = Context {
+                        apps: &self.apps,
+                        lang: self.lang,
+                    };
+                    for provider in &self.providers {
+                        provider.hits(query, &cx, &mut hits);
+                    }
+                }
+                hits
+            }
+            Mode::Clipboard => {
+                let mut hits: Vec<Hit> = self
+                    .history
+                    .iter()
+                    .filter(|(text, _)| {
+                        query.is_empty() || crate::fuzzy::score(query, text).is_some()
+                    })
+                    .map(|(text, pinned)| {
+                        let line: String = text
+                            .lines()
+                            .find(|l| !l.trim().is_empty())
+                            .unwrap_or_default()
+                            .chars()
+                            .take(90)
+                            .collect();
+                        Hit {
+                            title: line,
+                            kind: if *pinned {
+                                self.lang.pinned().into()
+                            } else {
+                                String::new()
+                            },
+                            color: None,
+                            choice: Choice::Paste(text.clone()),
+                        }
+                    })
+                    .collect();
+                if query.is_empty() && self.history.iter().any(|(_, p)| !p) {
+                    hits.truncate(MAX_RESULTS - 1);
+                    hits.push(Hit {
+                        title: self.lang.clear_history().into(),
+                        kind: String::new(),
+                        color: None,
+                        choice: Choice::ClearHistory,
+                    });
+                }
+                hits
+            }
+            Mode::Emoji => {
+                let emoji: Vec<&crate::emoji::Emoji> = if query.is_empty() {
+                    self.recents
+                        .iter()
+                        .filter_map(|g| crate::emoji::find(g))
+                        .collect()
+                } else {
+                    crate::emoji::search(query)
+                };
+                emoji
+                    .into_iter()
+                    .map(|e| {
+                        let glyph = e.with_tone(self.tone);
+                        Hit {
+                            title: format!("{glyph}  {}", e.name(self.lang)),
+                            kind: String::new(),
+                            color: None,
+                            choice: Choice::Insert(glyph),
+                        }
+                    })
+                    .collect()
+            }
+        }
     }
 
     pub fn close(&mut self) {
@@ -291,16 +484,7 @@ impl Launcher {
             self.tree.remove(child);
         }
         let query = self.query().trim().to_owned();
-        let mut hits = Vec::new();
-        if !query.is_empty() {
-            let cx = Context {
-                apps: &self.apps,
-                lang: self.lang,
-            };
-            for provider in &self.providers {
-                provider.hits(&query, &cx, &mut hits);
-            }
-        }
+        let mut hits = self.hits(&query);
         hits.truncate(MAX_RESULTS);
         self.selected = 0;
         let theme = self.tree.theme().clone();
@@ -341,19 +525,23 @@ impl Launcher {
                 continue;
             };
             self.tree.set_clickable(row, &name);
-            let _ = self.tree.add(
-                row,
-                Style {
-                    width: Length::Px(26.0),
-                    height: Length::Px(26.0),
-                    ..Style::default()
-                },
-                Kind::Box(Look {
-                    background: Some(Paint::Rgba(color)),
-                    radius: 7.0,
-                    ..Look::default()
-                }),
-            );
+            // Applications and results have their colour; copies and emoji
+            // speak for themselves.
+            if self.mode == Mode::Commands {
+                let _ = self.tree.add(
+                    row,
+                    Style {
+                        width: Length::Px(26.0),
+                        height: Length::Px(26.0),
+                        ..Style::default()
+                    },
+                    Kind::Box(Look {
+                        background: Some(Paint::Rgba(color)),
+                        radius: 7.0,
+                        ..Look::default()
+                    }),
+                );
+            }
             let _ = self.tree.add(
                 row,
                 Style {
@@ -390,6 +578,13 @@ impl Launcher {
         }
     }
 
+    fn selected_paste(&self) -> Option<String> {
+        match &self.rows.get(self.selected)?.1.choice {
+            Choice::Paste(text) => Some(text.clone()),
+            _ => None,
+        }
+    }
+
     fn choose(&self, i: usize) -> Option<LauncherEvent> {
         let (_, hit) = self.rows.get(i)?;
         Some(LauncherEvent::Chosen(hit.choice.clone()))
@@ -419,6 +614,26 @@ impl Launcher {
             Key::Escape => {
                 self.close();
                 vec![LauncherEvent::Closed]
+            }
+            // Tab pins in the history, and changes the skin tone of emoji.
+            Key::Tab if self.mode == Mode::Clipboard => self
+                .selected_paste()
+                .map(LauncherEvent::Pin)
+                .into_iter()
+                .collect(),
+            Key::Delete if self.mode == Mode::Clipboard => self
+                .selected_paste()
+                .map(LauncherEvent::Forget)
+                .into_iter()
+                .collect(),
+            Key::Tab if self.mode == Mode::Emoji => {
+                self.tone = (self.tone + 1) % 6;
+                self.show_hint();
+                let selected = self.selected;
+                self.search();
+                self.selected = selected.min(self.rows.len().saturating_sub(1));
+                self.show_selection();
+                Vec::new()
             }
             Key::Down | Key::Tab if !self.rows.is_empty() => {
                 self.selected = (self.selected + 1) % self.rows.len();

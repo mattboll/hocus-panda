@@ -95,6 +95,17 @@ configurations are answered then. Output globals are retired in two steps
 (hidden, destroyed seconds later) so that a client binding one meanwhile is
 not cut off.
 
+The clipboard history (#71) reads every text copied, by Wayland and X11
+clients, on a worker thread; a copy marked secret
+(`x-kde-passwordManagerHint`) is never read. Copies are numbered as they are
+made, so one read late goes to its place. Only the session keeps it on
+disk, sealed with ChaCha20-Poly1305 under a key file of its own (a copy of
+the file is unreadable; the account is not protected from itself). What the
+history and the emoji picker choose is typed into the focused application
+through text-input-v3, once it has the keyboard back; without an input
+method, the compositor sends the text itself, which the protocol has the
+client apply.
+
 ## Rendering
 
 - Compositing: smithay's GLES renderer with damage tracking.

@@ -8,6 +8,7 @@ mod api;
 mod authorize;
 mod bars;
 mod capture;
+mod clipboard;
 mod clock;
 mod config_watch;
 mod cursor;
@@ -252,6 +253,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         .state_dir
         .clone()
         .or_else(|| state.is_session.then(session::default_dir).flatten());
+    clipboard::start(&event_loop.handle(), &mut state, state_dir.clone());
     state.start_sessions(state_dir);
     if options.shell {
         state.child_env = options.child_env.clone();

@@ -101,7 +101,14 @@ impl State {
                 match action {
                     // A panel's own shortcut closes it; others still work.
                     Some(action)
-                        if !modal || matches!(action, Action::Launcher | Action::QuickSettings) =>
+                        if !modal
+                            || matches!(
+                                action,
+                                Action::Launcher
+                                    | Action::QuickSettings
+                                    | Action::ClipboardHistory
+                                    | Action::Emoji
+                            ) =>
                     {
                         FilterResult::Intercept(Handled::Shortcut(action))
                     }

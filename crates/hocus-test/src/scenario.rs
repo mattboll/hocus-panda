@@ -324,6 +324,9 @@ pub struct ExpectConfigFile {
 pub struct Clipboard {
     pub app_id: String,
     pub text: String,
+    /// Marked secret, as a password manager copies.
+    #[serde(default)]
+    pub secret: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1624,7 +1627,11 @@ impl Run<'_> {
 
     fn copy(&mut self, copy: &Clipboard) -> anyhow::Result<()> {
         if let Some(client) = self.clients.iter().find(|c| c.spec.app_id == copy.app_id) {
-            client.copy(&copy.text)?;
+            if copy.secret {
+                client.copy_secret(&copy.text)?;
+            } else {
+                client.copy(&copy.text)?;
+            }
         } else if let Some(client) = self
             .x11_clients
             .iter()

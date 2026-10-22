@@ -57,6 +57,11 @@ curtain_after = 300        # seconds before the curtain dims the screens (0: nev
 lock_after = 30            # seconds of curtain before the session locks
 lock = true                # false: the curtain only dims
 
+[clipboard]                # the history (Super+V)
+history = true             # keeps what is copied; never what password managers mark secret
+entries = 100              # copies kept, pinned ones besides
+keep = true                # across sessions, encrypted
+
 [screenshots]              # Print and its variants
 folder = ""                # empty: Screenshots in the pictures folder
 save = true                # into the folder
@@ -166,6 +171,8 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `settings` | opens the settings app, or brings its window forward |
 | `lock` | locks the session now |
 | `log-out`, `restart`, `shut-down` | after a ten-second countdown (Escape cancels), or once the applications holding it back are dealt with: saves the session, asks windows to close, then leaves |
+| `clipboard-history` | the clipboard history in the launcher's card: newest first, Enter pastes into the focused application, Tab pins, Delete forgets |
+| `emoji` | the emoji picker: searched in English and French, recent ones first, Tab changes the skin tone, Enter types it into the focused application |
 | `screenshot MODE [SECONDS]` | `screen` (under the pointer), `all` (every screen, each at its own pixel density), `window` (the one clicked next), `region` (drawn with the pointer, its size shown; Escape cancels), after a delay of up to 60 s: copied and saved, then a toast offers to open, delete or copy its text |
 | `suspend`, `hibernate` | sleeps now, locked first; hibernating only where the machine can |
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
@@ -194,6 +201,8 @@ Defaults:
 | Alt+F4 | `close` |
 | Super+Ctrl+Space | `switch-layout` |
 | Super+Space | `launcher` |
+| Super+V | `clipboard-history` |
+| Super+Period | `emoji` |
 | Print | `screenshot screen` |
 | Super+Print | `screenshot all` |
 | Shift+Print, Super+Shift+S | `screenshot region` |

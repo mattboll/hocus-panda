@@ -71,8 +71,28 @@ impl SelectionHandler for State {
         source: Option<SelectionSource>,
         _seat: Seat<Self>,
     ) {
+        // Kept in the history, read off the loop; asked once the selection
+        // is in place, after this request.
+        if ty == SelectionTarget::Clipboard
+            && let Some(source) = &source
+            && let Some((mime, fd)) = self.clipboard_reader(&source.mime_types())
+            && let Some(handle) = &self.loop_handle
+        {
+            handle.insert_idle(move |app| {
+                if let Err(err) =
+                    smithay::wayland::selection::data_device::request_data_device_client_selection(
+                        &app.state.seat,
+                        mime.to_owned(),
+                        fd,
+                    )
+                {
+                    tracing::debug!(?err, "could not read the clipboard");
+                }
+            });
+        }
+        let mimes = source.as_ref().map(|s| s.mime_types());
         if let Some(xwm) = self.xwm.as_mut()
-            && let Err(err) = xwm.new_selection(ty, source.map(|s| s.mime_types()))
+            && let Err(err) = xwm.new_selection(ty, mimes)
         {
             tracing::warn!(?err, "could not offer the selection to X11");
         }

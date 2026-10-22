@@ -1,0 +1,45 @@
+# The clipboard history (#71): three texts copied are listed newest first;
+# Enter on the second types it into the focused window. A copy marked
+# secret by its application (a password manager) is never listed.
+description = "Super+V lists copies newest first and pastes the one chosen; secrets are never kept"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+copy = { app_id = "editor", text = "first copy" }
+
+[[step]]
+copy = { app_id = "editor", text = "second copy" }
+
+[[step]]
+copy = { app_id = "editor", text = "third copy" }
+
+[[step]]
+copy = { app_id = "editor", text = "hunter2", secret = true }
+
+[[step]]
+keys = "super+v"
+
+[[step]]
+expect_ui = { label = "third copy", inside = [0, 0, 1280, 300] }
+
+[[step]]
+expect_ui = { label = "hunter2", shown = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "clipboard-history.png" }
+
+[[step]]
+keys = "down"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_received = { app_id = "editor", event = "text second copy" }

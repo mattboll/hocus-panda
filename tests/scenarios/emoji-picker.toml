@@ -1,0 +1,26 @@
+# The emoji picker (#71): "coeur" finds hearts in French; Enter types the
+# first into the focused window.
+description = "Super+Period, \"coeur\", Enter: a heart typed into the focused window"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+keys = "super+52"
+
+[[step]]
+type = "coeur"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "emoji-picker.png" }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_received = { app_id = "editor", event = "text 💘" }

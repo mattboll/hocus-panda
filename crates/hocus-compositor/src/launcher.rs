@@ -48,7 +48,7 @@ const TEXT: [&str; 3] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"
 
 #[derive(Debug)]
 pub struct LauncherPanel {
-    launcher: Launcher,
+    pub(crate) launcher: Launcher,
     on: Option<(String, Rectangle<i32, Logical>, f64)>,
     buffer: Option<MemoryRenderBuffer>,
     /// Where desktop entries are read from.
@@ -145,10 +145,23 @@ impl State {
     }
 
     pub fn toggle_launcher(&mut self) {
-        if self.launcher_open() {
+        self.toggle_launcher_mode(hocus_shell::launcher::Mode::Commands);
+    }
+
+    /// Opens the card on commands, the clipboard history or emoji; closes
+    /// it when it already shows that.
+    pub fn toggle_launcher_mode(&mut self, mode: hocus_shell::launcher::Mode) {
+        let showing = self
+            .launcher
+            .as_ref()
+            .is_some_and(|l| l.launcher.is_open() && l.launcher.mode() == mode);
+        if showing {
             self.close_launcher();
         } else {
             self.open_launcher();
+            if let Some(panel) = self.launcher.as_mut() {
+                panel.launcher.open_mode(mode);
+            }
         }
     }
 
@@ -266,6 +279,20 @@ impl State {
                     self.close_launcher();
                     self.open_settings(None);
                 }
+                LauncherEvent::Pin(text) => self.history_pin(&text),
+                LauncherEvent::Forget(text) => self.history_forget(&text),
+                LauncherEvent::Chosen(Choice::Paste(text)) => {
+                    self.close_launcher();
+                    self.insert_text(&text, true);
+                }
+                LauncherEvent::Chosen(Choice::Insert(glyph)) => {
+                    self.close_launcher();
+                    self.emoji_chosen(&glyph);
+                }
+                LauncherEvent::Chosen(Choice::ClearHistory) => {
+                    self.close_launcher();
+                    self.history_clear();
+                }
                 LauncherEvent::Chosen(Choice::Session(what)) => {
                     use hocus_core::Action as A;
                     use hocus_shell::launcher::SessionAction as S;
@@ -308,6 +335,7 @@ impl State {
     }
 
     pub fn copy_text(&mut self, text: &str) {
+        self.shell_copied(text);
         let mimes: Vec<String> = TEXT.iter().map(|m| (*m).to_owned()).collect();
         set_data_device_selection(
             &self.display_handle,
