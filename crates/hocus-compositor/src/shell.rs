@@ -42,7 +42,7 @@ pub enum WallClock {
 
 #[derive(Debug)]
 pub struct Shell {
-    column: Column,
+    pub(crate) column: Column,
     /// The output it is on, and that output's logical rectangle.
     on: Option<(String, Rectangle<i32, Logical>, f64)>,
     buffer: Option<MemoryRenderBuffer>,
@@ -83,6 +83,7 @@ pub fn start(
     let system = matches!(state.wall, WallClock::System(_));
     state.shell = Some(Shell::new(Theme::default(), lang));
     crate::notify::start(handle, state, session_bus, lang);
+    crate::tray::start(handle, state, session_bus);
     crate::launcher::start(handle, state, lang, data_dirs);
     crate::quick::start(handle, state, lang);
     crate::wallpaper::start(handle, state);
@@ -224,6 +225,7 @@ impl State {
             can_hibernate: self.leaver.caps.hibernate,
             notifications: self.notification_history(),
             status: self.status(),
+            tray: self.tray.apps.clone(),
         }
     }
 
@@ -366,6 +368,28 @@ impl State {
         true
     }
 
+    /// The secondary button pressed: over a tray application, its menu.
+    pub fn shell_secondary_click(&mut self, location: Point<f64, Logical>) -> bool {
+        let Some(shell) = self.shell.as_mut() else {
+            return false;
+        };
+        let Some((_, area, _)) = &shell.on else {
+            return false;
+        };
+        let origin = column_rect(*area).loc.to_f64();
+        let at = UiPoint::new(
+            (location.x - origin.x) as f32,
+            (location.y - origin.y) as f32,
+        );
+        if !shell.column.hit(at) {
+            return false;
+        }
+        for action in shell.column.secondary_click(at) {
+            self.shell_action(action);
+        }
+        true
+    }
+
     fn shell_action(&mut self, action: ShellAction) {
         use hocus_core::shortcuts::Action as A;
         let serial = SERIAL_COUNTER.next_serial();
@@ -382,6 +406,9 @@ impl State {
             ShellAction::Restart => self.run_action(&A::Restart, serial),
             ShellAction::ShutDown => self.run_action(&A::ShutDown, serial),
             ShellAction::OpenLauncher => self.open_launcher(),
+            ShellAction::TrayActivate(key) => self.tray_activate(key),
+            ShellAction::TrayMenu(key) => self.tray_menu(key),
+            ShellAction::TrayChosen { key, id } => self.tray_chosen(key, id),
             ShellAction::ShowDesktop { output, desktop } => {
                 if let Some(output) = self.find_output(&output)
                     && let Err(err) = self.show_desktop(&output, desktop.saturating_sub(1), serial)

@@ -56,6 +56,10 @@ Steps, one per `[[step]]` table:
 | `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
 | `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces? }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires) |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
+| `right_click_ui = "Chat"` | the same with the secondary button |
+| `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |
+| `tray_attention = { title, attention }` | it asks for attention, or stops |
+| `expect_tray = { title, asked = "clicked 2" }` | it was asked this: `activate`, `clicked N` (menu entry N, from 1) |
 | `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `keyboard`, `screens`) or its home, and waits for its window |
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |

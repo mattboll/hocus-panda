@@ -25,7 +25,9 @@ pub mod units;
 pub mod wallpaper;
 pub mod welcome;
 
-pub use column::{Action, ActiveWindow, Column, ColumnState, ScreenDesktops, WallTime};
+pub use column::{
+    Action, ActiveWindow, Column, ColumnState, ScreenDesktops, TrayApp, TrayMenuEntry, WallTime,
+};
 pub use i18n::Lang;
 pub use launcher::{App, Choice, Launcher, LauncherEvent, Showcase};
 pub use quick::{QuickAction, QuickState, Sheet, Tile};
