@@ -1770,6 +1770,31 @@ impl Run<'_> {
         while Instant::now() < until {
             self.compositor.dispatch(Duration::from_millis(5))?;
         }
+        // The annotation window draws the shape once it has the release:
+        // on a slow machine, later than any fixed wait.
+        if matches!(self.driving, Driving::Annotate) {
+            let end = (
+                node.rect.x + node.rect.w / 2.0 + drag.by[0] as f32,
+                node.rect.y + node.rect.h / 2.0 + drag.by[1] as f32,
+            );
+            let deadline = Instant::now() + CLIENT_TIMEOUT;
+            loop {
+                let shown = self.annotate.as_ref().and_then(|a| a.shown());
+                let done = shown.is_some_and(|s| {
+                    !s.drawing
+                        && s.pointer
+                            .is_some_and(|p| (p.x - end.0).abs() < 1.5 && (p.y - end.1).abs() < 1.5)
+                });
+                if done {
+                    break;
+                }
+                anyhow::ensure!(
+                    Instant::now() < deadline,
+                    "the annotation window never drew the drag"
+                );
+                self.compositor.dispatch(Duration::from_millis(5))?;
+            }
+        }
         Ok(())
     }
 

@@ -65,15 +65,30 @@ pub struct Options {
 /// The window running on a thread of its own (tests).
 #[derive(Debug)]
 pub struct Running {
-    access: Arc<Mutex<Option<AccessNode>>>,
+    shown: Arc<Mutex<Option<Shown>>>,
     thread: JoinHandle<anyhow::Result<()>>,
+}
+
+/// What the window's last frame showed.
+#[derive(Debug, Clone)]
+pub struct Shown {
+    /// As screen readers read it.
+    pub access: AccessNode,
+    /// Where the pointer was, and whether a shape was being drawn.
+    pub pointer: Option<Point>,
+    pub drawing: bool,
 }
 
 impl Running {
     /// What the window shows, as screen readers read it, after its last
     /// frame.
     pub fn access(&self) -> Option<AccessNode> {
-        self.access.lock().ok().and_then(|a| a.clone())
+        self.shown().map(|s| s.access)
+    }
+
+    /// The window's last frame.
+    pub fn shown(&self) -> Option<Shown> {
+        self.shown.lock().ok().and_then(|s| s.clone())
     }
 
     pub fn is_finished(&self) -> bool {
@@ -88,12 +103,12 @@ impl Running {
 }
 
 pub fn spawn(options: Options) -> anyhow::Result<Running> {
-    let access = Arc::new(Mutex::new(None));
+    let shown = Arc::new(Mutex::new(None));
     let thread = std::thread::Builder::new().name("annotate".into()).spawn({
-        let access = access.clone();
-        move || run(options, Some(access))
+        let shown = shown.clone();
+        move || run(options, Some(shown))
     })?;
-    Ok(Running { access, thread })
+    Ok(Running { shown, thread })
 }
 
 /// A file next to `file`, never over another: ` (annotated)` and a number
@@ -128,7 +143,7 @@ pub fn save_beside(file: &Path, png: &[u8]) -> std::io::Result<PathBuf> {
     Err(std::io::Error::other("no free name"))
 }
 
-pub fn run(options: Options, access: Option<Arc<Mutex<Option<AccessNode>>>>) -> anyhow::Result<()> {
+pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow::Result<()> {
     let png = std::fs::read(&options.file)
         .with_context(|| format!("could not read {}", options.file.display()))?;
     let picture = Picture::from_png(&png)?;
@@ -175,7 +190,7 @@ pub fn run(options: Options, access: Option<Arc<Mutex<Option<AccessNode>>>>) -> 
         modifiers: Modifiers::default(),
         closed: false,
         started: Instant::now(),
-        access,
+        shown,
     };
     while !app.closed {
         if app.configured && app.needs_draw {
@@ -219,7 +234,7 @@ struct App {
     modifiers: Modifiers,
     closed: bool,
     started: Instant,
-    access: Option<Arc<Mutex<Option<AccessNode>>>>,
+    shown: Option<Arc<Mutex<Option<Shown>>>>,
 }
 
 impl App {
@@ -290,10 +305,15 @@ impl App {
         buffer.attach_to(surface)?;
         self.window.commit();
         self.needs_draw = false;
-        if let Some(access) = &self.access
-            && let Ok(mut slot) = access.lock()
+        if let Some(shown) = &self.shown
+            && let Ok(mut slot) = shown.lock()
         {
-            *slot = Some(self.view.access());
+            let (pointer, drawing) = self.view.pointer();
+            *slot = Some(Shown {
+                access: self.view.access(),
+                pointer,
+                drawing,
+            });
         }
         Ok(())
     }

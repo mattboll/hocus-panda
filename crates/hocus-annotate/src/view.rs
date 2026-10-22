@@ -70,9 +70,9 @@ pub struct AnnotateView {
     tree: Tree,
     surface: Surface,
     picture: Picture,
-    /// The capture with its blurred areas, premultiplied, and how many
-    /// blurs it was made with.
-    base: (Vec<u8>, usize),
+    /// The capture with its blurred areas, premultiplied, and the areas
+    /// it was made with.
+    base: (Vec<u8>, Vec<Rect>),
     shapes: Vec<Shape>,
     /// A mark being drawn, from where.
     drawing: Option<(Point, Shape)>,
@@ -105,7 +105,7 @@ impl AnnotateView {
             tree: Tree::new(theme, size, scale),
             surface: Surface::new(size, scale),
             picture,
-            base: (base, 0),
+            base: (base, Vec::new()),
             shapes: Vec::new(),
             drawing: None,
             typing: None,
@@ -277,16 +277,17 @@ impl AnnotateView {
             all.extend(self.drawing.as_ref().map(|(_, s)| s.clone()));
             all
         };
-        let blurs = shapes
+        let blurs: Vec<Rect> = shapes
             .iter()
-            .filter(|s| matches!(s, Shape::Blur { .. }))
-            .count();
-        let blurring = self
-            .drawing
-            .as_ref()
-            .is_some_and(|(_, s)| matches!(s, Shape::Blur { .. }));
-        // The blurred base is made again only when the blurs change.
-        if blurs != self.base.1 || blurring {
+            .filter_map(|s| match s {
+                Shape::Blur { rect } => Some(*rect),
+                _ => None,
+            })
+            .collect();
+        // The blurred base is made again only when the blurred areas
+        // change: the last one drawn while dragging may not be where the
+        // drag ended.
+        if blurs != self.base.1 {
             self.base = (self.picture.base(&shapes), blurs);
         }
         let area = t
@@ -347,6 +348,12 @@ impl AnnotateView {
                 color: self.color,
             },
         }
+    }
+
+    /// Where the pointer was last, and whether a shape is being drawn: for
+    /// tests, which wait for a drag to be taken.
+    pub fn pointer(&self) -> (Option<Point>, bool) {
+        (self.pointer, self.drawing.is_some())
     }
 
     pub fn pointer_move(&mut self, at: Point) {
