@@ -114,6 +114,11 @@ the scene is drawn. While a value moves the loop asks for frames, which each
 output's clock paces; at rest it asks for none, and nothing is queued per
 frame. Tests run on a virtual clock and sample motion at a given time;
 those that do not ask for it (`motion = true`) see windows appear at once.
+Switching desktops (#36) slides a strip of the screen's desktops on that
+screen only: the model switches at once and only the picture moves, the
+windows of the desktops passing by drawn where they wait. A three-finger
+swipe holds the strip under the fingers and lets it spring to the nearest
+desktop; the switcher shows the screen's desktops meanwhile.
 
 A mirroring screen (#125, `mirror` in its `[[outputs]]` entry) stays lit but
 leaves the layout as an unplugged one would: its windows wait on the

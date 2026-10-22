@@ -44,6 +44,7 @@ mod session;
 mod settings;
 mod share;
 mod shell;
+mod slide;
 mod socket;
 mod state;
 mod stats;

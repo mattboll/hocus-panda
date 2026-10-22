@@ -75,6 +75,7 @@ Steps, one per `[[step]]` table:
 | `restart = true` | the compositor goes as a crash would, and a new one starts on the same configuration and state; clients go with it |
 | `open_trim = "{last_recording}"` | opens the recording editor on a file (the last recording saved), in-process, and waits for it; `expect_trim`, `click_trim`, `drag_trim` drive it as the annotation window's steps do |
 | `expect_export = { name_has, length? = [from, to], max_bytes? }` | a file the editor exported beside the last recording, once the editor names it: its length in seconds (ffprobe) and its size |
+| `swipe = { fingers, by = [dx, dy], begin? = true, release? = true }` | a touchpad swipe on the screen under the pointer, moved in eight steps a frame apart; `begin = false` goes on with the one held |
 | `expect_idle = { for_ms }` | no output draws a frame while this much virtual time passes: at rest, nothing is redrawn |
 | `expect_recording = { audio?, keys_at_ms? }` | the last recording saved, read by ffprobe and ffmpeg once done: with a sound track as long as the picture (or none); keys drawn near the bottom from this time in the video, the top unchanged |
 | `caldav = { dir, user, password }` | a CalDAV server on 127.0.0.1 serves the `.ics` files of `dir` (relative to the scenario); its calendar's address is `{caldav}` in later configuration, `type` and `calendar_password` steps |

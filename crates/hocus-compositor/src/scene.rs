@@ -244,6 +244,7 @@ impl State {
                 .into_iter()
                 .map(SceneElement::Frame),
         );
+        elements.extend(self.switcher_elements(renderer, output));
         // Third-party bars above the windows, but under a fullscreen one.
         if !fullscreen {
             elements.extend(
@@ -253,7 +254,22 @@ impl State {
             );
         }
         let focused = self.focused_window();
-        let windows: Vec<&Window> = self.space.elements().collect();
+        // Switching desktops (#36): the shown desktop's windows move with
+        // the strip, and those of the desktops passing by are drawn where
+        // they wait, below them.
+        let slide = self.slide_view(output);
+        let mut windows: Vec<(Window, Point<i32, Logical>)> = slide
+            .map(|v| self.slide_extras(output, v))
+            .unwrap_or_default();
+        windows.extend(self.space.elements().filter_map(|w| {
+            let mut at = self.space.element_location(w)?;
+            if let Some(v) = slide
+                && self.slides_with(w, output)
+            {
+                at.x += v.offset(v.shown);
+            }
+            Some((w.clone(), at))
+        }));
         // Focus mode: a veil over every window but the focused one, and
         // over what is behind them.
         let veil = |elements: &mut Vec<SceneElement<R>>| {
@@ -268,17 +284,15 @@ impl State {
             )));
         };
         let mut veiled = !self.comfort.focus_mode;
-        let focused_here = focused
-            .as_ref()
-            .is_some_and(|f| windows.contains(&f) && self.output_of(f) == Some(output));
+        let focused_here = focused.as_ref().is_some_and(|f| {
+            windows.iter().any(|(w, _)| w == f) && self.output_of(f) == Some(output)
+        });
         if !veiled && !focused_here {
             veil(&mut elements);
             veiled = true;
         }
-        for window in windows.into_iter().rev() {
-            let Some(mut location) = self.space.element_location(window) else {
-                continue;
-            };
+        for (window, mut location) in windows.into_iter().rev() {
+            let window = &window;
             // The drop-down terminal slides from above its place.
             if let Some(dy) = model_id(window).and_then(|id| self.dropdown_offset(id)) {
                 location.y += dy;

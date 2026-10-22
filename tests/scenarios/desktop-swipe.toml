@@ -1,0 +1,59 @@
+description = "A three-finger swipe holds the desktops under the fingers; let go at 40 % it springs back to the desktop shown, past half it switches"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+open = { app_id = "one", size = [600, 400], color = "#e5484d" }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+open = { app_id = "two", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+1"
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+# Held at 40 % towards the next desktop.
+[[step]]
+swipe = { fingers = 3, by = [-512, 0], release = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktop-swipe-held.png" }
+
+[[step]]
+swipe = { fingers = 3, by = [0, 0], begin = false }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_window = { app_id = "one", visible = true }
+
+# Past half: the next desktop.
+[[step]]
+swipe = { fingers = 3, by = [-800, 0] }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+expect_window = { app_id = "two", visible = true }
+
+[[step]]
+expect_idle = { for_ms = 2000 }

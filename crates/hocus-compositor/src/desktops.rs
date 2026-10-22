@@ -377,14 +377,22 @@ impl State {
         serial: Serial,
     ) -> Result<(), ModelError> {
         let name = OutputName(output.name());
-        let before = self.model.output(&name).map(|o| o.shown);
+        let index = |s: &Self| {
+            let out = s.model.output(&name)?;
+            out.desktops.iter().position(|d| *d == out.shown)
+        };
+        let before = index(self);
         self.model.show_nth(&name, n)?;
-        let after = self.model.output(&name).map(|o| o.shown);
+        let after = index(self);
         if before != after {
+            if let (Some(from), Some(to)) = (before, after) {
+                self.slide_desktops(output, from, to);
+            }
             self.sync_desktops();
+            let shown = self.model.output(&name).map(|o| o.shown.0);
             self.emit(|_| Event::DesktopShown {
                 output: name.0.clone(),
-                desktop: after.map(|d| d.0).unwrap_or_default(),
+                desktop: shown.unwrap_or_default(),
             });
             self.apply_focus(serial);
         }

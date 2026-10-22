@@ -115,6 +115,14 @@ pub enum Request {
         button: Button,
         pressed: bool,
     },
+    /// A touchpad swipe with `fingers`: begun, moved by `dx`, `dy` logical
+    /// pixels, ended or cancelled.
+    Swipe {
+        phase: SwipePhase,
+        fingers: u32,
+        dx: f64,
+        dy: f64,
+    },
     /// A wheel scroll in logical pixels, 15 per notch, down positive.
     PointerScroll {
         dy: f64,
@@ -226,6 +234,7 @@ impl Request {
             | Self::PointerMove { .. }
             | Self::PointerButton { .. }
             | Self::PointerScroll { .. }
+            | Self::Swipe { .. }
             | Self::Key { .. }
             | Self::CloseWindow { .. }
             | Self::SetWindowState { .. }
@@ -367,6 +376,16 @@ pub struct ConfigInfo {
     /// The account the session is, as it says it.
     #[serde(default)]
     pub user: String,
+}
+
+/// Where a swipe is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SwipePhase {
+    Begin,
+    Update,
+    End,
+    Cancel,
 }
 
 /// How well the compositor keeps up.

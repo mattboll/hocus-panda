@@ -1,0 +1,48 @@
+description = "Switching desktops on the external screen slides there only: sampled mid-way, the laptop has not moved"
+outputs = ["1280x800", "1920x1080"]
+motion = true
+
+[[step]]
+open = { app_id = "laptop", size = [600, 400], color = "#33cc66" }
+
+[[step]]
+pointer_move = [1900, 500]
+
+[[step]]
+open = { app_id = "one", size = [700, 450], color = "#e5484d" }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+open = { app_id = "two", size = [700, 450], color = "#3399ff" }
+
+[[step]]
+keys = "super+1"
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktop-slide-laptop.png" }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktop-slide-laptop.png" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "desktop-slide-external.png" }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_shown = { output = "HEADLESS-2", desktop = 2 }

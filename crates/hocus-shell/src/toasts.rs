@@ -130,7 +130,7 @@ impl std::fmt::Debug for Toasts {
 }
 
 /// A colour for an application, the same every time.
-pub(crate) fn app_color(app: &str) -> Color {
+pub fn app_color(app: &str) -> Color {
     const PALETTE: [Color; 7] = [
         Color::rgb(0x2f, 0x6f, 0xd6),
         Color::rgb(0x8e, 0x6c, 0xd8),
