@@ -29,7 +29,7 @@ use crate::{State, desktops::model_id, grabs::edges_of};
 
 impl State {
     /// The model's id of the managed window of `surface`.
-    fn managed_id(&self, surface: &WlSurface) -> Option<hocus_core::WindowId> {
+    pub(crate) fn managed_id(&self, surface: &WlSurface) -> Option<hocus_core::WindowId> {
         self.window_for(surface).as_ref().and_then(model_id)
     }
 }

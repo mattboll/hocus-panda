@@ -88,6 +88,22 @@ fast to compile and test, and lets the UI be developed in a plain window.
 - Frame pacing per output, driven by presentation feedback. Animations
   advance on that clock and never schedule work per tick.
 
+## Protocols
+
+Besides the core (compositor, xdg-shell, xdg-decoration, data device,
+XWayland), the compositor serves the protocols applications and tools
+expect: xdg-activation (a recent token brings its window forward),
+idle-inhibit, cursor-shape, keyboard-shortcuts-inhibit (granted while the
+window has the keyboard), xdg-foreign, presentation-time, fractional-scale,
+viewporter, single-pixel-buffer, alpha-modifier, content-type, pointer
+constraints and relative pointer, pointer gestures, the virtual keyboard,
+the primary selection, ext-data-control for clipboard managers,
+ext-foreign-toplevel-list and security-context. Clients started through a
+security context (Flatpak and other sandboxes) do not see the virtual
+keyboard, data control, the window list nor security contexts. Layer-shell
+(#113), screen capture (#114), idle notification (#29) and drm-lease (#27)
+come with their issues.
+
 ## Control API
 
 - UNIX socket next to the Wayland one (`hocus-0.api` beside `hocus-0`),

@@ -1,0 +1,28 @@
+description = "A window that holds the shortcuts back gets Super+A itself; quick settings stay closed"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "remote", size = [500, 400], color = "#2b2f36", inhibit_shortcuts = true }
+
+[[step]]
+expect_focus = "remote"
+
+[[step]]
+keys = "super+a"
+
+[[step]]
+expect_received = { app_id = "remote", event = "key 30 pressed" }
+
+[[step]]
+expect_ui = { label = "Quick settings", shown = false }
+
+# Another window has the keyboard: the shortcut works again.
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+keys = "super+a"
+
+[[step]]
+expect_ui = { label = "Quick settings" }

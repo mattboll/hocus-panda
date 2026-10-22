@@ -103,6 +103,9 @@ pub enum Step {
     ClickUi(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
+    /// The client of this app id asks for its window to come forward,
+    /// with an activation token of its own.
+    Activate(String),
     /// Starts the settings app on a page (or its home), and waits for its
     /// window: `{ page? }`.
     OpenSettings(OpenSettings),
@@ -198,6 +201,9 @@ pub struct OpenWindow {
     pub size: [u32; 2],
     /// `#rrggbb`.
     pub color: String,
+    /// Holds the compositor's shortcuts back while it has the keyboard.
+    #[serde(default)]
+    pub inhibit_shortcuts: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -388,6 +394,7 @@ impl fmt::Display for Step {
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
+            Self::Activate(app_id) => write!(f, "activate {app_id}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
             Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
             Self::ExpectConfigFile(_) => write!(f, "expect_config_file"),
@@ -553,6 +560,12 @@ impl Run<'_> {
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
             Step::OpenSettings(open) => self.open_settings(open),
+            Step::Activate(app_id) => self
+                .clients
+                .iter()
+                .find(|c| c.spec.app_id == *app_id)
+                .with_context(|| format!("no client {app_id}"))?
+                .activate(),
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
             Step::ExpectConfigFile(expected) => self.expect_config_file(expected),
@@ -780,14 +793,21 @@ impl Run<'_> {
                 }
             }
             Step::ExpectFocus(app_id) => {
-                let focused = self.windows()?.into_iter().find(|w| w.focused);
-                let focused = focused.and_then(|w| w.app_id);
-                anyhow::ensure!(
-                    focused.as_deref() == Some(app_id.as_str()),
-                    "focus: expected {app_id}, got {}",
-                    focused.as_deref().unwrap_or("nothing")
-                );
-                Ok(())
+                // What a client asked for (activation) may be on its way.
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let focused = self.windows()?.into_iter().find(|w| w.focused);
+                    let focused = focused.and_then(|w| w.app_id);
+                    if focused.as_deref() == Some(app_id.as_str()) {
+                        return Ok(());
+                    }
+                    anyhow::ensure!(
+                        Instant::now() < deadline,
+                        "focus: expected {app_id}, got {}",
+                        focused.as_deref().unwrap_or("nothing")
+                    );
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
             }
             Step::ExpectStack(expected) => {
                 let stack: Vec<String> = self
@@ -841,8 +861,12 @@ impl Run<'_> {
             argb: parse_color(&open.color)?,
         };
         let before = self.compositor.window_count();
-        self.clients
-            .push(window.spawn(self.compositor.socket_path())?);
+        self.clients.push(window.spawn_with(
+            self.compositor.socket_path(),
+            crate::client::ClientOptions {
+                inhibit_shortcuts: open.inhibit_shortcuts,
+            },
+        )?);
         self.compositor
             .dispatch_until(CLIENT_TIMEOUT, |c| c.window_count() > before)
             .context("the window did not appear")

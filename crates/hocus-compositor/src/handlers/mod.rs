@@ -1,6 +1,7 @@
 //! smithay protocol handlers.
 
 mod compositor;
+pub mod protocols;
 mod workspace;
 mod xdg_shell;
 mod xwayland;
@@ -43,9 +44,15 @@ impl SeatHandler for State {
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        self.protocols.keyboard_focus = focused.cloned();
         // The clipboard follows keyboard focus.
         let client = focused.and_then(|s| self.display_handle.get_client(s.id()).ok());
-        set_data_device_focus(&self.display_handle, seat, client);
+        set_data_device_focus(&self.display_handle, seat, client.clone());
+        smithay::wayland::selection::primary_selection::set_primary_focus(
+            &self.display_handle,
+            seat,
+            client,
+        );
     }
 }
 delegate_seat!(State);

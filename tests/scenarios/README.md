@@ -38,7 +38,8 @@ Steps, one per `[[step]]` table:
 
 | Step | Does |
 |---|---|
-| `open = { app_id, size = [w, h], color = "#rrggbb" }` | starts a test client with a solid window, waits until it is shown |
+| `open = { app_id, size = [w, h], color = "#rrggbb", inhibit_shortcuts? }` | starts a test client with a solid window, waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard |
+| `activate = "app_id"` | the client of that app id asks for its window to come forward, with an activation token of its own (xdg-activation) |
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
