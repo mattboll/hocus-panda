@@ -1,0 +1,41 @@
+description = "The Pandas page shows what their ear says and hides them all, written to the configuration; in the dark and light themes"
+outputs = ["1280x800"]
+
+[[step]]
+open_settings = { page = "pandas" }
+
+[[step]]
+expect_settings = { label = "Panda waiting for an answer" }
+
+[[step]]
+expect_settings = { label = "Show the pandas", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-pandas.png" }
+
+[[step]]
+click_settings = "Show the pandas"
+
+[[step]]
+expect_config_file = { contains = ["[pandas]", "enabled = false"] }
+
+[[step]]
+expect_settings = { label = "Show the pandas", selected = false }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+expect_settings = { label = "Show the pandas", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-pandas-light.png" }

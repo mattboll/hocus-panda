@@ -444,3 +444,322 @@ pub const CREDITS_TEXT: Words = Words::new(
     "Hocuspanda stands on smithay, calloop, vello, parley, zbus and many other free libraries: thank you to everyone who makes them.",
     "Hocuspanda s’appuie sur smithay, calloop, vello, parley, zbus et bien d’autres bibliothèques libres : merci à toutes celles et ceux qui les font.",
 );
+
+// Wallpaper.
+pub const STYLE: Words = Words::new("Style", "Style");
+pub const WALLPAPERS: [(&str, Words, Words); 6] = [
+    (
+        "glow",
+        Words::new("Glow", "Lueur"),
+        Words::new("soft light by the hour", "douce, selon l’heure"),
+    ),
+    (
+        "image",
+        Words::new("Picture", "Image"),
+        Words::new("one of yours", "une des tiennes"),
+    ),
+    (
+        "folder",
+        Words::new("Folder", "Dossier"),
+        Words::new("its pictures through the day", "ses images au fil du jour"),
+    ),
+    (
+        "colour",
+        Words::new("Colour", "Couleur"),
+        Words::new("plain", "unie"),
+    ),
+    (
+        "rain",
+        Words::new("Rain", "Pluie"),
+        Words::new("the Matrix rain", "la pluie de Matrix"),
+    ),
+    (
+        "stars",
+        Words::new("Stars", "Étoiles"),
+        Words::new("a slow night sky", "un ciel de nuit lent"),
+    ),
+];
+pub const MOVES_NOTE: Words = Words::new(
+    "Rain and stars move; they hold still with reduced motion, on the power saver, under a fullscreen window and without a graphics card.",
+    "La pluie et les étoiles bougent ; elles restent immobiles avec le mouvement réduit, en économie d’énergie, sous une fenêtre en plein écran et sans carte graphique.",
+);
+pub const SCREEN: Words = Words::new("Screen", "Écran");
+pub const EVERY_SCREEN: Words = Words::new("Every screen", "Tous les écrans");
+pub const OWN_WALLPAPER: Words = Words::new(
+    "This screen has its own wallpaper.",
+    "Cet écran a son propre fond.",
+);
+pub const LIKE_EVERY_SCREEN: Words = Words::new(
+    "It shows every screen’s until changed here.",
+    "Il montre celui de tous les écrans tant qu’il n’est pas changé ici.",
+);
+pub const LIKE_THE_OTHERS: Words = Words::new("Like the other screens", "Comme les autres écrans");
+pub const PICTURE: Words = Words::new("Picture", "Image");
+pub const PICTURE_FILE: Words = Words::new("Picture file", "Fichier image");
+pub const PICTURE_HINT: Words = Words::new("~/Pictures/hills.jpg", "~/Images/collines.jpg");
+pub const FOLDER: Words = Words::new("Folder", "Dossier");
+pub const FOLDER_FIELD: Words = Words::new("Folder of pictures", "Dossier d’images");
+pub const FOLDER_HINT: Words = Words::new("~/Pictures/day", "~/Images/jour");
+pub const PATH_NOTE: Words = Words::new(
+    "Type its path, then Enter.",
+    "Tape son chemin, puis Entrée.",
+);
+pub const FOLDER_NOTE: Words = Words::new(
+    "Its pictures follow one another through the day, in name order.",
+    "Ses images se suivent au fil du jour, dans l’ordre de leur nom.",
+);
+pub const FIT: Words = Words::new("Fit", "Ajustement");
+pub const MODES: [(&str, Words); 4] = [
+    ("fill", Words::new("Fill", "Remplir")),
+    ("fit", Words::new("Fit", "Adapter")),
+    ("stretch", Words::new("Stretch", "Étirer")),
+    ("center", Words::new("Centre", "Centrer")),
+];
+pub const COLOUR: Words = Words::new("Colour", "Couleur");
+pub const COLOUR_CODE: Words = Words::new("Colour code", "Code couleur");
+pub const THE_THEMES: Words = Words::new("The theme’s", "Celle du thème");
+pub const COLOUR_NOTE: Words = Words::new(
+    "Around a fitted or centred picture, or the whole screen.",
+    "Autour d’une image adaptée ou centrée, ou tout l’écran.",
+);
+pub const NOT_A_COLOUR: Words = Words::new(
+    "Not a colour: write it like #0e0f12.",
+    "Pas une couleur : écris-la comme #0e0f12.",
+);
+pub const COLOURS: [(&str, Words); 6] = [
+    ("#0e0f12", Words::new("Ink", "Encre")),
+    ("#14213d", Words::new("Night blue", "Bleu nuit")),
+    ("#1f3326", Words::new("Forest", "Forêt")),
+    ("#3b2238", Words::new("Plum", "Prune")),
+    ("#7a4b2a", Words::new("Clay", "Argile")),
+    ("#e9e6df", Words::new("Sand", "Sable")),
+];
+
+/// "Colour Ink", "Couleur Encre": a swatch's name.
+pub fn colour_named(name: Words, lang: Lang) -> String {
+    format!("{} {}", COLOUR.get(lang), name.get(lang))
+}
+
+/// The name of a wallpaper style as the user reads it.
+pub fn wallpaper_name(kind: &str, lang: Lang) -> String {
+    WALLPAPERS
+        .iter()
+        .find(|(id, _, _)| *id == kind)
+        .map_or_else(|| kind.to_owned(), |(_, name, _)| name.get(lang).to_owned())
+}
+
+// Column and dock.
+pub const COLUMN: Words = Words::new("Column", "Colonne");
+pub const COLUMN_NOTE: Words = Words::new(
+    "The clock, the agenda and notifications always show; these lines when there is something to say.",
+    "L’horloge, l’agenda et les notifications sont toujours là ; ces lignes quand il y a quelque chose à dire.",
+);
+pub const AGENTS: Words = Words::new("Coding agents", "Agents de code");
+pub const AGENTS_SUB: Words = Words::new(
+    "Each with its panda, from herdr",
+    "Chacun avec son panda, depuis herdr",
+);
+pub const PHONE: Words = Words::new("Phone", "Téléphone");
+pub const PHONE_SUB: Words = Words::new(
+    "Battery and Ring, through KDE Connect",
+    "Batterie et Sonner, par KDE Connect",
+);
+pub const SYSTEM_UPDATES: Words = Words::new("System updates", "Mises à jour du système");
+pub const SYSTEM_UPDATES_SUB: Words = Words::new(
+    "Looked for every few hours",
+    "Cherchées toutes les quelques heures",
+);
+pub const DOCK: Words = Words::new("Dock", "Dock");
+pub const DOCK_SUB: Words = Words::new(
+    "Super+D, an empty desktop or the bottom edge",
+    "Super+D, un bureau vide ou le bord du bas",
+);
+pub const PINNED: Words = Words::new("Kept in the dock", "Gardées dans le dock");
+pub const PINNED_NOTE: Words = Words::new(
+    "Open applications come after them; those not installed are left out.",
+    "Les applications ouvertes viennent après ; celles qui ne sont pas installées sont omises.",
+);
+pub const NO_PINNED: Words = Words::new(
+    "None: the dock shows the open applications.",
+    "Aucune : le dock montre les applications ouvertes.",
+);
+
+/// An application's name from its desktop entry's: the last part of
+/// `org.codeberg.dnkl.foot.desktop`, capitalised.
+pub fn app_name(entry: &str) -> String {
+    let id = entry.strip_suffix(".desktop").unwrap_or(entry);
+    let last = id.rsplit('.').next().unwrap_or(id);
+    let mut chars = last.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+// Pandas.
+pub const SHOW_PANDAS: Words = Words::new("Show the pandas", "Montrer les pandas");
+pub const SHOW_PANDAS_SUB: Words = Words::new(
+    "Off, none is drawn anywhere",
+    "Désactivé, aucun n’est dessiné nulle part",
+);
+pub const PANDAS_NOTE: Words = Words::new(
+    "They show what happens, move a moment when it changes, then hold still. Quick settings hide them for the session only.",
+    "Ils montrent ce qui se passe, bougent un instant quand ça change, puis restent immobiles. Les réglages rapides les cachent pour la session seulement.",
+);
+pub const EAR: Words = Words::new("What their ear says", "Ce que dit leur oreille");
+pub const MOODS: [(hocus_shell::panda::Mood, Words); 5] = [
+    (hocus_shell::panda::Mood::Work, Words::new("Acts", "Agit")),
+    (
+        hocus_shell::panda::Mood::Wait,
+        Words::new("Waits for you", "T’attend"),
+    ),
+    (hocus_shell::panda::Mood::Done, Words::new("Done", "A fini")),
+    (
+        hocus_shell::panda::Mood::Error,
+        Words::new("Stuck", "Bloqué"),
+    ),
+    (
+        hocus_shell::panda::Mood::Sleep,
+        Words::new("Asleep", "Dort"),
+    ),
+];
+pub const WHERE_PANDAS: Words = Words::new("Where they show", "Où ils apparaissent");
+pub const PANDAS_WHERE: [Words; 3] = [
+    Words::new(
+        "Beside each coding agent, in the column.",
+        "À côté de chaque agent de code, dans la colonne.",
+    ),
+    Words::new(
+        "With popcorn on the other screens while a video plays fullscreen.",
+        "Avec du pop-corn sur les autres écrans pendant une vidéo en plein écran.",
+    ),
+    Words::new(
+        "When the session starts, under the curtain and on the lock screen.",
+        "Au début de la session, sous le rideau et sur l’écran de verrouillage.",
+    ),
+];
+
+// Accessibility.
+pub const SEEING: Words = Words::new("Seeing", "Vue");
+pub const MOTION: Words = Words::new("Motion", "Mouvement");
+pub const MAGNIFIER: Words = Words::new("Magnifier", "Loupe");
+pub const ZOOM_IN: Words = Words::new("Zoom in", "Agrandir");
+pub const ZOOM_OUT: Words = Words::new("Zoom out", "Réduire");
+pub const MAGNIFIER_NOTE: Words = Words::new(
+    "Around the pointer, up to 8×; Super+Alt+wheel too. Back to 1×, it is off.",
+    "Autour du pointeur, jusqu’à 8× ; Super+Alt+molette aussi. Revenue à 1×, elle s’éteint.",
+);
+pub const CHANGE_KEYS: Words = Words::new("Change the keys", "Changer les touches");
+pub const NO_KEYS: Words = Words::new("No keys", "Aucune touche");
+
+// Language and region.
+pub const CLOCK: Words = Words::new("Clock", "Horloge");
+pub const HOURS_24: Words = Words::new("24 hours · 14:37", "24 heures · 14:37");
+pub const HOURS_12: Words = Words::new("12 hours · 2:37 PM", "12 heures · 2:37 PM");
+pub const TIME_ZONE: Words = Words::new("Time zone", "Fuseau horaire");
+pub const TIME_ZONE_NOTE: Words = Words::new(
+    "The clock, the agenda and the lock screen follow it; applications follow the system’s.",
+    "L’horloge, l’agenda et l’écran de verrouillage le suivent ; les applications suivent celui du système.",
+);
+
+/// Time zones offered, by region: the city named, its zone.
+pub const ZONES: [(Words, &[(&str, Words)]); 4] = [
+    (
+        Words::new("Europe", "Europe"),
+        &[
+            ("Europe/London", Words::new("London", "Londres")),
+            ("Europe/Lisbon", Words::new("Lisbon", "Lisbonne")),
+            ("Europe/Paris", Words::new("Paris", "Paris")),
+            ("Europe/Brussels", Words::new("Brussels", "Bruxelles")),
+            ("Europe/Zurich", Words::new("Zurich", "Zurich")),
+            ("Europe/Berlin", Words::new("Berlin", "Berlin")),
+            ("Europe/Madrid", Words::new("Madrid", "Madrid")),
+            ("Europe/Rome", Words::new("Rome", "Rome")),
+            ("Europe/Athens", Words::new("Athens", "Athènes")),
+            ("Europe/Istanbul", Words::new("Istanbul", "Istanbul")),
+            ("Europe/Moscow", Words::new("Moscow", "Moscou")),
+        ],
+    ),
+    (
+        Words::new("Africa", "Afrique"),
+        &[
+            ("Africa/Casablanca", Words::new("Casablanca", "Casablanca")),
+            ("Africa/Dakar", Words::new("Dakar", "Dakar")),
+            ("Africa/Abidjan", Words::new("Abidjan", "Abidjan")),
+            ("Africa/Lagos", Words::new("Lagos", "Lagos")),
+            ("Africa/Cairo", Words::new("Cairo", "Le Caire")),
+            ("Africa/Nairobi", Words::new("Nairobi", "Nairobi")),
+            (
+                "Africa/Johannesburg",
+                Words::new("Johannesburg", "Johannesburg"),
+            ),
+            ("Indian/Reunion", Words::new("Réunion", "La Réunion")),
+        ],
+    ),
+    (
+        Words::new("Americas", "Amériques"),
+        &[
+            ("America/Vancouver", Words::new("Vancouver", "Vancouver")),
+            (
+                "America/Los_Angeles",
+                Words::new("Los Angeles", "Los Angeles"),
+            ),
+            ("America/Denver", Words::new("Denver", "Denver")),
+            ("America/Chicago", Words::new("Chicago", "Chicago")),
+            ("America/Mexico_City", Words::new("Mexico City", "Mexico")),
+            ("America/Toronto", Words::new("Montreal", "Montréal")),
+            ("America/New_York", Words::new("New York", "New York")),
+            ("America/Guadeloupe", Words::new("Guadeloupe", "Guadeloupe")),
+            ("America/Bogota", Words::new("Bogotá", "Bogota")),
+            ("America/Sao_Paulo", Words::new("São Paulo", "São Paulo")),
+            (
+                "America/Argentina/Buenos_Aires",
+                Words::new("Buenos Aires", "Buenos Aires"),
+            ),
+            ("Pacific/Honolulu", Words::new("Honolulu", "Honolulu")),
+        ],
+    ),
+    (
+        Words::new("Asia and Oceania", "Asie et Océanie"),
+        &[
+            ("Asia/Dubai", Words::new("Dubai", "Dubaï")),
+            ("Asia/Kolkata", Words::new("Mumbai", "Bombay")),
+            ("Asia/Bangkok", Words::new("Bangkok", "Bangkok")),
+            ("Asia/Singapore", Words::new("Singapore", "Singapour")),
+            ("Asia/Shanghai", Words::new("Shanghai", "Shanghai")),
+            ("Asia/Seoul", Words::new("Seoul", "Séoul")),
+            ("Asia/Tokyo", Words::new("Tokyo", "Tokyo")),
+            ("Australia/Sydney", Words::new("Sydney", "Sydney")),
+            ("Pacific/Noumea", Words::new("Nouméa", "Nouméa")),
+            ("Pacific/Auckland", Words::new("Auckland", "Auckland")),
+            ("Pacific/Tahiti", Words::new("Tahiti", "Tahiti")),
+        ],
+    ),
+];
+
+/// A time zone as the user reads it: its city when offered, else its
+/// name in the database; the system's when empty.
+pub fn zone_name(zone: &str, lang: Lang) -> String {
+    if zone.is_empty() {
+        return LIKE_THE_SYSTEM.get(lang).to_owned();
+    }
+    if zone == "UTC" {
+        return "UTC".into();
+    }
+    ZONES
+        .iter()
+        .flat_map(|(_, cities)| cities.iter())
+        .find(|(id, _)| *id == zone)
+        .map_or_else(
+            || zone.replace('_', " "),
+            |(_, city)| city.get(lang).to_owned(),
+        )
+}
+
+/// "24 h" or "12 h", for summaries.
+pub fn clock_short(format: hocus_core::config::ClockFormat) -> &'static str {
+    match format {
+        hocus_core::config::ClockFormat::TwentyFour => "24 h",
+        hocus_core::config::ClockFormat::Twelve => "12 h",
+    }
+}

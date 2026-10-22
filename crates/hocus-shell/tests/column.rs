@@ -31,6 +31,7 @@ fn state() -> ColumnState {
             weekday: 2,
             day: 21,
             month: 10,
+            ..WallTime::default()
         },
         active: Some(ActiveWindow {
             title: "foot — ~/github/hocus-panda: cargo nextest run --workspace".into(),

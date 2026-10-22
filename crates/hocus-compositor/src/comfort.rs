@@ -127,12 +127,7 @@ impl State {
 
     /// Minutes the user's clock is ahead of UTC.
     fn wall_offset_minutes(&self) -> i32 {
-        match &self.wall {
-            crate::shell::WallClock::System(tz) => {
-                tz.to_offset(jiff::Timestamp::now()).seconds() / 60
-            }
-            crate::shell::WallClock::Virtual => 0,
-        }
+        self.wall.zone().to_offset(jiff::Timestamp::now()).seconds() / 60
     }
 
     /// Whether night light shows now: the schedule, unless the user said

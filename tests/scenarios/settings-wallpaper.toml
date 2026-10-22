@@ -1,0 +1,83 @@
+description = "The Wallpaper page gives one screen its own plain colour, at once, and shows every screen's picture settings; in the dark and light themes"
+outputs = ["1280x800", "1280x800+1280+0"]
+shell = true
+
+[[step]]
+open_settings = { page = "wallpaper" }
+
+[[step]]
+expect_settings = { label = "Every screen", selected = true }
+
+[[step]]
+expect_settings = { label = "Glow", selected = true }
+
+[[step]]
+click_settings = "HEADLESS-2"
+
+[[step]]
+click_settings = "Colour"
+
+[[step]]
+expect_config_file = { contains = ["[[wallpaper.screens]]", "output = \"HEADLESS-2\"", "kind = \"colour\""], lacks = ["[wallpaper]\n"] }
+
+[[step]]
+click_settings = "Colour Night blue"
+
+[[step]]
+expect_config_file = { contains = ["colour = \"#14213d\""] }
+
+[[step]]
+expect_settings = { label = "Colour Night blue", selected = true }
+
+[[step]]
+expect_settings = { label = "This screen has its own wallpaper." }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_pixel = { output = "HEADLESS-2", at = [640, 400], color = "#14213d", tolerance = 4 }
+
+# The other screen keeps every screen's glow.
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [10, 790], color = "#14213d", is = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-wallpaper.png" }
+
+# Every screen's picture, in the light theme.
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[wallpaper]
+kind = "image"
+image = "~/Pictures/hills.jpg"
+mode = "fit"
+colour = "#e9e6df"
+"""
+
+[[step]]
+click_settings = "Every screen"
+
+[[step]]
+expect_settings = { label = "Picture", selected = true }
+
+[[step]]
+expect_settings = { label = "Fit", selected = true }
+
+[[step]]
+expect_settings = { label = "Colour Sand", selected = true }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-wallpaper-light.png" }

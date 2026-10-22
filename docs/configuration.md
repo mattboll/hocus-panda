@@ -80,7 +80,7 @@ ocr = "tesseract"          # reads the text for "Copy the text", when installed
 annotate = "hocus-annotate" # the toast's "Annotate", given the capture's file
 
 [updates]                  # the system's, shown in the column and the settings
-enabled = true
+enabled = true             # false: neither looked for nor shown in the column
 every_hours = 6            # between looks, 1 to 168; never while fullscreen or on the power saver
 check = ""                 # a command printing NAME VERSION (or NAME OLD -> NEW) per update;
 install = ""               #   empty: apt, dnf, pacman or pkg, installed through polkit
@@ -157,6 +157,10 @@ herdr_socket = ""          # empty: $XDG_CONFIG_HOME/herdr/herdr.sock, looked fo
 
 [language]
 interface = "auto"         # en or fr; auto follows the session's locale (LANG); changed at once
+
+[clock]                    # the column's, the lock screen's and the agenda's
+format = "24h"             # or 12h (2:37 PM)
+time_zone = ""             # a time zone of the system's database (Europe/Paris); empty: the system's
 
 [hot_corners]              # the pointer resting in a screen's corner; one against another screen does nothing
 delay_ms = 150             # so that passing by does nothing

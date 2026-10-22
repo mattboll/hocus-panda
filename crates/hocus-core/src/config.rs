@@ -32,6 +32,7 @@ pub struct Config {
     pub pandas: Pandas,
     pub agents: Agents,
     pub language: Language,
+    pub clock: Clock,
     pub hot_corners: HotCorners,
     pub gestures: Gestures,
     pub clipboard: ClipboardConfig,
@@ -551,6 +552,61 @@ pub enum InterfaceLanguage {
 #[serde(default, deny_unknown_fields)]
 pub struct Language {
     pub interface: InterfaceLanguage,
+}
+
+/// How the shell writes the time (#67).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ClockFormat {
+    /// 14:37.
+    #[default]
+    #[serde(rename = "24h")]
+    TwentyFour,
+    /// 2:37 PM.
+    #[serde(rename = "12h")]
+    Twelve,
+}
+
+impl ClockFormat {
+    /// The time of day as the clock shows it.
+    pub fn time(self, hour: u8, minute: u8) -> String {
+        match self {
+            Self::TwentyFour => format!("{hour:02}:{minute:02}"),
+            Self::Twelve => {
+                let half = if hour < 12 { "AM" } else { "PM" };
+                let h = match hour % 12 {
+                    0 => 12,
+                    h => h,
+                };
+                format!("{h}:{minute:02} {half}")
+            }
+        }
+    }
+}
+
+/// The clock: its format and the time zone it follows.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Clock {
+    pub format: ClockFormat,
+    /// A time zone of the tz database (`Europe/Paris`); empty: the
+    /// system's.
+    pub time_zone: String,
+}
+
+impl Clock {
+    /// Whether `name` can be a time zone's: `Area/City` letters, digits,
+    /// `_`, `-` and `+`, never a way out of the database's folder.
+    pub fn zone_name_is_valid(name: &str) -> bool {
+        !name.is_empty()
+            && name.len() <= 64
+            && name.split('/').all(|part| {
+                !part.is_empty()
+                    && !part.starts_with('.')
+                    && part
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+'))
+            })
+    }
 }
 
 /// What a hot corner, Super alone or a touchpad gesture does (#86).
@@ -1138,6 +1194,14 @@ impl Config {
                 );
             }
         }
+        let zone = &self.clock.time_zone;
+        if !zone.is_empty() && !Clock::zone_name_is_valid(zone) {
+            return out_of_range(
+                "clock.time_zone",
+                format!("{zone:?}"),
+                "a time zone like \"Europe/Paris\", or \"\" for the system's",
+            );
+        }
         if !(0.2..=0.9).contains(&self.dropdown.height) {
             let h = self.dropdown.height.to_string();
             return out_of_range("dropdown.height", h, "0.2 to 0.9");
@@ -1207,6 +1271,29 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clock_reads_its_format_and_zone() -> Result<(), ConfigError> {
+        let config =
+            Config::parse("[clock]\nformat = \"12h\"\ntime_zone = \"America/New_York\"\n")?;
+        assert_eq!(config.clock.format, ClockFormat::Twelve);
+        assert_eq!(config.clock.format.time(14, 37), "2:37 PM");
+        assert_eq!(config.clock.format.time(0, 5), "12:05 AM");
+        assert_eq!(config.clock.format.time(12, 0), "12:00 PM");
+        assert_eq!(ClockFormat::TwentyFour.time(9, 3), "09:03");
+        assert_eq!(Config::parse("")?.clock, Clock::default());
+        for bad in [
+            "../../etc/passwd",
+            "/Europe/Paris",
+            "Europe/Paris ",
+            "Europe//Paris",
+        ] {
+            let text = format!("[clock]\ntime_zone = {bad:?}\n");
+            assert!(Config::parse(&text).is_err(), "{bad}");
+        }
+        assert!(Config::parse("[clock]\nformat = \"13h\"\n").is_err());
+        Ok(())
+    }
 
     #[test]
     fn a_screen_wallpaper_falls_back_on_the_general_one() -> Result<(), ConfigError> {

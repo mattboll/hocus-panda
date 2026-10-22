@@ -1,0 +1,62 @@
+description = "French chosen on Language and region: every page of the settings speaks it at once, without restart"
+outputs = ["1280x800"]
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+click_settings = "Français"
+
+[[step]]
+expect_config_file = { contains = ["interface = \"fr\""] }
+
+[[step]]
+expect_settings = { label = "24 heures · 14:37", selected = true }
+
+[[step]]
+click_settings = "Fond d’écran"
+
+[[step]]
+expect_settings = { label = "Lueur", selected = true }
+
+[[step]]
+expect_settings = { label = "Étoiles" }
+
+[[step]]
+click_settings = "Colonne et dock"
+
+[[step]]
+expect_settings = { label = "Agents de code", selected = true }
+
+[[step]]
+expect_settings = { label = "Retirer Firefox" }
+
+[[step]]
+click_settings = "Pandas"
+
+[[step]]
+expect_settings = { label = "Montrer les pandas", selected = true }
+
+[[step]]
+expect_settings = { label = "Panda qui attend une réponse" }
+
+[[step]]
+click_settings = "Accessibilité"
+
+[[step]]
+expect_settings = { label = "Contraste élevé", selected = false }
+
+[[step]]
+expect_settings = { label = "Taille du texte" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-french-pages.png" }
+
+[[step]]
+click_settings = "Apparence"
+
+[[step]]
+expect_settings = { label = "Sombre", selected = true }

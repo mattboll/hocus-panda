@@ -1,0 +1,53 @@
+description = "The Accessibility page turns high contrast and reduced motion on, and the settings draw in high contrast at once; in the dark and light themes"
+outputs = ["1280x800"]
+
+[[step]]
+open_settings = { page = "accessibility" }
+
+[[step]]
+expect_settings = { label = "High contrast", selected = false }
+
+[[step]]
+click_settings = "High contrast"
+
+[[step]]
+expect_config_file = { contains = ["[appearance]", "high_contrast = true"] }
+
+[[step]]
+click_settings = "Reduced motion"
+
+[[step]]
+expect_config_file = { contains = ["reduced_motion = true"] }
+
+[[step]]
+expect_settings = { label = "High contrast", selected = true }
+
+[[step]]
+expect_settings = { label = "Reduced motion", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-accessibility.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+expect_settings = { label = "High contrast", selected = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-accessibility-light.png" }
+
+[[step]]
+click_settings = "Change the keys"
+
+[[step]]
+expect_settings = { label = "Super+P shows these shortcuts over any window." }

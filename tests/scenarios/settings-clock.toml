@@ -1,0 +1,82 @@
+description = "Language and region sets the clock to 12 hours and Tokyo's time zone: the column's clock follows at once; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+expect_ui = { label = "14:37" }
+
+[[step]]
+expect_settings = { label = "24 hours · 14:37", selected = true }
+
+[[step]]
+click_settings = "12 hours · 2:37 PM"
+
+[[step]]
+expect_config_file = { contains = ["[clock]", "format = \"12h\""] }
+
+[[step]]
+expect_ui = { label = "2:37 PM" }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+click_settings = "Tokyo"
+
+[[step]]
+expect_config_file = { contains = ["time_zone = \"Asia/Tokyo\""] }
+
+# 14:37 in UTC, the virtual clock's zone, is 23:37 in Tokyo.
+[[step]]
+expect_ui = { label = "11:37 PM" }
+
+[[step]]
+expect_settings = { label = "Tokyo", selected = true }
+
+[[step]]
+scroll = -600
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-clock.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[clock]
+time_zone = "America/New_York"
+"""
+
+[[step]]
+expect_ui = { label = "10:37" }
+
+[[step]]
+expect_settings = { label = "New York", selected = true }
+
+[[step]]
+scroll = 600
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-clock-light.png" }
+
+[[step]]
+scroll = -600
+
+[[step]]
+click_settings = "Time zone: Like the system"
+
+[[step]]
+expect_ui = { label = "14:37" }

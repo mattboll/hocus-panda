@@ -326,12 +326,10 @@ impl State {
             screen_capture: Default::default(),
             locking: crate::lock::Locking::new(dh),
             sessions: Default::default(),
-            wall: match clock {
-                Clock::Monotonic { .. } => {
-                    crate::shell::WallClock::System(jiff::tz::TimeZone::system())
-                }
-                Clock::Virtual { .. } => crate::shell::WallClock::Virtual,
-            },
+            wall: crate::shell::WallClock::new(match clock {
+                Clock::Monotonic { .. } => crate::shell::WallSource::System,
+                Clock::Virtual { .. } => crate::shell::WallSource::Virtual,
+            }),
             idle_notifications: Vec::new(),
             workspaces: WorkspaceState::new(dh),
             measures: Measures::default(),
