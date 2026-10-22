@@ -37,6 +37,20 @@ enum Handled {
 }
 
 impl State {
+    /// A panel that takes the keys is open: the launcher, quick settings,
+    /// a chooser, a card, polkit's dialog, the window switcher.
+    pub fn modal_open(&self) -> bool {
+        self.launcher_open()
+            || self.share_open()
+            || self.quick_open()
+            || self.showcase_open()
+            || self.card_open()
+            || self.leave_open()
+            || self.auth_open()
+            || self.picking()
+            || self.alt_tab_open()
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
             InputEvent::Keyboard { event } => self.on_key::<I>(event),
@@ -141,15 +155,7 @@ impl State {
                 let action = combo
                     .filter(|_| !state.shortcuts_inhibited())
                     .and_then(|combo| state.shortcuts.action(&combo).cloned());
-                let modal = state.launcher_open()
-                    || state.share_open()
-                    || state.quick_open()
-                    || state.showcase_open()
-                    || state.card_open()
-                    || state.leave_open()
-                    || state.auth_open()
-                    || state.picking()
-                    || state.alt_tab_open();
+                let modal = state.modal_open();
                 match action {
                     // A panel's own shortcut closes it; others still work.
                     Some(action)
@@ -316,6 +322,7 @@ impl State {
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
             && (self.alt_tab_pointer(location, None, SERIAL_COUNTER.next_serial())
+                || self.dock_pointer(location, None)
                 || self.share_pointer(location, None)
                 || self.recording_pointer(location, None)
                 || self.picker_pointer(location, None)
@@ -380,6 +387,7 @@ impl State {
         if button == BTN_LEFT
             && !pointer.is_grabbed()
             && (self.alt_tab_pointer(at, Some(pressed), serial)
+                || self.dock_pointer(at, Some(pressed))
                 || self.share_pointer(at, Some(pressed))
                 || self.recording_pointer(at, Some(pressed))
                 || self.picker_pointer(at, Some(pressed))

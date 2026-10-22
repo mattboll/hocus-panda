@@ -35,4 +35,4 @@ expect_screenshot = { output = "HEADLESS-1", reference = "launcher-fuzzy.png" }
 keys = "escape"
 
 [[step]]
-expect_ui = { label = "Firefox", shown = false }
+expect_ui = { label = "Firewall", shown = false }

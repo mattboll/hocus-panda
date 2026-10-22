@@ -1,0 +1,61 @@
+description = "The pointer resting at the bottom edge for 300 ms shows the dock; leaving it hides it"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+"""
+
+[[step]]
+open = { app_id = "firefox", size = [900, 700], color = "#e8642c" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Foot", shown = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-hint.png" }
+
+# Passing by the edge is not enough.
+[[step]]
+pointer_move = [470, 799]
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_ui = { label = "Foot", shown = false }
+
+[[step]]
+advance_ms = 150
+
+[[step]]
+expect_ui = { label = "Foot" }
+
+# Up onto it: it stays; an app under the pointer rises.
+[[step]]
+pointer_move = [400, 720]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Foot" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-edge.png" }
+
+# Away: it goes.
+[[step]]
+pointer_move = [400, 300]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Foot", shown = false }

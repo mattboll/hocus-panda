@@ -93,6 +93,21 @@ pub fn start(
     if let Err(err) = inserted {
         tracing::warn!(%err.error, "the launcher will find no applications");
     }
+    // Read once at start, for the dock; again each time the launcher
+    // opens.
+    let first_dirs = dirs.clone().unwrap_or_else(apps::data_dirs);
+    let first_lang = std::env::var("LANG").ok();
+    let scan = std::thread::Builder::new()
+        .name("applications".into())
+        .spawn({
+            let sender = sender.clone();
+            move || {
+                let _ = sender.send(apps::scan(&first_dirs, first_lang.as_deref()));
+            }
+        });
+    if let Err(err) = scan {
+        tracing::warn!(%err, "could not read the applications");
+    }
     state.launcher = Some(LauncherPanel {
         launcher: Launcher::new(Theme::default(), lang, 1.0),
         on: None,
@@ -254,6 +269,8 @@ impl State {
     }
 
     fn apps_found(&mut self, entries: Vec<Entry>) {
+        // The dock names and launches the same apps.
+        self.dock.entries = entries.clone();
         if let Some(panel) = self.launcher.as_mut() {
             panel
                 .launcher

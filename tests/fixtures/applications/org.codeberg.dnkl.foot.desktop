@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Foot
+GenericName=Terminal
+Keywords=shell;prompt;command;
+Exec=true

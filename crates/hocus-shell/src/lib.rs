@@ -9,6 +9,7 @@ pub mod authorize;
 pub mod calc;
 pub mod checkbox;
 pub mod column;
+pub mod dock;
 pub mod emoji;
 pub mod fuzzy;
 pub mod i18n;

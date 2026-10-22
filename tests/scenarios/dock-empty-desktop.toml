@@ -1,0 +1,63 @@
+description = "An empty desktop shows the dock, pinned apps then open ones; a window hides it, Super+D brings it back, and a click focuses an app's window"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+"""
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Firefox" }
+
+[[step]]
+expect_ui = { label = "Foot" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-empty-desktop.png" }
+
+# A window: the desktop is no longer empty, only the hint is left.
+[[step]]
+open = { app_id = "firefox", size = [640, 420], color = "#e8642c" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Firefox", shown = false }
+
+# An app not pinned comes after the pinned ones while it is open.
+[[step]]
+open = { app_id = "viewer", size = [400, 300], color = "#2f6fd6" }
+
+[[step]]
+keys = "super+d"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "viewer" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-shortcut.png" }
+
+[[step]]
+click_ui = "Firefox"
+
+[[step]]
+expect_focus = "firefox"
+
+[[step]]
+keys = "super+d"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Firefox", shown = false }

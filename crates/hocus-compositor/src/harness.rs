@@ -36,7 +36,8 @@ pub struct HarnessOptions {
     /// Reads battery, network… from services on this (private, test) bus;
     /// without it, tests use a stub and never the machine's.
     pub system_bus: Option<String>,
-    /// Where the launcher reads desktop entries.
+    /// Where the launcher and the dock read desktop entries; none: no
+    /// applications, never the machine's.
     pub data_dirs: Option<Vec<std::path::PathBuf>>,
     /// What started applications inherit.
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
@@ -66,7 +67,7 @@ fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
         session_services: false,
         // Private: tests never touch the developer's saved session.
         state_dir: Some(config.with_file_name("state")),
-        data_dirs: harness.data_dirs.clone(),
+        data_dirs: Some(harness.data_dirs.clone().unwrap_or_default()),
         child_env: harness.child_env.clone(),
         polkit_helper: harness.polkit_helper.clone(),
     };
