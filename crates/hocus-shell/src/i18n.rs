@@ -153,6 +153,24 @@ impl Lang {
         }
     }
 
+    pub fn palette_hint(self) -> &'static str {
+        self.pick(
+            "Enter runs it on the active window · Tab: its shortcut in Settings · or press its keys",
+            "Entrée l’exécute sur la fenêtre active · Tab : son raccourci dans les Réglages · ou tapez ses touches",
+        )
+    }
+
+    pub fn palette_placeholder(self) -> &'static str {
+        self.pick(
+            "Search an action, or press its keys…",
+            "Chercher une action, ou taper ses touches…",
+        )
+    }
+
+    pub fn no_shortcut(self) -> &'static str {
+        self.pick("no shortcut", "pas de raccourci")
+    }
+
     pub fn tray_title(self) -> &'static str {
         self.pick("Tray", "Zone de notification")
     }

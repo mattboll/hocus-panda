@@ -6,9 +6,14 @@
 //! The same card shows the clipboard history (Super+V: newest first, Tab
 //! pins, Delete forgets) and the emoji picker (Super+Period: in English and
 //! French, recent ones first, Tab changes the skin tone).
+//!
+//! And the action palette (Super+P, #68): every action, with its keys as
+//! caps and what it acts on, recent ones first; searched by name in either
+//! language, or by keys typed ("Maj+S") or pressed.
 
 use std::time::Duration;
 
+use hocus_core::{Action, shortcuts::Combo};
 use hocus_ui::{
     AccessNode, Align, Direction, Event, Icon, Input, Insets, Key, Kind, Length, Look, NodeId,
     Paint, PixelRect, Point, Rect, Size, Style, Surface, TextField, Theme, Tree,
@@ -80,6 +85,10 @@ pub enum Choice {
     Insert(String),
     /// Forgets the history, but what is pinned.
     ClearHistory,
+    /// An action of the palette, on what had the focus.
+    Run(Action),
+    /// The settings' shortcuts, to give an action keys.
+    SetShortcut,
 }
 
 /// What the card shows.
@@ -89,6 +98,7 @@ pub enum Mode {
     Commands,
     Clipboard,
     Emoji,
+    Actions,
 }
 
 /// What the command field can do to the session.
@@ -126,7 +136,11 @@ pub struct Launcher {
     surface: Surface,
     field: NodeId,
     list: NodeId,
-    rows: Vec<(NodeId, Hit)>,
+    /// What answers the query, best first; `rows` shows `MAX_RESULTS` of
+    /// them from `first`.
+    hits: Vec<Hit>,
+    first: usize,
+    rows: Vec<NodeId>,
     apps: Vec<App>,
     providers: Vec<Box<dyn Provider>>,
     selected: usize,
@@ -138,6 +152,12 @@ pub struct Launcher {
     recents: Vec<String>,
     /// 0 none, 1 light to 5 dark.
     tone: u8,
+    /// Every binding, for the palette.
+    shortcuts: Vec<(Combo, Action)>,
+    /// Actions run from the palette lately, newest first.
+    action_recents: Vec<Action>,
+    /// The keys that open what the card shows, in the field's corner.
+    chip_text: NodeId,
     /// The hint under the list in the history and the picker, and its box.
     hint: NodeId,
     hint_box: NodeId,
@@ -238,18 +258,19 @@ impl Launcher {
                 }),
             )
             .unwrap_or_else(missing);
-        tree.add(
-            chip,
-            Style::default(),
-            Kind::text(
-                lang.launcher_shortcut(),
-                hocus_ui::TextStyle {
-                    typeface: hocus_ui::Typeface::Mono,
-                    ..theme.text.label.with_weight(500).with_color(Paint::Muted)
-                },
-            ),
-        )
-        .unwrap_or_else(missing);
+        let chip_text = tree
+            .add(
+                chip,
+                Style::default(),
+                Kind::text(
+                    lang.launcher_shortcut(),
+                    hocus_ui::TextStyle {
+                        typeface: hocus_ui::Typeface::Mono,
+                        ..theme.text.label.with_weight(500).with_color(Paint::Muted)
+                    },
+                ),
+            )
+            .unwrap_or_else(missing);
         let list = tree
             .add(
                 card,
@@ -277,6 +298,8 @@ impl Launcher {
             surface: Surface::new(size, scale),
             field,
             list,
+            hits: Vec::new(),
+            first: 0,
             rows: Vec::new(),
             apps: Vec::new(),
             providers: providers(&Enabled::default()),
@@ -286,6 +309,9 @@ impl Launcher {
             history: Vec::new(),
             recents: Vec::new(),
             tone: 0,
+            shortcuts: Vec::new(),
+            action_recents: Vec::new(),
+            chip_text,
             hint,
             hint_box,
             now: Duration::ZERO,
@@ -347,6 +373,18 @@ impl Launcher {
         self.mode = mode;
         self.tree.set_field_value(self.field, "");
         self.tree.set_focus(Some(self.field));
+        let keys = match mode {
+            Mode::Commands => self.lang.launcher_shortcut(),
+            Mode::Clipboard => "Super+V",
+            Mode::Emoji => "Super+.",
+            Mode::Actions => "Super+P",
+        };
+        self.tree.set_text(self.chip_text, keys);
+        let placeholder = match mode {
+            Mode::Actions => self.lang.palette_placeholder(),
+            _ => self.lang.command_placeholder(),
+        };
+        self.tree.set_placeholder(self.field, placeholder);
         self.show_hint();
         self.search();
     }
@@ -361,7 +399,7 @@ impl Launcher {
         if self.open && self.mode == Mode::Clipboard {
             let selected = self.selected;
             self.search();
-            self.selected = selected.min(self.rows.len().saturating_sub(1));
+            self.selected = selected.min(self.hits.len().saturating_sub(1));
             self.show_selection();
         }
     }
@@ -370,9 +408,108 @@ impl Launcher {
         self.recents = recents;
     }
 
+    /// The bindings in effect, for the palette.
+    pub fn set_shortcuts(&mut self, shortcuts: Vec<(Combo, Action)>) {
+        self.shortcuts = shortcuts;
+    }
+
+    pub fn set_action_recents(&mut self, recents: Vec<Action>) {
+        self.action_recents = recents;
+    }
+
+    /// Keys pressed in the palette: they are what it looks for.
+    pub fn press_keys(&mut self, combo: &Combo) {
+        if !self.open || self.mode != Mode::Actions {
+            return;
+        }
+        let text = crate::actions::caps(combo, self.lang).join("+");
+        self.tree.set_field_value(self.field, &text);
+        self.search();
+    }
+
+    /// The keys of `action`: those asked for when keys are searched, else
+    /// its first binding's.
+    fn keys_of(&self, action: &Action) -> Option<&Combo> {
+        let asked = crate::actions::keys_query(self.query());
+        self.shortcuts
+            .iter()
+            .filter(|(_, a)| a == action)
+            .min_by_key(|(c, _)| {
+                asked
+                    .as_ref()
+                    .and_then(|asked| crate::actions::keys_rank(asked, c))
+                    .unwrap_or(u8::MAX)
+            })
+            .map(|(c, _)| c)
+    }
+
+    /// Every action, matching the query: by keys when it reads as keys,
+    /// else by name in either language; recent ones first.
+    fn action_hits(&self, query: &str) -> Vec<Hit> {
+        use crate::actions::{catalog, describe, keys_query, keys_rank};
+        let mut all: Vec<Action> = self.action_recents.clone();
+        for action in catalog()
+            .into_iter()
+            .chain(self.shortcuts.iter().map(|(_, a)| a.clone()))
+        {
+            if !all.contains(&action) {
+                all.push(action);
+            }
+        }
+        let asked = keys_query(query);
+        let mut ranked: Vec<(i64, usize, Action)> = all
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, action)| {
+                let recent = i < self.action_recents.len();
+                let rank = if query.is_empty() {
+                    // Recent ones, then by group.
+                    if recent {
+                        0
+                    } else {
+                        1 + describe(&action, self.lang).group as i64
+                    }
+                } else if let Some(asked) = &asked {
+                    let best = self
+                        .shortcuts
+                        .iter()
+                        .filter(|(_, a)| *a == action)
+                        .filter_map(|(c, _)| keys_rank(asked, c))
+                        .min()?;
+                    i64::from(best)
+                } else {
+                    let names = [
+                        describe(&action, Lang::En).name,
+                        describe(&action, Lang::Fr).name,
+                    ];
+                    let score = names
+                        .iter()
+                        .filter_map(|n| crate::fuzzy::score(query, n))
+                        .max()?;
+                    -i64::from(score)
+                };
+                Some((rank, i, action))
+            })
+            .collect();
+        ranked.sort_by_key(|(rank, i, _)| (*rank, *i));
+        ranked
+            .into_iter()
+            .map(|(_, _, action)| {
+                let d = describe(&action, self.lang);
+                Hit {
+                    title: d.name,
+                    kind: format!("{} · {}", d.group.name(self.lang), d.scope),
+                    color: None,
+                    choice: Choice::Run(action),
+                }
+            })
+            .collect()
+    }
+
     fn show_hint(&mut self) {
         let hint = match self.mode {
             Mode::Commands => String::new(),
+            Mode::Actions => self.lang.palette_hint().to_owned(),
             Mode::Clipboard => self.lang.history_hint().to_owned(),
             Mode::Emoji => self.lang.emoji_hint(&self.tone_sample()),
         };
@@ -442,6 +579,7 @@ impl Launcher {
                 }
                 hits
             }
+            Mode::Actions => self.action_hits(query),
             Mode::Emoji => {
                 let emoji: Vec<&crate::emoji::Emoji> = if query.is_empty() {
                     self.recents
@@ -477,16 +615,33 @@ impl Launcher {
 
     /// Fills the list from what is typed.
     fn search(&mut self) {
-        for (row, _) in std::mem::take(&mut self.rows) {
+        let query = self.query().trim().to_owned();
+        self.hits = self.hits(&query);
+        // Only the palette scrolls: it lists everything.
+        if self.mode != Mode::Actions {
+            self.hits.truncate(MAX_RESULTS);
+        }
+        self.selected = 0;
+        self.first = 0;
+        self.render();
+    }
+
+    /// Shows `MAX_RESULTS` hits from `first`.
+    fn render(&mut self) {
+        for row in std::mem::take(&mut self.rows) {
             self.tree.remove(row);
         }
         for child in self.tree.children(self.list) {
             self.tree.remove(child);
         }
         let query = self.query().trim().to_owned();
-        let mut hits = self.hits(&query);
-        hits.truncate(MAX_RESULTS);
-        self.selected = 0;
+        let hits: Vec<Hit> = self
+            .hits
+            .iter()
+            .skip(self.first)
+            .take(MAX_RESULTS)
+            .cloned()
+            .collect();
         let theme = self.tree.theme().clone();
         if hits.is_empty() && !query.is_empty() {
             let _ = self.tree.add(
@@ -524,7 +679,15 @@ impl Launcher {
             ) else {
                 continue;
             };
-            self.tree.set_clickable(row, &name);
+            // An action says its keys too, for screen readers.
+            let said = match &hit.choice {
+                Choice::Run(action) => match self.keys_of(action) {
+                    Some(combo) => format!("{name}, {combo}"),
+                    None => format!("{name}, {}", self.lang.no_shortcut()),
+                },
+                _ => name.clone(),
+            };
+            self.tree.set_clickable(row, &said);
             // Applications and results have their colour; copies and emoji
             // speak for themselves.
             if self.mode == Mode::Commands {
@@ -558,35 +721,101 @@ impl Launcher {
                     theme.text.label.with_weight(500).with_color(Paint::Muted),
                 ),
             );
-            self.rows.push((row, hit));
+            if let Choice::Run(action) = &hit.choice {
+                self.add_caps(row, action, &theme);
+            }
+            self.rows.push(row);
         }
         self.show_selection();
     }
 
+    /// An action's keys as caps, or "no shortcut".
+    fn add_caps(&mut self, row: NodeId, action: &Action, theme: &Theme) {
+        let Some(keys) = self.tree.add(
+            row,
+            Style {
+                direction: Direction::Row,
+                width: Length::Px(200.0),
+                gap: 6.0,
+                align: Align::Center,
+                justify: hocus_ui::Justify::End,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        ) else {
+            return;
+        };
+        let mono = hocus_ui::TextStyle {
+            typeface: hocus_ui::Typeface::Mono,
+            ..theme.text.label.with_weight(500)
+        };
+        let Some(combo) = self.keys_of(action) else {
+            let _ = self.tree.add(
+                keys,
+                Style::default(),
+                Kind::text(
+                    self.lang.no_shortcut(),
+                    theme.text.label.with_color(Paint::Muted),
+                ),
+            );
+            return;
+        };
+        for cap in crate::actions::caps(combo, self.lang) {
+            let Some(cap_box) = self.tree.add(
+                keys,
+                Style {
+                    padding: Insets::symmetric(4.0, 9.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfacePressed),
+                    radius: 7.0,
+                    border: Some(Paint::Border),
+                    ..Look::default()
+                }),
+            ) else {
+                continue;
+            };
+            let _ = self
+                .tree
+                .add(cap_box, Style::default(), Kind::text(cap, mono));
+        }
+    }
+
+    /// Marks the chosen row, scrolling the list to it.
     fn show_selection(&mut self) {
+        if self.selected < self.first {
+            self.first = self.selected;
+            return self.render();
+        }
+        if self.selected >= self.first + MAX_RESULTS {
+            self.first = self.selected + 1 - MAX_RESULTS;
+            return self.render();
+        }
         let theme = self.tree.theme().clone();
-        for (i, (row, _)) in self.rows.iter().enumerate() {
+        for (i, row) in self.rows.iter().enumerate() {
+            let chosen = self.first + i == self.selected;
             self.tree.set_look(
                 *row,
                 Look {
-                    background: (i == self.selected).then_some(Paint::SurfaceHover),
+                    background: chosen.then_some(Paint::SurfaceHover),
                     radius: theme.radii.medium,
                     ..Look::default()
                 },
             );
-            self.tree.set_selected_box(*row, i == self.selected);
+            self.tree.set_selected_box(*row, chosen);
         }
     }
 
     fn selected_paste(&self) -> Option<String> {
-        match &self.rows.get(self.selected)?.1.choice {
+        match &self.hits.get(self.selected)?.choice {
             Choice::Paste(text) => Some(text.clone()),
             _ => None,
         }
     }
 
     fn choose(&self, i: usize) -> Option<LauncherEvent> {
-        let (_, hit) = self.rows.get(i)?;
+        let hit = self.hits.get(i)?;
         Some(LauncherEvent::Chosen(hit.choice.clone()))
     }
 
@@ -631,17 +860,22 @@ impl Launcher {
                 self.show_hint();
                 let selected = self.selected;
                 self.search();
-                self.selected = selected.min(self.rows.len().saturating_sub(1));
+                self.selected = selected.min(self.hits.len().saturating_sub(1));
                 self.show_selection();
                 Vec::new()
             }
-            Key::Down | Key::Tab if !self.rows.is_empty() => {
-                self.selected = (self.selected + 1) % self.rows.len();
+            // Tab in the palette: give the action keys in the settings.
+            Key::Tab if self.mode == Mode::Actions => {
+                self.close();
+                vec![LauncherEvent::Chosen(Choice::SetShortcut)]
+            }
+            Key::Down | Key::Tab if !self.hits.is_empty() => {
+                self.selected = (self.selected + 1) % self.hits.len();
                 self.show_selection();
                 Vec::new()
             }
-            Key::Up | Key::BackTab if !self.rows.is_empty() => {
-                self.selected = (self.selected + self.rows.len() - 1) % self.rows.len();
+            Key::Up | Key::BackTab if !self.hits.is_empty() => {
+                self.selected = (self.selected + self.hits.len() - 1) % self.hits.len();
                 self.show_selection();
                 Vec::new()
             }
@@ -694,8 +928,8 @@ impl Launcher {
             let Event::Activated(node) = event else {
                 continue;
             };
-            if let Some(i) = self.rows.iter().position(|(r, _)| *r == node)
-                && let Some(chosen) = self.choose(i)
+            if let Some(i) = self.rows.iter().position(|r| *r == node)
+                && let Some(chosen) = self.choose(self.first + i)
             {
                 self.close();
                 events.push(chosen);
@@ -795,6 +1029,75 @@ mod tests {
         let mut l = launcher();
         l.open();
         assert_eq!(l.key(Key::Escape), vec![LauncherEvent::Closed]);
+    }
+
+    fn palette(bindings: &[(&str, &str)]) -> Launcher {
+        let mut l = Launcher::new(Theme::default(), Lang::En, 1.0);
+        l.set_shortcuts(
+            bindings
+                .iter()
+                .map(|(c, a)| (c.parse().expect("keys"), a.parse().expect("an action")))
+                .collect(),
+        );
+        l.open_mode(Mode::Actions);
+        l
+    }
+
+    #[test]
+    fn the_palette_lists_every_action_with_its_keys() {
+        let mut l = palette(&[("Super+M", "toggle-maximized"), ("Super+F12", "spawn foot")]);
+        // Down goes through all of them, past what the card shows.
+        let mut seen = Vec::new();
+        for _ in 0..l.hits.len() {
+            if let Some(Choice::Run(action)) = l.hits.get(l.selected).map(|h| h.choice.clone()) {
+                seen.push(action);
+            }
+            l.key(Key::Down);
+        }
+        for action in crate::actions::catalog() {
+            assert!(seen.contains(&action), "{action} is listed");
+        }
+        assert!(
+            seen.contains(&Action::Spawn("foot".into())),
+            "a bound command too"
+        );
+        let dump = l.access().dump();
+        assert!(dump.contains("Maximize or restore, Super+M"), "{dump}");
+        assert!(l.rows.len() <= MAX_RESULTS);
+    }
+
+    #[test]
+    fn keys_typed_or_pressed_find_their_action_and_recent_ones_come_first() {
+        let region = Action::screenshot(hocus_core::shortcuts::ScreenshotMode::Region);
+        let mut l = palette(&[
+            ("Shift+Print", "screenshot region"),
+            ("Super+Shift+S", "screenshot region"),
+        ]);
+        l.text("Maj+S");
+        assert_eq!(
+            l.hits.first().map(|h| h.choice.clone()),
+            Some(Choice::Run(region.clone()))
+        );
+        l.press_keys(&"Super+Shift+S".parse().expect("keys"));
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![LauncherEvent::Chosen(Choice::Run(region))]
+        );
+        let mut l = palette(&[]);
+        l.set_action_recents(vec![Action::Lock]);
+        l.open_mode(Mode::Actions);
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![LauncherEvent::Chosen(Choice::Run(Action::Lock))]
+        );
+        let mut l = palette(&[]);
+        l.text("zone");
+        assert!(matches!(
+            l.key(Key::Enter).pop(),
+            Some(LauncherEvent::Chosen(Choice::Run(
+                Action::Screenshot { .. }
+            )))
+        ));
     }
 
     #[test]

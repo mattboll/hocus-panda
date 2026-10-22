@@ -1466,8 +1466,14 @@ impl SettingsView {
 
         // Groups.
         let chips = self.add(body, fill_width(row(6.0)), Kind::Box(Look::default()));
-        let groups = std::iter::once((None, words::ALL_GROUPS))
-            .chain(ShortcutGroup::ALL.into_iter().map(|g| (Some(g), g.label())));
+        let groups = std::iter::once((None, words::ALL_GROUPS)).chain(
+            ShortcutGroup::ALL.into_iter().map(|g| {
+                (
+                    Some(g),
+                    words::Words::new(g.name(Lang::En), g.name(Lang::Fr)),
+                )
+            }),
+        );
         for (group, label) in groups {
             let mut b = Button::new(label.get(lang), ButtonKind::Chip, theme);
             b.selected = self.group == group;

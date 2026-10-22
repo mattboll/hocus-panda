@@ -60,6 +60,8 @@ pub struct LauncherPanel {
     showcase: Option<Shown>,
     /// The configuration generation the providers follow.
     providers_from: u64,
+    /// Actions run from the palette, newest first.
+    action_recents: Vec<hocus_core::Action>,
 }
 
 /// Something shown over a whole screen.
@@ -101,6 +103,7 @@ pub fn start(
         lang,
         showcase: None,
         providers_from: 0,
+        action_recents: Vec::new(),
     });
 }
 
@@ -142,6 +145,36 @@ impl LauncherPanel {
 impl State {
     pub fn launcher_open(&self) -> bool {
         self.launcher.as_ref().is_some_and(|l| l.launcher.is_open())
+    }
+
+    pub fn palette_open(&self) -> bool {
+        self.launcher.as_ref().is_some_and(|l| {
+            l.launcher.is_open() && l.launcher.mode() == hocus_shell::launcher::Mode::Actions
+        })
+    }
+
+    /// The action palette, with the bindings in effect.
+    pub fn toggle_palette(&mut self) {
+        let shortcuts: Vec<_> = self
+            .shortcuts
+            .bindings
+            .iter()
+            .map(|(c, a)| (c.clone(), a.clone()))
+            .collect();
+        if let Some(panel) = self.launcher.as_mut() {
+            panel.launcher.set_shortcuts(shortcuts);
+            panel
+                .launcher
+                .set_action_recents(panel.action_recents.clone());
+        }
+        self.toggle_launcher_mode(hocus_shell::launcher::Mode::Actions);
+    }
+
+    pub fn palette_keys(&mut self, combo: &hocus_core::shortcuts::Combo) {
+        if let Some(panel) = self.launcher.as_mut() {
+            panel.launcher.press_keys(combo);
+        }
+        self.needs_redraw = true;
     }
 
     pub fn toggle_launcher(&mut self) {
@@ -278,6 +311,22 @@ impl State {
                 LauncherEvent::Chosen(Choice::Settings) => {
                     self.close_launcher();
                     self.open_settings(None);
+                }
+                LauncherEvent::Chosen(Choice::SetShortcut) => {
+                    self.close_launcher();
+                    self.open_settings(Some("keyboard".into()));
+                }
+                LauncherEvent::Chosen(Choice::Run(action)) => {
+                    self.close_launcher();
+                    if let Some(panel) = self.launcher.as_mut() {
+                        let recents = &mut panel.action_recents;
+                        recents.retain(|a| *a != action);
+                        recents.insert(0, action.clone());
+                        recents.truncate(5);
+                    }
+                    tracing::info!(%action, "from the palette");
+                    // On what had the focus before the palette.
+                    self.run_action(&action, smithay::utils::SERIAL_COUNTER.next_serial());
                 }
                 LauncherEvent::Pin(text) => self.history_pin(&text),
                 LauncherEvent::Forget(text) => self.history_forget(&text),

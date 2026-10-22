@@ -153,6 +153,7 @@ impl State {
                 self.toggle_launcher_mode(hocus_shell::launcher::Mode::Clipboard);
             }
             Action::Emoji => self.toggle_launcher_mode(hocus_shell::launcher::Mode::Emoji),
+            Action::Palette => self.toggle_palette(),
             Action::SwitchWindows(_) => {
                 tracing::debug!("the window switcher comes with #39");
             }

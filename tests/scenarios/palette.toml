@@ -1,0 +1,89 @@
+description = "Super+P lists every action with its keys, recent ones first; typing searches names in either language or keys, pressing a combination finds its action, and Enter runs it on the window focused before"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[shortcuts]
+"Super+M" = "toggle-maximized"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [500, 300], color = "#3399ff" }
+
+[[step]]
+expect_window = { app_id = "editor", focused = true }
+
+[[step]]
+keys = "super+25"
+
+[[step]]
+expect_ui = { label = "Maximize or restore, Super+M" }
+
+[[step]]
+expect_ui = { label = "Fullscreen, Super+F11" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "palette.png" }
+
+# A combination pressed is a search: Super+Shift+S finds the region capture
+# first (it is also Shift+Print).
+[[step]]
+keys = "super+shift+31"
+
+[[step]]
+expect_ui = { label = "Capture a region, Super+Shift+S", selected = true }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "palette-keys.png" }
+
+# Typed keys, in French names, find it too.
+[[step]]
+key = 1
+
+[[step]]
+keys = "super+25"
+
+[[step]]
+type = "Maj+S"
+
+[[step]]
+expect_ui = { label = "Capture a region, Super+Shift+S", selected = true }
+
+# By name: maximize runs on the window focused before.
+[[step]]
+key = 1
+
+[[step]]
+keys = "super+25"
+
+[[step]]
+type = "maximize"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized", focused = true }
+
+# Recent first; "zone" (French) starts a region capture.
+[[step]]
+keys = "super+25"
+
+[[step]]
+expect_ui = { label = "Maximize or restore, Super+M", selected = true }
+
+[[step]]
+type = "zone"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Drag over a region · Escape to cancel" }
