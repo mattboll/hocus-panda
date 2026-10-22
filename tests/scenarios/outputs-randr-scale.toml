@@ -1,0 +1,43 @@
+# A screen tool (as wlr-randr) changes the laptop's scale: windows keep
+# their place on their screen, a maximized one fills it again, and nothing
+# restarts (#28).
+description = "wlr-randr changes the laptop's scale; windows keep their places"
+outputs = ["2560x1600", "1920x1080"]
+
+[[step]]
+open = { app_id = "kept", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+open = { app_id = "full", size = [400, 300], color = "#cc6633" }
+
+[[step]]
+set_state = { app_id = "full", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "kept", geometry = [1080, 650, 400, 300] }
+
+[[step]]
+randr = { output = "HEADLESS-1", scale = 2.0 }
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 1280, 800], pixels = [2560, 1600], scale = 2.0 }
+
+# Its place on its screen, brought inside it.
+[[step]]
+expect_window = { app_id = "kept", geometry = [880, 500, 400, 300], visible = true }
+
+[[step]]
+expect_window = { app_id = "full", geometry = [0, 0, 1280, 800], state = "maximized" }
+
+[[step]]
+expect_event = { type = "output_changed", has = "HEADLESS-1" }
+
+# Back to scale 1: the layout was seen, every window comes back.
+[[step]]
+randr = { output = "HEADLESS-1", scale = 1.0 }
+
+[[step]]
+expect_window = { app_id = "kept", geometry = [1080, 650, 400, 300] }
+
+[[step]]
+expect_window = { app_id = "full", geometry = [0, 0, 2560, 1600], state = "maximized" }

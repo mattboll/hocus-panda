@@ -73,6 +73,7 @@ impl State {
         self.restore_places();
         self.sync_desktops();
         self.apply_focus(SERIAL_COUNTER.next_serial());
+        self.output_lit(output);
     }
 
     /// Removes an output: the windows it showed go to the primary output,
@@ -118,6 +119,7 @@ impl State {
         self.emit(|_| Event::OutputRemoved {
             name: name.0.clone(),
         });
+        self.output_settings.changed = true;
     }
 
     /// Notes where every window is, for the current set of outputs and their
@@ -136,9 +138,9 @@ impl State {
     }
 
     /// Puts windows back where they were in this layout, if it was seen.
-    fn restore_places(&mut self) {
+    pub fn restore_places(&mut self) -> bool {
         let Some(places) = self.places.get(&self.layout_key()) else {
-            return;
+            return false;
         };
         for (id, at) in places {
             if let Some(managed) = self.windows.get_mut(id) {
@@ -146,6 +148,7 @@ impl State {
                 managed.location = *at;
             }
         }
+        true
     }
 
     /// The outputs in the space and where they are, as one key.
@@ -527,7 +530,7 @@ impl State {
 
 /// `location` moved so that a window of `size` lies inside `area` as much as
 /// it can.
-fn clamp_into(
+pub(crate) fn clamp_into(
     location: Point<i32, Logical>,
     size: smithay::utils::Size<i32, Logical>,
     area: Rectangle<i32, Logical>,

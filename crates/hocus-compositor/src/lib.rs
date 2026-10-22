@@ -25,6 +25,7 @@ mod launcher;
 mod lock;
 mod notify;
 mod output_spec;
+mod outputs;
 mod quick;
 mod scene;
 mod screen_capture;
@@ -310,6 +311,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     event_loop.run(None, &mut app, |app| {
         app.state.refresh_shell();
         app.serve_captures();
+        app.settle_outputs();
         match &mut app.backend {
             BackendState::Winit(winit) => winit.after_dispatch(&mut app.state),
             BackendState::Headless(headless) => headless.after_dispatch(&handle, &app.state),

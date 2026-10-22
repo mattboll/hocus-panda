@@ -25,6 +25,8 @@ pub struct Config {
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
     pub rules: Vec<Rule>,
+    /// Each screen's mode, scale, rotation, place: `[[outputs]]`.
+    pub outputs: Vec<crate::outputs::OutputConfig>,
 }
 
 /// Where and how windows matching `app_id` and `title` (globs with `*` and
@@ -415,6 +417,12 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl Config {
+    /// What the file sets for the output `name`; the first entry for it
+    /// wins.
+    pub fn output(&self, name: &str) -> Option<&crate::outputs::OutputConfig> {
+        self.outputs.iter().find(|o| o.name == name)
+    }
+
     /// Reads a configuration file's text: what it holds over the defaults.
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let config: Self = toml::from_str(text).map_err(|err| ConfigError(err.to_string()))?;
@@ -462,6 +470,16 @@ impl Config {
                 && !(1..=8).contains(&d)
             {
                 return out_of_range(&format!("rules[{i}].desktop"), d.to_string(), "1 to 8");
+            }
+        }
+        for (i, output) in self.outputs.iter().enumerate() {
+            if let Err(err) = output.check() {
+                let line = text
+                    .match_indices("[[outputs]]")
+                    .nth(i)
+                    .map(|(at, _)| format!("line {}: ", text[..at].lines().count() + 1))
+                    .unwrap_or_default();
+                return Err(ConfigError(format!("{line}outputs[{i}].{err}")));
             }
         }
         if !["right", "left"].contains(&self.decorations.buttons.as_str()) {
@@ -670,5 +688,20 @@ mod tests {
         let config = Config::parse("[keyboard]\nlayouts = [\"fr\", \"us\"]\n")?;
         assert_eq!(Config::parse(&config.to_toml())?, config);
         Ok(())
+    }
+
+    #[test]
+    fn screens_are_set_by_name_and_wrong_ones_said_with_their_line() {
+        let c = Config::parse(
+            "[[outputs]]\nname = \"eDP-1\"\nscale = 1.5\ntransform = \"90\"\n\n\
+             [[outputs]]\nname = \"DP-1\"\nmode = \"2560x1440@144\"\nposition = [2560, 0]\n",
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(c.output("eDP-1").and_then(|o| o.scale), Some(1.5));
+        assert_eq!(c.output("DP-1").and_then(|o| o.position), Some([2560, 0]));
+        let err =
+            Config::parse("[[outputs]]\nname = \"a\"\n\n[[outputs]]\nname = \"b\"\nscale = 9\n")
+                .expect_err("scale 9 is refused");
+        assert!(err.0.starts_with("line 4: outputs[1].scale"), "{err}");
     }
 }

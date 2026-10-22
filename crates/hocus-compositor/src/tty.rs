@@ -35,7 +35,7 @@ use smithay::{
             LoopHandle, RegistrationToken,
             timer::{TimeoutAction, Timer},
         },
-        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc, property},
+        drm::control::{self, Device as ControlDevice, ModeTypeFlags, connector, crtc, property},
         input::Libinput,
         rustix::fs::OFlags,
         wayland_server::backend::GlobalId,
@@ -51,6 +51,7 @@ use crate::{
     capture::{self, Pixels},
     flip::{self, Flip, Health},
     output_spec::DEFAULT_DESKTOPS,
+    outputs::{Head, Setting},
     scene::SceneElement,
 };
 
@@ -89,13 +90,27 @@ struct Gpu {
     renderer: GlesRenderer,
     outputs: Outputs,
     screens: HashMap<crtc::Handle, Screen>,
+    /// Connected screens turned off: what is needed to light them again.
+    off: Vec<Off>,
     /// For clients that draw on the GPU: the formats it can read.
     _dmabuf: DmabufGlobal,
+}
+
+/// A connected screen turned off.
+struct Off {
+    connector: connector::Handle,
+    head: Head,
 }
 
 /// One connector lit, through one CRTC.
 struct Screen {
     connector: connector::Handle,
+    /// What the connector offers, and what the head says about it.
+    modes: Vec<control::Mode>,
+    head: Head,
+    vrr: bool,
+    /// Dark through output-power: nothing is drawn.
+    dark: bool,
     output: Output,
     global: GlobalId,
     surface: Surface,
@@ -245,6 +260,7 @@ fn open_gpu(
         renderer,
         outputs,
         screens: HashMap::new(),
+        off: Vec::new(),
         _dmabuf: dmabuf,
     })
 }
@@ -322,8 +338,17 @@ fn on_vblank(app: &mut App, crtc: crtc::Handle, metadata: &mut Option<DrmEventMe
         })
         .unwrap_or_else(|| state.clock.now());
     state.presented(&screen.output, now, screen.presented);
-    if screen.dirty && tty.active {
+    if screen.dirty && tty.active && !screen.dark {
         tty.gpu.render(crtc, state);
+    }
+}
+
+fn core_mode(m: control::Mode) -> hocus_core::outputs::Mode {
+    let wl = Mode::from(m);
+    hocus_core::outputs::Mode {
+        width: wl.size.w,
+        height: wl.size.h,
+        refresh: wl.refresh,
     }
 }
 
@@ -342,6 +367,9 @@ impl TtyBackend {
             .filter(|c| c.state() == connector::State::Connected && !c.modes().is_empty())
             .collect();
 
+        self.gpu
+            .off
+            .retain(|o| connected.iter().any(|c| c.handle() == o.connector));
         // Gone: unplugged, or no longer connected.
         let gone: Vec<crtc::Handle> = self
             .gpu
@@ -354,7 +382,7 @@ impl TtyBackend {
             if let Some(screen) = self.gpu.screens.remove(&crtc) {
                 tracing::info!(output = screen.output.name(), "screen unplugged");
                 state.unplug_output(&screen.output);
-                state.display_handle.remove_global::<State>(screen.global);
+                state.retire_global(screen.global);
                 for token in [screen.health, screen.pace].into_iter().flatten() {
                     if let Some(handle) = &state.loop_handle {
                         handle.remove(token);
@@ -364,19 +392,20 @@ impl TtyBackend {
         }
 
         for info in connected {
-            if self
+            let known = self
                 .gpu
                 .screens
                 .values()
                 .any(|s| s.connector == info.handle())
-            {
+                || self.gpu.off.iter().any(|o| o.connector == info.handle());
+            if known {
                 continue;
             }
             let Some(crtc) = self.free_crtc(&info) else {
                 tracing::warn!(connector = ?info.handle(), "no CRTC left for a screen");
                 continue;
             };
-            match self.light(crtc, &info, state) {
+            match self.light(crtc, &info, None, state) {
                 Ok(screen) => {
                     self.gpu.screens.insert(crtc, screen);
                 }
@@ -401,6 +430,7 @@ impl TtyBackend {
         &mut self,
         crtc: crtc::Handle,
         info: &connector::Info,
+        mode: Option<control::Mode>,
         state: &mut State,
     ) -> anyhow::Result<Screen> {
         let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
@@ -408,22 +438,25 @@ impl TtyBackend {
         let (make, model) = edid(device, info.handle())
             .map(|e| identity(&e))
             .unwrap_or_default();
-        let drm_mode = info
+        let preferred = info
             .modes()
             .iter()
-            .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
-            .or_else(|| info.modes().first())
-            .copied()
+            .position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED));
+        let drm_mode = mode
+            .or_else(|| preferred.map(|i| info.modes()[i]))
+            .or_else(|| info.modes().first().copied())
             .context("no mode")?;
         let mode = Mode::from(drm_mode);
         let (width_mm, height_mm) = info.size().unwrap_or((0, 0));
+        let make = make.unwrap_or_else(|| "Unknown".into());
+        let model = model.unwrap_or_else(|| "Unknown".into());
         let output = Output::new(
             name.clone(),
             PhysicalProperties {
                 size: (width_mm as i32, height_mm as i32).into(),
                 subpixel: info.subpixel().into(),
-                make: make.unwrap_or_else(|| "Unknown".into()),
-                model: model.unwrap_or_else(|| "Unknown".into()),
+                make: make.clone(),
+                model: model.clone(),
             },
         );
         let global = output.create_global::<State>(&state.display_handle);
@@ -470,8 +503,26 @@ impl TtyBackend {
             mode = %format!("{}x{}@{:.2}", mode.size.w, mode.size.h, f64::from(mode.refresh) / 1000.0),
             "screen lit"
         );
+        let vrr_capable = surface.with_compositor(|c| {
+            c.vrr_supported(info.handle())
+                .is_ok_and(|v| !matches!(v, smithay::backend::drm::VrrSupport::NotSupported))
+        });
+        let head = Head {
+            name,
+            make,
+            model,
+            physical_size: (width_mm as i32, height_mm as i32),
+            modes: info.modes().iter().map(|m| core_mode(*m)).collect(),
+            preferred,
+            vrr_capable,
+            now: Setting::of(&output, (x, 0), true, false),
+        };
         Ok(Screen {
             connector: info.handle(),
+            modes: info.modes().to_vec(),
+            head,
+            vrr: false,
+            dark: false,
             output,
             global,
             surface,
@@ -499,7 +550,7 @@ impl TtyBackend {
             .gpu
             .screens
             .iter()
-            .filter(|(_, s)| !s.flip.is_queued() && s.pace.is_none())
+            .filter(|(_, s)| !s.dark && !s.flip.is_queued() && s.pace.is_none())
             .map(|(crtc, _)| *crtc)
             .collect();
         for crtc in ready {
@@ -516,6 +567,152 @@ impl TtyBackend {
         cursor: bool,
     ) -> anyhow::Result<Pixels> {
         capture::output::<_, GlesTexture>(&mut self.gpu.renderer, output, state, cursor)
+    }
+
+    /// Every connected screen, lit or off.
+    pub fn heads(&self, state: &State) -> Vec<Head> {
+        let lit = self.gpu.screens.values().map(|s| {
+            let position = state
+                .space
+                .output_geometry(&s.output)
+                .map_or((0, 0), |g| (g.loc.x, g.loc.y));
+            Head {
+                now: Setting::of(&s.output, position, true, s.vrr),
+                ..s.head.clone()
+            }
+        });
+        let off = self.gpu.off.iter().map(|o| o.head.clone());
+        let mut heads: Vec<Head> = lit.chain(off).collect();
+        heads.sort_by(|a, b| a.name.cmp(&b.name));
+        heads
+    }
+
+    /// Sets a screen as asked: its mode on the CRTC, adaptive sync, on or
+    /// off; then the desktop follows.
+    pub fn apply(
+        &mut self,
+        name: &str,
+        setting: &Setting,
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        if let Some(i) = self.gpu.off.iter().position(|o| o.head.name == name) {
+            if !setting.enabled {
+                return Ok(());
+            }
+            let off = self.gpu.off.remove(i);
+            let device = self.gpu.outputs.device();
+            let info = device
+                .get_connector(off.connector, false)
+                .context("the screen is gone")?;
+            let mode = info
+                .modes()
+                .iter()
+                .find(|m| core_mode(**m) == setting.mode)
+                .copied();
+            let crtc = self.free_crtc(&info).context("no CRTC left")?;
+            let screen = self.light(crtc, &info, mode, state)?;
+            let output = screen.output.clone();
+            self.gpu.screens.insert(crtc, screen);
+            state.set_output(&output, setting);
+            return Ok(());
+        }
+        let (crtc, screen) = self
+            .gpu
+            .screens
+            .iter_mut()
+            .find(|(_, s)| s.output.name() == name)
+            .map(|(c, s)| (*c, s))
+            .with_context(|| format!("no screen named {name}"))?;
+        if !setting.enabled {
+            screen.surface.with_compositor(|c| {
+                if let Err(err) = c.clear() {
+                    tracing::warn!(%err, "could not turn the screen off");
+                }
+            });
+            let Some(screen) = self.gpu.screens.remove(&crtc) else {
+                return Ok(());
+            };
+            let position = state
+                .space
+                .output_geometry(&screen.output)
+                .map_or((0, 0), |g| (g.loc.x, g.loc.y));
+            state.disable_output(&screen.output);
+            state.retire_global(screen.global);
+            if let Some(handle) = &state.loop_handle {
+                for token in [screen.health, screen.pace].into_iter().flatten() {
+                    handle.remove(token);
+                }
+            }
+            let mut head = screen.head;
+            head.now = Setting {
+                enabled: false,
+                ..Setting::of(&screen.output, position, false, screen.vrr)
+            };
+            self.gpu.off.push(Off {
+                connector: screen.connector,
+                head,
+            });
+            return Ok(());
+        }
+        let current = core_mode(screen.surface.with_compositor(|c| c.pending_mode()));
+        if setting.mode != current {
+            let mode = screen
+                .modes
+                .iter()
+                .find(|m| core_mode(**m) == setting.mode)
+                .copied()
+                .context("the screen has no such mode")?;
+            screen
+                .surface
+                .use_mode::<_, SceneElement<GlesRenderer>>(
+                    mode,
+                    &mut self.gpu.renderer,
+                    &DrmOutputRenderElements::default(),
+                )
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+        }
+        if setting.vrr != screen.vrr {
+            screen
+                .surface
+                .with_compositor(|c| c.use_vrr(setting.vrr))
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            screen.vrr = setting.vrr;
+        }
+        screen.dirty = true;
+        let output = screen.output.clone();
+        state.set_output(&output, setting);
+        Ok(())
+    }
+
+    /// Turns a screen's light off or on (output-power): off, the CRTC is
+    /// cleared; on, it is committed afresh with a full frame.
+    pub fn power(&mut self, name: &str, on: bool, state: &mut State) -> anyhow::Result<()> {
+        let (crtc, screen) = self
+            .gpu
+            .screens
+            .iter_mut()
+            .find(|(_, s)| s.output.name() == name)
+            .map(|(c, s)| (*c, s))
+            .with_context(|| format!("no screen named {name}"))?;
+        if on == !screen.dark {
+            return Ok(());
+        }
+        screen.dark = !on;
+        screen.surface.with_compositor(|c| {
+            let result = if on { c.reset_state() } else { c.clear() };
+            if let Err(err) = result {
+                tracing::warn!(%err, on, "could not change the screen's power");
+            }
+        });
+        if on {
+            screen.flip = Flip::Idle;
+            screen.surface.reset_buffers();
+            screen.dirty = true;
+            if self.active {
+                self.gpu.render(crtc, state);
+            }
+        }
+        Ok(())
     }
 
     pub fn capture_window(&mut self, window: &Window, scale: f64) -> anyhow::Result<Pixels> {
@@ -591,7 +788,7 @@ fn pace(screen: &mut Screen, crtc: crtc::Handle, state: &State) {
             && let Some(screen) = tty.gpu.screens.get_mut(&crtc)
         {
             screen.pace = None;
-            if screen.dirty && tty.active && !screen.flip.is_queued() {
+            if screen.dirty && tty.active && !screen.dark && !screen.flip.is_queued() {
                 tty.gpu.render(crtc, state);
             }
         }

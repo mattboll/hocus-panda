@@ -108,6 +108,10 @@ pub struct State {
     pub is_session: bool,
     /// Switches virtual terminals, on a TTY.
     pub vt_switch: Option<smithay::backend::session::libseat::LibSeatSession>,
+    /// What screens are set to, and what was asked (#28).
+    pub output_settings: crate::outputs::Settings,
+    /// wlr-output-management and output-power, for third-party tools.
+    pub output_management: crate::handlers::output_management::OutputManagement,
     /// linux-dmabuf, whose global the TTY backend makes for its GPU.
     pub dmabuf_state: smithay::wayland::dmabuf::DmabufState,
     /// The configuration file, when there is one.
@@ -214,6 +218,8 @@ impl State {
             system_bus: None,
             is_session: false,
             vt_switch: None,
+            output_settings: Default::default(),
+            output_management: crate::handlers::output_management::OutputManagement::new(dh),
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
             settings_started: None,
             child_env: None,

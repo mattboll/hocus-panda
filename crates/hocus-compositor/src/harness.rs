@@ -228,6 +228,7 @@ impl Headless {
         self.event_loop.dispatch(Some(timeout), &mut self.app)?;
         self.app.state.refresh_shell();
         self.app.serve_captures();
+        self.app.settle_outputs();
         self.app.state.display_handle.flush_clients()?;
         Ok(())
     }

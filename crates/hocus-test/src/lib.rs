@@ -4,6 +4,7 @@ pub mod bus;
 pub mod client;
 pub mod image;
 pub mod layer;
+pub mod randr;
 pub mod scenario;
 pub mod screencopy;
 pub mod session_lock;
