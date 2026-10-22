@@ -128,11 +128,25 @@ fn expand(path: &str) -> PathBuf {
 }
 
 impl State {
-    /// The theme the configuration asks for, before any wallpaper accent.
-    fn configured_theme(&self) -> Theme {
+    /// How the desktop shown on `output` looks, if it has a look of its
+    /// own (#49).
+    fn look_on(&self, output: &str) -> Option<&hocus_core::config::DesktopLook> {
+        let o = self
+            .model
+            .output(&hocus_core::OutputName(output.to_owned()))?;
+        let index = o.desktops.iter().position(|d| *d == o.shown)?;
+        self.config.desktops.look(output, index)
+    }
+
+    /// The theme the configuration asks for on `output`, its shown
+    /// desktop's own over `[appearance]`, before any wallpaper accent.
+    fn configured_theme_on(&self, output: Option<&str>) -> Theme {
         let a = &self.config.appearance;
-        let mut theme = Theme::builtin(a.theme.parse().unwrap_or(ThemeName::Dark));
-        if let Ok(accent) = a.accent.parse::<Accent>() {
+        let look = output.and_then(|o| self.look_on(o));
+        let name = look.and_then(|l| l.theme.as_deref()).unwrap_or(&a.theme);
+        let accent = look.and_then(|l| l.accent.as_deref()).unwrap_or(&a.accent);
+        let mut theme = Theme::builtin(name.parse().unwrap_or(ThemeName::Dark));
+        if let Ok(accent) = accent.parse::<Accent>() {
             theme = theme.with_accent(accent);
         }
         if a.high_contrast {
@@ -146,26 +160,37 @@ impl State {
     /// After each dispatch: asks for the wallpapers that changed, and gives
     /// the shell the theme in effect.
     pub fn refresh_appearance(&mut self) {
-        let base = self.configured_theme();
-        let pattern = match base.name.parse::<ThemeName>() {
-            Ok(ThemeName::Hud) => Pattern::Grid,
-            Ok(ThemeName::Matrix) => Pattern::Rain,
-            _ => Pattern::None,
-        };
         let slot = self.wall_minutes() / 10;
         let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        // Each output's look: its shown desktop's own, or the general one.
+        let looks: Vec<(Theme, hocus_core::config::WallpaperSpec)> = outputs
+            .iter()
+            .map(|o| {
+                let name = o.name();
+                (
+                    self.configured_theme_on(Some(&name)),
+                    self.config
+                        .wallpaper
+                        .for_desktop(&name, self.look_on(&name)),
+                )
+            })
+            .collect();
         let Some(papers) = self.wallpapers.as_mut() else {
             return;
         };
         papers
             .papers
             .retain(|name, _| outputs.iter().any(|o| o.name() == *name));
-        for output in &outputs {
+        for (output, (base, spec)) in outputs.iter().zip(looks) {
             let Some(mode) = output.current_mode() else {
                 continue;
             };
             let name = output.name();
-            let spec = self.config.wallpaper.for_output(&name);
+            let pattern = match base.name.parse::<ThemeName>() {
+                Ok(ThemeName::Hud) => Pattern::Grid,
+                Ok(ThemeName::Matrix) => Pattern::Rain,
+                _ => Pattern::None,
+            };
             let still = spec.kind == "image" || spec.kind == "colour";
             let wanted = Wanted {
                 width: mode.size.w.max(1) as u32,
@@ -267,11 +292,21 @@ impl State {
         self.apply_theme();
     }
 
-    /// The theme in effect: the configured one, its accent from the
-    /// primary screen's wallpaper when asked.
+    /// The theme in effect where the column is (the primary screen
+    /// otherwise): the configured one or that desktop's own, its accent
+    /// from that screen's wallpaper when asked.
     pub fn theme(&self) -> Theme {
-        let theme = self.configured_theme();
-        if self.config.appearance.accent != "wallpaper" {
+        let column = self
+            .column_output()
+            .map(|o| o.name())
+            .or_else(|| self.model.primary().map(|o| o.name.0.clone()));
+        let theme = self.configured_theme_on(column.as_deref());
+        let accent = column
+            .as_deref()
+            .and_then(|o| self.look_on(o))
+            .and_then(|l| l.accent.as_deref())
+            .unwrap_or(&self.config.appearance.accent);
+        if accent != "wallpaper" {
             return theme;
         }
         let primary = self.model.primary().map(|o| o.name.0.clone());
@@ -300,8 +335,22 @@ impl State {
         if self.applied_theme.as_ref() == Some(&theme) {
             return;
         }
+        // A desktop's own theme comes with it: the column crossfades as
+        // that desktop slides in (a configuration change applies at once).
+        let desktop = self.column_output().and_then(|o| {
+            let o = self.model.output(&hocus_core::OutputName(o.name()))?;
+            o.desktops.iter().position(|d| *d == o.shown)
+        });
+        let moves = !self.instant_motion && !self.config.appearance.reduced_motion;
+        let now = self.clock.now();
         if let Some(shell) = self.shell.as_mut() {
-            shell.set_theme(theme.clone());
+            let switched = shell.themed_desktop.is_some() && shell.themed_desktop != desktop;
+            shell.themed_desktop = desktop;
+            if switched && moves {
+                shell.crossfade_theme(theme.clone(), now);
+            } else {
+                shell.set_theme(theme.clone());
+            }
         }
         if let Some(toasts) = self.toasts.as_mut() {
             toasts.set_theme(theme.clone());

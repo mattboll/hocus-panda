@@ -1,0 +1,37 @@
+# Themes per desktop (#49): the column's colours crossfade while the
+# desktop slides.
+description = "Switching to a desktop with its own theme crossfades the column with the slide"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[[desktops.looks]]
+desktop = 2
+theme = "paper"
+"""
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+advance_ms = 180
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktop-themes-crossfade.png" }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_idle = { for_ms = 1000 }

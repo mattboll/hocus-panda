@@ -1,0 +1,46 @@
+# Themes per desktop (#49): desktop 2 of the laptop's screen is paper; the
+# column there takes it, the other screen keeps the dark theme.
+description = "A desktop with its own theme: the column and the wallpaper of that screen only take it"
+outputs = ["1280x800", "1280x800+1280+0"]
+shell = true
+
+[[step]]
+config = """
+[[desktops.looks]]
+desktop = 2
+output = "HEADLESS-1"
+theme = "paper"
+"""
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktop-themes-paper.png" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "desktop-themes-other.png" }
+
+[[step]]
+keys = "super+1"
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktop-themes-dark.png" }

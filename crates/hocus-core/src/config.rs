@@ -127,16 +127,55 @@ pub struct Gaps {
     pub outer: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Desktops {
     /// Desktops of an output seen for the first time.
     pub per_output: u32,
+    /// A desktop's own theme and wallpaper (#49), to know at a glance
+    /// where you are: `[[desktops.looks]]`.
+    pub looks: Vec<DesktopLook>,
 }
 
 impl Default for Desktops {
     fn default() -> Self {
-        Self { per_output: 4 }
+        Self {
+            per_output: 4,
+            looks: Vec::new(),
+        }
+    }
+}
+
+/// How one desktop looks; what is not set comes from `[appearance]` and
+/// `[wallpaper]`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DesktopLook {
+    /// From 1.
+    pub desktop: u32,
+    /// Only on this output; every output's desktop of that number when
+    /// not set.
+    pub output: Option<String>,
+    pub theme: Option<String>,
+    pub accent: Option<String>,
+    pub kind: Option<String>,
+    pub image: Option<String>,
+    pub folder: Option<String>,
+    pub mode: Option<String>,
+    pub colour: Option<String>,
+}
+
+impl Desktops {
+    /// How desktop `index` (from 0) of `output` looks, if it has a look:
+    /// one for that output wins over one for every output.
+    pub fn look(&self, output: &str, index: usize) -> Option<&DesktopLook> {
+        let number = index as u32 + 1;
+        let mine = |l: &&DesktopLook| l.desktop == number;
+        self.looks
+            .iter()
+            .filter(mine)
+            .find(|l| l.output.as_deref() == Some(output))
+            .or_else(|| self.looks.iter().filter(mine).find(|l| l.output.is_none()))
     }
 }
 
@@ -282,6 +321,24 @@ pub struct WallpaperSpec {
 }
 
 impl Wallpaper {
+    /// What `output` shows on a desktop that `look`s its own way: the
+    /// desktop's settings over the output's, over the general ones.
+    pub fn for_desktop(&self, output: &str, look: Option<&DesktopLook>) -> WallpaperSpec {
+        let spec = self.for_output(output);
+        let Some(look) = look else {
+            return spec;
+        };
+        // A desktop with its own kind starts from that kind's own settings.
+        let or = |mine: &Option<String>, below: Option<String>| mine.clone().or(below);
+        WallpaperSpec {
+            kind: look.kind.clone().unwrap_or(spec.kind),
+            image: or(&look.image, spec.image),
+            folder: or(&look.folder, spec.folder),
+            mode: look.mode.clone().unwrap_or(spec.mode),
+            colour: or(&look.colour, spec.colour),
+        }
+    }
+
     /// What `output` shows: its own settings over the general ones.
     pub fn for_output(&self, output: &str) -> WallpaperSpec {
         let own = self.screens.iter().find(|s| s.output == output);
@@ -299,6 +356,46 @@ impl Wallpaper {
                 .unwrap_or_else(|| self.mode.clone()),
             colour: pick(own.map(|s| &s.colour), &self.colour),
         }
+    }
+}
+
+#[cfg(test)]
+mod desktop_looks {
+    use super::*;
+
+    #[test]
+    fn a_desktop_s_look_for_its_output_wins_over_one_for_every_output() {
+        let config: Config = toml::from_str(
+            r##"
+            [[desktops.looks]]
+            desktop = 2
+            theme = "paper"
+
+            [[desktops.looks]]
+            desktop = 2
+            output = "DP-1"
+            theme = "matrix"
+            kind = "colour"
+            colour = "#102030"
+            "##,
+        )
+        .expect("it reads");
+        let d = &config.desktops;
+        assert_eq!(
+            d.look("eDP-1", 1).and_then(|l| l.theme.as_deref()),
+            Some("paper")
+        );
+        assert_eq!(
+            d.look("DP-1", 1).and_then(|l| l.theme.as_deref()),
+            Some("matrix")
+        );
+        assert!(d.look("DP-1", 0).is_none());
+        let paper = config.wallpaper.for_desktop("DP-1", d.look("DP-1", 1));
+        assert_eq!(
+            (paper.kind.as_str(), paper.colour.as_deref()),
+            ("colour", Some("#102030"))
+        );
+        assert_eq!(config.wallpaper.for_desktop("DP-1", None).kind, "glow");
     }
 }
 

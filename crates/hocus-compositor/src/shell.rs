@@ -8,7 +8,10 @@ use hocus_shell::{
     Action as ShellAction, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, WallTime,
     column::{MARGIN, View, WIDTH},
 };
-use hocus_ui::{AccessNode, Input, Point as UiPoint, Theme};
+use hocus_ui::{
+    AccessNode, Input, Point as UiPoint, Theme,
+    motion::{Animated, Curve, Easing, LARGE},
+};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -50,10 +53,27 @@ pub struct Shell {
     pointer_inside: bool,
     /// A press began in the shell: its release goes there too.
     pressed: bool,
+    /// The column as it was before its theme changed, fading over the new
+    /// one (#49): its picture, size, and opacity.
+    fading: Option<(MemoryRenderBuffer, (u32, u32), Animated)>,
+    /// The desktop shown where it is, when its theme was last given.
+    pub(crate) themed_desktop: Option<usize>,
 }
 
 impl Shell {
     pub fn set_theme(&mut self, theme: Theme) {
+        self.column.set_theme(theme);
+    }
+
+    /// The new theme crossfades from the old one from `now`, as the
+    /// desktop it belongs to slides in.
+    pub fn crossfade_theme(&mut self, theme: Theme, now: std::time::Duration) {
+        if self.buffer.is_some() {
+            let view = self.column.view();
+            let mut fade = Animated::new(1.0);
+            fade.set(0.0, Curve::Ease(Easing::InOutCubic, LARGE), now);
+            self.fading = Some((buffer_for(&view), (view.width, view.height), fade));
+        }
         self.column.set_theme(theme);
     }
 
@@ -69,6 +89,8 @@ impl Shell {
             popover: None,
             pointer_inside: false,
             pressed: false,
+            fading: None,
+            themed_desktop: None,
         }
     }
 }
@@ -259,6 +281,15 @@ impl State {
     /// After each dispatch: follows the primary output, shows the current
     /// state and draws what changed. Nothing is drawn when nothing changed.
     pub fn refresh_shell(&mut self) {
+        let now = self.clock.now();
+        if let Some(shell) = self.shell.as_mut()
+            && let Some((_, _, fade)) = &shell.fading
+        {
+            if !fade.is_running(now) {
+                shell.fading = None;
+            }
+            self.needs_redraw = true;
+        }
         self.refresh_lock();
         self.refresh_sessions();
         self.refresh_leaving();
@@ -483,33 +514,40 @@ impl State {
             f64::from(rect.loc.y - area.loc.y),
         ));
         let mut elements = Vec::new();
-        let mut push =
-            |buffer: &MemoryRenderBuffer, at: Point<f64, Logical>, view_size: (u32, u32)| {
-                let (w, h) = view_size;
-                let all = Rectangle::from_size(Size::from((f64::from(w), f64::from(h))));
-                let size = Size::<f64, Logical>::from((f64::from(w) / scale, f64::from(h) / scale))
-                    .to_i32_round();
-                let location: Point<f64, Physical> = at.to_physical(*scale);
-                match MemoryRenderBufferRenderElement::from_buffer(
-                    renderer,
-                    location,
-                    buffer,
-                    None,
-                    Some(all),
-                    Some(size),
-                    Kind::Unspecified,
-                ) {
-                    Ok(element) => elements.push(element),
-                    Err(err) => tracing::warn!(?err, "could not draw the column"),
-                }
-            };
+        let now = self.clock.now();
+        let mut push = |buffer: &MemoryRenderBuffer,
+                        at: Point<f64, Logical>,
+                        view_size: (u32, u32),
+                        alpha: Option<f32>| {
+            let (w, h) = view_size;
+            let all = Rectangle::from_size(Size::from((f64::from(w), f64::from(h))));
+            let size = Size::<f64, Logical>::from((f64::from(w) / scale, f64::from(h) / scale))
+                .to_i32_round();
+            let location: Point<f64, Physical> = at.to_physical(*scale);
+            match MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                location,
+                buffer,
+                alpha,
+                Some(all),
+                Some(size),
+                Kind::Unspecified,
+            ) {
+                Ok(element) => elements.push(element),
+                Err(err) => tracing::warn!(?err, "could not draw the column"),
+            }
+        };
         if let (Some((buffer, at)), Some(view)) = (&shell.popover, shell.column.popover_view()) {
             let at = local + Point::from((f64::from(at.x), f64::from(at.y)));
-            push(buffer, at, (view.width, view.height));
+            push(buffer, at, (view.width, view.height), None);
+        }
+        // The old theme's column over the new one, fading.
+        if let Some((buffer, size, fade)) = &shell.fading {
+            push(buffer, local, *size, Some(fade.value(now).clamp(0.0, 1.0)));
         }
         if let Some(buffer) = &shell.buffer {
             let view = shell.column.view();
-            push(buffer, local, (view.width, view.height));
+            push(buffer, local, (view.width, view.height), None);
         }
         elements
     }
