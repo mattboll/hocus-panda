@@ -46,6 +46,14 @@ impl XdgShellHandler for State {
             let area = self.work_area(&output);
             surface.with_pending_state(|p| p.bounds = Some(area.size));
         }
+        // Its picture as its surface goes, for the closing motion (#34):
+        // a client that quits may take its surface before its toplevel, and
+        // this hook, added before the renderer's, runs before it drops the
+        // textures.
+        smithay::wayland::compositor::add_destruction_hook(
+            surface.wl_surface(),
+            |state: &mut State, surface| state.surface_going(surface),
+        );
         // Mapped once its first buffer tells us its size.
         self.unplaced.push(Window::new_wayland_window(surface));
     }

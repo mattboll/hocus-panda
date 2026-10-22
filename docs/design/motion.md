@@ -40,6 +40,13 @@ Motion is a first-class part of Hocuspanda, not decoration added at the end.
 | Dialogs | Appear from their parent with a short scale; the parent dims behind modal ones |
 | Send to desktop | The window flies towards the desktop indicator of its screen |
 
+Closing, minimizing and maximizing draw the window's last picture while its
+client moves on: its surfaces' textures, kept by handle as the window
+changes (nothing is copied), drawn stretched or bent. A client that quits
+takes its surface with it, so the picture is taken as the surface goes.
+A maximizing window heads for the place it was given, not for its size
+of the moment: the client follows at its own pace.
+
 ## Desktops, overview, switching
 
 | Moment | Motion |

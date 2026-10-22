@@ -13,7 +13,7 @@ use hocus_shell::dock::{Dock as DockView, DockApp, DockHint, look_of};
 use smithay::{
     output::Output,
     reexports::calloop::timer::{TimeoutAction, Timer},
-    utils::{Logical, Point, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
 use crate::{State, scene::SceneElement, shell::Panel, surface::title_and_app_id};
@@ -362,6 +362,24 @@ impl State {
             .map(SceneElement::Frame)
             .into_iter()
             .collect()
+    }
+
+    /// Where a window's app is in the dock, global, while it shows.
+    pub fn dock_icon_of(&self, id: WindowId) -> Option<Rectangle<f64, Logical>> {
+        self.dock.shown?;
+        let i = self
+            .dock
+            .items
+            .iter()
+            .position(|i| i.windows.contains(&id))?;
+        let (name, place, panel) = self.dock.panel.as_ref()?;
+        let origin = self.space.output_geometry(&self.find_output(name)?)?.loc;
+        let r = panel.view.icon_rect(i)?;
+        let at = (origin + *place).to_f64();
+        Some(Rectangle::new(
+            (at.x + f64::from(r.x), at.y + f64::from(r.y)).into(),
+            (f64::from(r.w), f64::from(r.h)).into(),
+        ))
     }
 
     /// Its apps, for the control API.

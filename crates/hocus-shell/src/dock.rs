@@ -233,6 +233,11 @@ impl Dock {
             .position(|i| self.tree.rect(*i).is_some_and(|r| r.contains(at)))
     }
 
+    /// App `i`'s square, from the corner.
+    pub fn icon_rect(&self, i: usize) -> Option<hocus_ui::Rect> {
+        self.tree.rect(*self.icons.get(i)?)
+    }
+
     /// Whether `at`, from the corner, is on the pill.
     pub fn hit(&self, at: Point) -> bool {
         let s = self.tree.size();
