@@ -85,6 +85,10 @@ pub struct State {
     pub quick: Option<crate::quick::QuickPanel>,
     /// Wallpapers, when the shell runs.
     pub wallpapers: Option<crate::wallpaper::Wallpapers>,
+    /// The configuration file, when there is one.
+    pub config_path: Option<std::path::PathBuf>,
+    /// When the settings app was started, until its window comes.
+    pub settings_started: Option<std::time::Duration>,
     /// Title bars, when they are on.
     pub bars: crate::bars::Bars,
     /// The drop-down terminal.
@@ -181,6 +185,8 @@ impl State {
             applied_theme: None,
             dropdown: Default::default(),
             bars: Default::default(),
+            config_path: None,
+            settings_started: None,
             child_env: None,
             layout_index: 0,
             user: std::env::var("USER")

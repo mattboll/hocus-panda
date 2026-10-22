@@ -252,6 +252,11 @@ impl State {
                     self.clear_notifications();
                     None
                 }
+                QuickAction::OpenSettings => {
+                    self.close_quick();
+                    self.open_settings(None);
+                    None
+                }
             };
             if let (Some(change), Some(service)) =
                 (change, self.quick.as_ref().and_then(|q| q.service.as_ref()))

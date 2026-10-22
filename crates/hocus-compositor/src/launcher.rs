@@ -254,6 +254,10 @@ impl State {
                     tracing::info!(url, "opening");
                     self.launch("xdg-open", &[url]);
                 }
+                LauncherEvent::Chosen(Choice::Settings) => {
+                    self.close_launcher();
+                    self.open_settings(None);
+                }
                 LauncherEvent::Chosen(Choice::Show(what)) => {
                     self.close_launcher();
                     self.show(what);

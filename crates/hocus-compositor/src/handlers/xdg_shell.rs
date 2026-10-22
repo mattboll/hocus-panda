@@ -40,6 +40,12 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        // What a window may take, so that one that chooses its size fits
+        // the screen it opens on.
+        if let Some(output) = self.output_under_pointer() {
+            let area = self.work_area(&output);
+            surface.with_pending_state(|p| p.bounds = Some(area.size));
+        }
         // Mapped once its first buffer tells us its size.
         self.unplaced.push(Window::new_wayland_window(surface));
     }

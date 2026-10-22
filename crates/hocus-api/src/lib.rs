@@ -112,6 +112,12 @@ pub enum Request {
     /// The shell's interface as screen readers see it: roles, labels and
     /// where each element is.
     Ui,
+    /// Opens the settings app on a page (`hocus settings keyboard`), or
+    /// brings it forward.
+    OpenSettings {
+        #[serde(default)]
+        page: Option<String>,
+    },
     /// Shows the `index`th desktop (from 0) of an output.
     ShowDesktop {
         output: String,
@@ -166,7 +172,9 @@ impl Request {
             | Self::Config
             | Self::Desktops
             | Self::Ui
-            | Self::Screenshot { .. } => Permission::Observe,
+            | Self::Screenshot { .. }
+            // Showing the settings window changes nothing by itself.
+            | Self::OpenSettings { .. } => Permission::Observe,
             Self::Scene
             | Self::PointerMove { .. }
             | Self::PointerButton { .. }
@@ -298,6 +306,9 @@ pub struct ConfigInfo {
     /// wallpaper).
     #[serde(default)]
     pub accent: Option<String>,
+    /// The file the configuration is read from, if any.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// How well the compositor keeps up.
@@ -490,6 +501,10 @@ pub enum Event {
     },
     OutputRemoved {
         name: String,
+    },
+    /// The settings app is asked to show a page (`None`: its home).
+    OpenSettings {
+        page: Option<String>,
     },
 }
 

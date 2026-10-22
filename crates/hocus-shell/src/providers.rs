@@ -82,6 +82,7 @@ pub fn providers(enabled: &Enabled) -> Vec<Box<dyn Provider>> {
     if enabled.urls {
         out.push(Box::new(Urls));
     }
+    out.push(Box::new(Settings));
     out.push(Box::new(Apps));
     if enabled.web_search {
         out.push(Box::new(WebSearch {
@@ -255,6 +256,37 @@ impl Provider for Apps {
             color: Some(app_color(&app.name)),
             choice: Choice::Launch(app.clone()),
         }));
+    }
+}
+
+/// `settings`, `réglages`: the settings app.
+struct Settings;
+
+impl Provider for Settings {
+    fn name(&self) -> &'static str {
+        "settings"
+    }
+
+    fn hits(&self, query: &str, cx: &Context<'_>, out: &mut Vec<Hit>) {
+        const NAMES: [&str; 6] = [
+            "settings",
+            "réglages",
+            "preferences",
+            "préférences",
+            "paramètres",
+            "configuration",
+        ];
+        if NAMES
+            .iter()
+            .any(|n| fuzzy::score(query, n).is_some_and(|s| s >= 10_000))
+        {
+            out.push(Hit {
+                title: cx.lang.settings().into(),
+                kind: "Hocuspanda".into(),
+                color: None,
+                choice: Choice::Settings,
+            });
+        }
     }
 }
 

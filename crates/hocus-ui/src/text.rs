@@ -255,7 +255,9 @@ impl TextBox {
                 && let Some(max) = max_width
             {
                 layout.break_all_lines(None);
-                if layout.width() > max * scale {
+                // Widths that went through layout arithmetic differ in their
+                // last bits: half a pixel is not too wide.
+                if layout.width() > max * scale + 0.5 {
                     layout = self.cut(fonts, max * scale, scale);
                 }
             }

@@ -90,6 +90,7 @@ pub enum QuickAction {
     Brightness(String, u8),
     Layout(usize),
     ClearNotifications,
+    OpenSettings,
     Closed,
 }
 
@@ -113,6 +114,7 @@ struct Nodes {
     layouts: Vec<NodeId>,
     notifications: Option<NodeId>,
     clear: Option<NodeId>,
+    settings: Option<NodeId>,
     battery: Option<NodeId>,
 }
 
@@ -273,12 +275,10 @@ impl Sheet {
                 ),
             );
         }
-        let mut settings = Button::new("", ButtonKind::Plain, &theme)
+        let settings = Button::new("", ButtonKind::Plain, &theme)
             .with_icon(stroked(icons::SETTINGS, 18.0))
             .with_name(lang.settings());
-        // The settings application comes with #66.
-        settings.enabled = false;
-        t.add(
+        n.settings = t.add(
             head,
             Style {
                 width: Length::Px(44.0),
@@ -286,8 +286,7 @@ impl Sheet {
                 ..Style::default()
             },
             Kind::Button(settings),
-        )
-        .unwrap_or_else(missing);
+        );
 
         // Tiles, two by two.
         let grid = t
@@ -714,6 +713,8 @@ impl Sheet {
                         out.push(QuickAction::Layout(i));
                     } else if Some(id) == n.clear {
                         out.push(QuickAction::ClearNotifications);
+                    } else if Some(id) == n.settings {
+                        out.push(QuickAction::OpenSettings);
                     }
                 }
                 Event::Changed(id) => {

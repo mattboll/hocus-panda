@@ -1,0 +1,29 @@
+description = "Super+Comma starts the settings once; again, it brings the same window forward"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[settings]
+command = "{test_client} --app-id hocus-settings --color '#16181c'"
+"""
+
+[[step]]
+keys = "super+comma"
+
+[[step]]
+expect_window = { app_id = "hocus-settings", focused = true }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+keys = "super+comma"
+
+[[step]]
+expect_focus = "hocus-settings"
+
+[[step]]
+expect_runtime_file = { name = "hocus-settings.starts", lines = 1 }

@@ -56,6 +56,7 @@ A Cargo workspace; names may move as the code lands.
 | `hocus-compositor` | smithay glue: protocols, backends, input, rendering, XWayland | yes |
 | `hocus-ui` | Small retained widget toolkit drawn into textures: layout, text, theme tokens, springs, hit testing, accessibility tree | no |
 | `hocus-shell` | The desktop's own UI built on `hocus-ui`: widget column, dock, launcher, notifications, quick settings, menus, lock screen, pandas | no |
+| `hocus-settings` | The settings app: a Wayland client of its own, drawn with `hocus-ui`, changing the configuration file ([decision 0010](decisions/0010-settings-as-a-client.md)) | no |
 | `hocus-platform` | Services behind traits: power, battery, backlight, network, audio, session, notifications (D-Bus); Linux and FreeBSD implementations | no |
 | `hocus-api` | Control protocol types, socket server, event stream; MCP bridge | no |
 | `hocus-test` | Scenario runner, test clients, screenshot comparison | yes |
@@ -102,6 +103,10 @@ fast to compile and test, and lets the UI be developed in a plain window.
   agent permission (`--api-permission test`; agents come with their seat).
 - Agents get their own seat (pointer and keyboard) through the API: see the
   agent seat idea in [ideas](ideas.md).
+- The settings app ([decision 0010](decisions/0010-settings-as-a-client.md))
+  reads what is in effect through it (`config`, `outputs`), follows the event
+  stream, and is told which page to show by `open_settings`
+  (`hocus settings keyboard`).
 
 ## Configuration
 

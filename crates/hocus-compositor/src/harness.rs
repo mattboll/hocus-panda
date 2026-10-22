@@ -312,6 +312,11 @@ impl Headless {
 
     /// Writes the configuration file and runs the compositor until it has
     /// read it; returns the error if it was refused.
+    /// The configuration file the compositor reads.
+    pub fn config_path(&self) -> &Path {
+        &self.config
+    }
+
     pub fn write_config(&mut self, text: &str) -> anyhow::Result<Option<String>> {
         let before = self.app.state.config_generation;
         std::fs::write(&self.config, text)?;

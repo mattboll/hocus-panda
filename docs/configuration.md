@@ -32,6 +32,10 @@ buttons = "right"  # which side of the bar has minimize, maximize and close: rig
 [appearance]
 theme = "dark"             # dark, light, matrix, hud, paper
 accent = "theme"           # theme, bamboo, amber, blue, pink, or wallpaper (taken from it, made readable)
+text_size = 100            # percent of the theme's text size, 80 to 150
+high_contrast = false      # borders and muted text closer to the text colour
+reduced_motion = false     # animations jump to their end
+transparency = true        # frosted glass behind panels (with blur, #37)
 
 [wallpaper]                # behind the windows of every screen
 kind = "glow"              # glow (soft light by the time of day), image, folder (its images through the day), colour
@@ -43,6 +47,10 @@ colour = "#0e0f12"         # around a fitted image, or the whole screen; the the
 [[wallpaper.screens]]      # one screen's own, over the settings above
 output = "DP-1"
 image = "~/Pictures/wide.png"
+
+[settings]                 # the settings app (Super+Comma)
+command = "hocus-settings" # `--page <page>` is added for a page
+app_id = "hocus-settings"  # how its window is recognised
 
 [dropdown]                 # the drop-down terminal (Super+Backtick)
 command = "foot --app-id=hocus-dropdown"
@@ -105,6 +113,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `switch-layout` | the next keyboard layout |
 | `launcher` | opens the launcher (applications, calculator), or closes it |
 | `quick-settings` | opens quick settings on the screen under the pointer, or closes them |
+| `settings` | opens the settings app, or brings its window forward |
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `spawn COMMAND` | runs a command through the shell |
@@ -133,5 +142,6 @@ Defaults:
 | Super+Space | `launcher` |
 | Super+A | `quick-settings` |
 | Super+Backtick | `dropdown` |
+| Super+Comma | `settings` |
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |
 | Ctrl+Alt+BackSpace | `quit` |

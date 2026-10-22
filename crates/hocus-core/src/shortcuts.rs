@@ -54,6 +54,8 @@ pub enum Action {
     /// Shows the drop-down terminal on the screen under the pointer, or
     /// hides it.
     Dropdown,
+    /// Opens the settings app, or brings it forward.
+    Settings,
     /// Window switcher (#39): the windows of the output under the pointer,
     /// or of every output.
     SwitchWindows(Scope),
@@ -88,6 +90,7 @@ impl fmt::Display for Action {
             Self::Launcher => write!(f, "launcher"),
             Self::QuickSettings => write!(f, "quick-settings"),
             Self::Dropdown => write!(f, "dropdown"),
+            Self::Settings => write!(f, "settings"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
             Self::Spawn(command) => write!(f, "spawn {command}"),
         }
@@ -148,6 +151,7 @@ impl FromStr for Action {
             "launcher" => bare(Self::Launcher),
             "quick-settings" => bare(Self::QuickSettings),
             "dropdown" => bare(Self::Dropdown),
+            "settings" => bare(Self::Settings),
             "switch-windows" => scope().map(Self::SwitchWindows),
             "spawn" if !rest.is_empty() => Ok(Self::Spawn(rest.to_string())),
             "spawn" => Err("spawn: which command?".into()),
@@ -273,6 +277,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Space", Action::Launcher),
         ("Super+A", Action::QuickSettings),
         ("Super+Backtick", Action::Dropdown),
+        ("Super+Comma", Action::Settings),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),
         ("Super+Tab", Action::SwitchWindows(Scope::AllOutputs)),
     ]

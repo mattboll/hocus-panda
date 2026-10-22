@@ -436,6 +436,8 @@ pub struct Theme {
     pub text: TypeScale,
     /// Width of the keyboard focus ring.
     pub focus_ring: f32,
+    /// Animations jump to their end (reduced motion).
+    pub reduced_motion: bool,
 }
 
 impl Theme {
@@ -471,9 +473,43 @@ impl Theme {
             },
             text: type_scale(),
             focus_ring: 2.0,
+            reduced_motion: false,
         };
         theme.set_accent(theme.accent);
         Ok(theme)
+    }
+
+    /// Text `percent` of its size, 80 to 150.
+    pub fn with_text_size(mut self, percent: u32) -> Self {
+        let k = percent.clamp(80, 150) as f32 / 100.0;
+        let t = &mut self.text;
+        for style in [
+            &mut t.caption,
+            &mut t.body,
+            &mut t.label,
+            &mut t.title,
+            &mut t.headline,
+            &mut t.display,
+        ] {
+            style.size = (style.size * k * 2.0).round() / 2.0;
+        }
+        self
+    }
+
+    /// Sharper edges and plainer text: borders and muted text closer to
+    /// the text colour, a thicker focus ring.
+    pub fn with_high_contrast(mut self) -> Self {
+        let c = &mut self.colors;
+        c.muted = c.muted.mix(c.text, 0.6);
+        c.border = c.border.mix(c.text, 0.5);
+        c.surface_hover = c.surface_hover.mix(c.text, 0.06);
+        self.focus_ring = 3.0;
+        self
+    }
+
+    pub fn with_reduced_motion(mut self, reduced: bool) -> Self {
+        self.reduced_motion = reduced;
+        self
     }
 
     /// The theme with an accent of its own colour (from a wallpaper): the

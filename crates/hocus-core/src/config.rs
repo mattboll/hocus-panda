@@ -18,6 +18,7 @@ pub struct Config {
     pub wallpaper: Wallpaper,
     pub launcher: Launcher,
     pub dropdown: Dropdown,
+    pub settings: Settings,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
     /// Window rules, in file order: later rules override earlier ones.
@@ -179,6 +180,13 @@ pub struct Appearance {
     /// `theme` (the theme's own), `bamboo`, `amber`, `blue`, `pink`, or
     /// `wallpaper` (taken from it, made readable).
     pub accent: String,
+    /// Text size, percent of the theme's: 80 to 150.
+    pub text_size: u32,
+    pub high_contrast: bool,
+    /// Animations jump to their end.
+    pub reduced_motion: bool,
+    /// Frosted glass behind panels (comes with blur, #37).
+    pub transparency: bool,
 }
 
 impl Default for Appearance {
@@ -186,6 +194,10 @@ impl Default for Appearance {
         Self {
             theme: "dark".into(),
             accent: "theme".into(),
+            text_size: 100,
+            high_contrast: false,
+            reduced_motion: false,
+            transparency: true,
         }
     }
 }
@@ -264,6 +276,25 @@ impl Wallpaper {
                 .and_then(|s| s.mode.clone())
                 .unwrap_or_else(|| self.mode.clone()),
             colour: pick(own.map(|s| &s.colour), &self.colour),
+        }
+    }
+}
+
+/// The settings app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Settings {
+    /// What starts it; `--page <page>` is added for a page.
+    pub command: String,
+    /// How its window is recognised.
+    pub app_id: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            command: "hocus-settings".into(),
+            app_id: "hocus-settings".into(),
         }
     }
 }
@@ -392,6 +423,10 @@ impl Config {
         if !["right", "left"].contains(&self.decorations.buttons.as_str()) {
             let b = format!("{:?}", self.decorations.buttons);
             return out_of_range("decorations.buttons", b, "right, left");
+        }
+        if !(80..=150).contains(&self.appearance.text_size) {
+            let s = self.appearance.text_size.to_string();
+            return out_of_range("appearance.text_size", s, "80 to 150");
         }
         if !THEMES.contains(&self.appearance.theme.as_str()) {
             let t = format!("{:?}", self.appearance.theme);

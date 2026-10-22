@@ -281,7 +281,15 @@ impl App {
                 warnings: state.config_warnings.clone(),
                 generation: state.config_generation,
                 accent: state.shell.is_some().then(|| state.accent_hex()),
+                path: state
+                    .config_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned()),
             }),
+            Request::OpenSettings { page } => {
+                state.open_settings(page);
+                Reply::Done
+            }
             Request::PlugOutput { spec, name } => {
                 let spec: OutputSpec = match spec.parse() {
                     Ok(spec) => spec,
