@@ -35,6 +35,10 @@ fn state() -> ColumnState {
         layout: "FR".into(),
         layout_name: "fr".into(),
         user: "Camille".into(),
+        notifications: vec![
+            ("Mail".into(), "Revue de la MR #42".into()),
+            ("Chat".into(), "Les maquettes du dock sont prêtes".into()),
+        ],
     }
 }
 

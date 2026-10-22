@@ -7,6 +7,8 @@
 pub mod column;
 pub mod i18n;
 pub mod icons;
+pub mod toasts;
 
 pub use column::{Action, ActiveWindow, Column, ColumnState, ScreenDesktops, WallTime};
 pub use i18n::Lang;
+pub use toasts::{Toast, ToastEvent, Toasts};

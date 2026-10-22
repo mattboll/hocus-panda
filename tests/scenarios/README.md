@@ -14,6 +14,10 @@ xwayland = false
 # Shows the widget column on the primary output (in English, at a fixed
 # Wednesday 21 October 14:37 plus the virtual time, for user "Alex")
 shell = false
+# A private D-Bus bus for the compositor (notifications); never the session's
+dbus = false
+# Programs the steps run: the scenario is skipped where one is missing
+needs = ["notify-send"]
 
 [[step]]
 open = { app_id = "back", size = [400, 300], color = "#3399ff" }
@@ -33,8 +37,10 @@ Steps, one per `[[step]]` table:
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
+| `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
+| `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces? }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires) |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
-| `expect_ui = { label, disabled?, shown? }` | the shell shows an element with this label (disabled or not); `shown = false` checks it does not |
+| `expect_ui = { label, disabled?, shown?, inside? }` | the shell shows an element with this label (disabled or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
 | `click = "left"` | presses and releases a button (`left`, `right`, `middle`) |

@@ -72,6 +72,11 @@ struct Args {
     #[arg(long)]
     no_shell: bool,
 
+    /// Serve notifications on this D-Bus address. Nested in a live session,
+    /// never the session's own bus: its notification daemon owns the name.
+    #[arg(long, value_name = "ADDRESS")]
+    session_bus: Option<String>,
+
     /// Configuration file, watched and applied on change. Default:
     /// $XDG_CONFIG_HOME/hocuspanda/config.toml.
     #[arg(long, value_name = "FILE")]
@@ -132,6 +137,7 @@ fn main() -> anyhow::Result<()> {
         config_poll: hocus_compositor::CONFIG_POLL,
         xwayland: !args.no_xwayland,
         shell: !args.no_shell,
+        session_bus: args.session_bus,
         backend: match args.backend {
             BackendArg::Winit => Backend::Winit,
             BackendArg::Headless => Backend::Headless(HeadlessConfig {

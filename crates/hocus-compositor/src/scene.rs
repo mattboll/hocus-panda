@@ -95,7 +95,13 @@ impl State {
                 Kind::Unspecified,
             )));
         }
-        // The column, above windows but under a fullscreen one.
+        // Toasts, then the column, above windows; the column under a
+        // fullscreen one.
+        elements.extend(
+            self.toast_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         elements.extend(
             self.shell_elements(renderer, output)
                 .into_iter()

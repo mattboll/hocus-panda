@@ -54,6 +54,12 @@ pub struct Scenario {
     /// Shows the widget column on the primary output.
     #[serde(default)]
     pub shell: bool,
+    /// Gives the compositor a private D-Bus bus (notifications).
+    #[serde(default)]
+    pub dbus: bool,
+    /// Programs the scenario runs; it is skipped where one is missing.
+    #[serde(default)]
+    pub needs: Vec<String>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
     /// The file's name without extension.
@@ -75,6 +81,10 @@ pub enum Step {
     Copy(Clipboard),
     /// The client of this app id reads this text from the clipboard.
     ExpectClipboard(Clipboard),
+    /// Runs `notify-send` with these arguments on the private bus.
+    NotifySend(Vec<String>),
+    /// Sends a notification on the private bus.
+    Notify(NotifyStep),
     /// Clicks the shell's button with this label (or accessible name).
     ClickUi(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
@@ -168,9 +178,28 @@ pub struct OpenWindow {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct NotifyStep {
+    pub app: String,
+    pub summary: String,
+    #[serde(default)]
+    pub body: String,
+    /// `[key, label]` pairs; `default` is a click on the toast.
+    #[serde(default)]
+    pub actions: Vec<[String; 2]>,
+    /// `low`, `normal` or `critical`.
+    pub urgency: Option<String>,
+    /// -1 lets the server choose, 0 never expires.
+    pub timeout_ms: Option<i32>,
+    pub replaces: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectUi {
     pub label: String,
     pub disabled: Option<bool>,
+    /// `[x, y, width, height]` the element lies within, global logical.
+    pub inside: Option<[i32; 4]>,
     /// `false` checks that no element has this label.
     #[serde(default = "yes")]
     pub shown: bool,
@@ -286,6 +315,8 @@ impl fmt::Display for Step {
             Self::Open(open) => write!(f, "open {}", open.app_id),
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
+            Self::NotifySend(args) => write!(f, "notify_send {args:?}"),
+            Self::Notify(n) => write!(f, "notify {} {:?}", n.app, n.summary),
             Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
             Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
             Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
@@ -376,6 +407,11 @@ impl Scenario {
                 .map(|s| s.parse())
                 .collect::<Result<_, _>>()?
         };
+        let bus = if self.dbus {
+            Some(crate::bus::PrivateBus::start()?)
+        } else {
+            None
+        };
         let compositor = Headless::start_options(HarnessOptions {
             headless: HeadlessConfig {
                 outputs,
@@ -386,6 +422,7 @@ impl Scenario {
             watchdog: None,
             xwayland: self.xwayland,
             shell: self.shell,
+            session_bus: bus.as_ref().map(|b| b.address.clone()),
         })?;
         let mut run = Run {
             scenario: self,
@@ -393,6 +430,7 @@ impl Scenario {
             compositor,
             clients: Vec::new(),
             x11_clients: Vec::new(),
+            bus,
             events: Vec::new(),
         };
         run.request(Request::Subscribe)?;
@@ -410,6 +448,7 @@ struct Run<'a> {
     compositor: Headless,
     clients: Vec<TestClient>,
     x11_clients: Vec<X11Client>,
+    bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
 }
@@ -422,6 +461,8 @@ impl Run<'_> {
             Step::Copy(copy) => self.copy(copy),
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label),
+            Step::NotifySend(args) => self.notify_send(args),
+            Step::Notify(n) => self.notify(n),
             Step::ExpectUi(expected) => self.expect_ui(expected),
             Step::Close(app_id) => self.close(app_id),
             Step::PointerMove([x, y]) => {
@@ -719,6 +760,63 @@ impl Run<'_> {
             .context("the X11 window did not appear")
     }
 
+    fn bus(&self) -> anyhow::Result<&str> {
+        self.bus
+            .as_ref()
+            .map(|b| b.address.as_str())
+            .context("no bus: the scenario needs `dbus = true`")
+    }
+
+    fn notify_send(&mut self, args: &[String]) -> anyhow::Result<()> {
+        let mut child = std::process::Command::new("notify-send")
+            .args(args)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("DBUS_SESSION_BUS_ADDRESS", self.bus()?)
+            .spawn()
+            .context("could not run notify-send")?;
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            if let Some(status) = child.try_wait()? {
+                anyhow::ensure!(status.success(), "notify-send failed: {status}");
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("notify-send did not return");
+            }
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    fn notify(&mut self, n: &NotifyStep) -> anyhow::Result<()> {
+        let urgency = match n.urgency.as_deref() {
+            Some("low") => 0_u8,
+            Some("critical") => 2,
+            Some("normal") | None => 1,
+            Some(other) => anyhow::bail!("unknown urgency {other:?}"),
+        };
+        let actions: Vec<&str> = n
+            .actions
+            .iter()
+            .flat_map(|[k, l]| [k.as_str(), l.as_str()])
+            .collect();
+        crate::bus::notify(
+            self.bus()?,
+            &crate::bus::Note {
+                app: &n.app,
+                replaces: n.replaces.unwrap_or(0),
+                summary: &n.summary,
+                body: &n.body,
+                actions: &actions,
+                urgency,
+                timeout_ms: n.timeout_ms.unwrap_or(-1),
+            },
+        )?;
+        Ok(())
+    }
+
     fn ui(&mut self) -> anyhow::Result<Vec<hocus_api::UiNode>> {
         match self.request(Request::Ui)? {
             Reply::Ui(nodes) => Ok(nodes),
@@ -762,8 +860,15 @@ impl Run<'_> {
             let found = nodes
                 .iter()
                 .find(|n| n.label.as_deref() == Some(expected.label.as_str()));
+            let within = |r: &hocus_api::Rect| {
+                expected.inside.is_none_or(|[x, y, w, h]| {
+                    r.x >= x && r.y >= y && r.x + r.width <= x + w && r.y + r.height <= y + h
+                })
+            };
             let ok = match (found, expected.shown) {
-                (Some(n), true) => expected.disabled.is_none_or(|d| d == n.disabled),
+                (Some(n), true) => {
+                    expected.disabled.is_none_or(|d| d == n.disabled) && within(&n.rect)
+                }
                 (None, false) => true,
                 _ => false,
             };
@@ -776,7 +881,9 @@ impl Run<'_> {
                     "{:?} {}; the interface shows {labels:?}",
                     expected.label,
                     match (found, expected.shown) {
-                        (Some(n), true) => format!("has disabled = {}", n.disabled),
+                        (Some(n), true) => {
+                            format!("has disabled = {} and is at {:?}", n.disabled, n.rect)
+                        }
                         (Some(_), false) => "is shown".into(),
                         _ => "is not shown".into(),
                     }

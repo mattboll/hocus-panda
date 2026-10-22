@@ -6,7 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
-use hocus_test::scenario::{RunOptions, Scenario};
+use hocus_test::{
+    bus::installed,
+    scenario::{RunOptions, Scenario},
+};
 use libtest_mimic::{Arguments, Failed, Trial};
 
 fn main() -> std::process::ExitCode {
@@ -25,8 +28,13 @@ fn main() -> std::process::ExitCode {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let options = options.clone();
-                // Without XWayland (FreeBSD CI), X11 scenarios are skipped.
-                let skip = Scenario::load(&file).is_ok_and(|s| s.xwayland) && !has_xwayland();
+                // Without XWayland, D-Bus or a tool it runs (FreeBSD CI),
+                // a scenario is skipped.
+                let skip = Scenario::load(&file).is_ok_and(|s| {
+                    (s.xwayland && !installed("Xwayland"))
+                        || (s.dbus && !installed("dbus-daemon"))
+                        || s.needs.iter().any(|n| !installed(n))
+                });
                 Trial::test(name, move || run(&file, &options)).with_ignored_flag(skip)
             })
             .collect(),
@@ -44,11 +52,6 @@ fn scenario_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
         .collect();
     files.sort();
     Ok(files)
-}
-
-fn has_xwayland() -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("Xwayland").is_file()))
 }
 
 fn run(file: &Path, options: &RunOptions) -> Result<(), Failed> {

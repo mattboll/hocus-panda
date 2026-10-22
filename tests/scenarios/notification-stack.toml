@@ -1,0 +1,51 @@
+description = "Three toasts stack newest on top; when the middle one is dismissed, the others close the gap"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+notify = { app = "Mail", summary = "first", body = "One.", timeout_ms = 0 }
+
+[[step]]
+notify = { app = "Chat", summary = "second", body = "Two.", timeout_ms = 0, actions = [["reply", "Reply"]] }
+
+[[step]]
+notify = { app = "Build", summary = "third", body = "Three.", urgency = "critical" }
+
+[[step]]
+expect_ui = { label = "first" }
+
+[[step]]
+expect_ui = { label = "Dismiss: second" }
+
+[[step]]
+expect_ui = { label = "third" }
+
+# Each one pushed the others down with a spring; they have settled.
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "notification-stack-3.png" }
+
+[[step]]
+click_ui = "Dismiss: second"
+
+[[step]]
+expect_ui = { label = "second", shown = false }
+
+[[step]]
+expect_ui = { label = "first" }
+
+[[step]]
+expect_ui = { label = "third" }
+
+# The lower toast springs up into the gap, then rests.
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "notification-stack-2.png" }

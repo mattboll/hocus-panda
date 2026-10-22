@@ -88,7 +88,8 @@ impl State {
             return;
         };
         // Over the column, windows do not see the pointer.
-        let over_shell = !pointer.is_grabbed() && self.shell_pointer_motion(location);
+        let over_shell = !pointer.is_grabbed()
+            && (self.toasts_pointer_motion(location) || self.shell_pointer_motion(location));
         let under = if over_shell {
             None
         } else {
@@ -118,9 +119,11 @@ impl State {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
+        let at = pointer.current_location();
+        let pressed = state == ButtonState::Pressed;
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && self.shell_pointer_button(pointer.current_location(), state == ButtonState::Pressed)
+            && (self.toasts_pointer_button(at, pressed) || self.shell_pointer_button(at, pressed))
         {
             return;
         }

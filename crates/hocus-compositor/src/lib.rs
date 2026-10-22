@@ -16,6 +16,7 @@ mod handlers;
 mod harness;
 mod headless;
 mod input;
+mod notify;
 mod output_spec;
 mod scene;
 mod shell;
@@ -83,6 +84,8 @@ pub struct Options {
     pub xwayland: bool,
     /// Shows the desktop's own interface: the widget column.
     pub shell: bool,
+    /// Serves notifications on this session bus (with the shell).
+    pub session_bus: Option<String>,
 }
 
 /// How often the configuration file is looked at by default.
@@ -187,7 +190,11 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     }
     state.loop_handle = Some(event_loop.handle());
     if options.shell {
-        shell::start(&event_loop.handle(), &mut state);
+        shell::start(
+            &event_loop.handle(),
+            &mut state,
+            options.session_bus.as_deref(),
+        );
     }
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);

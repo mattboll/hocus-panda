@@ -543,6 +543,23 @@ impl Tree {
         Some(id)
     }
 
+    /// Adds a child at `index` among `parent`'s children (the end if past
+    /// it).
+    pub fn insert(
+        &mut self,
+        parent: NodeId,
+        index: usize,
+        style: Style,
+        kind: Kind,
+    ) -> Option<NodeId> {
+        self.node(parent)?;
+        let id = self.alloc(Some(parent), style, kind);
+        let children = &mut self.node_mut(parent)?.children;
+        children.insert(index.min(children.len()), id);
+        self.relayout = true;
+        Some(id)
+    }
+
     /// Removes a node and everything below it.
     pub fn remove(&mut self, id: NodeId) {
         if id == self.root {
@@ -715,6 +732,34 @@ impl Tree {
         }
     }
 
+    /// Lays out what changed now, without drawing: to know where nodes go
+    /// before animating them there.
+    pub fn layout(&mut self) {
+        if self.relayout {
+            let root = self.root;
+            let size = self.size;
+            if let Some(root) = self.node_mut(root) {
+                root.style.width = Length::Px(size.w);
+                root.style.height = Length::Px(size.h);
+            }
+            self.arrange(root, Rect::new(0.0, 0.0, size.w, size.h));
+            self.relayout = false;
+        }
+    }
+
+    /// Puts a property at `value` at once (reduced motion, or the start of a
+    /// move from where a node was).
+    pub fn jump(&mut self, id: NodeId, property: Property, value: f32) {
+        if let Some(node) = self.node_mut(id) {
+            let v = match property {
+                Property::Opacity => &mut node.opacity,
+                Property::OffsetX => &mut node.offset_x,
+                Property::OffsetY => &mut node.offset_y,
+            };
+            v.jump(value);
+        }
+    }
+
     /// Whether something moves at `now`: the caller schedules a frame then,
     /// and only then.
     pub fn is_animating(&self, now: Duration) -> bool {
@@ -733,6 +778,13 @@ impl Tree {
                 node.changed = true;
             }
         }
+    }
+
+    /// A node's children, in order.
+    pub fn children(&self, id: NodeId) -> Vec<NodeId> {
+        self.node(id)
+            .map(|n| n.children.clone())
+            .unwrap_or_default()
     }
 
     /// Where a node was laid out, without animated offsets.
@@ -947,16 +999,7 @@ impl Tree {
     /// regions to draw again, in logical pixels.
     pub fn update(&mut self, now: Duration) -> Vec<Rect> {
         self.now = now;
-        if self.relayout {
-            let root = self.root;
-            let size = self.size;
-            if let Some(root) = self.node_mut(root) {
-                root.style.width = Length::Px(size.w);
-                root.style.height = Length::Px(size.h);
-            }
-            self.arrange(root, Rect::new(0.0, 0.0, size.w, size.h));
-            self.relayout = false;
-        }
+        self.layout();
         let mut damage = std::mem::take(&mut self.removed);
         let root = self.root;
         self.collect_damage(root, (0.0, 0.0), false, &mut damage);

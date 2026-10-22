@@ -469,6 +469,12 @@ pub enum Event {
     KeyboardLayout {
         layout: String,
     },
+    /// A notification is shown as a toast.
+    Notification {
+        id: u32,
+        app: String,
+        summary: String,
+    },
     /// The file was not applied; the previous configuration stays.
     ConfigError {
         message: String,
