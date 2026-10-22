@@ -114,6 +114,11 @@ owned, to a worker thread that feeds an encoder process (ffmpeg, VA-API when
 the card has it) at a steady rate and paints click rings into it. A frame
 the worker has no room for is dropped; the loop never waits for it.
 
+Notes (#79) are one Markdown file, read and written whole on worker
+threads (written to a new file, then renamed over the old one); lines the
+notes do not understand are kept as they were. The file is read again each
+time the notes open, so edits made elsewhere show.
+
 Comfort over the whole screen (#78): focus mode puts a veil just under the
 focused window; the magnifier wraps every element of an output's scene in a
 rescale around the pointer, so the pointer's point stays put and input needs

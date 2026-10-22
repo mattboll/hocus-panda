@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod config;
 pub mod model;
 pub mod night;
+pub mod notes;
 pub mod outputs;
 pub mod session;
 pub mod shortcuts;

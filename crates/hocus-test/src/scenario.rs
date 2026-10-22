@@ -95,6 +95,9 @@ pub enum Step {
     /// A file a started program wrote in the compositor's runtime
     /// directory: `{ name, contains?, lacks? }`.
     ExpectRuntimeFile(ExpectFile),
+    /// A file of the compositor's state directory (notes, the session):
+    /// `{ name, contains?, lacks? }`, once written.
+    ExpectStateFile(ExpectFile),
     /// Runs `notify-send` with these arguments on the private bus.
     NotifySend(Vec<String>),
     /// Sends a notification on the private bus.
@@ -569,6 +572,7 @@ impl fmt::Display for Step {
             Self::Type(text) => write!(f, "type {text:?}"),
             Self::ExpectAccent(e) => write!(f, "expect_accent {:?}", e.hue),
             Self::ExpectRuntimeFile(e) => write!(f, "expect_runtime_file {}", e.name),
+            Self::ExpectStateFile(e) => write!(f, "expect_state_file {}", e.name),
             Self::NotifySend(args) => write!(f, "notify_send {args:?}"),
             Self::Notify(n) => write!(f, "notify {} {:?}", n.app, n.summary),
             Self::RightClickUi(label) => write!(f, "right_click_ui {label:?}"),
@@ -996,6 +1000,7 @@ impl Run<'_> {
             Step::ExpectConfigFile(expected) => self.expect_config_file(expected),
             Step::Type(text) => self.type_text(text),
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
+            Step::ExpectStateFile(expected) => self.expect_state_file(expected),
             Step::NotifySend(args) => self.notify_send(args),
             Step::Notify(n) => self.notify(n),
             Step::ExpectUi(expected) => self.expect_ui(expected),
@@ -1431,6 +1436,23 @@ impl Run<'_> {
     }
 
     /// Started programs run in their own time: the file gets a moment.
+    /// A file of the state directory holds these strings, and lacks those,
+    /// once its worker wrote it.
+    fn expect_state_file(&mut self, expected: &ExpectFile) -> anyhow::Result<()> {
+        let path = self.compositor.state_dir().join(&expected.name);
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            let ok = expected.contains.iter().all(|c| text.contains(c.as_str()))
+                && !expected.lacks.iter().any(|l| text.contains(l.as_str()));
+            if ok {
+                return Ok(());
+            }
+            anyhow::ensure!(Instant::now() < deadline, "{} is:\n{text}", expected.name);
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
     fn expect_runtime_file(&mut self, expected: &ExpectFile) -> anyhow::Result<()> {
         let dir = self
             .compositor

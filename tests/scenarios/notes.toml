@@ -1,0 +1,62 @@
+description = "Super+N: a line typed as - [ ] becomes a to-do, saved in the notes' Markdown file; the column shows it, and ticking it there writes - [x]"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+keys = "super+49"
+
+[[step]]
+type = "- [ ] buy bamboo"
+
+[[step]]
+key = 28
+
+[[step]]
+type = "the wifi code is on the fridge"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "buy bamboo" }
+
+[[step]]
+expect_state_file = { name = "notes.md", contains = ["- [ ] buy bamboo\n", "- the wifi code is on the fridge\n"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "notes.png" }
+
+# The column's preview.
+[[step]]
+key = 1
+
+[[step]]
+expect_ui = { label = "TASKS · 1 TO DO" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "notes-column.png" }
+
+[[step]]
+click_ui = "buy bamboo"
+
+[[step]]
+expect_state_file = { name = "notes.md", contains = ["- [x] buy bamboo\n"] }
+
+[[step]]
+expect_ui = { label = "TASKS · 1 TO DO", shown = false }
+
+# The command field finds notes.
+[[step]]
+keys = "super+57"
+
+[[step]]
+type = "fridge"
+
+[[step]]
+expect_ui = { label = "the wifi code is on the fridge" }

@@ -193,6 +193,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `clipboard-history` | the clipboard history in the launcher's card: newest first, Enter pastes into the focused application, Tab pins, Delete forgets |
 | `palette` | the action palette: every action with its keys and what it acts on, recent ones first; searched by name (English or French) or by keys, typed (`Maj+S`) or pressed; Enter runs it on the window that had the focus, Tab opens the settings to give it keys |
 | `emoji` | the emoji picker: searched in English and French, recent ones first, Tab changes the skin tone, Enter types it into the focused application |
+| `notes` | notes and to-dos in the launcher's card: what is typed is added, a to-do when it starts `- [ ]`; on an empty line Enter ticks, Delete removes. Kept in `~/.local/share/hocuspanda/notes.md`, plain Markdown; the column shows the to-dos left, the command field finds notes |
 | `focus-mode` | everything but the focused window dims; again, it lifts |
 | `night-light` | night light on or off, until the schedule changes |
 | `zoom-in`, `zoom-out` | the magnifier, around the pointer, up to 8×; back to 1 it is off (also Super+Alt+wheel) |
@@ -233,6 +234,7 @@ Defaults:
 | Shift+Print, Super+Shift+S | `screenshot region` |
 | Super+Shift+R | `record` |
 | Super+F | `focus-mode` |
+| Super+N | `notes` |
 | Super+Equal, Super+Minus | `zoom-in`, `zoom-out` |
 | Ctrl+Print | `screenshot window` |
 | Super+A | `quick-settings` |

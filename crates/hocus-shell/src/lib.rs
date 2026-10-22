@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod authorize;
 pub mod calc;
+pub mod checkbox;
 pub mod column;
 pub mod emoji;
 pub mod fuzzy;

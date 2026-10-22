@@ -227,6 +227,7 @@ impl State {
             status: self.status(),
             tray: self.tray.apps.clone(),
             sharing: self.sharing(),
+            todos: self.open_todos(),
         }
     }
 
@@ -411,6 +412,7 @@ impl State {
             ShellAction::ShutDown => self.run_action(&A::ShutDown, serial),
             ShellAction::OpenLauncher => self.open_launcher(),
             ShellAction::StopSharing => self.stop_sharing(),
+            ShellAction::TickTodo(index) => self.tick_note(index),
             ShellAction::TrayActivate(key) => self.tray_activate(key),
             ShellAction::TrayMenu(key) => self.tray_menu(key),
             ShellAction::TrayChosen { key, id } => self.tray_chosen(key, id),
