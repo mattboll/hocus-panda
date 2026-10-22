@@ -139,6 +139,7 @@ impl Headless {
             shell: harness.shell,
             session_bus: harness.session_bus.clone(),
             system_bus: harness.system_bus.clone(),
+            session_services: false,
             // Private: tests never touch the developer's saved session.
             state_dir: Some(config_dir.path().join("state")),
             data_dirs: harness.data_dirs.clone(),

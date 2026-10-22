@@ -82,6 +82,13 @@ struct Args {
     #[arg(long, value_name = "ADDRESS")]
     system_bus: Option<String>,
 
+    /// Use the machine's services as the session itself does: logind,
+    /// UPower, sound, saving the session, autostart. For a VM or a spare
+    /// machine; never next to a live session, whose sound, sleep and saved
+    /// session it would take over.
+    #[arg(long)]
+    session_services: bool,
+
     /// Configuration file, watched and applied on change. Default:
     /// $XDG_CONFIG_HOME/hocuspanda/config.toml.
     #[arg(long, value_name = "FILE")]
@@ -145,6 +152,7 @@ fn main() -> anyhow::Result<()> {
         session_bus: args.session_bus,
         system_bus: args.system_bus,
         state_dir: None,
+        session_services: args.session_services,
         data_dirs: None,
         child_env: None,
         backend: match args.backend {

@@ -211,6 +211,11 @@ private buses with services of their own.
 
 ## Testing
 
+A Debian testing VM (`scripts/vm/`) runs a headless hocuspanda with
+`--session-services` against real logind, PAM, UPower, NetworkManager,
+power-profiles-daemon and PipeWire, suspends and wakes; the DRM backend
+comes to it with #27.
+
 - **Unit tests** on `hocus-core` and `hocus-ui`: layout, snapping, desktops,
   springs, text layout.
 - **Scenarios**: files that describe steps (spawn a test client, move the
