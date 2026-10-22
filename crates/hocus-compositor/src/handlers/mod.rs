@@ -72,13 +72,20 @@ impl SelectionHandler for State {
         _seat: Seat<Self>,
     ) {
         // Kept in the history, read off the loop; asked once the selection
-        // is in place, after this request.
-        if ty == SelectionTarget::Clipboard
+        // is in place, after this request. Asking reads whatever the
+        // clipboard holds then: if a newer selection came meanwhile (a
+        // password manager's, marked secret, that must never be read), this
+        // one is not read at all.
+        let asked = (ty == SelectionTarget::Clipboard).then(|| self.selection_changed());
+        if let Some(asked) = asked
             && let Some(source) = &source
             && let Some((mime, fd)) = self.clipboard_reader(&source.mime_types())
             && let Some(handle) = &self.loop_handle
         {
             handle.insert_idle(move |app| {
+                if !app.state.selection_is(asked) {
+                    return;
+                }
                 if let Err(err) =
                     smithay::wayland::selection::data_device::request_data_device_client_selection(
                         &app.state.seat,

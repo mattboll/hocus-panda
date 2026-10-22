@@ -327,6 +327,9 @@ pub struct Clipboard {
     /// Marked secret, as a password manager copies.
     #[serde(default)]
     pub secret: bool,
+    /// Copied at once after `text`, marked secret, in the same request.
+    #[serde(default)]
+    pub then_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1627,7 +1630,9 @@ impl Run<'_> {
 
     fn copy(&mut self, copy: &Clipboard) -> anyhow::Result<()> {
         if let Some(client) = self.clients.iter().find(|c| c.spec.app_id == copy.app_id) {
-            if copy.secret {
+            if let Some(secret) = &copy.then_secret {
+                client.copy_then_secret(&copy.text, secret)?;
+            } else if copy.secret {
                 client.copy_secret(&copy.text)?;
             } else {
                 client.copy(&copy.text)?;

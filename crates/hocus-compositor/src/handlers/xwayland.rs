@@ -258,6 +258,8 @@ impl XwmHandler for State {
     /// An X11 client took the selection: Wayland clients see it offered.
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         if selection == SelectionTarget::Clipboard {
+            // A Wayland selection's read still waiting is dropped.
+            self.selection_changed();
             // Kept in the history, read off the loop.
             if let Some((mime, fd)) = self.clipboard_reader(&mime_types)
                 && let (Some(xwm), Some(handle)) = (self.xwm.as_mut(), self.loop_handle.clone())
