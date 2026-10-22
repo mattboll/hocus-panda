@@ -2893,17 +2893,53 @@ impl SettingsView {
             )),
         );
         self.targets.insert(identify, Target::Identify);
-        // Mirroring comes with #125.
-        let mut mirror = Button::new(words::MIRROR.get(lang), ButtonKind::Plain, theme);
-        mirror.enabled = false;
-        self.add(
+        // Mirroring (#125): every other lit screen shows the primary one.
+        let primary = self
+            .ctx
+            .screens
+            .iter()
+            .find(|s| s.primary)
+            .or_else(|| self.ctx.screens.iter().find(|s| s.enabled))
+            .map(|s| s.name.clone());
+        let others: Vec<String> = self
+            .ctx
+            .screens
+            .iter()
+            .filter(|s| s.enabled && Some(&s.name) != primary.as_ref())
+            .map(|s| s.name.clone())
+            .collect();
+        let mirroring = !others.is_empty()
+            && others.iter().all(|name| {
+                self.ctx.config.output(name).and_then(|o| o.mirror.as_ref()) == primary.as_ref()
+            });
+        let label = if mirroring {
+            words::STOP_MIRROR
+        } else {
+            words::MIRROR
+        };
+        let mut button = Button::new(label.get(lang), ButtonKind::Plain, theme);
+        button.enabled = primary.is_some() && !others.is_empty();
+        let mirror = self.add(
             buttons,
             Style {
                 height: Length::Px(40.0),
                 ..Style::default()
             },
-            Kind::Button(mirror),
+            Kind::Button(button),
         );
+        if let Some(primary) = primary {
+            let changes = others
+                .iter()
+                .map(|name| {
+                    if mirroring {
+                        Change::output_unset(name, "mirror")
+                    } else {
+                        Change::output(name, "mirror", primary.as_str())
+                    }
+                })
+                .collect();
+            self.targets.insert(mirror, Target::SetAll(changes));
+        }
 
         let wide = self.tree.size().w >= 1180.0;
         let pair = self.add(

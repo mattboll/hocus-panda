@@ -226,6 +226,11 @@ impl State {
             Some(scale),
             Some(setting.position.into()),
         );
+        // Showing another's picture: only its mode and scale change.
+        if self.is_mirroring(&name) {
+            self.needs_redraw = true;
+            return;
+        }
         self.space.map_output(output, setting.position);
         self.output_moved(output);
         let new = self.space.output_geometry(output).unwrap_or_default();
@@ -371,6 +376,8 @@ impl App {
             }
         }
         self.state.settle_desktops_and_primary();
+        let heads = self.heads();
+        self.state.settle_mirrors(&heads);
         // Screens turned off or on through output-power.
         for (name, on) in std::mem::take(&mut self.state.output_management.power_wanted) {
             let App { state, backend } = self;

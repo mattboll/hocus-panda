@@ -135,6 +135,8 @@ pub struct State {
     pub identifying: Vec<(String, crate::shell::Panel<hocus_shell::identify::Identify>)>,
     /// What screens are set to, and what was asked (#28).
     pub output_settings: crate::outputs::Settings,
+    /// Screens showing another's picture (#125).
+    pub mirrors: Vec<crate::mirror::Mirror>,
     /// wlr-output-management and output-power, for third-party tools.
     pub output_management: crate::handlers::output_management::OutputManagement,
     /// linux-dmabuf, whose global the TTY backend makes for its GPU.
@@ -245,6 +247,7 @@ impl State {
             is_session: false,
             vt_switch: None,
             output_settings: Default::default(),
+            mirrors: Vec::new(),
             identifying: Vec::new(),
             leaver: Default::default(),
             authorizer: Default::default(),

@@ -29,6 +29,7 @@ mod launcher;
 mod leave;
 mod lock;
 mod media;
+mod mirror;
 mod notes;
 mod notify;
 mod output_spec;

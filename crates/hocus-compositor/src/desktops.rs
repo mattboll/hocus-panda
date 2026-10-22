@@ -79,6 +79,11 @@ impl State {
     /// Removes an output: the windows it showed go to the primary output,
     /// at the same offset from its corner, and come back when it does.
     pub fn unplug_output(&mut self, output: &Output) {
+        // Showing another's picture, it was out of the layout already.
+        if self.mirrors.iter().any(|m| m.output == *output) {
+            self.mirrors.retain(|m| m.output != *output);
+            return;
+        }
         self.remember_places();
         let name = OutputName(output.name());
         let area = self.space.output_geometry(output).unwrap_or_default();

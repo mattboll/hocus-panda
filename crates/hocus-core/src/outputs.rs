@@ -30,6 +30,10 @@ pub struct OutputConfig {
     pub primary: Option<bool>,
     /// Desktops of its own, 1 to 8; `desktops.per_output` otherwise.
     pub desktops: Option<u32>,
+    /// Shows this other screen's picture, scaled to fit, instead of
+    /// desktops of its own, which wait for it (#125): a projector showing
+    /// the laptop.
+    pub mirror: Option<String>,
 }
 
 /// A set of screens and how they are placed: in effect when exactly these
@@ -184,6 +188,12 @@ impl OutputConfig {
     pub fn check(&self) -> Result<(), String> {
         if self.name.is_empty() {
             return Err("name: expected the output's name, as `hocus msg outputs` lists".into());
+        }
+        if self.mirror.as_deref() == Some(self.name.as_str()) {
+            return Err(format!(
+                "mirror = {:?}: a screen cannot show itself",
+                self.name
+            ));
         }
         if let Some(mode) = &self.mode {
             mode.parse::<ModeSpec>()

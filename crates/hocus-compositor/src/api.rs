@@ -534,14 +534,9 @@ impl App {
         let state = &self.state;
         let result = match target {
             Target::Output(name) => {
-                let output = state
-                    .space
-                    .outputs()
-                    .find(|o| o.name() == *name)
-                    .cloned()
-                    .ok_or_else(|| {
-                        ApiError::new(ErrorCode::NotFound, format!("no output named {name}"))
-                    })?;
+                let output = state.lit_output(name).ok_or_else(|| {
+                    ApiError::new(ErrorCode::NotFound, format!("no output named {name}"))
+                })?;
                 match &mut self.backend {
                     BackendState::Winit(winit) => winit.capture_output(&output, state, cursor),
                     BackendState::Headless(headless) => {
