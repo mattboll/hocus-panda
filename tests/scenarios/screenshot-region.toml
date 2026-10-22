@@ -1,0 +1,54 @@
+# A region drawn with the pointer (#69): its size in pixels shows as it is
+# drawn; let go, the clipboard holds a PNG of exactly that region at the
+# output's pixel size.
+description = "A region screenshot goes to the clipboard at the output's pixel size"
+outputs = ["1280x800@2"]
+shell = true
+
+[[step]]
+config = """
+[screenshots]
+save = false
+"""
+
+[[step]]
+open = { app_id = "reader", size = [400, 300], color = "#3366cc" }
+
+[[step]]
+keys = "shift+99"
+
+[[step]]
+expect_ui = { label = "Drag over a region · Escape to cancel" }
+
+[[step]]
+pointer_move = [100, 100]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [420, 340]
+
+[[step]]
+expect_ui = { label = "640 × 480" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "screenshot-region.png" }
+
+[[step]]
+release = "left"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_event = { type = "screenshot", has = "\"width\":640,\"height\":480" }
+
+[[step]]
+expect_clipboard = { app_id = "reader", text = "image/png 640x480" }
+
+[[step]]
+expect_ui = { label = "Screenshot taken" }

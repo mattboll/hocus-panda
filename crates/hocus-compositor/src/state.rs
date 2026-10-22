@@ -108,6 +108,8 @@ pub struct State {
     pub is_session: bool,
     /// Switches virtual terminals, on a TTY.
     pub vt_switch: Option<smithay::backend::session::libseat::LibSeatSession>,
+    /// The screenshot tool (#69).
+    pub shots: crate::screenshot::Screenshots,
     /// polkit's password requests and their dialog (#83).
     pub authorizer: crate::authorize::Authorizer,
     /// Leaving the session: its card, what the machine can do (#72).
@@ -228,6 +230,7 @@ impl State {
             identifying: Vec::new(),
             leaver: Default::default(),
             authorizer: Default::default(),
+            shots: Default::default(),
             output_management: crate::handlers::output_management::OutputManagement::new(dh),
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
             settings_started: None,

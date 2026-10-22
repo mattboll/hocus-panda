@@ -89,6 +89,7 @@ impl SelectionHandler for State {
     ) {
         match offer {
             crate::launcher::Offer::Text(text) => crate::launcher::send_text(text.clone(), fd),
+            crate::launcher::Offer::Png(png) => crate::launcher::send_bytes(png.clone(), fd),
             crate::launcher::Offer::X11 => {
                 if let (Some(xwm), Some(handle)) = (self.xwm.as_mut(), self.loop_handle.clone())
                     && let Err(err) = xwm.send_selection(ty, mime_type, fd, handle)

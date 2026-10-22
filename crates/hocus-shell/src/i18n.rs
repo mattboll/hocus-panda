@@ -579,6 +579,56 @@ impl Lang {
     pub fn authenticate(self) -> &'static str {
         self.pick("Authenticate", "Authentifier")
     }
+
+    pub fn pick_region(self) -> &'static str {
+        self.pick(
+            "Drag over a region · Escape to cancel",
+            "Tracer une zone · Échap pour annuler",
+        )
+    }
+
+    pub fn pick_window(self) -> &'static str {
+        self.pick(
+            "Click a window · Escape to cancel",
+            "Cliquer une fenêtre · Échap pour annuler",
+        )
+    }
+
+    pub fn screenshot_taken(self) -> &'static str {
+        self.pick("Screenshot taken", "Capture prise")
+    }
+
+    /// Under the screenshot's toast: where it went.
+    pub fn screenshot_where(self, file: Option<&str>, copied: bool) -> String {
+        match (self, file, copied) {
+            (Self::En, Some(f), true) => format!("{f}, and copied"),
+            (Self::En, Some(f), false) => f.to_owned(),
+            (Self::En, None, _) => "Copied to the clipboard".into(),
+            (Self::Fr, Some(f), true) => format!("{f}, et copiée"),
+            (Self::Fr, Some(f), false) => f.to_owned(),
+            (Self::Fr, None, _) => "Copiée dans le presse-papiers".into(),
+        }
+    }
+
+    pub fn open_file(self) -> &'static str {
+        self.pick("Open", "Ouvrir")
+    }
+
+    pub fn delete(self) -> &'static str {
+        self.pick("Delete", "Supprimer")
+    }
+
+    pub fn copy_text(self) -> &'static str {
+        self.pick("Copy the text", "Copier le texte")
+    }
+
+    pub fn text_copied(self) -> &'static str {
+        self.pick("Text copied", "Texte copié")
+    }
+
+    pub fn no_text_found(self) -> &'static str {
+        self.pick("No text found", "Aucun texte trouvé")
+    }
 }
 
 #[cfg(test)]

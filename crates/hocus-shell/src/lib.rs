@@ -14,6 +14,7 @@ pub mod identify;
 pub mod launcher;
 pub mod leave;
 pub mod lock;
+pub mod picker;
 pub mod providers;
 pub mod quick;
 pub mod showcase;

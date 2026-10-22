@@ -543,7 +543,8 @@ impl DataDeviceHandler for Client {
     fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64) {}
 
     /// Reads every text clipboard offered, from a thread: the source may be
-    /// slow, and an X11 one goes through the compositor.
+    /// slow, and an X11 one goes through the compositor. A PNG is read as
+    /// `image/png WIDTHxHEIGHT`.
     fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
         if self.copied.is_some() {
             // Its own: reading it would wait on itself.
@@ -554,20 +555,35 @@ impl DataDeviceHandler for Client {
         };
         let Some(mime) = offer.with_mime_types(|mimes| {
             TEXT.iter()
+                .chain(&["image/png"])
                 .find(|t| mimes.iter().any(|m| m == *t))
                 .map(|t| t.to_string())
         }) else {
             return;
         };
+        let png = mime == "image/png";
         let Ok(mut pipe) = offer.receive(mime) else {
             return;
         };
         let clipboard = self.clipboard.clone();
         std::thread::spawn(move || {
-            let mut text = String::new();
-            if pipe.read_to_string(&mut text).is_ok()
-                && let Ok(mut clipboard) = clipboard.lock()
-            {
+            let mut bytes = Vec::new();
+            if pipe.read_to_end(&mut bytes).is_err() {
+                return;
+            }
+            let text = if png {
+                // The size, from the header: width and height after the
+                // signature and the IHDR chunk's length and type.
+                let be = |i: usize| {
+                    bytes
+                        .get(i..i + 4)
+                        .map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+                };
+                format!("image/png {}x{}", be(16), be(20))
+            } else {
+                String::from_utf8_lossy(&bytes).into_owned()
+            };
+            if let Ok(mut clipboard) = clipboard.lock() {
                 *clipboard = Some(text);
             }
         });

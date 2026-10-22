@@ -555,6 +555,13 @@ pub enum Event {
     OutputRemoved {
         name: String,
     },
+    /// A screenshot was taken (#69): where it was saved, if it was, and its
+    /// size in pixels.
+    Screenshot {
+        path: Option<String>,
+        width: u32,
+        height: u32,
+    },
     /// Leaving the session (#72): `action` is `log-out`, `restart`,
     /// `shut-down`, `suspend` or `hibernate`; `stage` is `countdown`,
     /// `closing`, `cancelled` or `now`.

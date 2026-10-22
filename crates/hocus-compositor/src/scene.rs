@@ -100,6 +100,8 @@ impl State {
                 .into_iter()
                 .map(SceneElement::Frame),
         );
+        // Choosing what a screenshot takes, and its flash.
+        elements.extend(self.screenshot_elements(renderer, output));
         // Each screen's name, while identifying.
         elements.extend(
             self.identify_elements(renderer, output)

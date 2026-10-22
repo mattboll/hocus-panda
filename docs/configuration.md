@@ -57,6 +57,12 @@ curtain_after = 300        # seconds before the curtain dims the screens (0: nev
 lock_after = 30            # seconds of curtain before the session locks
 lock = true                # false: the curtain only dims
 
+[screenshots]              # Print and its variants
+folder = ""                # empty: Screenshots in the pictures folder
+save = true                # into the folder
+copy = true                # onto the clipboard (as PNG)
+ocr = "tesseract"          # reads the text for "Copy the text", when installed
+
 [settings]                 # the settings app (Super+Comma)
 command = "hocus-settings" # `--page <page>` is added for a page
 app_id = "hocus-settings"  # how its window is recognised
@@ -160,6 +166,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `settings` | opens the settings app, or brings its window forward |
 | `lock` | locks the session now |
 | `log-out`, `restart`, `shut-down` | after a ten-second countdown (Escape cancels), or once the applications holding it back are dealt with: saves the session, asks windows to close, then leaves |
+| `screenshot MODE [SECONDS]` | `screen` (under the pointer), `all` (every screen, each at its own pixel density), `window` (the one clicked next), `region` (drawn with the pointer, its size shown; Escape cancels), after a delay of up to 60 s: copied and saved, then a toast offers to open, delete or copy its text |
 | `suspend`, `hibernate` | sleeps now, locked first; hibernating only where the machine can |
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
@@ -187,6 +194,10 @@ Defaults:
 | Alt+F4 | `close` |
 | Super+Ctrl+Space | `switch-layout` |
 | Super+Space | `launcher` |
+| Print | `screenshot screen` |
+| Super+Print | `screenshot all` |
+| Shift+Print, Super+Shift+S | `screenshot region` |
+| Ctrl+Print | `screenshot window` |
 | Super+A | `quick-settings` |
 | Super+Backtick | `dropdown` |
 | Super+Comma | `settings` |
