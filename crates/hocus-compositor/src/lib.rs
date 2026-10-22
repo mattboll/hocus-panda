@@ -100,6 +100,10 @@ pub struct Options {
     /// Reads the system's state (battery, network…) on this bus instead of
     /// the machine's system bus.
     pub system_bus: Option<String>,
+    /// Uses the machine's services as the session itself does (logind,
+    /// UPower, sound, saving the session, autostart) without the DRM
+    /// backend: for a VM, never next to a live session.
+    pub session_services: bool,
     /// Where the session is saved; the session itself uses
     /// `$XDG_STATE_HOME/hocuspanda`, others save nothing unless given one.
     pub state_dir: Option<PathBuf>,
@@ -218,6 +222,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     }
     state.loop_handle = Some(event_loop.handle());
     state.system_bus = options.system_bus.clone();
+    state.is_session = options.session_services;
     lock::start(&event_loop.handle(), &mut state);
     lock::start_session(
         &event_loop.handle(),

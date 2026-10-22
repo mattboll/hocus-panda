@@ -60,7 +60,22 @@ cargo run -p hocus-ui --example gallery
 HOCUS_BLESS=1 cargo test -p hocus-ui --test spring
 ```
 
-Update this section as commands land (VM scripts).
+Against a real system (logind, PAM, UPower, NetworkManager, power profiles,
+PipeWire, autostart, suspend), in a Debian testing VM (QEMU with KVM; the
+base image is cached in `$XDG_CACHE_HOME/hocuspanda-vm`):
+
+```sh
+scripts/vm/debian.sh up        # boot it, user alex / panda
+scripts/vm/debian.sh copy      # target/debug's programs into it
+scripts/vm/debian.sh ssh '~/hocus-vm start; ~/hocus-vm msg ui'
+scripts/vm/debian.sh monitor system_wakeup   # after `systemctl suspend` in it
+scripts/vm/debian.sh down
+```
+
+`--session-services` makes a headless hocuspanda use the machine's services
+as the session would: only in a VM, never next to a live session.
+
+Update this section as commands land.
 
 ## Hard rules
 
