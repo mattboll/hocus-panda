@@ -28,6 +28,7 @@ pub struct Config {
     /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
     pub calendars: Vec<CalendarAccount>,
     pub dock: Dock,
+    pub pandas: Pandas,
     pub language: Language,
     pub hot_corners: HotCorners,
     pub gestures: Gestures,
@@ -365,6 +366,19 @@ impl Default for Screenshots {
             ocr: "tesseract".into(),
             annotate: "hocus-annotate".into(),
         }
+    }
+}
+
+/// The pandas (#47), which show what happens: off, none is drawn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Pandas {
+    pub enabled: bool,
+}
+
+impl Default for Pandas {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 

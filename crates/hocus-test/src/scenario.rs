@@ -314,6 +314,9 @@ pub struct OpenWindow {
     /// Holds the compositor's shortcuts back while it has the keyboard.
     #[serde(default)]
     pub inhibit_shortcuts: bool,
+    /// Keeps the session awake while shown, as a video player does.
+    #[serde(default)]
+    pub inhibit_idle: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1583,6 +1586,7 @@ impl Run<'_> {
             self.compositor.socket_path(),
             crate::client::ClientOptions {
                 inhibit_shortcuts: open.inhibit_shortcuts,
+                inhibit_idle: open.inhibit_idle,
             },
         )?);
         self.compositor

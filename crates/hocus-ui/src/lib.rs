@@ -16,6 +16,7 @@ pub mod access;
 pub mod canvas;
 pub mod geom;
 pub mod motion;
+pub mod shape;
 pub mod text;
 pub mod theme;
 pub mod tree;
@@ -23,6 +24,7 @@ pub mod tree;
 pub use access::{AccessNode, Role};
 pub use canvas::Canvas;
 pub use geom::{Insets, PixelRect, Point, Rect, Size};
+pub use shape::{Shape, Transform};
 pub use theme::{Accent, Color, Face, Paint, TextStyle, Theme, ThemeName, Typeface};
 pub use tree::{
     Align, Button, ButtonKind, Direction, Draw, Event, Icon, Input, Justify, Key, Kind, Length,

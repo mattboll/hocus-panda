@@ -1,0 +1,53 @@
+# The pandas (#47) turned off: in the configuration, none is drawn; from
+# quick settings, for the session.
+description = "Pandas off, in the configuration or from quick settings, draw none"
+outputs = ["1280x800", "1280x800"]
+shell = true
+
+[[step]]
+config = """
+[pandas]
+enabled = false
+"""
+
+[[step]]
+open = { app_id = "player", size = [640, 360], color = "#101010", inhibit_idle = true }
+
+[[step]]
+set_state = { app_id = "player", state = "fullscreen" }
+
+[[step]]
+expect_ui = { label = "Panda watching a video", shown = false }
+
+[[step]]
+config = """
+[pandas]
+enabled = true
+"""
+
+[[step]]
+expect_ui = { label = "Panda watching a video" }
+
+[[step]]
+set_state = { app_id = "player", state = "normal" }
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+a"
+
+[[step]]
+click_ui = "Pandas"
+
+[[step]]
+expect_ui = { label = "Pandas", selected = false }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+set_state = { app_id = "player", state = "fullscreen" }
+
+[[step]]
+expect_ui = { label = "Panda watching a video", shown = false }

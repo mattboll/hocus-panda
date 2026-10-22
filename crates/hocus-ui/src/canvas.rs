@@ -169,6 +169,23 @@ impl Canvas {
         self.ctx.fill_path(path);
     }
 
+    /// A shape in a `view`×`view` box, filled, drawn into `r`.
+    pub fn fill_shape(&mut self, shape: &crate::shape::Shape, view: f32, r: Rect, color: Color) {
+        self.path(&shape.0, view, r, color);
+    }
+
+    /// A shape's outline, `width` in the box's units.
+    pub fn stroke_shape(
+        &mut self,
+        shape: &crate::shape::Shape,
+        view: f32,
+        r: Rect,
+        width: f32,
+        color: Color,
+    ) {
+        self.stroke_path(&shape.0, view, r, width, color);
+    }
+
     /// A path's outline in a `view`×`view` box, `width` in the box's units,
     /// with round ends and joins.
     pub fn stroke_path(&mut self, path: &BezPath, view: f32, r: Rect, width: f32, color: Color) {

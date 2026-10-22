@@ -14,27 +14,53 @@ Naming in code and on the system:
 
 ## Mascot
 
-Several pandas that **show the real state of the desktop**:
+Two characters, one family (`hocus-shell/src/panda.rs`):
+
+- **The apprentice magician**: mischievous, a little overtaken by his own
+  magic. A patched top hat that does everything (held out to ask, thrown
+  when done, over his eyes to sleep, a popcorn bucket's neighbour), a
+  sparkle pinned in its band, a stage bow tie, a wand, a wink.
+- **The watcher**: calm and round, keeps the machine at night. Welding
+  goggles pulled down to work, a scarf, a lantern raised to call you.
+
+Agents get them in turn, so two agents side by side are told apart. What
+ties them: one ear **touched by magic**, in the accent colour, that says
+the state: lit while the panda acts, radiating when something waits for
+you, orange and drooping when stuck, dark asleep; and the sparkle. Dark
+parts are slate (`#23262E`), never pure black, with a cream rim so they
+read on a dark background; no pink cheeks.
+
+They **move for a moment when their state changes** (juggling, the hat
+thrown, sparks, smoke, a lantern swaying), then hold still; a panda that
+is a page's subject (the welcome) may move all the time. With reduced
+motion or on battery saver they hold still.
+
+**Logo**: the apprentice's head, winking, with the magic ear and a sparkle
+("the magic ear"). Kept in reserve: a panda coming out of the top hat
+instead of a rabbit, and a top hat with two panda ears. The exploration
+board has all three.
+
+They **show the real state of the desktop**:
 
 | State | Panda |
 |---|---|
-| A coding agent works | One panda per agent, at its laptop |
-| An agent waits for your answer | Raised paw, question bubble |
-| An agent finished | Arms up, sparkles |
-| An agent is stuck or failed | Paw on the head, question mark |
-| Nothing is happening | Plays with a ball |
+| A coding agent works | One panda per agent, at its laptop or welding |
+| An agent waits for your answer | Holds out his hat or raises his lantern; the ear radiates |
+| An agent finished | Arms up, sparkles, the hat thrown |
+| An agent is stuck or failed | The spell smoked; the ear turns orange |
+| Nothing is happening | Juggles |
 | A video plays fullscreen on the other screen | Eats popcorn, looking at it |
 | Before locking, locked | Yawns, then sleeps on the lock screen |
 | Boot, session restore | Waves, sets the desktop up |
-| Logo | Top hat with an accent band, sparkles |
+| Logo | The apprentice's head, winking, the magic ear, a sparkle |
 
 **Not Clippy.** The pandas:
 - never interrupt and only talk when asked;
 - can be turned off with one setting (quick settings: "Pandas");
-- do not move when nothing changes: no cost at rest, none on battery saver;
+- move only a moment when something changes: no cost at rest, none on battery saver;
 - are original drawings: no resemblance to the WWF logo or Kung Fu Panda.
 
-Styles to explore: flat vector (current mockups), soft 3D, pixel art. Artwork
+Flat vector, drawn from shapes by the toolkit at any size. Artwork
 may get its own license (CC BY or CC0) next to the MIT code.
 
 ## Colour

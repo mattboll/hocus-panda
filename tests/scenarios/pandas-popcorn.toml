@@ -1,0 +1,40 @@
+# The pandas (#47): while a video plays fullscreen on one screen, a panda
+# eats popcorn in a corner of the other, looking at it; it goes with the
+# video. A fullscreen window that does not keep the session awake is not a
+# video.
+description = "A fullscreen video on one screen brings the popcorn panda to the other"
+outputs = ["1280x800", "1280x800"]
+
+[[step]]
+open = { app_id = "slides", size = [600, 400], color = "#3366cc" }
+
+[[step]]
+set_state = { app_id = "slides", state = "fullscreen" }
+
+[[step]]
+expect_ui = { label = "Panda watching a video", shown = false }
+
+[[step]]
+open = { app_id = "player", size = [640, 360], color = "#101010", inhibit_idle = true }
+
+[[step]]
+set_state = { app_id = "player", state = "fullscreen" }
+
+[[step]]
+expect_ui = { label = "Panda watching a video", inside = [2372, 560, 170, 170] }
+
+# Still once it has moved a moment: no frames at rest.
+[[step]]
+advance_ms = 5000
+
+[[step]]
+expect_idle = { for_ms = 2000 }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "pandas-popcorn.png" }
+
+[[step]]
+set_state = { app_id = "player", state = "normal" }
+
+[[step]]
+expect_ui = { label = "Panda watching a video", shown = false }

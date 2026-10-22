@@ -51,6 +51,10 @@ use wayland_client::{
     },
 };
 use wayland_protocols::{
+    wp::idle_inhibit::zv1::client::{
+        zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1,
+        zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
+    },
     wp::keyboard_shortcuts_inhibit::zv1::client::{
         zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1,
         zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1,
@@ -78,6 +82,8 @@ enum Command {
 pub struct ClientOptions {
     /// Holds the compositor's shortcuts back while it has the keyboard.
     pub inhibit_shortcuts: bool,
+    /// Keeps the session awake while it is shown, as a video player does.
+    pub inhibit_idle: bool,
 }
 
 /// The text formats the test client copies and reads.
@@ -257,6 +263,11 @@ impl SolidWindow {
                 .bind(&qh, 1..=1, ())
                 .context("no keyboard shortcuts inhibitor")?;
             manager.inhibit_shortcuts(window.wl_surface(), &seat, &qh, ());
+        }
+        if options.inhibit_idle {
+            let manager: ZwpIdleInhibitManagerV1 =
+                globals.bind(&qh, 1..=1, ()).context("no idle inhibitor")?;
+            manager.create_inhibitor(window.wl_surface(), &qh, ());
         }
         let activation: Option<XdgActivationV1> = globals.bind(&qh, 1..=1, ()).ok();
         // Typing from the compositor: on while it has the keyboard.
@@ -766,6 +777,30 @@ impl Dispatch<ZwpKeyboardShortcutsInhibitorV1, ()> for Client {
         _: &mut Self,
         _: &ZwpKeyboardShortcutsInhibitorV1,
         _: <ZwpKeyboardShortcutsInhibitorV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpIdleInhibitManagerV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpIdleInhibitManagerV1,
+        _: <ZwpIdleInhibitManagerV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpIdleInhibitorV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpIdleInhibitorV1,
+        _: <ZwpIdleInhibitorV1 as wayland_client::Proxy>::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,

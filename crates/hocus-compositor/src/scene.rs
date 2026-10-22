@@ -255,6 +255,7 @@ impl State {
         );
         elements.extend(self.switcher_elements(renderer, output));
         elements.extend(self.dock_elements(renderer, output));
+        elements.extend(self.panda_elements(renderer, output));
         // Third-party bars above the windows, but under a fullscreen one.
         if !fullscreen {
             elements.extend(

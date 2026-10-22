@@ -145,6 +145,7 @@ pub struct State {
     pub triggers: crate::corners::Triggers,
     /// Drawing on the screen (#86).
     pub ink: crate::ink::Inking,
+    pub pandas: crate::pandas::Pandas,
     /// Desktops sliding, screen by screen (#36).
     pub slides: crate::slide::Slides,
     /// The window switcher (#39).
@@ -266,6 +267,7 @@ impl State {
             snapshots: Default::default(),
             triggers: Default::default(),
             ink: Default::default(),
+            pandas: Default::default(),
             slides: Default::default(),
             alt_tab: Default::default(),
             dock: Default::default(),
