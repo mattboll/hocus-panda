@@ -25,6 +25,6 @@ pub use canvas::Canvas;
 pub use geom::{Insets, PixelRect, Point, Rect, Size};
 pub use theme::{Accent, Color, Face, Paint, TextStyle, Theme, ThemeName, Typeface};
 pub use tree::{
-    Align, ButtonKind, Direction, Draw, Event, Input, Justify, Key, Kind, Length, Look, NodeId,
-    Property, Style, Surface, Tree,
+    Align, Button, ButtonKind, Direction, Draw, Event, Icon, Input, Justify, Key, Kind, Length,
+    Look, NodeId, Property, Style, Surface, Tree,
 };

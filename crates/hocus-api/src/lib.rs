@@ -109,6 +109,9 @@ pub enum Request {
     Config,
     /// Each output's desktops, with their windows, and the one it shows.
     Desktops,
+    /// The shell's interface as screen readers see it: roles, labels and
+    /// where each element is.
+    Ui,
     /// Shows the `index`th desktop (from 0) of an output.
     ShowDesktop {
         output: String,
@@ -162,6 +165,7 @@ impl Request {
             | Self::Stats
             | Self::Config
             | Self::Desktops
+            | Self::Ui
             | Self::Screenshot { .. } => Permission::Observe,
             Self::Scene
             | Self::PointerMove { .. }
@@ -237,8 +241,27 @@ pub enum Reply {
     Stats(Stats),
     Desktops(Vec<OutputDesktops>),
     Config(ConfigInfo),
+    Ui(Vec<UiNode>),
     /// The request was carried out.
     Done,
+}
+
+/// An element of the shell's interface, depth first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UiNode {
+    /// `group`, `text`, `button`, `image`, `icon` or `custom`.
+    pub role: String,
+    pub label: Option<String>,
+    /// In the global logical space.
+    pub rect: Rect,
+    /// How deep in the tree, from 0.
+    pub depth: u32,
+    #[serde(default)]
+    pub focused: bool,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub selected: bool,
 }
 
 /// An output's desktops: its own first, then guests from unplugged outputs.

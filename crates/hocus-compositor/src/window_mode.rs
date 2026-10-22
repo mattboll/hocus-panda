@@ -61,7 +61,11 @@ impl State {
     /// Where windows go when maximized or placed: the output minus what the
     /// shell reserves (nothing yet; the column will) and the outer gap.
     pub fn work_area(&self, output: &Output) -> Rectangle<i32, Logical> {
-        let area = self.space.output_geometry(output).unwrap_or_default();
+        let mut area = self.space.output_geometry(output).unwrap_or_default();
+        // The widget column takes the right of its output.
+        if let Some(column) = self.column_rect(output) {
+            area.size.w = (column.loc.x - area.loc.x).max(1);
+        }
         let gap = i32::try_from(self.config.windows.gaps.outer).unwrap_or(0);
         let inner = Rectangle::new(
             area.loc + Point::from((gap, gap)),

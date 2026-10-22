@@ -274,6 +274,7 @@ impl App {
                     .collect(),
             ),
             Request::Desktops => Reply::Desktops(state.desktops_info()),
+            Request::Ui => Reply::Ui(state.shell_ui()),
             Request::Config => Reply::Config(ConfigInfo {
                 toml: state.config.to_toml(),
                 error: state.config_error.clone(),

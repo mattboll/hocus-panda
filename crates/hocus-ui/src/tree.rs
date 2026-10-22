@@ -108,8 +108,111 @@ pub struct Look {
 pub enum ButtonKind {
     /// On the accent colour: the main action.
     Primary,
+    /// A surface with a border.
     #[default]
     Plain,
+    /// A tinted surface without a border: icon buttons, status chips.
+    Chip,
+    /// Nothing until hovered: menu items.
+    Ghost,
+}
+
+/// A vector icon: SVG path data in a `view`×`view` box, filled or stroked.
+#[derive(Debug, Clone)]
+pub struct Icon {
+    path: BezPath,
+    view: f32,
+    pub size: f32,
+    /// Line width in the box's units, or `None` to fill.
+    stroke: Option<f32>,
+}
+
+impl Icon {
+    /// Filled, from a 24×24 box.
+    pub fn filled(svg_path: &str, size: f32) -> Option<Self> {
+        Some(Self {
+            path: BezPath::from_svg(svg_path).ok()?,
+            view: 24.0,
+            size,
+            stroke: None,
+        })
+    }
+
+    /// Stroked with round ends, from a 24×24 box.
+    pub fn stroked(svg_path: &str, size: f32, width: f32) -> Option<Self> {
+        Some(Self {
+            stroke: Some(width),
+            ..Self::filled(svg_path, size)?
+        })
+    }
+
+    fn draw(&self, canvas: &mut Canvas, r: Rect, color: Color) {
+        match self.stroke {
+            Some(width) => canvas.stroke_path(&self.path, self.view, r, width, color),
+            None => canvas.path(&self.path, self.view, r, color),
+        }
+    }
+}
+
+/// A button: text, an icon, or both.
+#[derive(Debug)]
+pub struct Button {
+    label: TextBox,
+    icon: Option<Icon>,
+    /// What it does, for screen readers, when it shows no text.
+    name: Option<String>,
+    pub kind: ButtonKind,
+    /// On, for toggles: tinted with the accent.
+    pub selected: bool,
+    pub enabled: bool,
+    /// Content at the start instead of centred: menu items.
+    pub start: bool,
+}
+
+impl Button {
+    pub fn new(label: impl Into<String>, kind: ButtonKind, theme: &Theme) -> Self {
+        let style = match kind {
+            ButtonKind::Primary => theme.text.label.with_color(Paint::OnAccent),
+            _ => theme.text.label,
+        };
+        Self {
+            label: TextBox::new(label, style),
+            icon: None,
+            name: None,
+            kind,
+            selected: false,
+            enabled: true,
+            start: false,
+        }
+    }
+
+    /// Content at the start, as in a menu.
+    pub fn at_start(mut self) -> Self {
+        self.start = true;
+        self
+    }
+
+    pub fn with_icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// The name screen readers say, for a button without text.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn with_style(mut self, style: TextStyle) -> Self {
+        self.label = TextBox::new(self.label.text().to_owned(), style);
+        self
+    }
+
+    fn name(&self) -> String {
+        self.name
+            .clone()
+            .unwrap_or_else(|| self.label.text().to_owned())
+    }
 }
 
 /// Something drawn by its own code: a gauge, a spinner, a chart.
@@ -128,20 +231,14 @@ pub trait Draw {
 pub enum Kind {
     Box(Look),
     Text(TextBox),
-    Button {
-        label: TextBox,
-        kind: ButtonKind,
-    },
+    Button(Button),
     Image {
         pixmap: Arc<Pixmap>,
         /// What the image shows, for screen readers.
         alt: String,
     },
     Icon {
-        /// SVG path data in a `view`×`view` box.
-        path: BezPath,
-        view: f32,
-        size: f32,
+        icon: Icon,
         color: Paint,
         /// What it means; `None` for a decorative icon.
         label: Option<String>,
@@ -157,11 +254,7 @@ impl fmt::Debug for Kind {
         match self {
             Self::Box(look) => f.debug_tuple("Box").field(look).finish(),
             Self::Text(text) => f.debug_tuple("Text").field(text).finish(),
-            Self::Button { label, kind } => f
-                .debug_struct("Button")
-                .field("label", label)
-                .field("kind", kind)
-                .finish(),
+            Self::Button(button) => button.fmt(f),
             Self::Image { alt, .. } => f.debug_struct("Image").field("alt", alt).finish(),
             Self::Icon { label, .. } => f.debug_struct("Icon").field("label", label).finish(),
             Self::Custom { label, .. } => f.debug_struct("Custom").field("label", label).finish(),
@@ -174,23 +267,24 @@ impl Kind {
         Self::Text(TextBox::new(text, style))
     }
 
-    pub fn button(label: impl Into<String>, kind: ButtonKind, theme: &Theme) -> Self {
-        let style = match kind {
-            ButtonKind::Primary => theme.text.label.with_color(Paint::OnAccent),
-            ButtonKind::Plain => theme.text.label,
-        };
-        Self::Button {
-            label: TextBox::new(label, style),
-            kind,
-        }
+    /// A line of text cut with "…" when it does not fit.
+    pub fn text_line(text: impl Into<String>, style: TextStyle) -> Self {
+        Self::Text(TextBox::new(text, style).single_line())
     }
 
-    /// An icon from SVG path data in a 24×24 box.
+    pub fn button(label: impl Into<String>, kind: ButtonKind, theme: &Theme) -> Self {
+        Self::Button(Button::new(label, kind, theme))
+    }
+
+    /// A button showing only an icon, named for screen readers.
+    pub fn icon_button(icon: Icon, name: &str, kind: ButtonKind, theme: &Theme) -> Self {
+        Self::Button(Button::new("", kind, theme).with_icon(icon).with_name(name))
+    }
+
+    /// A filled icon from SVG path data in a 24×24 box.
     pub fn icon(svg_path: &str, size: f32, color: Paint, label: Option<&str>) -> Option<Self> {
         Some(Self::Icon {
-            path: BezPath::from_svg(svg_path).ok()?,
-            view: 24.0,
-            size,
+            icon: Icon::filled(svg_path, size)?,
             color,
             label: label.map(str::to_owned),
         })
@@ -211,7 +305,7 @@ impl Kind {
     }
 
     fn focusable(&self) -> bool {
-        matches!(self, Self::Button { .. })
+        matches!(self, Self::Button(b) if b.enabled)
     }
 }
 
@@ -250,9 +344,16 @@ struct Node {
     /// It moved or faded at the last frame: the next one draws where it
     /// stopped.
     moving: bool,
+    /// A box that takes clicks, with its name for screen readers.
+    clickable: Option<String>,
 }
 
 impl Node {
+    /// It takes clicks and the keyboard focus.
+    fn interactive(&self) -> bool {
+        self.kind.focusable() || self.clickable.is_some()
+    }
+
     fn is_moving(&self, now: Duration) -> bool {
         self.opacity.is_running(now)
             || self.offset_x.is_running(now)
@@ -398,6 +499,7 @@ impl Tree {
             hovered: false,
             pressed: false,
             moving: false,
+            clickable: None,
         };
         if let Some(index) = self.free.pop() {
             let slot = &mut self.nodes[index as usize];
@@ -477,7 +579,7 @@ impl Tree {
     /// Changes the text of a text node or the label of a button.
     pub fn set_text(&mut self, id: NodeId, text: &str) {
         let changed = match self.node_mut(id).map(|n| &mut n.kind) {
-            Some(Kind::Text(t) | Kind::Button { label: t, .. }) => t.set_text(text),
+            Some(Kind::Text(t) | Kind::Button(Button { label: t, .. })) => t.set_text(text),
             _ => false,
         };
         if changed {
@@ -514,6 +616,71 @@ impl Tree {
             node.style = style;
             node.changed = true;
             self.relayout = true;
+        }
+    }
+
+    /// Makes a box take clicks, as a button named `name` would: its whole
+    /// content is the button (a line with dots, an avatar and a name).
+    pub fn set_clickable(&mut self, id: NodeId, name: &str) {
+        if let Some(node) = self.node_mut(id)
+            && node.clickable.as_deref() != Some(name)
+        {
+            node.clickable = Some(name.to_owned());
+        }
+    }
+
+    /// Changes a button's or an icon's icon.
+    pub fn set_icon(&mut self, id: NodeId, new: Icon) {
+        if let Some(node) = self.node_mut(id) {
+            match &mut node.kind {
+                Kind::Button(b) => b.icon = Some(new),
+                Kind::Icon { icon, .. } => *icon = new,
+                _ => return,
+            }
+            node.changed = true;
+        }
+    }
+
+    /// Changes what screen readers call a button or a clickable box.
+    pub fn set_name(&mut self, id: NodeId, name: &str) {
+        if let Some(node) = self.node_mut(id) {
+            if let Kind::Button(b) = &mut node.kind {
+                b.name = Some(name.to_owned());
+            } else if node.clickable.is_some() {
+                node.clickable = Some(name.to_owned());
+            }
+        }
+    }
+
+    /// Turns a toggle button on or off.
+    pub fn set_selected(&mut self, id: NodeId, selected: bool) {
+        if let Some(node) = self.node_mut(id)
+            && let Kind::Button(b) = &mut node.kind
+            && b.selected != selected
+        {
+            b.selected = selected;
+            node.changed = true;
+        }
+    }
+
+    /// A disabled button is shown, but neither takes clicks nor focus.
+    pub fn set_enabled(&mut self, id: NodeId, enabled: bool) {
+        let changed = if let Some(node) = self.node_mut(id)
+            && let Kind::Button(b) = &mut node.kind
+            && b.enabled != enabled
+        {
+            b.enabled = enabled;
+            node.changed = true;
+            true
+        } else {
+            false
+        };
+        if changed && !enabled {
+            for slot in [&mut self.hovered, &mut self.pressed, &mut self.focused] {
+                if *slot == Some(id) {
+                    *slot = None;
+                }
+            }
         }
     }
 
@@ -605,7 +772,14 @@ impl Tree {
                     inner_w.max(0.0),
                     (fh.unwrap_or(avail.h) - pad.vertical()).max(0.0),
                 );
+                main += style.gap * children.len().saturating_sub(1) as f32;
+                let mut fills = Vec::new();
                 for child in &children {
+                    let child_style = self.node(*child).map(|n| n.style).unwrap_or_default();
+                    if style.direction == Direction::Row && child_style.width == Length::Fill {
+                        fills.push((*child, child_style.grow.max(0.0)));
+                        continue;
+                    }
                     let s = self.measure(*child, inner);
                     match style.direction {
                         Direction::Column => {
@@ -618,7 +792,16 @@ impl Tree {
                         }
                     }
                 }
-                main += style.gap * children.len().saturating_sub(1) as f32;
+                // In a row, filling children share what is left, and their
+                // height is the one at that width (text wraps).
+                let grow: f32 = fills.iter().map(|(_, g)| g).sum();
+                let free = (inner.w - main).max(0.0);
+                for (child, g) in fills {
+                    let w = if grow > 0.0 { free * g / grow } else { 0.0 };
+                    let s = self.measure(child, Size::new(w, inner.h));
+                    main += w;
+                    cross = cross.max(s.h);
+                }
                 match style.direction {
                     Direction::Column => Size::new(cross, main),
                     Direction::Row => Size::new(main, cross),
@@ -639,18 +822,29 @@ impl Tree {
         match &mut node.kind {
             Kind::Box(_) => None,
             Kind::Text(text) => Some(text.measure(fonts, Some(avail.w), scale)),
-            Kind::Button { label, .. } => {
-                let s = label.measure(fonts, None, scale);
+            Kind::Button(b) => {
+                let text = if b.label.text().is_empty() {
+                    Size::default()
+                } else {
+                    b.label.measure(fonts, None, scale)
+                };
+                let icon = b.icon.as_ref().map_or(0.0, |i| i.size);
+                let gap = if icon > 0.0 && text.w > 0.0 {
+                    spacing.xs * 1.5
+                } else {
+                    0.0
+                };
+                let pad = if text.w > 0.0 { spacing.l } else { spacing.s };
                 Some(Size::new(
-                    s.w + 2.0 * spacing.l,
-                    (s.h + 2.0 * spacing.s).max(32.0),
+                    icon + gap + text.w + 2.0 * pad,
+                    (text.h.max(icon) + 2.0 * spacing.s).max(32.0),
                 ))
             }
             Kind::Image { pixmap, .. } => Some(Size::new(
                 f32::from(pixmap.width()) / scale,
                 f32::from(pixmap.height()) / scale,
             )),
-            Kind::Icon { size, .. } => Some(Size::new(*size, *size)),
+            Kind::Icon { icon, .. } => Some(Size::new(icon.size, icon.size)),
             Kind::Custom { draw, .. } => Some(draw.size()),
         }
     }
@@ -714,6 +908,12 @@ impl Tree {
                 None => size.w,
             };
             let child_style = self.node(*child).map(|n| n.style).unwrap_or_default();
+            // A child filling a row is as tall as its content at its width.
+            let size = if !column && fill.is_some() {
+                self.measure(*child, Size::new(main, inner.h))
+            } else {
+                size
+            };
             let cross_fill = if column {
                 child_style.width == Length::Fill
             } else {
@@ -940,7 +1140,7 @@ impl Tree {
                 return Some(hit);
             }
         }
-        (rect.contains(p) && (!interactive || node.kind.focusable())).then_some(id)
+        (rect.contains(p) && (!interactive || node.interactive())).then_some(id)
     }
 
     fn set_flag(&mut self, id: Option<NodeId>, hovered: Option<bool>, pressed: Option<bool>) {
@@ -985,7 +1185,7 @@ impl Tree {
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
             if let Some(node) = self.node(id) {
-                if node.kind.focusable() {
+                if node.interactive() {
                     out.push(id);
                 }
                 stack.extend(node.children.iter().rev());
@@ -1061,6 +1261,8 @@ impl Tree {
             label: None,
             rect: Rect::default(),
             focused: false,
+            disabled: false,
+            selected: false,
             children: Vec::new(),
         })
     }
@@ -1068,9 +1270,10 @@ impl Tree {
     fn access_node(&self, id: NodeId) -> Option<AccessNode> {
         let node = self.node(id)?;
         let (role, label) = match &node.kind {
+            Kind::Box(_) if node.clickable.is_some() => (Role::Button, node.clickable.clone()),
             Kind::Box(_) => (Role::Group, None),
             Kind::Text(t) => (Role::Text, Some(t.text().to_owned())),
-            Kind::Button { label, .. } => (Role::Button, Some(label.text().to_owned())),
+            Kind::Button(b) => (Role::Button, Some(b.name())),
             Kind::Image { alt, .. } => (Role::Image, Some(alt.clone())),
             // Decorative icons say nothing.
             Kind::Icon { label: None, .. } => return None,
@@ -1082,6 +1285,8 @@ impl Tree {
             label,
             rect: node.rect,
             focused: self.focused == Some(id),
+            disabled: matches!(&node.kind, Kind::Button(b) if !b.enabled),
+            selected: matches!(&node.kind, Kind::Button(b) if b.selected),
             children: node
                 .children
                 .iter()
@@ -1104,6 +1309,12 @@ fn draw_kind(
 ) {
     match kind {
         Kind::Box(look) => {
+            // A clickable box shows the pointer over it.
+            let tint = match (pressed, hovered) {
+                (true, _) => Some(theme.colors.surface_pressed),
+                (false, true) => Some(theme.colors.surface_hover),
+                _ => None,
+            };
             if look.shadow > 0.0 {
                 canvas.shadow(
                     rect.translate(0.0, look.shadow / 3.0),
@@ -1112,8 +1323,8 @@ fn draw_kind(
                     theme.colors.shadow,
                 );
             }
-            if let Some(bg) = look.background {
-                canvas.fill_rect(rect, look.radius, theme.color(bg));
+            if let Some(bg) = tint.or(look.background.map(|bg| theme.color(bg))) {
+                canvas.fill_rect(rect, look.radius, bg);
             }
             if let Some(border) = look.border {
                 canvas.stroke_rect(rect, look.radius, 1.0, theme.color(border));
@@ -1124,46 +1335,89 @@ fn draw_kind(
             let layout = text.layout(fonts, Some(rect.w), scale);
             canvas.text(layout, Point::new(rect.x, rect.y), color);
         }
-        Kind::Button { label, kind } => {
-            let kind = *kind;
+        Kind::Button(b) => {
             let c = &theme.colors;
-            let bg = match (kind, pressed, hovered) {
-                (ButtonKind::Primary, true, _) => c.accent.mix(Color::rgb(0, 0, 0), 0.15),
-                (ButtonKind::Primary, false, true) => c.accent.mix(Color::rgb(255, 255, 255), 0.12),
-                (ButtonKind::Primary, false, false) => c.accent,
-                (ButtonKind::Plain, true, _) => c.surface_pressed,
-                (ButtonKind::Plain, false, true) => c.surface_hover,
-                (ButtonKind::Plain, false, false) => c.surface,
+            let (hovered, pressed) = (hovered && b.enabled, pressed && b.enabled);
+            let tint = c.accent.with_alpha(0x29);
+            let (bg, border, fg) = match (b.kind, b.selected) {
+                (ButtonKind::Primary, _) => {
+                    let bg = if pressed {
+                        c.accent.mix(Color::BLACK, 0.15)
+                    } else if hovered {
+                        c.accent.mix(Color::WHITE, 0.12)
+                    } else {
+                        c.accent
+                    };
+                    (Some(bg), None, c.on_accent)
+                }
+                (_, true) => (Some(tint), Some(c.accent), c.accent),
+                (kind, false) => {
+                    let rest = match kind {
+                        ButtonKind::Plain => Some(c.surface),
+                        ButtonKind::Chip => Some(c.surface_hover),
+                        _ => None,
+                    };
+                    let bg = if pressed {
+                        Some(c.surface_pressed)
+                    } else if hovered {
+                        Some(if kind == ButtonKind::Chip {
+                            c.surface_pressed
+                        } else {
+                            c.surface_hover
+                        })
+                    } else {
+                        rest
+                    };
+                    let border = (kind == ButtonKind::Plain).then_some(c.border);
+                    (bg, border, theme.color(b.label.style().color))
+                }
             };
-            canvas.fill_rect(rect, theme.radii.small, bg);
-            if kind == ButtonKind::Plain {
-                canvas.stroke_rect(rect, theme.radii.small, 1.0, c.border);
+            let fg = if b.enabled { fg } else { c.muted };
+            let radius = match b.kind {
+                ButtonKind::Primary | ButtonKind::Plain => theme.radii.small,
+                ButtonKind::Chip | ButtonKind::Ghost => theme.radii.medium,
+            };
+            if let Some(bg) = bg {
+                canvas.fill_rect(rect, radius, bg);
             }
-            let color = theme.color(label.style().color);
-            let size = label.measure(fonts, None, scale);
-            let at = Point::new(
-                rect.x + (rect.w - size.w) / 2.0,
-                rect.y + (rect.h - size.h) / 2.0,
-            );
-            if let Some(layout) = label.laid_out() {
-                canvas.text(layout, at, color);
+            if let Some(border) = border {
+                canvas.stroke_rect(rect, radius, 1.0, border);
+            }
+            let has_text = !b.label.text().is_empty();
+            let text = if has_text {
+                b.label.measure(fonts, None, scale)
+            } else {
+                Size::default()
+            };
+            let icon = b.icon.as_ref().map_or(0.0, |i| i.size);
+            let gap = if icon > 0.0 && has_text {
+                theme.spacing.xs * 1.5
+            } else {
+                0.0
+            };
+            let mut x = if b.start {
+                rect.x + theme.spacing.m
+            } else {
+                rect.x + (rect.w - (icon + gap + text.w)) / 2.0
+            };
+            if let Some(i) = &b.icon {
+                let at = Rect::new(x, rect.y + (rect.h - i.size) / 2.0, i.size, i.size);
+                i.draw(canvas, at, fg);
+                x += i.size + gap;
+            }
+            if has_text && let Some(layout) = b.label.laid_out() {
+                canvas.text(layout, Point::new(x, rect.y + (rect.h - text.h) / 2.0), fg);
             }
         }
         Kind::Image { pixmap, .. } => canvas.image(pixmap, rect),
-        Kind::Icon {
-            path,
-            view,
-            size,
-            color,
-            ..
-        } => {
+        Kind::Icon { icon, color, .. } => {
             let at = Rect::new(
-                rect.x + (rect.w - *size) / 2.0,
-                rect.y + (rect.h - *size) / 2.0,
-                *size,
-                *size,
+                rect.x + (rect.w - icon.size) / 2.0,
+                rect.y + (rect.h - icon.size) / 2.0,
+                icon.size,
+                icon.size,
             );
-            canvas.path(path, *view, at, theme.color(*color));
+            icon.draw(canvas, at, theme.color(*color));
         }
         Kind::Custom { draw, .. } => draw.draw(canvas, rect, theme, now),
     }

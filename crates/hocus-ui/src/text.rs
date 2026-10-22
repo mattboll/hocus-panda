@@ -68,6 +68,8 @@ pub struct TextBox {
     face: Option<Face>,
     /// The width lines were broken at, in logical pixels.
     broken_at: Option<Option<f32>>,
+    /// One line, cut with an ellipsis when too long (window titles).
+    single_line: bool,
 }
 
 impl fmt::Debug for TextBox {
@@ -88,7 +90,14 @@ impl TextBox {
             scale: 0.0,
             face: None,
             broken_at: None,
+            single_line: false,
         }
+    }
+
+    /// Keeps the text on one line, cut with "…" when it does not fit.
+    pub fn single_line(mut self) -> Self {
+        self.single_line = true;
+        self
     }
 
     pub fn text(&self) -> &str {
@@ -131,33 +140,71 @@ impl TextBox {
     /// The layout at `scale`, in physical pixels.
     pub fn layout(&mut self, fonts: &mut Fonts, max_width: Option<f32>, scale: f32) -> &Layout<()> {
         let face = fonts.faces.get(self.style.typeface);
-        if self.layout.is_none() || self.scale != scale || self.face != Some(face) {
-            let mut builder =
-                fonts
-                    .layouts
-                    .ranged_builder(&mut fonts.fonts, &self.text, scale, true);
-            builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-                Cow::Borrowed(face.family()),
-            )));
-            builder.push_default(StyleProperty::FontSize(self.style.size));
-            builder.push_default(StyleProperty::FontWeight(FontWeight::new(f32::from(
-                self.style.weight,
-            ))));
-            builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-                self.style.line_height,
-            )));
-            self.layout = Some(builder.build(&self.text));
+        let rebuild = self.layout.is_none() || self.scale != scale || self.face != Some(face);
+        if rebuild || (self.single_line && self.broken_at != Some(max_width)) {
+            let mut layout = self.build(fonts, &self.text, scale);
+            if self.single_line
+                && let Some(max) = max_width
+            {
+                layout.break_all_lines(None);
+                if layout.width() > max * scale {
+                    layout = self.cut(fonts, max * scale, scale);
+                }
+            }
+            self.layout = Some(layout);
             self.scale = scale;
             self.face = Some(face);
             self.broken_at = None;
         }
         let layout = self.layout.get_or_insert_with(Layout::new);
         if self.broken_at != Some(max_width) {
-            layout.break_all_lines(max_width.map(|w| w * scale));
+            let width = if self.single_line { None } else { max_width };
+            layout.break_all_lines(width.map(|w| w * scale));
             layout.align(Alignment::Start, AlignmentOptions::default());
             self.broken_at = Some(max_width);
         }
         layout
+    }
+
+    fn build(&self, fonts: &mut Fonts, text: &str, scale: f32) -> Layout<()> {
+        let face = fonts.faces.get(self.style.typeface);
+        let mut builder = fonts
+            .layouts
+            .ranged_builder(&mut fonts.fonts, text, scale, true);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
+            Cow::Borrowed(face.family()),
+        )));
+        builder.push_default(StyleProperty::FontSize(self.style.size));
+        builder.push_default(StyleProperty::FontWeight(FontWeight::new(f32::from(
+            self.style.weight,
+        ))));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+            self.style.line_height,
+        )));
+        builder.build(text)
+    }
+
+    /// The longest start of the text that fits in `max` physical pixels with
+    /// an ellipsis after it.
+    fn cut(&self, fonts: &mut Fonts, max: f32, scale: f32) -> Layout<()> {
+        let ends: Vec<usize> = self.text.char_indices().map(|(i, _)| i).collect();
+        // `k` characters end at `ends[k]`; the whole text is known too wide.
+        let (mut lo, mut hi) = (0, ends.len().saturating_sub(1));
+        let mut best = self.build(fonts, "…", scale);
+        best.break_all_lines(None);
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            let candidate = format!("{}…", self.text[..ends[mid]].trim_end());
+            let mut layout = self.build(fonts, &candidate, scale);
+            layout.break_all_lines(None);
+            if layout.width() <= max {
+                best = layout;
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        best
     }
 
     /// The layout as last computed, for drawing.

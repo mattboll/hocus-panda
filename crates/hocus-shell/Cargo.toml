@@ -8,3 +8,10 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+hocus-ui = { version = "0.1.0", path = "../hocus-ui" }
+
+[dev-dependencies]
+anyhow = "1.0.104"
+png = "0.18.1"

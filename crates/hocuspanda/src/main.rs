@@ -68,6 +68,10 @@ struct Args {
     #[arg(long)]
     no_xwayland: bool,
 
+    /// Do not show the desktop's own interface (the widget column).
+    #[arg(long)]
+    no_shell: bool,
+
     /// Configuration file, watched and applied on change. Default:
     /// $XDG_CONFIG_HOME/hocuspanda/config.toml.
     #[arg(long, value_name = "FILE")]
@@ -127,6 +131,7 @@ fn main() -> anyhow::Result<()> {
         config,
         config_poll: hocus_compositor::CONFIG_POLL,
         xwayland: !args.no_xwayland,
+        shell: !args.no_shell,
         backend: match args.backend {
             BackendArg::Winit => Backend::Winit,
             BackendArg::Headless => Backend::Headless(HeadlessConfig {

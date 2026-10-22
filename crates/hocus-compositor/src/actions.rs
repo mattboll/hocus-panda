@@ -209,13 +209,17 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        let layout = keyboard.with_xkb_state(self, |mut ctx| {
+        let (index, layout) = keyboard.with_xkb_state(self, |mut ctx| {
             ctx.cycle_next_layout();
             ctx.xkb()
                 .lock()
-                .map(|xkb| xkb.layout_name(xkb.active_layout()).to_string())
+                .map(|xkb| {
+                    let active = xkb.active_layout();
+                    (active.0 as usize, xkb.layout_name(active).to_string())
+                })
                 .unwrap_or_default()
         });
+        self.layout_index = index;
         tracing::info!(layout, "keyboard layout");
         self.emit(|_| Event::KeyboardLayout { layout });
     }
@@ -264,6 +268,8 @@ impl State {
             options: (!k.options.is_empty()).then(|| k.options.clone()),
             ..Default::default()
         };
+        // A new keymap starts on its first layout.
+        self.layout_index = 0;
         if let Err(err) = keyboard.set_xkb_config(self, xkb_config) {
             tracing::warn!(?err, layout, "keyboard layouts not applied");
             self.config_warnings

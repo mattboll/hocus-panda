@@ -29,6 +29,8 @@ pub struct HarnessOptions {
     pub watchdog: Option<WatchdogConfig>,
     /// Starts XWayland, for X11 test clients.
     pub xwayland: bool,
+    /// Shows the widget column.
+    pub shell: bool,
 }
 
 /// A headless compositor in a private runtime directory, on a virtual clock.
@@ -102,6 +104,7 @@ impl Headless {
             api_permission,
             watchdog: None,
             xwayland: false,
+            shell: false,
         })
     }
 
@@ -120,6 +123,7 @@ impl Headless {
             config: Some(config.clone()),
             config_poll: Duration::from_millis(20),
             xwayland: harness.xwayland,
+            shell: harness.shell,
         };
         let Started {
             event_loop,
@@ -191,6 +195,7 @@ impl Headless {
     /// something to arrive. The virtual clock does not move.
     pub fn dispatch(&mut self, timeout: Duration) -> anyhow::Result<()> {
         self.event_loop.dispatch(Some(timeout), &mut self.app)?;
+        self.app.state.refresh_shell();
         self.app.state.display_handle.flush_clients()?;
         Ok(())
     }
@@ -224,6 +229,8 @@ impl Headless {
             }
             self.dispatch(Duration::ZERO)?;
             self.app.state.clock.advance_to(next);
+            // The column's clock follows the virtual time.
+            self.app.state.refresh_shell();
             let App { state, backend } = &mut self.app;
             if let BackendState::Headless(headless) = backend {
                 headless.frame(state);

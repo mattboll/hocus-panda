@@ -11,6 +11,9 @@ description = "A click on a window behind another focuses it and raises it"
 outputs = ["2560x1600@2/1", "1920x1080"]
 # Starts XWayland for `open_x11`; the scenario is skipped where Xwayland is missing
 xwayland = false
+# Shows the widget column on the primary output (in English, at a fixed
+# Wednesday 21 October 14:37 plus the virtual time, for user "Alex")
+shell = false
 
 [[step]]
 open = { app_id = "back", size = [400, 300], color = "#3399ff" }
@@ -30,6 +33,8 @@ Steps, one per `[[step]]` table:
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
+| `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
+| `expect_ui = { label, disabled?, shown? }` | the shell shows an element with this label (disabled or not); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
 | `click = "left"` | presses and releases a button (`left`, `right`, `middle`) |

@@ -1,0 +1,40 @@
+description = "With the widget column shown, a window snapped right ends at the column's left edge minus the gap"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[windows.gaps]
+inner = 8
+outer = 8
+"""
+
+[[step]]
+open = { app_id = "editor", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+keys = "super+right"
+
+# The column takes x 944 to 1264; the work area stops 8 px before it.
+[[step]]
+expect_window = { app_id = "editor", geometry = [476, 8, 460, 784], state = "snapped" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [8, 8, 928, 784], state = "maximized" }
+
+[[step]]
+set_state = { app_id = "editor", state = "normal" }
+
+# Back where it opened, centred in the work area left of the column; the
+# client has redrawn at that size before the picture.
+[[step]]
+expect_window = { app_id = "editor", geometry = [222, 200, 500, 400], state = "normal" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "column-snap-right.png" }

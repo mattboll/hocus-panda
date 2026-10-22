@@ -23,6 +23,7 @@ fn compositor(dump_dir: &std::path::Path, limit: Duration) -> anyhow::Result<Hea
             dump_dir: dump_dir.to_path_buf(),
         }),
         xwayland: false,
+        shell: false,
     })
 }
 
