@@ -49,6 +49,7 @@ same keys twice, the first one wins and the second is reported.
 | `send-to-next-desktop`, `send-to-previous-desktop` | the same, to the next or previous desktop of its output |
 | `send-to-output-left`, `send-to-output-right` | sends the focused window to the output beside |
 | `toggle-maximized`, `toggle-fullscreen`, `minimize`, `close` | the focused window |
+| `snap ZONE` | snaps the focused window: `left`, `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right`, `top` (maximize) |
 | `switch-layout` | the next keyboard layout |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `spawn COMMAND` | runs a command through the shell |
@@ -65,6 +66,7 @@ Defaults:
 | Ctrl+Alt+Shift+Left / Right | `send-to-previous-desktop` / `send-to-next-desktop` |
 | Super+Shift+Left / Right | `send-to-output-left` / `send-to-output-right` |
 | Super+Up | `toggle-maximized` |
+| Super+Left / Right | `snap left` / `snap right` |
 | Super+Down | `minimize` |
 | Super+Shift+F | `toggle-fullscreen` |
 | Alt+F4 | `close` |

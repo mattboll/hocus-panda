@@ -1,0 +1,39 @@
+description = "Two windows snapped left and right are laid out again when the gaps change"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "left", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+keys = "super+left"
+
+[[step]]
+open = { app_id = "right", size = [400, 300], color = "#f2a65a" }
+
+[[step]]
+keys = "super+right"
+
+[[step]]
+expect_window = { app_id = "left", geometry = [0, 0, 640, 800], state = "snapped" }
+
+[[step]]
+expect_window = { app_id = "right", geometry = [640, 0, 640, 800], state = "snapped" }
+
+[[step]]
+config = """
+[windows.gaps]
+inner = 10
+outer = 20
+"""
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_window = { app_id = "left", geometry = [20, 20, 615, 760] }
+
+[[step]]
+expect_window = { app_id = "right", geometry = [645, 20, 615, 760] }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "snapped-follow-gaps.png" }

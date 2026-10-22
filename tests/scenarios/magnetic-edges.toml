@@ -1,0 +1,31 @@
+description = "A window moved near another window's edge sticks to it"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "still", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "moved", size = [200, 200], color = "#f2a65a" }
+
+# "moved" opens at (540, 300); drag it so its left edge comes 7 px right of
+# "still"'s right edge (840).
+[[step]]
+pointer_move = [600, 350]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [907, 350]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "moved", geometry = [840, 300, 200, 200] }

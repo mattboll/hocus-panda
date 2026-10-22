@@ -136,6 +136,12 @@ pub enum Request {
         window: u64,
         state: WindowState,
     },
+    /// Snaps a window: `left`, `right`, `top-left`, `top-right`,
+    /// `bottom-left`, `bottom-right`, `top` (maximize).
+    SnapWindow {
+        window: u64,
+        zone: String,
+    },
     /// Asks a window to close, as its close button would.
     CloseWindow {
         window: u64,
@@ -159,6 +165,7 @@ impl Request {
             | Self::Key { .. }
             | Self::CloseWindow { .. }
             | Self::SetWindowState { .. }
+            | Self::SnapWindow { .. }
             | Self::ShowDesktop { .. }
             | Self::SendWindow { .. }
             | Self::PlugOutput { .. }
@@ -361,6 +368,8 @@ pub enum WindowState {
     Maximized,
     Fullscreen,
     Minimized,
+    /// Snapped to a half or a quarter.
+    Snapped,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

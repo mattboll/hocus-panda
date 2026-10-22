@@ -2,12 +2,13 @@
 //! the top with its focus ring, its content with rounded corners, and its
 //! shadow. The headless and nested backends draw it, and screenshots too.
 
+use hocus_core::Zone;
 use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, Texture,
         element::{
-            AsRenderElements, memory::MemoryRenderBufferRenderElement, render_elements,
-            surface::WaylandSurfaceRenderElement,
+            AsRenderElements, Kind, memory::MemoryRenderBufferRenderElement, render_elements,
+            solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement,
         },
     },
     desktop::Window,
@@ -20,7 +21,7 @@ use crate::{
     State,
     cursor::CursorElement,
     decoration::{Rounded, ring_elements, shadow_elements},
-    desktops::model_id,
+    desktops::{model_id, rect},
     window_mode::WindowMode,
 };
 
@@ -29,9 +30,28 @@ render_elements! {
     Cursor=CursorElement<R>,
     Window=Rounded<WaylandSurfaceRenderElement<R>>,
     Frame=MemoryRenderBufferRenderElement<R>,
+    Solid=SolidColorRenderElement,
 }
 
 impl State {
+    /// Shows, moves or hides the zone a dragged window would snap to.
+    pub fn set_snap_preview(&mut self, preview: Option<(Output, Zone)>) {
+        if self.snap_preview == preview {
+            return;
+        }
+        if let Some((output, zone)) = &preview {
+            let target = zone.rect(rect(self.work_area(output)), self.config.windows.gaps.inner);
+            let [r, g, b] = self.style.accent;
+            // The accent, see-through, premultiplied.
+            let a = 0.22;
+            let c = |v: u8| f32::from(v) / 255.0 * a;
+            self.snap_preview_buffer
+                .update((target.width, target.height), [c(r), c(g), c(b), a]);
+        }
+        self.snap_preview = preview;
+        self.needs_redraw = true;
+    }
+
     /// Everything `output` shows, front first.
     pub fn scene_elements<R>(
         &self,
@@ -55,6 +75,27 @@ impl State {
             return elements;
         };
         let scale = output.current_scale().fractional_scale();
+        if let Some((preview_output, zone)) = &self.snap_preview
+            && preview_output == output
+        {
+            let target = zone.rect(rect(self.work_area(output)), self.config.windows.gaps.inner);
+            let local = Rectangle::<i32, Logical>::new(
+                Point::from((target.x, target.y)) - area.loc,
+                (target.width, target.height).into(),
+            );
+            elements.extend(
+                ring_elements(renderer, &self.textures, &self.style, local.to_f64(), scale)
+                    .into_iter()
+                    .map(SceneElement::Frame),
+            );
+            elements.push(SceneElement::Solid(SolidColorRenderElement::from_buffer(
+                &self.snap_preview_buffer,
+                local.loc.to_physical_precise_round(scale),
+                scale,
+                1.0,
+                Kind::Unspecified,
+            )));
+        }
         let focused = self.focused_window();
         let windows: Vec<&Window> = self.space.elements().collect();
         for window in windows.into_iter().rev() {
@@ -101,12 +142,12 @@ impl State {
     }
 
     /// Whether the compositor draws the window's corners, shadow and ring:
-    /// in normal mode, when the window has no shadow of its own (server-side
+    /// in normal or snapped mode, when the window has no shadow of its own (server-side
     /// decorations, or a buffer no larger than the window).
     fn decorated(&self, window: &Window) -> bool {
         let normal = model_id(window)
             .and_then(|id| self.windows.get(&id))
-            .is_none_or(|m| m.mode == WindowMode::Normal);
+            .is_none_or(|m| matches!(m.mode, WindowMode::Normal | WindowMode::Snapped { .. }));
         let server_side = window
             .toplevel()
             .is_some_and(|t| t.current_state().decoration_mode == Some(DecorationMode::ServerSide));
