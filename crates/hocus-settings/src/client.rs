@@ -14,7 +14,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use hocus_api::{Client as Api, Event, Reply, Request};
+use hocus_api::{Client as Api, Event, OutputInfo, Reply, Request};
 use hocus_shell::Lang;
 use hocus_ui::{Accent, AccessNode, Color, Key, Point, Size, Theme, ThemeName};
 use smithay_client_toolkit::{
@@ -68,15 +68,40 @@ pub struct Options {
 /// The app running on a thread of its own (tests).
 #[derive(Debug)]
 pub struct Running {
-    access: Arc<Mutex<Option<AccessNode>>>,
+    shown: Arc<Mutex<Option<Shown>>>,
     thread: JoinHandle<anyhow::Result<()>>,
+}
+
+/// What the window's last frame showed.
+#[derive(Debug, Clone)]
+pub struct Shown {
+    /// As screen readers read it.
+    pub access: AccessNode,
+    /// The configuration and screens it was drawn from.
+    pub config: hocus_core::Config,
+    pub outputs: Vec<OutputInfo>,
 }
 
 impl Running {
     /// What the window shows, as screen readers read it, after its last
     /// frame.
     pub fn access(&self) -> Option<AccessNode> {
-        self.access.lock().ok().and_then(|a| a.clone())
+        self.shown().map(|s| s.access)
+    }
+
+    /// The window's last frame.
+    pub fn shown(&self) -> Option<Shown> {
+        self.shown.lock().ok().and_then(|s| s.clone())
+    }
+
+    /// Whether the last frame was drawn from this configuration (as the
+    /// control API gives it) and these screens.
+    pub fn shows(&self, config: &str, outputs: &[OutputInfo]) -> bool {
+        let Ok(config) = hocus_core::Config::parse(config) else {
+            return false;
+        };
+        self.shown()
+            .is_some_and(|s| s.config == config && s.outputs == outputs)
     }
 
     pub fn is_finished(&self) -> bool {
@@ -91,12 +116,12 @@ impl Running {
 }
 
 pub fn spawn(options: Options) -> anyhow::Result<Running> {
-    let access = Arc::new(Mutex::new(None));
+    let shown = Arc::new(Mutex::new(None));
     let thread = std::thread::Builder::new().name("settings".into()).spawn({
-        let access = access.clone();
-        move || run(options, Some(access))
+        let shown = shown.clone();
+        move || run(options, Some(shown))
     })?;
-    Ok(Running { access, thread })
+    Ok(Running { shown, thread })
 }
 
 /// What the control API thread tells the window.
@@ -176,7 +201,7 @@ pub fn theme(ctx: &Context, accent: Option<&str>) -> Theme {
         .with_reduced_motion(a.reduced_motion)
 }
 
-pub fn run(options: Options, access: Option<Arc<Mutex<Option<AccessNode>>>>) -> anyhow::Result<()> {
+pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow::Result<()> {
     let stream = std::os::unix::net::UnixStream::connect(&options.wayland)
         .with_context(|| format!("could not connect to {}", options.wayland.display()))?;
     let conn = Connection::from_socket(stream)?;
@@ -241,7 +266,7 @@ pub fn run(options: Options, access: Option<Arc<Mutex<Option<AccessNode>>>>) -> 
         pointer: None,
         closed: false,
         started: Instant::now(),
-        access,
+        shown,
         from_api,
         api: options.api.clone(),
     };
@@ -295,7 +320,7 @@ struct App {
     pointer: Option<wl_pointer::WlPointer>,
     closed: bool,
     started: Instant,
-    access: Option<Arc<Mutex<Option<AccessNode>>>>,
+    shown: Option<Arc<Mutex<Option<Shown>>>>,
     from_api: Receiver<FromApi>,
     /// The compositor's control socket, for one-off requests.
     api: PathBuf,
@@ -394,10 +419,15 @@ impl App {
             self.frame_pending = true;
         }
         self.window.commit();
-        if let Some(access) = &self.access
-            && let Ok(mut slot) = access.lock()
+        if let Some(shown) = &self.shown
+            && let Ok(mut slot) = shown.lock()
         {
-            *slot = Some(self.view.access());
+            let ctx = self.view.context();
+            *slot = Some(Shown {
+                access: self.view.access(),
+                config: ctx.config.clone(),
+                outputs: ctx.outputs.clone(),
+            });
         }
         Ok(())
     }
