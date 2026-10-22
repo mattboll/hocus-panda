@@ -75,10 +75,7 @@ fn a_flood_from_one_app_is_rate_limited_and_the_loop_keeps_its_budget() -> anyho
         .filter(|e| matches!(e, Event::Notification { .. }))
         .count();
     assert_eq!(shown, 5, "the burst passes, then one a second");
-    assert_eq!(
-        stats.slow_handlers,
-        vec![],
-        "no loop handler over its budget"
-    );
+    let held = hocus_test::held_the_loop(&stats);
+    assert!(held.is_empty(), "the loop was held: {held:?}");
     Ok(())
 }

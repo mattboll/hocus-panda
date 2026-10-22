@@ -191,10 +191,7 @@ fn a_region_recorded_plays_at_its_size_with_clicks_ringed_in_it_only() -> anyhow
     let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
         anyhow::bail!("expected stats");
     };
-    assert_eq!(
-        stats.slow_handlers,
-        vec![],
-        "no loop handler over its budget"
-    );
+    let held = hocus_test::held_the_loop(&stats);
+    assert!(held.is_empty(), "the loop was held: {held:?}");
     Ok(())
 }
