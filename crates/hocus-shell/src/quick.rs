@@ -69,6 +69,8 @@ pub struct QuickState {
     pub tiles: Vec<(Tile, bool, String, bool)>,
     /// 0 saver, 1 balanced, 2 performance.
     pub profile: usize,
+    /// Which profiles the machine offers; the others show disabled.
+    pub profiles: [bool; 3],
     pub volume: u8,
     pub output_device: String,
     /// Each screen: its name and brightness.
@@ -653,6 +655,7 @@ impl Sheet {
         }
         for (i, id) in n.profiles.iter().enumerate() {
             t.set_selected(*id, i == state.profile);
+            t.set_enabled(*id, state.profiles[i]);
         }
         if let Some((slider, text)) = n.volume {
             t.set_slider_value(slider, f32::from(state.volume) / 100.0);

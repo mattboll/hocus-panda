@@ -198,6 +198,7 @@ impl State {
                 Profile::Balanced => 1,
                 Profile::Performance => 2,
             },
+            profiles: p.profiles,
             volume: p.volume,
             output_device: p.output_device.clone(),
             // Every screen plugged now; the service knows those it has
