@@ -322,8 +322,12 @@ its own client, each tied to a desktop (`[[agents.herdr]]`); an agent's key
 on the board is its herdr's and its pane's. The column shows in full the
 agents of the desktop its screen shows (and of a herdr tied to none), every
 other desktop's in a line with its counts, which goes there when clicked;
-short of room, those lines share one, then go, before the agents shown in
-full give any. The desktops not shown carry a badge wherever the
+short of room, those lines share one, then go; then the meeting card takes
+one line (when · title · Join) and a waiting agent's row is said in short
+(its name with Yes and No, its question on one line), before the
+notifications go and the agents shown in full give any; room left over
+goes back to the notifications. A 1280×800 laptop's column so keeps a
+waiting agent, the meeting and the account card. The desktops not shown carry a badge wherever the
 desktops are drawn (the column's dots and its desktops popover, the
 switcher's strip, Alt+Tab and the overview): an agent waiting, a window
 asking for attention, an agent done since a screen last showed its

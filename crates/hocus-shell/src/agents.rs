@@ -471,6 +471,9 @@ pub struct Fit {
     /// The line the rest share shows; without it, the header's summary
     /// and the desktops' badges still say what goes on there.
     pub shared: bool,
+    /// A waiting agent's row in short: its name, its question on one
+    /// line, Yes and No beside them, no panda.
+    pub compact: bool,
 }
 
 impl Fit {
@@ -478,12 +481,20 @@ impl Fit {
         rows: ROWS,
         lines: 8,
         shared: true,
+        compact: false,
     };
 
-    /// One less: a desktop's line while some show (they merge into one),
-    /// else the line they share, else a row while more than one shows;
-    /// `None` when nothing gives more.
+    /// One less, in the order the column gives room: [`Fit::less_lines`],
+    /// [`Fit::less_compact`], [`Fit::less_rows`].
     pub fn less(self, view: &AgentsView) -> Option<Self> {
+        self.less_lines(view)
+            .or_else(|| self.less_compact(view))
+            .or_else(|| self.less_rows(view))
+    }
+
+    /// A desktop's line less while some show (they merge into one), else
+    /// the line they share.
+    pub fn less_lines(self, view: &AgentsView) -> Option<Self> {
         let lines = self.lines.min(view.others.len());
         if lines > 0 {
             return Some(Self {
@@ -491,17 +502,31 @@ impl Fit {
                 ..self
             });
         }
-        if self.shared && !view.others.is_empty() {
-            return Some(Self {
-                lines,
-                shared: false,
-                ..self
-            });
-        }
+        (self.shared && !view.others.is_empty()).then_some(Self {
+            lines,
+            shared: false,
+            ..self
+        })
+    }
+
+    /// The waiting agents' rows in short, when one shows.
+    pub fn less_compact(self, view: &AgentsView) -> Option<Self> {
+        let waits = view
+            .rows
+            .iter()
+            .take(self.rows.max(1))
+            .any(|r| r.state == AgentState::Wait);
+        (!self.compact && waits).then_some(Self {
+            compact: true,
+            ..self
+        })
+    }
+
+    /// A row less while more than one shows.
+    pub fn less_rows(self, view: &AgentsView) -> Option<Self> {
         let rows = self.rows.min(view.rows.len());
         (rows > 1).then(|| Self {
             rows: rows - 1,
-            lines,
             ..self
         })
     }
@@ -835,6 +860,10 @@ pub(crate) fn fill(
         } else {
             card(Paint::SurfaceHover)
         };
+        if waits && fit.compact {
+            targets.extend(compact_row(tree, room, theme, lang, agent, look));
+            continue;
+        }
         let box_ = add(
             tree,
             room,
@@ -979,6 +1008,122 @@ pub(crate) fn fill(
         let name = lang.agents_other_desktops(rest.len());
         desktop_line(tree, room, theme, lang, &name, &counts);
     }
+    targets
+}
+
+/// A waiting agent in short, for a column short of room: a dot of the
+/// waiting colour and its name with Yes and No beside them, its question
+/// on one line under them, no panda. The name shows it, as the full row
+/// does.
+fn compact_row(
+    tree: &mut Tree,
+    room: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    agent: &AgentRow,
+    look: Look,
+) -> Vec<(NodeId, Action)> {
+    let missing = || unreachable!("adding to a node of this tree");
+    let row = |gap: f32| Style {
+        direction: Direction::Row,
+        gap,
+        align: Align::Center,
+        ..Style::default()
+    };
+    let box_ = tree
+        .add(
+            room,
+            Style {
+                padding: Insets::symmetric(8.0, 12.0),
+                gap: 2.0,
+                ..Style::default()
+            },
+            Kind::Box(look),
+        )
+        .unwrap_or_else(missing);
+    let top = tree
+        .add(box_, row(8.0), Kind::Box(Look::default()))
+        .unwrap_or_else(missing);
+    let line = tree
+        .add(
+            top,
+            Style {
+                width: Length::Fill,
+                ..row(10.0)
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    tree.set_clickable(
+        line,
+        &format!("{} · {}", agent.name, lang.agent_status(agent)),
+    );
+    tree.add(
+        line,
+        square(10.0),
+        Kind::Box(Look {
+            background: Some(Paint::Waiting),
+            radius: 5.0,
+            ..Look::default()
+        }),
+    )
+    .unwrap_or_else(missing);
+    tree.add(
+        line,
+        Style {
+            width: Length::Fill,
+            ..Style::default()
+        },
+        Kind::text_line(
+            agent.name.clone(),
+            TextStyle {
+                size: 15.0,
+                weight: 700,
+                ..theme.text.title
+            },
+        ),
+    )
+    .unwrap_or_else(missing);
+    let mut targets = vec![(line, action(agent, AgentAsk::Show))];
+    for (ask, label, kind) in [
+        (AgentAsk::Yes, lang.agent_yes(), ButtonKind::Primary),
+        (AgentAsk::No, lang.agent_no(), ButtonKind::Plain),
+    ] {
+        let button = tree
+            .add(
+                top,
+                Style {
+                    width: Length::Px(64.0),
+                    height: Length::Px(36.0),
+                    grow: 0.0,
+                    ..Style::default()
+                },
+                Kind::Button(
+                    Button::new(label, kind, theme).with_name(lang.agent_button(ask, &agent.name)),
+                ),
+            )
+            .unwrap_or_else(missing);
+        targets.push((button, action(agent, ask)));
+    }
+    let question = agent
+        .question
+        .clone()
+        .unwrap_or_else(|| lang.agent_waiting().to_owned());
+    tree.add(
+        box_,
+        Style::default(),
+        Kind::text_line(
+            question,
+            TextStyle {
+                size: 13.0,
+                weight: 500,
+                line_height: 1.35,
+                ..theme.text.label
+            }
+            .with_color(Paint::Waiting),
+        ),
+    )
+    .unwrap_or_else(missing);
     targets
 }
 
@@ -1275,7 +1420,9 @@ mod tests {
         assert_eq!((fit.lines, fit.shared), (0, true));
         let fit = fit.less(&view).expect("the shared line less");
         assert_eq!((fit.lines, fit.shared), (0, false));
-        assert_eq!(fit.less(&view), None);
+        // 2/d waits, shown in full: its row in short.
+        let fit = fit.less(&view);
+        assert!(fit.is_none_or(|f| f.compact), "{fit:?}");
     }
 
     #[test]
