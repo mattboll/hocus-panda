@@ -62,6 +62,12 @@ expect_journal = { has = [
 [[step]]
 expect_ui = { label = "reader · Connection refused" }
 
+# On a laptop's screen the account stays inside the column (its card ends
+# 16 pixels above the screen's bottom, its content 16 more above): the
+# notifications and the journal give room back.
+[[step]]
+expect_ui = { label = "Account: Alex", inside = [944, 16, 320, 752] }
+
 [[step]]
 advance_ms = 300
 
