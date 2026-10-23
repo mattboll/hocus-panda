@@ -79,6 +79,8 @@ Steps, one per `[[step]]` table:
 | `phone_remove = 1` | the notification it posted first (from 1) goes on the phone |
 | `expect_phone = "reply r1 On my way"` | the phone was asked this: `ring`, `reply ID TEXT`, `clipboard TEXT`, `share URL`, `browse` |
 | `expect_phone_state = "absent"` | KDE Connect as the session found it, once so: `absent`, `stopped`, `running`, `off` |
+| `scan_pairing_code = true` | the phone scans the pairing QR code the popover shows (wireless adb): its name and password go to the adb stand-in, as `NAME PASSWORD` in `{runtime_dir}/adb-phone` |
+| `expect_adb = "ready"` | wireless adb as the session has it, once so, within seconds: `off`, `absent`, `ready`, `pairing` |
 | `mcp = { agent?, tool, window?, arguments? = { … }, contains? = […], error? }` | an MCP session (`hocus mcp`, #42) of its own, as agent `agent` of `[[agents.mcp]]` (or none), calls `tool` with `arguments`; `window` is an app id whose window's id goes in as the `window` argument; the result's text holds `contains`, or the tool fails with `error` in its message |
 | `expect_journal = { has? = […], lacks? = […], stopped? }` | the agents' journal (#176), as `hocus msg agents-journal` prints it, holds the strings of `has` in that order (each after the one before, on its line or a later one) and none of `lacks`; agents are stopped or not |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |

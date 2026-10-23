@@ -6,7 +6,7 @@ use hocus_shell::{
     Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, TrayApp, TrayMenuEntry,
     WallTime,
     agents::{AgentAsk, AgentState, AgentsView, Board},
-    column::{Agenda, Meeting, PhoneLine},
+    column::{AdbLine, Agenda, Meeting, PairStage, Pairing, PhoneLine},
     journal::{Did, JournalLine, JournalView, Pressed},
 };
 use hocus_ui::{Input, Point, Role, Theme};
@@ -551,6 +551,8 @@ fn the_phone_rings_and_its_popover_sends_and_browses() -> anyhow::Result<()> {
             name: "Pixel 8".into(),
             battery: Some(82),
             charging: false,
+            connect: true,
+            adb: None,
         }),
         ..state()
     });
@@ -559,7 +561,7 @@ fn the_phone_rings_and_its_popover_sends_and_browses() -> anyhow::Result<()> {
     let at = button(&column, "Ring")?;
     assert_eq!(click(&mut column, at), vec![Action::RingPhone]);
     let at = button(&column, "Phone: Pixel 8, 82%")?;
-    assert_eq!(click(&mut column, at), vec![]);
+    assert_eq!(click(&mut column, at), vec![Action::PhoneOpened]);
     column.draw(Duration::ZERO);
     assert!(column.access().dump().contains("Battery 82%"));
     let at = button(&column, "Send the clipboard")?;
@@ -576,5 +578,90 @@ fn the_phone_rings_and_its_popover_sends_and_browses() -> anyhow::Result<()> {
     column.draw(Duration::ZERO);
     assert!(button(&column, "Browse its files").is_err());
     assert!(button(&column, "Ring").is_err());
+    Ok(())
+}
+
+#[test]
+fn adb_alone_pairs_by_a_qr_code_and_mirrors() -> anyhow::Result<()> {
+    let mut column = column(Lang::En);
+    let adb = AdbLine {
+        device: None,
+        mirror: true,
+        pairing: None,
+    };
+    let phone = PhoneLine {
+        connect: false,
+        adb: Some(adb.clone()),
+        ..PhoneLine::default()
+    };
+    column.set_state(&ColumnState {
+        phone: Some(phone.clone()),
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    // No KDE Connect: no Ring, a line to pair from.
+    assert!(button(&column, "Ring").is_err());
+    let at = button(&column, "Phone")?;
+    assert_eq!(click(&mut column, at), vec![Action::PhoneOpened]);
+    column.draw(Duration::ZERO);
+    assert!(column.access().dump().contains("No phone paired yet"));
+    assert!(
+        button(&column, "Mirror its screen").is_err(),
+        "nothing to mirror"
+    );
+    let at = button(&column, "Pair over Wi-Fi")?;
+    assert_eq!(click(&mut column, at), vec![Action::PairPhone]);
+    // The popover stays, and shows the code: drawn, never named.
+    let qr = "WIFI:T:ADB;S:hocuspanda-test;P:secret123;;".to_owned();
+    let pairing = |stage| PhoneLine {
+        adb: Some(AdbLine {
+            pairing: Some(Pairing {
+                qr: qr.clone(),
+                stage,
+            }),
+            ..adb.clone()
+        }),
+        ..phone.clone()
+    };
+    column.set_state(&ColumnState {
+        phone: Some(pairing(PairStage::Waiting)),
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    let dump = column.access().dump();
+    assert!(dump.contains("QR code to scan with the phone"), "{dump}");
+    assert!(dump.contains("Waiting for the phone"), "{dump}");
+    assert!(!dump.contains("secret123"), "{dump}");
+    assert!(!format!("{:?}", pairing(PairStage::Waiting)).contains("secret123"));
+    column.set_state(&ColumnState {
+        phone: Some(pairing(PairStage::Failed("Could not pair".into()))),
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Try again")?;
+    assert_eq!(click(&mut column, at), vec![Action::PairPhone]);
+    let at = button(&column, "Cancel")?;
+    assert_eq!(click(&mut column, at), vec![Action::CancelPairing]);
+    // Paired: the device, and its screen to mirror.
+    column.set_state(&ColumnState {
+        phone: Some(PhoneLine {
+            name: "Pixel 8".into(),
+            adb: Some(AdbLine {
+                device: Some(("Pixel 8".into(), true)),
+                ..adb.clone()
+            }),
+            ..phone.clone()
+        }),
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    assert!(
+        column
+            .access()
+            .dump()
+            .contains("Paired over Wi-Fi: Pixel 8")
+    );
+    let at = button(&column, "Mirror its screen")?;
+    assert_eq!(click(&mut column, at), vec![Action::MirrorPhone]);
     Ok(())
 }

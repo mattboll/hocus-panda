@@ -3,15 +3,31 @@
 //! allows it. The column shows the first phone within reach with Ring and
 //! a popover; its notifications become toasts, a reply typed into one goes
 //! back to the phone. Without KDE Connect nothing shows.
+//!
+//! Wireless adb (#153), once `[phone] adb` allows it and adb is installed
+//! (`hocus_platform::adb`, on worker threads): the popover pairs a phone
+//! by a QR code and mirrors the device adb reaches with scrcpy. With adb
+//! but no KDE Connect, the column shows a phone line for it alone.
 
-use std::{collections::VecDeque, path::PathBuf, sync::Mutex};
+use std::{
+    collections::VecDeque,
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use hocus_api::{Event, PhoneDevice, PhoneInfo};
 use hocus_platform::{
+    adb::{self, AdbEvent, Code, Failure, Stage, Tools},
     notifications::Notification as DesktopNotification,
     phone::{Device, Notification, Outcome, Phone, PhoneEvent, Presence, Request},
 };
-use hocus_shell::{column::PhoneLine, toasts::REPLY};
+use hocus_shell::{
+    column::{AdbLine, PairStage, Pairing as PairingView, PhoneLine},
+    toasts::REPLY,
+};
 use smithay::reexports::calloop::{LoopHandle, channel};
 
 use crate::{App, State};
@@ -40,9 +56,44 @@ pub struct PhoneState {
     presence: Option<Presence>,
     devices: Vec<Device>,
     shown: VecDeque<Shown>,
+    adb: AdbState,
+}
+
+/// Wireless adb (#153).
+#[derive(Debug, Default)]
+struct AdbState {
+    news: Option<channel::Sender<AdbEvent>>,
+    /// Looked for once on: not again until the popover opens.
+    looked: bool,
+    /// `None` until looked; `Some(None)` without adb.
+    tools: Option<Option<Tools>>,
+    /// What adb reaches; the first is the popover's.
+    devices: Vec<adb::Device>,
+    pairing: Option<Pairing>,
+    /// The last pairing's number: answers to an older one are dropped.
+    pairings: u64,
+}
+
+#[derive(Debug)]
+struct Pairing {
+    id: u64,
+    code: Code,
+    stage: Stage,
+    cancel: Arc<AtomicBool>,
 }
 
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, session_bus: Option<&str>) {
+    // adb needs no bus.
+    let (news, received) = channel::channel::<AdbEvent>();
+    let inserted = handle.insert_source(received, |event, _, app| {
+        if let channel::Event::Msg(event) = event {
+            app.timed("adb", |app| app.state.adb_event(event));
+        }
+    });
+    match inserted {
+        Ok(_) => state.phone.adb.news = Some(news),
+        Err(err) => tracing::warn!(%err.error, "no wireless debugging"),
+    }
     let Some(bus) = session_bus else {
         return;
     };
@@ -68,6 +119,7 @@ impl State {
     /// After each dispatch: KDE Connect is followed once the configuration
     /// is read and allows it.
     pub fn refresh_phone(&mut self) {
+        self.refresh_adb();
         if self.phone.started || !self.phone_on() {
             return;
         }
@@ -326,18 +378,264 @@ impl State {
             } else {
                 Vec::new()
             },
+            adb: self.adb_state().into(),
         }
     }
 
-    /// The column's line: the first phone within reach.
+    /// The column's line: the first phone within reach; with adb but no
+    /// KDE Connect phone, one for adb alone.
     pub fn phone_line(&self) -> Option<PhoneLine> {
         if !self.phone_on() {
             return None;
         }
-        self.phone.devices.first().map(|d| PhoneLine {
-            name: d.name.clone(),
-            battery: d.battery,
-            charging: d.charging,
+        let adb = self.adb_line();
+        match self.phone.devices.first() {
+            Some(d) => Some(PhoneLine {
+                name: d.name.clone(),
+                battery: d.battery,
+                charging: d.charging,
+                connect: true,
+                adb,
+            }),
+            None => adb.map(|adb| PhoneLine {
+                name: adb
+                    .device
+                    .as_ref()
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_default(),
+                battery: None,
+                charging: false,
+                connect: false,
+                adb: Some(adb),
+            }),
+        }
+    }
+
+    // Wireless adb (#153).
+
+    fn adb_on(&self) -> bool {
+        self.phone_on() && self.config.phone.adb
+    }
+
+    /// adb is looked for once the configuration is read and allows it;
+    /// turned off, it is forgotten.
+    fn refresh_adb(&mut self) {
+        if !self.adb_on() {
+            if self.phone.adb.looked {
+                self.stop_pairing();
+                let news = self.phone.adb.news.take();
+                self.phone.adb = AdbState {
+                    news,
+                    pairings: self.phone.adb.pairings,
+                    ..AdbState::default()
+                };
+                self.phone_changed();
+            }
+            return;
+        }
+        if self.phone.adb.looked || (self.config_path.is_some() && !self.config_read) {
+            return;
+        }
+        self.phone.adb.looked = true;
+        self.adb_look();
+    }
+
+    fn adb_env(&self) -> adb::Env {
+        adb::Env {
+            vars: self.child_env.clone(),
+            runtime_dir: self.socket_path.parent().map(PathBuf::from),
+        }
+    }
+
+    fn adb_sink(&self) -> Option<impl Fn(AdbEvent) + Send + Sync + 'static> {
+        let news = Mutex::new(self.phone.adb.news.clone()?);
+        Some(move |event| {
+            if let Ok(news) = news.lock() {
+                let _ = news.send(event);
+            }
         })
+    }
+
+    /// adb and scrcpy looked for, and what adb reaches, on a worker.
+    fn adb_look(&self) {
+        if let Some(sink) = self.adb_sink() {
+            adb::look(self.adb_env(), sink);
+        }
+    }
+
+    fn adb_event(&mut self, event: AdbEvent) {
+        if !self.adb_on() {
+            return;
+        }
+        match event {
+            AdbEvent::Found { tools, devices } => {
+                self.phone.adb.tools = Some(tools);
+                self.phone.adb.devices = devices;
+            }
+            AdbEvent::Pairing { id, stage } => {
+                let Some(pairing) = self.phone.adb.pairing.as_mut().filter(|p| p.id == id) else {
+                    return;
+                };
+                match stage {
+                    Stage::Paired(device) => {
+                        tracing::info!(device = %device.name, "a phone paired for debugging");
+                        self.phone.adb.pairing = None;
+                        let devices = &mut self.phone.adb.devices;
+                        devices.retain(|d| d.serial != device.serial);
+                        // The popover, open since Pair, says it.
+                        devices.insert(0, device);
+                    }
+                    Stage::Failed(failure) => {
+                        // A phone not scanned in time is no fault.
+                        tracing::info!(?failure, "a phone did not pair");
+                        pairing.stage = Stage::Failed(failure);
+                    }
+                    stage => pairing.stage = stage,
+                }
+            }
+        }
+        self.phone_changed();
+    }
+
+    /// "Pair over Wi-Fi" (or Try again): a fresh code, and a worker that
+    /// waits for the phone to scan it.
+    pub fn pair_phone(&mut self) {
+        let Some(Some(tools)) = self.phone.adb.tools.clone() else {
+            return;
+        };
+        if !self.adb_on() {
+            return;
+        }
+        self.stop_pairing();
+        let code = match Code::new() {
+            Ok(code) => code,
+            Err(err) => {
+                tracing::warn!(%err, "no pairing code");
+                return;
+            }
+        };
+        let Some(sink) = self.adb_sink() else {
+            return;
+        };
+        self.phone.adb.pairings += 1;
+        let id = self.phone.adb.pairings;
+        let cancel = Arc::new(AtomicBool::new(false));
+        adb::pair(
+            id,
+            tools.adb,
+            self.adb_env(),
+            code.clone(),
+            cancel.clone(),
+            sink,
+        );
+        self.phone.adb.pairing = Some(Pairing {
+            id,
+            code,
+            stage: Stage::Waiting,
+            cancel,
+        });
+        self.phone_changed();
+    }
+
+    pub fn cancel_pairing(&mut self) {
+        self.stop_pairing();
+        self.phone_changed();
+    }
+
+    fn stop_pairing(&mut self) {
+        if let Some(pairing) = self.phone.adb.pairing.take() {
+            pairing.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// The phone's popover opened: what adb reaches is read again (a
+    /// cable plugged in, adb installed since), and a failed pairing is
+    /// forgotten.
+    pub fn phone_opened(&mut self) {
+        if !self.adb_on() || !self.phone.adb.looked {
+            return;
+        }
+        if self
+            .phone
+            .adb
+            .pairing
+            .as_ref()
+            .is_some_and(|p| matches!(p.stage, Stage::Failed(_)))
+        {
+            self.cancel_pairing();
+        }
+        self.adb_look();
+    }
+
+    /// "Mirror its screen": scrcpy for the device adb reaches, in a window
+    /// like any other.
+    pub fn mirror_phone(&mut self) {
+        let Some(Some(Tools {
+            scrcpy: Some(scrcpy),
+            ..
+        })) = self.phone.adb.tools.clone()
+        else {
+            return;
+        };
+        let Some(device) = self.phone.adb.devices.first() else {
+            return;
+        };
+        if !self.adb_on() {
+            return;
+        }
+        let args = ["-s".to_owned(), device.serial.clone()];
+        tracing::info!(device = %device.name, "mirroring a phone");
+        self.launch(&scrcpy.to_string_lossy(), &args);
+    }
+
+    /// The QR code's text while a pairing waits for the phone, for the
+    /// test harness's simulated scan.
+    pub(crate) fn phone_pairing_code(&self) -> Option<String> {
+        let pairing = self.phone.adb.pairing.as_ref()?;
+        matches!(pairing.stage, Stage::Waiting).then(|| pairing.code.qr())
+    }
+
+    fn adb_line(&self) -> Option<AdbLine> {
+        if !self.adb_on() {
+            return None;
+        }
+        let tools = self.phone.adb.tools.as_ref()?.as_ref()?;
+        let lang = self.shell_lang();
+        Some(AdbLine {
+            device: self
+                .phone
+                .adb
+                .devices
+                .first()
+                .map(|d| (d.name.clone(), d.wireless)),
+            mirror: tools.scrcpy.is_some(),
+            pairing: self.phone.adb.pairing.as_ref().map(|p| PairingView {
+                qr: p.code.qr(),
+                stage: match &p.stage {
+                    Stage::Waiting => PairStage::Waiting,
+                    Stage::Pairing | Stage::Paired(_) => PairStage::Pairing,
+                    Stage::Failed(Failure::NotSeen) => {
+                        PairStage::Failed(lang.pair_not_seen().to_owned())
+                    }
+                    Stage::Failed(Failure::Pair(why) | Failure::Connect(why)) => {
+                        PairStage::Failed(lang.pair_failed(why))
+                    }
+                },
+            }),
+        })
+    }
+
+    /// adb as the session found it: `off`, `looking`, `absent`, `ready`
+    /// or `pairing`.
+    fn adb_state(&self) -> &'static str {
+        if !self.adb_on() {
+            return "off";
+        }
+        match (&self.phone.adb.tools, &self.phone.adb.pairing) {
+            (None, _) => "looking",
+            (Some(None), _) => "absent",
+            (Some(Some(_)), Some(_)) => "pairing",
+            (Some(Some(_)), None) => "ready",
+        }
     }
 }

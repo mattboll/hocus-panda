@@ -1,5 +1,6 @@
 //! The phone's words and icons (#85): its line in the column, its
-//! popover, and the reply of its notifications' toasts.
+//! popover, and the reply of its notifications' toasts; pairing over
+//! Wi-Fi and mirroring through adb (#153).
 
 use crate::i18n::Lang;
 
@@ -11,6 +12,10 @@ pub const RING: &str = "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4";
 pub const SEND: &str = "M7 4h10v16H7zM12 15V9M9.5 11.5L12 9l2.5 2.5";
 /// A folder, for its files.
 pub const FOLDER: &str = "M3 6h7l2 2h9v11H3z";
+/// A screen with a phone before it, for mirroring its screen.
+pub const MIRROR: &str = "M3 5h13v10H3zM7 19h5M13 9h7v11h-7z";
+/// A QR code's corners, for pairing by one.
+pub const QR: &str = "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2z";
 
 /// The action key of a toast that takes a reply typed into it, as KDE's
 /// notifications name it.
@@ -29,6 +34,10 @@ impl Lang {
 
     /// The line for screen readers, and what opens the popover.
     pub fn phone_name(self, name: &str, battery: Option<u8>, charging: bool) -> String {
+        // A phone known only as one to pair (adb, #153).
+        if name.is_empty() {
+            return self.phone_line(None);
+        }
         let level = match (self, battery, charging) {
             (_, None, _) => String::new(),
             (Self::En, Some(p), false) => format!(", {p}%"),
@@ -94,6 +103,88 @@ impl Lang {
         self.pick("Nothing copied to send", "Rien de copié à envoyer")
     }
 
+    pub fn mirror_phone(self) -> &'static str {
+        self.pick("Mirror its screen", "Afficher son écran")
+    }
+
+    pub fn pair_phone(self) -> &'static str {
+        self.pick("Pair over Wi-Fi", "Associer par Wi-Fi")
+    }
+
+    /// The popover's line for the device adb reaches.
+    pub fn adb_device(self, name: &str, wireless: bool) -> String {
+        match (self, wireless) {
+            (Self::En, true) => format!("Paired over Wi-Fi: {name}"),
+            (Self::En, false) => format!("Plugged in for debugging: {name}"),
+            (Self::Fr, true) => format!("Associé par Wi-Fi\u{a0}: {name}"),
+            (Self::Fr, false) => format!("Branché pour le débogage\u{a0}: {name}"),
+        }
+    }
+
+    /// The popover's line with adb but nothing paired.
+    pub fn adb_none(self) -> &'static str {
+        self.pick("No phone paired yet", "Aucun téléphone associé")
+    }
+
+    /// Where the phone scans the code, as Android names it.
+    pub fn pair_steps(self) -> &'static [&'static str] {
+        match self {
+            Self::En => &[
+                "On the phone, in Developer options,",
+                "Wireless debugging:",
+                "Pair device with QR code",
+            ],
+            Self::Fr => &[
+                "Sur le téléphone, dans",
+                "Options pour les développeurs,",
+                "Débogage sans fil\u{a0}:",
+                "Associer l’appareil avec un code QR",
+            ],
+        }
+    }
+
+    /// The QR code, for screen readers (never its text: a password).
+    pub fn pair_code(self) -> &'static str {
+        self.pick(
+            "QR code to scan with the phone",
+            "Code QR à scanner avec le téléphone",
+        )
+    }
+
+    pub fn pair_waiting(self) -> &'static str {
+        self.pick("Waiting for the phone…", "En attente du téléphone…")
+    }
+
+    pub fn pairing(self) -> &'static str {
+        self.pick("Pairing…", "Association…")
+    }
+
+    pub fn try_again(self) -> &'static str {
+        self.pick("Try again", "Réessayer")
+    }
+
+    pub fn cancel_pairing(self) -> &'static str {
+        self.pick("Cancel", "Annuler")
+    }
+
+    /// Pairing failed: the phone never showed up.
+    pub fn pair_not_seen(self) -> &'static str {
+        self.pick(
+            "The phone did not scan the code",
+            "Le téléphone n’a pas scanné le code",
+        )
+    }
+
+    /// Pairing failed: adb refused, or the phone was not joined.
+    pub fn pair_failed(self, why: &str) -> String {
+        match (self, why.is_empty()) {
+            (Self::En, true) => "Could not pair".into(),
+            (Self::Fr, true) => "Association impossible".into(),
+            (Self::En, false) => format!("Could not pair: {why}"),
+            (Self::Fr, false) => format!("Association impossible\u{a0}: {why}"),
+        }
+    }
+
     pub fn phone_failed(self, name: &str) -> String {
         match self {
             Self::En => format!("{name} did not answer"),
@@ -108,7 +199,7 @@ mod tests {
 
     #[test]
     fn the_icons_parse() {
-        for path in [PHONE, RING, SEND, FOLDER] {
+        for path in [PHONE, RING, SEND, FOLDER, MIRROR, QR] {
             assert!(hocus_ui::Icon::stroked(path, 16.0, 2.0).is_some(), "{path}");
         }
     }

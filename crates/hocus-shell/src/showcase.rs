@@ -11,9 +11,24 @@ use hocus_ui::{
 use crate::{column::View, i18n::Lang, launcher::Showcase};
 
 /// A QR code: dark modules on a white card with its quiet zone.
-struct QrCode {
+pub(crate) struct QrCode {
     modules: Vec<bool>,
     width: usize,
+}
+
+impl QrCode {
+    /// The code for `text`; `None` when it does not fit in one.
+    pub(crate) fn new(text: &str) -> Option<Self> {
+        let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
+        Some(Self {
+            modules: code
+                .to_colors()
+                .into_iter()
+                .map(|c| c == qrcode::Color::Dark)
+                .collect(),
+            width: code.width(),
+        })
+    }
 }
 
 impl Draw for QrCode {
@@ -94,9 +109,8 @@ impl Showcased {
                 let _ = tree.add(root, Style::default(), Kind::text(text.as_str(), style));
             }
             Showcase::Qr(text) => {
-                let code = qrcode::QrCode::new(text.as_bytes()).ok();
                 let side = (size.w.min(size.h) * 0.6).round();
-                if let Some(code) = code {
+                if let Some(code) = QrCode::new(text) {
                     let _ = tree.add(
                         root,
                         Style {
@@ -105,14 +119,7 @@ impl Showcased {
                             ..Style::default()
                         },
                         Kind::Custom {
-                            draw: Box::new(QrCode {
-                                modules: code
-                                    .to_colors()
-                                    .into_iter()
-                                    .map(|c| c == qrcode::Color::Dark)
-                                    .collect(),
-                                width: code.width(),
-                            }),
+                            draw: Box::new(code),
                             label: Some(format!("QR: {text}")),
                         },
                     );

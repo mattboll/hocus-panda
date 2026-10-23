@@ -837,6 +837,10 @@ pub struct PhoneInfo {
     pub state: String,
     /// The phones paired and within reach; the first is the column's.
     pub phones: Vec<PhoneDevice>,
+    /// Wireless adb (#153): `off` (the configuration), `looking`,
+    /// `absent` (not installed), `ready` or `pairing`.
+    #[serde(default)]
+    pub adb: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

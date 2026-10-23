@@ -405,6 +405,12 @@ impl Headless {
         Ok(self.app.state.config_error.clone())
     }
 
+    /// The text of the QR code a phone pairing shows (#153), as a phone
+    /// scanning it would read it; `None` while none is shown.
+    pub fn pairing_code(&self) -> Option<String> {
+        self.app.state.phone_pairing_code()
+    }
+
     /// Runs `handler` on the loop at the next dispatch, timed like the
     /// compositor's own handlers.
     pub fn on_loop(&mut self, name: &'static str, handler: impl FnOnce(&mut State) + 'static) {

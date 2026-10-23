@@ -246,6 +246,23 @@ sending the clipboard or files (`hocus msg send-to-phone`) and mounting
 its files each run on a thread of their own, so a phone slow to answer
 holds nothing.
 
+Wireless adb (#153), once `[phone] adb` allows it, pairs a phone for
+debugging and mirrors its screen. adb and scrcpy are looked for on the
+`PATH` the session's programs get, on a worker; without adb nothing runs
+and nothing shows. Pairing follows Android Studio's flow: the popover shows
+a QR code `WIFI:T:ADB;S:<name>;P:<password>;;` (a fresh random name and
+password each time, never logged nor named to screen readers); the phone
+scans it and advertises a `_adb-tls-pairing._tcp` service under that name
+over mDNS; a worker polls adb's own discovery (`adb mdns services`) for it,
+runs `adb pair` with the password, then `adb connect` to the debugging port
+the phone advertises next (`_adb-tls-connect._tcp`), unless adb joined it
+by itself. Asking adb rather than browsing mDNS ourselves keeps one view of
+the network and needs no daemon or crate of our own. Every adb command runs
+on that worker with a time limit. "Mirror its screen" starts scrcpy for the
+device adb reaches (`scrcpy -s SERIAL`), as any program the user starts;
+its window is an ordinary one. With adb but no KDE Connect phone, the
+column shows a phone line for adb alone.
+
 Coding agents (#41) come from herdr's API socket (JSON lines): a worker
 thread lists the agents, follows each one's status through a subscription,
 and lists them again when panes come or go; another carries out focusing
@@ -474,7 +491,10 @@ guarded by these rules (#134):
 - **The phone (#85)** goes through KDE Connect, which pairs (a code
   confirmed on both screens) and talks over TLS itself; the session only
   uses phones already paired there, on the session's own bus. Wireless
-  adb, when it comes, is off by default and pairs the same way.
+  adb (#153) is off by default (`[phone] adb`), since a paired phone can be
+  debugged from this computer; it pairs the same way, with a password the
+  QR code carries and both sides prove over SPAKE2 and TLS (adb's own),
+  never sent in clear.
 - **Calendar passwords (#75)** live in the keyring, never in the
   configuration, and travel only over https (plain http is refused but to
   this machine); the cache of events is sealed.

@@ -244,7 +244,7 @@ The column on the right of the screen is the chosen form (see
 - Keyboard layout
 - Power profile `[linux]`
 - Next meeting (filling ring, Join); today's agenda
-- Phone: KDE Connect (battery, ring, notifications with reply, clipboard, send and browse files), wireless adb, screen mirroring `[linux]`
+- Phone: KDE Connect (battery, ring, notifications with reply, clipboard, send and browse files), wireless adb paired by a QR code, screen mirroring with scrcpy `[linux]`
 - System updates `[linux]`
 - Notification area (StatusNotifierItem) with menus, ring when the app waits
 - Desktop icons (Home, Trash, ~/Desktop)
