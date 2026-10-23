@@ -43,7 +43,7 @@ timedated = "UTC"
 # paths, serving the .ics files of dir as its calendar; it takes only the
 # token GOA handed out last. With running = false, GOA's name is taken only
 # at a `goa = "run"` step: until then, it is not installed
-goa = { identity = "alex.panda@gmail.com", dir = "calendar/google", running = true }
+goa = { identity = "alex.panda@example.com", dir = "calendar/google", running = true }
 # Windows move as in a session, to sample motion at a virtual time;
 # otherwise they appear and go at once
 motion = false

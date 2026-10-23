@@ -2,7 +2,7 @@ description = "Google refuses the token GNOME Online Accounts held (it expired w
 outputs = ["1280x800"]
 shell = true
 # GOA starts after the session, its token already stale at Google.
-goa = { identity = "alex.panda@gmail.com", dir = "calendar/google", running = false }
+goa = { identity = "alex.panda@example.com", dir = "calendar/google", running = false }
 
 [[step]]
 expect_calendars = { online = "absent", online_accounts = 0, events = 0 }
@@ -17,4 +17,4 @@ goa = "run"
 expect_calendars = { online = "installed", online_accounts = 1, contains = ["Family dinner"], error = false }
 
 [[step]]
-expect_goa = ["GetAccessToken", "PROPFIND /caldav/v2/ refused", "EnsureCredentials", "GetAccessToken", "PROPFIND /caldav/v2/ ok", "REPORT /caldav/v2/alex.panda%40gmail.com/events/ ok"]
+expect_goa = ["GetAccessToken", "PROPFIND /caldav/v2/ refused", "EnsureCredentials", "GetAccessToken", "PROPFIND /caldav/v2/ ok", "REPORT /caldav/v2/alex.panda%40example.com/events/ ok"]

@@ -340,7 +340,10 @@ mod tests {
 
     #[test]
     fn an_address_stays_readable_in_a_path() {
-        assert_eq!(calendar_id("alex.panda@gmail.com"), "alex.panda@gmail.com");
+        assert_eq!(
+            calendar_id("alex.panda@example.com"),
+            "alex.panda@example.com"
+        );
         assert_eq!(calendar_id("a b/é@x.org"), "a%20b%2F%C3%A9@x.org");
     }
 

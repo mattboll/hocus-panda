@@ -1,7 +1,7 @@
 description = "The Accounts and calendar page lists the Google accounts of GNOME Online Accounts read-only, how they synced, and opens GNOME's own settings for them"
 outputs = ["1280x800"]
 shell = true
-goa = { identity = "alex.panda@gmail.com", dir = "calendar/google" }
+goa = { identity = "alex.panda@example.com", dir = "calendar/google" }
 # GNOME's settings are a stand-in that says what it was asked.
 child_env = { PATH = "{scenario_dir}/calendar/bin" }
 
@@ -15,7 +15,7 @@ open_settings = { page = "accounts" }
 expect_settings = { label = "FROM GNOME ONLINE ACCOUNTS" }
 
 [[step]]
-expect_settings = { label = "alex.panda@gmail.com" }
+expect_settings = { label = "alex.panda@example.com" }
 
 [[step]]
 expect_settings = { label = "Synced · 2 events" }

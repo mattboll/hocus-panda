@@ -3,14 +3,14 @@ outputs = ["1280x800"]
 shell = true
 # GNOME Online Accounts' stand-in on the scenario's private bus, and
 # Google's on 127.0.0.1: never the session's, never Google.
-goa = { identity = "alex.panda@gmail.com", dir = "calendar/google" }
+goa = { identity = "alex.panda@example.com", dir = "calendar/google" }
 
 [[step]]
 expect_calendars = { online = "installed", online_accounts = 1, contains = ["Family dinner", "Dentist"], error = false }
 
 # Discovered from Google's base, with the token GOA handed out.
 [[step]]
-expect_goa = ["GetAccessToken", "PROPFIND /caldav/v2/ ok", "PROPFIND /caldav/v2/alex.panda%40gmail.com/user ok", "REPORT /caldav/v2/alex.panda%40gmail.com/events/ ok"]
+expect_goa = ["GetAccessToken", "PROPFIND /caldav/v2/ ok", "PROPFIND /caldav/v2/alex.panda%40example.com/user ok", "REPORT /caldav/v2/alex.panda%40example.com/events/ ok"]
 
 [[step]]
 expect_calendar_cache = { contains = ["goa:account_1761055200_0", "Family dinner"] }

@@ -24,7 +24,7 @@ use hocus_test::{
 };
 use jiff::Timestamp;
 
-const ALEX: &str = "alex.panda@gmail.com";
+const ALEX: &str = "alex.panda@example.com";
 
 #[derive(Clone, Default)]
 struct Captured(Arc<Mutex<Vec<u8>>>);
