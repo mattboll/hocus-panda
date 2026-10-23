@@ -75,6 +75,10 @@ pub struct Showing {
     pub label: String,
     /// The ring at the point, before a click.
     pub ring: bool,
+    /// The element it surrounds instead, when the agent aims at one of an
+    /// application's (#175): its rectangle from the point, logical
+    /// pixels, `[x, y, width, height]`.
+    pub around: Option<[i32; 4]>,
     pub confirm: Option<Confirm>,
 }
 
@@ -207,6 +211,51 @@ impl Draw for Ring {
     }
 }
 
+/// The ring around an element: its rectangle, a little larger, in the
+/// agent's colour with a glow, and a dot where the click lands.
+struct Frame {
+    size: Size,
+    /// The point, from the frame's corner.
+    point: Point,
+}
+
+/// How far the frame stands off the element.
+const FRAME_PAD: f32 = 8.0;
+
+impl Draw for Frame {
+    fn draw(&self, canvas: &mut Canvas, rect: Rect, theme: &Theme, _now: Duration) {
+        let color = theme.colors.accent;
+        let inner = Rect::new(
+            rect.x + GLOW,
+            rect.y + GLOW,
+            rect.w - 2.0 * GLOW,
+            rect.h - 2.0 * GLOW,
+        );
+        let glow = Rect::new(
+            inner.x - GLOW / 2.0,
+            inner.y - GLOW / 2.0,
+            inner.w + GLOW,
+            inner.h + GLOW,
+        );
+        canvas.stroke_rect(glow, 12.0, GLOW, color.with_alpha(56));
+        canvas.stroke_rect(inner, 8.0, 3.0, color);
+        canvas.fill_rect(
+            Rect::new(
+                rect.x + self.point.x - 2.5,
+                rect.y + self.point.y - 2.5,
+                5.0,
+                5.0,
+            ),
+            2.5,
+            color,
+        );
+    }
+
+    fn size(&self) -> Size {
+        self.size
+    }
+}
+
 /// The pointer: the boards' arrow in the agent's colour, outlined.
 struct Arrow(Option<Shape>);
 
@@ -266,7 +315,24 @@ impl SeatView {
             parts.push((id, style));
             id
         };
-        if showing.pointer && showing.ring {
+        if let (true, true, Some([x, y, w, h])) = (showing.pointer, showing.ring, showing.around) {
+            let pad = FRAME_PAD + GLOW;
+            let corner = Point::new(at.x + x as f32 - pad, at.y + y as f32 - pad);
+            add(
+                &mut tree,
+                Style {
+                    at: Some(corner),
+                    ..Style::default()
+                },
+                Kind::Custom {
+                    draw: Box::new(Frame {
+                        size: Size::new(w as f32 + 2.0 * pad, h as f32 + 2.0 * pad),
+                        point: Point::new(at.x - corner.x, at.y - corner.y),
+                    }),
+                    label: None,
+                },
+            );
+        } else if showing.pointer && showing.ring {
             add(
                 &mut tree,
                 Style {
@@ -564,6 +630,7 @@ mod tests {
             pointer: true,
             label: "helper · Clicks in Notes".into(),
             ring: true,
+            around: None,
             confirm: confirm.then(|| Confirm {
                 title: Lang::En.agent_will("helper", false),
                 intent: "Deletes every note".into(),
@@ -667,6 +734,26 @@ mod tests {
         assert_eq!(view.key(Key::Tab), None);
         assert_eq!(view.key(Key::Enter), Some(Answer::Refuse));
         assert_eq!(make(&showing).key(Key::Escape), Some(Answer::Refuse));
+    }
+
+    #[test]
+    fn the_ring_surrounds_an_element_aimed_at() {
+        let room = Size::new(1280.0, 800.0);
+        let mut showing = showing(false);
+        // A button of 100×40 whose centre is the point.
+        showing.around = Some([-50, -20, 100, 40]);
+        let mut view = SeatView::new(
+            agent_theme(&Theme::default(), "helper"),
+            Lang::En,
+            1.0,
+            room,
+            Point::new(400.0, 300.0),
+            &showing,
+        );
+        view.draw(Duration::ZERO);
+        let o = view.origin();
+        assert!(o.x <= 350.0 - FRAME_PAD - GLOW, "{o:?}");
+        assert!(o.y <= 280.0 - FRAME_PAD - GLOW, "{o:?}");
     }
 
     #[test]

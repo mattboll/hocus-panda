@@ -182,6 +182,12 @@ pub enum Request {
     /// The shell's interface as screen readers see it: roles, labels and
     /// where each element is.
     Ui,
+    /// A window's own accessibility tree, as its application exposes it
+    /// over AT-SPI (#175): roles, labels and places in the window. An
+    /// agent reads those of the windows it may act on alone.
+    WindowTree {
+        window: u64,
+    },
     /// Saves the session now.
     SaveSession,
     /// Offers to put the saved session back, as at start.
@@ -307,6 +313,9 @@ impl Request {
             | Self::Config
             | Self::Desktops
             | Self::Ui
+            // What any program of the session may read on the
+            // accessibility bus itself.
+            | Self::WindowTree { .. }
             | Self::Screenshot { .. }
             // What agents did: the user's to read, and the agents' own.
             | Self::AgentsJournal
@@ -351,6 +360,7 @@ impl Request {
                 | Self::Windows
                 | Self::Desktops
                 | Self::Ui
+                | Self::WindowTree { .. }
                 | Self::Screenshot { .. }
                 | Self::Subscribe
                 | Self::Agent { .. }
@@ -374,6 +384,15 @@ pub enum ActTarget {
     /// The shell's element with this label (as `ui` lists it), at its
     /// centre.
     Element { label: String },
+    /// An element of a window's own accessibility tree (#175), by its
+    /// label (exactly, else a part of it, ignoring case) and its role when
+    /// given (`push button`), at its centre; refused when several match.
+    AppElement {
+        window: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        label: String,
+    },
 }
 
 /// What an agent does there.
@@ -491,6 +510,9 @@ pub enum JournalTarget {
         app_id: Option<String>,
         #[serde(default)]
         title: Option<String>,
+        /// The element of its accessibility tree aimed at, by label (#175).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        element: Option<String>,
     },
     /// An element of the shell, by its label.
     Element { label: String },
@@ -539,8 +561,16 @@ impl std::fmt::Display for JournalEntry {
         }
         match &self.target {
             None => {}
-            Some(JournalTarget::Window { id, app_id, title }) => {
-                write!(f, " on window {id}")?;
+            Some(JournalTarget::Window {
+                id,
+                app_id,
+                title,
+                element,
+            }) => {
+                match element {
+                    Some(label) => write!(f, " on {label:?} of window {id}")?,
+                    None => write!(f, " on window {id}")?,
+                }
                 if let Some(app_id) = app_id {
                     write!(f, " {app_id}")?;
                 }
@@ -625,6 +655,7 @@ pub enum Reply {
     Desktops(Vec<OutputDesktops>),
     Config(ConfigInfo),
     Ui(Vec<UiNode>),
+    AppTree(AppTree),
     /// The agent this connection is now.
     Agent(AgentInfo),
     AgentsJournal(AgentsJournal),
@@ -680,6 +711,50 @@ pub struct UiNode {
     pub disabled: bool,
     #[serde(default)]
     pub selected: bool,
+}
+
+/// A window's own accessibility tree (#175), read over AT-SPI.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AppTree {
+    pub window: u64,
+    /// The application as the accessibility bus names it; `None` when
+    /// the window has no tree, and `missing` says why.
+    #[serde(default)]
+    pub application: Option<String>,
+    #[serde(default)]
+    pub toolkit: Option<String>,
+    /// Depth first, the window itself first.
+    pub elements: Vec<AppElement>,
+    /// The reading stopped at a limit: what was left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub missing: Option<String>,
+}
+
+/// One element of an application's tree.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppElement {
+    /// As AT-SPI names it: `push button`, `entry`, `password text`.
+    pub role: String,
+    pub label: Option<String>,
+    /// From the window's top-left corner, logical pixels, as its
+    /// application says; `None` when it does not.
+    pub rect: Option<Rect>,
+    /// How deep in the window, from 0.
+    pub depth: u32,
+    #[serde(default)]
+    pub focused: bool,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub selected: bool,
+    /// For check boxes, radio buttons, toggles and switches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+    /// What a field holds, its first characters; never a password's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 /// An output's desktops: its own first, then guests from unplugged outputs.
@@ -1375,6 +1450,74 @@ mod tests {
             },
             r#"{"id":6,"request":"agent","name":"helper"}"#,
         );
+        round_trip(
+            &RequestLine {
+                id: 9,
+                request: Request::Act {
+                    target: ActTarget::AppElement {
+                        window: 3,
+                        role: Some("push button".into()),
+                        label: "Send".into(),
+                    },
+                    action: Action::Click {
+                        button: Button::Left,
+                        count: 1,
+                    },
+                    intent: None,
+                },
+            },
+            r#"{"id":9,"request":"act","target":{"app_element":{"window":3,"role":"push button","label":"Send"}},"action":{"click":{"button":"left","count":1}}}"#,
+        );
+    }
+
+    #[test]
+    fn an_application_tree_is_read_by_window() {
+        round_trip(
+            &RequestLine {
+                id: 4,
+                request: Request::WindowTree { window: 3 },
+            },
+            r#"{"id":4,"request":"window_tree","window":3}"#,
+        );
+        assert!(Request::WindowTree { window: 3 }.agents_may());
+        assert_eq!(
+            Request::WindowTree { window: 3 }.permission(),
+            Permission::Observe
+        );
+        let tree = AppTree {
+            window: 3,
+            application: Some("mail".into()),
+            toolkit: None,
+            elements: vec![AppElement {
+                role: "push button".into(),
+                label: Some("Send".into()),
+                rect: Some(Rect {
+                    x: 1,
+                    y: 2,
+                    width: 3,
+                    height: 4,
+                }),
+                depth: 2,
+                focused: false,
+                disabled: false,
+                selected: false,
+                checked: None,
+                value: None,
+            }],
+            partial: None,
+            missing: None,
+        };
+        let line = ServerLine::Reply {
+            id: 4,
+            ok: Reply::AppTree(tree),
+        };
+        let text = serde_json::to_string(&line).expect("serializes");
+        assert!(
+            !text.contains("value") && !text.contains("partial"),
+            "{text}"
+        );
+        let back: ServerLine = serde_json::from_str(&text).expect("deserializes");
+        assert_eq!(back, line);
     }
 
     #[test]
@@ -1390,6 +1533,7 @@ mod tests {
                 id: 3,
                 app_id: Some("notes".into()),
                 title: Some("Shopping list".into()),
+                element: None,
             }),
             refused: None,
             confirmed: false,
@@ -1397,6 +1541,23 @@ mod tests {
         assert_eq!(
             entry.to_string(),
             "2026-10-21 14:37:05 helper: type 4 characters on window 3 notes \"Shopping list\""
+        );
+        let on_element = JournalEntry {
+            action: JournalAction::Click {
+                button: Button::Left,
+                count: 1,
+            },
+            target: Some(JournalTarget::Window {
+                id: 3,
+                app_id: Some("mail".into()),
+                title: Some("Compose".into()),
+                element: Some("Send".into()),
+            }),
+            ..entry.clone()
+        };
+        assert_eq!(
+            on_element.to_string(),
+            "2026-10-21 14:37:05 helper: click on \"Send\" of window 3 mail \"Compose\""
         );
         let refused = JournalEntry {
             action: JournalAction::Click {

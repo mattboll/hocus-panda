@@ -163,6 +163,9 @@ struct Pending {
     intent: String,
     entry: (u8, u8, JournalEntry),
     phase: Phase,
+    /// The rectangle of an application's element it aims at (#175), from
+    /// the point: the ring surrounds it.
+    around: Option<[i32; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -345,9 +348,28 @@ impl State {
     ) -> Option<Result<Reply, ApiError>> {
         // The window as it is before the action changes it.
         let entry = self.journal_entry(name, &target, &action);
-        if self
-            .agent_seat(connection)
-            .is_some_and(|s| s.pending.is_some())
+        self.agent_act_aimed(connection, id, name, target, action, intent, entry, None)
+    }
+
+    /// The same, its journal entry made, and the element of an
+    /// application's tree it aims at when it does (#175), found.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn agent_act_aimed(
+        &mut self,
+        connection: ConnectionId,
+        id: u64,
+        name: &str,
+        target: ActTarget,
+        action: Action,
+        intent: Option<String>,
+        entry: (u8, u8, JournalEntry),
+        found: Option<crate::a11y::Found>,
+    ) -> Option<Result<Reply, ApiError>> {
+        // An element being looked for is an action under way too.
+        if self.resolving(connection)
+            || self
+                .agent_seat(connection)
+                .is_some_and(|s| s.pending.is_some())
         {
             let busy = ApiError::new(
                 ErrorCode::BadRequest,
@@ -378,7 +400,12 @@ impl State {
             };
         }
         let now = self.clock.now();
-        let words = intent.unwrap_or_else(|| aim.words.clone());
+        let lang = self.shell_lang();
+        let words = intent.unwrap_or_else(|| match (&found, &action) {
+            (Some(found), Action::Scroll { .. }) => lang.scrolls_in(&format!("“{}”", found.label)),
+            (Some(found), _) => lang.clicks_on(&found.label),
+            (None, _) => aim.words.clone(),
+        });
         let phase = self.first_phase(connection, &aim, &action, now);
         let shown = self.shown_point(&aim);
         if let Some(seat) = self.agent_seat(connection) {
@@ -406,6 +433,7 @@ impl State {
                         intent: words,
                         entry,
                         phase,
+                        around: found.map(|f| f.around),
                     });
                 }
                 self.wake_for_seats();
@@ -417,6 +445,33 @@ impl State {
                 Some(result)
             }
         }
+    }
+
+    /// Whether agent `name` may do `action` in `window`, as the
+    /// configuration in effect says: before an element of its tree is
+    /// looked for.
+    pub(crate) fn agent_may(
+        &mut self,
+        connection: ConnectionId,
+        name: &str,
+        window: u64,
+        action: &Action,
+    ) -> Result<(), ApiError> {
+        self.agent_aim(
+            connection,
+            name,
+            &ActTarget::Window { window, at: None },
+            action,
+        )
+        .map(drop)
+    }
+
+    /// Whether the agent of this connection waits on an action.
+    pub(crate) fn seat_busy(&self, connection: ConnectionId) -> bool {
+        self.seats
+            .list
+            .iter()
+            .any(|s| s.connection == connection && s.pending.is_some())
     }
 
     /// Brings back a minimized window an agent acts on (#229): on its own
@@ -606,6 +661,10 @@ impl State {
         // What is typed stays out of the log: it may be a password.
         tracing::debug!(agent = name, ?target, typing, "an agent acts");
         match target {
+            ActTarget::AppElement { .. } => Err(ApiError::new(
+                ErrorCode::BadRequest,
+                "an application's element is found before it is aimed at",
+            )),
             ActTarget::Element { label } => {
                 if typing {
                     return Err(ApiError::new(
@@ -1360,6 +1419,7 @@ impl State {
             Some(said) => format!("{} · {said}", seat.name),
             None => seat.name.clone(),
         };
+        let around = seat.pending.as_ref().and_then(|p| p.around);
         let (ring, confirm) = match seat.pending.as_ref().map(|p| (&p.phase, p)) {
             Some((Phase::Showing { .. }, _)) => (true, None),
             Some((Phase::Binding { .. } | Phase::Settling { .. }, p)) => {
@@ -1399,6 +1459,7 @@ impl State {
                 pointer: seen,
                 label,
                 ring,
+                around: around.filter(|_| ring),
                 confirm,
             },
         ))

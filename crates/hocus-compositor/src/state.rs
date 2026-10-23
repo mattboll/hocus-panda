@@ -184,6 +184,8 @@ pub struct State {
     pub journal: crate::journal::Journal,
     /// MCP agents' own seats (#43).
     pub seats: crate::seat::Seats,
+    /// Applications' accessibility trees, for agents (#175).
+    pub a11y: crate::a11y::A11y,
     /// The first session's welcome (#82).
     pub first_run: crate::first_run::FirstRun,
     /// Desktops sliding, screen by screen (#36).
@@ -322,6 +324,7 @@ impl State {
             activity: Default::default(),
             journal: Default::default(),
             seats: Default::default(),
+            a11y: Default::default(),
             first_run: Default::default(),
             slides: Default::default(),
             alt_tab: Default::default(),

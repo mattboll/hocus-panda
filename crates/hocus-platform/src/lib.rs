@@ -5,6 +5,7 @@ pub mod account;
 pub mod adb;
 pub mod ai;
 pub mod apps;
+pub mod atspi;
 pub mod auth;
 pub mod bluetooth;
 pub mod calendar;

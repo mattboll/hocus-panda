@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod ai;
+pub mod atspi;
 pub mod bus;
 pub mod caldav;
 pub mod client;

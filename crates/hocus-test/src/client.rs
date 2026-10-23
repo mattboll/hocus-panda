@@ -98,6 +98,18 @@ pub struct ClientOptions {
     /// at once when its last frame was shown, else at the next frame
     /// callback.
     pub marks: bool,
+    /// Elements it draws, as its accessibility tree says them (#175): a
+    /// press on one is recorded as [`ClientEvent::Hit`].
+    pub elements: Vec<Drawn>,
+}
+
+/// An element a test client draws: a rectangle of its window, in surface
+/// pixels, `[x, y, width, height]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Drawn {
+    pub label: String,
+    pub rect: [u32; 4],
+    pub argb: u32,
 }
 
 /// The text formats the test client copies and reads.
@@ -146,6 +158,8 @@ pub enum ClientEvent {
     /// An event of another seat than the first, by the seat's name: an MCP
     /// agent's (#43).
     OnSeat(String, Box<ClientEvent>),
+    /// A button pressed over an element it draws, by its label (#175).
+    Hit(String),
 }
 
 impl fmt::Display for ClientEvent {
@@ -164,6 +178,7 @@ impl fmt::Display for ClientEvent {
             Self::Token => write!(f, "token"),
             Self::PasswordField => write!(f, "password_field"),
             Self::OnSeat(seat, event) => write!(f, "{event} on {seat}"),
+            Self::Hit(label) => write!(f, "hit {label}"),
         }
     }
 }
@@ -367,6 +382,8 @@ impl SolidWindow {
             other_inputs,
             password: options.password,
             marks: options.marks.then(Marks::default),
+            elements: options.elements,
+            pointers: vec![None; bound.len()],
             seat_names: vec![String::new(); bound.len()],
             typed: None,
             serial: 0,
@@ -464,6 +481,11 @@ struct Client {
     password: bool,
     /// The marks it draws, when asked to.
     marks: Option<Marks>,
+    /// The elements it draws.
+    elements: Vec<Drawn>,
+    /// Where each seat's pointer is on its window, by the order it was
+    /// bound in.
+    pointers: Vec<Option<(f64, f64)>>,
     /// Each seat's name, by the order it was bound in.
     seat_names: Vec<String>,
     /// Text committed, recorded at the next `done`.
@@ -515,6 +537,17 @@ impl Client {
         )?;
         for pixel in canvas.as_chunks_mut::<4>().0 {
             *pixel = argb.to_le_bytes();
+        }
+        for element in &self.elements {
+            let [x0, y0, w, h] = element.rect;
+            for y in y0..(y0 + h).min(height) {
+                for x in x0..(x0 + w).min(width) {
+                    let at = ((y * width + x) * 4) as usize;
+                    if let Some(pixel) = canvas.get_mut(at..at + 4) {
+                        pixel.copy_from_slice(&element.argb.to_le_bytes());
+                    }
+                }
+            }
         }
         // The marks in rows from the top left corner.
         if let Some(marks) = &mut self.marks {
@@ -597,6 +630,26 @@ impl WindowHandler for Client {
 }
 
 impl Client {
+    /// Where seat `i`'s pointer is on the window, if on it.
+    fn point(&mut self, i: usize, at: Option<(f64, f64)>) {
+        if let Some(p) = self.pointers.get_mut(i) {
+            *p = at;
+        }
+    }
+
+    /// The element under seat `i`'s pointer.
+    fn hit(&self, i: usize) -> Option<String> {
+        let (x, y) = self.pointers.get(i).copied().flatten()?;
+        self.elements
+            .iter()
+            .rev()
+            .find(|e| {
+                let [ex, ey, w, h] = e.rect.map(f64::from);
+                (ex..ex + w).contains(&x) && (ey..ey + h).contains(&y)
+            })
+            .map(|e| e.label.clone())
+    }
+
     /// Records `event` of seat `i`: plain for the first, by its name for
     /// others.
     fn record_on(&self, i: usize, event: ClientEvent) {
@@ -650,8 +703,23 @@ impl Dispatch<wl_pointer::WlPointer, usize> for Client {
         qh: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { .. } => client.record_on(*i, ClientEvent::PointerEnter),
-            wl_pointer::Event::Leave { .. } => client.record_on(*i, ClientEvent::PointerLeave),
+            wl_pointer::Event::Enter {
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                client.point(*i, Some((surface_x, surface_y)));
+                client.record_on(*i, ClientEvent::PointerEnter);
+            }
+            wl_pointer::Event::Leave { .. } => {
+                client.point(*i, None);
+                client.record_on(*i, ClientEvent::PointerLeave);
+            }
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => client.point(*i, Some((surface_x, surface_y))),
             wl_pointer::Event::Button {
                 button,
                 state,
@@ -670,6 +738,9 @@ impl Dispatch<wl_pointer::WlPointer, usize> for Client {
                     },
                 );
                 if pressed {
+                    if let Some(label) = client.hit(*i) {
+                        client.record_on(*i, ClientEvent::Hit(label));
+                    }
                     client.mark(qh);
                 }
             }
@@ -701,6 +772,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, usize> for Client {
                 let pressed = state == WEnum::Value(wl_keyboard::KeyState::Pressed);
                 client.record_on(*i, ClientEvent::Key { code: key, pressed });
                 if pressed {
+                    if let Some(label) = client.hit(*i) {
+                        client.record_on(*i, ClientEvent::Hit(label));
+                    }
                     client.mark(qh);
                 }
             }
@@ -797,6 +871,7 @@ impl ProvidesRegistryState for Client {
         if interface == "wl_seat" {
             let i = self.seat_names.len();
             self.seat_names.push(String::new());
+            self.pointers.push(None);
             let seat: wl_seat::WlSeat = self.registry.registry().bind(name, version.min(7), qh, i);
             if let (Some(m), true) = (&self.text_inputs, self.password) {
                 self.other_inputs.push(m.get_text_input(&seat, qh, i));

@@ -1,0 +1,60 @@
+description = "Given a window whose application exposes its accessibility tree, when an agent reads it and clicks the Send button by its label, then a ring surrounds the button with the agent's intent a moment, the click lands on the button through the agent's seat, and the journal names the button"
+
+[[step]]
+config = """
+[agents]
+show_before_click_ms = 600
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["test.mail"]
+"""
+
+# Alex's mail compose window, its application on the accessibility bus.
+[[step]]
+open = { app_id = "test.mail", title = "Compose", size = [400, 300], color = "#1d2025", accessible = "compose" }
+
+[[step]]
+mcp_session = "helper"
+
+# Its tree: roles, labels and places in the window; the password field's
+# role and label, never what it holds.
+[[step]]
+mcp = { agent = "helper", tool = "accessibility_tree", window = "test.mail", contains = ['"role": "push button"', '"label": "Send"', '"x": 284', '"role": "password text"', '"value": "Lunch on Friday"'] }
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "test.mail", arguments = { label = "Send", intent = "Sends the message" }, wait = false }
+
+# Shown before it lands: the ring around the button, the pointer at its
+# centre, and what the agent means to do.
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_ui = { label = "helper · Sends the message" }
+
+[[step]]
+expect_not_received = { app_id = "test.mail", event = "hit Send on agent-helper" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-app-element.png" }
+
+[[step]]
+expect_mcp = { agent = "helper" }
+
+[[step]]
+expect_received = { app_id = "test.mail", event = "hit Send on agent-helper" }
+
+[[step]]
+expect_not_received = { app_id = "test.mail", event = "hit Send" }
+
+[[step]]
+expect_journal = { has = ['helper: click on "Send" of window 1 test.mail "Compose"'] }
+
+# Two labels share a part: refused, both listed, nothing clicked.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "test.mail", arguments = { label = "send" }, error = '2 elements match "send"' }
+
+[[step]]
+expect_not_received = { app_id = "test.mail", event = "hit Send later on agent-helper" }
