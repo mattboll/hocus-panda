@@ -20,10 +20,15 @@
 - **As built**: the window effects (§1 to §8) and the shell's (§9 to §16)
   are drawn with the elements every renderer has (the window's picture
   stretched, parts of the shell's pictures, plain colours, rows of glyphs
-  from a sheet), so that pixman and the scenarios show them too.
-  What needs a shader is left for the GPU: true RGB channel separation,
-  bloom, scanlines and vignette; the phosphor glow is a faint wider line,
-  the green shift a tint. Sounds are not played yet.
+  from a sheet), so that pixman and the scenarios show them too;
+  the green shift is a tint. On the GPU (GLES), shaders add what needs
+  one (#169): the closing glitch takes red and blue apart, bright lines
+  bloom, and fullscreen overlays get scanlines and a vignette; without a
+  GPU, and with reduced motion, the plain effects stay, the phosphor glow
+  a faint wider line. Measured at 1920×1080 (a debug build, waiting for
+  the GPU): the glitch of a window as large as the screen 0.13 ms, the
+  scanlines and vignette over it 0.12 ms, the blooms of eight traces
+  1.1 ms. Sounds are not played yet.
 - **Window border**: every decorated window has a 1 px hairline inside its
   edge, `rgba(0,240,96,0.22)` here (the boards' window border).
 
@@ -105,6 +110,12 @@ Matrix-specific decay. Instead of generic pixelation, the window content
 - Small green "sparks" (1-2px bright green dots) emit from dissolving block
   edges, 20-30 particles total, lifetime 150ms each.
 
+As built: the glitch shifts bands of the picture sideways, a new glitch
+every 30 ms, stronger as it goes, under a green tint. On the GPU each band
+also takes its red from one side and its blue from the other, 2 to 6 px
+apart, so that the colours part at every edge; it is painted on each
+frame of its 120 ms and damages only the window.
+
 ### Sound Effects
 - Brief digital "derez" sound (80ms, descending tone cluster 4kHz to 800Hz).
 
@@ -139,7 +150,8 @@ horizontally toward the taskbar icon position, leaving a brief phosphor trail.
   along its path, 1px tall, decaying with an exponential decay table over 3-4 frames.
 
 The line and the flash are drawn over the dock, so that the flash shows on
-the icon; the crushed window is drawn with the windows.
+the icon; the crushed window is drawn with the windows. On the GPU the line
+blooms (see §5); elsewhere it has a faint wider glow.
 
 ### Sound Effects
 - CRT "zzzip" (60ms, descending sweep 6kHz to 200Hz, sawtooth wave).
@@ -206,6 +218,12 @@ all four borders.
 ### Particle Effects
 - At each corner where a trace reaches the screen edge, a small burst of
   4-6 green sparks (2px dots, 100ms lifetime).
+
+As built: on the GPU the traces bloom: a gaussian glow one pixel wide
+(sigma) around each, at 30 % (the phosphor glow), showing over two pixels
+on each side, drawn in nine parts from a profile painted once. The grid
+lines of a snap (§6) and the guides of a drag (§7) bloom the same; where
+there is no GPU they have a faint wider line instead.
 
 ### Sound Effects
 - None (maximize is too frequent to warrant sound).
@@ -433,7 +451,9 @@ and 100% brightness).
 
 As built: the glow follows the card's ring as it glides (150 ms,
 out-cubic, as in every theme); the trace runs between the cards'
-middles. Scanlines are the GPU's (#169).
+middles. On the GPU (#169), every other row of the whole overlay is
+8 % darker and a vignette darkens its corners (45 % at most), both
+fading with it; the overview has them too, its rows 15 % darker.
 
 ---
 
@@ -488,8 +508,12 @@ field's caret is the field's own. Refused, the padlock and the field
 shake three times within 200 ms under red scanlines, the rain red for
 300 ms. Unlocked: the rain speeds up to three times over 150 ms, a
 flash fades in 50 ms (out-quad), and the desktop's green in 100 ms. A
-lock client's own screen is left as it draws it. Vignette and its pulse
-are the GPU's (#169).
+lock client's own screen is left as it draws it. On the GPU (#169), the
+lock has scanlines (every other row 15 % darker) as the rain covers the
+desktop, and a vignette that swells once, slowly, as the lock comes in
+(one second), then rests: a pulse that went on would repaint a still
+locked screen. Unlocked, they fade in 200 ms. The boot screen has them
+too, gone with its flash.
 
 ---
 

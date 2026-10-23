@@ -47,3 +47,7 @@ expect_no_window = "editor"
 
 [[step]]
 expect_idle = { for_ms = 5000 }
+
+# The plain effect: no colours taken apart without a GPU (#169).
+[[step]]
+expect_glitch = { at_most = 0 }

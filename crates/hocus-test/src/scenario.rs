@@ -421,6 +421,10 @@ pub enum Step {
     /// The blur behind panels was computed so many times since the last
     /// such step, or the start: `{ at_least?, at_most? }`.
     ExpectBlur(ExpectBlur),
+    /// Frames of a closing window's glitch painted with its colours apart
+    /// on the GPU (#169), so many since the last such step, or the start:
+    /// `{ at_least?, at_most? }`.
+    ExpectGlitch(ExpectBlur),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1088,6 +1092,9 @@ impl fmt::Display for Step {
             Self::ExpectReceived(e) => write!(f, "expect_received {} `{}`", e.app_id, e.event),
             Self::ExpectBudget(e) => write!(f, "expect_budget {} ms", e.max_ms),
             Self::ExpectBlur(e) => write!(f, "expect_blur {:?} to {:?}", e.at_least, e.at_most),
+            Self::ExpectGlitch(e) => {
+                write!(f, "expect_glitch {:?} to {:?}", e.at_least, e.at_most)
+            }
             Self::ExpectPixel(e) => write!(
                 f,
                 "expect_pixel {} {:?} {} {}",
@@ -1106,6 +1113,20 @@ impl fmt::Display for Step {
             }
         }
     }
+}
+
+/// Something done `done` times, as `expected` says.
+fn counted(what: &str, done: u64, expected: &ExpectBlur) -> anyhow::Result<()> {
+    if let Some(least) = expected.at_least {
+        anyhow::ensure!(
+            done >= least,
+            "{what} {done} times, at least {least} expected"
+        );
+    }
+    if let Some(most) = expected.at_most {
+        anyhow::ensure!(done <= most, "{what} {done} times, at most {most} expected");
+    }
+    Ok(())
 }
 
 /// Where a run writes images, and whether it records new references.
@@ -1239,6 +1260,7 @@ impl Scenario {
             blurs: 0,
             mcp_sessions: Vec::new(),
             mcp_waiting: Vec::new(),
+            glitches: 0,
             home,
         };
         run.request(Request::Subscribe)?;
@@ -1294,6 +1316,8 @@ struct Run<'a> {
     mcp_sessions: Vec<McpSession>,
     /// Calls left with `wait = false`, oldest first.
     mcp_waiting: Vec<McpWaiting>,
+    /// Glitch frames painted at the last `expect_glitch`.
+    glitches: u64,
     /// The scenario's own home, last: the compositor is gone before it.
     home: Option<PrivateHome>,
 }
@@ -2376,19 +2400,16 @@ impl Run<'_> {
                 // A restart counts from zero again.
                 let done = now.checked_sub(self.blurs).unwrap_or(now);
                 self.blurs = now;
-                if let Some(least) = expected.at_least {
-                    anyhow::ensure!(
-                        done >= least,
-                        "blurred {done} times, at least {least} expected"
-                    );
-                }
-                if let Some(most) = expected.at_most {
-                    anyhow::ensure!(
-                        done <= most,
-                        "blurred {done} times, at most {most} expected"
-                    );
-                }
-                Ok(())
+                counted("blurred", done, expected)
+            }
+            Step::ExpectGlitch(expected) => {
+                let Reply::Stats(stats) = self.request(Request::Stats)? else {
+                    anyhow::bail!("expected stats");
+                };
+                let now: u64 = stats.outputs.iter().map(|o| o.glitches).sum();
+                let done = now.checked_sub(self.glitches).unwrap_or(now);
+                self.glitches = now;
+                counted("glitched", done, expected)
             }
         }
     }

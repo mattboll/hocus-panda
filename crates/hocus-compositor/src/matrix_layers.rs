@@ -17,7 +17,7 @@ use smithay::{
         Color32F, ImportMem, Renderer,
         element::{
             Element, Id, Kind, RenderElement, memory::MemoryRenderBufferRenderElement,
-            solid::SolidColorRenderElement,
+            solid::SolidColorRenderElement, texture::TextureRenderElement,
         },
         utils::{CommitCounter, DamageBag, DamageSet, DamageSnapshot, OpaqueRegions},
     },
@@ -28,13 +28,15 @@ use smithay::{
 /// new, and repainted whole.
 const KEEP: u64 = 600;
 
-/// One thing a brush draws: part of the sheet of glyphs, or a colour.
+/// One thing a brush draws: part of the sheet of glyphs, a colour, or
+/// part of a phosphor bloom's profile (#169, GLES only).
 // Most are glyphs: boxed, each would cost an allocation.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum Stroke<R: Renderer> {
     Glyphs(MemoryRenderBufferRenderElement<R>),
     Solid(SolidColorRenderElement),
+    Bloom(TextureRenderElement<R::TextureId>),
 }
 
 impl<R> Stroke<R>
@@ -46,6 +48,7 @@ where
         match self {
             Self::Glyphs(e) => e.geometry(scale),
             Self::Solid(e) => e.geometry(scale),
+            Self::Bloom(e) => e.geometry(scale),
         }
     }
 
@@ -62,6 +65,14 @@ where
                 )
             }
             Self::Solid(e) => (e.color().components().map(f32::to_bits), NO_SRC),
+            // Not the sheet's: marked apart.
+            Self::Bloom(e) => {
+                let s = Element::src(e);
+                (
+                    [e.alpha().to_bits(), 1, 0, 0],
+                    [s.loc.x, s.loc.y, s.size.w, s.size.h].map(f64::to_bits),
+                )
+            }
         };
         Mark {
             at: [g.loc.x, g.loc.y, g.size.w, g.size.h],
@@ -352,7 +363,7 @@ impl Layers {
                         })
                         .collect::<Vec<_>>()
                 }
-                Stroke::Glyphs(_) => Vec::new(),
+                Stroke::Glyphs(_) | Stroke::Bloom(_) => Vec::new(),
             })
             .collect();
         Some(LayerElement {
@@ -486,6 +497,9 @@ where
             match stroke {
                 Stroke::Glyphs(e) => RenderElement::<R>::draw(e, frame, e.src(), at, &local, &[])?,
                 Stroke::Solid(e) => RenderElement::<R>::draw(e, frame, e.src(), at, &local, &[])?,
+                Stroke::Bloom(e) => {
+                    RenderElement::<R>::draw(e, frame, Element::src(e), at, &local, &[])?
+                }
             }
         }
         Ok(())

@@ -72,6 +72,7 @@ type Grab = Box<dyn Fn(&WlSurface, Point<f64, Logical>) -> Vec<Piece>>;
 
 /// A window gone, dissolving.
 struct Closing {
+    id: WindowId,
     picture: Snapshot,
     /// Its geometry, global.
     frame: Rectangle<f64, Logical>,
@@ -592,6 +593,27 @@ impl State {
         }
     }
 
+    /// The windows closing in the Matrix theme whose glitch plays at
+    /// `now`, for the GPU to separate their colours (#169).
+    pub(crate) fn glitching(&self, now: std::time::Duration) -> Vec<crate::crt::Glitching> {
+        self.snapshots
+            .closing
+            .iter()
+            .filter_map(|c| {
+                let Fade::Matrix(close) = &c.fade else {
+                    return None;
+                };
+                Some(crate::crt::Glitching {
+                    id: c.id,
+                    frame: c.frame,
+                    picture: c.picture.clone(),
+                    bands: close.bands(now)?,
+                    split: close.split(now),
+                })
+            })
+            .collect()
+    }
+
     /// A window going: it dissolves from how it is now.
     pub fn window_closing(&mut self, id: WindowId) {
         self.snapshots.away.remove(&id);
@@ -621,6 +643,7 @@ impl State {
         };
         let decorated = self.decorated(&window);
         self.snapshots.closing.push(Closing {
+            id,
             picture,
             frame,
             decorated,
@@ -947,7 +970,9 @@ impl State {
             let motion = match &closing.fade {
                 Fade::Plain(motion) => motion,
                 Fade::Matrix(close) => {
-                    out.extend(self.matrix_closing(renderer, closing, close, origin, scale));
+                    out.extend(
+                        self.matrix_closing(renderer, output, closing, close, origin, scale),
+                    );
                     continue;
                 }
             };
@@ -1087,6 +1112,7 @@ impl State {
     fn matrix_closing<R>(
         &self,
         renderer: &mut R,
+        output: &Output,
         closing: &Closing,
         close: &matrix::Close,
         origin: Point<f64, Logical>,
@@ -1107,8 +1133,21 @@ impl State {
                 0
             };
             let clip = local.to_physical_precise_round(scale);
-            let picture = match close.bands(now) {
-                Some(bands) => bands
+            let bands = close.bands(now);
+            // On the GPU, its colours apart too (#169).
+            let glitched = bands.as_ref().and_then(|_| {
+                self.glitch_element(
+                    renderer,
+                    output,
+                    closing.id,
+                    clip,
+                    local.size.to_i32_round(),
+                    alpha,
+                )
+            });
+            let picture = match (glitched, bands) {
+                (Some(glitched), _) => vec![glitched],
+                (None, Some(bands)) => bands
                     .into_iter()
                     .flat_map(|(v0, v1, dx)| {
                         closing
@@ -1116,7 +1155,7 @@ impl State {
                             .band(renderer, local, (v0, v1), dx, scale, alpha)
                     })
                     .collect(),
-                None => closing.picture.stretched(renderer, local, scale, alpha),
+                (None, None) => closing.picture.stretched(renderer, local, scale, alpha),
             };
             if closing.decorated {
                 out.extend(

@@ -186,10 +186,11 @@ impl WinitBackend {
 
     fn render(&mut self, state: &mut State) {
         let start = Instant::now();
-        // A wallpaper that moves, then the blur behind panels, before the
-        // scene shows them.
+        // A wallpaper that moves, the blur behind panels and the Matrix
+        // theme's GPU effects, before the scene shows them.
         state.paint_backdrop(self.backend.renderer(), &self.output);
         state.paint_glass(self.backend.renderer(), &self.output);
+        state.paint_crt(self.backend.renderer(), &self.output);
         let damage = {
             // The host draws the cursor of the nested window.
             let elements = state.scene_elements(self.backend.renderer(), &self.output, false);

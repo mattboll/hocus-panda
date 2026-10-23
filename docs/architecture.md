@@ -179,6 +179,18 @@ output, so that scenarios check a still scene is never blurred again.
 Without shaders (pixman), with transparency off, high contrast or the
 power saver, the theme has no glass and the panels are solid. Windows'
 shadows take their darkness from the theme.
+The Matrix theme's refinements on the GPU (#169, `crt`) are painted the
+same way, before a GLES backend draws an output: a closing window's
+picture is flattened once into a texture, and on each frame of its glitch
+a shader draws it shifted in bands, red and blue taken apart, into a
+texture the scene shows instead of the bands (a new id each time: only
+the window is damaged). The profile of the phosphor bloom, a screen's
+scanlines and the vignette are painted once by another shader; the
+brushes stretch the profile around bright lines (as strokes of their
+layer), and fullscreen overlays show the scanlines and vignette with ids
+kept from frame to frame, so that a still overlay repaints nothing. The
+stats count the glitch's frames per output. Pixman, reduced motion and
+instant motion keep the plain effects.
 The window switcher (#39) shows each card's window live: the window's own
 surfaces drawn again, scaled into the card (a rescale element: a surface
 element's size follows the output's scale, not the one it was made at), so

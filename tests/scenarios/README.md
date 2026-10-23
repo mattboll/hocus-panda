@@ -125,6 +125,7 @@ Steps, one per `[[step]]` table:
 | `expect_idle = { for_ms }` | no output draws a frame while this much virtual time passes: at rest, nothing is redrawn |
 | `expect_frames = { for_ms, at_least }` | every output draws at least that many frames while this much virtual time passes: something moves |
 | `expect_blur = { at_least?, at_most? }` | the blur behind panels and windows (#37) was computed so many times since the last `expect_blur`, or the start: only when what is behind changes (with `renderer = "gles"`; never with pixman) |
+| `expect_glitch = { at_least?, at_most? }` | frames of a closing window's glitch in the Matrix theme painted with its colours apart on the GPU (#169), so many since the last `expect_glitch`, or the start (with `renderer = "gles"`; never with pixman or reduced motion) |
 | `expect_recording = { audio?, keys_at_ms? }` | the last recording saved, read by ffprobe and ffmpeg once done: with a sound track as long as the picture (or none); keys drawn near the bottom from this time in the video, the top unchanged |
 | `caldav = { dir, user, password }` | a CalDAV server on 127.0.0.1 serves the `.ics` files of `dir` (relative to the scenario); its calendar's address is `{caldav}` in later configuration, `type` and `calendar_password` steps |
 | `caldav_stop = true` | the CalDAV server goes, as the network would |

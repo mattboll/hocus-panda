@@ -1,0 +1,121 @@
+# The Matrix theme's GPU refinements (#169, docs/design/matrix-theme.md §6,
+# §11 and §12).
+description = "On the GPU in the Matrix theme, Alt+Tab has scanlines (every other row 8 % darker), a snapped window's grid line blooms two pixels on each side, and the lock's scanlines and vignette stay still once it is in, so that nothing is drawn; with reduced motion there are none"
+renderer = "gles"
+shell = true
+motion = true
+
+# A still wallpaper: only the effects draw.
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+
+[wallpaper]
+kind = "colour"
+colour = "#000000"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "mail", size = [600, 420], color = "#ffffff" }
+
+[[step]]
+open = { app_id = "editor", size = [640, 440], color = "#ffffff" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+keys = "15"
+
+[[step]]
+advance_ms = 300
+
+# The white of a card's preview, every other row darker.
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [500, 380], color = "#ffffff", tolerance = 6 }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [500, 381], color = "#ebebeb", tolerance = 6 }
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+advance_ms = 400
+
+# The grid line at x 472; its bloom two pixels beside it.
+[[step]]
+keys = "super+left"
+
+[[step]]
+advance_ms = 50
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [470, 100], color = "#00160c", tolerance = 8 }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+keys = "super+l"
+
+[[step]]
+expect_ui = { label = "Password" }
+
+[[step]]
+advance_ms = 1500
+
+# Its scanlines over the clock: every other row 15 % darker.
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [530, 124], color = "#bcf0c8", tolerance = 8 }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [530, 125], color = "#a0ccaa", tolerance = 8 }
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+[[step]]
+type = "panda"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "Password", shown = false }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+reduced_motion = true
+
+[wallpaper]
+kind = "colour"
+colour = "#000000"
+"""
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+keys = "15"
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [500, 381], color = "#ffffff", tolerance = 6 }
+
+[[step]]
+key_up = "alt"

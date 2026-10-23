@@ -23,6 +23,7 @@ mod clock;
 mod comfort;
 mod config_watch;
 mod corners;
+mod crt;
 mod cursor;
 mod decoration;
 mod desktops;
