@@ -95,7 +95,7 @@ use smithay::reexports::{
 };
 
 pub use clock::Clock;
-pub use harness::{HarnessOptions, Headless};
+pub use harness::{HarnessOptions, Headless, write_whole};
 pub use headless::{FRAME, HeadlessConfig, OutputInfo, RendererChoice, RendererKind};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use state::State;

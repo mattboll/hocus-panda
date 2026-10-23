@@ -527,10 +527,7 @@ impl State {
     /// Wakes the loop at the next deadline (the virtual clock of tests
     /// moves by itself and needs none).
     fn schedule_lock_timer(&mut self) {
-        if matches!(self.clock, crate::clock::Clock::Virtual { .. }) {
-            return;
-        }
-        let Some(handle) = self.loop_handle.clone() else {
+        let Some(handle) = self.waker().cloned() else {
             return;
         };
         let next = self.next_deadline();

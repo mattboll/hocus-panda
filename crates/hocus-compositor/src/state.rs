@@ -148,6 +148,8 @@ pub struct State {
     pub leaver: crate::leave::Leaver,
     /// Each screen's name card while "identify" shows them.
     pub identifying: Vec<(String, crate::shell::Panel<hocus_shell::identify::Identify>)>,
+    /// When they go.
+    pub identifying_until: Option<std::time::Duration>,
     /// What screens are set to, and what was asked (#28).
     pub output_settings: crate::outputs::Settings,
     /// Screens showing another's picture (#125).
@@ -309,6 +311,7 @@ impl State {
             alt_tab: Default::default(),
             dock: Default::default(),
             identifying: Vec::new(),
+            identifying_until: None,
             leaver: Default::default(),
             authorizer: Default::default(),
             shots: Default::default(),
@@ -371,6 +374,17 @@ impl State {
 
     /// The window whose toplevel surface is `surface`: managed, shown or
     /// not, or waiting for its first buffer.
+    /// The loop's handle, to wake it on real time when something falls
+    /// due; none on a virtual clock, which needs no waking (see
+    /// [`Clock::is_virtual`]).
+    pub(crate) fn waker(
+        &self,
+    ) -> Option<&smithay::reexports::calloop::LoopHandle<'static, crate::App>> {
+        self.loop_handle
+            .as_ref()
+            .filter(|_| !self.clock.is_virtual())
+    }
+
     pub fn window_for(&self, surface: &WlSurface) -> Option<Window> {
         self.windows
             .values()

@@ -176,3 +176,45 @@ fn a_stuck_output_is_recovered_after_three_looks() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// Real time passing changes nothing on the screen (#212): what falls due
+/// does on the virtual clock, so a test waiting for a client between two
+/// steps sees the frames one that does not wait sees. The calendar's first
+/// sync (2 s) used to wake the loop on real time, and a redraw under the
+/// Matrix theme's lock is never empty.
+#[test]
+fn real_time_passing_draws_nothing_at_rest() -> anyhow::Result<()> {
+    let mut compositor = Headless::start_options(hocus_compositor::HarnessOptions {
+        headless: HeadlessConfig {
+            renderer: RendererChoice::Pixman,
+            ..Default::default()
+        },
+        api_permission: Permission::Test,
+        watchdog: None,
+        xwayland: false,
+        shell: true,
+        session_bus: None,
+        system_bus: None,
+        data_dirs: None,
+        child_env: None,
+        polkit_helper: None,
+        motion: true,
+        first_run: false,
+    })?;
+    compositor.write_config("[appearance]\ntheme = \"matrix\"\n")?;
+    compositor.dispatch_until(CLIENT_TIMEOUT, Headless::wallpapers_ready)?;
+    compositor.advance(FRAME)?;
+    // Super+L: locked, the rain comes down and stops.
+    for (code, pressed) in [(125, true), (38, true), (38, false), (125, false)] {
+        compositor.request(Request::Key { code, pressed })?;
+    }
+    compositor.advance(Duration::from_secs(3))?;
+    let before = frames(&compositor);
+    let until = std::time::Instant::now() + Duration::from_millis(2500);
+    while std::time::Instant::now() < until {
+        compositor.dispatch(Duration::from_millis(20))?;
+    }
+    compositor.advance(Duration::from_secs(1))?;
+    assert_eq!(frames(&compositor), before, "a frame was drawn at rest");
+    Ok(())
+}

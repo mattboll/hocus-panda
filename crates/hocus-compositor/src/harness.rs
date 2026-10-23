@@ -282,6 +282,11 @@ impl Headless {
         self.app.state.clock.now()
     }
 
+    /// Whether a tool shares the screen, as the compositor sees it.
+    pub fn sharing(&self) -> bool {
+        self.app.state.sharing()
+    }
+
     /// Windows shown on the outputs.
     pub fn window_count(&self) -> usize {
         self.app.state.space.elements().count()
@@ -408,7 +413,7 @@ impl Headless {
 
     pub fn write_config(&mut self, text: &str) -> anyhow::Result<Option<String>> {
         let before = self.app.state.config_generation;
-        std::fs::write(&self.config, text)?;
+        write_whole(&self.config, text.as_bytes())?;
         self.dispatch_until(REQUEST_TIMEOUT, |h| h.app.state.config_generation > before)?;
         Ok(self.app.state.config_error.clone())
     }
@@ -433,6 +438,17 @@ impl Headless {
             BackendState::Winit(_) | BackendState::Tty(_) => None,
         }
     }
+}
+
+/// Writes `path` as an editor saving it does: the new text whole, never
+/// a file emptied and then written, which the configuration's watcher
+/// could read in between and apply, empty, as all the defaults (#212).
+pub fn write_whole(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let mut name = path.file_name().unwrap_or_default().to_owned();
+    name.push(".new");
+    let new = path.with_file_name(name);
+    std::fs::write(&new, contents)?;
+    std::fs::rename(&new, path)
 }
 
 /// Frames fall on multiples of [`FRAME`].

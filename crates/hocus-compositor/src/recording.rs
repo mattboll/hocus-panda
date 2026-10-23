@@ -289,7 +289,7 @@ impl State {
     /// Wakes the loop each second while recording: the countdown and the
     /// time move on.
     fn tick_each_second(&mut self) {
-        let Some(handle) = &self.loop_handle else {
+        let Some(handle) = self.waker() else {
             return;
         };
         let ticking =

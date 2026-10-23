@@ -26,6 +26,14 @@ impl Clock {
         }
     }
 
+    /// Whether only a test harness moves it. Timers on real time are then
+    /// of no use and do harm: what falls due is seen as the harness
+    /// advances, and a timer firing while a test waits for a client would
+    /// redraw at a moment the test did not choose (#212).
+    pub fn is_virtual(&self) -> bool {
+        matches!(self, Self::Virtual { .. })
+    }
+
     /// Moves a virtual clock forward to `to`; a monotonic clock cannot be
     /// moved, and time never goes back.
     pub fn advance_to(&mut self, to: Duration) {

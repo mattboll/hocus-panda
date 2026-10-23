@@ -184,7 +184,7 @@ impl State {
     fn screenshot_later(&mut self, due: Due, delay: u32) {
         self.shots.due = Some((self.clock.now() + Duration::from_secs(delay.into()), due));
         // Wakes the loop then; the clock decides.
-        if let Some(handle) = &self.loop_handle {
+        if let Some(handle) = self.waker() {
             let woken = handle.insert_source(
                 Timer::from_duration(Duration::from_secs(delay.into())),
                 |_, _, app| {

@@ -95,6 +95,7 @@ pub struct ScreenCapture {
     frames: HashMap<String, u64>,
     /// Sessions that captured more than once: sharing.
     sharing_sessions: usize,
+    /// When a tool copying as the screen changes was last given a frame.
     last_damage_copy: Option<Duration>,
     /// Notifications held while sharing.
     pub held: usize,
@@ -286,6 +287,9 @@ impl App {
                     }
                     Reply::Wlr(frame, damage) => {
                         frame.flags(wlr_frame::Flags::empty());
+                        if damage {
+                            self.state.screen_capture.last_damage_copy = Some(now);
+                        }
                         if damage && frame.version() >= 2 {
                             frame.damage(0, 0, w as u32, h as u32);
                         }
@@ -840,10 +844,11 @@ impl Dispatch<ZwlrScreencopyFrameV1, WlrFrameData> for State {
         if damage && !state.screen_capture.wlr_sharers.contains(&client.id()) {
             state.screen_capture.wlr_sharers.push(client.id());
         }
-        let after = damage.then(|| {
-            state.screen_capture.last_damage_copy = Some(state.clock.now());
-            (output.name(), state.output_frame(output))
-        });
+        // While it waits it shares; the time it shares on after is taken
+        // when its frame is served, not now: a tool asks again whenever
+        // its thread gets to it, a frame is served on the compositor's
+        // own time (#212).
+        let after = damage.then(|| (output.name(), state.output_frame(output)));
         state.screen_capture.pending.push(Pending {
             target: Target::Output(output.clone()),
             region: data.region,

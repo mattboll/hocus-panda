@@ -32,6 +32,9 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<P
         return;
     }
     state.first_run.due = Some((state.clock.now() + AFTER, mark));
+    if state.clock.is_virtual() {
+        return;
+    }
     let woken = handle.insert_source(Timer::from_duration(AFTER), |_, _, app| {
         app.state.needs_redraw = true;
         TimeoutAction::Drop

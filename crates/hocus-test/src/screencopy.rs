@@ -129,7 +129,18 @@ pub fn share(
     socket: &std::path::Path,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<()> {
-    use std::sync::atomic::Ordering;
+    share_paced(socket, stop, None)
+}
+
+/// As [`share`], but each copy after the first waits for a message on
+/// `pace`: a test chooses when the tool gets round to asking again, as a
+/// slow or busy thread would.
+pub fn share_paced(
+    socket: &std::path::Path,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pace: Option<std::sync::mpsc::Receiver<()>>,
+) -> anyhow::Result<()> {
+    use std::sync::{atomic::Ordering, mpsc::RecvTimeoutError};
     let conn = Connection::from_socket(std::os::unix::net::UnixStream::connect(socket)?)?;
     let (globals, mut queue) = registry_queue_init::<Copier>(&conn)?;
     let qh = queue.handle();
@@ -142,7 +153,16 @@ pub fn share(
         .find(|g| g.interface == "wl_output")
         .map(|g| globals.registry().bind(g.name, 1, &qh, ()))
         .ok_or_else(|| anyhow::anyhow!("no output"))?;
+    let mut first = true;
     while !stop.load(Ordering::Relaxed) {
+        if let Some(pace) = pace.as_ref().filter(|_| !first) {
+            match pace.recv_timeout(std::time::Duration::from_millis(10)) {
+                Ok(()) => {}
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        first = false;
         let frame = manager.capture_output(0, &output, &qh, ());
         let mut copier = Copier::default();
         while copier.buffer.is_none() && !copier.failed {
