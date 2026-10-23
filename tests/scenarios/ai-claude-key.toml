@@ -1,13 +1,14 @@
 # AI providers (#44): Claude's key comes from the keyring (a sealed file in
 # tests: never the developer's keyring), never the configuration. Without
 # it, the field says the provider refused; with it, the answer streams.
-description = "Claude is asked with the key kept by \"hocus msg ai-key\"; without one, the field says it was refused and how to set it"
+description = "The AI is off until enabled; Claude is then asked with the key kept by \"hocus msg ai-key\" and the newest Opus it lists; without a key, the field says it was refused and how to set it"
 outputs = ["1280x800"]
 shell = true
 
 [[step]]
 ai_server = { delay_ms = 10, pieces = ["Forty", "-two."] }
 
+# Off by default: nothing about the AI shows, nothing is asked.
 [[step]]
 config = """
 [ai]
@@ -17,6 +18,29 @@ url = "{ai}"
 
 [[step]]
 pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "what is the answer?"
+
+[[step]]
+expect_ui = { label = "Search the web for “what is the answer?”" }
+
+[[step]]
+expect_ui = { label = "Ask “what is the answer?”", shown = false }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+config = """
+[ai]
+enabled = true
+provider = "claude"
+url = "{ai}"
+"""
 
 [[step]]
 keys = "super+space"
@@ -45,8 +69,12 @@ key = 28
 [[step]]
 expect_ui = { label = "Forty-two." }
 
+# No model named: the newest Opus the provider lists.
 [[step]]
-expect_ai = { path = "/v1/messages", header = "x-api-key: sk-test-panda", contains = ["claude-opus-5-5", "what is the answer?"] }
+expect_ai = { path = "/v1/models", header = "x-api-key: sk-test-panda" }
+
+[[step]]
+expect_ai = { path = "/v1/messages", header = "x-api-key: sk-test-panda", contains = ["\"model\":\"claude-opus-9-1\"", "what is the answer?"] }
 
 [[step]]
 expect_ui = { label = "ANSWER · CLAUDE · 0 S" }

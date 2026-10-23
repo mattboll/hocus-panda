@@ -2,8 +2,10 @@
 //! the same pieces, a pause before each, as a slow model streams. It speaks
 //! ollama (`/api/tags`, `/api/chat`), OpenAI's chat completions
 //! (`/v1/chat/completions`, which llama.cpp's server speaks) and Claude's
-//! Messages API (`/v1/messages`, refused without a key), and keeps what it
-//! was asked: path, headers, body.
+//! Messages API (`/v1/messages`, refused without a key), lists its models
+//! (`/v1/models`, newest first: `claude-sonnet-9`, `claude-opus-9-1`,
+//! `claude-opus-9`, `claude-haiku-9`), and keeps what it was asked: path,
+//! headers, body.
 
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -160,6 +162,13 @@ fn serve(
                 &mut stream,
                 "200 OK",
                 r#"{"models":[{"name":"test-model"}]}"#,
+            );
+        }
+        "/v1/models" => {
+            return whole(
+                &mut stream,
+                "200 OK",
+                r#"{"data":[{"id":"claude-sonnet-9","type":"model"},{"id":"claude-opus-9-1","type":"model"},{"id":"claude-opus-9","type":"model"},{"id":"claude-haiku-9","type":"model"}],"has_more":false}"#,
             );
         }
         "/api/chat" => (

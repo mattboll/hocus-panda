@@ -4,6 +4,10 @@
 //! channel; the loop only adds the pieces to the card. Typing again,
 //! closing the field or Stop tells the worker to stop at the next piece.
 //!
+//! Without a model named, the worker asks the provider which it has at
+//! the first question (the newest Claude Opus, ollama's first…), and the
+//! session keeps that one: models change too often to be written here.
+//!
 //! Nested or in tests, a provider's usual address is never asked (the
 //! developer's own model is not ours): only the address the configuration
 //! gives, and only the session's own keyring.
@@ -35,6 +39,8 @@ enum News {
     Piece(u64, String),
     Done(u64),
     Failed(u64, AskError),
+    /// The model a provider at an address picked, kept for the session.
+    Model(Provider, String, String),
     /// A key was stored, or not.
     Stored(Result<String, String>),
 }
@@ -52,6 +58,8 @@ pub struct Ai {
     news: Option<channel::Sender<News>>,
     asking: Option<Asking>,
     secrets: Option<Secrets>,
+    /// The model picked for a provider at an address, for the session.
+    model: Option<(Provider, String, String)>,
 }
 
 pub fn start(
@@ -95,7 +103,7 @@ fn said(err: &AskError, url: &str, lang: Lang) -> String {
         AskError::Refused(why) => lang.ai_refused(why),
         AskError::NoModel => lang.ai_no_model().into(),
         AskError::Declined => lang.ai_declined().into(),
-        AskError::Failed(why) => lang.ai_failed(why),
+        AskError::Invalid(why) | AskError::Failed(why) => lang.ai_failed(why),
     }
 }
 
@@ -157,10 +165,15 @@ impl State {
             since: self.clock.now(),
         });
         let secrets = self.ai.secrets.clone();
+        let model = match (&self.config.ai.model, &self.ai.model) {
+            (named, _) if !named.is_empty() => named.clone(),
+            (_, Some((p, u, picked))) if *p == provider && *u == url => picked.clone(),
+            _ => String::new(),
+        };
         let mut question = Question {
             provider,
             url,
-            model: self.config.ai.model.clone(),
+            model,
             key: None,
             system: answer::instructions(lang),
             text: question,
@@ -174,6 +187,21 @@ impl State {
                 match secrets.lookup(provider.name()) {
                     Ok(key) => question.key = key,
                     Err(err) => tracing::warn!(err, "the keyring did not give the key"),
+                }
+            }
+            if question.model.is_empty() {
+                match ai::pick_model(&question) {
+                    Ok(Some(model)) => {
+                        let at = question.url.clone();
+                        let _ = news.send(News::Model(provider, at, model.clone()));
+                        question.model = model;
+                    }
+                    // The server answers with its own.
+                    Ok(None) => {}
+                    Err(err) => {
+                        let _ = news.send(News::Failed(id, err));
+                        return;
+                    }
                 }
             }
             let sender = news.clone();
@@ -221,6 +249,10 @@ impl State {
                 }
                 let url = self.ai_provider().map(|(_, u)| u).unwrap_or_default();
                 self.answer_news(id, AnswerNews::Failed(said(&err, &url, lang)));
+            }
+            News::Model(provider, url, model) => {
+                tracing::info!(provider = provider.name(), model, "AI model picked");
+                self.ai.model = Some((provider, url, model));
             }
             News::Stored(Ok(provider)) => tracing::info!(provider, "AI key kept"),
             News::Stored(Err(err)) => tracing::warn!(err, "the AI key was not kept"),

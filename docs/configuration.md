@@ -170,13 +170,14 @@ intents = true             # "capture de slack dans 3 secondes", "open the keybo
                            #   offline in English and French, shown to confirm before anything runs
 
 [ai]                       # questions typed in the command field; the answer streams into it
-enabled = true             # false: nothing is offered to ask, nothing is sent
+enabled = false            # off until turned on: nothing about the AI shows, nothing is sent
 provider = "ollama"        # ollama, llamacpp (its server), openai (or any server speaking its chat
                            #   completions: LM Studio, vLLM…), claude
 url = ""                   # empty: the provider's usual address (ollama http://127.0.0.1:11434, llama.cpp
                            #   http://127.0.0.1:8080), used by the session only; https, or http to this machine
-model = ""                 # empty: ollama's first model, the llama.cpp server's own, Claude's default;
-                           #   openai needs one
+model = ""                 # empty: asked of the provider at the first question and kept for the session:
+                           #   the newest Claude Opus it lists, ollama's or an OpenAI-like server's first
+                           #   model, the llama.cpp server's own
                            # keys are in the keyring, never here: hocus msg ai-key claude < key.txt
 
 [dock]                     # Super+D; shown on an empty desktop or after resting at the bottom edge

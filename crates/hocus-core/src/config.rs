@@ -1243,7 +1243,8 @@ pub const AI_PROVIDERS: [&str; 4] = ["ollama", "llamacpp", "openai", "claude"];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Ai {
-    /// Offers to ask what is typed; false: never, and nothing is sent.
+    /// Offers to ask what is typed; false (the default): nothing about it
+    /// shows, and nothing is sent.
     pub enabled: bool,
     /// `ollama`, `llamacpp` (its server), `openai` (or any server speaking
     /// its chat completions) or `claude`.
@@ -1251,15 +1252,16 @@ pub struct Ai {
     /// The provider's address; empty: its usual one, which only the
     /// session uses (nested or in tests, nothing is asked without one).
     pub url: String,
-    /// The model; empty: ollama's first one, the llama.cpp server's own,
-    /// Claude's default. OpenAI needs one.
+    /// The model; empty: the one the provider lists first at the first
+    /// question (the newest Claude Opus, ollama's first…), kept for the
+    /// session; the llama.cpp server's own when it lists none.
     pub model: String,
 }
 
 impl Default for Ai {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             provider: "ollama".into(),
             url: String::new(),
             model: String::new(),
@@ -1799,6 +1801,7 @@ mod tests {
         let claude = Config::parse("[ai]\nprovider = \"claude\"\n")?;
         assert!(!claude.ai.is_local(), "the cloud");
         assert!(Config::default().ai.is_local(), "ollama by default");
+        assert!(!Config::default().ai.enabled, "off until enabled");
         let err = Config::parse("[ai]\nprovider = \"skynet\"\n").expect_err("unknown");
         assert!(err.0.contains("ai.provider"), "{err}");
         let err = Config::parse("[ai]\nprovider = \"openai\"\nurl = \"http://example.org\"\n")
