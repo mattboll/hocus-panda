@@ -491,14 +491,34 @@ without unlocking leaves our lock screen: a crash never unlocks.
   waits for a state, never on the loop. Started with `--agent NAME`, it sends
   `agent` first; the connection then makes only what agents may (windows,
   outputs, desktops, `ui`, screenshots, events, `act`), whatever the
-  server's permission. `act` aims input at a window (a point relative to it,
-  the window brought forward first) or at a labelled element of the shell;
-  the compositor checks, at each action, the agent's rights in the
-  configuration in effect (`[[agents.mcp]]`: read or act, which app ids,
-  the shell or not), that the session is not locked nor a password dialog
-  open, and that nothing covers the point. Typed keys go straight to the
-  window with the keyboard, past the shortcuts, through the layout in
+  server's permission. `act` aims input at a window (a point relative to
+  it) or at a labelled element of the shell; the compositor checks, at each
+  action, the agent's rights in the configuration in effect
+  (`[[agents.mcp]]`: read or act, which app ids, the shell or not), and
+  that the session is not locked nor a password dialog open. Typed keys go
+  straight to the window, past the shortcuts, through the layout in
   effect. Applications' own accessibility trees (AT-SPI) are not read yet.
+- Each agent connection gets a seat of its own (#43, `seat.rs`): a
+  `wl_seat` made when it names itself and gone with it, whose pointer and
+  keyboard have their own focus. Its input goes to its windows through
+  smithay's pointer and keyboard handles, never the user's; what follows
+  the user's keyboard (the clipboard history, shortcut inhibitors, the
+  cursor a client sets) checks the seat is the user's, and an agent's
+  activation token or move request takes nothing from the user. An `act`
+  is answered later (the handler returns `None`, and the server's `reply`
+  follows): it waits on the compositor's clock, checked after each
+  dispatch, for the window's application to take the new seat, for its
+  text inputs to say what the field is for once the agent's keyboard came
+  in (the compositor tells the agent seat's text inputs itself, since no
+  input method runs; it reads their content purpose through its own
+  dispatch of text-input-v3 before smithay's), for the ring before a
+  click, and for the user on the card of a sensitive action; then it
+  checks everything again and lands, through the agent's seat. The
+  server tells which agent connections went (`take_departed`). Each seat's
+  pointer, ring and card are a small view of `hocus_shell::seat` placed
+  where it points, made again only when what it shows changes; the
+  column's journal leaves a slot for each agent's window, which the
+  compositor draws there, live, as the switcher draws its previews.
 - The agents' journal (#176) keeps each `act` of an agent connection, carried
   out or refused, with the window as it was and the user's local time, and
   each question the user hands a coding agent from an AI's answer (#197); the
@@ -508,9 +528,6 @@ without unlocking leaves our lock screen: a crash never unlocks.
   stop reaching them too. An agent connection reads its own entries alone.
   The journal is a ring in memory: nothing per entry goes to disk or to the
   log above debug.
-- Agents will get their own seat (pointer and keyboard) through the API:
-  see the agent seat idea in [ideas](ideas.md). Until then, acting moves the
-  session's pointer and keyboard focus.
 - The settings app ([decision 0010](decisions/0010-settings-as-a-client.md))
   reads what is in effect through it (`config`, `outputs`), follows the event
   stream, and is told which page to show by `open_settings`
@@ -625,7 +642,11 @@ guarded by these rules (#134):
   check and permissions per connection; never TCP. An agent that names
   itself is held to its `[[agents.mcp]]` entry by the compositor, not by
   its own client: read-only unless it says `act`, only on the app ids it
-  lists, never while locked. The name scopes a cooperating agent; it is no
+  lists, never while locked. It acts through a seat of its own, never the
+  user's keyboard; its actions in the applications of `[agents]
+  confirm_apps` and its typing into a field said to be a password wait for
+  the user, on a card the user's pointer answers (never a key, which a
+  user typing elsewhere could press by mistake). The name scopes a cooperating agent; it is no
   secret, as any program of the user's could edit the configuration too.
 - **The phone (#85)** goes through KDE Connect, which pairs (a code
   confirmed on both screens) and talks over TLS itself; the session only

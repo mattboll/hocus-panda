@@ -141,9 +141,22 @@ pub enum Step {
     /// Clicks the shell's button with this label (or accessible name).
     ClickUi(String),
     /// Calls a tool of the MCP server (`hocus mcp`, #42) in a session of
-    /// its own, as an agent of `[[agents.mcp]]`, and checks the result:
-    /// `{ agent?, tool, window?, arguments?, contains?, error? }`.
+    /// its own, as an agent of `[[agents.mcp]]` (or in that agent's lasting
+    /// session, when one is open), and checks the result: `{ agent?, tool,
+    /// window?, arguments?, contains?, error?, wait? }`. While it waits, an
+    /// action shown before it lands moves the clock to when it does; with
+    /// `wait = false` the step goes on, and `expect_mcp` checks the result
+    /// later.
     Mcp(McpCall),
+    /// An MCP session as this agent that lasts until `mcp_end` or the end
+    /// of the scenario: its seat (#43) stays meanwhile.
+    McpSession(String),
+    /// That agent's lasting session ends.
+    McpEnd(String),
+    /// The result of the oldest call left with `wait = false` (that
+    /// agent's, when `agent` is given), once it comes: `{ agent?,
+    /// contains?, error? }`.
+    ExpectMcp(ExpectMcp),
     /// The agents' journal (#176), as `hocus msg agents-journal` prints it:
     /// `{ has? = […], lacks? = […], stopped? }`, the lines holding `has` in
     /// that order (one after the other, a later string on the same line or
@@ -452,6 +465,9 @@ pub struct OpenWindow {
     /// Its title; none by default.
     #[serde(default)]
     pub title: Option<String>,
+    /// Its field is for a password, as its text inputs say (#43).
+    #[serde(default)]
+    pub password: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -480,6 +496,41 @@ pub struct McpCall {
     /// The tool failed, with this in its message; otherwise it must
     /// succeed.
     pub error: Option<String>,
+    /// The step waits for the result (by default), or goes on.
+    #[serde(default = "yes")]
+    pub wait: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectMcp {
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub contains: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// A call to a lasting session, and where its answer goes.
+type McpCallIn = (
+    serde_json::Value,
+    std::sync::mpsc::Sender<Option<serde_json::Value>>,
+);
+
+/// An MCP session that lasts, on a thread of its own: calls go in, each
+/// answered on its own channel.
+#[derive(Debug)]
+struct McpSession {
+    agent: String,
+    calls: std::sync::mpsc::Sender<McpCallIn>,
+}
+
+/// A call whose answer is still to come.
+#[derive(Debug)]
+struct McpWaiting {
+    agent: Option<String>,
+    answer: std::sync::mpsc::Receiver<Option<serde_json::Value>>,
+    /// A session of its own: the agents' seats there were before it.
+    fresh: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -922,6 +973,9 @@ impl fmt::Display for Step {
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
             Self::Mcp(call) => write!(f, "mcp {}", call.tool),
+            Self::McpSession(agent) => write!(f, "mcp_session {agent}"),
+            Self::McpEnd(agent) => write!(f, "mcp_end {agent}"),
+            Self::ExpectMcp(_) => write!(f, "expect_mcp"),
             Self::ExpectJournal(_) => write!(f, "expect_journal"),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
@@ -1183,6 +1237,8 @@ impl Scenario {
             herdrs: Vec::new(),
             ai: None,
             blurs: 0,
+            mcp_sessions: Vec::new(),
+            mcp_waiting: Vec::new(),
             home,
         };
         run.request(Request::Subscribe)?;
@@ -1234,6 +1290,10 @@ struct Run<'a> {
     ai: Option<crate::ai::Server>,
     /// Blurs computed at the last `expect_blur`.
     blurs: u64,
+    /// MCP sessions that last, by agent (#43).
+    mcp_sessions: Vec<McpSession>,
+    /// Calls left with `wait = false`, oldest first.
+    mcp_waiting: Vec<McpWaiting>,
     /// The scenario's own home, last: the compositor is gone before it.
     home: Option<PrivateHome>,
 }
@@ -1307,6 +1367,12 @@ impl Run<'_> {
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label, Button::Left),
             Step::Mcp(call) => self.mcp(call),
+            Step::McpSession(agent) => self.mcp_session(agent),
+            Step::McpEnd(agent) => {
+                self.mcp_sessions.retain(|s| s.agent != *agent);
+                Ok(())
+            }
+            Step::ExpectMcp(expected) => self.expect_mcp(expected),
             Step::ExpectJournal(expected) => self.expect_journal(expected),
             Step::RightClickUi(label) => self.click_ui(label, Button::Right),
             Step::TrayApp(t) => {
@@ -2363,6 +2429,7 @@ impl Run<'_> {
                 inhibit_shortcuts: open.inhibit_shortcuts,
                 inhibit_idle: open.inhibit_idle,
                 title: open.title.clone(),
+                password: open.password,
             },
         )?);
         self.compositor
@@ -2452,10 +2519,11 @@ impl Run<'_> {
         Ok(())
     }
 
-    /// One MCP session: initialized, one tool called, from a thread of its
-    /// own while the compositor serves it.
+    /// A tool call, through the agent's lasting session when one is open,
+    /// else in a session of its own; checked when the step waits, kept for
+    /// `expect_mcp` when it does not.
     fn mcp(&mut self, call: &McpCall) -> anyhow::Result<()> {
-        use serde_json::{Value, json};
+        use serde_json::json;
         let mut arguments = serde_json::to_value(&call.arguments)?;
         if let Some(app_id) = &call.window {
             let window = self
@@ -2463,58 +2531,170 @@ impl Run<'_> {
                 .with_context(|| format!("no window of {app_id}"))?;
             arguments["window"] = window.id.into();
         }
-        let socket = self.compositor.api_socket().to_path_buf();
-        let agent = call.agent.clone();
-        let tool = call.tool.clone();
-        let session = std::thread::spawn(move || {
-            let mut bridge = hocus_api::mcp::Bridge::new(socket, agent);
-            bridge.handle(json!({
-                "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                "params": {
-                    "protocolVersion": hocus_api::mcp::PROTOCOL_VERSIONS[0],
-                    "capabilities": {},
-                    "clientInfo": { "name": "scenario", "version": "0" },
-                },
-            }));
-            bridge.handle(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
-            bridge.handle(json!({
-                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": { "name": tool, "arguments": arguments },
-            }))
+        let params = json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": { "name": call.tool, "arguments": arguments },
         });
-        // As long as the longest wait a scenario asks for, and some.
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while !session.is_finished() {
-            anyhow::ensure!(Instant::now() < deadline, "the MCP server never answered");
-            self.compositor.dispatch(Duration::from_millis(5))?;
+        let lasting = self
+            .mcp_sessions
+            .iter()
+            .any(|s| Some(&s.agent) == call.agent.as_ref());
+        let fresh = (!lasting).then(|| self.compositor.agent_seats());
+        let answer = match self
+            .mcp_sessions
+            .iter()
+            .find(|s| Some(&s.agent) == call.agent.as_ref())
+        {
+            Some(session) => {
+                let (tx, rx) = std::sync::mpsc::channel();
+                session
+                    .calls
+                    .send((params, tx))
+                    .map_err(|_| anyhow::anyhow!("the MCP session ended"))?;
+                rx
+            }
+            None => {
+                let socket = self.compositor.api_socket().to_path_buf();
+                let agent = call.agent.clone();
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let mut bridge = hocus_api::mcp::Bridge::new(socket, agent);
+                    mcp_initialize(&mut bridge);
+                    let _ = tx.send(bridge.handle(params));
+                });
+                rx
+            }
+        };
+        if !call.wait {
+            // Once it is in, past its window's application taking the seat,
+            // or answered: later steps move the clock.
+            let (before, _) = self.compositor.agent_pending();
+            let deadline = Instant::now() + CLIENT_TIMEOUT;
+            let answer = loop {
+                if let Ok(early) = answer.try_recv() {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let _ = tx.send(early);
+                    break rx;
+                }
+                let (pending, binding) = self.compositor.agent_pending();
+                if !binding && pending > before {
+                    break answer;
+                }
+                anyhow::ensure!(
+                    Instant::now() < deadline,
+                    "the action never came in, or its window's application never took the \
+                     agent's seat"
+                );
+                self.compositor.dispatch(Duration::from_millis(5))?;
+            };
+            self.mcp_waiting.push(McpWaiting {
+                agent: call.agent.clone(),
+                answer,
+                fresh,
+            });
+            return Ok(());
         }
-        let answer = session
-            .join()
-            .map_err(|_| anyhow::anyhow!("the MCP session panicked"))?
-            .context("no answer")?;
-        let result = answer
-            .get("result")
-            .with_context(|| format!("not a result: {answer}"))?;
-        let failed = result["isError"] == Value::Bool(true);
-        let text: Vec<&str> = result["content"]
-            .as_array()
-            .map(|c| c.iter().filter_map(|c| c["text"].as_str()).collect())
-            .unwrap_or_default();
-        let text = text.join("\n");
-        match &call.error {
-            Some(expected) => anyhow::ensure!(
-                failed && text.contains(expected.as_str()),
-                "expected the tool to fail with {expected:?}, got {answer}"
-            ),
-            None => anyhow::ensure!(!failed, "the tool failed: {text}"),
-        }
-        for expected in &call.contains {
-            anyhow::ensure!(
-                text.contains(expected.as_str()),
-                "the result lacks {expected:?}: {text}"
-            );
+        let answer = self.mcp_answer(&answer)?;
+        self.mcp_gone(fresh)?;
+        mcp_check(&answer, call.error.as_deref(), &call.contains)
+    }
+
+    /// A session of its own ends with its call: its seat goes before the
+    /// next step, so that seats are named the same every run.
+    fn mcp_gone(&mut self, fresh: Option<usize>) -> anyhow::Result<()> {
+        if let Some(before) = fresh {
+            self.compositor
+                .dispatch_until(CLIENT_TIMEOUT, |c| c.agent_seats() <= before)
+                .context("the agent's seat stayed after its session")?;
         }
         Ok(())
+    }
+
+    /// Opens a lasting MCP session as `agent`, named at once (its seat
+    /// comes then).
+    fn mcp_session(&mut self, agent: &str) -> anyhow::Result<()> {
+        use serde_json::json;
+        anyhow::ensure!(
+            !self.mcp_sessions.iter().any(|s| s.agent == agent),
+            "agent {agent} already has a session"
+        );
+        let socket = self.compositor.api_socket().to_path_buf();
+        let (calls, to_call) = std::sync::mpsc::channel::<McpCallIn>();
+        let (first_tx, first) = std::sync::mpsc::channel();
+        let name = agent.to_owned();
+        std::thread::spawn(move || {
+            let mut bridge = hocus_api::mcp::Bridge::new(socket, Some(name));
+            mcp_initialize(&mut bridge);
+            // A first call connects, and names the agent.
+            let answer = bridge.handle(json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "list_windows", "arguments": {} },
+            }));
+            if first_tx.send(answer).is_err() {
+                return;
+            }
+            // One call at a time, in order, each answered on its own.
+            while let Ok((call, answer)) = to_call.recv() {
+                let _ = answer.send(bridge.handle(call));
+            }
+        });
+        let answer = self.mcp_answer(&first)?;
+        mcp_check(&answer, None, &[])?;
+        // The windows' applications take the new seat a moment later: the
+        // scenario goes on once they did, whatever its clock does next.
+        self.compositor
+            .dispatch_until(CLIENT_TIMEOUT, Headless::agent_seats_taken)
+            .context("the windows' applications did not take the agent's seat")?;
+        self.mcp_sessions.push(McpSession {
+            agent: agent.to_owned(),
+            calls,
+        });
+        Ok(())
+    }
+
+    /// Waits for an MCP answer. An agent's action shown before it lands
+    /// moves the virtual clock to when it does; one waiting for the user's
+    /// confirmation is the scenario's to answer.
+    fn mcp_answer(
+        &mut self,
+        answer: &std::sync::mpsc::Receiver<Option<serde_json::Value>>,
+    ) -> anyhow::Result<serde_json::Value> {
+        use std::sync::mpsc::TryRecvError;
+        // As long as the longest wait a scenario asks for, and some.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            match answer.try_recv() {
+                Ok(answer) => return answer.context("no answer"),
+                Err(TryRecvError::Disconnected) => anyhow::bail!("the MCP session ended"),
+                Err(TryRecvError::Empty) => {}
+            }
+            anyhow::ensure!(Instant::now() < deadline, "the MCP server never answered");
+            let (due, asking) = self.compositor.agent_deadline();
+            anyhow::ensure!(
+                !asking || !self.mcp_waiting.is_empty(),
+                "the action waits for the user's confirmation: call it with wait = false, \
+                 then answer its card"
+            );
+            match due {
+                Some(due) if due > self.compositor.now() => {
+                    let by = due - self.compositor.now();
+                    self.compositor.advance(by)?;
+                }
+                _ => self.compositor.dispatch(Duration::from_millis(5))?,
+            }
+        }
+    }
+
+    fn expect_mcp(&mut self, expected: &ExpectMcp) -> anyhow::Result<()> {
+        let i = self
+            .mcp_waiting
+            .iter()
+            .position(|w| expected.agent.is_none() || w.agent == expected.agent)
+            .context("no MCP call left waiting with wait = false")?;
+        let waiting = self.mcp_waiting.remove(i);
+        let answer = self.mcp_answer(&waiting.answer)?;
+        self.mcp_gone(waiting.fresh)?;
+        mcp_check(&answer, expected.error.as_deref(), &expected.contains)
     }
 
     fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
@@ -3845,6 +4025,53 @@ fn us_key(c: char) -> Option<(u32, bool)> {
         '~' => shifted(41),
         _ => None,
     }
+}
+
+/// Initializes an MCP session, as a client does first.
+fn mcp_initialize(bridge: &mut hocus_api::mcp::Bridge) {
+    use serde_json::json;
+    bridge.handle(json!({
+        "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": {
+            "protocolVersion": hocus_api::mcp::PROTOCOL_VERSIONS[0],
+            "capabilities": {},
+            "clientInfo": { "name": "scenario", "version": "0" },
+        },
+    }));
+    bridge.handle(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+}
+
+/// A tool's answer failed with `error` in its message, or succeeded; its
+/// text holds `contains`.
+fn mcp_check(
+    answer: &serde_json::Value,
+    error: Option<&str>,
+    contains: &[String],
+) -> anyhow::Result<()> {
+    use serde_json::Value;
+    let result = answer
+        .get("result")
+        .with_context(|| format!("not a result: {answer}"))?;
+    let failed = result["isError"] == Value::Bool(true);
+    let text: Vec<&str> = result["content"]
+        .as_array()
+        .map(|c| c.iter().filter_map(|c| c["text"].as_str()).collect())
+        .unwrap_or_default();
+    let text = text.join("\n");
+    match error {
+        Some(expected) => anyhow::ensure!(
+            failed && text.contains(expected),
+            "expected the tool to fail with {expected:?}, got {answer}"
+        ),
+        None => anyhow::ensure!(!failed, "the tool failed: {text}"),
+    }
+    for expected in contains {
+        anyhow::ensure!(
+            text.contains(expected.as_str()),
+            "the result lacks {expected:?}: {text}"
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

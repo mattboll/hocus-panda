@@ -72,7 +72,7 @@ fn session(
         Bridge::new(socket, agent).serve(input.as_bytes(), &mut output)?;
         Ok(output)
     });
-    compositor.dispatch_until(TIMEOUT, |_| thread.is_finished())?;
+    run_until(compositor, || thread.is_finished())?;
     let output = thread
         .join()
         .map_err(|_| anyhow::anyhow!("the MCP server panicked"))??;
@@ -80,6 +80,23 @@ fn session(
         .lines()
         .map(|line| Ok(serde_json::from_str(line)?))
         .collect()
+}
+
+/// Runs the compositor until `done`, its clock moved on to when an
+/// agent's click lands, shown a moment before (#43).
+fn run_until(compositor: &mut Headless, done: impl Fn() -> bool) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while !done() {
+        anyhow::ensure!(std::time::Instant::now() < deadline, "not done in time");
+        match compositor.agent_deadline().0 {
+            Some(due) if due > compositor.now() => {
+                let by = due - compositor.now();
+                compositor.advance(by)?;
+            }
+            _ => compositor.dispatch(Duration::from_millis(5))?,
+        }
+    }
+    Ok(())
 }
 
 fn initialize() -> [Value; 2] {
@@ -110,11 +127,16 @@ fn answer(answers: &[Value], id: u64) -> anyhow::Result<&Value> {
         .ok_or_else(|| anyhow::anyhow!("no answer {id} among {answers:?}"))
 }
 
+/// Clicks the window saw, the agent's seat's included.
 fn clicks(client: &TestClient) -> usize {
+    let pressed = |e: &ClientEvent| matches!(e, ClientEvent::Button { pressed: true, .. });
     client
         .events()
         .iter()
-        .filter(|e| matches!(e, ClientEvent::Button { pressed: true, .. }))
+        .filter(|e| match e {
+            ClientEvent::OnSeat(_, e) => pressed(e),
+            e => pressed(e),
+        })
         .count()
 }
 
@@ -285,7 +307,7 @@ fn given_the_stop_key_pressed_when_a_connected_agent_tries_to_act_then_it_is_ref
         answers
     });
     let step = |compositor: &mut Headless, stop: bool| -> anyhow::Result<()> {
-        compositor.dispatch_until(TIMEOUT, |_| waited.try_recv().is_ok())?;
+        run_until(compositor, || waited.try_recv().is_ok())?;
         compositor.on_loop("the stop key", move |state| state.set_agents_stopped(stop));
         compositor.dispatch(Duration::from_millis(10))?;
         go.send(())?;
@@ -293,7 +315,7 @@ fn given_the_stop_key_pressed_when_a_connected_agent_tries_to_act_then_it_is_ref
     };
     step(&mut compositor, true)?;
     step(&mut compositor, false)?;
-    compositor.dispatch_until(TIMEOUT, |_| session.is_finished())?;
+    run_until(&mut compositor, || session.is_finished())?;
     let answers: Vec<Value> = session
         .join()
         .map_err(|_| anyhow::anyhow!("the MCP session panicked"))?

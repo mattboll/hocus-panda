@@ -1,0 +1,134 @@
+description = "Given a sensitive action, when the agent requests it, then nothing happens until the user confirms it; refused or not confirmed in time, nothing is done, and the journal keeps it either way"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[agents]
+confirm_timeout_s = 30
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["*"]
+"""
+
+# A password manager is in [agents] confirm_apps by default.
+[[step]]
+open = { app_id = "org.keepassxc.KeePassXC", title = "Passwords", size = [500, 340], color = "#3399ff" }
+
+[[step]]
+mcp_session = "helper"
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "org.keepassxc.KeePassXC", arguments = { x = 120, y = 80, intent = "Deletes the entry “Bank”" }, wait = false }
+
+# It waits for the user: nothing reaches the window meanwhile.
+[[step]]
+advance_ms = 5000
+
+[[step]]
+expect_not_received = { app_id = "org.keepassxc.KeePassXC", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_ui = { label = "HELPER WILL CLICK · SENSITIVE ACTION" }
+
+[[step]]
+expect_ui = { label = "Deletes the entry “Bank”" }
+
+[[step]]
+expect_ui = { label = "In org.keepassxc.KeePassXC, which asks you first" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-seat-confirm.png" }
+
+# Allowed, it lands, and the journal says the user confirmed it.
+[[step]]
+click_ui = "Allow"
+
+[[step]]
+expect_mcp = { agent = "helper" }
+
+[[step]]
+expect_received = { app_id = "org.keepassxc.KeePassXC", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_ui = { label = "Allow", shown = false }
+
+[[step]]
+expect_journal = { has = ['helper: click on window 1 org.keepassxc.KeePassXC "Passwords"; confirmed by the user'] }
+
+# Refused, nothing is done.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "org.keepassxc.KeePassXC", arguments = { button = "right" }, wait = false }
+
+[[step]]
+click_ui = "Refuse"
+
+[[step]]
+expect_mcp = { agent = "helper", error = "the user refused it" }
+
+[[step]]
+expect_not_received = { app_id = "org.keepassxc.KeePassXC", event = "button 273 pressed on agent-helper" }
+
+# Typing into a field the application says is for a password waits too;
+# not confirmed in time, it is refused. The agent's keyboard follows its
+# click into the field, whose application says then what it is for.
+[[step]]
+open = { app_id = "login", title = "Sign in", size = [300, 200], color = "#ff6600", password = true }
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "login" }
+
+[[step]]
+expect_received = { app_id = "login", event = "password_field on agent-helper" }
+
+[[step]]
+frames = 1
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "login", arguments = { text = "hunter2" }, wait = false }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_ui = { label = "HELPER WILL TYPE · SENSITIVE ACTION" }
+
+[[step]]
+expect_ui = { label = "In a password field" }
+
+[[step]]
+advance_ms = 30000
+
+[[step]]
+expect_mcp = { agent = "helper", error = "did not confirm it within 30 s" }
+
+[[step]]
+expect_not_received = { app_id = "login", event = "key 35 pressed on agent-helper" }
+
+[[step]]
+expect_ui = { label = "In a password field", shown = false }
+
+[[step]]
+expect_journal = { has = [
+  'helper: click on window 1 org.keepassxc.KeePassXC "Passwords"; confirmed by the user',
+  'helper: right click on window 1',
+  'refused: the user refused it',
+  'helper: click on window 2 login "Sign in"',
+  'helper: type 7 characters on window 2 login "Sign in"; refused: the user did not confirm it within 30 s',
+], lacks = ["hunter2"] }
+
+# Stopping every agent refuses what waits.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "org.keepassxc.KeePassXC", wait = false }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+keys = "super+shift+escape"
+
+[[step]]
+expect_mcp = { agent = "helper", error = "the user stopped every agent" }

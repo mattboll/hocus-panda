@@ -35,6 +35,7 @@ pub mod providers;
 pub mod quick;
 pub mod readout;
 pub mod recording;
+pub mod seat;
 pub mod share;
 pub mod showcase;
 pub mod switcher;

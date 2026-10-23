@@ -180,6 +180,8 @@ pub struct State {
     pub activity: crate::activity::Activity,
     /// What MCP agents did (#176).
     pub journal: crate::journal::Journal,
+    /// MCP agents' own seats (#43).
+    pub seats: crate::seat::Seats,
     /// The first session's welcome (#82).
     pub first_run: crate::first_run::FirstRun,
     /// Desktops sliding, screen by screen (#36).
@@ -316,6 +318,7 @@ impl State {
             agents: Default::default(),
             activity: Default::default(),
             journal: Default::default(),
+            seats: Default::default(),
             first_run: Default::default(),
             slides: Default::default(),
             alt_tab: Default::default(),

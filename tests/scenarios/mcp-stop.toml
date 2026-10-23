@@ -20,7 +20,7 @@ open = { app_id = "editor", title = "Draft", size = [400, 300], color = "#3399ff
 mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "a" } }
 
 [[step]]
-expect_received = { app_id = "editor", event = "key 30 pressed" }
+expect_received = { app_id = "editor", event = "key 30 pressed on agent-helper" }
 
 [[step]]
 keys = "super+shift+escape"
@@ -85,7 +85,7 @@ expect_journal = { stopped = false }
 mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "c" } }
 
 [[step]]
-expect_received = { app_id = "editor", event = "key 46 pressed" }
+expect_received = { app_id = "editor", event = "key 46 pressed on agent-helper" }
 
 # The column's button stops them, and allows them again.
 [[step]]
@@ -101,4 +101,4 @@ click_ui = "Allow agents again"
 mcp = { agent = "helper", tool = "click", window = "editor" }
 
 [[step]]
-expect_received = { app_id = "editor", event = "button 272 pressed" }
+expect_received = { app_id = "editor", event = "button 272 pressed on agent-helper" }

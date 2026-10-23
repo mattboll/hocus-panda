@@ -33,19 +33,23 @@ mcp = { agent = "helper", tool = "click", window = "front", error = "may not act
 [[step]]
 expect_not_received = { app_id = "front", event = "button 272 pressed" }
 
-# Its own app's window comes forward and gets the click, at the point
-# asked, behind the front window's centre.
+# Its own app's window gets the click through the agent's own seat, at
+# its centre behind the front window: nothing comes forward, and the
+# user's keyboard stays where it was.
 [[step]]
 mcp = { agent = "helper", tool = "click", window = "back" }
 
 [[step]]
-expect_focus = "back"
+expect_focus = "front"
 
 [[step]]
-expect_stack = ["front", "back"]
+expect_stack = ["back", "front"]
 
 [[step]]
-expect_received = { app_id = "back", event = "button 272 pressed" }
+expect_received = { app_id = "back", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_not_received = { app_id = "back", event = "button 272 pressed" }
 
 [[step]]
 mcp = { agent = "helper", tool = "click", window = "back", arguments = { x = 500, y = 10 }, error = "outside the window" }

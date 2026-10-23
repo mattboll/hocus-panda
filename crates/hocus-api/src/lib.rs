@@ -242,11 +242,17 @@ pub enum Request {
         name: String,
     },
     /// Input an agent aims at a window or at an element of the shell
-    /// (#42): the compositor brings the window forward, checks the point is
-    /// the window's, and checks the agent may act on it.
+    /// (#42), through the agent's own seat (#43): the compositor checks the
+    /// agent may act on it, shows the agent's intent (a click waits a
+    /// moment under a ring), and asks the user first when the action is
+    /// sensitive; the reply comes once it is carried out or refused.
     Act {
         target: ActTarget,
         action: Action,
+        /// What the agent means to do, in one line, shown before it acts:
+        /// "Sends the message".
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intent: Option<String>,
     },
     /// What MCP agents did this session, oldest first, and whether they
     /// are stopped (#176).
@@ -428,6 +434,10 @@ pub struct JournalEntry {
     /// Why it was refused; `None` when carried out.
     #[serde(default)]
     pub refused: Option<String>,
+    /// A sensitive action the user confirmed before it was carried out
+    /// (#43).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirmed: bool,
 }
 
 /// What an agent did, as the journal keeps it: typed text only when the
@@ -537,6 +547,8 @@ impl std::fmt::Display for JournalEntry {
         }
         if let Some(why) = &self.refused {
             write!(f, "; refused: {why}")?;
+        } else if self.confirmed {
+            write!(f, "; confirmed by the user")?;
         }
         Ok(())
     }
@@ -1314,9 +1326,26 @@ mod tests {
                         button: Button::Left,
                         count: 1,
                     },
+                    intent: None,
                 },
             },
             r#"{"id":5,"request":"act","target":{"window":{"window":3,"at":{"x":10.0,"y":20.0}}},"action":{"click":{"button":"left","count":1}}}"#,
+        );
+        round_trip(
+            &RequestLine {
+                id: 8,
+                request: Request::Act {
+                    target: ActTarget::Window {
+                        window: 3,
+                        at: None,
+                    },
+                    action: Action::Keys {
+                        keys: "Return".into(),
+                    },
+                    intent: Some("Sends the message".into()),
+                },
+            },
+            r#"{"id":8,"request":"act","target":{"window":{"window":3,"at":null}},"action":{"keys":{"keys":"Return"}},"intent":"Sends the message"}"#,
         );
         round_trip(
             &RequestLine {
@@ -1344,6 +1373,7 @@ mod tests {
                 title: Some("Shopping list".into()),
             }),
             refused: None,
+            confirmed: false,
         };
         assert_eq!(
             entry.to_string(),
@@ -1370,6 +1400,11 @@ mod tests {
             ..entry
         };
         assert!(keys.to_string().contains("keys (not kept) on window 3"));
+        let confirmed = JournalEntry {
+            confirmed: true,
+            ..keys.clone()
+        };
+        assert!(confirmed.to_string().ends_with("; confirmed by the user"));
         let connect = JournalEntry {
             action: JournalAction::Connect,
             target: None,
@@ -1400,6 +1435,7 @@ mod tests {
                     label: "Close".into()
                 },
                 action: Action::Scroll { dy: 15.0 },
+                intent: None,
             }
             .agents_may()
         );

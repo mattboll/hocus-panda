@@ -63,6 +63,7 @@ mod scene;
 mod screen_capture;
 mod screenshot;
 mod search;
+mod seat;
 mod session;
 mod settings;
 mod share;

@@ -282,6 +282,11 @@ pub enum Action {
     StopAgents,
     /// Allowed again.
     AllowAgents,
+    /// The user takes over from an MCP agent, by name (#43): its window
+    /// gets their keyboard, and its actions are refused.
+    TakeOver(String),
+    /// And hands back.
+    HandBack(String),
 }
 
 /// An application in the tray.
@@ -433,6 +438,14 @@ struct Nodes {
     journal_entries: Option<NodeId>,
 }
 
+/// The agents' seats the journal shows (#43): their buttons and window
+/// slots.
+#[derive(Debug, Clone, Default)]
+struct Seats {
+    buttons: Vec<(NodeId, String, bool)>,
+    slots: Vec<(String, NodeId)>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PopoverKind {
     Desktops,
@@ -502,6 +515,8 @@ pub struct Column {
     fit: Fit,
     /// The agents' rows and buttons.
     agent_targets: Vec<(NodeId, Action)>,
+    /// The MCP agents' seats in the journal (#43).
+    seats: Seats,
     now: Duration,
 }
 
@@ -523,11 +538,33 @@ impl Column {
             tray_menu: None,
             todo_rows: Vec::new(),
             agent_targets: Vec::new(),
+            seats: Seats::default(),
             fit: Fit::MOST,
             now: Duration::ZERO,
         };
         column.apply(&ColumnState::default(), true);
         column
+    }
+
+    /// Where each MCP agent's window shows in the journal, live, from the
+    /// column's corner: the compositor draws it there.
+    pub fn seat_slots(&self) -> Vec<(String, hocus_ui::Rect)> {
+        self.seats
+            .slots
+            .iter()
+            .filter_map(|(agent, id)| Some((agent.clone(), self.tree.rect(*id)?)))
+            .filter(|(_, r)| r.h > 1.0)
+            .collect()
+    }
+
+    /// What the journal's section filled in.
+    fn take_journal(&mut self, filled: crate::journal::Filled) {
+        self.nodes.journal_button = filled.button;
+        self.nodes.journal_entries = filled.entries;
+        self.seats = Seats {
+            buttons: filled.seats,
+            slots: filled.slots,
+        };
     }
 
     pub fn size(&self) -> Size {
@@ -615,9 +652,9 @@ impl Column {
             for child in self.tree.children(n.journal) {
                 self.tree.remove(child);
             }
-            let (button, entries) =
+            let filled =
                 crate::journal::fill(&mut self.tree, n.journal, &theme, lang, view, want.journal);
-            (self.nodes.journal_button, self.nodes.journal_entries) = (Some(button), Some(entries));
+            self.take_journal(filled);
         }
         if want.compact_meeting != self.fit.compact_meeting {
             self.nodes.meeting_button = fill_meeting(
@@ -766,11 +803,14 @@ impl Column {
                 t.remove(child);
             }
             let theme = t.theme().clone();
-            (self.nodes.journal_button, self.nodes.journal_entries) = match shown
+            let filled = shown
                 .map(|view| crate::journal::fill(t, n.journal, &theme, lang, view, fit.journal))
-            {
-                Some((button, entries)) => (Some(button), Some(entries)),
-                None => (None, None),
+                .unwrap_or_default();
+            self.nodes.journal_button = filled.button;
+            self.nodes.journal_entries = filled.entries;
+            self.seats = Seats {
+                buttons: filled.seats,
+                slots: filled.slots,
             };
         }
         if all || old.updates != state.updates {
@@ -1231,6 +1271,14 @@ impl Column {
                 });
             } else if Some(id) == n.journal_entries {
                 self.toggle(PopoverKind::Journal);
+            } else if let Some((_, agent, taken)) =
+                self.seats.buttons.iter().find(|(b, _, _)| *b == id)
+            {
+                actions.push(if *taken {
+                    Action::HandBack(agent.clone())
+                } else {
+                    Action::TakeOver(agent.clone())
+                });
             } else if Some(id) == n.stop_sharing {
                 actions.push(Action::StopSharing);
             } else if n.tray.is_some_and(|(_, chip)| chip == id) {
