@@ -23,6 +23,9 @@ pub struct Measures {
     frames: HashMap<String, FrameTimes>,
     /// Blurs computed, per output.
     blurs: HashMap<String, u64>,
+    /// Frames of a closing glitch painted with its colours apart, per
+    /// output.
+    glitches: HashMap<String, u64>,
     slow_handlers: VecDeque<SlowHandler>,
     stalls: VecDeque<Stall>,
 }
@@ -49,6 +52,12 @@ impl Measures {
     /// The blur behind something on `output` was computed again.
     pub fn blur(&mut self, output: &str) {
         *self.blurs.entry(output.to_string()).or_default() += 1;
+    }
+
+    /// A closing window's glitch was painted on `output` with its colours
+    /// apart (#169).
+    pub fn glitch(&mut self, output: &str) {
+        *self.glitches.entry(output.to_string()).or_default() += 1;
     }
 
     pub fn slow_handler(&mut self, name: &str, took: Duration, at: Duration) {
@@ -86,6 +95,7 @@ impl Measures {
                     histogram,
                     max_ms: times.max.as_secs_f64() * 1000.0,
                     blurs: self.blurs.get(name).copied().unwrap_or(0),
+                    glitches: self.glitches.get(name).copied().unwrap_or(0),
                 }
             })
             .collect();

@@ -47,7 +47,8 @@ render_elements! {
     Solid=SolidColorRenderElement,
     /// A plain colour over a window's picture, its corners cut (#154).
     Tint=Rounded<SolidColorRenderElement>,
-    /// A wallpaper that moves, painted by a shader (#108).
+    /// A wallpaper that moves, painted by a shader (#108); the Matrix
+    /// theme's scanlines and vignette (#169).
     Backdrop=TextureRenderElement<<R as RendererSuper>::TextureId>,
     /// What a brush of the Matrix theme drew (#221).
     Layer=LayerElement<R>,
@@ -207,6 +208,9 @@ impl State {
         );
         // Drawing on the screen (#86), over everything.
         elements.extend(self.ink_elements(renderer, output));
+        // The Matrix theme's scanlines and vignette over a fullscreen
+        // overlay, on the GPU (#169).
+        elements.extend(self.crt_elements(renderer, output));
         let Some(area) = self.space.output_geometry(output) else {
             return elements;
         };

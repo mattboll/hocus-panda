@@ -22,6 +22,7 @@ use smithay::{
                 Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
                 solid::SolidColorRenderElement,
+                texture::TextureRenderElement,
             },
             utils::CommitCounter,
         },
@@ -190,6 +191,19 @@ impl Close {
         )
     }
 
+    /// How far apart the glitch takes red and blue where the GPU separates
+    /// them (#169), logical pixels: wider as it goes, its side changing
+    /// with each new glitch.
+    pub fn split(&self, now: Duration) -> f64 {
+        let t = millis(self.since, now).min(120.0);
+        let side = if hash(&[self.seed, (t / 30.0) as u64, 7]).is_multiple_of(2) {
+            1.0
+        } else {
+            -1.0
+        };
+        side * (2.0 + 4.0 * f64::from(t / 120.0))
+    }
+
     /// How much of the window is glyphs, 0 to 1.
     fn coverage(t: f32) -> f32 {
         if t < 120.0 {
@@ -243,6 +257,8 @@ pub(crate) struct Brush<'a, R: Renderer + ImportAll + ImportMem> {
     sheet: SheetBuffer,
     pub(crate) scale: f64,
     layers: &'a Layers,
+    /// The phosphor bloom's profile, where the GPU draws it (#169).
+    bloom: Option<R::TextureId>,
     strokes: Vec<Stroke<R>>,
     /// Where the effect draws, whatever it covers this frame.
     extent: Option<Rectangle<i32, Physical>>,
@@ -350,6 +366,40 @@ where
         self.cut(at, size, (col, row), alpha);
     }
 
+    /// A phosphor bloom around `line` (output-local), as strong as
+    /// `alpha` along it; false where the GPU draws none (pixman, reduced
+    /// motion), for a plain glow instead.
+    pub(crate) fn bloom(&mut self, line: Rectangle<f64, Logical>, alpha: f32) -> bool {
+        let Some(texture) = self.bloom.clone() else {
+            return false;
+        };
+        if alpha <= 0.0 {
+            return true;
+        }
+        for (dst, src) in crate::crt::bloom_parts(line) {
+            let size =
+                Size::<i32, Logical>::from((dst.size.w.round() as i32, dst.size.h.round() as i32));
+            if size.w <= 0 || size.h <= 0 {
+                continue;
+            }
+            self.strokes
+                .push(Stroke::Bloom(TextureRenderElement::from_static_texture(
+                    self.layers.stroke_id(),
+                    self.renderer.context_id(),
+                    dst.loc.to_physical(self.scale),
+                    texture.clone(),
+                    1,
+                    Transform::Normal,
+                    Some(alpha.min(1.0)),
+                    Some(src),
+                    Some(size),
+                    None,
+                    Kind::Unspecified,
+                )));
+        }
+        true
+    }
+
     pub(crate) fn solid(&mut self, rect: Rectangle<f64, Logical>, color: Color, alpha: f32) {
         let geometry = rect.to_physical_precise_round(self.scale);
         if geometry.size.w <= 0 || geometry.size.h <= 0 || alpha <= 0.0 {
@@ -425,12 +475,14 @@ impl State {
     pub(crate) fn brush<'a, R>(&'a self, renderer: &'a mut R, scale: f64) -> Brush<'a, R>
     where
         R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Clone + 'static,
     {
         Brush {
             renderer,
             sheet: self.matrix_sheets.get(scale),
             scale,
             layers: &self.matrix_layers,
+            bloom: self.bloom_texture(),
             strokes: Vec::new(),
             extent: None,
         }

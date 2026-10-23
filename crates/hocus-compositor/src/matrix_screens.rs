@@ -90,6 +90,29 @@ enum Stage {
     Closing(f32, Option<usize>),
 }
 
+impl Stage {
+    /// How much of a switcher shows at this stage, its previews and its
+    /// panel.
+    fn shows(self, moves: bool, overview: bool) -> (f32, f32) {
+        match self {
+            Self::Open(t) if moves && overview => (phase(t, 0.0, 400.0), phase(t, 250.0, 400.0)),
+            Self::Open(t) if moves => {
+                let a = Easing::OutCubic.apply(t / 150.0);
+                (a, a)
+            }
+            Self::Open(_) => (1.0, 1.0),
+            Self::Closing(t, _) if overview => (
+                1.0 - Easing::OutCubic.apply(t / 350.0),
+                1.0 - phase(t, 0.0, 150.0),
+            ),
+            Self::Closing(t, _) => {
+                let a = 1.0 - Easing::OutCubic.apply(t / 200.0);
+                (a, a)
+            }
+        }
+    }
+}
+
 impl<R> Brush<'_, R>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -162,6 +185,23 @@ where
 }
 
 impl State {
+    /// Whether the switcher or the overview shows on `output` in the
+    /// Matrix theme: whether it is the overview, and how much of it shows.
+    pub(crate) fn matrix_switcher_shows(&self, output: &Output) -> Option<(bool, f32)> {
+        if !self.matrix_look() {
+            return None;
+        }
+        let now = self.clock.now();
+        let (open, stage) = match (&self.alt_tab.open, &self.alt_tab.closing) {
+            (Some(open), _) => (open, Stage::Open(millis(open.since, now))),
+            (None, Some(c)) => (&c.open, Stage::Closing(millis(c.since, now), c.picked)),
+            (None, None) => return None,
+        };
+        open.views.iter().find(|v| v.output == output.name())?;
+        let overview = open.shown == Shown::Overview;
+        Some((overview, stage.shows(self.matrix_moves(), overview).0))
+    }
+
     /// The switcher or the overview on `output` in the Matrix theme,
     /// coming, there, or going: front first.
     pub(crate) fn matrix_switcher_elements<R>(
@@ -215,23 +255,7 @@ impl State {
                 Some((view.first + i, window, card, slot, frame))
             })
             .collect();
-        // How much of it shows, its previews and its panel.
-        let (shows, panel_alpha) = match stage {
-            Stage::Open(t) if moves && overview => (phase(t, 0.0, 400.0), phase(t, 250.0, 400.0)),
-            Stage::Open(t) if moves => {
-                let a = Easing::OutCubic.apply(t / 150.0);
-                (a, a)
-            }
-            Stage::Open(_) => (1.0, 1.0),
-            Stage::Closing(t, _) if overview => (
-                1.0 - Easing::OutCubic.apply(t / 350.0),
-                1.0 - phase(t, 0.0, 150.0),
-            ),
-            Stage::Closing(t, _) => {
-                let a = 1.0 - Easing::OutCubic.apply(t / 200.0);
-                (a, a)
-            }
-        };
+        let (shows, panel_alpha) = stage.shows(moves, overview);
         let mut out = Vec::new();
         let mut brush = self.brush(renderer, scale);
         let mut behind: Vec<Rect> = Vec::new();

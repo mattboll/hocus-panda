@@ -184,6 +184,11 @@ fn gles_offscreen(
     specs: &[OutputSpec],
     state: &mut State,
 ) -> anyhow::Result<Canvas<GlesRenderer, GlesTexture>> {
+    Canvas::new(gles_renderer()?, Fourcc::Abgr8888, specs, state)
+}
+
+/// A GLES renderer on the first GPU with a render node.
+pub(crate) fn gles_renderer() -> anyhow::Result<GlesRenderer> {
     anyhow::ensure!(egl_available(), "libEGL.so.1 is not installed");
     let device = EGLDevice::enumerate()
         .context("could not list EGL devices")?
@@ -199,7 +204,7 @@ fn gles_offscreen(
     // SAFETY: the context was just created and is used on this thread only.
     #[allow(unsafe_code)]
     let renderer = unsafe { GlesRenderer::new(context) }.context("could not start GLES")?;
-    Canvas::new(renderer, Fourcc::Abgr8888, specs, state)
+    Ok(renderer)
 }
 
 /// smithay panics when it cannot load libEGL: ask the loader first.
@@ -699,11 +704,13 @@ impl HeadlessBackend {
         }
         match &mut self.renderers {
             Renderers::Gles(canvas) => {
-                // Wallpapers that move, then the blur behind panels (over
-                // them), before the outputs show them.
+                // Wallpapers that move, the blur behind panels (over them)
+                // and the Matrix theme's GPU effects, before the outputs
+                // show them.
                 for out in &canvas.outputs {
                     state.paint_backdrop(&mut canvas.renderer, &out.output);
                     state.paint_glass(&mut canvas.renderer, &out.output);
+                    state.paint_crt(&mut canvas.renderer, &out.output);
                 }
                 canvas.render(state)
             }

@@ -777,10 +777,11 @@ impl Gpu {
         };
         let start = Instant::now();
         screen.dirty = false;
-        // A wallpaper that moves, then the blur behind panels, before the
-        // scene shows them.
+        // A wallpaper that moves, the blur behind panels and the Matrix
+        // theme's GPU effects, before the scene shows them.
         state.paint_backdrop(renderer, &screen.output);
         state.paint_glass(renderer, &screen.output);
+        state.paint_crt(renderer, &screen.output);
         let elements = state.scene_elements(renderer, &screen.output, true);
         let result =
             screen

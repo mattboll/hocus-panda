@@ -85,6 +85,8 @@ pub struct State {
     pub backdrops: crate::backdrop::Backdrops,
     /// Frosted glass behind panels, blurred by shaders (#37).
     pub blurs: crate::blur::Blurs,
+    /// The Matrix theme's refinements on the GPU (#169).
+    pub crt: crate::crt::Crt,
     pub xdg_decoration_state: XdgDecorationState,
     /// The X11 window manager, once XWayland is ready, and its display.
     pub xwm: Option<smithay::xwayland::X11Wm>,
@@ -286,6 +288,7 @@ impl State {
             matrix_shell: Default::default(),
             backdrops: Default::default(),
             blurs: Default::default(),
+            crt: Default::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
             xwm: None,
             xdisplay: None,

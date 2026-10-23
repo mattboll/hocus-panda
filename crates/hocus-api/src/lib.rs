@@ -755,6 +755,10 @@ pub struct OutputStats {
     /// what is behind changes, not every frame.
     #[serde(default)]
     pub blurs: u64,
+    /// Frames of a closing window's glitch in the Matrix theme painted
+    /// with its colours apart, on the GPU (#169).
+    #[serde(default)]
+    pub glitches: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

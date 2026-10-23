@@ -1,0 +1,85 @@
+# The Matrix theme's GPU refinements (#169, docs/design/matrix-theme.md §2).
+description = "On the GPU in the Matrix theme, a closing window's glitch takes red and blue apart in each band, on every frame of its 120 ms and no longer; with reduced motion there is no glitch at all; frames keep within their budget"
+renderer = "gles"
+shell = true
+motion = true
+
+# A still wallpaper: only the effect draws.
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+
+[wallpaper]
+kind = "colour"
+colour = "#000000"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#ffffff" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_glitch = { at_most = 0 }
+
+[[step]]
+close = "editor"
+
+[[step]]
+advance_ms = 60
+
+# The white picture under the glitch's green: at its left edge red and
+# green without blue, at its right edge green and blue without red,
+# where the plain effect has neither.
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [174, 250], color = "#befb19" }
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [770, 250], color = "#00fbd7" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_no_window = "editor"
+
+# A frame each 16 ms of the 120: about seven.
+[[step]]
+expect_glitch = { at_least = 5, at_most = 9 }
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+reduced_motion = true
+
+[wallpaper]
+kind = "colour"
+colour = "#000000"
+"""
+
+[[step]]
+open = { app_id = "notes", size = [600, 400], color = "#ffffff" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+close = "notes"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_glitch = { at_most = 0 }
+
+[[step]]
+expect_budget = { max_ms = 50 }

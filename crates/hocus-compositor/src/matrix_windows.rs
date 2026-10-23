@@ -315,7 +315,8 @@ where
     }
 
     /// A line one pixel wide, in dashes four pixels long and four apart,
-    /// over a faint glow three pixels wide.
+    /// over a phosphor bloom on the GPU, a faint glow three pixels wide
+    /// otherwise.
     fn dashed(&mut self, line: Rectangle<f64, Logical>, color: Color, alpha: f32, glow: f32) {
         let vertical = line.size.h > line.size.w;
         let length = if vertical { line.size.h } else { line.size.w };
@@ -330,6 +331,9 @@ where
             self.solid(rect, color, alpha);
             at += 8.0;
         }
+        if self.bloom(line, glow) {
+            return;
+        }
         let halo = if vertical {
             Rectangle::new((line.loc.x - 1.0, line.loc.y).into(), (3.0, length).into())
         } else {
@@ -338,14 +342,15 @@ where
         self.solid(halo, GLOW, glow);
     }
 
-    /// A bright line two pixels tall from `left` to `right` at `y`, glowing.
+    /// A bright line two pixels tall from `left` to `right` at `y`, glowing:
+    /// blooming on the GPU.
     fn beam(&mut self, left: f64, right: f64, y: f64, alpha: f32) {
         let w = (right - left).max(1.0);
-        self.solid(
-            Rectangle::new((left, y).into(), (w, 2.0).into()),
-            HEAD,
-            alpha,
-        );
+        let line = Rectangle::new((left, y).into(), (w, 2.0).into());
+        self.solid(line, HEAD, alpha);
+        if self.bloom(line, 0.3 * alpha) {
+            return;
+        }
         self.solid(
             Rectangle::new((left - 2.0, y - 2.0).into(), (w + 4.0, 6.0).into()),
             GLOW,
@@ -572,7 +577,8 @@ impl State {
                 );
             }
         }
-        // From each corner to where it goes, across then along.
+        // From each corner to where it goes, across then along, blooming
+        // on the GPU.
         let alpha = 1.0 - phase(t, 200.0, 350.0);
         if alpha > 0.0 {
             let reach = f64::from(out_quad(t / 200.0));
@@ -583,17 +589,14 @@ impl State {
                 let along = (length - dx.abs()).max(0.0);
                 let x_end = ax + across * dx.signum();
                 let y_end = ay + along * dy.signum();
-                brush.solid(
-                    Rectangle::new((ax.min(x_end), ay).into(), (across.max(1.0), 1.0).into()),
-                    GLOW,
-                    alpha,
-                );
+                let first =
+                    Rectangle::new((ax.min(x_end), ay).into(), (across.max(1.0), 1.0).into());
+                brush.solid(first, GLOW, alpha);
+                brush.bloom(first, 0.3 * alpha);
                 if along > 0.0 {
-                    brush.solid(
-                        Rectangle::new((bx, ay.min(y_end)).into(), (1.0, along).into()),
-                        GLOW,
-                        alpha,
-                    );
+                    let then = Rectangle::new((bx, ay.min(y_end)).into(), (1.0, along).into());
+                    brush.solid(then, GLOW, alpha);
+                    brush.bloom(then, 0.3 * alpha);
                 }
                 if t < 200.0 {
                     let tip = if along > 0.0 {
