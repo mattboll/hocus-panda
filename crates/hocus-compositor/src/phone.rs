@@ -476,6 +476,7 @@ impl State {
                 self.phone.adb.devices = devices;
             }
             AdbEvent::Pairing { id, stage } => {
+                let open = self.phone_popover_open();
                 let Some(pairing) = self.phone.adb.pairing.as_mut().filter(|p| p.id == id) else {
                     return;
                 };
@@ -485,13 +486,24 @@ impl State {
                         self.phone.adb.pairing = None;
                         let devices = &mut self.phone.adb.devices;
                         devices.retain(|d| d.serial != device.serial);
-                        // The popover, open since Pair, says it.
-                        devices.insert(0, device);
+                        devices.insert(0, device.clone());
+                        // An open popover says it already; closed after
+                        // the phone scanned, a toast does.
+                        if !open {
+                            let lang = self.shell_lang();
+                            self.shell_toast(&lang.paired_with(&device.name), "");
+                        }
                     }
                     Stage::Failed(failure) => {
                         // A phone not scanned in time is no fault.
                         tracing::info!(?failure, "a phone did not pair");
-                        pairing.stage = Stage::Failed(failure);
+                        if open {
+                            pairing.stage = Stage::Failed(failure);
+                        } else {
+                            self.phone.adb.pairing = None;
+                            let why = failure_text(self.shell_lang(), &failure);
+                            self.shell_toast(&why, "");
+                        }
                     }
                     stage => pairing.stage = stage,
                 }
@@ -549,6 +561,28 @@ impl State {
     pub fn cancel_pairing(&mut self) {
         self.stop_pairing();
         self.phone_changed();
+    }
+
+    fn phone_popover_open(&self) -> bool {
+        self.shell
+            .as_ref()
+            .is_some_and(|s| s.column.phone_popover_open())
+    }
+
+    /// The phone's popover closed (or another took its place): a code no
+    /// one sees any more is cancelled, its worker stopped and the code
+    /// forgotten. Once the phone scanned it, `adb pair` is under way and
+    /// the phone ends paired whatever is done here: that pairing goes on,
+    /// and a toast says how it ended.
+    pub fn phone_popover_closed(&mut self) {
+        let waiting = match &self.phone.adb.pairing {
+            Some(p) => matches!(p.stage, Stage::Waiting | Stage::Failed(_)),
+            None => false,
+        };
+        if waiting {
+            tracing::debug!("pairing cancelled: its popover closed");
+            self.cancel_pairing();
+        }
     }
 
     fn stop_pairing(&mut self) {
@@ -623,12 +657,7 @@ impl State {
                 stage: match &p.stage {
                     Stage::Waiting => PairStage::Waiting,
                     Stage::Pairing | Stage::Paired(_) => PairStage::Pairing,
-                    Stage::Failed(Failure::NotSeen) => {
-                        PairStage::Failed(lang.pair_not_seen().to_owned())
-                    }
-                    Stage::Failed(Failure::Pair(why) | Failure::Connect(why)) => {
-                        PairStage::Failed(lang.pair_failed(why))
-                    }
+                    Stage::Failed(failure) => PairStage::Failed(failure_text(lang, failure)),
                 },
             }),
         })
@@ -646,5 +675,13 @@ impl State {
             (Some(Some(_)), Some(_)) => "pairing",
             (Some(Some(_)), None) => "ready",
         }
+    }
+}
+
+/// Why a pairing failed, in the session's language.
+fn failure_text(lang: hocus_shell::Lang, failure: &Failure) -> String {
+    match failure {
+        Failure::NotSeen => lang.pair_not_seen().to_owned(),
+        Failure::Pair(why) | Failure::Connect(why) => lang.pair_failed(why),
     }
 }

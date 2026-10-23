@@ -415,6 +415,9 @@ impl State {
             (Some(view), _) => shell.popover = Some((buffer_for(&view), view.at)),
             (None, _) => shell.popover = None,
         }
+        if damage.popover_changed && !shell.column.phone_popover_open() {
+            self.phone_popover_closed();
+        }
         if moved {
             // The work area of the column's output changed.
             self.relayout();

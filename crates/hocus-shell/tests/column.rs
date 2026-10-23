@@ -611,8 +611,10 @@ fn adb_alone_pairs_by_a_qr_code_and_mirrors() -> anyhow::Result<()> {
         button(&column, "Mirror its screen").is_err(),
         "nothing to mirror"
     );
+    assert!(column.phone_popover_open());
     let at = button(&column, "Pair over Wi-Fi")?;
     assert_eq!(click(&mut column, at), vec![Action::PairPhone]);
+    assert!(column.phone_popover_open(), "pairing shows in it");
     // The popover stays, and shows the code: drawn, never named.
     let qr = "WIFI:T:ADB;S:hocuspanda-test;P:secret123;;".to_owned();
     let pairing = |stage| PhoneLine {
@@ -665,5 +667,25 @@ fn adb_alone_pairs_by_a_qr_code_and_mirrors() -> anyhow::Result<()> {
     );
     let at = button(&column, "Mirror its screen")?;
     assert_eq!(click(&mut column, at), vec![Action::MirrorPhone]);
+    Ok(())
+}
+
+#[test]
+fn the_phone_popover_says_when_it_closes() -> anyhow::Result<()> {
+    let mut column = column(Lang::En);
+    column.set_state(&ColumnState {
+        phone: Some(PhoneLine {
+            adb: Some(AdbLine::default()),
+            ..PhoneLine::default()
+        }),
+        ..state()
+    });
+    column.draw(Duration::ZERO);
+    assert!(!column.phone_popover_open());
+    let at = button(&column, "Phone")?;
+    click(&mut column, at);
+    assert!(column.phone_popover_open());
+    column.clicked_elsewhere();
+    assert!(!column.phone_popover_open());
     Ok(())
 }

@@ -185,6 +185,14 @@ impl Lang {
         }
     }
 
+    /// A toast once a phone paired with its popover closed.
+    pub fn paired_with(self, name: &str) -> String {
+        match self {
+            Self::En => format!("Paired with {name}"),
+            Self::Fr => format!("Associé à {name}"),
+        }
+    }
+
     pub fn phone_failed(self, name: &str) -> String {
         match self {
             Self::En => format!("{name} did not answer"),

@@ -555,6 +555,60 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_pairing_stops_asking_adb() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("a directory");
+        // An adb that sees no phone, saying each time it was asked.
+        let adb = dir.path().join("adb");
+        std::fs::write(
+            &adb,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$XDG_RUNTIME_DIR/asked\"\n\
+             echo 'List of discovered mdns services'\n",
+        )
+        .expect("written");
+        std::fs::set_permissions(&adb, std::fs::Permissions::from_mode(0o755))
+            .expect("made runnable");
+        let env = Env {
+            vars: Some(vec![("PATH".into(), "/usr/bin:/bin".into())]),
+            runtime_dir: Some(dir.path().to_owned()),
+        };
+        let said = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let heard = said.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let code = Code::new().expect("random bytes");
+        pair(1, adb, env, code, cancel.clone(), move |e| {
+            if let Ok(mut said) = heard.lock() {
+                said.push(e);
+            }
+        });
+        let asked = || {
+            std::fs::read_to_string(dir.path().join("asked"))
+                .map(|t| t.lines().count())
+                .unwrap_or(0)
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while asked() == 0 {
+            assert!(Instant::now() < deadline, "adb was never asked");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        cancel.store(true, Ordering::Relaxed);
+        // One look may be under way; then none.
+        std::thread::sleep(POLL * 3);
+        let then = asked();
+        std::thread::sleep(POLL * 3);
+        assert_eq!(asked(), then, "adb still asked once cancelled");
+        let said = said.lock().map(|s| s.clone()).unwrap_or_default();
+        assert_eq!(
+            said,
+            vec![AdbEvent::Pairing {
+                id: 1,
+                stage: Stage::Waiting
+            }],
+            "nothing said once cancelled"
+        );
+    }
+
+    #[test]
     fn the_paired_phone_is_known_by_its_guid_or_host() {
         let said = "Successfully paired to 192.168.1.20:37099 [guid=adb-1A2B3C-xYz]\n";
         assert_eq!(paired_guid(said).as_deref(), Some("adb-1A2B3C-xYz"));
