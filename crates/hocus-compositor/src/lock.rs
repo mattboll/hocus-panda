@@ -846,7 +846,6 @@ impl State {
         let t = open.value(self.clock.now()).clamp(0.0, 1.0);
         let half = g.size.w / 2;
         let shift = (f64::from(half) * f64::from(t)).round() as i32;
-        let alpha = 1.0 - 0.5 * t;
         [
             (0, Point::from((-shift, 0))),
             (half, Point::from((half + shift, 0))),
@@ -854,7 +853,9 @@ impl State {
         .into_iter()
         .filter_map(|(from, at)| {
             let part = smithay::utils::Rectangle::new((from, 0).into(), (half, g.size.h).into());
-            panel.element_part(renderer, output, at, part, Some(alpha))
+            // Opaque, as two doors: a half that faded would show what is
+            // under it through the lock's own clock and texts.
+            panel.element_part(renderer, output, at, part, None)
         })
         .collect()
     }
