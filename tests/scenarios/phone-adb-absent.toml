@@ -1,0 +1,33 @@
+description = "With wireless adb on but adb not installed, the phone's popover offers no pairing and no mirroring"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+# No adb on it, whatever the machine has.
+child_env = { PATH = "{scenario_dir}/phone/none" }
+
+[[step]]
+config = """
+[phone]
+adb = true
+"""
+
+[[step]]
+expect_adb = "absent"
+
+[[step]]
+phone = { name = "Pixel 8", battery = 82 }
+
+[[step]]
+expect_ui = { label = "Phone: Pixel 8, 82%" }
+
+[[step]]
+click_ui = "Phone: Pixel 8, 82%"
+
+[[step]]
+expect_ui = { label = "Browse its files" }
+
+[[step]]
+expect_ui = { label = "Pair over Wi-Fi", shown = false }
+
+[[step]]
+expect_ui = { label = "Mirror its screen", shown = false }

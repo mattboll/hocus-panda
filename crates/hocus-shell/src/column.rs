@@ -123,10 +123,53 @@ pub struct Meeting {
 /// The phone's line: which, and its battery.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PhoneLine {
+    /// Empty for a phone not known yet (only adb, nothing paired).
     pub name: String,
     /// Percent, when the phone shares it.
     pub battery: Option<u8>,
     pub charging: bool,
+    /// Through KDE Connect: Ring, the clipboard, its files.
+    pub connect: bool,
+    /// Wireless debugging (#153), when on and adb is installed.
+    pub adb: Option<AdbLine>,
+}
+
+/// What adb offers in the phone's popover.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AdbLine {
+    /// The device adb reaches: its name, and whether over Wi-Fi.
+    pub device: Option<(String, bool)>,
+    /// scrcpy is installed: its screen can be mirrored.
+    pub mirror: bool,
+    /// A pairing going on: the popover shows its QR code.
+    pub pairing: Option<Pairing>,
+}
+
+/// Pairing by a QR code, as the popover shows it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Pairing {
+    /// The QR code's text. It holds the pairing password: it is drawn,
+    /// never named to screen readers or logged.
+    pub qr: String,
+    pub stage: PairStage,
+}
+
+impl std::fmt::Debug for Pairing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pairing")
+            .field("stage", &self.stage)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PairStage {
+    /// The code is shown; the phone has not scanned it.
+    Waiting,
+    /// Scanned: pairing, then joining it.
+    Pairing,
+    /// Why not, in the session's language.
+    Failed(String),
 }
 
 /// The agenda's month and today's events.
@@ -192,6 +235,13 @@ pub enum Action {
     SendClipboardToPhone,
     /// The phone's files open.
     BrowsePhone,
+    /// The phone's popover opened: what adb reaches is read again.
+    PhoneOpened,
+    /// Pairing a phone over Wi-Fi starts (or again): a QR code shows.
+    PairPhone,
+    CancelPairing,
+    /// The device adb reaches shows its screen in a window (scrcpy).
+    MirrorPhone,
     /// A tray application clicked.
     TrayActivate(String),
     /// A tray application's menu asked for.
@@ -673,7 +723,7 @@ impl Column {
             (self.nodes.phone_line, self.nodes.phone_ring) = match &state.phone {
                 Some(p) => {
                     let (line, ring) = fill_phone(t, n.phone, &theme, lang, p);
-                    (Some(line), Some(ring))
+                    (Some(line), ring)
                 }
                 None => (None, None),
             };
@@ -872,6 +922,8 @@ impl Column {
     // Popovers.
 
     fn open(&mut self, kind: PopoverKind) {
+        // Opened again as the state changes: its anchor where it now is.
+        self.tree.layout();
         let theme = self.tree.theme().clone();
         let scale = self.tree.scale();
         let anchor = match kind {
@@ -1022,7 +1074,11 @@ impl Column {
                 }
             }
             if in_popover {
-                if !actions.is_empty() {
+                // Pairing shows in the popover, which stays.
+                let stays = actions
+                    .iter()
+                    .all(|a| matches!(a, Action::PairPhone | Action::CancelPairing));
+                if !actions.is_empty() && !stays {
                     self.close_popover();
                 }
                 return actions;
@@ -1074,6 +1130,13 @@ impl Column {
                 actions.push(Action::RingPhone);
             } else if Some(id) == n.phone_line {
                 self.toggle(PopoverKind::Phone);
+                if self
+                    .popover
+                    .as_ref()
+                    .is_some_and(|p| p.kind == PopoverKind::Phone)
+                {
+                    actions.push(Action::PhoneOpened);
+                }
             } else if Some(id) == n.journal_button {
                 let stopped = self.state.journal.as_ref().is_some_and(|j| j.stopped);
                 actions.push(if stopped {
@@ -1882,15 +1945,16 @@ fn fill_updates(
 /// The phone's square, as board D13 colours it.
 const PHONE_COLOR: Color = Color::rgb(0x2f, 0x6f, 0xd6);
 
-/// The phone's line, as board D13 draws it: "Phone · 82 %", and Ring.
-/// The line opens the phone's popover; its line and Ring, returned.
+/// The phone's line, as board D13 draws it: "Phone · 82 %", and Ring
+/// through KDE Connect. The line opens the phone's popover; its line and
+/// Ring, returned.
 fn fill_phone(
     tree: &mut Tree,
     room: NodeId,
     theme: &Theme,
     lang: Lang,
     phone: &PhoneLine,
-) -> (NodeId, NodeId) {
+) -> (NodeId, Option<NodeId>) {
     let missing = || unreachable!("adding to a node of this tree");
     let row = |gap| Style {
         direction: hocus_ui::Direction::Row,
@@ -1942,8 +2006,8 @@ fn fill_phone(
         Kind::text_line(lang.phone_line(phone.battery), theme.text.body),
     )
     .unwrap_or_else(missing);
-    let ring = tree
-        .add(
+    let ring = phone.connect.then(|| {
+        tree.add(
             line,
             Style {
                 height: Length::Px(36.0),
@@ -1952,7 +2016,8 @@ fn fill_phone(
             },
             Kind::Button(Button::new(lang.ring_phone(), ButtonKind::Plain, theme)),
         )
-        .unwrap_or_else(missing);
+        .unwrap_or_else(missing)
+    });
     (open, ring)
 }
 
@@ -1969,24 +2034,47 @@ fn journal_popover(
     (tree, Vec::new())
 }
 
-/// The phone's popover: its name and battery, then what it can do.
+/// The phone's popover: its name and battery, then what it can do; while
+/// pairing over Wi-Fi, the QR code instead.
 fn phone_popover(
     theme: &Theme,
     lang: Lang,
     phone: &PhoneLine,
     scale: f32,
 ) -> (Tree, Vec<(NodeId, Action)>) {
-    let items = [
-        (phone::RING, lang.ring_phone(), Action::RingPhone),
-        (
-            phone::SEND,
-            lang.send_clipboard(),
-            Action::SendClipboardToPhone,
-        ),
-        (phone::FOLDER, lang.browse_phone(), Action::BrowsePhone),
-    ];
-    // Padding, the name and battery lines, the buttons.
-    let height = 16.0 * 2.0 + 56.0 + items.len() as f32 * 44.0;
+    if let Some(pairing) = phone.adb.as_ref().and_then(|a| a.pairing.as_ref()) {
+        return pairing_popover(theme, lang, pairing, scale);
+    }
+    let mut items = Vec::new();
+    let mut lines = Vec::new();
+    if phone.connect {
+        items.extend([
+            (phone::RING, lang.ring_phone(), Action::RingPhone),
+            (
+                phone::SEND,
+                lang.send_clipboard(),
+                Action::SendClipboardToPhone,
+            ),
+            (phone::FOLDER, lang.browse_phone(), Action::BrowsePhone),
+        ]);
+        lines.push(lang.phone_battery(phone.battery, phone.charging));
+    }
+    if let Some(adb) = &phone.adb {
+        match &adb.device {
+            Some((name, wireless)) => {
+                lines.push(lang.adb_device(name, *wireless));
+                if adb.mirror {
+                    items.push((phone::MIRROR, lang.mirror_phone(), Action::MirrorPhone));
+                }
+            }
+            None if !phone.connect => lines.push(lang.adb_none().to_owned()),
+            None => {}
+        }
+        items.push((phone::QR, lang.pair_phone(), Action::PairPhone));
+    }
+    // Padding, the name and its lines, the buttons.
+    let height =
+        16.0 * 2.0 + 56.0 + lines.len().saturating_sub(1) as f32 * 22.0 + items.len() as f32 * 44.0;
     let (mut tree, card) = popover_tree(theme, 260.0, height, scale);
     let missing = || unreachable!("adding to a node of this tree");
     tree.set_style(
@@ -1998,6 +2086,11 @@ fn phone_popover(
             ..Style::default()
         },
     );
+    let title = if phone.name.is_empty() {
+        lang.phone_line(None)
+    } else {
+        phone.name.clone()
+    };
     tree.add(
         card,
         Style {
@@ -2007,25 +2100,25 @@ fn phone_popover(
             },
             ..Style::default()
         },
-        Kind::text_line(phone.name.as_str(), theme.text.title.with_weight(700)),
+        Kind::text_line(title, theme.text.title.with_weight(700)),
     )
     .unwrap_or_else(missing);
-    tree.add(
-        card,
-        Style {
-            padding: Insets {
-                bottom: 12.0,
-                left: 12.0,
-                ..Insets::default()
+    let last = lines.len().saturating_sub(1);
+    for (i, line) in lines.into_iter().enumerate() {
+        tree.add(
+            card,
+            Style {
+                padding: Insets {
+                    bottom: if i == last { 12.0 } else { 0.0 },
+                    left: 12.0,
+                    ..Insets::default()
+                },
+                ..Style::default()
             },
-            ..Style::default()
-        },
-        Kind::text_line(
-            lang.phone_battery(phone.battery, phone.charging),
-            theme.text.body.with_color(Paint::Muted),
-        ),
-    )
-    .unwrap_or_else(missing);
+            Kind::text_line(line, theme.text.body.with_color(Paint::Muted)),
+        )
+        .unwrap_or_else(missing);
+    }
     let mut targets = Vec::new();
     for (path, label, action) in items {
         let button = Button::new(label, ButtonKind::Ghost, theme)
@@ -2043,6 +2136,131 @@ fn phone_popover(
             .unwrap_or_else(missing);
         targets.push((id, action));
     }
+    (tree, targets)
+}
+
+/// Pairing over Wi-Fi (#153): where to scan, the QR code, how it goes,
+/// and Cancel (with Try again once it failed).
+fn pairing_popover(
+    theme: &Theme,
+    lang: Lang,
+    pairing: &Pairing,
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    const QR_SIDE: f32 = 196.0;
+    let steps = lang.pair_steps();
+    // Padding, the title, the steps, the code, its state, the buttons.
+    let height = 16.0 * 2.0 + 28.0 + steps.len() as f32 * 20.0 + QR_SIDE + 22.0 + 40.0 + 4.0 * 10.0;
+    let (mut tree, card) = popover_tree(theme, 300.0, height, scale);
+    let missing = || unreachable!("adding to a node of this tree");
+    tree.set_style(
+        card,
+        Style {
+            height: Length::Fill,
+            padding: Insets::all(16.0),
+            gap: 10.0,
+            ..Style::default()
+        },
+    );
+    tree.add(
+        card,
+        Style::default(),
+        Kind::text_line(lang.pair_phone(), theme.text.title.with_weight(700)),
+    )
+    .unwrap_or_else(missing);
+    let said = tree
+        .add(
+            card,
+            Style {
+                gap: 0.0,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    for step in steps {
+        tree.add(
+            said,
+            Style::default(),
+            Kind::text_line(*step, theme.text.body.with_color(Paint::Muted)),
+        )
+        .unwrap_or_else(missing);
+    }
+    let code = tree
+        .add(
+            card,
+            Style {
+                align: Align::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    if let Some(qr) = crate::showcase::QrCode::new(&pairing.qr) {
+        tree.add(
+            code,
+            Style {
+                width: Length::Px(QR_SIDE),
+                height: Length::Px(QR_SIDE),
+                ..Style::default()
+            },
+            Kind::Custom {
+                draw: Box::new(qr),
+                label: Some(lang.pair_code().to_owned()),
+            },
+        )
+        .unwrap_or_else(missing);
+    }
+    let said = match &pairing.stage {
+        PairStage::Waiting => lang.pair_waiting().to_owned(),
+        PairStage::Pairing => lang.pairing().to_owned(),
+        PairStage::Failed(why) => why.clone(),
+    };
+    tree.add(
+        card,
+        Style::default(),
+        Kind::text_line(said, theme.text.body),
+    )
+    .unwrap_or_else(missing);
+    let buttons = tree
+        .add(
+            card,
+            Style {
+                direction: Direction::Row,
+                gap: 8.0,
+                justify: Justify::End,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    let mut targets = Vec::new();
+    if matches!(pairing.stage, PairStage::Failed(_)) {
+        let again = tree
+            .add(
+                buttons,
+                Style {
+                    height: Length::Px(36.0),
+                    padding: Insets::symmetric(0.0, 14.0),
+                    ..Style::default()
+                },
+                Kind::Button(Button::new(lang.try_again(), ButtonKind::Plain, theme)),
+            )
+            .unwrap_or_else(missing);
+        targets.push((again, Action::PairPhone));
+    }
+    let cancel = tree
+        .add(
+            buttons,
+            Style {
+                height: Length::Px(36.0),
+                padding: Insets::symmetric(0.0, 14.0),
+                ..Style::default()
+            },
+            Kind::Button(Button::new(lang.cancel_pairing(), ButtonKind::Plain, theme)),
+        )
+        .unwrap_or_else(missing);
+    targets.push((cancel, Action::CancelPairing));
     (tree, targets)
 }
 

@@ -1,0 +1,49 @@
+#!/bin/sh
+# Stands for adb and a phone on the network, never the real ones: the
+# phone advertises its pairing service once it scanned the QR code
+# (`scan_pairing_code` writes its name and password to `adb-phone`), pairs
+# with that password, then advertises its debugging port. Says what it was
+# asked in `adb`.
+dir="$XDG_RUNTIME_DIR"
+printf '%s\n' "$*" >> "$dir/adb"
+case "$1" in
+mdns)
+    echo "List of discovered mdns services"
+    if [ -f "$dir/adb-phone" ]; then
+        read -r name password < "$dir/adb-phone"
+        printf '%s\t_adb-tls-pairing._tcp.\t127.0.0.1:37001\n' "$name"
+    fi
+    if [ -f "$dir/adb-paired" ]; then
+        printf 'adb-1A2B3C-xYz\t_adb-tls-connect._tcp.\t127.0.0.1:41001\n'
+    fi
+    ;;
+pair)
+    read -r name password < "$dir/adb-phone"
+    if [ "$2" = 127.0.0.1:37001 ] && [ "$3" = "$password" ]; then
+        : > "$dir/adb-paired"
+        echo "Successfully paired to 127.0.0.1:37001 [guid=adb-1A2B3C-xYz]"
+    else
+        echo "Failed: Wrong password or connection was dropped."
+        exit 1
+    fi
+    ;;
+connect)
+    if [ -f "$dir/adb-paired" ] && [ "$2" = 127.0.0.1:41001 ]; then
+        : > "$dir/adb-connected"
+        echo "connected to $2"
+    else
+        echo "failed to connect to $2"
+        exit 1
+    fi
+    ;;
+devices)
+    echo "List of devices attached"
+    if [ -f "$dir/adb-connected" ]; then
+        echo "127.0.0.1:41001        device product:shiba model:Pixel_8 device:shiba transport_id:1"
+    fi
+    echo
+    ;;
+*)
+    exit 1
+    ;;
+esac

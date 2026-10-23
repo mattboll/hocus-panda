@@ -1,0 +1,70 @@
+description = "With wireless adb on, a phone pairs by a QR code: the popover shows it, the phone scans it, adb pairs and joins the phone; it shows as paired and Mirror its screen starts scrcpy for it"
+outputs = ["1280x800"]
+shell = true
+# Stand-ins for adb (and the phone on the network) and scrcpy, first on it.
+child_env = { PATH = "{scenario_dir}/phone/bin:/usr/bin:/bin" }
+
+[[step]]
+config = """
+[phone]
+adb = true
+"""
+
+[[step]]
+expect_adb = "ready"
+
+# No KDE Connect: a line for adb alone, nothing paired yet.
+[[step]]
+expect_ui = { label = "Ring", shown = false }
+
+[[step]]
+click_ui = "Phone"
+
+[[step]]
+expect_ui = { label = "No phone paired yet" }
+
+[[step]]
+expect_ui = { label = "Mirror its screen", shown = false }
+
+[[step]]
+click_ui = "Pair over Wi-Fi"
+
+[[step]]
+expect_ui = { label = "QR code to scan with the phone" }
+
+[[step]]
+expect_ui = { label = "Waiting for the phone…" }
+
+[[step]]
+expect_adb = "pairing"
+
+[[step]]
+advance_ms = 300
+
+# The code is new each time: its pixels may differ, nothing else.
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-adb-pairing.png", pixel_tolerance = 0.03 }
+
+[[step]]
+scan_pairing_code = true
+
+[[step]]
+expect_adb = "ready"
+
+[[step]]
+expect_ui = { label = "Paired over Wi-Fi: Pixel 8" }
+
+[[step]]
+expect_runtime_file = { name = "adb", contains = ["pair 127.0.0.1:37001 ", "connect 127.0.0.1:41001"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-adb-paired.png" }
+
+[[step]]
+click_ui = "Mirror its screen"
+
+[[step]]
+expect_runtime_file = { name = "scrcpy", contains = ["scrcpy -s 127.0.0.1:41001"] }

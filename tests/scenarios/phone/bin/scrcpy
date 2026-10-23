@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stands for scrcpy: says what it was asked to mirror.
+printf 'scrcpy %s\n' "$*" >> "$XDG_RUNTIME_DIR/scrcpy"

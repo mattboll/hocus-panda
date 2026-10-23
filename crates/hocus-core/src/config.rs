@@ -939,6 +939,10 @@ pub struct PhoneConfig {
     pub enabled: bool,
     /// Its notifications as toasts, with a reply where it takes one.
     pub notifications: bool,
+    /// Wireless debugging through adb (#153), when it is installed:
+    /// pairing by a QR code, mirroring with scrcpy. Off by default: a
+    /// paired phone can be debugged from this computer.
+    pub adb: bool,
 }
 
 impl Default for PhoneConfig {
@@ -946,6 +950,7 @@ impl Default for PhoneConfig {
         Self {
             enabled: true,
             notifications: true,
+            adb: false,
         }
     }
 }

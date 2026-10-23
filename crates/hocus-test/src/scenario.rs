@@ -172,6 +172,13 @@ pub enum Step {
     /// KDE Connect as the session found it, once so: `absent`,
     /// `stopped`, `running`, `off`.
     ExpectPhoneState(String),
+    /// The phone scans the pairing QR code the popover shows (#153): the
+    /// name and password it holds go to the adb stand-in, as `NAME
+    /// PASSWORD` in `adb-phone` in the compositor's runtime directory.
+    ScanPairingCode(bool),
+    /// Wireless adb as the session has it, once so (within seconds: adb
+    /// runs on workers): `off`, `absent`, `ready`, `pairing`.
+    ExpectAdb(String),
     /// The shell shows an element with this label: `{ label, disabled? }`.
     ExpectUi(ExpectUi),
     /// Writes the saved session file (TOML); `{test_client}` is the test
@@ -876,6 +883,8 @@ impl fmt::Display for Step {
             Self::PhoneRemove(n) => write!(f, "phone_remove {n}"),
             Self::ExpectPhone(asked) => write!(f, "expect_phone {asked:?}"),
             Self::ExpectPhoneState(state) => write!(f, "expect_phone_state {state:?}"),
+            Self::ScanPairingCode(_) => write!(f, "scan_pairing_code"),
+            Self::ExpectAdb(state) => write!(f, "expect_adb {state:?}"),
             Self::ExpectTimedated(asked) => write!(f, "expect_timedated {asked:?}"),
             Self::TimedatedZone(zone) => write!(f, "timedated_zone {zone}"),
             Self::TimedatedRefuses(r) => write!(f, "timedated_refuses {r}"),
@@ -1242,6 +1251,44 @@ impl Run<'_> {
                     }
                     if Instant::now() > deadline {
                         anyhow::bail!("the phone was asked {asked:?}, not {expected:?}");
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
+            Step::ScanPairingCode(_) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                let qr = loop {
+                    if let Some(qr) = self.compositor.pairing_code() {
+                        break qr;
+                    }
+                    anyhow::ensure!(Instant::now() < deadline, "no pairing code shown");
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                };
+                let code = hocus_platform::adb::Code::parse(&qr)
+                    .with_context(|| format!("not a pairing code: {qr:?}"))?;
+                let dir = self
+                    .compositor
+                    .api_socket()
+                    .parent()
+                    .context("no runtime directory")?
+                    .to_path_buf();
+                std::fs::write(
+                    dir.join("adb-phone"),
+                    format!("{} {}\n", code.name, code.password),
+                )?;
+                Ok(())
+            }
+            Step::ExpectAdb(expected) => {
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                loop {
+                    let Reply::Phone(info) = self.request(Request::Phone)? else {
+                        anyhow::bail!("expected the phone");
+                    };
+                    if info.adb == *expected {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("adb is {:?}, not {expected:?}", info.adb);
                     }
                     self.compositor.dispatch(Duration::from_millis(10))?;
                 }

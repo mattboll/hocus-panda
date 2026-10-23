@@ -112,6 +112,8 @@ install = ""               #   empty: apt, dnf, pacman or pkg, installed through
 [phone]                    # through KDE Connect, when it runs: a phone paired and within reach
 enabled = true             # its line in the column (battery, Ring), its popover
 notifications = true       # its notifications as toasts, with a reply typed into them
+adb = false                # wireless debugging when adb is installed: pairing by a QR code,
+                           #   mirroring its screen when scrcpy is installed too
 
 [[calendars]]              # one per account or subscription (Settings → Accounts and calendar)
 name = "Work"
