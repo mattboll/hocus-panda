@@ -83,7 +83,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Client- or server-side decorations, depending on the application
 - Title bar colours from the theme, fade on focus change
 - Soft shadows, as dark as the theme makes them, cast by the light of the hour: from one side in the morning, straight down in the afternoon, from the other side in the evening, darker at night (windows and panels alike)
-- Frosted blur behind the panel, menus, launcher and notifications, computed again only when what is behind changes; solid panels where it cannot blur, with transparency off, high contrast, reduced motion or the power saver
+- Frosted blur behind the panel, menus, launcher, notifications, the dock, the switchers and the system dialogs, computed again only when what is behind changes; solid panels where it cannot blur, with transparency off, high contrast, reduced motion or the power saver
 - Blur behind windows (a rule, for see-through ones), rounded corners everywhere
 - Wobbly windows while moving
 - "Magic lamp" minimize towards the dock

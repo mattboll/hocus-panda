@@ -139,7 +139,7 @@ impl Leave {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(Paint::Surface),
+                    background: Some(Paint::Glass),
                     radius: 24.0,
                     border: Some(Paint::Border),
                     shadow: 30.0,
@@ -250,6 +250,12 @@ impl Leave {
     pub fn draw(&mut self, now: Duration) -> Vec<PixelRect> {
         let damage = self.tree.update(now);
         self.surface.draw(&mut self.tree, &damage)
+    }
+
+    /// Its see-through panels, from its corner, for the compositor to blur
+    /// what is behind them (#37, #162).
+    pub fn glass(&self) -> Vec<hocus_ui::Glass> {
+        self.tree.glass()
     }
 
     pub fn view(&self) -> View<'_> {

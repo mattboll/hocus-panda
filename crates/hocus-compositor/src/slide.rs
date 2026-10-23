@@ -228,6 +228,26 @@ impl State {
     }
 
     /// The switcher on `output`, while it shows.
+    /// The desktop switcher on glass, while it shows on `output`.
+    pub(crate) fn switcher_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+        let Some(slide) = self.slides.by_output.get(&output.name()) else {
+            return Vec::new();
+        };
+        if self.clock.now() >= slide.until && slide.swipe.is_none() {
+            return Vec::new();
+        }
+        slide
+            .switcher
+            .as_ref()
+            .map_or_else(Vec::new, |(place, panel)| {
+                crate::blur::spots(
+                    crate::blur::Surface::DesktopSwitcher,
+                    place.to_f64(),
+                    &panel.view.glass(),
+                )
+            })
+    }
+
     pub fn switcher_elements<R>(&self, renderer: &mut R, output: &Output) -> Vec<SceneElement<R>>
     where
         R: smithay::backend::renderer::Renderer

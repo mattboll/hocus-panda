@@ -249,6 +249,18 @@ impl State {
         dialog.panel.element(renderer, output, Point::default())
     }
 
+    /// Its panel on glass, on the output it shows on.
+    pub(crate) fn auth_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+        match self.authorizer.dialog.as_ref() {
+            Some(dialog) if dialog.output == output.name() => crate::blur::spots(
+                crate::blur::Surface::Authorize,
+                Default::default(),
+                &dialog.panel.view.glass(),
+            ),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn auth_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
         let Some(dialog) = &self.authorizer.dialog else {
             return;

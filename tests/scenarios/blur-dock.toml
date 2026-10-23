@@ -1,0 +1,49 @@
+# Glass on the dock (#162): shown over a window, the blur behind it is
+# computed once, then not again while nothing behind it changes; with
+# transparency off it is solid and nothing is blurred.
+description = "The dock's glass is blurred once over a still window, and not at all with transparency off"
+renderer = "gles"
+shell = true
+
+[[step]]
+open = { app_id = "doc", size = [900, 700], color = "#3399ff" }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_blur = { at_least = 1 }
+
+[[step]]
+keys = "super+d"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_blur = { at_least = 1 }
+
+# The pointer moves, frames are drawn: nothing behind the dock changed.
+[[step]]
+pointer_move = [300, 300]
+
+[[step]]
+frames = 3
+
+[[step]]
+expect_blur = { at_most = 0 }
+
+[[step]]
+config = """
+[appearance]
+transparency = false
+"""
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_blur = { at_most = 0 }

@@ -229,23 +229,38 @@ impl State {
                 .map(SceneElement::Frame),
         );
         // What to share, asked by a portal.
-        elements.extend(
-            self.share_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        if let Some(panel) = self.share_elements(renderer, output) {
+            elements.push(SceneElement::Frame(panel));
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.share_glass(output),
+                build,
+            );
+        }
         // The system's password dialog, over everything but the cursor.
-        elements.extend(
-            self.auth_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        if let Some(panel) = self.auth_elements(renderer, output) {
+            elements.push(SceneElement::Frame(panel));
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.auth_glass(output),
+                build,
+            );
+        }
         // Leaving: the countdown, over everything else.
-        elements.extend(
-            self.leave_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        if let Some(panel) = self.leave_elements(renderer, output) {
+            elements.push(SceneElement::Frame(panel));
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.leave_glass(output),
+                build,
+            );
+        }
         // Choosing what a screenshot takes, and its flash.
         elements.extend(self.screenshot_elements(renderer, output));
         // What is recorded, and the recording's bar.
@@ -257,11 +272,16 @@ impl State {
                 .map(SceneElement::Frame),
         );
         // The card asking what to put back.
-        elements.extend(
-            self.card_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        if let Some(panel) = self.card_elements(renderer, output) {
+            elements.push(SceneElement::Frame(panel));
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.card_glass(output),
+                build,
+            );
+        }
         // The curtain over everything but the cursor.
         elements.extend(
             self.curtain_elements(renderer, output)
@@ -319,7 +339,17 @@ impl State {
         // they dim; toasts, then the column, above windows; the column
         // under a fullscreen one. Each panel over the blur of what is
         // behind it (#37).
-        elements.extend(self.alt_tab_elements(renderer, output));
+        let alt_tab = self.alt_tab_elements(renderer, output);
+        if !alt_tab.is_empty() {
+            elements.extend(alt_tab);
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.alt_tab_glass(output),
+                build,
+            );
+        }
         let launcher = self.launcher_elements(renderer, output);
         if !launcher.is_empty() {
             elements.extend(launcher.into_iter().map(SceneElement::Frame));
@@ -361,8 +391,28 @@ impl State {
             elements.push(SceneElement::Frame(column));
             self.glass(&mut elements, renderer, output, column_glass, build);
         }
-        elements.extend(self.switcher_elements(renderer, output));
-        elements.extend(self.dock_elements(renderer, output));
+        let switcher = self.switcher_elements(renderer, output);
+        if !switcher.is_empty() {
+            elements.extend(switcher);
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.switcher_glass(output),
+                build,
+            );
+        }
+        let dock = self.dock_elements(renderer, output);
+        if !dock.is_empty() {
+            elements.extend(dock);
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.dock_glass(output),
+                build,
+            );
+        }
         elements.extend(self.panda_elements(renderer, output));
         // Third-party bars above the windows, but under a fullscreen one.
         if !fullscreen {
