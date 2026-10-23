@@ -48,11 +48,19 @@ mcp = { agent = "helper", tool = "list_windows", error = "the user stopped every
 [[step]]
 mcp = { agent = "reader", tool = "journal", error = "the user stopped every agent" }
 
-# Each of these sessions was refused as it named itself: nothing reached a
-# window, so nothing more is kept. An agent already connected has its
-# actions kept as refused (crates/hocus-test/tests/mcp.rs).
+# Each of these sessions was refused as it named itself, and kept so. An
+# agent already connected has its actions kept as refused
+# (crates/hocus-test/tests/mcp.rs).
 [[step]]
-expect_journal = { has = ['helper: type 1 character on window 1 editor "Draft"'], lacks = ["refused"], stopped = true }
+expect_journal = { has = [
+  'helper: type 1 character on window 1 editor "Draft"',
+  'helper: connect; refused: the user stopped every agent',
+  'helper: connect; refused',
+  'reader: connect; refused',
+], stopped = true }
+
+[[step]]
+expect_ui = { label = "reader · Connection refused" }
 
 [[step]]
 advance_ms = 300

@@ -388,7 +388,9 @@ pub struct JournalEntry {
     pub at: String,
     pub agent: String,
     pub action: JournalAction,
-    pub target: JournalTarget,
+    /// What it aimed at; none for a connection.
+    #[serde(default)]
+    pub target: Option<JournalTarget>,
     /// Why it was refused; `None` when carried out.
     #[serde(default)]
     pub refused: Option<String>,
@@ -418,6 +420,9 @@ pub enum JournalAction {
         #[serde(default)]
         keys: Option<String>,
     },
+    /// The agent named itself; kept when refused, as while agents are
+    /// stopped.
+    Connect,
 }
 
 /// What an agent aimed at, as it was then.
@@ -468,9 +473,11 @@ impl std::fmt::Display for JournalEntry {
             JournalAction::Type { characters, .. } => write!(f, "type {characters} characters")?,
             JournalAction::Keys { keys: Some(keys) } => write!(f, "keys {keys}")?,
             JournalAction::Keys { keys: None } => write!(f, "keys (not kept)")?,
+            JournalAction::Connect => write!(f, "connect")?,
         }
         match &self.target {
-            JournalTarget::Window { id, app_id, title } => {
+            None => {}
+            Some(JournalTarget::Window { id, app_id, title }) => {
                 write!(f, " on window {id}")?;
                 if let Some(app_id) = app_id {
                     write!(f, " {app_id}")?;
@@ -479,7 +486,7 @@ impl std::fmt::Display for JournalEntry {
                     write!(f, " {title:?}")?;
                 }
             }
-            JournalTarget::Element { label } => write!(f, " on the shell's {label:?}")?,
+            Some(JournalTarget::Element { label }) => write!(f, " on the shell's {label:?}")?,
         }
         if let Some(why) = &self.refused {
             write!(f, "; refused: {why}")?;
@@ -1229,11 +1236,11 @@ mod tests {
                 characters: 4,
                 text: None,
             },
-            target: JournalTarget::Window {
+            target: Some(JournalTarget::Window {
                 id: 3,
                 app_id: Some("notes".into()),
                 title: Some("Shopping list".into()),
-            },
+            }),
             refused: None,
         };
         assert_eq!(
@@ -1245,9 +1252,9 @@ mod tests {
                 button: Button::Right,
                 count: 2,
             },
-            target: JournalTarget::Element {
+            target: Some(JournalTarget::Element {
                 label: "Close".into(),
-            },
+            }),
             refused: Some("agents are stopped".into()),
             ..entry.clone()
         };
@@ -1261,6 +1268,16 @@ mod tests {
             ..entry
         };
         assert!(keys.to_string().contains("keys (not kept) on window 3"));
+        let connect = JournalEntry {
+            action: JournalAction::Connect,
+            target: None,
+            refused: Some("agents are stopped".into()),
+            ..keys
+        };
+        assert_eq!(
+            connect.to_string(),
+            "2026-10-21 14:37:05 helper: connect; refused: agents are stopped"
+        );
         round_trip(
             &RequestLine {
                 id: 7,

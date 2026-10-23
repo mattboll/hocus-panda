@@ -3,7 +3,9 @@
 //! as it was then and the time as the user reads it; what an agent types
 //! only when `[agents] journal_text` says so, since it may be a secret.
 //! The control API, `hocus msg agents-journal` and the MCP `journal` tool
-//! read it; the column shows the last few once an agent connected.
+//! read it (an agent only its own entries); the column shows the last few
+//! once an agent connected. It lives in memory alone: nothing per entry
+//! goes to a file or to the log above debug.
 //!
 //! `stop-agents` (and the column's button) refuses every request of every
 //! agent connection, reading included, and new agents naming themselves,
@@ -85,8 +87,8 @@ impl State {
     }
 
     /// The refusal of a request while agents are stopped: every request of
-    /// an agent's connection, and naming oneself an agent. An action
-    /// refused so is kept in the journal.
+    /// an agent's connection, and naming oneself an agent. An action or a
+    /// connection refused so is kept in the journal.
     pub(crate) fn agents_gate(
         &mut self,
         connection: ConnectionId,
@@ -102,7 +104,22 @@ impl State {
                 self.journal_keep(entry, Some(&stopped()));
                 Some(stopped())
             }
-            (Some(_), _) | (None, Request::Agent { .. }) => Some(stopped()),
+            (None, Request::Agent { name }) => {
+                let civil = self.wall_civil();
+                let entry = JournalEntry {
+                    at: wall(&civil),
+                    agent: name.clone(),
+                    action: JournalAction::Connect,
+                    target: None,
+                    refused: None,
+                };
+                self.journal_keep(
+                    (civil.hour() as u8, civil.minute() as u8, entry),
+                    Some(&stopped()),
+                );
+                Some(stopped())
+            }
+            (Some(_), _) => Some(stopped()),
             (None, _) => None,
         }
     }
@@ -155,10 +172,10 @@ impl State {
             },
         };
         let entry = JournalEntry {
-            at: civil.strftime("%Y-%m-%dT%H:%M:%S").to_string(),
+            at: wall(&civil),
             agent: agent.to_owned(),
             action,
-            target,
+            target: Some(target),
             refused: None,
         };
         (civil.hour() as u8, civil.minute() as u8, entry)
@@ -182,14 +199,17 @@ impl State {
         });
     }
 
-    /// The journal, for the control API.
-    pub fn agents_journal(&self) -> AgentsJournal {
+    /// The journal, for the control API: an agent's connection reads its
+    /// own entries alone, any other all of them.
+    pub fn agents_journal(&self, connection: ConnectionId) -> AgentsJournal {
+        let agent = self.api.agent(connection);
         AgentsJournal {
             stopped: self.agents_stopped(),
             entries: self
                 .journal
                 .entries
                 .iter()
+                .filter(|k| agent.is_none_or(|a| k.entry.agent == a))
                 .map(|k| k.entry.clone())
                 .collect(),
         }
@@ -211,7 +231,12 @@ impl State {
             .map(|k| JournalLine {
                 agent: k.entry.agent.clone(),
                 did: did(&k.entry.action),
-                target: target_words(&k.entry.target),
+                target: k
+                    .entry
+                    .target
+                    .as_ref()
+                    .map(target_words)
+                    .unwrap_or_default(),
                 time: format.time(k.hour, k.minute),
                 refused: k.entry.refused.clone(),
             })
@@ -240,7 +265,13 @@ fn did(action: &JournalAction) -> Did {
             text: text.clone(),
         },
         JournalAction::Keys { keys } => Did::Keys(keys.clone()),
+        JournalAction::Connect => Did::Connect,
     }
+}
+
+/// The local date and time, as the journal keeps it.
+fn wall(civil: &jiff::civil::DateTime) -> String {
+    civil.strftime("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
 /// A window by its title, else its app id; an element by its label.

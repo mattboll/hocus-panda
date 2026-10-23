@@ -38,6 +38,8 @@ pub enum Did {
     },
     /// The combination, when it is kept.
     Keys(Option<String>),
+    /// It named itself (kept when refused).
+    Connect,
 }
 
 /// One entry, newest first in [`JournalView::lines`].
@@ -45,7 +47,8 @@ pub enum Did {
 pub struct JournalLine {
     pub agent: String,
     pub did: Did,
-    /// The window's title (or app id), or the shell element's label.
+    /// The window's title (or app id), or the shell element's label;
+    /// empty for a connection.
     pub target: String,
     /// The time of day, as the clock shows it.
     pub time: String,
@@ -137,6 +140,7 @@ impl Lang {
                 Did::Scroll { .. } => self.pick("Scroll refused", "Défilement refusé"),
                 Did::Type { .. } => self.pick("Typing refused", "Saisie refusée"),
                 Did::Keys(_) => self.pick("Keys refused", "Touches refusées"),
+                Did::Connect => self.pick("Connection refused", "Connexion refusée"),
             }
             .into();
         }
@@ -176,17 +180,18 @@ impl Lang {
                 true => format!("A appuyé sur {keys}"),
             },
             Did::Keys(None) => self.pick("Pressed keys", "A appuyé sur des touches").into(),
+            Did::Connect => self.pick("Connected", "S’est connecté").into(),
         }
     }
 
     /// An entry in one line: agent · what · where.
     pub fn journal_line(self, line: &JournalLine) -> String {
-        format!(
-            "{} · {} · {}",
-            line.agent,
-            self.did(&line.did, line.refused.is_some()),
-            line.target
-        )
+        let did = self.did(&line.did, line.refused.is_some());
+        if line.target.is_empty() {
+            format!("{} · {did}", line.agent)
+        } else {
+            format!("{} · {did} · {}", line.agent, line.target)
+        }
     }
 }
 
@@ -534,6 +539,18 @@ mod tests {
             "helper · Click refused · Shopping list"
         );
         assert_eq!(Lang::Fr.did(&refused.did, true), "Clic refusé");
+        let connect = JournalLine {
+            target: String::new(),
+            ..line(Did::Connect, Some("stopped"))
+        };
+        assert_eq!(
+            Lang::En.journal_line(&connect),
+            "helper · Connection refused"
+        );
+        assert_eq!(
+            Lang::Fr.journal_line(&connect),
+            "helper · Connexion refusée"
+        );
         let keys = Did::Keys(Some("Ctrl+S".into()));
         assert_eq!(Lang::Fr.did(&keys, false), "A appuyé sur Ctrl+S");
         let kept = Did::Type {
