@@ -708,7 +708,9 @@ fn tools() -> Vec<Value> {
             "name": "capture",
             "title": "Capture a window",
             "description": "A PNG of a window (or of a whole output) as the screen shows it, at the \
-                output's scale; the text says how its pixels map to logical coordinates.",
+                output's scale; the text says how its pixels map to logical coordinates. A window \
+                on a desktop no screen shows, or minimized, as its application last drew it: it \
+                draws on while this agent acts in it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -722,12 +724,12 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "click",
             "title": "Click",
-            "description": "Clicks a point of a window shown on a screen, with this agent's own \
-                pointer (the user's pointer and keyboard stay theirs), or the centre of a labelled \
-                element of the shell. A ring and the intent show at the point a moment before the \
+            "description": "Clicks a point of a window, with this agent's own pointer (the user's \
+                pointer and keyboard stay theirs), or the centre of a labelled element of the \
+                shell. The window may be on a desktop no screen shows; a minimized one comes back \
+                on its desktop first. A ring and the intent show at the point a moment before the \
                 click; a sensitive one (a password manager, the settings…) waits until the user \
-                confirms it. Refused when the agent may not act on that window's app, or when the \
-                window is minimized or on a desktop not shown.",
+                confirms it. Refused when the agent may not act on that window's app.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

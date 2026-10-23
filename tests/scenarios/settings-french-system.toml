@@ -1,4 +1,4 @@
-description = "French chosen on Language and region: the System pages, AI and agents and Search among them, speak it at once, without restart"
+description = "French chosen on Language and region: the System pages, AI and agents (with what agents show and ask first) and Search among them, speak it at once, without restart"
 outputs = ["1280x800"]
 shell = true
 dbus = true
@@ -57,6 +57,18 @@ expect_settings = { label = "Fournisseur : ollama", selected = true }
 
 [[step]]
 expect_settings = { label = "ollama n’a pas besoin de clé." }
+
+[[step]]
+expect_settings = { label = "Montre avant un clic : 0,6\u00a0s", selected = true }
+
+[[step]]
+expect_settings = { label = "Attend votre réponse : 1\u00a0min", selected = true }
+
+[[step]]
+expect_settings = { label = "Retirer org.keepassxc.KeePassXC" }
+
+[[step]]
+expect_settings = { label = "Nouvelle application qui demande d’abord" }
 
 [[step]]
 click_settings = "Recherche"

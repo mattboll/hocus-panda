@@ -616,17 +616,24 @@ impl App {
                     BackendState::Tty(tty) => tty.capture_output(&output, state, cursor),
                 }
             }
+            // Wherever it is: on a desktop no screen shows, or minimized,
+            // it is drawn as its application last drew it (#229).
             Target::Window(id) => {
                 let window = state
-                    .space
-                    .elements()
-                    .find(|w| window_id(w) == *id)
-                    .cloned()
+                    .windows
+                    .get(&hocus_core::WindowId(*id))
+                    .map(|m| m.window.clone())
                     .ok_or_else(|| {
                         ApiError::new(ErrorCode::NotFound, format!("no window with id {id}"))
                     })?;
                 let scale = state
                     .output_of(&window)
+                    .cloned()
+                    .or_else(|| {
+                        let desktop = state.model.desktop_of(hocus_core::WindowId(*id))?;
+                        let host = state.model.host_of(desktop)?;
+                        state.find_output(&host.name.0)
+                    })
                     .map_or(1.0, |o| o.current_scale().fractional_scale());
                 match &mut self.backend {
                     BackendState::Winit(winit) => winit.capture_window(&window, scale),

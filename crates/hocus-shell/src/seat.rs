@@ -1,15 +1,17 @@
 //! An MCP agent's seat on the screen (#43), as board D04 draws it: its
 //! pointer in its own colour with its name beside it, and, before a click,
 //! a ring at the point and what it means to do in one line; a sensitive
-//! action waits on a card the user answers. The compositor places the
-//! view so that its anchor (the pointer's tip) is where the agent points.
+//! action waits on a card the user answers, with the pointer, or with the
+//! keyboard once clicked (#229). The compositor places the view so that its
+//! anchor (the pointer's tip) is where the agent points; where no screen
+//! shows the agent's window, the card alone shows.
 
 use std::time::Duration;
 
 use hocus_ui::{
-    AccessNode, ButtonKind, Color, Direction, Event, Input, Insets, Kind, Length, Look, NodeId,
-    Paint, PixelRect, Point, Rect, Shape, Size, Style, Surface, Theme, Tree, canvas::Canvas,
-    tree::Draw,
+    AccessNode, ButtonKind, Color, Direction, Event, Input, Insets, Key, Kind, Length, Look,
+    NodeId, Paint, PixelRect, Point, Rect, Shape, Size, Style, Surface, Theme, Tree,
+    canvas::Canvas, tree::Draw,
 };
 
 use crate::{column::View, i18n::Lang};
@@ -59,11 +61,16 @@ pub struct Confirm {
     pub intent: String,
     /// Why it asks: "In a password field".
     pub why: String,
+    /// The user clicked it: it has the keyboard, Enter allows, Escape
+    /// refuses.
+    pub keys: bool,
 }
 
 /// What the seat shows now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Showing {
+    /// Its pointer and label are drawn: a screen shows where it points.
+    pub pointer: bool,
     /// Its name, or its name and what it does.
     pub label: String,
     /// The ring at the point, before a click.
@@ -97,6 +104,14 @@ impl Lang {
         match self {
             Self::En => format!("In {app}, which asks you first"),
             Self::Fr => format!("Dans {app}, qui vous demande d’abord"),
+        }
+    }
+
+    /// Why it asks, and the desktop no screen shows where it acts.
+    pub fn sensitive_unseen(self, why: &str, desktop: &str) -> String {
+        match self {
+            Self::En => format!("{why} · {desktop}, not shown"),
+            Self::Fr => format!("{why} · {desktop}, non affiché"),
         }
     }
 
@@ -245,7 +260,7 @@ impl SeatView {
             parts.push((id, style));
             id
         };
-        if showing.ring {
+        if showing.pointer && showing.ring {
             add(
                 &mut tree,
                 Style {
@@ -258,39 +273,41 @@ impl SeatView {
                 },
             );
         }
-        add(
-            &mut tree,
-            Style {
-                at: Some(Point::new(at.x - TIP, at.y - TIP)),
-                ..Style::default()
-            },
-            Kind::Custom {
-                draw: Box::new(Arrow(Shape::svg(ARROW))),
-                label: None,
-            },
-        );
-        let label = add(
-            &mut tree,
-            Style {
-                at: Some(Point::new(at.x + LABEL.x, at.y + LABEL.y)),
-                padding: Insets::symmetric(4.0, 10.0),
-                ..Style::default()
-            },
-            Kind::Box(Look {
-                background: Some(Paint::Accent),
-                radius: 8.0,
-                ..Look::default()
-            }),
-        );
-        tree.add(
-            label,
-            Style::default(),
-            Kind::text_line(
-                &showing.label,
-                theme.text.caption.with_color(Paint::OnAccent),
-            ),
-        )
-        .unwrap_or_else(MISSING);
+        if showing.pointer {
+            add(
+                &mut tree,
+                Style {
+                    at: Some(Point::new(at.x - TIP, at.y - TIP)),
+                    ..Style::default()
+                },
+                Kind::Custom {
+                    draw: Box::new(Arrow(Shape::svg(ARROW))),
+                    label: None,
+                },
+            );
+            let label = add(
+                &mut tree,
+                Style {
+                    at: Some(Point::new(at.x + LABEL.x, at.y + LABEL.y)),
+                    padding: Insets::symmetric(4.0, 10.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::Accent),
+                    radius: 8.0,
+                    ..Look::default()
+                }),
+            );
+            tree.add(
+                label,
+                Style::default(),
+                Kind::text_line(
+                    &showing.label,
+                    theme.text.caption.with_color(Paint::OnAccent),
+                ),
+            )
+            .unwrap_or_else(MISSING);
+        }
         let mut view = Self {
             tree,
             surface: Surface::new(Size::new(1.0, 1.0), scale),
@@ -304,6 +321,11 @@ impl SeatView {
             parts.extend(view.add_card(&theme, lang, room, at, confirm));
         }
         view.fit(room, scale, &parts);
+        // Clicked, the card has the keyboard: Allow shows it, as Tab
+        // would.
+        if showing.confirm.as_ref().is_some_and(|c| c.keys) {
+            view.tree.input(Input::Key(Key::Tab));
+        }
         view
     }
 
@@ -467,6 +489,22 @@ impl SeatView {
         })
     }
 
+    /// A key while the card has the keyboard: Escape refuses, Enter and
+    /// Space press the button with the keyboard (Allow first), Tab moves
+    /// it.
+    pub fn key(&mut self, key: Key) -> Option<Answer> {
+        if key == Key::Escape {
+            return self.card.map(|_| Answer::Refuse);
+        }
+        let events = self.tree.input(Input::Key(key));
+        events.into_iter().find_map(|event| match event {
+            Event::Activated(id) if Some(id) == self.allow => Some(Answer::Allow),
+            Event::Activated(id) if Some(id) == self.refuse => Some(Answer::Refuse),
+            Event::Activated(id) if Some(id) == self.take_over => Some(Answer::TakeOver),
+            _ => None,
+        })
+    }
+
     pub fn draw(&mut self, now: Duration) -> Vec<PixelRect> {
         let damage = self.tree.update(now);
         self.surface.draw(&mut self.tree, &damage)
@@ -492,12 +530,14 @@ mod tests {
 
     fn showing(confirm: bool) -> Showing {
         Showing {
+            pointer: true,
             label: "helper · Clicks in Notes".into(),
             ring: true,
             confirm: confirm.then(|| Confirm {
                 title: Lang::En.agent_will("helper", false),
                 intent: "Deletes every note".into(),
                 why: Lang::En.sensitive_app("Passwords"),
+                keys: false,
             }),
         }
     }
@@ -568,5 +608,56 @@ mod tests {
         view.pointer_move(Point::new(xy[0] + 8.0, xy[1] + 8.0));
         view.pointer_button(true);
         assert_eq!(view.pointer_button(false), Some(Answer::Allow));
+    }
+
+    #[test]
+    fn the_clicked_card_answers_the_keyboard() {
+        let room = Size::new(1280.0, 800.0);
+        let mut showing = showing(true);
+        let make = |showing: &Showing| {
+            SeatView::new(
+                agent_theme(&Theme::default(), "helper"),
+                Lang::En,
+                1.0,
+                room,
+                Point::new(400.0, 300.0),
+                showing,
+            )
+        };
+        // Not clicked: Enter presses nothing.
+        let mut view = make(&showing);
+        assert_eq!(view.key(Key::Enter), None);
+        // Clicked: Enter allows, Tab then Enter refuses, Escape refuses.
+        if let Some(c) = showing.confirm.as_mut() {
+            c.keys = true;
+        }
+        assert_eq!(make(&showing).key(Key::Enter), Some(Answer::Allow));
+        let mut view = make(&showing);
+        assert_eq!(view.key(Key::Tab), None);
+        assert_eq!(view.key(Key::Enter), Some(Answer::Refuse));
+        assert_eq!(make(&showing).key(Key::Escape), Some(Answer::Refuse));
+    }
+
+    #[test]
+    fn unseen_the_card_shows_alone() {
+        let room = Size::new(1280.0, 800.0);
+        let mut showing = showing(true);
+        showing.pointer = false;
+        let mut view = SeatView::new(
+            agent_theme(&Theme::default(), "helper"),
+            Lang::En,
+            1.0,
+            room,
+            Point::new(400.0, 300.0),
+            &showing,
+        );
+        view.draw(Duration::ZERO);
+        let dump = view.access().dump();
+        assert!(!dump.contains("helper · Clicks in Notes"), "{dump}");
+        assert!(view.card_rect().is_some());
+        assert_eq!(
+            Lang::Fr.sensitive_unseen("Dans un champ de mot de passe", "Bureau 2"),
+            "Dans un champ de mot de passe · Bureau 2, non affiché"
+        );
     }
 }

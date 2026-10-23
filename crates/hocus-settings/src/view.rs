@@ -3887,6 +3887,24 @@ mod tests {
         out
     }
 
+    /// Scrolls the page until the element labelled `label` shows whole,
+    /// below the page's title.
+    fn scroll_to(v: &mut SettingsView, label: &str) {
+        v.scroll(-100_000.0);
+        v.draw(Duration::ZERO);
+        let room = v.tree.size().h;
+        for _ in 0..200 {
+            let node = find(&v.access(), label)
+                .unwrap_or_else(|| panic!("no {label}:\n{}", v.access().dump()));
+            if node.rect.y > 140.0 && node.rect.y + node.rect.h < room {
+                return;
+            }
+            v.scroll(50.0);
+            v.draw(Duration::ZERO);
+        }
+        panic!("{label} never shows");
+    }
+
     fn keyboard_view(toml: &str) -> SettingsView {
         let mut v = view(Lang::En);
         v.set_context(Context {
@@ -5068,13 +5086,13 @@ mod tests {
         );
         let out = click(&mut v, "Remove ~/web.sock");
         assert_eq!(places(&out), [Place::Herdr(0)]);
-        v.scroll(10_000.0);
-        v.draw(Duration::ZERO);
+        scroll_to(&mut v, "Journal keeps typed text");
         let out = click(&mut v, "Journal keeps typed text");
         assert_eq!(
             changes(&out),
             [("journal_text".into(), Some("true".into()))]
         );
+        scroll_to(&mut v, "Stop all agents");
         let out = click(&mut v, "Stop all agents");
         assert!(
             matches!(out.as_slice(), [Outcome::StopAgents(true)]),
@@ -5085,11 +5103,52 @@ mod tests {
         v.set_context(ctx);
         v.draw(Duration::ZERO);
         assert!(find(&v.access(), "Stopped: their requests are refused").is_some());
+        scroll_to(&mut v, "Allow agents");
         let out = click(&mut v, "Allow agents");
         assert!(
             matches!(out.as_slice(), [Outcome::StopAgents(false)]),
             "{out:?}"
         );
+        // What an agent shows first and what asks first (#229).
+        scroll_to(&mut v, "Shows before a click: At once");
+        assert!(
+            find(&v.access(), "Shows before a click: 0.6 s")
+                .expect("it")
+                .selected
+        );
+        let out = click(&mut v, "Shows before a click: At once");
+        assert_eq!(
+            changes(&out),
+            [("show_before_click_ms".into(), Some("0".into()))]
+        );
+        scroll_to(&mut v, "Waits for your answer: 2 min");
+        let out = click(&mut v, "Waits for your answer: 2 min");
+        assert_eq!(
+            changes(&out),
+            [("confirm_timeout_s".into(), Some("120".into()))]
+        );
+        scroll_to(&mut v, "Remove 1Password");
+        let out = click(&mut v, "Remove 1Password");
+        let changed = changes(&out);
+        let [(key, Some(list))] = changed.as_slice() else {
+            panic!("{out:?}");
+        };
+        assert_eq!(key, "confirm_apps");
+        assert!(
+            list.contains("\"Bitwarden\"") && !list.contains("1Password"),
+            "{list}"
+        );
+        scroll_to(&mut v, "New application asking first");
+        click(&mut v, "New application asking first");
+        v.text("my.bank.*");
+        let out = v.key(Key::Enter);
+        let changed = changes(&out);
+        let [(_, Some(list))] = changed.as_slice() else {
+            panic!("{out:?}");
+        };
+        assert!(list.ends_with("\"my.bank.*\"]"), "{list}");
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
         assert!(
             find(&v.access(), "Keys held: Super+Shift")
                 .expect("it")

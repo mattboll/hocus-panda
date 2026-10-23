@@ -531,6 +531,25 @@ without unlocking leaves our lock screen: a crash never unlocks.
   where it points, made again only when what it shows changes; the
   column's journal leaves a slot for each agent's window, which the
   compositor draws there, live, as the switcher draws its previews.
+- An agent acts on its windows wherever they are (#229). A window on a
+  desktop no screen shows is unmapped from the space but keeps its place
+  (`Managed::location`): the agent's point is taken from there, and its
+  seat's pointer focus is set on the surface found there, which hit-testing
+  in smithay's pointer does not tie to an output. While an agent drives
+  such a window (an action waits, or it acted in the last ten seconds),
+  `refresh_seats` sends it frame callbacks every 100 ms on the
+  compositor's clock, for the output that hosts its desktop; one deadline,
+  woken by the seats' timer, nothing queued per frame, and nothing once no
+  agent drives one. Nothing is rendered for it; a capture of the window
+  (`screenshot` of a window) renders its surfaces on demand, mapped or not.
+  The seat remembers the window under its pointer: its pointer and ring
+  are drawn only where a screen shows that window; a card waiting for the
+  user shows alone, on the screen at its place. A minimized window an
+  agent acts on is brought back by `Model::unminimize`, which touches
+  neither focus nor the shown desktop.
+- A card the user clicked holds their keyboard (`seat_card_keys`, one of
+  the modal panels): Enter and Space press its focused button, Tab moves,
+  Escape refuses; a press elsewhere lets go.
 - The agents' journal (#176) keeps each `act` of an agent connection, carried
   out or refused, with the window as it was and the user's local time, and
   each question the user hands a coding agent from an AI's answer (#197); the

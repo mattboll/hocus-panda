@@ -39,7 +39,7 @@ enum Handled {
 impl State {
     /// A panel that takes the keys is open: the launcher, quick settings,
     /// a chooser, a card, polkit's dialog, the window switcher, a reply
-    /// typed into a toast.
+    /// typed into a toast, an agent's card the user clicked.
     pub fn modal_open(&self) -> bool {
         self.launcher_open()
             || self.toast_replying()
@@ -52,6 +52,7 @@ impl State {
             || self.circle_open()
             || self.picking()
             || self.alt_tab_open()
+            || self.seat_card_keys()
     }
 
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -244,6 +245,17 @@ impl State {
             }
             Some(Handled::Panel(sym, _)) if self.card_open() => {
                 self.card_key(sym);
+            }
+            // An agent's card the user clicked (#229), unless a panel
+            // opened over it.
+            Some(Handled::Panel(sym, _))
+                if self.seat_card_keys()
+                    && !self.toast_replying()
+                    && !self.launcher_open()
+                    && !self.quick_open()
+                    && !self.showcase_open() =>
+            {
+                self.seat_card_key(sym);
             }
             // A reply typed into a toast has the keys, unless a panel
             // opened over it.

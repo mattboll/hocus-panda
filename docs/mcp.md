@@ -48,7 +48,7 @@ With Claude Code: `claude mcp add hocuspanda -- hocus mcp --agent assistant`.
 |---|---|
 | `list_windows` | the screens, and every window: id, title, app id, output, geometry (global logical pixels), focus, visibility, state, desktop |
 | `accessibility_tree` | the shell's interface (role, label, rectangle, depth, focused, disabled, selected); with `window`, that window alone: applications' own trees (AT-SPI) are not read yet |
-| `capture` | a PNG of a `window` (or an `output`), and how its pixels map to logical coordinates |
+| `capture` | a PNG of a `window` (or an `output`), and how its pixels map to logical coordinates; a window on a desktop no screen shows, or minimized, as its application last drew it |
 | `click` | `window` at `x`, `y` (from its top-left corner, logical pixels; its centre when left out), or `element` by label; `button`, `count`, `intent` |
 | `scroll` | the same aim, `dy` in logical pixels (15 per notch, down positive); `intent` |
 | `type` | `text` into `window`, with the keyboard layout in effect; `intent` |
@@ -71,11 +71,14 @@ user's pointer, keyboard focus and stacking stay as they are. Nothing comes
 forward for an agent:
 
 - A click or a scroll lands on the window at the point asked, even under
-  another window: the seat is the agent's alone. The window must be shown
-  on a screen (not minimized, its desktop shown), so that the user sees
-  it happen; otherwise it is refused.
-- Typing goes wherever the window is, shown or not. The agent's keyboard
-  follows its clicks, as the user's does theirs.
+  another window: the seat is the agent's alone.
+- Clicks, scrolls and typing go wherever the window is: on a desktop no
+  screen shows too (see below). The agent's keyboard follows its clicks,
+  as the user's does theirs.
+- A minimized window the agent acts on comes back on its own desktop,
+  where it was in its stack, without the user's keyboard and without
+  switching desktops: shown if a screen shows that desktop, unseen
+  otherwise.
 - A click on the shell's own interface (`element`, with `shell = true`)
   still goes through the session's pointer, put back where it was after:
   the shell has one pointer.
@@ -97,6 +100,25 @@ Limits:
 - A window that the agent's click would activate (xdg-activation, opening
   a link) asks for attention instead of taking the user's keyboard, and
   an agent's click never starts moving or resizing a window.
+
+## A desktop it works on, unseen
+
+An agent may work on a desktop no screen shows, desktop 2 say, while the
+user stays on desktop 1: its windows there keep living as if shown. They
+keep their size and state; while the agent drives one (it acted on it in
+the last ten seconds, or an action waits), the compositor sends its
+application a frame callback ten times a second, so that it draws what
+the agent does, and the agent's `capture` of that window shows it. Nothing
+is drawn on a screen for them, and nothing at all once no agent drives a
+window there: the cost is an application drawing at most ten times a
+second while an agent works in it, and one wake of the compositor each
+time, no rendering.
+
+The agent's pointer, ring and intent show where a screen shows the window
+it points at: going to desktop 2, the user sees it work. A card that waits
+for the user shows wherever they are, alone, saying where the window is
+(`In a password field · Desktop 2, not shown`). Take over brings the
+window forward on its desktop, as before.
 
 ## It shows before acting
 
@@ -122,8 +144,10 @@ they are refused, and nothing is done. Either way the journal keeps them
 
 Scrolling never waits. The keys an agent types never reach the desktop's
 shortcuts (locking, the stop key), so those are not on the list. The card
-takes the user's pointer, never the keyboard: an Enter typed in another
-window cannot allow an agent's action by mistake.
+takes the user's pointer; it takes their keyboard only once they clicked
+it (Allow shows it): then Enter presses Allow (Tab moves to the other
+buttons), Escape refuses, and a press elsewhere gives the keyboard back.
+An Enter typed in another window before that never answers it.
 
 ```toml
 [agents]
@@ -132,15 +156,17 @@ confirm_timeout_s = 60
 confirm_apps = ["hocus-settings", "org.keepassxc.KeePassXC", "my.bank.App"]
 ```
 
+The settings' AI and agents page sets the three, applied at once.
+
 ## Take over
 
 While an agent is connected, the column's journal shows its window, small
 and live, with where it is (`helper · in Shopping list`) and Take over: the
 window comes forward with the user's keyboard, and the agent's actions are
 refused (`refused: the user took over…`) until Hand back. The card of a
-sensitive action offers the same. An agent's own screen to work on (a
-virtual output shown as the thumbnail) is not there yet: its window is on
-the user's desktops.
+sensitive action offers the same. The thumbnail shows the window wherever
+it is, on a desktop no screen shows too: the desktops are the agent's
+screens, there is no output of its own.
 
 ## The journal
 

@@ -36,16 +36,16 @@ expect_window = { app_id = "editor", state = "minimized" }
 [[step]]
 mcp = { agent = "assistant", tool = "click", arguments = { element = "No such thing" }, error = "no element labelled" }
 
-# A minimized window is not brought back for a click: the agent's seat
-# never moves the user's desktop. It types there all the same.
+# A minimized window the agent acts on comes back where it was (#229),
+# without the user's keyboard; the agent types there.
 [[step]]
-mcp = { agent = "helper", tool = "click", window = "editor", error = "is not shown" }
+mcp = { agent = "helper", tool = "click", window = "editor" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal", focused = false }
 
 [[step]]
 mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "a" } }
-
-[[step]]
-expect_window = { app_id = "editor", state = "minimized" }
 
 [[step]]
 expect_received = { app_id = "editor", event = "key 30 pressed on agent-helper" }

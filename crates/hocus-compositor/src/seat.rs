@@ -14,6 +14,15 @@
 //! The user may take over from an agent (in the column, or on the card):
 //! its window gets the user's keyboard and the agent's actions are refused
 //! until they hand back.
+//!
+//! An agent works where its windows are (#229): on a desktop no screen
+//! shows, a window keeps living as if shown. Its clicks land there, and
+//! while an agent drives it the window gets a frame callback now and then,
+//! so that its application draws on for the agent's captures; nothing is
+//! drawn on a screen for it. Its pointer and ring show once a screen shows
+//! that desktop; a card that waits shows wherever the user is. A minimized
+//! window an agent acts on comes back on its own desktop, without the
+//! user's keyboard.
 
 use std::time::Duration;
 
@@ -36,7 +45,7 @@ use smithay::{
         calloop::timer::{TimeoutAction, Timer},
         wayland_server::{backend::GlobalId, protocol::wl_surface::WlSurface},
     },
-    utils::{Logical, Point, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
     wayland::seat::WaylandFocus as _,
 };
 
@@ -57,6 +66,12 @@ const BIND_WAIT: Duration = Duration::from_secs(2);
 /// How long typing waits once the agent's keyboard came into a window, for
 /// its application to say what the field is for (a password?).
 const SETTLE: Duration = Duration::from_millis(300);
+/// A window no screen shows is driven this long after an agent acted on
+/// it: its application gets frame callbacks meanwhile.
+const DRIVEN_FOR: Duration = Duration::from_secs(10);
+/// How often such a window gets one: enough for an agent's captures to
+/// follow, little for its application to draw.
+const UNSEEN_FRAME: Duration = Duration::from_millis(100);
 
 impl crate::shell::Pixels for SeatView {
     fn pixels(&self) -> hocus_shell::column::View<'_> {
@@ -77,6 +92,9 @@ pub struct Seats {
     /// An agent's click on the shell goes through the user's pointer: the
     /// agents' cards ignore it meanwhile.
     injecting: bool,
+    /// When windows agents drive that no screen shows get their next frame
+    /// callback, while there are some.
+    unseen_frame: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -86,6 +104,9 @@ struct AgentSeat {
     seat: Seat<State>,
     /// Where its pointer is drawn, global logical, while on a screen.
     at: Option<Point<f64, Logical>>,
+    /// The window under it there, if any: while no screen shows that
+    /// window, its pointer does not show.
+    on: Option<WindowId>,
     /// When it last asked for something.
     last: Duration,
     /// What it does, said beside its name.
@@ -133,8 +154,13 @@ enum Phase {
     Settling { until: Duration },
     /// Under the ring, until it lands.
     Showing { until: Duration },
-    /// On the card, until the user answers or the time is up.
-    Confirming { until: Duration, why: Sensitive },
+    /// On the card, until the user answers or the time is up; `keys` once
+    /// the user clicked it: it has their keyboard.
+    Confirming {
+        until: Duration,
+        why: Sensitive,
+        keys: bool,
+    },
 }
 
 /// Why an action waits for the user.
@@ -168,6 +194,16 @@ enum Aimed {
     Shell(Point<f64, Logical>),
 }
 
+impl Aim {
+    /// The window it acts in, if any.
+    fn window(&self) -> Option<&Window> {
+        match &self.target {
+            Aimed::Point { window, .. } | Aimed::Keys { window } => Some(window),
+            Aimed::Shell(_) => None,
+        }
+    }
+}
+
 fn denied(message: impl Into<String>) -> ApiError {
     ApiError::new(ErrorCode::PermissionDenied, message)
 }
@@ -199,6 +235,7 @@ impl State {
             name: name.to_owned(),
             seat,
             at: None,
+            on: None,
             last: self.clock.now(),
             said: None,
             pending: None,
@@ -297,13 +334,27 @@ impl State {
             self.journal_keep(entry, Some(&busy));
             return Some(Err(busy));
         }
-        let aim = match self.agent_aim(connection, name, &target, &action) {
+        let mut aim = match self.agent_aim(connection, name, &target, &action) {
             Ok(aim) => aim,
             Err(err) => {
                 self.journal_keep(entry, Some(&err));
                 return Some(Err(err));
             }
         };
+        // A minimized window comes back on its desktop, then is aimed at
+        // again where it is now.
+        if let Some(id) = aim.window().and_then(model_id)
+            && self.model.is_minimized(id)
+        {
+            self.agent_restore(id, name);
+            aim = match self.agent_aim(connection, name, &target, &action) {
+                Ok(aim) => aim,
+                Err(err) => {
+                    self.journal_keep(entry, Some(&err));
+                    return Some(Err(err));
+                }
+            };
+        }
         let now = self.clock.now();
         let words = intent.unwrap_or_else(|| aim.words.clone());
         let phase = self.first_phase(connection, &aim, &action, now);
@@ -311,10 +362,11 @@ impl State {
         if let Some(seat) = self.agent_seat(connection) {
             seat.last = now;
             seat.said = Some(words.clone());
-            if let Some(at) = shown {
+            if let Some((at, on)) = shown {
                 seat.at = Some(at);
+                seat.on = on;
             }
-            if let Aimed::Point { window, .. } | Aimed::Keys { window } = &aim.target {
+            if let Some(window) = aim.window() {
                 seat.window = model_id(window);
             }
         }
@@ -343,6 +395,22 @@ impl State {
                 Some(result)
             }
         }
+    }
+
+    /// Brings back a minimized window an agent acts on (#229): on its own
+    /// desktop, shown there or not, and without the user's keyboard, which
+    /// stays where it is.
+    fn agent_restore(&mut self, id: WindowId, name: &str) {
+        if let Err(err) = self.model.unminimize(id) {
+            tracing::warn!(%err, "an agent's window stays minimized");
+            return;
+        }
+        tracing::info!(
+            agent = name,
+            window = id.0,
+            "an agent brings its window back"
+        );
+        self.sync_desktops();
     }
 
     /// What an action waits on first: its window's application taking the
@@ -402,6 +470,7 @@ impl State {
             Some(why) => Some(Phase::Confirming {
                 until: now + self.config.agents.confirm_timeout(),
                 why: why.clone(),
+                keys: false,
             }),
             None if matches!(action, Action::Click { .. }) && !delay.is_zero() => {
                 Some(Phase::Showing { until: now + delay })
@@ -441,23 +510,37 @@ impl State {
         }
     }
 
-    /// Where the agent's pointer shows for an action: the point, or the
-    /// middle of the window it types in, when shown.
-    fn shown_point(&self, aim: &Aim) -> Option<Point<f64, Logical>> {
+    /// Where the agent's pointer shows for an action, and the window under
+    /// it: the point, or the middle of the window it types in, when the
+    /// user would see it there.
+    fn shown_point(&self, aim: &Aim) -> Option<(Point<f64, Logical>, Option<WindowId>)> {
         match &aim.target {
-            Aimed::Point { at, .. } => Some(*at),
-            Aimed::Shell(at) => Some(*at),
-            // Where the user sees the window it types in: not over another.
+            Aimed::Point { at, window } => Some((*at, model_id(window))),
+            Aimed::Shell(at) => Some((*at, None)),
             Aimed::Keys { window } => {
-                let g = self.space.element_geometry(window)?;
+                let g = self.agent_geometry(window)?;
                 let centre = g.loc.to_f64()
                     + Point::from((f64::from(g.size.w) / 2.0, f64::from(g.size.h) / 2.0));
-                self.space
+                // On a screen, not over another window; on a desktop no
+                // screen shows, where it shows once one does.
+                let shown = self.space.element_location(window).is_some();
+                let over = self
+                    .space
                     .element_under(centre)
-                    .filter(|(w, _)| *w == window)
-                    .map(|_| centre)
+                    .is_some_and(|(w, _)| w == window);
+                (!shown || over).then(|| (centre, model_id(window)))
             }
         }
+    }
+
+    /// Where a window is in the global space: where it is mapped, or, on a
+    /// desktop no screen shows (#229), where it goes once one does.
+    fn agent_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        let at = self.space.element_location(window).or_else(|| {
+            let id = model_id(window)?;
+            Some(self.windows.get(&id)?.location)
+        })?;
+        Some(Rectangle::new(at, window.geometry().size))
     }
 
     /// Checks what agent `name` asks for, as the configuration in effect
@@ -590,22 +673,18 @@ impl State {
     }
 
     /// A point of `window` (from its top-left corner; its centre when
-    /// `None`) in the global space. The window must be on a screen: an
-    /// agent clicks where the user can see it, without bringing anything
-    /// forward.
+    /// `None`) in the global space, wherever the window is: on a screen,
+    /// or on a desktop no screen shows (#229). Nothing comes forward.
     fn agent_point(
         &self,
         window: &Window,
         id: u64,
         at: Option<hocus_api::Point>,
     ) -> Result<Point<f64, Logical>, ApiError> {
-        let geometry = self.space.element_geometry(window).ok_or_else(|| {
+        let geometry = self.agent_geometry(window).ok_or_else(|| {
             ApiError::new(
                 ErrorCode::Failed,
-                format!(
-                    "window {id} is not shown (minimized, or on a desktop no screen shows): \
-                     agents click where the user sees it; typing works wherever it is"
-                ),
+                format!("window {id} has no place: it is not managed"),
             )
         })?;
         let (w, h) = (f64::from(geometry.size.w), f64::from(geometry.size.h));
@@ -657,11 +736,13 @@ impl State {
                     .get_pointer()
                     .ok_or_else(|| ApiError::new(ErrorCode::Failed, "the agent has no pointer"))?;
                 // Whatever is over it, the point is the window's: the
-                // seat is the agent's alone.
-                let location = self.space.element_location(window).unwrap_or_default();
+                // seat is the agent's alone. Its surfaces start where its
+                // geometry says, on a screen or not.
+                let geometry = self.agent_geometry(window).unwrap_or_default();
+                let origin = geometry.loc - window.geometry().loc;
                 let focus = window
-                    .surface_under(*at - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, p)| (s, (p + location).to_f64()));
+                    .surface_under(*at - origin.to_f64(), WindowSurfaceType::ALL)
+                    .map(|(s, p)| (s, (p + origin).to_f64()));
                 pointer.motion(
                     self,
                     focus,
@@ -811,6 +892,7 @@ impl State {
             self.display_handle.remove_global::<State>(global);
         }
         self.refresh_binding(now);
+        self.frame_unseen(now);
         let due: Vec<ConnectionId> = self
             .seats
             .list
@@ -846,6 +928,55 @@ impl State {
         }
         self.redraw_seats();
         self.wake_for_seats();
+    }
+
+    /// Windows agents drive that no screen shows get a frame callback every
+    /// [`UNSEEN_FRAME`] (#229), so that their applications draw what the
+    /// agents do, for their captures. Nothing is drawn for them, and
+    /// nothing wakes once no agent drives one.
+    fn frame_unseen(&mut self, now: Duration) {
+        let driven = self.unseen_driven(now);
+        if driven.is_empty() {
+            self.seats.unseen_frame = None;
+            return;
+        }
+        if self.seats.unseen_frame.is_some_and(|at| now < at) {
+            return;
+        }
+        for (window, output) in &driven {
+            window.send_frame(output, now, None, |_, _| Some(output.clone()));
+        }
+        self.seats.unseen_frame = Some(now + UNSEEN_FRAME);
+    }
+
+    /// The windows agents drive (acting on them, or lately) that no screen
+    /// shows, each with the output that shows its desktop once shown.
+    fn unseen_driven(&self, now: Duration) -> Vec<(Window, Output)> {
+        let mut out: Vec<(Window, Output)> = Vec::new();
+        for seat in &self.seats.list {
+            let driving = seat.pending.is_some() || now.saturating_sub(seat.last) < DRIVEN_FOR;
+            let Some(id) = seat.window.filter(|_| driving && !seat.taken) else {
+                continue;
+            };
+            let Some(managed) = self.windows.get(&id) else {
+                continue;
+            };
+            if self.space.element_location(&managed.window).is_some()
+                || out.iter().any(|(w, _)| *w == managed.window)
+            {
+                continue;
+            }
+            let output = self
+                .model
+                .desktop_of(id)
+                .and_then(|d| self.model.host_of(d))
+                .and_then(|o| self.find_output(&o.name.0))
+                .or_else(|| self.space.outputs().next().cloned());
+            if let Some(output) = output {
+                out.push((managed.window.clone(), output));
+            }
+        }
+        out
     }
 
     /// A waiting action goes on to what it waits on next, checked again
@@ -1062,7 +1193,8 @@ impl State {
     }
 
     /// What each seat shows now, and where: its pointer while it acts or
-    /// acted lately, on a screen.
+    /// acted lately, where a screen shows the window it points at; else its
+    /// card alone, while one waits for the user.
     fn seat_showing(
         &self,
         seat: &AgentSeat,
@@ -1072,8 +1204,34 @@ impl State {
         if !recent && seat.pending.is_none() {
             return None;
         }
-        let at = seat.at?;
-        let output = self.space.output_under(at).next()?.clone();
+        let seen = seat.on.is_none_or(|id| {
+            self.windows
+                .get(&id)
+                .is_some_and(|m| self.space.element_location(&m.window).is_some())
+        });
+        let asking = seat
+            .pending
+            .as_ref()
+            .is_some_and(|p| matches!(p.phase, Phase::Confirming { .. }));
+        if !seen && !asking {
+            return None;
+        }
+        let mut at = seat.at?;
+        let output = match self.space.output_under(at).next() {
+            Some(output) => output.clone(),
+            // Where no screen is now (its screen went): the card shows on
+            // the first, inside it.
+            None if !seen => {
+                let output = self.space.outputs().next()?.clone();
+                let area = self.space.output_geometry(&output)?.to_f64();
+                at = Point::from((
+                    at.x.clamp(area.loc.x, area.loc.x + area.size.w - 1.0),
+                    at.y.clamp(area.loc.y, area.loc.y + area.size.h - 1.0),
+                ));
+                output
+            }
+            None => return None,
+        };
         let lang = self.shell_lang();
         let said = seat.pending.as_ref().map(|p| p.intent.clone()).or_else(|| {
             seat.said
@@ -1089,23 +1247,38 @@ impl State {
             Some((Phase::Binding { .. } | Phase::Settling { .. }, p)) => {
                 (matches!(p.action, Action::Click { .. }), None)
             }
-            Some((Phase::Confirming { why, .. }, p)) => (
-                matches!(p.action, Action::Click { .. }),
-                Some(Confirm {
-                    title: lang.agent_will(&seat.name, !matches!(p.action, Action::Click { .. })),
-                    intent: p.intent.clone(),
-                    why: match why {
-                        Sensitive::Password => lang.sensitive_password().to_owned(),
-                        Sensitive::App(app) => lang.sensitive_app(app),
-                    },
-                }),
-            ),
+            Some((Phase::Confirming { why, keys, .. }, p)) => {
+                let why = match why {
+                    Sensitive::Password => lang.sensitive_password().to_owned(),
+                    Sensitive::App(app) => lang.sensitive_app(app),
+                };
+                // Where no screen shows the window, the card says where it
+                // is.
+                let why = match seat.on.filter(|_| !seen).and_then(|id| {
+                    let desktop = self.model.desktop_of(id)?;
+                    self.desktop_label(desktop)
+                }) {
+                    Some(desktop) => lang.sensitive_unseen(&why, &desktop),
+                    None => why,
+                };
+                (
+                    matches!(p.action, Action::Click { .. }),
+                    Some(Confirm {
+                        title: lang
+                            .agent_will(&seat.name, !matches!(p.action, Action::Click { .. })),
+                        intent: p.intent.clone(),
+                        why,
+                        keys: *keys,
+                    }),
+                )
+            }
             None => (false, None),
         };
         Some((
             output,
             at,
             Showing {
+                pointer: seen,
                 label,
                 ring,
                 confirm,
@@ -1204,6 +1377,7 @@ impl State {
             })
             .flatten()
             .chain(self.seats.retired.iter().map(|(_, at)| *at))
+            .chain(self.seats.unseen_frame)
             .filter(|at| *at > now)
             .min();
         if next == self.seats.waking {
@@ -1321,7 +1495,8 @@ impl State {
     }
 
     /// The user's pointer over an agent's card: it takes the pointer
-    /// there. `pressed` for a button.
+    /// there. `pressed` for a button. A click on a card gives it the
+    /// keyboard (#229); a press elsewhere takes it back.
     pub fn seat_card_pointer(&mut self, at: Point<f64, Logical>, pressed: Option<bool>) -> bool {
         if self.seats.injecting || self.locked() {
             return false;
@@ -1351,6 +1526,26 @@ impl State {
                 hit = Some((seat.connection, answer));
             }
         }
+        // Let go on a card (not on its buttons, which answer), it has the
+        // keyboard; pressed elsewhere, none has it.
+        let keys_to = match (pressed, hit) {
+            (Some(false), Some((c, None))) => Some(Some(c)),
+            (Some(true), None) => Some(None),
+            _ => None,
+        };
+        if let Some(clicked) = keys_to {
+            for seat in &mut self.seats.list {
+                if let Some(Pending {
+                    phase: Phase::Confirming { keys, .. },
+                    ..
+                }) = &mut seat.pending
+                    && *keys != (Some(seat.connection) == clicked)
+                {
+                    *keys = !*keys;
+                    self.needs_redraw = true;
+                }
+            }
+        }
         let Some((connection, answer)) = hit else {
             return false;
         };
@@ -1359,6 +1554,58 @@ impl State {
         }
         self.needs_redraw = true;
         true
+    }
+
+    /// Whether an agent's card has the user's keyboard: they clicked it,
+    /// and it waits still.
+    pub fn seat_card_keys(&self) -> bool {
+        self.seats.list.iter().any(|s| {
+            s.pending
+                .as_ref()
+                .is_some_and(|p| matches!(p.phase, Phase::Confirming { keys: true, .. }))
+        })
+    }
+
+    /// A key for the card that has the keyboard: Enter presses the button
+    /// with the keyboard (Allow first), Escape refuses, Tab moves; the
+    /// rest does nothing.
+    pub fn seat_card_key(&mut self, sym: smithay::input::keyboard::Keysym) {
+        use hocus_ui::Key;
+        use smithay::input::keyboard::Keysym;
+        let key = match sym {
+            Keysym::Return | Keysym::KP_Enter => Key::Enter,
+            Keysym::space => Key::Space,
+            Keysym::Escape => Key::Escape,
+            Keysym::Tab => Key::Tab,
+            Keysym::ISO_Left_Tab => Key::BackTab,
+            _ => return,
+        };
+        let Some(seat) = self.seats.list.iter_mut().find(|s| {
+            s.pending
+                .as_ref()
+                .is_some_and(|p| matches!(p.phase, Phase::Confirming { keys: true, .. }))
+        }) else {
+            return;
+        };
+        let connection = seat.connection;
+        // The view shows the card with the keyboard, made at the last
+        // dispatch; else Enter allows, as Allow has the keyboard first.
+        let answer = match seat
+            .view
+            .as_mut()
+            .filter(|(k, _)| k.showing.confirm.as_ref().is_some_and(|c| c.keys))
+        {
+            Some((_, panel)) => panel.view.key(key),
+            None => match key {
+                Key::Enter | Key::Space => Some(Answer::Allow),
+                Key::Escape => Some(Answer::Refuse),
+                _ => None,
+            },
+        };
+        if let Some(answer) = answer {
+            self.seat_answer(connection, answer);
+        }
+        self.needs_redraw = true;
     }
 }
 

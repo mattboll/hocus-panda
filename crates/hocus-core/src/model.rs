@@ -239,6 +239,17 @@ impl Model {
         Ok(())
     }
 
+    /// Brings a minimized window back on its own desktop, where it was in
+    /// its stack, without focusing it nor showing its desktop: an agent's
+    /// window (#229), which never takes the keyboard.
+    pub fn unminimize(&mut self, window: WindowId) -> Result<(), ModelError> {
+        if !self.windows.contains_key(&window) {
+            return Err(ModelError::UnknownWindow);
+        }
+        self.minimized.remove(&window);
+        Ok(())
+    }
+
     /// Plugs an output. One seen before gets its own desktops back, with
     /// their windows; a new one gets `desktops` desktops (at least one).
     pub fn plug(
@@ -1097,6 +1108,28 @@ mod tests {
 
         assert_eq!(model.visible_windows(&laptop()), [a, b]);
         assert_eq!(model.focused(), Some(b));
+        Ok(())
+    }
+
+    #[test]
+    fn an_unminimized_window_comes_back_without_focus_nor_desktop() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let away = model.open_window(&external())?;
+        model.minimize(away)?;
+        model.show_nth(&external(), 1)?;
+        let here = model.open_window(&external())?;
+
+        model.unminimize(away)?;
+
+        assert!(!model.is_minimized(away));
+        assert_eq!(model.focused(), Some(here));
+        assert_eq!(model.visible_windows(&external()), [here]);
+        model.show_nth(&external(), 0)?;
+        assert_eq!(model.visible_windows(&external()), [away]);
+        assert_eq!(
+            model.unminimize(WindowId(99)),
+            Err(ModelError::UnknownWindow)
+        );
         Ok(())
     }
 
