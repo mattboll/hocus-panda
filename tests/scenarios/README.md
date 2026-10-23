@@ -134,6 +134,7 @@ Steps, one per `[[step]]` table:
 | `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
+| `pointer_path = [[x, y], …]` | moves the pointer through these points in turn, as a hand drawing a line |
 | `click = "left"` | presses and releases a button (`left`, `right`, `middle`) |
 | `press = "left"`, `release = "left"` | holds and lets go a button, for drags |
 | `scroll = 15` | scrolls the wheel, logical pixels (15 per notch, down positive) |

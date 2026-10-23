@@ -266,6 +266,17 @@ impl State {
                 build,
             );
         }
+        // A circled area, its menu and the answer (#46).
+        if let Some(panel) = self.circle_elements(renderer, output) {
+            elements.push(SceneElement::Frame(panel));
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.circle_glass(output),
+                build,
+            );
+        }
         // Choosing what a screenshot takes, and its flash.
         elements.extend(self.screenshot_elements(renderer, output));
         // What is recorded, and the recording's bar.

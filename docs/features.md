@@ -72,6 +72,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Configurable hot corners (overview, launcher, desktop), set in settings
 - Super pressed and released alone opens the overview
 - Super + drag draws on the screen; the line fades when Super is released
+- Super+Shift + drag circles anything to ask about it (keys set in `[circle]`): its text is read (tesseract), then copied, searched, noted, or explained, translated or asked about when the AI is on
 - Touchpad gestures: 3 fingers for desktops and overview, 4 fingers for the launcher
 - Gestures passed to applications: pinch (browser zoom), hold
 - Use the touchpad better: pinch in or out for the overview or the radial menu, and find other useful gestures. Must coexist with two-finger pinch in applications (browser zoom): 3 or 4 fingers, a modifier, or pinch on the desktop background
@@ -261,6 +262,7 @@ The column on the right of the screen is the chosen form (see
 - Offline intents
 - Document search: text, HTML, PDF, office files, OCR of screenshots; words + meaning; secrets excluded (never index `~/.ssh`, keyrings, password stores…); paused on battery
 - AI answers inside the command field rather than in a separate window
+- Circle to ask: a loop drawn around anything on screen (Super+Shift + drag) offers Explain, Search, Translate, Copy the text, Note and a question of one's own; the answer streams into a card beside it
 - Better semantic search in French
 - Coding agents (agent managers such as herdr, any Claude Code session): list with a panda per agent, preview, notifications with reply buttons, halo, jump to the agent that waits
 

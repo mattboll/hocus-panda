@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands for a slow tesseract: the same line, a second later.
+sleep 1
+exec "$(dirname "$0")/ocr" "$@"

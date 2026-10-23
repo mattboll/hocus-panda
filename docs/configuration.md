@@ -101,7 +101,7 @@ keep = true                # across sessions, encrypted
 folder = ""                # empty: Screenshots in the pictures folder
 save = true                # into the folder
 copy = true                # onto the clipboard (as PNG)
-ocr = "tesseract"          # reads the text for "Copy the text", when installed
+ocr = "tesseract"          # reads the text for "Copy the text" and circling to ask, when installed
 annotate = "hocus-annotate" # the toast's "Annotate", given the capture's file
 
 [updates]                  # the system's, shown in the column and the settings
@@ -226,6 +226,11 @@ bottom_right = "none"
 
 [hot_corners.outputs."HDMI-A-1"]   # one screen's own, the others' otherwise
 top_left = "launcher"
+
+[circle]                   # circle to ask: a left drag with these keys draws a loop around anything;
+enabled = true             #   its text is read (see [screenshots] ocr), then copied, searched, noted,
+modifiers = "Super+Shift"  #   or explained, translated or asked about while [ai] is on. Super, Ctrl,
+                           #   Alt, Shift; "Super" alone takes the place of drawing on the screen
 
 [gestures]                 # Super alone and the touchpad; overview, launcher, show-desktop or none
 super_alone = "overview"   # Super pressed and let go with nothing else between

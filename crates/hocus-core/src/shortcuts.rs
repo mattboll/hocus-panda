@@ -327,6 +327,39 @@ pub struct Modifiers {
     pub shift: bool,
 }
 
+impl Modifiers {
+    /// Adds the modifier named so (`Super`, `Ctrl`, `Alt`, `Shift`, any
+    /// case); the name back when it is none of them.
+    fn hold(&mut self, name: &str) -> Result<(), String> {
+        match name.to_ascii_lowercase().as_str() {
+            "super" | "logo" | "mod4" => self.logo = true,
+            "ctrl" | "control" => self.ctrl = true,
+            "alt" | "mod1" => self.alt = true,
+            "shift" => self.shift = true,
+            other => return Err(other.to_owned()),
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for Modifiers {
+    type Err = String;
+
+    /// Modifiers alone, as a mouse gesture holds them: `"Super+Shift"`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut modifiers = Self::default();
+        for m in s.split('+').map(str::trim) {
+            if m.is_empty() {
+                return Err(format!("{s:?}: a modifier is missing"));
+            }
+            modifiers
+                .hold(m)
+                .map_err(|other| format!("{s:?}: unknown modifier {other:?}"))?;
+        }
+        Ok(modifiers)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Combo {
     pub modifiers: Modifiers,
@@ -344,13 +377,9 @@ impl FromStr for Combo {
             return Err(format!("{s:?}: empty"));
         };
         for m in mods {
-            match m.to_ascii_lowercase().as_str() {
-                "super" | "logo" | "mod4" => modifiers.logo = true,
-                "ctrl" | "control" => modifiers.ctrl = true,
-                "alt" | "mod1" => modifiers.alt = true,
-                "shift" => modifiers.shift = true,
-                other => return Err(format!("{s:?}: unknown modifier {other:?}")),
-            }
+            modifiers
+                .hold(m)
+                .map_err(|other| format!("{s:?}: unknown modifier {other:?}"))?;
         }
         let lower = key.to_ascii_lowercase();
         let key = match lower.as_str() {

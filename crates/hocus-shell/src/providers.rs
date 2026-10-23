@@ -464,7 +464,7 @@ struct WebSearch {
 }
 
 /// Percent-encoding for a query string: unreserved characters stay.
-fn encode(s: &str) -> String {
+pub fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

@@ -158,7 +158,7 @@ impl State {
     }
 
     /// The output that `at` is on.
-    fn output_at(&self, at: Point<f64, Logical>) -> Option<Output> {
+    pub(crate) fn output_at(&self, at: Point<f64, Logical>) -> Option<Output> {
         self.space
             .outputs()
             .find(|o| {

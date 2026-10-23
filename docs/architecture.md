@@ -251,6 +251,21 @@ question brings back is dropped. Nested or in tests, a provider's usual
 address is never asked: only the one the configuration gives. The answer's
 card (`hocus-shell::answer`) is shared with circling to ask (#46).
 
+Circling to ask (#46) is a left drag with `[circle] modifiers` held
+(Super+Shift: Super alone draws on the screen, #86). One sheet the size of
+the screen (`hocus-shell::circle`) holds the loop, drawn piece by piece as
+the drawing pen's line is, the menu beside it and the answer's card. The
+release asks for the loop's bounding box to be captured after the turn,
+without the sheet; a worker encodes it, hands it to the program that reads
+text (`[screenshots] ocr`, tesseract) through a file of the runtime
+directory, removes the file and sends the text back. What is chosen before
+the text is there waits for it. Explain, Translate and a question go
+through the same worker as the command field's questions, told who asked,
+and are offered only while the AI is on; Copy the text, Note and Search
+(the launcher's search engine through `xdg-open`) act at once. The menu
+holds the keyboard and the pointer: Escape, or a press anywhere else that
+no client sees, closes it all.
+
 The phone (#85) goes through KDE Connect's daemon on the session bus,
 followed on a worker thread and never started by us: the session starts it
 from its autostart entry, with the environment its clipboard needs to reach

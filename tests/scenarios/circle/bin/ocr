@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stands for tesseract (`ocr IMAGE -`): reads a picture of the circled area
+# as a known line, and nothing in what is not a PNG file.
+[ "$2" = "-" ] || exit 2
+[ "$(head -c 4 "$1" | tail -c 3)" = "PNG" ] || exit 1
+printf "fatal error: 'linux/input.h' file not found\n"

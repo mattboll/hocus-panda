@@ -320,6 +320,8 @@ pub enum Step {
     /// Asks the window of this app id to close, and waits until it is gone.
     Close(String),
     PointerMove([f64; 2]),
+    /// Moves the pointer through these points in turn: a drawn line.
+    PointerPath(Vec<[f64; 2]>),
     /// Presses and releases a button.
     Click(ButtonName),
     /// Presses a button and holds it (for drags).
@@ -954,6 +956,7 @@ impl fmt::Display for Step {
             Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
             Self::Close(app_id) => write!(f, "close {app_id}"),
             Self::PointerMove([x, y]) => write!(f, "pointer_move {x},{y}"),
+            Self::PointerPath(points) => write!(f, "pointer_path of {} points", points.len()),
             Self::Click(button) => write!(f, "click {button:?}"),
             Self::Press(button) => write!(f, "press {button:?}"),
             Self::Scroll(dy) => write!(f, "scroll {dy}"),
@@ -1835,6 +1838,12 @@ impl Run<'_> {
             Step::Close(app_id) => self.close(app_id),
             Step::PointerMove([x, y]) => {
                 self.request(Request::PointerMove { x: *x, y: *y })?;
+                Ok(())
+            }
+            Step::PointerPath(points) => {
+                for [x, y] in points {
+                    self.request(Request::PointerMove { x: *x, y: *y })?;
+                }
                 Ok(())
             }
             Step::Click(button) => {

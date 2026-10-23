@@ -299,6 +299,7 @@ impl Headless {
         self.app.state.refresh_shell();
         self.app.serve_captures();
         self.app.serve_screenshots();
+        self.app.serve_circle();
         self.app.serve_recording();
         self.app.apply_gamma();
         self.app.settle_outputs();
