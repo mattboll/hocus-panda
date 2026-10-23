@@ -1,0 +1,49 @@
+# The Matrix theme's column (#155, docs/design/matrix-theme.md §14): it goes
+# under a fullscreen window swept away by rain, and comes back behind a
+# curtain of rain sweeping in from the screen's edge.
+description = "In the Matrix theme the column turns green and a band of rain sweeps it away to the right as a window goes fullscreen; back to normal, the rain sweeps in from the right and the column shows behind it"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "video", size = [500, 300], color = "#3399ff" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+set_state = { app_id = "video", state = "fullscreen" }
+
+[[step]]
+advance_ms = 160
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-column-close.png" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+set_state = { app_id = "video", state = "normal" }
+
+[[step]]
+advance_ms = 90
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-column-open.png" }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_idle = { for_ms = 1000 }

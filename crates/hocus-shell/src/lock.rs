@@ -2,18 +2,21 @@
 //! curtain dims the screen with a countdown; any input lifts it (so it has
 //! no "lock now" button: Super+L locks at once). The lock
 //! screen shows the clock, the date, who is logged in and the password
-//! field, with a warning when Caps Lock is on.
+//! field, with a warning when Caps Lock is on. In the Matrix theme it
+//! leaves its background and a padlock's place to the compositor, which
+//! draws the rain and the padlock there.
 
 use std::time::Duration;
 
 use hocus_ui::{
     AccessNode, Align, Color, Input, Insets, Justify, Key, Kind, Length, Look, NodeId, Paint,
-    PixelRect, Point, Size, Style, Surface, TextField, Theme, Tree,
+    PixelRect, Point, Rect, Size, Style, Surface, TextField, Theme, Tree,
 };
 
 use crate::{
     column::{View, WallTime},
     i18n::Lang,
+    matrix::{CELL, PADLOCK_CELLS, Variant},
     panda::{Character, Mood, Panda},
 };
 
@@ -173,6 +176,9 @@ pub struct LockScreen {
     lang: Lang,
     clock: NodeId,
     date: NodeId,
+    /// Who is logged in, or the padlock's place in the Matrix theme.
+    badge: NodeId,
+    field_box: NodeId,
     field: NodeId,
     note: NodeId,
     time: Option<WallTime>,
@@ -193,13 +199,24 @@ impl std::fmt::Debug for LockScreen {
 
 impl LockScreen {
     /// For `user`, whose initial shows; `pandas`, two asleep in a corner.
-    pub fn new(theme: Theme, lang: Lang, size: Size, scale: f32, user: &str, pandas: bool) -> Self {
+    /// The Matrix variant has no background and an empty place for the
+    /// padlock instead of the initial.
+    pub fn new(
+        theme: Theme,
+        lang: Lang,
+        size: Size,
+        scale: f32,
+        user: &str,
+        pandas: bool,
+        variant: Variant,
+    ) -> Self {
+        let matrix = variant == Variant::Matrix;
         let mut tree = Tree::new(theme.clone(), size, scale);
         let root = tree.root();
         tree.set_look(
             root,
             Look {
-                background: Some(Paint::Background),
+                background: (!matrix).then_some(Paint::Background),
                 ..Look::default()
             },
         );
@@ -236,47 +253,62 @@ impl LockScreen {
         tree.add(
             root,
             Style {
-                height: Length::Px(54.0),
+                height: Length::Px(if matrix { 30.0 } else { 54.0 }),
                 ..Style::default()
             },
             Kind::Box(Look::default()),
         )
         .unwrap_or_else(MISSING);
-        let avatar = tree
-            .add(
+        let badge = if matrix {
+            let (cols, rows) = PADLOCK_CELLS;
+            tree.add(
                 root,
                 Style {
-                    width: Length::Px(72.0),
-                    height: Length::Px(72.0),
-                    justify: Justify::Center,
-                    align: Align::Center,
+                    width: Length::Px((cols * CELL.0) as f32),
+                    height: Length::Px((rows * CELL.1) as f32),
                     ..Style::default()
                 },
-                Kind::Box(Look {
-                    background: Some(Paint::Accent),
-                    radius: 36.0,
-                    ..Look::default()
-                }),
+                Kind::Box(Look::default()),
+            )
+            .unwrap_or_else(MISSING)
+        } else {
+            let avatar = tree
+                .add(
+                    root,
+                    Style {
+                        width: Length::Px(72.0),
+                        height: Length::Px(72.0),
+                        justify: Justify::Center,
+                        align: Align::Center,
+                        ..Style::default()
+                    },
+                    Kind::Box(Look {
+                        background: Some(Paint::Accent),
+                        radius: 36.0,
+                        ..Look::default()
+                    }),
+                )
+                .unwrap_or_else(MISSING);
+            let initial: String = user
+                .chars()
+                .next()
+                .map(|c| c.to_uppercase().collect())
+                .unwrap_or_default();
+            tree.add(
+                avatar,
+                Style::default(),
+                Kind::text(
+                    initial,
+                    theme
+                        .text
+                        .headline
+                        .with_weight(700)
+                        .with_color(Paint::OnAccent),
+                ),
             )
             .unwrap_or_else(MISSING);
-        let initial: String = user
-            .chars()
-            .next()
-            .map(|c| c.to_uppercase().collect())
-            .unwrap_or_default();
-        tree.add(
-            avatar,
-            Style::default(),
-            Kind::text(
-                initial,
-                theme
-                    .text
-                    .headline
-                    .with_weight(700)
-                    .with_color(Paint::OnAccent),
-            ),
-        )
-        .unwrap_or_else(MISSING);
+            avatar
+        };
         tree.add(
             root,
             Style {
@@ -353,6 +385,8 @@ impl LockScreen {
             lang,
             clock,
             date,
+            badge,
+            field_box,
             field,
             note,
             time: None,
@@ -476,6 +510,21 @@ impl LockScreen {
         self.surface.draw(&mut self.tree, &damage)
     }
 
+    /// Who is logged in, or the padlock's place: logical, from the corner.
+    pub fn badge(&self) -> Option<Rect> {
+        self.tree.rect(self.badge)
+    }
+
+    /// What shakes when the password is wrong, across the screen: from the
+    /// badge down to the note under the field.
+    pub fn band(&self) -> Option<Rect> {
+        let top = self.tree.rect(self.badge)?;
+        let field = self.tree.rect(self.field_box)?;
+        let note = self.tree.rect(self.note).map_or(0.0, |n| n.h);
+        let bottom = field.y + field.h + 6.0 + note.max(20.0);
+        Some(Rect::new(0.0, top.y, self.tree.size().w, bottom - top.y))
+    }
+
     pub fn view(&self) -> View<'_> {
         view(&self.surface)
     }
@@ -497,6 +546,7 @@ mod tests {
             1.0,
             "alex",
             true,
+            Variant::Plain,
         );
         s.set_time(WallTime {
             hour: 23,
@@ -525,6 +575,25 @@ mod tests {
         s.set_check(Check::Failed);
         s.draw(Duration::ZERO);
         assert!(s.access().dump().contains("Wrong password"));
+    }
+
+    #[test]
+    fn the_matrix_variant_leaves_room_for_the_padlock() {
+        let mut s = LockScreen::new(
+            Theme::default(),
+            Lang::En,
+            Size::new(800.0, 700.0),
+            1.0,
+            "alex",
+            false,
+            Variant::Matrix,
+        );
+        s.draw(Duration::ZERO);
+        let badge = s.badge().expect("laid out");
+        assert_eq!((badge.w, badge.h), (96.0, 224.0));
+        let band = s.band().expect("laid out");
+        assert!(band.y == badge.y && band.h > badge.h + 52.0, "{band:?}");
+        assert!(!s.access().dump().contains("\"A\""), "no initial");
     }
 
     #[test]

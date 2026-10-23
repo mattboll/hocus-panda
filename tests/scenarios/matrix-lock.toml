@@ -1,0 +1,96 @@
+# The Matrix theme's lock (#155, docs/design/matrix-theme.md §12).
+description = "In the Matrix theme dense rain cascades over the desktop as it locks, then the lock fades in with its padlock of glyphs over still rain; a wrong password shakes the padlock and the field under red; unlocked, the rain speeds up, flashes and the desktop's green fades"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [500, 400], color = "#3399ff" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+keys = "super+l"
+
+[[step]]
+expect_ui = { label = "Password" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-lock-cascade.png" }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-lock.png" }
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+[[step]]
+type = "bamboo"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "Wrong password" }
+
+[[step]]
+advance_ms = 40
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-lock-refused.png" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+[[step]]
+type = "panda"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "Password", shown = false }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-unlock-rain.png" }
+
+# A screenshot takes a frame (16 ms): the flash, half gone.
+[[step]]
+advance_ms = 20
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-unlock-flash.png" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+[[step]]
+expect_focus = "editor"

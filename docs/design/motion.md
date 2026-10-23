@@ -110,7 +110,10 @@ blue, never brownish. The window motions are drawn with plain elements, so
 that every renderer shows them and scenarios sample them; with reduced
 motion they give way to the short fades of every theme. Every decorated
 window has a hairline just inside its edge in the theme's tint (green in
-this theme, faint white in the dark one), as the boards draw it.
+this theme, faint white in the dark one), as the boards draw it. The
+shell's moments are drawn the same way; with reduced motion they keep the
+theme's colours (the black behind the lock and Alt+Tab, the padlock, the
+launcher's dim) and come and go as in every theme.
 
 ## The pandas
 

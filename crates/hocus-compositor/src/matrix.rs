@@ -32,8 +32,8 @@ use smithay::{
 use crate::{State, scene::SceneElement};
 
 /// The sheet's cells across and down; its last row holds the heads.
-const SHEET_COLS: u32 = 48;
-const SHEET_ROWS: u32 = 33;
+pub(crate) const SHEET_COLS: u32 = 48;
+pub(crate) const SHEET_ROWS: u32 = 33;
 
 /// A window opening: 400 ms, and glyphs that scatter 100 ms longer.
 const OPEN_MS: f32 = 500.0;
@@ -236,7 +236,7 @@ impl Sheets {
 pub(crate) struct Brush<'a, R: Renderer + ImportAll + ImportMem> {
     pub(crate) renderer: &'a mut R,
     sheet: SheetBuffer,
-    scale: f64,
+    pub(crate) scale: f64,
     pub(crate) out: Vec<SceneElement<R>>,
 }
 
@@ -248,7 +248,7 @@ where
     /// Part of the sheet, `cells` across and down from cell `(col, row)`,
     /// drawn at `at` (output-local, logical) at the cells' own size, cut
     /// to `size`.
-    fn cut(
+    pub(crate) fn cut(
         &mut self,
         at: Point<f64, Logical>,
         size: Size<f64, Logical>,
@@ -281,7 +281,7 @@ where
 
     /// A row of glyphs `width` wide (and `height` tall, a row at most),
     /// from the sheet's row `row` and its column `col`, wrapping around.
-    fn row(
+    pub(crate) fn row(
         &mut self,
         at: Point<f64, Logical>,
         width: f64,
@@ -304,7 +304,14 @@ where
 
     /// A column of glyphs `height` tall from the sheet's column `col` and
     /// its row `row`, wrapping around its green rows.
-    fn column(&mut self, at: Point<f64, Logical>, height: f64, col: u32, row: u32, alpha: f32) {
+    pub(crate) fn column(
+        &mut self,
+        at: Point<f64, Logical>,
+        height: f64,
+        col: u32,
+        row: u32,
+        alpha: f32,
+    ) {
         let ch = f64::from(CELL.1);
         let green = SHEET_ROWS - 1;
         let (mut y, mut row) = (0.0, row % green);
@@ -377,7 +384,7 @@ where
 }
 
 /// Which of the sheet's green rows and columns a row of the window takes.
-fn pick(seed: u64, n: u32, salt: u64) -> u64 {
+pub(crate) fn pick(seed: u64, n: u32, salt: u64) -> u64 {
     hash(&[seed, n.into(), salt])
 }
 

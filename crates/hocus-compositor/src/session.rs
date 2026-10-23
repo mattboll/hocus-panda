@@ -62,8 +62,12 @@ struct Booting {
     since: Duration,
     /// By output name.
     panels: std::collections::BTreeMap<String, crate::shell::Panel<Boot>>,
-    /// Everything back (or it waited long enough): it fades.
-    leaving: Option<Animated>,
+    /// Everything back (or it waited long enough): it fades, or in the
+    /// Matrix theme says so and dissolves (#155).
+    leaving: Option<crate::lock::Moment>,
+    /// The applications put back, in order, for the Matrix theme's
+    /// terminal.
+    apps: Vec<String>,
 }
 
 /// `$XDG_STATE_HOME/hocuspanda`, or `~/.local/state/hocuspanda`.
@@ -258,6 +262,12 @@ impl State {
                 since: now,
                 panels: Default::default(),
                 leaving: None,
+                apps: self
+                    .sessions
+                    .pending
+                    .iter()
+                    .map(|w| w.app_id.clone())
+                    .collect(),
             });
             self.needs_redraw = true;
         }
@@ -268,7 +278,29 @@ impl State {
     fn refresh_boot(&mut self) {
         let now = self.clock.now();
         let moves = !self.instant_motion && !self.config.appearance.reduced_motion;
+        let matrix = self.matrix_moves();
+        let variant = if self.matrix_look() {
+            hocus_shell::matrix::Variant::Matrix
+        } else {
+            hocus_shell::matrix::Variant::Plain
+        };
         let left = self.sessions.pending.len();
+        let back: Vec<(String, bool)> = self
+            .sessions
+            .boot
+            .as_ref()
+            .map(|b| {
+                b.apps
+                    .iter()
+                    .map(|a| {
+                        (
+                            a.clone(),
+                            !self.sessions.pending.iter().any(|w| &w.app_id == a),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let Some(boot) = self.sessions.boot.as_mut() else {
             return;
         };
@@ -279,11 +311,19 @@ impl State {
                 self.needs_redraw = true;
                 return;
             }
-            let mut fade = Animated::new(1.0);
-            fade.set(0.0, Curve::Ease(Easing::InCubic, STANDARD), now);
-            boot.leaving = Some(fade);
+            boot.leaving = Some(if matrix {
+                crate::lock::Moment::Matrix(now)
+            } else {
+                let mut fade = Animated::new(1.0);
+                fade.set(0.0, Curve::Ease(Easing::InCubic, STANDARD), now);
+                crate::lock::Moment::Plain(fade)
+            });
         }
-        if boot.leaving.as_ref().is_some_and(|f| !f.is_running(now)) {
+        if boot
+            .leaving
+            .as_ref()
+            .is_some_and(|f| !f.is_running(now, crate::matrix_screens::BOOT_OUT))
+        {
             self.sessions.boot = None;
             self.needs_redraw = true;
             return;
@@ -310,11 +350,21 @@ impl State {
         let total = boot.total;
         boot.panels
             .retain(|name, _| outputs.iter().any(|(o, _, _)| o == name));
-        let mut redraw = boot.leaving.is_some();
+        // The Matrix theme's rain falls while it shows.
+        let mut redraw = boot.leaving.is_some() || matrix;
         for (name, size, scale) in outputs {
             let panel = boot.panels.entry(name).or_insert_with(|| {
-                crate::shell::Panel::new(Boot::new(theme.clone(), lang, size, scale, total, pandas))
+                crate::shell::Panel::new(Boot::new(
+                    theme.clone(),
+                    lang,
+                    size,
+                    scale,
+                    total,
+                    pandas,
+                    variant,
+                ))
             });
+            panel.view.set_lines(&back);
             panel.view.set_progress(total - left.min(total), total);
             let drawn = panel.view.draw(now);
             redraw |= panel.upload(&drawn) || panel.view.is_moving(now);
@@ -336,15 +386,33 @@ impl State {
         let Some(boot) = &self.sessions.boot else {
             return Vec::new();
         };
-        let alpha = boot
-            .leaving
-            .as_ref()
-            .map(|f| f.value(self.clock.now()).clamp(0.0, 1.0));
+        // The Matrix theme's boot draws it with its rain (#155).
+        if self.matrix_look() {
+            return Vec::new();
+        }
+        let alpha = boot.leaving.as_ref().map(|m| match m {
+            crate::lock::Moment::Plain(fade) => fade.value(self.clock.now()).clamp(0.0, 1.0),
+            crate::lock::Moment::Matrix(_) => 0.0,
+        });
         boot.panels
             .get(&output.name())
             .and_then(|p| p.element_with(renderer, output, Default::default(), alpha))
             .into_iter()
             .collect()
+    }
+
+    /// The boot screen on `output` in the Matrix theme: since when it
+    /// shows, since when it goes, and its picture.
+    pub(crate) fn boot_matrix_on(
+        &self,
+        output: &smithay::output::Output,
+    ) -> Option<(Duration, Option<Duration>, &crate::shell::Panel<Boot>)> {
+        let boot = self.sessions.boot.as_ref()?;
+        let leaving = match boot.leaving {
+            Some(crate::lock::Moment::Matrix(since)) => Some(since),
+            Some(crate::lock::Moment::Plain(_)) | None => None,
+        };
+        Some((boot.since, leaving, boot.panels.get(&output.name())?))
     }
 
     pub fn boot_ui(&self, out: &mut Vec<hocus_api::UiNode>) {

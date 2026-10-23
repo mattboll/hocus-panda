@@ -1,6 +1,7 @@
 //! The Matrix theme's rain (docs/design/matrix-theme.md): its glyphs, the
-//! still rain of the wallpaper, and a sheet of glyphs the compositor's
-//! window effects cut their rows and columns from.
+//! still rain of the wallpaper, a sheet of glyphs the compositor's
+//! effects cut their rows and columns from, and the shapes they draw in
+//! glyphs (the lock's padlock, the boot's large letters).
 //!
 //! The glyphs are drawn here, stroke by stroke, after half-width katakana
 //! and digits, some of them mirrored as in the films: no bundled font has
@@ -582,6 +583,83 @@ impl Atlas {
     }
 }
 
+/// How a view of the shell is drawn: as in every theme, or leaving room
+/// for what the compositor draws of the Matrix theme (its rain behind,
+/// its padlock, its progress strip).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Variant {
+    #[default]
+    Plain,
+    Matrix,
+}
+
+/// The lock screen's padlock, a glyph per set bit, 12 cells across (the
+/// highest bit on the left) and 16 down (docs/design/matrix-theme.md, §12).
+pub const PADLOCK: [u16; 16] = [
+    0b0000_1111_0000,
+    0b0001_1111_1000,
+    0b0011_0000_1100,
+    0b0011_0000_1100,
+    0b0110_0000_0110,
+    0b0110_0000_0110,
+    0b0110_0000_0110,
+    0b1111_1111_1111,
+    0b1111_1111_1111,
+    0b1111_1001_1111,
+    0b1111_0000_1111,
+    0b1111_1001_1111,
+    0b1111_1001_1111,
+    0b1111_1001_1111,
+    0b1111_1111_1111,
+    0b1111_1111_1111,
+];
+/// The padlock's cells across and down.
+pub const PADLOCK_CELLS: (u32, u32) = (12, 16);
+
+/// A capital letter on a grid 5 wide and 7 tall, a row per byte (the
+/// highest of its five bits on the left), for the boot's large words;
+/// accents dropped, anything else blank.
+pub fn letter(c: char) -> [u8; 7] {
+    let base = match c {
+        'À' | 'Â' | 'Ä' | 'à' | 'â' | 'ä' => 'A',
+        'Ç' | 'ç' => 'C',
+        'É' | 'È' | 'Ê' | 'Ë' | 'é' | 'è' | 'ê' | 'ë' => 'E',
+        'Î' | 'Ï' | 'î' | 'ï' => 'I',
+        'Ô' | 'Ö' | 'ô' | 'ö' => 'O',
+        'Ù' | 'Û' | 'Ü' | 'ù' | 'û' | 'ü' => 'U',
+        c => c.to_ascii_uppercase(),
+    };
+    match base {
+        'A' => [14, 17, 17, 31, 17, 17, 17],
+        'B' => [30, 17, 17, 30, 17, 17, 30],
+        'C' => [14, 17, 16, 16, 16, 17, 14],
+        'D' => [30, 17, 17, 17, 17, 17, 30],
+        'E' => [31, 16, 16, 30, 16, 16, 31],
+        'F' => [31, 16, 16, 30, 16, 16, 16],
+        'G' => [14, 17, 16, 23, 17, 17, 15],
+        'H' => [17, 17, 17, 31, 17, 17, 17],
+        'I' => [14, 4, 4, 4, 4, 4, 14],
+        'J' => [7, 2, 2, 2, 2, 18, 12],
+        'K' => [17, 18, 20, 24, 20, 18, 17],
+        'L' => [16, 16, 16, 16, 16, 16, 31],
+        'M' => [17, 27, 21, 21, 17, 17, 17],
+        'N' => [17, 17, 25, 21, 19, 17, 17],
+        'O' => [14, 17, 17, 17, 17, 17, 14],
+        'P' => [30, 17, 17, 30, 16, 16, 16],
+        'Q' => [14, 17, 17, 17, 21, 18, 13],
+        'R' => [30, 17, 17, 30, 20, 18, 17],
+        'S' => [15, 16, 16, 14, 1, 1, 30],
+        'T' => [31, 4, 4, 4, 4, 4, 4],
+        'U' => [17, 17, 17, 17, 17, 17, 14],
+        'V' => [17, 17, 17, 17, 17, 10, 4],
+        'W' => [17, 17, 17, 21, 21, 21, 10],
+        'X' => [17, 17, 10, 4, 10, 17, 17],
+        'Y' => [17, 17, 10, 4, 4, 4, 4],
+        'Z' => [31, 1, 2, 4, 8, 16, 31],
+        _ => [0; 7],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,6 +723,19 @@ mod tests {
                 assert_eq!(atlas.pixels[((y * atlas.width + x) * 4 + 3) as usize], 0);
             }
         }
+    }
+
+    #[test]
+    fn letters_fit_their_grid_and_accents_drop() {
+        for c in 'A'..='Z' {
+            let rows = letter(c);
+            assert!(rows.iter().all(|r| *r < 32), "{c}");
+            assert!(rows.iter().any(|r| *r != 0), "{c} is blank");
+        }
+        assert_eq!(letter('È'), letter('E'));
+        assert_eq!(letter('ê'), letter('E'));
+        assert_eq!(letter(' '), [0; 7]);
+        assert!(PADLOCK.iter().all(|r| *r < 1 << PADLOCK_CELLS.0));
     }
 
     #[test]

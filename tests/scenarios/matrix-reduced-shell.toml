@@ -1,0 +1,58 @@
+# The Matrix theme's shell with reduced motion (#155): its colours and its
+# padlock, no rain, nothing moving.
+description = "In the Matrix theme with reduced motion the lock is black with its padlock of glyphs and no rain, at once, and Alt+Tab shows at once over black, its choice glowing"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+reduced_motion = true
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "mail", size = [600, 420], color = "#e5484d" }
+
+[[step]]
+open = { app_id = "editor", size = [640, 440], color = "#33cc66" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+keys = "15"
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-reduced-alt-tab.png" }
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "mail", focused = true }
+
+[[step]]
+keys = "super+l"
+
+[[step]]
+expect_ui = { label = "Password" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-reduced-lock.png" }
+
+[[step]]
+expect_idle = { for_ms = 1000 }

@@ -1,0 +1,110 @@
+# The Matrix theme's Alt+Tab and overview (#155, docs/design/matrix-theme.md
+# §10 and §11).
+description = "In the Matrix theme Alt+Tab fades in over black and slow rain, the choice glowing, a trace to the next card; the overview turns the windows to rain that gathers into its grid over pure black, and going, the one picked springs back to its place while the others fall"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "mail", size = [600, 420], color = "#e5484d" }
+
+[[step]]
+open = { app_id = "editor", size = [640, 440], color = "#33cc66" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+keys = "15"
+
+[[step]]
+expect_ui = { label = "mail", selected = true }
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-alt-tab-in.png" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+keys = "15"
+
+[[step]]
+expect_ui = { label = "editor", selected = true }
+
+[[step]]
+advance_ms = 30
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-alt-tab-trace.png" }
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "editor", focused = true }
+
+
+[[step]]
+advance_ms = 500
+
+# The overview, Super alone.
+[[step]]
+key_down = "super"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "mail" }
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-overview-decode.png" }
+
+[[step]]
+advance_ms = 160
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-overview-gather.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-overview.png" }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_window = { app_id = "mail", focused = true }
+
+[[step]]
+advance_ms = 120
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-overview-exit.png" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_idle = { for_ms = 2000 }

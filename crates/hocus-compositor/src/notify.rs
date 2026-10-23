@@ -14,7 +14,7 @@ use hocus_shell::{
 use hocus_ui::{Input, Point as UiPoint, Theme};
 use smithay::{
     backend::renderer::{
-        ImportMem, Renderer,
+        ImportAll, ImportMem, Renderer,
         element::{
             Kind,
             memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
@@ -25,7 +25,7 @@ use smithay::{
     utils::{Logical, Physical, Point, Rectangle, Size},
 };
 
-use crate::{App, State};
+use crate::{App, State, scene::SceneElement};
 
 /// How long a toast stays when its client lets us choose.
 const NORMAL: Duration = Duration::from_secs(6);
@@ -35,7 +35,7 @@ const INSET: i32 = 8;
 
 #[derive(Debug)]
 pub struct ToastPanel {
-    toasts: Toasts,
+    pub(crate) toasts: Toasts,
     lang: Lang,
     /// The next id of the shell's own toasts.
     next_shell_id: u32,
@@ -144,6 +144,13 @@ impl State {
         }
         let now = self.clock.now();
         let dnd = self.dnd();
+        // In the Matrix theme a toast is typed in where it goes (#155).
+        let entrance = if self.matrix_moves() {
+            hocus_shell::toasts::Entrance::InPlace
+        } else {
+            hocus_shell::toasts::Entrance::Slide
+        };
+        let mut typed_in = None;
         // While the screen is shared, nothing private shows on it.
         let sharing = self.sharing();
         // A first toast goes where the user works; the others join it.
@@ -183,7 +190,13 @@ impl State {
                     }
                     Vec::new()
                 } else {
+                    let id = toast.id;
+                    let new = !panel.toasts.shown().contains(&id);
+                    panel.toasts.set_entrance(entrance);
                     let events = panel.toasts.show(toast, now);
+                    if new {
+                        typed_in = Some(id);
+                    }
                     self.emit(|_| shown);
                     events
                 }
@@ -197,6 +210,9 @@ impl State {
                 Vec::new()
             }
         };
+        if let Some(id) = typed_in {
+            self.matrix_toast_shown(id);
+        }
         self.toast_events(events);
         self.needs_redraw = true;
     }
@@ -609,6 +625,17 @@ impl State {
         ))
         .to_i32_round();
         let local = origin - area.loc.to_f64();
+        // In the Matrix theme, what is not typed in yet is left out.
+        let hidden = self.matrix_toasts_hidden();
+        if !hidden.is_empty() {
+            let whole = crate::matrix_shell::rect(0.0, 0.0, f64::from(size.w), f64::from(size.h));
+            return crate::matrix_shell::subtract(whole, &hidden)
+                .into_iter()
+                .filter_map(|part| {
+                    crate::matrix_shell::buffer_part(renderer, buffer, *scale, local, part, 1.0)
+                })
+                .collect();
+        }
         let location: Point<f64, Physical> = local.to_physical(*scale);
         match MemoryRenderBufferRenderElement::from_buffer(
             renderer,
@@ -625,6 +652,25 @@ impl State {
                 Vec::new()
             }
         }
+    }
+
+    /// The Matrix theme's glyphs over the toasts on `output` (#155).
+    pub fn matrix_toasts_on<R>(&self, renderer: &mut R, output: &Output) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let (Some(panel), Some(origin)) = (&self.toasts, self.toasts_origin()) else {
+            return Vec::new();
+        };
+        let (Some((name, _, scale)), Some(area)) = (&panel.on, self.space.output_geometry(output))
+        else {
+            return Vec::new();
+        };
+        if *name != output.name() {
+            return Vec::new();
+        }
+        self.matrix_toast_elements(renderer, origin - area.loc.to_f64(), *scale)
     }
 
     /// The toasts for the control API, in global coordinates.

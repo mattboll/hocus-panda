@@ -11,7 +11,7 @@ use hocus_ui::{
     motion::{Curve, Easing, SMALL},
 };
 
-use crate::column::View;
+use crate::{column::View, matrix::Variant};
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
 
@@ -23,6 +23,9 @@ const GAP: f32 = 14.0;
 const PAD: f32 = 18.0;
 /// Room for the shadow.
 const ROOM: f32 = 18.0;
+/// A title is typed in at this pace in the Matrix theme
+/// (docs/design/matrix-theme.md, §11).
+const TYPED: Duration = Duration::from_millis(3);
 
 /// A window as the switcher shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +42,10 @@ pub struct WindowSwitcher {
     ring: NodeId,
     columns: usize,
     selected: Option<usize>,
+    /// Each card's title, and what it says in full.
+    titles: Vec<(NodeId, String)>,
+    /// Titles typed in since then, a character at a time.
+    typing: Option<Duration>,
 }
 
 impl std::fmt::Debug for WindowSwitcher {
@@ -76,13 +83,15 @@ impl WindowSwitcher {
     }
 
     /// The cards across at most `width`, `selected` ringed (none: none on
-    /// this screen).
+    /// this screen); in the Matrix theme each card has the theme's thin
+    /// border.
     pub fn new(
         theme: Theme,
         scale: f32,
         cards: &[Card],
         selected: Option<usize>,
         width: f32,
+        variant: Variant,
     ) -> Self {
         let size = Self::size(cards.len(), width);
         let columns = Self::columns(cards.len(), width);
@@ -117,6 +126,7 @@ impl WindowSwitcher {
         let card = card_size();
         let mut nodes = Vec::new();
         let mut previews = Vec::new();
+        let mut titles = Vec::new();
         for row in cards.chunks(columns) {
             let line = tree
                 .add(
@@ -143,6 +153,7 @@ impl WindowSwitcher {
                         Kind::Box(Look {
                             background: Some(Paint::SurfaceHover),
                             radius: 14.0,
+                            border: (variant == Variant::Matrix).then_some(Paint::Border),
                             ..Look::default()
                         }),
                     )
@@ -190,15 +201,17 @@ impl WindowSwitcher {
                     }),
                 )
                 .unwrap_or_else(MISSING);
-                tree.add(
-                    label,
-                    Style {
-                        width: Length::Px(PREVIEW.w - 20.0),
-                        ..Style::default()
-                    },
-                    Kind::text_line(c.title.clone(), theme.text.label.with_weight(600)),
-                )
-                .unwrap_or_else(MISSING);
+                let title = tree
+                    .add(
+                        label,
+                        Style {
+                            width: Length::Px(PREVIEW.w - 20.0),
+                            ..Style::default()
+                        },
+                        Kind::text_line(c.title.clone(), theme.text.label.with_weight(600)),
+                    )
+                    .unwrap_or_else(MISSING);
+                titles.push((title, c.title.clone()));
                 nodes.push(node);
                 previews.push(preview);
             }
@@ -229,6 +242,8 @@ impl WindowSwitcher {
             ring,
             columns,
             selected: None,
+            titles,
+            typing: None,
         };
         switcher.place_ring(selected, false);
         let damage = switcher.tree.update(Duration::ZERO);
@@ -272,6 +287,38 @@ impl WindowSwitcher {
         }
     }
 
+    /// The titles show from nothing, typed in from `since` a character
+    /// every 3 ms, each card's at once.
+    pub fn type_titles(&mut self, since: Duration) {
+        self.typing = Some(since);
+        for (node, _) in &self.titles {
+            self.tree.set_text(*node, "");
+        }
+    }
+
+    /// The titles as typed by `now`; whether some are still being typed.
+    fn type_in(&mut self, now: Duration) {
+        let Some(since) = self.typing else {
+            return;
+        };
+        let typed = (now.saturating_sub(since).as_millis() / TYPED.as_millis()) as usize;
+        let mut done = true;
+        for (node, title) in &self.titles {
+            let count = title.chars().count();
+            done &= typed >= count;
+            let shown: String = title.chars().take(typed).collect();
+            self.tree.set_text(*node, &shown);
+        }
+        if done {
+            self.typing = None;
+        }
+    }
+
+    /// Card `i`, logical from the corner.
+    pub fn card(&self, i: usize) -> Option<Rect> {
+        self.tree.rect(*self.cards.get(i)?)
+    }
+
     /// Where card `i`'s preview goes, logical from the corner.
     pub fn preview(&self, i: usize) -> Option<Rect> {
         self.tree.rect(*self.previews.get(i)?)
@@ -289,10 +336,11 @@ impl WindowSwitcher {
     }
 
     pub fn is_animating(&self, now: Duration) -> bool {
-        self.tree.is_animating(now)
+        self.tree.is_animating(now) || self.typing.is_some()
     }
 
     pub fn draw(&mut self, now: Duration) -> Vec<PixelRect> {
+        self.type_in(now);
         let damage = self.tree.update(now);
         self.surface.draw(&mut self.tree, &damage)
     }
@@ -332,7 +380,14 @@ mod tests {
 
     #[test]
     fn the_grid_wraps_and_the_ring_follows() {
-        let mut s = WindowSwitcher::new(Theme::default(), 1.0, &cards(5), Some(1), 900.0);
+        let mut s = WindowSwitcher::new(
+            Theme::default(),
+            1.0,
+            &cards(5),
+            Some(1),
+            900.0,
+            Variant::Plain,
+        );
         assert_eq!(s.columns_shown(), 3);
         let first = s.preview(0).expect("a preview");
         let fourth = s.preview(3).expect("a preview");
@@ -340,5 +395,29 @@ mod tests {
         s.select(Some(4));
         assert_eq!(s.selected, Some(4));
         assert!(s.access().dump().contains("Window 4"));
+    }
+
+    #[test]
+    fn titles_are_typed_in_three_ms_a_character() {
+        let mut s = WindowSwitcher::new(
+            Theme::default(),
+            1.0,
+            &cards(2),
+            Some(0),
+            900.0,
+            Variant::Matrix,
+        );
+        let since = Duration::from_secs(1);
+        s.type_titles(since);
+        s.draw(since + Duration::from_millis(9));
+        assert!(
+            s.access().dump().contains("\"Win\""),
+            "{}",
+            s.access().dump()
+        );
+        assert!(s.is_animating(since + Duration::from_millis(9)));
+        s.draw(since + Duration::from_millis(40));
+        assert!(s.access().dump().contains("Window 1"));
+        assert!(!s.is_animating(since + Duration::from_millis(40)));
     }
 }

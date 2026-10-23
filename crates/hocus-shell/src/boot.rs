@@ -1,17 +1,23 @@
 //! The boot screen (#48): while a saved session is put back, the pandas
 //! set the desktop up: the logo, the name, how far it has got, and two
 //! pandas at work in a corner. It goes as soon as everything is back.
+//!
+//! In the Matrix theme it leaves its background and its progress bar to
+//! the compositor, which draws the rain there and fills the bar with
+//! glyphs, and lists the windows as a terminal would, each `OK` once
+//! back (docs/design/matrix-theme.md, §16).
 
 use std::time::Duration;
 
 use hocus_ui::{
     AccessNode, Align, Direction, Justify, Kind, Length, Look, NodeId, Paint, PixelRect, Point,
-    Size, Style, Surface, Theme, Tree,
+    Rect, Size, Style, Surface, Theme, Tree, Typeface,
 };
 
 use crate::{
     column::View,
     i18n::Lang,
+    matrix::{HEAD, Variant},
     panda::{Character, Mood, Panda},
 };
 
@@ -19,14 +25,20 @@ const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree")
 
 /// The progress bar's width, logical pixels.
 const BAR: f32 = 260.0;
+/// The terminal's lines, at most, the latest.
+const LINES: usize = 6;
 
 pub struct Boot {
     tree: Tree,
     surface: Surface,
     lang: Lang,
+    bar: NodeId,
     filled: NodeId,
     line: NodeId,
     progress: (usize, usize),
+    /// The Matrix theme's terminal, and what it lists.
+    terminal: Option<NodeId>,
+    lines: Vec<(String, bool)>,
 }
 
 impl std::fmt::Debug for Boot {
@@ -39,7 +51,8 @@ impl std::fmt::Debug for Boot {
 
 impl Boot {
     /// For `total` windows to put back; `pandas` false leaves the two at
-    /// work out (the logo stays: it is the name's).
+    /// work out (the logo stays: it is the name's). The Matrix variant has
+    /// no background, an empty bar and a terminal.
     pub fn new(
         theme: Theme,
         lang: Lang,
@@ -47,13 +60,15 @@ impl Boot {
         scale: f32,
         total: usize,
         pandas: bool,
+        variant: Variant,
     ) -> Self {
+        let matrix = variant == Variant::Matrix;
         let mut tree = Tree::new(theme.clone(), size, scale);
         let root = tree.root();
         tree.set_look(
             root,
             Look {
-                background: Some(Paint::Background),
+                background: (!matrix).then_some(Paint::Background),
                 ..Look::default()
             },
         );
@@ -114,7 +129,7 @@ impl Boot {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(Paint::SurfaceHover),
+                    background: (!matrix).then_some(Paint::SurfaceHover),
                     radius: 3.0,
                     ..Look::default()
                 }),
@@ -129,7 +144,7 @@ impl Boot {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(Paint::Accent),
+                    background: (!matrix).then_some(Paint::Accent),
                     radius: 3.0,
                     ..Look::default()
                 }),
@@ -142,6 +157,19 @@ impl Boot {
                 Kind::text("", theme.text.body.with_color(Paint::Muted)),
             )
             .unwrap_or_else(MISSING);
+        let terminal = matrix.then(|| {
+            tree.add(
+                root,
+                Style {
+                    width: Length::Px(BAR + 60.0),
+                    height: Length::Px(LINES as f32 * 22.0),
+                    gap: 4.0,
+                    ..Style::default()
+                },
+                Kind::Box(Look::default()),
+            )
+            .unwrap_or_else(MISSING)
+        });
         if pandas {
             // Two at work in the corner, as the board has them.
             for (i, (character, mood)) in [
@@ -169,9 +197,12 @@ impl Boot {
             surface: Surface::new(size, scale),
             tree,
             lang,
+            bar,
             filled,
             line,
             progress: (usize::MAX, total),
+            terminal,
+            lines: Vec::new(),
         };
         boot.set_progress(0, total);
         boot
@@ -198,6 +229,78 @@ impl Boot {
         );
         self.tree
             .set_text(self.line, &self.lang.putting_back(total));
+    }
+
+    /// The terminal's lines in the Matrix theme: each window put back, by
+    /// its application, and whether it is back.
+    pub fn set_lines(&mut self, lines: &[(String, bool)]) {
+        let Some(terminal) = self.terminal else {
+            return;
+        };
+        let shown = &lines[lines.len().saturating_sub(LINES)..];
+        if self.lines == shown {
+            return;
+        }
+        self.lines = shown.to_vec();
+        for child in self.tree.children(terminal) {
+            self.tree.remove(child);
+        }
+        let theme = self.tree.theme().clone();
+        let mono = hocus_ui::TextStyle {
+            typeface: Typeface::Mono,
+            ..theme.text.body
+        };
+        for (app, back) in shown {
+            let row = self
+                .tree
+                .add(
+                    terminal,
+                    Style {
+                        direction: Direction::Row,
+                        width: Length::Fill,
+                        justify: Justify::SpaceBetween,
+                        ..Style::default()
+                    },
+                    Kind::Box(Look::default()),
+                )
+                .unwrap_or_else(MISSING);
+            self.tree
+                .add(
+                    row,
+                    Style::default(),
+                    Kind::text_line(format!("> {app}"), mono.with_color(Paint::Muted)),
+                )
+                .unwrap_or_else(MISSING);
+            // Back: its OK bright, as the boot's status lines are.
+            let (status, color) = if *back {
+                ("OK", Paint::Rgba(HEAD))
+            } else {
+                ("..", Paint::Muted)
+            };
+            self.tree
+                .add(
+                    row,
+                    Style::default(),
+                    Kind::text_line(status, mono.with_weight(700).with_color(color)),
+                )
+                .unwrap_or_else(MISSING);
+        }
+    }
+
+    /// The progress bar, logical from the corner: the Matrix theme's
+    /// compositor fills it with glyphs.
+    pub fn bar(&self) -> Option<Rect> {
+        self.tree.rect(self.bar)
+    }
+
+    /// How much of the bar is filled, 0 to 1.
+    pub fn progress(&self) -> f32 {
+        let (done, total) = self.progress;
+        if total == 0 {
+            1.0
+        } else {
+            done.min(total) as f32 / total as f32
+        }
     }
 
     pub fn draw(&mut self, now: Duration) -> Vec<PixelRect> {
@@ -237,6 +340,7 @@ mod tests {
             1.0,
             7,
             true,
+            Variant::Plain,
         );
         boot.draw(Duration::ZERO);
         let labels = |boot: &Boot| {
@@ -263,7 +367,32 @@ mod tests {
             1.0,
             7,
             false,
+            Variant::Plain,
         );
         assert!(!labels(&without).iter().any(|l| l == "Panda waving"));
+    }
+
+    #[test]
+    fn the_matrix_terminal_lists_the_windows_and_says_ok_once_back() {
+        let mut boot = Boot::new(
+            Theme::default(),
+            Lang::En,
+            Size::new(1280.0, 800.0),
+            1.0,
+            2,
+            false,
+            Variant::Matrix,
+        );
+        boot.set_lines(&[("editor".into(), true), ("mail".into(), false)]);
+        boot.set_progress(1, 2);
+        boot.draw(Duration::ZERO);
+        let dump = boot.access().dump();
+        assert!(
+            dump.contains("> editor") && dump.contains("\"OK\""),
+            "{dump}"
+        );
+        assert!(dump.contains("> mail") && dump.contains("\"..\""), "{dump}");
+        assert_eq!(boot.progress(), 0.5);
+        assert_eq!(boot.bar().map(|r| r.w), Some(BAR));
     }
 }

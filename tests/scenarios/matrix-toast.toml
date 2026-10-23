@@ -1,0 +1,55 @@
+# The Matrix theme's toasts (#155, docs/design/matrix-theme.md §13).
+description = "In the Matrix theme a toast is typed in where it goes, left to right in glyphs on black, then shows under its fading green; when it goes, its glyphs scatter; then nothing is drawn"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+notify = { app = "Mail", summary = "Review of MR 42", body = "The pipeline is green.", timeout_ms = 1000 }
+
+[[step]]
+expect_ui = { label = "Review of MR 42" }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-toast-typing.png" }
+
+[[step]]
+advance_ms = 150
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-toast-shows.png" }
+
+# Its time is up: it goes in glyphs.
+[[step]]
+advance_ms = 800
+
+[[step]]
+expect_ui = { label = "Review of MR 42", shown = false }
+
+[[step]]
+advance_ms = 120
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-toast-scatter.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_idle = { for_ms = 1000 }

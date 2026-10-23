@@ -65,17 +65,17 @@ const SPRING: Spring = Spring {
     damping_ratio: 0.7,
 };
 
-fn out_quad(t: f32) -> f32 {
+pub(crate) fn out_quad(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     1.0 - (1.0 - t) * (1.0 - t)
 }
 
-fn lerp(a: f64, b: f64, t: f32) -> f64 {
+pub(crate) fn lerp(a: f64, b: f64, t: f32) -> f64 {
     a + (b - a) * f64::from(t)
 }
 
 /// A spring from 0 to 1 that has settled by `p` = 1, over `seconds`.
-fn damped(p: f32, seconds: f32) -> f32 {
+pub(crate) fn damped(p: f32, seconds: f32) -> f32 {
     if p >= 1.0 {
         return 1.0;
     }
@@ -255,7 +255,7 @@ fn zone_lines(zone: Zone, area: hocus_core::Rect, gap: u32) -> Vec<Rectangle<f64
 }
 
 /// A plain colour in `rect` (output-local), its corners cut as a window's.
-fn tint<R>(
+pub(crate) fn tint<R>(
     rect: Rectangle<f64, Logical>,
     color: Color,
     alpha: f32,
@@ -289,7 +289,13 @@ where
     R::TextureId: Send + Clone + 'static,
 {
     /// A disc of `radius` about `centre`, in rows two pixels tall.
-    fn disc(&mut self, centre: Point<f64, Logical>, radius: f64, color: Color, alpha: f32) {
+    pub(crate) fn disc(
+        &mut self,
+        centre: Point<f64, Logical>,
+        radius: f64,
+        color: Color,
+        alpha: f32,
+    ) {
         if radius < 0.5 {
             return;
         }

@@ -134,7 +134,19 @@ springs in under the grid line of its zone; a dragged window leaves a
 phosphor trail of where it was drawn lately (positions kept as it moves,
 not per frame), a resized one glows and reads out its size. What shines
 over the dock (the CRT's line and flash, the traces) is drawn over the
-panels, the window's own picture with the windows. The theme's wallpaper is
+panels, the window's own picture with the windows. Its shell (#155) is
+drawn the same way, in `matrix_shell` and `matrix_screens`: the desktop
+left behind breaks into glyphs that rain away, Alt+Tab and the overview
+come over black and slow rain, the lock's rain cascades over the desktop
+and comes to rest behind its padlock of glyphs, toasts are typed in and
+scatter, the column comes and goes behind a band of rain, the launcher
+jacks in and rains away, the boot wakes, lists the windows as a terminal
+and says SYSTEM READY. The shell's views leave room for it (a variant
+without background, the padlock's place, the progress bar's) and say
+where their parts are; what is drawn is parts of their pictures, glyphs
+and plain colours, each a closed form of the time since it began. Rain
+that stays (behind the lock, the launcher) stands still; nothing is drawn
+once a moment is over. The theme's wallpaper is
 its still rain, drawn with the other wallpapers on their worker thread.
 Wallpapers that move (#108, `rain` and `stars`) are GLES shaders: before
 a GLES backend draws an output, the wallpaper is painted into a texture

@@ -1,0 +1,75 @@
+# The Matrix theme's launcher (#155, docs/design/matrix-theme.md §15).
+description = "In the Matrix theme the launcher jacks in: a cursor blinks, the field opens from it, the results are typed in one after the other over a dim with still rain; closing, its text falls as rain and the field closes to its middle"
+outputs = ["1280x800"]
+shell = true
+motion = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+type = "fir"
+
+[[step]]
+expect_ui = { label = "Firefox", selected = true }
+
+[[step]]
+advance_ms = 30
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-launcher-cursor.png" }
+
+[[step]]
+advance_ms = 220
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-launcher-field.png" }
+
+[[step]]
+advance_ms = 90
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-launcher-rows.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-launcher.png" }
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Firewall", shown = false }
+
+[[step]]
+advance_ms = 120
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-launcher-close.png" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+expect_idle = { for_ms = 1000 }

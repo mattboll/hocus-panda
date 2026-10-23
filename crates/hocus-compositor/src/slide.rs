@@ -81,6 +81,22 @@ impl State {
             return;
         }
         let now = self.clock.now();
+        // The Matrix theme's desktop rains away instead (#155); the
+        // switcher shows the same.
+        if self.matrix_moves() {
+            self.matrix_switch_desktops(output, from, to);
+            self.slides.by_output.insert(
+                output.name(),
+                Slide {
+                    position: Animated::new(to as f32),
+                    swipe: None,
+                    switcher: None,
+                    until: now,
+                },
+            );
+            self.show_switcher(output);
+            return;
+        }
         let slide = self
             .slides
             .by_output
