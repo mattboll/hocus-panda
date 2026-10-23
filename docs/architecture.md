@@ -239,7 +239,13 @@ llama.cpp server, OpenAI's chat completions, Claude's Messages API) on a
 worker thread of its own, which reads the provider's key from the keyring
 (the Secret Service; a sealed file without one), asks with `ureq` and sends
 the answer back piece by piece through a channel; the loop only appends the
-pieces and lays the card out once per turn. Typing again, closing the field
+pieces and lays the card out once per turn; a long answer scrolls inside
+the card (the wheel over it, Page Up and Page Down). Without a model named,
+the worker asks the provider which models it has at the first question
+(Claude's newest Opus, ollama's first…) and the session keeps that one:
+none is written in the code. A Claude model that refuses the request's
+options (effort, fallbacks) is asked once more without them. The AI is off
+until `[ai] enabled` turns it on. Typing again, closing the field
 or Stop tells the worker to stop at the next piece, and what an older
 question brings back is dropped. Nested or in tests, a provider's usual
 address is never asked: only the one the configuration gives. The answer's

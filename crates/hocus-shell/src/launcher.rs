@@ -25,7 +25,7 @@ use std::time::Duration;
 use hocus_core::{Action, shortcuts::Combo};
 use hocus_ui::{
     AccessNode, Align, Direction, Event, Icon, Input, Insets, Key, Kind, Length, Look, NodeId,
-    Paint, PixelRect, Point, Rect, Size, Style, Surface, TextField, Theme, Tree,
+    Paint, PixelRect, Point, Property, Rect, Size, Style, Surface, TextField, Theme, Tree,
 };
 
 use crate::{
@@ -98,17 +98,6 @@ fn list_style(card: bool) -> Style {
     }
 }
 
-/// A long answer's text, cut.
-fn cut_style() -> Style {
-    Style {
-        gap: 8.0,
-        clip: true,
-        grow: 0.0,
-        height: Length::Px(ANSWER_MAX),
-        ..Style::default()
-    }
-}
-
 /// The card's width, from the design.
 pub const WIDTH: f32 = 860.0;
 /// Room around the card for its shadow.
@@ -121,8 +110,10 @@ const MAX_ALSO: usize = 3;
 const ALSO_ROW: f32 = 44.0;
 /// The card's height with an answer: the field, the answer, "Also".
 const TALL: f32 = FIELD + 1.0 + 470.0 + 210.0;
-/// A longer answer is cut there; Copy takes it all.
+/// A longer answer scrolls in a box this high.
 const ANSWER_MAX: f32 = 300.0;
+/// Page Up and Page Down scroll the answer by this much.
+const ANSWER_PAGE: f32 = ANSWER_MAX - 40.0;
 
 /// An application the launcher can start.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -301,10 +292,12 @@ pub struct Launcher {
     card_buttons: Vec<(NodeId, CardAction)>,
     /// Which hit each row shows.
     row_hits: Vec<usize>,
-    /// The answer's text box, to cut a long one.
-    answer_text: Option<NodeId>,
-    /// The answer is too long for the card: its text is cut.
-    answer_cut: bool,
+    /// The answer's text box and its text, to scroll a long one.
+    answer_text: Option<(NodeId, NodeId)>,
+    /// The answer is too long for the card: it scrolls in its box.
+    answer_tall: bool,
+    /// How far down the answer is scrolled, logical pixels.
+    answer_scroll: f32,
     /// Who answers questions, if anyone.
     ask: Option<Source>,
     answer: Option<Answer>,
@@ -476,7 +469,8 @@ impl Launcher {
             card_buttons: Vec::new(),
             row_hits: Vec::new(),
             answer_text: None,
-            answer_cut: false,
+            answer_tall: false,
+            answer_scroll: 0.0,
             ask: None,
             answer: None,
             asked: 0,
@@ -874,7 +868,8 @@ impl Launcher {
         // Typing again leaves the answer.
         if self.answer.as_ref().is_some_and(|a| a.question != query) {
             self.answer = None;
-            self.answer_cut = false;
+            self.answer_tall = false;
+            self.answer_scroll = 0.0;
         }
         self.hits = self.hits(&query);
         // Only the palette scrolls: it lists everything.
@@ -1022,9 +1017,12 @@ impl Launcher {
                 .first()
                 .is_some_and(|h| h.choice == Choice::Answer)
             {
-                self.answer_text = Some(filled.text);
-                if self.answer_cut {
-                    self.tree.set_style(filled.text, cut_style());
+                self.answer_text = Some((filled.text, filled.content));
+                if self.answer_tall {
+                    self.tree
+                        .set_style(filled.text, answer::text_box(ANSWER_MAX));
+                    self.tree
+                        .jump(filled.content, Property::OffsetY, -self.answer_scroll);
                 }
             }
             if self.hits.len() > 1
@@ -1425,15 +1423,45 @@ impl Launcher {
             self.render();
         }
         let mut damage = self.tree.update(now);
-        if let Some(text) = self.answer_text
-            && !self.answer_cut
-            && self.tree.rect(text).is_some_and(|r| r.h > ANSWER_MAX)
+        if let Some((text, content)) = self.answer_text
+            && !self.answer_tall
+            && self.tree.rect(content).is_some_and(|r| r.h > ANSWER_MAX)
         {
-            self.answer_cut = true;
-            self.tree.set_style(text, cut_style());
+            // Too long: it scrolls in a box of its own.
+            self.answer_tall = true;
+            self.tree.set_style(text, answer::text_box(ANSWER_MAX));
             damage.extend(self.tree.update(now));
         }
         self.surface.draw(&mut self.tree, &damage)
+    }
+
+    /// Scrolls a long answer by `dy` logical pixels, down positive;
+    /// whether there was one to scroll.
+    pub fn scroll(&mut self, dy: f32) -> bool {
+        let Some((_, content)) = self.answer_text.filter(|_| self.answer_tall && self.open) else {
+            return false;
+        };
+        let Some(inner) = self.tree.rect(content) else {
+            return false;
+        };
+        let room = (inner.h - ANSWER_MAX).max(0.0);
+        let scroll = (self.answer_scroll + dy).clamp(0.0, room);
+        if scroll != self.answer_scroll {
+            self.answer_scroll = scroll;
+            self.tree.jump(content, Property::OffsetY, -scroll);
+        }
+        true
+    }
+
+    /// The wheel over the card, `at` relative to the surface: a long
+    /// answer scrolls.
+    pub fn wheel(&mut self, at: Point, dy: f32) -> bool {
+        self.hit(at) && self.scroll(dy)
+    }
+
+    /// Page Up or Page Down while the field has the keyboard.
+    pub fn page(&mut self, down: bool) -> bool {
+        self.scroll(if down { ANSWER_PAGE } else { -ANSWER_PAGE })
     }
 
     /// Enter on a hit, or a click on its row, in the command field.
@@ -1462,7 +1490,8 @@ impl Launcher {
         };
         self.asked += 1;
         self.answer = Some(Answer::new(question.clone(), source));
-        self.answer_cut = false;
+        self.answer_tall = false;
+        self.answer_scroll = 0.0;
         self.search();
         vec![LauncherEvent::Ask {
             id: self.asked,
@@ -1802,6 +1831,51 @@ mod tests {
         l.text("x");
         assert_eq!(l.awaited(), None);
         assert!(l.answer().is_none());
+    }
+
+    #[test]
+    fn a_long_answer_scrolls_in_its_box() {
+        let mut l = launcher();
+        l.set_providers(&Enabled {
+            ask: Some(Source::Local),
+            ..Enabled::default()
+        });
+        l.open();
+        l.text("why?");
+        l.key(Key::Enter);
+        let long: String = (1..=30).map(|i| format!("- step {i}\n")).collect();
+        l.answer_news(1, answer::News::Text(format!("Because.\n\n{long}")));
+        l.answer_news(1, answer::News::Done(Duration::from_secs(1)));
+        l.draw(Duration::ZERO);
+        let y = |l: &Launcher, label: &str| {
+            l.access()
+                .walk()
+                .into_iter()
+                .find(|n| n.label.as_deref() == Some(label))
+                .map(|n| n.rect.y)
+                .unwrap_or_else(|| panic!("{label} is shown"))
+        };
+        let size = l.size();
+        let last = y(&l, "• step 30");
+        assert!(l.page(true), "a long answer scrolls");
+        l.draw(Duration::from_millis(16));
+        let paged = y(&l, "• step 30");
+        assert!(paged < last - 200.0, "{last} then {paged}");
+        // As far as it goes, no further.
+        assert!(l.scroll(10_000.0));
+        l.draw(Duration::from_millis(32));
+        let end = y(&l, "• step 30");
+        assert!(l.scroll(500.0));
+        l.draw(Duration::from_millis(48));
+        assert_eq!(y(&l, "• step 30"), end);
+        assert!(
+            l.wheel(Point::new(400.0, 300.0), -10_000.0),
+            "the wheel over the card"
+        );
+        l.draw(Duration::from_millis(64));
+        assert_eq!(y(&l, "• step 30"), last, "back to the top");
+        assert_eq!(l.size(), size, "the card does not grow");
+        assert!(!l.wheel(Point::new(2.0, 2.0), 50.0), "not outside the card");
     }
 
     #[test]

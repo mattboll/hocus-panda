@@ -520,7 +520,8 @@ impl State {
         };
         self.activity();
         self.super_spoiled();
-        if self.opacity_wheel(amount(Axis::Vertical)) {
+        if self.opacity_wheel(amount(Axis::Vertical)) || self.launcher_wheel(amount(Axis::Vertical))
+        {
             return;
         }
         let mut frame = AxisFrame::new(event.time_msec()).source(source);
@@ -547,7 +548,7 @@ impl State {
     pub fn scroll(&mut self, dy: f64, time_msec: u32) {
         self.activity();
         self.super_spoiled();
-        if self.opacity_wheel(dy) {
+        if self.opacity_wheel(dy) || self.launcher_wheel(dy) {
             return;
         }
         let frame = AxisFrame::new(time_msec)
