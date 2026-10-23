@@ -23,11 +23,13 @@ use crate::{
 
 mod agents;
 mod hardware;
+mod map;
 mod personalise;
 mod system;
 mod work;
 
 use hardware::HardwarePage;
+pub use hardware::{BluetoothAction, Listed, Pairing, Secret, WifiAction};
 use personalise::WallpaperPage;
 use system::SystemPage;
 use work::{Field, Fields};
@@ -87,6 +89,13 @@ pub enum Outcome {
     },
     /// Every MCP agent stopped, or allowed again, through the compositor.
     StopAgents(bool),
+    /// A network is joined, left or forgotten, through NetworkManager.
+    Wifi(WifiAction),
+    /// A device is paired, connected, disconnected or forgotten, through
+    /// BlueZ.
+    Bluetooth(BluetoothAction),
+    /// The passkey the pairing asked about is the device's, or not.
+    PairingAnswer(bool),
 }
 
 /// What a node does when clicked.
@@ -149,6 +158,16 @@ enum Target {
     /// The key of this provider is forgotten.
     ForgetKey(String),
     StopAgents(bool),
+    Wifi(WifiAction),
+    /// The password of this network is asked.
+    AskPassword(String),
+    CancelPassword,
+    /// The network is joined with the password typed.
+    JoinTyped,
+    Bluetooth(BluetoothAction),
+    PairingAnswer(bool),
+    /// The world map: the city nearest the pointer gives the zone.
+    Map,
 }
 
 /// Which of a screen's choices are open.
@@ -384,6 +403,10 @@ pub struct SettingsView {
     system: SystemPage,
     /// Why the system did not take the time zone chosen last.
     zone_refused: Option<String>,
+    /// The time zones' places, for the map; none without the database.
+    places: std::sync::Arc<Vec<hocus_platform::timedate::Place>>,
+    /// The map, where it is.
+    map: Option<NodeId>,
     dirty: bool,
     now: Duration,
 }
@@ -465,6 +488,8 @@ impl SettingsView {
             hardware: HardwarePage::default(),
             system: SystemPage::default(),
             zone_refused: None,
+            places: Default::default(),
+            map: None,
             dirty: true,
             now: Duration::ZERO,
         }
@@ -536,6 +561,14 @@ impl SettingsView {
         self.dirty = true;
     }
 
+    /// The time zones' places, as the database says, for the map.
+    pub fn set_places(&mut self, places: Vec<hocus_platform::timedate::Place>) {
+        if places != *self.places {
+            self.places = std::sync::Arc::new(places);
+            self.dirty = true;
+        }
+    }
+
     pub fn context(&self) -> &Context {
         &self.ctx
     }
@@ -574,6 +607,7 @@ impl SettingsView {
             self.system.open = None;
             self.system.openai_like = false;
             self.system.bad_address = false;
+            self.hardware.leave();
         }
         self.screen = screen;
         self.typing = screen == Screen::Home;
@@ -660,6 +694,20 @@ impl SettingsView {
     }
 
     pub fn key(&mut self, key: Key) -> Vec<Outcome> {
+        self.catch_up();
+        // A network's password: Enter joins, Escape forgets it.
+        if self.hardware.password_field(self.tree.focused()) {
+            match key {
+                Key::Enter => return self.join_typed().into_iter().collect(),
+                Key::Escape => {
+                    self.hardware.password = None;
+                    self.tree.set_focus(None);
+                    self.dirty = true;
+                    return Vec::new();
+                }
+                _ => {}
+            }
+        }
         // A path or colour typed: Enter writes it, Escape forgets it.
         if let Some(entry) = self.wallpaper.entry_of(self.tree.focused()) {
             match key {
@@ -777,13 +825,24 @@ impl SettingsView {
         }
     }
 
+    /// Built again now if a click changed what shows: keys typed at once
+    /// after it go to the field it brought (a network's password).
+    fn catch_up(&mut self) {
+        if self.dirty {
+            self.build();
+            self.dirty = false;
+        }
+    }
+
     /// Typed text goes to the search field.
     pub fn text(&mut self, text: &str) -> Vec<Outcome> {
+        self.catch_up();
         // The calendar form's or the wallpaper's field that has the
         // keyboard keeps it.
         if self.accounts.index(self.tree.focused()).is_some()
             || self.wallpaper.entry_of(self.tree.focused()).is_some()
             || self.fields.field_of(self.tree.focused()).is_some()
+            || self.hardware.password_field(self.tree.focused())
         {
             let events = self.tree.text_input(text);
             return self.handle(events);
@@ -841,6 +900,21 @@ impl SettingsView {
                     let value = self.tree.slider_value(id).unwrap_or(0.0);
                     out.extend(self.volume_moved(value));
                 }
+                Event::Changed(id) if self.hardware.password_field(Some(id)) => {
+                    let typed = self.tree.field_value(id).unwrap_or_default().to_owned();
+                    // The Join button comes alive with the first letter.
+                    let was_empty = self
+                        .hardware
+                        .password
+                        .as_ref()
+                        .is_some_and(|(_, _, t)| t.is_empty());
+                    if let Some((_, _, t)) = &mut self.hardware.password {
+                        *t = typed;
+                    }
+                    if was_empty {
+                        self.dirty = true;
+                    }
+                }
                 Event::Changed(id) if self.accounts.index(Some(id)).is_some() => {
                     if let Some(i) = self.accounts.index(Some(id)) {
                         self.accounts.values[i] =
@@ -863,7 +937,8 @@ impl SettingsView {
                 Event::Activated(id)
                     if self.accounts.index(Some(id)).is_some()
                         || self.wallpaper.entry_of(Some(id)).is_some()
-                        || self.fields.field_of(Some(id)).is_some() => {}
+                        || self.fields.field_of(Some(id)).is_some()
+                        || self.hardware.password_field(Some(id)) => {}
                 Event::Activated(id) => match self.targets.get(&id).cloned() {
                     Some(Target::Home) => {
                         self.highlight = None;
@@ -959,6 +1034,24 @@ impl SettingsView {
                         key: String::new(),
                     }),
                     Some(Target::StopAgents(stop)) => out.push(Outcome::StopAgents(stop)),
+                    Some(Target::Wifi(action)) => out.push(self.ask_network(action)),
+                    Some(Target::AskPassword(ssid)) => {
+                        self.hardware.password = Some((ssid, None, String::new()));
+                        self.hardware.network_failed = None;
+                        self.dirty = true;
+                    }
+                    Some(Target::CancelPassword) => {
+                        self.hardware.password = None;
+                        self.dirty = true;
+                    }
+                    Some(Target::JoinTyped) => out.extend(self.join_typed()),
+                    Some(Target::Bluetooth(action)) => out.push(self.ask_device(action)),
+                    Some(Target::PairingAnswer(yes)) => {
+                        self.hardware.pairing = None;
+                        self.dirty = true;
+                        out.push(Outcome::PairingAnswer(yes));
+                    }
+                    Some(Target::Map) => out.extend(self.map_clicked()),
                     Some(Target::SetZone(zone)) => {
                         self.zone_refused = None;
                         self.dirty = true;
@@ -1141,6 +1234,10 @@ impl SettingsView {
         self.scroller = None;
         self.text_size = None;
         self.hardware.volume = None;
+        self.map = None;
+        if let Some((_, field, _)) = &mut self.hardware.password {
+            *field = None;
+        }
         self.tree.set_look(
             root,
             Look {
@@ -1175,6 +1272,8 @@ impl SettingsView {
         // What had the keyboard keeps it; what the pointer was over is
         // hovered again.
         if let Some((_, Some(field))) = &self.screens.renaming {
+            self.tree.set_focus(Some(*field));
+        } else if let Some((_, Some(field), _)) = &self.hardware.password {
             self.tree.set_focus(Some(*field));
         } else if let Some(i) = typing_in_form.filter(|_| self.accounts.fields[0].is_some()) {
             self.tree.set_focus(self.accounts.fields[i]);
@@ -4447,6 +4546,180 @@ mod tests {
         // Until the services answer, their switches do nothing.
         let mut v = page_view("", Page::Bluetooth, &[]);
         assert!(click(&mut v, "Bluetooth radio").is_empty());
+    }
+
+    fn network(
+        ssid: &str,
+        strength: u8,
+        security: hocus_platform::wifi::Security,
+    ) -> hocus_platform::wifi::Network {
+        hocus_platform::wifi::Network {
+            ssid: ssid.into(),
+            strength,
+            security,
+            connected: false,
+            saved: false,
+        }
+    }
+
+    #[test]
+    fn networks_are_joined_with_a_password_left_and_forgotten() {
+        use hocus_platform::wifi::{JoinError, Security, Wifi};
+        let mut v = hardware_view("", Page::Network);
+        assert!(find(&v.access(), "Looking for networks…").is_some());
+        let mut joined = network("Bamboo grove", 82, Security::Personal);
+        joined.connected = true;
+        joined.saved = true;
+        v.set_wifi(Listed::Known(Wifi::Networks(vec![
+            joined,
+            network("Panda den", 64, Security::Personal),
+            network("Café du Parc", 47, Security::Open),
+            network("Office", 58, Security::Other),
+        ])));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Connected · Secured · 82%").is_some());
+        // An account's network is joined elsewhere.
+        assert!(find(&v.access(), "Join Office").is_none());
+        let out = click(&mut v, "Disconnect Bamboo grove");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Wifi(WifiAction::Disconnect(s))] if s == "Bamboo grove"),
+            "{out:?}"
+        );
+        v.wifi_done(Ok(()));
+        // An open one at once; a secured one asks for its password first.
+        let out = click(&mut v, "Join Café du Parc");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Wifi(WifiAction::Join { ssid, password: None })] if ssid == "Café du Parc"),
+            "{out:?}"
+        );
+        assert!(find(&v.access(), "Joining…").is_some());
+        v.wifi_done(Ok(()));
+        v.draw(Duration::ZERO);
+        assert!(click(&mut v, "Join Panda den").is_empty());
+        let field = find(&v.access(), "Password for Panda den").expect("the field");
+        assert!(field.focused);
+        v.text("bamboo shoots");
+        let out = v.key(Key::Enter);
+        match out.as_slice() {
+            [
+                Outcome::Wifi(WifiAction::Join {
+                    ssid,
+                    password: Some(p),
+                }),
+            ] => {
+                assert_eq!(
+                    (ssid.as_str(), p.0.as_str()),
+                    ("Panda den", "bamboo shoots")
+                );
+                assert!(!format!("{out:?}").contains("bamboo"), "never printed");
+            }
+            other => panic!("{other:?}"),
+        }
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Password for Panda den").is_none());
+        v.wifi_done(Err(JoinError::Failed));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Not joined: check the password").is_some());
+        // Escape forgets what was typed.
+        click(&mut v, "Join Panda den");
+        v.text("oops");
+        v.key(Key::Escape);
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Password for Panda den").is_none());
+        // The radio off: no list.
+        v.set_wifi(Listed::Known(Wifi::Off));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Turn Wi-Fi on to see the networks in reach.").is_some());
+    }
+
+    #[test]
+    fn devices_are_paired_with_their_passkey_and_forgotten() {
+        use hocus_platform::bluetooth::{Bluetooth, Device, Kind};
+        let device = |name: &str, kind, paired, connected, battery| Device {
+            path: format!("/org/bluez/hci0/{name}"),
+            name: name.into(),
+            kind,
+            paired,
+            connected,
+            battery,
+        };
+        let mut v = hardware_view("", Page::Bluetooth);
+        v.set_bluetooth(Listed::Known(Bluetooth::Devices(vec![
+            device("Headphones", Kind::Headphones, true, true, Some(80)),
+            device("Keyboard", Kind::Keyboard, false, false, None),
+        ])));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Connected: Headphones").is_some());
+        assert!(find(&v.access(), "Headphones · Connected · Battery 80%").is_some());
+        let out = click(&mut v, "Pair Keyboard");
+        assert!(
+            matches!(out.as_slice(), [Outcome::Bluetooth(BluetoothAction::Pair(p))] if p.ends_with("Keyboard")),
+            "{out:?}"
+        );
+        assert!(find(&v.access(), "Pairing…").is_some());
+        v.set_pairing(Some(Pairing::Confirm(123_456)));
+        v.draw(Duration::ZERO);
+        assert!(
+            find(
+                &v.access(),
+                "Does Keyboard show 123456? Pair only if it is the same."
+            )
+            .is_some()
+        );
+        let out = click(&mut v, "Same code: pair Keyboard");
+        assert!(
+            matches!(out.as_slice(), [Outcome::PairingAnswer(true)]),
+            "{out:?}"
+        );
+        v.bluetooth_done(Err("Authentication Rejected".into()));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Did not work: Authentication Rejected").is_some());
+        let out = click(&mut v, "Forget Headphones");
+        assert!(
+            matches!(
+                out.as_slice(),
+                [Outcome::Bluetooth(BluetoothAction::Forget(_))]
+            ),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn a_city_clicked_on_the_map_gives_its_zone() {
+        use catalogue::SystemZone;
+        use hocus_platform::timedate::Place;
+        let mut v = page_view("", Page::Language, &[]);
+        v.set_zone(SystemZone::Known("Europe/Paris".into()));
+        v.set_places(vec![
+            Place {
+                zone: "Europe/Paris".into(),
+                latitude: 48.87,
+                longitude: 2.33,
+            },
+            Place {
+                zone: "Asia/Tokyo".into(),
+                latitude: 35.65,
+                longitude: 139.74,
+            },
+        ]);
+        v.draw(Duration::ZERO);
+        let map = find(&v.access(), "World map of the time zones").expect("the map");
+        assert!(find(&v.access(), "In effect: Paris").is_some());
+        // Near Tokyo's dot.
+        let rect = hocus_ui::Rect::new(map.rect.x, map.rect.y, map.rect.w, map.rect.h);
+        let tokyo = map::project(rect, 35.65, 139.74);
+        v.pointer_move(Point::new(tokyo.x + 4.0, tokyo.y - 3.0));
+        let mut out = v.pointer_button(true);
+        out.extend(v.pointer_button(false));
+        assert!(
+            matches!(out.as_slice(), [Outcome::SetTimeZone(z)] if z == "Asia/Tokyo"),
+            "{out:?}"
+        );
+        // Far from every city: nothing.
+        v.pointer_move(Point::new(map.rect.x + 2.0, map.rect.y + map.rect.h - 2.0));
+        let mut out = v.pointer_button(true);
+        out.extend(v.pointer_button(false));
+        assert!(out.is_empty(), "{out:?}");
     }
 
     #[test]

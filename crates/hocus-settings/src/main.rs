@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
             app_id: "hocus-settings".into(),
             system_bus: client::SystemBus::Machine,
             xdg: client::Xdg::Machine,
+            zoneinfo: hocus_platform::timedate::zoneinfo(),
         },
         None,
     )

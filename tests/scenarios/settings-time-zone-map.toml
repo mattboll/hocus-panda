@@ -1,0 +1,70 @@
+# Language and region's world map (#67): the land (Natural Earth, public
+# domain), the cities of the time zone database (the scenarios' own copy
+# of zone1970.tab), the zone in effect ringed and named; a click near a
+# city asks timedated (a stand-in on a private system bus) for its zone.
+# The list stays the way readers and keyboards take.
+description = "Language and region shows the time zones on a world map; a click near Tokyo asks timedated for Asia/Tokyo and the map rings it; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+timedated = "Europe/Paris"
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+expect_settings = { label = "World map of the time zones" }
+
+[[step]]
+expect_settings = { label = "Paris", selected = true }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 240
+
+# Tokyo, at 35°39′ N 139°44′ E: 0.888 of the way east, 0.336 down from
+# 84° N to 60° S.
+[[step]]
+click_settings_at = { label = "World map of the time zones", at = [0.888, 0.336] }
+
+[[step]]
+expect_timedated = "SetTimezone Asia/Tokyo interactive"
+
+# 14:37 in UTC is 23:37 in Tokyo.
+[[step]]
+expect_ui = { label = "23:37" }
+
+[[step]]
+expect_settings = { label = "Tokyo", selected = true }
+
+# Far from every city, in the Pacific off Chile: nothing asked.
+[[step]]
+click_settings_at = { label = "World map of the time zones", at = [0.25, 0.75] }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-time-zone-map.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+expect_settings = { label = "Tokyo", selected = true }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-time-zone-map-light.png" }

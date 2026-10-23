@@ -51,7 +51,7 @@ use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::{
 use crate::{
     catalogue::{Context, Page, SystemZone},
     edit,
-    view::{Outcome, SettingsView},
+    view::{BluetoothAction, Listed, Outcome, Pairing, Screen, SettingsView, WifiAction},
 };
 
 /// The window's size before the compositor says otherwise.
@@ -72,6 +72,9 @@ pub struct Options {
     /// Where the default applications and autostart entries are read and
     /// written.
     pub xdg: Xdg,
+    /// The time zone database, whose `zone1970.tab` places the cities of
+    /// the map.
+    pub zoneinfo: PathBuf,
 }
 
 /// The XDG directories the Applications page reads and writes.
@@ -146,6 +149,205 @@ fn account_thread(
         });
     if let Err(err) = spawned {
         tracing::warn!(%err, "the account will not be read");
+    }
+}
+
+/// How often the networks in reach are looked for, and read, while the
+/// Network page shows.
+const SCAN_EVERY: Duration = Duration::from_secs(10);
+const READ_EVERY: Duration = Duration::from_secs(2);
+/// How often the Bluetooth devices are read while their page shows.
+const DEVICES_EVERY: Duration = Duration::from_secs(1);
+
+/// Lists the networks in reach while the Network page shows: scanned for
+/// at once and every [`SCAN_EVERY`], read every [`READ_EVERY`]; what the
+/// page asks is done here, in turn. Ends when `asked` is dropped.
+fn network_worker(bus: Option<String>, to_window: Sender<FromApi>, asked: Receiver<WifiAction>) {
+    use hocus_platform::wifi::{JoinError, NetworkManager};
+    let nm = match NetworkManager::connect(&bus) {
+        Ok(nm) => nm,
+        Err(why) => {
+            tracing::info!(why, "no NetworkManager");
+            let _ = to_window.send(FromApi::Wifi(Listed::Absent(why)));
+            // Waits for the page to close, answering what it asks.
+            for _ in asked {
+                let refused = Err(JoinError::Refused("no NetworkManager".into()));
+                let _ = to_window.send(FromApi::WifiDone(refused));
+            }
+            return;
+        }
+    };
+    let mut scanned: Option<Instant> = None;
+    let mut last = None;
+    loop {
+        if scanned.is_none_or(|at| at.elapsed() >= SCAN_EVERY) {
+            nm.scan();
+            scanned = Some(Instant::now());
+        }
+        let now = match nm.read() {
+            Ok(wifi) => Listed::Known(wifi),
+            Err(why) => Listed::Absent(why),
+        };
+        if last.as_ref() != Some(&now) {
+            if to_window.send(FromApi::Wifi(now.clone())).is_err() {
+                return;
+            }
+            last = Some(now);
+        }
+        match asked.recv_timeout(READ_EVERY) {
+            Ok(action) => {
+                let done = match action {
+                    WifiAction::Join { ssid, password } => {
+                        nm.join(&ssid, password.as_ref().map(|p| p.0.as_str()))
+                    }
+                    WifiAction::Disconnect(_) => nm.disconnect().map_err(JoinError::Refused),
+                    WifiAction::Forget(ssid) => nm.forget(&ssid).map_err(JoinError::Refused),
+                };
+                if let Err(err) = &done {
+                    tracing::info!(?err, "the network did not do what was asked");
+                }
+                // Read again before it says so: the list shows the result.
+                if let Ok(wifi) = nm.read() {
+                    let now = Listed::Known(wifi);
+                    let _ = to_window.send(FromApi::Wifi(now.clone()));
+                    last = Some(now);
+                }
+                let _ = to_window.send(FromApi::WifiDone(done));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
+/// Lists the Bluetooth devices while the Bluetooth page shows, looking
+/// for those in reach meanwhile; what the page asks is done here, in
+/// turn. Stops looking and ends when `asked` is dropped.
+fn bluetooth_worker(
+    bus: Option<String>,
+    to_window: Sender<FromApi>,
+    asked: Receiver<BluetoothAction>,
+) {
+    use hocus_platform::bluetooth::{Bluetooth, Bluez};
+    let bluez = match Bluez::connect(&bus) {
+        Ok(bluez) => bluez,
+        Err(why) => {
+            tracing::info!(why, "no BlueZ");
+            let _ = to_window.send(FromApi::Bluetooth(Listed::Absent(why)));
+            for _ in asked {
+                let _ = to_window.send(FromApi::BluetoothDone(Err("no BlueZ".into())));
+            }
+            return;
+        }
+    };
+    let mut discovering = false;
+    let mut last = None;
+    loop {
+        let now = match bluez.read() {
+            Ok(bluetooth) => Listed::Known(bluetooth),
+            Err(why) => Listed::Absent(why),
+        };
+        // Looked for once the radio is on, and again if it went off.
+        let on = matches!(now, Listed::Known(Bluetooth::Devices(_)));
+        if on && !discovering {
+            match bluez.discover(true) {
+                Ok(()) => discovering = true,
+                Err(why) => tracing::debug!(why, "no discovery"),
+            }
+        } else if !on {
+            discovering = false;
+        }
+        if last.as_ref() != Some(&now) {
+            if to_window.send(FromApi::Bluetooth(now.clone())).is_err() {
+                break;
+            }
+            last = Some(now);
+        }
+        match asked.recv_timeout(DEVICES_EVERY) {
+            Ok(action) => {
+                let done = match &action {
+                    BluetoothAction::Pair(device) => {
+                        let tx = Mutex::new(to_window.clone());
+                        bluez.pair(device, move |ask| {
+                            if let Ok(tx) = tx.lock() {
+                                let _ = tx.send(FromApi::Ask(ask));
+                            }
+                        })
+                    }
+                    BluetoothAction::Connect(device) => bluez.connect_device(device, true),
+                    BluetoothAction::Disconnect(device) => bluez.connect_device(device, false),
+                    BluetoothAction::Forget(device) => bluez.forget(device),
+                };
+                if let Err(why) = &done {
+                    tracing::info!(why, ?action, "the device did not do what was asked");
+                }
+                if let Ok(bluetooth) = bluez.read() {
+                    let now = Listed::Known(bluetooth);
+                    let _ = to_window.send(FromApi::Bluetooth(now.clone()));
+                    last = Some(now);
+                }
+                let _ = to_window.send(FromApi::BluetoothDone(done));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    if discovering && let Err(why) = bluez.discover(false) {
+        tracing::debug!(why, "discovery not stopped");
+    }
+}
+
+/// A page's worker: what the page asks goes to it; it says it ended.
+struct Worker<T> {
+    asked: Sender<T>,
+    ended: Receiver<()>,
+}
+
+impl<T: Send + 'static> Worker<T> {
+    fn start(
+        name: &str,
+        to_window: Sender<FromApi>,
+        bus: Option<String>,
+        work: fn(Option<String>, Sender<FromApi>, Receiver<T>),
+    ) -> Option<Self> {
+        let (asked, receive) = channel();
+        let (end, ended) = channel();
+        let spawned = std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || {
+                work(bus, to_window, receive);
+                let _ = end.send(());
+            });
+        match spawned {
+            Ok(_) => Some(Self { asked, ended }),
+            Err(err) => {
+                tracing::warn!(%err, name, "the list will not be read");
+                None
+            }
+        }
+    }
+
+    /// Lets it end, and waits a moment for it: discovery is stopped
+    /// before the app goes.
+    fn stop(self, wait: Duration) {
+        drop(self.asked);
+        let _ = self.ended.recv_timeout(wait);
+    }
+}
+
+/// Reads the time zones' places, on a thread of its own.
+fn read_places(zoneinfo: PathBuf, to_window: Sender<FromApi>) {
+    let spawned = std::thread::Builder::new()
+        .name("time zones".into())
+        .spawn(move || {
+            let places = hocus_platform::timedate::places(&zoneinfo);
+            if places.is_empty() {
+                tracing::info!(dir = %zoneinfo.display(), "no zone1970.tab: no map");
+            }
+            let _ = to_window.send(FromApi::Places(places));
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "the time zones will not be placed");
     }
 }
 
@@ -278,6 +480,17 @@ enum FromApi {
     Account(hocus_platform::account::AccountInfo),
     /// AccountsService refused a change, and why.
     AccountRefused(String),
+    /// The time zones' places, for the map.
+    Places(Vec<hocus_platform::timedate::Place>),
+    /// The networks in reach, as NetworkManager says.
+    Wifi(Listed<hocus_platform::wifi::Wifi>),
+    /// What was asked of a network is done, or why not.
+    WifiDone(Result<(), hocus_platform::wifi::JoinError>),
+    /// The Bluetooth devices, as BlueZ says.
+    Bluetooth(Listed<hocus_platform::bluetooth::Bluetooth>),
+    BluetoothDone(Result<(), String>),
+    /// What a pairing asks.
+    Ask(hocus_platform::bluetooth::Ask),
 }
 
 fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
@@ -425,6 +638,8 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     let mut early_zone = None;
     let (mut early_apps, mut early_account) = (None, None);
     apps_thread(options.xdg.clone(), zone_news.clone(), |_| {});
+    read_places(options.zoneinfo.clone(), zone_news.clone());
+    let mut early_places = None;
     let (ctx, accent, file) = loop {
         match from_api.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(FromApi::Context(what)) => break *what,
@@ -432,8 +647,17 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
             Ok(FromApi::ZoneSet(_) | FromApi::AccountRefused(_)) => {}
             Ok(FromApi::Apps(apps)) => early_apps = Some(apps),
             Ok(FromApi::Account(account)) => early_account = Some(account),
+            Ok(FromApi::Places(places)) => early_places = Some(places),
             Ok(FromApi::Gone(err)) => anyhow::bail!("the compositor did not answer: {err}"),
-            Ok(FromApi::Open(_)) => {}
+            // No page asks yet.
+            Ok(
+                FromApi::Open(_)
+                | FromApi::Wifi(_)
+                | FromApi::WifiDone(_)
+                | FromApi::Bluetooth(_)
+                | FromApi::BluetoothDone(_)
+                | FromApi::Ask(_),
+            ) => {}
             Err(_) => anyhow::bail!("the compositor did not answer in time"),
         }
     };
@@ -453,6 +677,9 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     }
     if let Some(account) = early_account {
         view.set_account(account);
+    }
+    if let Some(places) = early_places {
+        view.set_places(places);
     }
     // The account is the compositor's user's.
     let user = view.context().user.clone();
@@ -491,9 +718,13 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         system_bus: options.system_bus.clone(),
         xdg: options.xdg.clone(),
         zone_news,
+        network: None,
+        bluetooth: None,
+        answer: None,
     };
     while !app.closed {
         app.take_api_news();
+        app.follow_page();
         if app.configured && app.needs_draw && !app.frame_pending {
             app.draw(&qh)?;
         }
@@ -518,6 +749,11 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
                 guard.read()?;
             }
         }
+    }
+    // Discovery stops with the window.
+    app.answer = None;
+    if let Some(worker) = app.bluetooth.take() {
+        worker.stop(Duration::from_secs(2));
     }
     Ok(())
 }
@@ -556,9 +792,61 @@ struct App {
     /// Where the answers of timedated, AccountsService and the XDG files'
     /// threads come back.
     zone_news: Sender<FromApi>,
+    /// The networks' worker, while the Network page shows.
+    network: Option<Worker<WifiAction>>,
+    /// The devices' worker, while the Bluetooth page shows.
+    bluetooth: Option<Worker<BluetoothAction>>,
+    /// The answer a pairing waits for.
+    answer: Option<hocus_platform::bluetooth::Answer>,
 }
 
 impl App {
+    /// The lists' workers run while their page shows.
+    fn follow_page(&mut self) {
+        let page = match self.view.screen() {
+            Screen::Page(page) => Some(page),
+            Screen::Home => None,
+        };
+        let bus = self.system_bus.address();
+        let wanted = page == Some(Page::Network);
+        if wanted && self.network.is_none() {
+            match bus.clone() {
+                Some(bus) => {
+                    let tx = self.zone_news.clone();
+                    self.network = Worker::start("networks", tx, bus, network_worker);
+                }
+                None if self.view.wifi_unknown() => {
+                    self.view.set_wifi(Listed::Absent("no system bus".into()));
+                }
+                None => {}
+            }
+        } else if !wanted && let Some(worker) = self.network.take() {
+            // It ends after what it is doing.
+            drop(worker);
+        }
+        let wanted = page == Some(Page::Bluetooth);
+        if wanted && self.bluetooth.is_none() {
+            match bus {
+                Some(bus) => {
+                    let tx = self.zone_news.clone();
+                    self.bluetooth = Worker::start("bluetooth", tx, bus, bluetooth_worker);
+                }
+                None if self.view.bluetooth_unknown() => {
+                    self.view
+                        .set_bluetooth(Listed::Absent("no system bus".into()));
+                }
+                None => {}
+            }
+        } else if !wanted && let Some(worker) = self.bluetooth.take() {
+            // A pairing waiting for its answer is refused.
+            self.answer = None;
+            worker.stop(Duration::ZERO);
+        }
+        if self.view.is_animating() {
+            self.needs_draw = true;
+        }
+    }
+
     fn take_api_news(&mut self) {
         while let Ok(message) = self.from_api.try_recv() {
             match message {
@@ -587,6 +875,26 @@ impl App {
                 FromApi::Apps(apps) => self.view.set_apps(apps),
                 FromApi::Account(account) => self.view.set_account(account),
                 FromApi::AccountRefused(why) => self.view.account_refused(why),
+                FromApi::Places(places) => self.view.set_places(places),
+                FromApi::Wifi(wifi) => self.view.set_wifi(wifi),
+                FromApi::WifiDone(result) => self.view.wifi_done(result),
+                FromApi::Bluetooth(bluetooth) => self.view.set_bluetooth(bluetooth),
+                FromApi::BluetoothDone(result) => self.view.bluetooth_done(result),
+                FromApi::Ask(ask) => {
+                    use hocus_platform::bluetooth::Ask;
+                    let pairing = match ask {
+                        Ask::Confirm { passkey, answer } => {
+                            self.answer = Some(answer);
+                            Some(Pairing::Confirm(passkey))
+                        }
+                        Ask::Show { code } => Some(Pairing::Show(code)),
+                        Ask::Over => {
+                            self.answer = None;
+                            None
+                        }
+                    };
+                    self.view.set_pairing(pairing);
+                }
             }
             self.needs_draw = true;
         }
@@ -797,6 +1105,26 @@ impl App {
                             });
                     if let Err(err) = spawned {
                         tracing::warn!(%err, "could not identify the screens");
+                    }
+                }
+                // To the page's worker, which does it in turn.
+                Outcome::Wifi(action) => {
+                    let sent = self.network.as_ref().map(|w| w.asked.send(action));
+                    if !matches!(sent, Some(Ok(()))) {
+                        let refused =
+                            hocus_platform::wifi::JoinError::Refused("no NetworkManager".into());
+                        self.view.wifi_done(Err(refused));
+                    }
+                }
+                Outcome::Bluetooth(action) => {
+                    let sent = self.bluetooth.as_ref().map(|w| w.asked.send(action));
+                    if !matches!(sent, Some(Ok(()))) {
+                        self.view.bluetooth_done(Err("no BlueZ".into()));
+                    }
+                }
+                Outcome::PairingAnswer(yes) => {
+                    if let Some(answer) = self.answer.take() {
+                        answer.give(yes);
                     }
                 }
                 Outcome::Change(change) => {

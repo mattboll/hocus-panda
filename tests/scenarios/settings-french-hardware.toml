@@ -1,4 +1,4 @@
-description = "French chosen on Language and region: the Hardware pages speak it at once, without restart"
+description = "French chosen on Language and region: the Hardware pages, their networks and devices too, speak it at once, without restart"
 outputs = ["1280x800"]
 shell = true
 devices = true
@@ -28,10 +28,22 @@ click_settings = "Réseau"
 expect_settings = { label = "Connecté : Bamboo grove" }
 
 [[step]]
+expect_settings = { label = "Rejoindre Panda den" }
+
+[[step]]
+expect_settings = { label = "Connecté · Sécurisé · 82 %" }
+
+[[step]]
 click_settings = "Bluetooth"
 
 [[step]]
-expect_settings = { label = "Aucun appareil connecté" }
+expect_settings = { label = "Connecté : Bamboo headphones" }
+
+[[step]]
+expect_settings = { label = "Appairer Panda keyboard" }
+
+[[step]]
+expect_settings = { label = "Casque · Connecté · Batterie 80 %" }
 
 [[step]]
 click_settings = "Verrouillage"

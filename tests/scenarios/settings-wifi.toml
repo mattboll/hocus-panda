@@ -1,0 +1,135 @@
+# The Network page's list (#67): the networks NetworkManager sees (a
+# stand-in on a private system bus, never the machine's), the one joined
+# first, each name once; a secured one joined with its password, which
+# goes to NetworkManager and nowhere else; a wrong password not kept; one
+# left, one forgotten.
+description = "The Network page lists the networks in reach, joins a secured one with its password, says a wrong one, leaves and forgets; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+devices = true
+
+[[step]]
+open_settings = { page = "network" }
+
+# Looked for as the page opens.
+[[step]]
+expect_devices = "RequestScan"
+
+[[step]]
+expect_settings = { label = "Connected · Secured · 82%" }
+
+[[step]]
+expect_settings = { label = "Disconnect Bamboo grove" }
+
+# An account's network is joined with the system's tools.
+[[step]]
+expect_settings = { label = "Join Office", shown = false }
+
+[[step]]
+click_settings = "Join Panda den"
+
+[[step]]
+expect_settings = { label = "Password for Panda den", focused = true }
+
+[[step]]
+type = "bamboo shoots"
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-wifi.png" }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_devices = "AddAndActivateConnection Panda den wpa-psk"
+
+# Joined: first in the list now.
+[[step]]
+expect_settings = { label = "Disconnect Panda den" }
+
+[[step]]
+expect_settings = { label = "Connected · Secured · 64%" }
+
+[[step]]
+expect_ui = { label = "Network: Panda den" }
+
+# A wrong password: said, and not kept.
+[[step]]
+click_settings = "Join Tea house"
+
+[[step]]
+expect_settings = { label = "Password for Tea house", focused = true }
+
+[[step]]
+type = "oops"
+
+[[step]]
+click_settings = "Join Tea house"
+
+[[step]]
+expect_devices = "AddAndActivateConnection Tea house sae"
+
+[[step]]
+expect_devices = "Delete Tea house"
+
+[[step]]
+expect_settings = { label = "Not joined: check the password" }
+
+[[step]]
+expect_settings = { label = "Forget Tea house", shown = false }
+
+# Left, then forgotten.
+[[step]]
+click_settings = "Join Panda den"
+
+[[step]]
+expect_settings = { label = "Disconnect Panda den" }
+
+[[step]]
+click_settings = "Disconnect Panda den"
+
+[[step]]
+expect_devices = "Disconnect"
+
+[[step]]
+expect_settings = { label = "Join Panda den" }
+
+[[step]]
+click_settings = "Forget Bamboo grove"
+
+[[step]]
+expect_devices = "Delete Bamboo grove"
+
+[[step]]
+expect_settings = { label = "Forget Bamboo grove", shown = false }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+# The password never reaches the configuration.
+[[step]]
+expect_config_file = { lacks = ["bamboo", "Panda den"] }
+
+[[step]]
+click_settings = "Join Panda den"
+
+[[step]]
+expect_settings = { label = "Disconnect Panda den" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-wifi-light.png" }

@@ -666,6 +666,24 @@ pub const NO_TIMEDATED: Words = Words::new(
     "Le fuseau du système se règle par systemd-timedated, absent ici : changez-le avec les outils du système.",
 );
 
+pub const MAP_NAME: Words = Words::new(
+    "World map of the time zones",
+    "Carte du monde des fuseaux horaires",
+);
+pub const MAP_NOTE: Words = Words::new(
+    "Click near a city to take its time zone; the list below offers the main ones by name.",
+    "Cliquez près d’une ville pour prendre son fuseau ; la liste ci-dessous propose les principales par leur nom.",
+);
+
+/// The zone the map rings: "In effect: Paris".
+pub fn zone_in_effect(zone: &str, lang: Lang) -> String {
+    let city = zone.rsplit('/').next().unwrap_or(zone);
+    match lang {
+        Lang::En => format!("In effect: {city}"),
+        Lang::Fr => format!("En vigueur\u{a0}: {city}"),
+    }
+}
+
 /// The system did not change its zone, and why.
 pub fn zone_refused(why: &str, lang: Lang) -> String {
     match lang {
@@ -1143,9 +1161,64 @@ pub const AIRPLANE_SUB: Words = Words::new("Wi-Fi and Bluetooth off", "Wi-Fi et 
 pub const WIFI_SUB_OFF: Words = Words::new("The radio is off", "La radio est coupée");
 pub const NOT_CONNECTED: Words = Words::new("Not connected", "Non connecté");
 pub const NETWORK_NOTE: Words = Words::new(
-    "Through NetworkManager. Networks are joined with its own tools for now (nmtui, nmcli); a list here comes later.",
-    "Par NetworkManager. On rejoint un réseau avec ses propres outils pour l’instant (nmtui, nmcli) ; une liste ici viendra plus tard.",
+    "Through NetworkManager, which keeps the passwords. The networks are looked for again every 10 seconds while this page shows.",
+    "Par NetworkManager, qui garde les mots de passe. Les réseaux sont recherchés de nouveau toutes les 10 secondes tant que la page est affichée.",
 );
+pub const NETWORKS: Words = Words::new("Networks in reach", "Réseaux à portée");
+pub const LOOKING_NETWORKS: Words = Words::new("Looking for networks…", "Recherche des réseaux…");
+pub const WIFI_OFF_LIST: Words = Words::new(
+    "Turn Wi-Fi on to see the networks in reach.",
+    "Activez le Wi-Fi pour voir les réseaux à portée.",
+);
+pub const NO_WIFI_DEVICE: Words = Words::new(
+    "No Wi-Fi device on this machine.",
+    "Pas d’appareil Wi-Fi sur cette machine.",
+);
+pub const NO_NETWORKMANAGER: Words = Words::new(
+    "The networks are listed through NetworkManager, which is not here: join them with the system’s own tools.",
+    "Les réseaux sont listés par NetworkManager, absent ici : rejoignez-les avec les outils du système.",
+);
+pub const NO_NETWORK: Words = Words::new("No network in reach.", "Aucun réseau à portée.");
+pub const JOIN: Words = Words::new("Join", "Rejoindre");
+pub const DISCONNECT: Words = Words::new("Disconnect", "Déconnecter");
+pub const FORGET: Words = Words::new("Forget", "Oublier");
+pub const CONNECTED: Words = Words::new("Connected", "Connecté");
+pub const SAVED_NETWORK: Words = Words::new("Saved", "Enregistré");
+pub const OPEN_NETWORK: Words = Words::new("Open", "Ouvert");
+pub const SECURED: Words = Words::new("Secured", "Sécurisé");
+pub const SECURED_WPA3: Words = Words::new("Secured, WPA3", "Sécurisé, WPA3");
+pub const ACCOUNT_NETWORK: Words = Words::new(
+    "Joined with the system’s own tools",
+    "À rejoindre avec les outils du système",
+);
+pub const JOINING: Words = Words::new("Joining…", "Connexion…");
+pub const WIFI_PASSWORD_NOTE: Words = Words::new(
+    "The password goes to NetworkManager, which keeps it; never into Hocuspanda’s settings. Enter joins, Escape cancels.",
+    "Le mot de passe va à NetworkManager, qui le garde ; jamais dans les réglages de Hocuspanda. Entrée rejoint, Échap annule.",
+);
+
+/// A button's name with what it acts on: "Join Panda den".
+pub fn acting(verb: Words, on: &str, lang: Lang) -> String {
+    format!("{} {on}", verb.get(lang))
+}
+
+/// The password field of a network.
+pub fn password_for(network: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Password for {network}"),
+        Lang::Fr => format!("Mot de passe de {network}"),
+    }
+}
+
+/// Why a network was not joined.
+pub fn not_joined(why: Option<&str>, lang: Lang) -> String {
+    match (why, lang) {
+        (None, Lang::En) => "Not joined: check the password".into(),
+        (None, Lang::Fr) => "Pas connecté\u{a0}: vérifiez le mot de passe".into(),
+        (Some(why), Lang::En) => format!("Not joined: {why}"),
+        (Some(why), Lang::Fr) => format!("Pas connecté\u{a0}: {why}"),
+    }
+}
 
 /// "Joined: Bamboo grove".
 pub fn joined(network: &str, lang: Lang) -> String {
@@ -1162,9 +1235,84 @@ pub const BLUETOOTH_RADIO: Words = Words::new("Bluetooth radio", "Radio Bluetoot
 pub const BLUETOOTH_SUB_OFF: Words = Words::new("Nothing connects", "Rien ne se connecte");
 pub const NO_BLUETOOTH_DEVICE: Words = Words::new("No device connected", "Aucun appareil connecté");
 pub const BLUETOOTH_NOTE: Words = Words::new(
-    "Through BlueZ. Devices are paired with its own tools for now (bluetoothctl); a list here comes later.",
-    "Par BlueZ. On appaire les appareils avec ses propres outils pour l’instant (bluetoothctl) ; une liste ici viendra plus tard.",
+    "Through BlueZ. A device that asks for a code typed on this machine is not paired here yet: pair it with bluetoothctl.",
+    "Par BlueZ. Un appareil qui demande un code tapé sur cette machine ne s’appaire pas encore ici : appairez-le avec bluetoothctl.",
 );
+pub const MY_DEVICES: Words = Words::new("My devices", "Mes appareils");
+pub const DEVICES_IN_REACH: Words = Words::new("Devices in reach", "Appareils à portée");
+pub const LOOKING_DEVICES: Words = Words::new(
+    "Looked for while this page shows: put a device in pairing mode to see it here.",
+    "Recherchés tant que la page est affichée : mettez un appareil en mode appairage pour le voir ici.",
+);
+pub const NONE_IN_REACH: Words = Words::new("None found yet.", "Aucun trouvé pour l’instant.");
+pub const NO_PAIRED: Words = Words::new(
+    "No device paired yet.",
+    "Aucun appareil appairé pour l’instant.",
+);
+pub const BLUETOOTH_OFF_LIST: Words = Words::new(
+    "Turn Bluetooth on to see the devices.",
+    "Activez le Bluetooth pour voir les appareils.",
+);
+pub const NO_BLUEZ: Words = Words::new(
+    "The devices are listed through BlueZ, which is not here: pair them with the system’s own tools.",
+    "Les appareils sont listés par BlueZ, absent ici : appairez-les avec les outils du système.",
+);
+pub const NO_ADAPTER: Words = Words::new(
+    "No Bluetooth adapter on this machine.",
+    "Pas d’adaptateur Bluetooth sur cette machine.",
+);
+pub const LOOKING_BLUETOOTH: Words = Words::new("Asking BlueZ…", "BlueZ est interrogé…");
+pub const PAIR: Words = Words::new("Pair", "Appairer");
+pub const CONNECT: Words = Words::new("Connect", "Connecter");
+pub const PAIRING: Words = Words::new("Pairing…", "Appairage…");
+pub const WORKING: Words = Words::new("Asked…", "Demandé…");
+pub const SAME_CODE: Words = Words::new("Same code: pair", "Même code : appairer");
+
+/// What a device is, from what BlueZ says.
+pub fn device_kind(kind: hocus_platform::bluetooth::Kind) -> Words {
+    use hocus_platform::bluetooth::Kind;
+    match kind {
+        Kind::Headphones => Words::new("Headphones", "Casque"),
+        Kind::Speaker => Words::new("Speaker", "Enceinte"),
+        Kind::Keyboard => Words::new("Keyboard", "Clavier"),
+        Kind::Mouse => Words::new("Mouse", "Souris"),
+        Kind::Gamepad => Words::new("Game controller", "Manette"),
+        Kind::Phone => Words::new("Phone", "Téléphone"),
+        Kind::Computer => Words::new("Computer", "Ordinateur"),
+        Kind::Other => Words::new("Device", "Appareil"),
+    }
+}
+
+/// "Battery 80%".
+pub fn device_battery(level: u8, lang: Lang) -> String {
+    format!("{} {}", BATTERY.get(lang), percent(u32::from(level), lang))
+}
+
+/// The passkey a device shows, to compare.
+pub fn compare_code(device: &str, code: u32, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Does {device} show {code:06}? Pair only if it is the same."),
+        Lang::Fr => {
+            format!("{device} affiche-t-il {code:06}\u{a0}? N’appairez que si c’est le même.")
+        }
+    }
+}
+
+/// The code typed on the device.
+pub fn type_code(device: &str, code: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Type {code} on {device}, then Enter."),
+        Lang::Fr => format!("Tapez {code} sur {device}, puis Entrée."),
+    }
+}
+
+/// Why what was asked of a device did not happen.
+pub fn device_failed(why: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Did not work: {why}"),
+        Lang::Fr => format!("Échec\u{a0}: {why}"),
+    }
+}
 
 /// "Connected: Headphones".
 pub fn connected(device: &str, lang: Lang) -> String {

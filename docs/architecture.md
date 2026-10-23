@@ -527,8 +527,21 @@ without unlocking leaves our lock screen: a crash never unlocks.
   fingerprints (AccountsService, fprintd) on the system bus; the default
   applications and autostart entries in the XDG files (`mimeapps.list`,
   the user's copy of an autostart entry), which every desktop reads.
-  Tests give it a private system bus with stand-ins and private XDG
-  directories, never the machine's.
+  While the Network page shows, a worker lists the Wi-Fi networks in reach
+  through NetworkManager (a scan at once and every 10 s), joins, leaves
+  and forgets them; a password typed there goes to NetworkManager, which
+  keeps it, never to the file nor the logs. While the Bluetooth page shows,
+  another lists BlueZ's devices with discovery on, stopped as the page
+  closes, and pairs, connects, disconnects and forgets them; a pairing
+  registers an agent with BlueZ for that pairing only, which asks the page
+  to confirm a passkey or shows the code to type on the device (a code
+  typed here is not offered yet). The time zone's world map places the
+  cities after the system's `zone1970.tab` (tzdata, public domain), read at
+  start; without it only the list shows. Its land is Natural Earth's
+  1:110m outline (public domain), simplified to half degrees by
+  `scripts/land-outline.py` into `crates/hocus-settings/data/land.txt`.
+  Tests give it a private system bus with stand-ins, private XDG
+  directories and their own copy of `zone1970.tab`, never the machine's.
 
 ## Configuration
 
@@ -669,7 +682,9 @@ suspends and wakes.
 ## Licenses
 
 MIT for the code. Dependencies must be permissive (MIT, Apache-2.0, BSD,
-ISC, Zlib, Unicode, CC0; OFL for fonts), checked by `cargo deny` in CI. No
+ISC, Zlib, Unicode, CC0; OFL for fonts), checked by `cargo deny` in CI;
+data shipped in the tree too (Natural Earth's land outline and tzdata's
+`zone1970.tab` copy for the tests are in the public domain). No
 code copied or translated from GPL projects: niri and cosmic-comp (both
 smithay-based) are GPL-3.0, as are KWin and Mutter. Read their documentation
 and design discussions, not their code. smithay and its `anvil` example are
