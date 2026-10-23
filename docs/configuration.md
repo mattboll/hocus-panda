@@ -89,9 +89,9 @@ sleep_after = 0            # seconds before the machine sleeps, locked first (0:
 sleep = "suspend"          # or "hibernate", where the machine can (it suspends otherwise)
 fullscreen_awake = true    # a fullscreen window keeps the session awake, as applications asking do
 
-[idle.battery]             # on battery (UPower says the charger is out): what differs; plugging or
-curtain_after = 60         #   unplugging the charger counts as input, the other delays start from then
-sleep_after = 900
+[idle.battery]             # on battery (UPower says the charger is out); plugging or unplugging
+curtain_after = 120        #   the charger counts as input, the other delays start from then; left
+sleep_after = 900          #   out: these, or the charger's when shorter
 
 [clipboard]                # the history (Super+V)
 history = true             # keeps what is copied; never what password managers mark secret

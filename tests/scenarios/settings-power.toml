@@ -25,7 +25,7 @@ expect_devices = "ActiveProfile power-saver"
 expect_settings = { label = "Power profile: Saver", selected = true }
 
 [[step]]
-expect_settings = { label = "On battery: Dim the screens after: 5 min", selected = true }
+expect_settings = { label = "On battery: Dim the screens after: 2 min", selected = true }
 
 [[step]]
 click_settings = "On battery: Dim the screens after: 1 min"
@@ -46,7 +46,7 @@ expect_settings = { label = "On the charger: Dim the screens after: 10 min", sel
 expect_settings = { label = "On battery: Dim the screens after: 1 min", selected = true }
 
 [[step]]
-expect_settings = { label = "On battery: Sleep after: Never", selected = true }
+expect_settings = { label = "On battery: Sleep after: 15 min", selected = true }
 
 [[step]]
 pointer_move = [500, 500]

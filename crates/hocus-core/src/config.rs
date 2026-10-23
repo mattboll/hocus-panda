@@ -1227,13 +1227,19 @@ impl Default for Idle {
     }
 }
 
-/// `[idle.battery]`: what it leaves out is as on the charger.
+/// `[idle.battery]`: a laptop's delays for what it leaves out, the
+/// charger's when those are shorter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BatteryDelays {
     pub curtain_after: Option<u32>,
     pub sleep_after: Option<u32>,
 }
+
+/// On battery, unless the file says otherwise: the curtain after two
+/// minutes, sleep after fifteen.
+pub const BATTERY_CURTAIN_AFTER: u32 = 120;
+pub const BATTERY_SLEEP_AFTER: u32 = 900;
 
 /// How the machine sleeps once idle long enough.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1279,10 +1285,23 @@ impl Idle {
         };
         match source {
             PowerSource::Charger => charger,
-            PowerSource::Battery => Delays {
-                curtain_after: self.battery.curtain_after.unwrap_or(charger.curtain_after),
-                sleep_after: self.battery.sleep_after.unwrap_or(charger.sleep_after),
-            },
+            PowerSource::Battery => {
+                // The shorter of the charger's and a laptop's: 0 is never.
+                let shorter = |charger: u32, laptop: u32| match charger {
+                    0 => laptop,
+                    c => c.min(laptop),
+                };
+                Delays {
+                    curtain_after: self
+                        .battery
+                        .curtain_after
+                        .unwrap_or_else(|| shorter(charger.curtain_after, BATTERY_CURTAIN_AFTER)),
+                    sleep_after: self
+                        .battery
+                        .sleep_after
+                        .unwrap_or_else(|| shorter(charger.sleep_after, BATTERY_SLEEP_AFTER)),
+                }
+            }
         }
     }
 }
@@ -1749,7 +1768,8 @@ mod tests {
     }
 
     #[test]
-    fn the_battery_s_delays_fall_back_on_the_charger_s() -> Result<(), ConfigError> {
+    fn the_battery_s_delays_are_a_laptop_s_unless_the_charger_s_are_shorter()
+    -> Result<(), ConfigError> {
         let c = Config::parse(
             "[idle]\ncurtain_after = 600\nsleep_after = 1800\nsleep = \"hibernate\"\n[idle.battery]\ncurtain_after = 60\n",
         )?;
@@ -1761,20 +1781,30 @@ mod tests {
                 sleep_after: 1800
             }
         );
+        // Sleep left out: a laptop's fifteen minutes, shorter than the
+        // charger's half hour.
         assert_eq!(
             on(PowerSource::Battery),
             Delays {
                 curtain_after: 60,
-                sleep_after: 1800
+                sleep_after: BATTERY_SLEEP_AFTER
             }
         );
         assert_eq!(c.idle.sleep, Sleep::Hibernate);
+        // By default: never asleep on the charger, a laptop's delays on
+        // battery.
         let d = Idle::default();
         assert!(d.fullscreen_awake && d.sleep_after == 0);
         assert_eq!(
             d.delays(PowerSource::Battery),
-            d.delays(PowerSource::Charger)
+            Delays {
+                curtain_after: BATTERY_CURTAIN_AFTER,
+                sleep_after: BATTERY_SLEEP_AFTER
+            }
         );
+        // A charger's delay shorter than a laptop's is kept on battery.
+        let quick = Config::parse("[idle]\ncurtain_after = 60\n")?;
+        assert_eq!(quick.idle.delays(PowerSource::Battery).curtain_after, 60);
         assert!(Config::parse("[idle]\nsleep = \"nap\"\n").is_err());
         Ok(())
     }

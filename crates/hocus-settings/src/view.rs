@@ -4425,8 +4425,8 @@ mod tests {
     fn the_battery_s_delays_go_to_their_own_section() {
         use crate::edit::Place;
         let mut v = hardware_view("[idle]\ncurtain_after = 600\n", Page::Power);
-        // Left out on battery, the charger's.
-        let battery = find(&v.access(), "On battery: Dim the screens after: 10 min");
+        // Left out on battery, a laptop's: shorter than the charger's.
+        let battery = find(&v.access(), "On battery: Dim the screens after: 2 min");
         assert!(battery.expect("the battery's").selected);
         let out = click(&mut v, "On battery: Dim the screens after: 1 min");
         assert_eq!(
