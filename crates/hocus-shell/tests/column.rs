@@ -250,6 +250,77 @@ fn the_journal_shows_the_latest_opens_on_all_and_stops_every_agent() -> anyhow::
     Ok(())
 }
 
+/// The rectangle of the element labelled `label`.
+fn rect_of(column: &Column, label: &str) -> anyhow::Result<hocus_ui::Rect> {
+    let access = column.access();
+    access
+        .walk()
+        .into_iter()
+        .find(|n| n.label.as_deref() == Some(label))
+        .map(|n| n.rect)
+        .ok_or_else(|| anyhow::anyhow!("no {label:?} in\n{}", access.dump()))
+}
+
+#[test]
+fn on_a_laptop_screen_the_account_stays_in_the_column_and_the_lists_give_room_back()
+-> anyhow::Result<()> {
+    // 1280×800, less the margins.
+    let height = 768.0;
+    let mut column = Column::new(Theme::default(), Lang::En, height, 1.0);
+    let mut s = state();
+    s.journal = Some(journal(true));
+    s.notifications = (1..=5)
+        .map(|i| ("Mail".to_owned(), format!("Message {i}")))
+        .collect();
+    s.meeting = Some(Meeting {
+        title: "Design review".into(),
+        when: "In 12 min".into(),
+        progress: 80,
+        join: true,
+    });
+    s.calendar_set = true;
+    s.phone = Some(PhoneLine {
+        name: "Pixel 8".into(),
+        battery: Some(82),
+        charging: false,
+    });
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let account = rect_of(&column, "Account: Camille")?;
+    assert!(
+        account.y >= 0.0 && account.bottom() <= height - 16.0 + 0.5,
+        "the account at {account:?} leaves the column, {height} tall"
+    );
+    // The notifications gave room first, then the journal, down to its
+    // latest entry, then the notifications' section altogether.
+    let access = column.access().dump();
+    assert!(!access.contains("Mail · Message 2"), "{access}");
+    assert!(
+        access.contains("helper · Click refused · Passwords"),
+        "{access}"
+    );
+    assert!(!access.contains("helper · Typed 4"), "{access}");
+    // Without the phone, a notification has room again.
+    s.phone = None;
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let account = rect_of(&column, "Account: Camille")?;
+    assert!(account.bottom() <= height - 16.0 + 0.5, "{account:?}");
+    let access = column.access().dump();
+    assert!(access.contains("Mail · Message 1"), "{access}");
+    // With room again, everything shows again.
+    let mut tall = Column::new(Theme::default(), Lang::En, 1400.0, 1.0);
+    tall.set_state(&s);
+    tall.draw(Duration::ZERO);
+    let access = tall.access().dump();
+    assert!(access.contains("Mail · Message 3"), "{access}");
+    assert!(access.contains("helper · Pressed Ctrl+S"), "{access}");
+    column.resize(1400.0, 1.0);
+    column.draw(Duration::ZERO);
+    assert_eq!(column.access().dump(), access);
+    Ok(())
+}
+
 #[test]
 fn the_window_buttons_ask_for_their_actions() -> anyhow::Result<()> {
     let mut column = column(Lang::En);

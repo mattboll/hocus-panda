@@ -22,11 +22,15 @@ use crate::{i18n::Lang, icons, phone};
 pub const WIDTH: f32 = 320.0;
 /// Between the column and the screen's edges.
 pub const MARGIN: f32 = 16.0;
+/// Above and below the card's content.
+const CARD_PADDING: f32 = 16.0;
 /// Between a popover and the column.
 const POPOVER_GAP: f32 = 12.0;
 /// Room around a popover's card for its shadow.
 const SHADOW_ROOM: f32 = 24.0;
 const ICON_STROKE: f32 = 2.1;
+/// Notifications shown at most.
+const NOTIFICATIONS: usize = 3;
 
 /// The time on the wall, as the user reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -339,6 +343,10 @@ struct Nodes {
     meeting_button: Option<NodeId>,
     /// The coding agents' room.
     agents: NodeId,
+    /// The card everything sits in: the account must stay inside it.
+    card: NodeId,
+    /// The notifications' caption and list, hidden when there is no room.
+    notes: NodeId,
     /// The agents' journal's room, its stop button, and its entries (which
     /// open the popover).
     journal: NodeId,
@@ -410,6 +418,9 @@ pub struct Column {
     tray_menu: Option<(String, Vec<TrayMenuEntry>)>,
     /// The to-dos shown, and their places in the notes.
     todo_rows: Vec<(NodeId, usize)>,
+    /// How many notifications and journal entries are shown: fewer when
+    /// the column has no room for all.
+    fit: Fit,
     /// The agents' rows and buttons.
     agent_targets: Vec<(NodeId, Action)>,
     now: Duration,
@@ -433,6 +444,7 @@ impl Column {
             tray_menu: None,
             todo_rows: Vec::new(),
             agent_targets: Vec::new(),
+            fit: Fit::MOST,
             now: Duration::ZERO,
         };
         column.apply(&ColumnState::default(), true);
@@ -460,6 +472,65 @@ impl Column {
             self.tree.resize(size, scale);
             self.surface = Surface::new(size, scale);
             self.close_popover();
+            self.fit_room();
+        }
+    }
+
+    /// Shows as many notifications and journal entries as there is room
+    /// for, the account inside the card: the notifications go first, down
+    /// to one, then the journal's entries, down to one.
+    fn fit_room(&mut self) {
+        let mut want = Fit::MOST;
+        loop {
+            self.fit_to(want);
+            self.tree.layout();
+            if self.account_inside() {
+                return;
+            }
+            match want.less(&self.state) {
+                Some(less) => want = less,
+                None => return,
+            }
+        }
+    }
+
+    /// Builds the notifications and the journal again for `want`, if it
+    /// differs from what they show.
+    fn fit_to(&mut self, want: Fit) {
+        let lang = self.lang;
+        let theme = self.tree.theme().clone();
+        let n = self.nodes;
+        if want.notifications != self.fit.notifications {
+            fill_history(
+                &mut self.tree,
+                (n.notes, n.history),
+                &theme,
+                lang,
+                &self.state.notifications,
+                want.notifications,
+            );
+        }
+        if want.journal != self.fit.journal
+            && let Some(view) = &self.state.journal
+        {
+            for child in self.tree.children(n.journal) {
+                self.tree.remove(child);
+            }
+            let (button, entries) =
+                crate::journal::fill(&mut self.tree, n.journal, &theme, lang, view, want.journal);
+            (self.nodes.journal_button, self.nodes.journal_entries) = (Some(button), Some(entries));
+        }
+        self.fit = want;
+    }
+
+    /// Whether the account lies within the card's padding.
+    fn account_inside(&self) -> bool {
+        match (
+            self.tree.rect(self.nodes.account),
+            self.tree.rect(self.nodes.card),
+        ) {
+            (Some(account), Some(card)) => account.bottom() <= card.bottom() - CARD_PADDING + 0.5,
+            _ => true,
         }
     }
 
@@ -498,6 +569,7 @@ impl Column {
         }
         let all_status = all || rebuilt;
         let n = self.nodes;
+        let fit = self.fit;
         let t = &mut self.tree;
         if let Some((ring, chip)) = n.tray
             && (all_status || old.tray != state.tray)
@@ -575,11 +647,12 @@ impl Column {
                 t.remove(child);
             }
             let theme = t.theme().clone();
-            (self.nodes.journal_button, self.nodes.journal_entries) =
-                match shown.map(|view| crate::journal::fill(t, n.journal, &theme, lang, view)) {
-                    Some((button, entries)) => (Some(button), Some(entries)),
-                    None => (None, None),
-                };
+            (self.nodes.journal_button, self.nodes.journal_entries) = match shown
+                .map(|view| crate::journal::fill(t, n.journal, &theme, lang, view, fit.journal))
+            {
+                Some((button, entries)) => (Some(button), Some(entries)),
+                None => (None, None),
+            };
         }
         if all || old.updates != state.updates {
             t.set_style(n.updates, tasks_room(state.updates.is_some()));
@@ -675,53 +748,15 @@ impl Column {
             t.set_name(n.layout, &lang.keyboard_layout(&state.layout_name));
         }
         if all || old.notifications != state.notifications {
-            let rows = t.children(n.history);
-            for row in rows {
-                t.remove(row);
-            }
             let theme = t.theme().clone();
-            if state.notifications.is_empty() {
-                let _ = t.add(
-                    n.history,
-                    Style::default(),
-                    Kind::text(lang.nothing_new(), theme.text.body.with_color(Paint::Muted)),
-                );
-            }
-            for (app, summary) in state.notifications.iter().take(3) {
-                let Some(row) = t.add(
-                    n.history,
-                    Style {
-                        direction: Direction::Row,
-                        gap: 10.0,
-                        align: Align::Center,
-                        ..Style::default()
-                    },
-                    Kind::Box(Look::default()),
-                ) else {
-                    continue;
-                };
-                let _ = t.add(
-                    row,
-                    Style {
-                        width: Length::Px(22.0),
-                        height: Length::Px(22.0),
-                        ..Style::default()
-                    },
-                    Kind::Box(Look {
-                        background: Some(Paint::Rgba(crate::toasts::app_color(app))),
-                        radius: 6.0,
-                        ..Look::default()
-                    }),
-                );
-                let _ = t.add(
-                    row,
-                    Style {
-                        width: Length::Fill,
-                        ..Style::default()
-                    },
-                    Kind::text_line(format!("{app} · {summary}"), theme.text.body),
-                );
-            }
+            fill_history(
+                t,
+                (n.notes, n.history),
+                &theme,
+                lang,
+                &state.notifications,
+                fit.notifications,
+            );
         }
         if all || old.user != state.user {
             let initial: String = state
@@ -733,6 +768,11 @@ impl Column {
             t.set_text(n.initial, &initial);
             t.set_text(n.user, &state.user);
             t.set_name(n.account, &lang.account(&state.user));
+        }
+        // What the sections in between take may push the account out of
+        // the card: the notifications, then the journal, give room back.
+        if all || takes_other_room(&old, state) {
+            self.fit_room();
         }
         // An open desktops popover follows the screens.
         if !all
@@ -1137,6 +1177,130 @@ impl Column {
     }
 }
 
+/// How many notifications and journal entries the column shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fit {
+    notifications: usize,
+    journal: usize,
+}
+
+impl Fit {
+    const MOST: Self = Self {
+        notifications: NOTIFICATIONS,
+        journal: crate::journal::ROWS,
+    };
+
+    /// One less: a notification while more than one shows, else a journal
+    /// entry while more than one shows; `None` when nothing gives more.
+    fn less(self, state: &ColumnState) -> Option<Self> {
+        // "Nothing new" takes a line too.
+        let notifications = self.notifications.min(state.notifications.len().max(1));
+        if notifications > 1 {
+            return Some(Self {
+                notifications: notifications - 1,
+                ..self
+            });
+        }
+        let journal = state
+            .journal
+            .as_ref()
+            .map_or(0, |j| self.journal.min(j.lines.len()));
+        if journal > 1 {
+            return Some(Self {
+                notifications,
+                journal: journal - 1,
+            });
+        }
+        // Last, the notifications' section goes altogether.
+        (notifications > 0).then_some(Self {
+            notifications: 0,
+            journal,
+        })
+    }
+}
+
+/// Whether what changed may take more or less room in the column.
+fn takes_other_room(old: &ColumnState, new: &ColumnState) -> bool {
+    old.notifications != new.notifications
+        || old.journal != new.journal
+        || old.agents != new.agents
+        || old.todos != new.todos
+        || old.updates != new.updates
+        || old.phone != new.phone
+        || old.sharing != new.sharing
+        || old.meeting != new.meeting
+        || old.calendar_set != new.calendar_set
+}
+
+/// The notifications' section: shown, or taking no room.
+fn notes_room(shown: bool) -> Style {
+    Style {
+        gap: 8.0,
+        height: if shown { Length::Auto } else { Length::Px(0.0) },
+        // Shown, it is drawn as before: a clip would cut its edges.
+        clip: !shown,
+        ..Style::default()
+    }
+}
+
+/// The latest notifications, `limit` at most, or that there is none; with
+/// no room for any, the section takes none.
+fn fill_history(
+    tree: &mut Tree,
+    (notes, history): (NodeId, NodeId),
+    theme: &Theme,
+    lang: Lang,
+    notifications: &[(String, String)],
+    limit: usize,
+) {
+    tree.set_style(notes, notes_room(limit > 0));
+    for row in tree.children(history) {
+        tree.remove(row);
+    }
+    if notifications.is_empty() {
+        let _ = tree.add(
+            history,
+            Style::default(),
+            Kind::text(lang.nothing_new(), theme.text.body.with_color(Paint::Muted)),
+        );
+    }
+    for (app, summary) in notifications.iter().take(limit) {
+        let Some(row) = tree.add(
+            history,
+            Style {
+                direction: Direction::Row,
+                gap: 10.0,
+                align: Align::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        ) else {
+            continue;
+        };
+        let _ = tree.add(
+            row,
+            Style {
+                width: Length::Px(22.0),
+                height: Length::Px(22.0),
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Rgba(crate::toasts::app_color(app))),
+                radius: 6.0,
+                ..Look::default()
+            }),
+        );
+        let _ = tree.add(
+            row,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
+            Kind::text_line(format!("{app} · {summary}"), theme.text.body),
+        );
+    }
+}
+
 fn translate(node: &mut AccessNode, by: Point) {
     node.rect = node.rect.translate(by.x, by.y);
     for child in &mut node.children {
@@ -1159,7 +1323,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
             Style {
                 width: Length::Fill,
                 height: Length::Fill,
-                padding: Insets::symmetric(16.0, 18.0),
+                padding: Insets::symmetric(CARD_PADDING, 18.0),
                 gap: 16.0,
                 ..Style::default()
             },
@@ -1384,15 +1548,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
     // Board D13: the phone, the updates, then the notifications.
     let phone = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     let updates = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
-    let notes = add(
-        tree,
-        feed,
-        Style {
-            gap: 8.0,
-            ..Style::default()
-        },
-        Kind::Box(Look::default()),
-    );
+    let notes = add(tree, feed, notes_room(true), Kind::Box(Look::default()));
     add(
         tree,
         notes,
@@ -1514,6 +1670,8 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         ring,
         meeting_button: None,
         agents,
+        card,
+        notes,
         journal,
         journal_button: None,
         journal_entries: None,

@@ -244,14 +244,15 @@ fn dot(refused: bool) -> (Style, Kind) {
 }
 
 /// Fills the section: its caption and the stop button, the stopped line,
-/// then the latest entries, which open the popover. The button, and the
-/// entries (the popover's anchor).
+/// then the latest `rows` entries (one at least), which open the popover.
+/// The button, and the entries (the popover's anchor).
 pub(crate) fn fill(
     tree: &mut Tree,
     room: NodeId,
     theme: &Theme,
     lang: Lang,
     view: &JournalView,
+    rows: usize,
 ) -> (NodeId, NodeId) {
     let missing = || unreachable!("adding to a node of this tree");
     let add = |tree: &mut Tree, parent, style, kind| {
@@ -342,7 +343,7 @@ pub(crate) fn fill(
             ),
         );
     }
-    for line in view.lines.iter().take(ROWS) {
+    for line in view.lines.iter().take(rows.max(1)) {
         let r = add(tree, entries, row(10.0), Kind::Box(Look::default()));
         let (style, kind) = dot(line.refused.is_some());
         add(tree, r, style, kind);
