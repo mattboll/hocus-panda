@@ -22,6 +22,7 @@ per_output = 4     # desktops of an output seen for the first time (1 to 8)
 [[desktops.looks]]  # a desktop's own theme and wallpaper, to know where you are; the column crossfades
 desktop = 2         # from 1
 output = "eDP-1"    # only this screen's desktop 2; every screen's when left out
+name = "Website"    # what it is called, unless the screen's desktop_names names it
 theme = "paper"     # as [appearance] theme; accent too
 kind = "colour"     # as [wallpaper]: kind, image, folder, mode, colour
 colour = "#efe7d6"

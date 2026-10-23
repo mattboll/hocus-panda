@@ -462,7 +462,8 @@ impl State {
         changed
     }
 
-    /// The name the file gives a desktop, on the output it belongs to.
+    /// The name the file gives a desktop: its output's `desktop_names`,
+    /// else the look of that desktop number (#218).
     pub fn desktop_name(&self, id: hocus_core::DesktopId) -> Option<String> {
         let home = &self.model.desktop(id)?.home;
         let index = self
@@ -470,13 +471,22 @@ impl State {
             .own_desktops(home)?
             .iter()
             .position(|d| *d == id)?;
-        let name = self
-            .config
-            .output(&home.0)?
-            .desktop_names
-            .get(index)?
-            .trim();
-        (!name.is_empty()).then(|| name.to_owned())
+        let named = |name: &str| {
+            let name = name.trim();
+            (!name.is_empty()).then(|| name.to_owned())
+        };
+        self.config
+            .output(&home.0)
+            .and_then(|o| o.desktop_names.get(index))
+            .and_then(|n| named(n))
+            .or_else(|| {
+                self.config
+                    .desktops
+                    .look(&home.0, index)?
+                    .name
+                    .as_deref()
+                    .and_then(named)
+            })
     }
 
     /// Shows each lit screen's name on it for three seconds.

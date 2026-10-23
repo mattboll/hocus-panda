@@ -333,7 +333,10 @@ switcher's strip, Alt+Tab and the overview): an agent waiting, a window
 asking for attention, an agent done since a screen last showed its
 desktop. A window asks for attention when it asks to come forward with an
 activation token too old to let it (tokens are timed on the compositor's
-clock), until it has the keyboard.
+clock), or with any token while no screen shows its desktop: Alex goes
+there by choice, from a badge, never pulled away (#218); it asks until it
+has the keyboard. A waiting agent's toast names its desktop when no screen
+shows it.
 
 Notes (#79) are one Markdown file, read and written whole on worker
 threads (written to a new file, then renamed over the old one); lines the

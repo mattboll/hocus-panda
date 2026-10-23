@@ -280,9 +280,12 @@ impl State {
                     ]
                     .map(|(k, l)| (k.to_owned(), l.to_owned()))
                     .to_vec();
-                    if let Some(id) =
-                        self.shell_toast_waiting(&format!("herdr · {name}"), &summary, actions)
-                    {
+                    // Its desktop, when no screen shows it (#218).
+                    let title = match self.unseen_desktop_label(&key) {
+                        Some(desktop) => format!("herdr · {name} · {desktop}"),
+                        None => format!("herdr · {name}"),
+                    };
+                    if let Some(id) = self.shell_toast_waiting(&title, &summary, actions) {
                         self.agents.toasts.insert(id, key);
                     }
                 }
@@ -328,6 +331,24 @@ impl State {
     /// The desktop an agent works for, by its key.
     pub(crate) fn agent_desktop(&self, key: &str) -> Option<DesktopId> {
         self.source_desktop(pane_of(key)?.0)
+    }
+
+    /// What an agent's desktop is called, when no screen shows it: its
+    /// name, else its number.
+    fn unseen_desktop_label(&self, key: &str) -> Option<String> {
+        let desktop = self.agent_desktop(key)?;
+        if self.desktop_is_shown(desktop) {
+            return None;
+        }
+        self.desktop_name(desktop).or_else(|| {
+            let home = &self.model.desktop(desktop)?.home;
+            let n = self
+                .model
+                .own_desktops(home)?
+                .iter()
+                .position(|d| *d == desktop)?;
+            Some(self.shell_lang().desktop(n + 1))
+        })
     }
 
     /// Whether a screen shows this desktop.

@@ -184,6 +184,9 @@ pub struct DesktopLook {
     /// Only on this output; every output's desktop of that number when
     /// not set.
     pub output: Option<String>,
+    /// What the desktop is called (#218); a screen's own `desktop_names`
+    /// wins over it.
+    pub name: Option<String>,
     pub theme: Option<String>,
     pub accent: Option<String>,
     pub kind: Option<String>,
