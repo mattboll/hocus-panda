@@ -50,6 +50,7 @@ impl State {
             || self.leave_open()
             || self.auth_open()
             || self.circle_open()
+            || self.radial_open()
             || self.picking()
             || self.alt_tab_open()
             || self.seat_card_keys()
@@ -208,8 +209,10 @@ impl State {
         self.super_fired();
         match handled {
             Some(Handled::Shortcut(action)) => {
-                // A circle's menu gives way to what was asked for.
+                // A circle's menu, or the window menu, gives way to what
+                // was asked for.
                 self.close_circle();
+                self.close_radial();
                 self.run_action(&action, serial);
             }
             Some(Handled::PaletteKeys(combo)) => self.palette_keys(&combo),
@@ -236,6 +239,9 @@ impl State {
             }
             Some(Handled::Panel(sym, modifiers)) if self.auth_open() => {
                 self.auth_key(sym, &modifiers);
+            }
+            Some(Handled::Panel(sym, _)) if self.radial_open() => {
+                self.radial_key(sym);
             }
             Some(Handled::Panel(sym, modifiers)) if self.circle_open() => {
                 self.circle_key(sym, &modifiers);
@@ -378,7 +384,8 @@ impl State {
         }
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.seat_card_pointer(location, None)
+            && (self.radial_pointer_motion(location)
+                || self.seat_card_pointer(location, None)
                 || self.alt_tab_pointer(location, None, SERIAL_COUNTER.next_serial())
                 || self.dock_pointer(location, None)
                 || self.share_pointer(location, None)
@@ -445,6 +452,11 @@ impl State {
         // Super with a button is no longer Super alone (#86); with the
         // left one it draws on the screen, and no client sees it.
         self.super_spoiled();
+        // With the right one, the window's menu (#40).
+        if !pointer.is_grabbed() && self.radial_button(at, button, pressed) {
+            self.needs_redraw = true;
+            return;
+        }
         // With Shift too, it circles something to ask about it (#46).
         if !pointer.is_grabbed() && self.circle_button(at, button, pressed) {
             self.needs_redraw = true;

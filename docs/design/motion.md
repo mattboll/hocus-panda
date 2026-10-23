@@ -84,7 +84,7 @@ of the moment: the client follows at its own pace.
 ## Menus and popovers
 
 - Open from their origin (the icon, the pointer) with fade + scale, close faster than they open
-- The radial menu unfolds around the pointer; a quick flick in a direction triggers the action without waiting for the menu to show
+- The radial menu unfolds around the pointer, its actions springing out from it (critically damped) as its disc fades in over `SMALL`; a quick flick in a direction triggers the action without waiting for the menu to show; it folds back as it fades, faster (`SMALL`, in-cubic); resting on Close fills a ring around it over 300 ms; with reduced motion it is there and gone at once
 - Submenus slide in the reading direction
 
 ## Session moments

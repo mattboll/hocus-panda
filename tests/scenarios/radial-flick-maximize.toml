@@ -1,0 +1,112 @@
+# The radial menu (#40): Super and the right button over a window open its
+# actions around the pointer; a quick flick up maximizes it as soon as the
+# button is let go, without waiting. Close is never flicked: a flick toward
+# it does nothing. The window never sees the buttons.
+description = "Super and the right button then a flick up maximize the window under the pointer on release; a flick toward Close does nothing; the window never sees the buttons"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "editor", size = [800, 500], color = "#3399ff" }
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+expect_ui = { label = "Maximize" }
+
+# 110 px up in 60 ms.
+[[step]]
+pointer_move = [640, 290]
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_ui = { label = "Maximize", shown = false }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "button 273 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "button 273 released" }
+
+# A flick up and left, toward Close: nothing, and the menu goes.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+pointer_move = [560, 320]
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "Restore", shown = false }
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized" }
+
+# Maximized, the same flick restores it.
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+expect_ui = { label = "Restore" }
+
+[[step]]
+pointer_move = [560, 240]
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal" }
+
+# Without Super, the right button is the window's.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+click = "right"
+
+[[step]]
+expect_received = { app_id = "editor", event = "button 273 pressed" }
+
+[[step]]
+expect_ui = { label = "Maximize", shown = false }

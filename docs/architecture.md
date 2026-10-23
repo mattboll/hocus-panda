@@ -306,6 +306,22 @@ and are offered only while the AI is on; Copy the text, Note and Search
 holds the keyboard and the pointer: Escape, or a press anywhere else that
 no client sees, closes it all.
 
+The radial menu (#40) is a window's actions around the pointer, opened by
+`[radial]`'s button with its keys held (Super and the right button: Super
+and the left one draw, #86) over a window, never over the shell. Its
+panel (`hocus-shell::radial`) is a square drawn at the pointer and moved
+in to stay whole on that screen; it takes the pointer and the keys while
+open, and no client sees its buttons. Held, `Gesture` keeps the last
+moments of the pointer's way: let go at least 28 px away at 500 px/s or
+more (over the last 100 ms) is a flick, which picks the direction it
+points at; slower, the sector past 56 px lights up and the release picks
+it; nearer, nothing. Close is never flicked: resting 300 ms on it arms it.
+Moved less than 6 px, the press is a click and the menu stays for a click
+or the arrows, Enter and Escape. What is picked is the compositor's own
+action on that window (maximize, pin, send to the next screen or a desktop
+of its screen, minimize, on top, snap, close), as the shortcuts and the
+control API do it.
+
 Document search (#45) lives in `hocus-platform::search`: an indexer thread
 at nice 19 walks the configured folders a few entries at a time with pauses
 between batches, reads what changed since the index was kept (by date and

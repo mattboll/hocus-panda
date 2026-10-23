@@ -1,0 +1,72 @@
+# The radial menu (#40): Close only by resting on it. Held toward it, a ring
+# fills around it for 300 ms; let go before, nothing; once full, the
+# window closes on release.
+description = "Resting 300 ms on the radial menu's Close closes the window on release, a ring filling meanwhile; let go sooner, nothing"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "editor", size = [800, 500], color = "#3399ff" }
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+pointer_move = [580, 340]
+
+[[step]]
+expect_ui = { label = "Close", selected = true }
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "Close", shown = false }
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+# Again, resting long enough.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+pointer_move = [580, 340]
+
+[[step]]
+advance_ms = 150
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "radial-close-rest.png" }
+
+[[step]]
+advance_ms = 160
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_no_window = "editor"

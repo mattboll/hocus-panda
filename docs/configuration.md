@@ -268,6 +268,11 @@ enabled = true             #   its text is read (see [screenshots] ocr), then co
 modifiers = "Super+Shift"  #   or explained, translated or asked about while [ai] is on. Super, Ctrl,
                            #   Alt, Shift; "Super" alone takes the place of drawing on the screen
 
+[radial]                   # the window menu at the pointer: this button with these keys over a window
+enabled = true             #   opens its actions around the pointer (a flick picks one at once)
+modifiers = "Super"        #   Super, Ctrl, Alt, Shift
+button = "right"           #   right or middle; Super with the left one draws on the screen
+
 [gestures]                 # Super alone and the touchpad; overview, launcher, show-desktop or none
 super_alone = "overview"   # Super pressed and let go with nothing else between
 three_sideways = true      # three fingers sideways switch desktops
@@ -464,3 +469,11 @@ Defaults:
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |
 | Super+Shift+Escape | `stop-agents` |
 | Ctrl+Alt+BackSpace | `quit` |
+
+With the pointer, besides: Alt+drag moves a window and Alt+right drag
+resizes it, Super+drag draws on the screen, `[circle] modifiers` (Super+
+Shift) with a drag circles something to ask about it, and `[radial]`
+(Super and the right button) over a window opens its radial menu: held, a
+flick or a slow move picks an action on release; clicked, it stays for a
+click or the arrows, Enter and Escape. Its Close is never flicked: rest on
+it 300 ms, or click it.

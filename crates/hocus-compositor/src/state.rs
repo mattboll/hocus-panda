@@ -173,6 +173,8 @@ pub struct State {
     /// Drawing on the screen (#86).
     pub ink: crate::ink::Inking,
     pub circles: crate::circle::Circles,
+    /// The window menu at the pointer (#40).
+    pub radials: crate::radial::Radials,
     /// Wobbly windows and flicks (#35).
     pub wobbles: crate::wobble::Wobbles,
     pub pandas: crate::pandas::Pandas,
@@ -318,6 +320,7 @@ impl State {
             triggers: Default::default(),
             ink: Default::default(),
             circles: Default::default(),
+            radials: Default::default(),
             wobbles: Default::default(),
             pandas: Default::default(),
             agents: Default::default(),
