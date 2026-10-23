@@ -510,6 +510,91 @@ impl Reader {
     }
 }
 
+/// Turns the session's accessibility on while agents are there (#175):
+/// Firefox, Chromium, Electron and Qt expose their trees only when
+/// `org.a11y.Status.IsEnabled` is set. It is set back once the last agent
+/// leaves, and only if it was this that set it. On a thread of its own;
+/// with no session bus (tests, nested), it does nothing.
+#[derive(Debug)]
+pub struct Toggle {
+    wanted: mpsc::Sender<bool>,
+}
+
+impl Toggle {
+    pub fn start(bus: &Bus) -> std::io::Result<Option<Self>> {
+        let Bus::Session(session) = bus else {
+            return Ok(None);
+        };
+        let session = session.clone();
+        let (wanted, asked) = mpsc::channel::<bool>();
+        std::thread::Builder::new()
+            .name("atspi status".into())
+            .spawn(move || {
+                // Whether IsEnabled is on because this turned it on.
+                let mut ours = false;
+                while let Ok(on) = asked.recv() {
+                    if on == ours {
+                        continue;
+                    }
+                    match zbus::block_on(status(&session, on, ours)) {
+                        Ok(set) => ours = set,
+                        Err(err) => tracing::debug!(%err, "the accessibility status"),
+                    }
+                }
+            })?;
+        Ok(Some(Self { wanted }))
+    }
+
+    /// On while an agent is there, off (as it was) once none is.
+    pub fn agents(&self, there: bool) {
+        let _ = self.wanted.send(there);
+    }
+}
+
+/// Turns `IsEnabled` on when asked and off, and returns whether it is on
+/// because of this: on asked while already on stays someone else's.
+async fn status(session: &str, on: bool, ours: bool) -> Result<bool, String> {
+    let conn = zbus::connection::Builder::address(session)
+        .method_timeout(CALL_TIMEOUT)
+        .build()
+        .await
+        .map_err(|e| e.to_string())?;
+    let properties = "org.freedesktop.DBus.Properties";
+    if on {
+        let reply = conn
+            .call_method(
+                Some("org.a11y.Bus"),
+                "/org/a11y/bus",
+                Some(properties),
+                "Get",
+                &("org.a11y.Status", "IsEnabled"),
+            )
+            .await
+            .map_err(|e| format!("org.a11y.Status: {e}"))?;
+        let already: bool = reply
+            .body()
+            .deserialize::<OwnedVariant>()
+            .ok()
+            .and_then(|v| bool::try_from(&*v).ok())
+            .unwrap_or(false);
+        if already {
+            return Ok(false);
+        }
+    } else if !ours {
+        return Ok(false);
+    }
+    conn.call_method(
+        Some("org.a11y.Bus"),
+        "/org/a11y/bus",
+        Some(properties),
+        "Set",
+        &("org.a11y.Status", "IsEnabled", zbus::Variant::from(on)),
+    )
+    .await
+    .map_err(|e| format!("org.a11y.Status: {e}"))?;
+    Ok(on)
+}
+
 /// An object on the bus: its connection's name and its path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Ref {
