@@ -1137,7 +1137,9 @@ name = "hocus-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "tempfile",
  "toml",
+ "toml_edit",
 ]
 
 [[package]]
@@ -1174,7 +1176,6 @@ dependencies = [
  "png",
  "rustix 1.1.5",
  "smithay-client-toolkit",
- "tempfile",
  "toml_edit",
  "tracing",
  "tracing-subscriber",
@@ -1192,6 +1193,7 @@ dependencies = [
  "image",
  "png",
  "qrcode",
+ "serde_json",
 ]
 
 [[package]]

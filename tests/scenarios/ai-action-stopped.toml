@@ -1,0 +1,91 @@
+# AI answers that act (#197), while every agent is stopped (#176): the
+# answer shows with Copy and Add to the notes only; nothing it proposes is
+# offered, so nothing acts.
+description = "Given agents stopped, when an answer is shown, then no acting action is offered"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+herdr = { agents = [{ name = "refacto", status = "idle" }] }
+
+[[step]]
+ai_server = { delay_ms = 30, pieces = [
+  "The theme is dark.\n\n",
+  "```hocus-actions\n",
+  "{\"action\":\"config\",\"section\":\"appearance\",\"key\":\"theme\",\"value\":\"light\"}\n",
+  "{\"action\":\"agent\"}\n",
+  "{\"action\":\"settings\",\"page\":\"appearance\"}\n",
+  "```\n",
+] }
+
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+
+[ai]
+enabled = true
+provider = "ollama"
+url = "{ai}"
+"""
+
+[[step]]
+expect_ui = { label = "1 at rest" }
+
+[[step]]
+keys = "super+shift+escape"
+
+[[step]]
+expect_journal = { stopped = true }
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "why is it so dark?"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "The theme is dark." }
+
+[[step]]
+expect_ui = { label = "Copy" }
+
+[[step]]
+expect_ui = { label = "Add to the notes" }
+
+[[step]]
+expect_ui = { label = "Fix the configuration", shown = false }
+
+[[step]]
+expect_ui = { label = "Hand to an agent", shown = false }
+
+[[step]]
+expect_ui = { label = "Open the settings", shown = false }
+
+# Allowed again, the same answer offers them.
+[[step]]
+key = 1
+
+[[step]]
+keys = "super+shift+escape"
+
+[[step]]
+expect_journal = { stopped = false }
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "why is it so dark?"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Fix the configuration" }
+
+[[step]]
+expect_ui = { label = "Hand to an agent" }

@@ -19,6 +19,8 @@
 //! 3 secondes") shows as a card to confirm before it runs; a question can
 //! be asked, and its answer streams into the card, with buttons to copy it
 //! or keep it in the notes. The other results stay below, under "Also".
+//! The actions it proposes (#197) come first: each shows what it will do,
+//! and runs only once confirmed.
 
 use std::time::Duration;
 
@@ -35,6 +37,7 @@ use crate::{
     icons,
     intents::Intent,
     panda::Mood,
+    proposals::{Offer, Run},
     providers::{Context, Enabled, Hit, Provider, providers},
 };
 
@@ -114,6 +117,8 @@ const TALL: f32 = FIELD + 1.0 + 470.0 + 210.0;
 const ANSWER_MAX: f32 = 300.0;
 /// Page Up and Page Down scroll the answer by this much.
 const ANSWER_PAGE: f32 = ANSWER_MAX - 40.0;
+/// The card's room inside its padding, for its buttons.
+const PANEL: f32 = WIDTH - 2.0 * 28.0;
 
 /// An application the launcher can start.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +228,8 @@ pub enum LauncherEvent {
     },
     /// An answer, kept in the notes.
     NoteAnswer(String),
+    /// An action an answer proposed, confirmed (#197).
+    Act(Run),
 }
 
 /// What a button of the card does.
@@ -234,6 +241,12 @@ enum CardAction {
     Note,
     Stop,
     Retry,
+    /// The answer's proposal at this index: its confirmation shows.
+    Offer(usize),
+    /// The confirmation's button at this index: it runs.
+    Run(usize),
+    /// Back to the answer, nothing done.
+    Back,
 }
 
 /// Where the launcher's parts are, logical from its corner, for the Matrix
@@ -305,6 +318,10 @@ pub struct Launcher {
     asked: u64,
     /// The answer changed since it was drawn.
     answer_changed: bool,
+    /// What the answer proposes, once all there (#197).
+    offers: Vec<Offer>,
+    /// The proposal whose confirmation shows.
+    confirming: Option<usize>,
     now: Duration,
 }
 
@@ -475,6 +492,8 @@ impl Launcher {
             answer: None,
             asked: 0,
             answer_changed: false,
+            offers: Vec::new(),
+            confirming: None,
             now: Duration::ZERO,
         }
     }
@@ -522,6 +541,11 @@ impl Launcher {
     /// The applications to search; an open launcher searches them again.
     /// The application whose windows have `app_id`: its desktop entry is
     /// `<app id>.desktop`, or ends with `.<app id>.desktop`.
+    /// The applications it knows.
+    pub fn apps(&self) -> &[App] {
+        &self.apps
+    }
+
     pub fn app_for(&self, app_id: &str) -> Option<&App> {
         let wanted = app_id.to_lowercase();
         self.apps.iter().find(|app| {
@@ -560,6 +584,8 @@ impl Launcher {
         self.open = true;
         self.mode = mode;
         self.answer = None;
+        self.offers.clear();
+        self.confirming = None;
         self.tree.set_field_value(self.field, "");
         self.tree.set_focus(Some(self.field));
         let keys = match mode {
@@ -868,6 +894,8 @@ impl Launcher {
         // Typing again leaves the answer.
         if self.answer.as_ref().is_some_and(|a| a.question != query) {
             self.answer = None;
+            self.offers.clear();
+            self.confirming = None;
             self.answer_tall = false;
             self.answer_scroll = 0.0;
         }
@@ -920,12 +948,16 @@ impl Launcher {
                     chips: intent.facts(lang),
                     error: None,
                     buttons: vec![intent.confirm(lang).into(), lang.cancel().into()],
+                    width: PANEL,
                 },
                 vec![CardAction::Confirm, CardAction::Cancel],
             )),
             Choice::Answer => {
                 let a = self.answer.as_ref()?;
-                let mut blocks = answer::blocks(&a.text);
+                if let Some(offer) = self.confirming.and_then(|i| self.offers.get(i)) {
+                    return Some(confirmation(offer, lang));
+                }
+                let mut blocks = answer::blocks(a.shown());
                 if blocks.is_empty() && a.state == answer::State::Streaming {
                     blocks.push(answer::Block::Paragraph(lang.thinking().into()));
                 }
@@ -933,10 +965,18 @@ impl Launcher {
                     answer::State::Streaming => {
                         (None, vec![lang.stop().into()], vec![CardAction::Stop])
                     }
+                    // What it proposes first, the main one first (#197).
                     answer::State::Done(_) => (
                         None,
-                        vec![lang.copy().into(), lang.add_to_notes().into()],
-                        vec![CardAction::Copy, CardAction::Note],
+                        self.offers
+                            .iter()
+                            .map(|o| o.label.clone())
+                            .chain([lang.copy().into(), lang.add_to_notes().into()])
+                            .collect(),
+                        (0..self.offers.len())
+                            .map(CardAction::Offer)
+                            .chain([CardAction::Copy, CardAction::Note])
+                            .collect(),
                     ),
                     answer::State::Failed(why) => (
                         Some(why.clone()),
@@ -952,6 +992,7 @@ impl Launcher {
                         chips: Vec::new(),
                         error,
                         buttons,
+                        width: PANEL,
                     },
                     actions,
                 ))
@@ -1490,6 +1531,8 @@ impl Launcher {
         };
         self.asked += 1;
         self.answer = Some(Answer::new(question.clone(), source));
+        self.offers.clear();
+        self.confirming = None;
         self.answer_tall = false;
         self.answer_scroll = 0.0;
         self.search();
@@ -1532,7 +1575,48 @@ impl Launcher {
                 let question = self.answer.as_ref().map(|a| a.question.clone());
                 question.map(|q| self.start_answer(q)).unwrap_or_default()
             }
+            CardAction::Offer(i) => {
+                if i < self.offers.len() {
+                    self.confirming = Some(i);
+                    self.answer_tall = false;
+                    self.answer_scroll = 0.0;
+                    self.render();
+                }
+                Vec::new()
+            }
+            CardAction::Run(j) => {
+                let run = self
+                    .confirming
+                    .and_then(|i| self.offers.get(i))
+                    .and_then(|o| o.confirms.get(j))
+                    .map(|(_, run)| run.clone());
+                match run {
+                    Some(run) => {
+                        self.close();
+                        vec![LauncherEvent::Act(run)]
+                    }
+                    None => Vec::new(),
+                }
+            }
+            CardAction::Back => {
+                self.confirming = None;
+                self.answer_tall = false;
+                self.answer_scroll = 0.0;
+                self.render();
+                Vec::new()
+            }
         }
+    }
+
+    /// What the answer to question `id` proposes, once it is all there,
+    /// as the desktop can offer it.
+    pub fn set_offers(&mut self, id: u64, offers: Vec<Offer>) {
+        if id != self.asked || self.answer.is_none() {
+            return;
+        }
+        self.offers = offers;
+        self.confirming = None;
+        self.answer_changed = true;
     }
 
     /// More of the answer to question `id`, its end, or why it stopped;
@@ -1592,6 +1676,36 @@ impl Launcher {
     pub fn access(&self) -> AccessNode {
         self.tree.access()
     }
+}
+
+/// What a proposal's confirmation shows (#197): what it will do, the
+/// diff or the text it sends, then its buttons and Cancel, which goes back
+/// to the answer.
+fn confirmation(offer: &Offer, lang: Lang) -> (Card, Vec<CardAction>) {
+    let mut blocks = vec![answer::Block::Paragraph(offer.title.clone())];
+    blocks.extend(offer.detail.clone().map(answer::Block::Code));
+    let buttons = offer
+        .confirms
+        .iter()
+        .map(|(label, _)| label.clone())
+        .chain([lang.cancel().to_owned()])
+        .collect();
+    let actions = (0..offer.confirms.len())
+        .map(CardAction::Run)
+        .chain([CardAction::Back])
+        .collect();
+    (
+        Card {
+            mood: Mood::Wait,
+            caption: lang.intent_caption().into(),
+            blocks,
+            chips: offer.chips.clone(),
+            error: None,
+            buttons,
+            width: PANEL,
+        },
+        actions,
+    )
 }
 
 #[cfg(test)]
@@ -1831,6 +1945,45 @@ mod tests {
         l.text("x");
         assert_eq!(l.awaited(), None);
         assert!(l.answer().is_none());
+    }
+
+    #[test]
+    fn a_proposed_action_shows_what_it_does_and_runs_only_once_confirmed() {
+        let mut l = launcher();
+        l.set_providers(&Enabled {
+            ask: Some(Source::Local),
+            ..Enabled::default()
+        });
+        l.open();
+        l.text("how do I get a light theme?");
+        l.key(Key::Enter);
+        let text = "Switch the theme.\n\n```hocus-actions\n{\"action\":\"settings\",\"page\":\"appearance\"}\n```\n";
+        l.answer_news(1, answer::News::Text(text.into()));
+        l.answer_news(1, answer::News::Done(Duration::from_secs(1)));
+        let found = crate::proposals::read(text, &[]);
+        let offers =
+            crate::proposals::offers(&found, &crate::proposals::Context::default(), Lang::En);
+        l.set_offers(1, offers);
+        l.draw(Duration::ZERO);
+        let dump = l.access().dump();
+        assert!(!dump.contains("hocus-actions"), "{dump}");
+        assert!(dump.contains("Open the settings"), "{dump}");
+        // The main button shows what it will do; Cancel goes back.
+        assert_eq!(l.key(Key::Enter), vec![]);
+        l.draw(Duration::ZERO);
+        assert!(l.access().dump().contains("Open the settings: Appearance"));
+        assert_eq!(l.card_action(CardAction::Back), vec![]);
+        l.draw(Duration::ZERO);
+        assert!(!l.access().dump().contains("Open the settings: Appearance"));
+        // Chosen again and confirmed, it runs.
+        assert_eq!(l.key(Key::Enter), vec![]);
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![LauncherEvent::Act(crate::proposals::Run::Settings(
+                "appearance".into()
+            ))]
+        );
+        assert!(!l.is_open());
     }
 
     #[test]

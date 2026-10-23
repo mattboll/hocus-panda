@@ -438,6 +438,11 @@ fn settings(words: &[String]) -> Option<Intent> {
         .map(|(page, ..)| Intent::Settings((*page).to_owned()))
 }
 
+/// The settings pages a request can open, by name.
+pub fn pages() -> impl Iterator<Item = &'static str> {
+    PAGES.iter().map(|(page, ..)| *page)
+}
+
 /// The page's label.
 pub fn page_label(page: &str, lang: Lang) -> &'static str {
     PAGES

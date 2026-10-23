@@ -1,0 +1,95 @@
+# AI answers that act (#197): "Hand to an agent" gives the question and
+# the answer to a coding agent of herdr (a stand-in of the test's own,
+# never the user's), as a prompt, once the agent is chosen and confirmed;
+# the agents' journal (#176) keeps it as that agent's, its text only when
+# [agents] journal_text says so.
+description = "Given an answer with Hand to an agent, when chosen and confirmed, then the herdr agent receives the question and the answer, and the journal records it"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+herdr = { agents = [
+  { name = "refacto", status = "idle" },
+  { name = "docs", status = "working" },
+] }
+
+[[step]]
+ai_server = { delay_ms = 30, pieces = [
+  "The build cache is off since sccache was updated at 9:12.\n\n",
+  "- The configuration still sets the old RUSTC_WRAPPER.\n\n",
+  "```hocus-actions\n",
+  "{\"action\":\"agent\"}\n",
+  "{\"action\":\"intent\",\"request\":\"screenshot in 3 seconds\"}\n",
+  "```\n",
+] }
+
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+
+[ai]
+enabled = true
+provider = "ollama"
+url = "{ai}"
+"""
+
+[[step]]
+expect_ui = { label = "docs · Works" }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "why is the build slow since this morning?"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "The build cache is off since sccache was updated at 9:12." }
+
+[[step]]
+expect_ui = { label = "Hand to an agent" }
+
+[[step]]
+expect_ui = { label = "Screenshot of the screen in 3\u00a0s" }
+
+# Chosen: what goes, and to which agent.
+[[step]]
+click_ui = "Hand to an agent"
+
+[[step]]
+expect_ui = { label = "Give the question and the answer to a coding agent" }
+
+[[step]]
+expect_ui = { label = "Give to docs" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "ai-action-agent.png" }
+
+[[step]]
+click_ui = "Give to refacto"
+
+[[step]]
+expect_herdr = """
+agent.prompt refacto why is the build slow since this morning?
+
+An AI answered:
+The build cache is off since sccache was updated at 9:12.
+• The configuration still sets the old RUSTC_WRAPPER."""
+
+[[step]]
+expect_ui = { label = "Handed to refacto" }
+
+[[step]]
+expect_journal = { has = ["refacto: prompted with 170 characters"], lacks = ["sccache"] }

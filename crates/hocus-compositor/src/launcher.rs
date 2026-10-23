@@ -426,6 +426,10 @@ impl State {
                 // Asked and answered in the field itself.
                 LauncherEvent::Chosen(Choice::Ask(_) | Choice::Answer) => {}
                 LauncherEvent::Ask { id, question } => self.ask_ai(id, question),
+                LauncherEvent::Act(run) => {
+                    self.close_launcher();
+                    self.run_proposal(run);
+                }
                 LauncherEvent::NoteAnswer(text) => {
                     self.close_launcher();
                     // A line of the notes.
@@ -439,7 +443,7 @@ impl State {
     }
 
     /// Runs a request the user confirmed (#44).
-    fn run_intent(&mut self, intent: hocus_shell::intents::Intent) {
+    pub(crate) fn run_intent(&mut self, intent: hocus_shell::intents::Intent) {
         use hocus_shell::intents::Intent;
         tracing::info!(?intent, "confirmed");
         match intent {

@@ -30,6 +30,7 @@ pub mod matrix;
 pub mod panda;
 pub mod phone;
 pub mod picker;
+pub mod proposals;
 pub mod providers;
 pub mod quick;
 pub mod readout;

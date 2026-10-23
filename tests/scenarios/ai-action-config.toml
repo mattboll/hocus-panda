@@ -1,0 +1,133 @@
+# AI answers that act (#197): the model (a stand-in on 127.0.0.1) ends
+# its answer with a hocus-actions block, never shown. What it proposes from
+# the fixed set comes first under the answer, the main one first
+# ("Corriger la configuration", as board D06 draws it); what is not in the
+# set (a shell command, a malformed line, a key it may not change) is
+# dropped. Choosing it shows the change as a diff of the file; Cancel goes
+# back with nothing done; Change it writes the one key through the
+# settings app's writer, the file's comments kept.
+description = "Given an answer that proposes changing [appearance] theme, when the user confirms, then the configuration changes (comments kept) and the change was shown first as a diff; Cancel does nothing"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+ai_server = { delay_ms = 30, pieces = [
+  "Le thème se règle dans l’apparence : il est sombre en ce moment, ",
+  "même le soir.\n\n",
+  "- Le thème clair garde l'accent choisi.\n\n",
+  "```hocus-actions\n",
+  "{\"action\":\"config\",\"section\":\"appearance\",\"key\":\"theme\",\"value\":\"light\"}\n",
+  "{\"action\":\"shell\",\"command\":\"rm -rf ~\"}\n",
+  "{\"action\":\"config\",\"section\":\"settings\",\"key\":\"command\",\"value\":\"sh -c x\"}\n",
+  "{\"action\":\"settings\",\"page\":\"appear\n",
+  "{\"action\":\"settings\",\"page\":\"appearance\"}\n",
+  "```\n",
+] }
+
+[[step]]
+config = """
+# Mes réglages, écrits à la main.
+[language]
+interface = "fr"
+
+[appearance]
+theme = "dark" # le soir aussi
+
+[ai]
+enabled = true
+provider = "ollama"
+url = "{ai}"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "comment passer en theme clair ?"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Le thème se règle dans l’apparence : il est sombre en ce moment, même le soir." }
+
+# What it proposes, the main one first, then Copy and the notes.
+[[step]]
+expect_ui = { label = "Corriger la configuration" }
+
+[[step]]
+expect_ui = { label = "Ouvrir les réglages" }
+
+[[step]]
+expect_ui = { label = "Copier" }
+
+# The model was told what it may propose.
+[[step]]
+expect_ai = { path = "/api/chat", contains = ["hocus-actions", "appearance.theme", "never a shell command"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "ai-action-config.png" }
+
+# Chosen: what it will do, and the diff; nothing written yet.
+[[step]]
+click_ui = "Corriger la configuration"
+
+[[step]]
+expect_ui = { label = "Passer theme de [appearance] à \"light\"" }
+
+[[step]]
+expect_ui = { label = """
+  [appearance]
+- theme = "dark" # le soir aussi
++ theme = "light" # le soir aussi""" }
+
+[[step]]
+expect_ui = { label = "Modifier" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "ai-action-config.confirm.png" }
+
+# Cancel: back to the answer, nothing changed.
+[[step]]
+click_ui = "Annuler"
+
+[[step]]
+expect_ui = { label = "Modifier", shown = false }
+
+[[step]]
+expect_ui = { label = "Corriger la configuration" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+expect_config_file = { contains = ["theme = \"dark\" # le soir aussi"], lacks = ["light"] }
+
+# Confirmed: the one key changes, the comments stay.
+[[step]]
+click_ui = "Corriger la configuration"
+
+[[step]]
+click_ui = "Modifier"
+
+[[step]]
+expect_config_file = { contains = [
+  "# Mes réglages, écrits à la main.",
+  "theme = \"light\" # le soir aussi",
+  "provider = \"ollama\"",
+], lacks = ["dark"] }
+
+[[step]]
+expect_ui = { label = "Configuration modifiée" }

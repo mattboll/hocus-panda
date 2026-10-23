@@ -18,7 +18,8 @@ use crate::{App, State};
 /// What the watcher found.
 #[derive(Debug)]
 pub enum ConfigUpdate {
-    Read(Box<Config>),
+    /// The configuration, and the file's text (empty when there is none).
+    Read(Box<Config>, String),
     Invalid(String),
 }
 
@@ -68,10 +69,10 @@ pub fn start(
                     seen = Some(now);
                     let update = match now {
                         // No file: the defaults.
-                        None => ConfigUpdate::Read(Box::default()),
+                        None => ConfigUpdate::Read(Box::default(), String::new()),
                         Some(_) => match std::fs::read_to_string(&path) {
                             Ok(text) => match Config::parse(&text) {
-                                Ok(config) => ConfigUpdate::Read(Box::new(config)),
+                                Ok(config) => ConfigUpdate::Read(Box::new(config), text),
                                 Err(err) => {
                                     ConfigUpdate::Invalid(format!("{}: {err}", path.display()))
                                 }
@@ -102,9 +103,10 @@ impl State {
     fn apply_config_update(&mut self, update: ConfigUpdate) {
         self.config_generation += 1;
         match update {
-            ConfigUpdate::Read(config) => {
+            ConfigUpdate::Read(config, text) => {
                 self.config_error = None;
                 self.config_read = true;
+                self.config_text = Some(text);
                 self.apply_config(*config);
                 tracing::info!("configuration applied");
                 self.emit(|_| hocus_api::Event::ConfigApplied);

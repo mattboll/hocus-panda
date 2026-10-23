@@ -6,6 +6,7 @@
 pub mod arrange;
 pub mod catalogue;
 pub mod client;
-pub mod edit;
+/// The configuration file's writer, shared with the shell's AI actions (#197).
+pub use hocus_core::config_edit as edit;
 pub mod view;
 pub mod words;

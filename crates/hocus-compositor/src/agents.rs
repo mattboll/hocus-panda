@@ -475,6 +475,47 @@ impl State {
         }
     }
 
+    /// The agents a question can be handed to (#197), as key and name:
+    /// those working for the desktop the column's screen shows first, then
+    /// those of no desktop, then the others.
+    pub(crate) fn agent_choices(&self) -> Vec<(String, String)> {
+        if !self.config.agents.enabled {
+            return Vec::new();
+        }
+        let here = self
+            .column_output()
+            .and_then(|o| self.model.output(&OutputName(o.name())))
+            .map(|o| o.shown);
+        let mut choices: Vec<(u8, String, String)> = self
+            .agents
+            .board
+            .agents()
+            .map(|(key, name, source)| {
+                let rank = match self.source_desktop(source) {
+                    Some(d) if Some(d) == here => 0,
+                    None => 1,
+                    Some(_) => 2,
+                };
+                (rank, key.to_owned(), name.to_owned())
+            })
+            .collect();
+        choices.sort_by_key(|(rank, ..)| *rank);
+        choices.into_iter().map(|(_, k, n)| (k, n)).collect()
+    }
+
+    /// Hands `text` to the agent of this key as a prompt (#197); whether
+    /// it went to its herdr.
+    pub(crate) fn prompt_agent(&mut self, key: &str, text: &str) -> bool {
+        let Some((source, pane)) = pane_of(key) else {
+            return false;
+        };
+        let Some(herdr) = self.agents.herdr.get(source).and_then(Option::as_ref) else {
+            return false;
+        };
+        herdr.prompt(pane, text);
+        true
+    }
+
     /// Brings forward the window of the nearest of these processes: the
     /// terminal herdr shows in.
     fn raise_terminal(&mut self, processes: &[u32]) {

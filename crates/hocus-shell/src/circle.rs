@@ -3,7 +3,8 @@
 //! translate, copy the text, note, or a question typed) and, on the side,
 //! the card an AI's answer streams into, the command field's own
 //! ([`crate::answer`]). One sheet the size of the screen holds the three;
-//! the compositor reads the circled text and runs what is chosen.
+//! the compositor reads the circled text and runs what is chosen. What an
+//! answer proposes (#197) comes first under it, confirmed before it runs.
 
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ use crate::{
     answer::{self, Answer, Block, Card, Source},
     column::View,
     i18n::Lang,
+    proposals::{Offer, Run},
 };
 
 /// The loop's width, logical, as the board draws it.
@@ -89,6 +91,24 @@ pub enum Asked {
 }
 
 impl Asked {
+    /// What was asked, in words, for an agent the answer goes to (#197).
+    pub fn question(&self, lang: Lang) -> String {
+        match self {
+            Self::Explain => lang
+                .pick("Explain the circled text.", "Explique le texte entouré.")
+                .into(),
+            Self::Translate => lang
+                .pick("Translate the circled text.", "Traduis le texte entouré.")
+                .into(),
+            Self::Question(q) => q.clone(),
+        }
+    }
+
+    /// Whether its answer may propose actions: a translation is only that.
+    pub fn proposes(&self) -> bool {
+        !matches!(self, Self::Translate)
+    }
+
     /// "Explain", as the card's caption starts.
     fn caption(&self, lang: Lang) -> &'static str {
         match self {
@@ -143,6 +163,8 @@ pub enum CircleEvent {
     StopAnswer,
     /// The answer asked again.
     Retry(Asked),
+    /// An action the answer proposed, confirmed (#197).
+    Run(Run),
     /// Escape, or a click elsewhere.
     Close,
 }
@@ -179,11 +201,25 @@ struct CardShown {
     node: NodeId,
     asked: Asked,
     answer: Answer,
-    buttons: Vec<(NodeId, CircleEvent)>,
+    buttons: Vec<(NodeId, Press)>,
+    /// What the answer proposes, once all there (#197).
+    offers: Vec<Offer>,
+    /// The proposal whose confirmation shows.
+    confirming: Option<usize>,
     /// The answer's box and its text, to scroll a long one.
     text: Option<(NodeId, NodeId)>,
     tall: bool,
     scroll: f32,
+}
+
+/// What a card's button does.
+#[derive(Debug, Clone)]
+enum Press {
+    Event(CircleEvent),
+    /// The proposal at this index: its confirmation shows.
+    Offer(usize),
+    /// Back to the answer, nothing done.
+    Back,
 }
 
 /// One screen's circle.
@@ -474,6 +510,8 @@ impl Circle {
             asked,
             answer,
             buttons: Vec::new(),
+            offers: Vec::new(),
+            confirming: None,
             text: None,
             tall: false,
             scroll: 0.0,
@@ -488,6 +526,21 @@ impl Circle {
             card.answer.apply(news);
             self.card_changed = true;
         }
+    }
+
+    /// What the answer proposes, once all there, as the desktop can
+    /// offer it.
+    pub fn set_offers(&mut self, offers: Vec<Offer>) {
+        if let Some(card) = self.card.as_mut() {
+            card.offers = offers;
+            card.confirming = None;
+            self.card_changed = true;
+        }
+    }
+
+    /// The answer on the card, and what it answers.
+    pub fn answer(&self) -> Option<(&Asked, &Answer)> {
+        self.card.as_ref().map(|c| (&c.asked, &c.answer))
     }
 
     /// Whether an answer streams in.
@@ -507,41 +560,57 @@ impl Circle {
             self.tree.remove(child);
         }
         let a = &card.answer;
-        let mut blocks = answer::blocks(&a.text);
-        if blocks.is_empty() && a.state == answer::State::Streaming {
-            blocks.push(Block::Paragraph(lang.thinking().into()));
-        }
-        let plain = a.plain();
-        let (error, buttons, events) = match &a.state {
-            answer::State::Streaming => (
-                None,
-                vec![lang.stop().to_owned()],
-                vec![CircleEvent::StopAnswer],
-            ),
-            answer::State::Done(_) => (
-                None,
-                vec![lang.copy().to_owned(), lang.add_to_notes().to_owned()],
-                vec![
-                    CircleEvent::CopyAnswer(plain.clone()),
-                    CircleEvent::NoteAnswer(plain),
-                ],
-            ),
-            answer::State::Failed(why) => (
-                Some(why.clone()),
-                vec![lang.ask_again().to_owned()],
-                vec![CircleEvent::Retry(card.asked.clone())],
-            ),
-        };
-        let shown = Card {
-            mood: a.mood(),
-            caption: format!("{} · {}", card.asked.caption(lang), a.source.label(lang)),
-            blocks,
-            chips: Vec::new(),
-            error,
-            buttons,
+        let confirming = card.confirming.and_then(|i| card.offers.get(i));
+        let (shown, presses) = match confirming {
+            Some(offer) => confirmation(offer, lang),
+            None => {
+                let mut blocks = answer::blocks(a.shown());
+                if blocks.is_empty() && a.state == answer::State::Streaming {
+                    blocks.push(Block::Paragraph(lang.thinking().into()));
+                }
+                let plain = a.plain();
+                let (error, buttons, presses) = match &a.state {
+                    answer::State::Streaming => (
+                        None,
+                        vec![lang.stop().to_owned()],
+                        vec![Press::Event(CircleEvent::StopAnswer)],
+                    ),
+                    // What it proposes first, the main one first (#197).
+                    answer::State::Done(_) => (
+                        None,
+                        card.offers
+                            .iter()
+                            .map(|o| o.label.clone())
+                            .chain([lang.copy().to_owned(), lang.add_to_notes().to_owned()])
+                            .collect(),
+                        (0..card.offers.len())
+                            .map(Press::Offer)
+                            .chain([
+                                Press::Event(CircleEvent::CopyAnswer(plain.clone())),
+                                Press::Event(CircleEvent::NoteAnswer(plain)),
+                            ])
+                            .collect(),
+                    ),
+                    answer::State::Failed(why) => (
+                        Some(why.clone()),
+                        vec![lang.ask_again().to_owned()],
+                        vec![Press::Event(CircleEvent::Retry(card.asked.clone()))],
+                    ),
+                };
+                let card = Card {
+                    mood: a.mood(),
+                    caption: format!("{} · {}", card.asked.caption(lang), a.source.label(lang)),
+                    blocks,
+                    chips: Vec::new(),
+                    error,
+                    buttons,
+                    width: CARD - 48.0,
+                };
+                (card, presses)
+            }
         };
         let filled = answer::fill(&mut self.tree, card.node, &shown);
-        card.buttons = filled.buttons.into_iter().zip(events).collect();
+        card.buttons = filled.buttons.into_iter().zip(presses).collect();
         card.text = Some((filled.text, filled.content));
         if card.tall {
             let room = self.text_room();
@@ -690,10 +759,18 @@ impl Circle {
                     return Some(CircleEvent::Ask(typed));
                 }
             }
-            if let Some(card) = &self.card
-                && let Some((_, event)) = card.buttons.iter().find(|(b, _)| *b == id)
+            if let Some(card) = self.card.as_mut()
+                && let Some((_, press)) = card.buttons.iter().find(|(b, _)| *b == id)
             {
-                return Some(event.clone());
+                match press.clone() {
+                    Press::Event(event) => return Some(event),
+                    Press::Offer(i) => card.confirming = Some(i),
+                    Press::Back => card.confirming = None,
+                }
+                card.tall = false;
+                card.scroll = 0.0;
+                self.card_changed = true;
+                return None;
             }
         }
         None
@@ -743,6 +820,36 @@ impl Circle {
     pub fn access(&self) -> AccessNode {
         self.tree.access()
     }
+}
+
+/// What a proposal's confirmation shows (#197): what it will do, the
+/// diff or the text it sends, then its buttons and Cancel, which goes back
+/// to the answer.
+fn confirmation(offer: &Offer, lang: Lang) -> (Card, Vec<Press>) {
+    let mut blocks = vec![Block::Paragraph(offer.title.clone())];
+    blocks.extend(offer.detail.clone().map(Block::Code));
+    let buttons = offer
+        .confirms
+        .iter()
+        .map(|(label, _)| label.clone())
+        .chain([lang.cancel().to_owned()])
+        .collect();
+    let presses = offer
+        .confirms
+        .iter()
+        .map(|(_, run)| Press::Event(CircleEvent::Run(run.clone())))
+        .chain([Press::Back])
+        .collect();
+    let card = Card {
+        mood: crate::panda::Mood::Wait,
+        caption: lang.intent_caption().into(),
+        blocks,
+        chips: offer.chips.clone(),
+        error: None,
+        buttons,
+        width: CARD - 48.0,
+    };
+    (card, presses)
 }
 
 fn menu_style(at: Point) -> Style {

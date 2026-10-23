@@ -82,7 +82,9 @@ journal_text = true
 
 Key combinations are kept (`Ctrl+S`), but neither keys nor text while the
 session is locked or a password is asked for, when agents are refused
-anyway.
+anyway. A question the user hands a coding agent from an AI's answer is
+kept too, as that agent's (`refacto: prompted with 170 characters`, the
+text only with `journal_text`).
 
 ```
 $ hocus msg agents-journal

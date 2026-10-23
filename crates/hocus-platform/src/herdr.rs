@@ -1,6 +1,7 @@
 //! herdr (#41), a terminal workspace manager for coding agents: its API
 //! socket (JSON lines, protocol 19) says which agents run in which panes and
-//! what each is doing; focusing one and answering it go back the same way.
+//! what each is doing; focusing one, answering it and handing it a prompt
+//! (#197) go back the same way.
 //!
 //! One thread lists the agents and follows their status events; another
 //! carries out what the user asks, each on a connection of its own. Neither
@@ -92,6 +93,7 @@ pub enum News {
 enum Ask {
     Focus(String),
     Keys(String, Vec<String>),
+    Prompt(String, String),
 }
 
 /// herdr's default socket, from the environment's values.
@@ -154,6 +156,14 @@ impl Herdr {
         let keys = keys.iter().map(|k| (*k).to_owned()).collect();
         let _ = self.asks.send(Ask::Keys(pane.to_owned(), keys));
     }
+
+    /// Submits `text` to the agent as a prompt, as `herdr agent prompt`
+    /// does: typed into its input and sent.
+    pub fn prompt(&self, pane: &str, text: &str) {
+        let _ = self
+            .asks
+            .send(Ask::Prompt(pane.to_owned(), text.to_owned()));
+    }
 }
 
 impl Drop for Herdr {
@@ -166,6 +176,7 @@ fn carry_out(socket: &Path, ask: Ask, sink: &dyn Fn(News)) {
     let (method, params) = match &ask {
         Ask::Focus(pane) => ("agent.focus", json!({ "target": pane })),
         Ask::Keys(pane, keys) => ("agent.send_keys", json!({ "target": pane, "keys": keys })),
+        Ask::Prompt(pane, text) => ("agent.prompt", json!({ "target": pane, "text": text })),
     };
     if let Err(err) = call(socket, method, params) {
         tracing::warn!(method, %err, "herdr did not do it");

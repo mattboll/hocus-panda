@@ -257,7 +257,7 @@ The column on the right of the screen is the chosen form (see
 - Chat with the AI: tabs, streamed Markdown, code blocks
 - Providers: Claude, OpenAI, local models (ollama, LM Studio, llama.cpp…)
 - Keys in the keyring
-- The AI acts on the desktop, each action confirmed
+- The AI acts on the desktop, each action confirmed: an answer proposes, from a fixed set, opening a settings page, changing one configuration key (shown as a diff, the file's comments kept), a request of the command field or handing the question and the answer to a coding agent (journaled); nothing is offered while agents are stopped
 - Desktop tools shared between the AI and MCP: windows, desktops, screenshot, launch, notify, file search, agenda
 - MCP server (`hocus mcp`): windows, the shell's accessibility tree, window captures, clicks, typing and scrolls aimed at a window or a labelled element, waiting for a state; per-agent rights (read or act, which apps), enforced by the compositor
 - Agents' journal: what each MCP agent did (when, which action, on which window, refused or not; typed text only on request), in the column, `hocus msg agents-journal` and the `journal` tool; one key (Super+Shift+Escape) or the column's button stops every agent at once until allowed again

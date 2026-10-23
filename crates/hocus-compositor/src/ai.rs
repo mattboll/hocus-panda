@@ -12,6 +12,9 @@
 //! Nested or in tests, a provider's usual address is never asked (the
 //! developer's own model is not ours): only the address the configuration
 //! gives, and only the session's own keyring.
+//!
+//! The model is told which actions it may propose (#197); once an answer
+//! is all there, what it proposes is offered under it (`ai_actions`).
 
 use std::{
     path::PathBuf,
@@ -29,6 +32,7 @@ use hocus_platform::{
 use hocus_shell::{
     Lang,
     answer::{self, News as AnswerNews, Source},
+    proposals,
 };
 use smithay::reexports::calloop::{LoopHandle, channel};
 
@@ -43,7 +47,7 @@ pub enum Asker {
 
 /// What the workers send back.
 #[derive(Debug)]
-enum News {
+pub(crate) enum News {
     Piece(Asker, u64, String),
     Done(Asker, u64),
     Failed(Asker, u64, AskError),
@@ -53,6 +57,9 @@ enum News {
     Stored(Result<String, String>),
     /// The providers with a key kept, as read.
     Keys(Result<Vec<String>, String>),
+    /// A configuration change an answer proposed was written, as said, or
+    /// not (#197).
+    Written(Result<String, String>),
 }
 
 /// The question being answered.
@@ -66,7 +73,7 @@ struct Asking {
 
 #[derive(Debug, Default)]
 pub struct Ai {
-    news: Option<channel::Sender<News>>,
+    pub(crate) news: Option<channel::Sender<News>>,
     asking: Option<Asking>,
     secrets: Option<Secrets>,
     /// The model picked for a provider at an address, for the session.
@@ -163,7 +170,7 @@ impl State {
 
     /// Asks `question` (the command field's question `id`) on a worker.
     pub fn ask_ai(&mut self, id: u64, question: String) {
-        let system = answer::instructions(self.shell_lang());
+        let system = answer::instructions(self.shell_lang()) + &proposals::instructions();
         self.ask_ai_for(Asker::Launcher, id, system, question);
     }
 
@@ -270,6 +277,10 @@ impl State {
                     }
                 };
                 self.answer_news(asker, id, AnswerNews::Done(took));
+                match asker {
+                    Asker::Launcher => self.offer_launcher_proposals(id),
+                    Asker::Circle => self.offer_circle_proposals(id),
+                }
             }
             News::Failed(asker, id, err) => {
                 tracing::warn!(%err, "no answer");
@@ -300,6 +311,7 @@ impl State {
                 }
             }
             News::Keys(Err(err)) => tracing::warn!(err, "the AI keys kept were not read"),
+            News::Written(written) => self.config_written(written),
         }
     }
 
