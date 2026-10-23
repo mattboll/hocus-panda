@@ -2,7 +2,7 @@ description = "Without GNOME Online Accounts, the Accounts and calendar page say
 outputs = ["1280x800"]
 shell = true
 # Its name is taken only later: until then, not installed.
-goa = { identity = "alex.panda@gmail.com", dir = "calendar/google", running = false }
+goa = { identity = "alex.panda@example.com", dir = "calendar/google", running = false }
 # No GNOME settings to open.
 child_env = { PATH = "{scenario_dir}/calendar/google" }
 
