@@ -15,8 +15,6 @@ use serde_json::{Value, json};
 
 /// Claude's API version, sent with every request.
 const ANTHROPIC_VERSION: &str = "2026-10-21";
-/// Claude's model when the configuration names none.
-pub const CLAUDE_MODEL: &str = "claude-opus-5-5";
 /// What the answer may take, at most; the field shows the start of a long
 /// one and Copy takes it all.
 const MAX_TOKENS: u32 = 16_000;
@@ -106,6 +104,8 @@ pub enum AskError {
     Refused(String),
     /// The provider has no model to answer with, or needs one named.
     NoModel,
+    /// The provider found the request itself wrong (a 400).
+    Invalid(String),
     /// The model declined to answer.
     Declined,
     Failed(String),
@@ -117,6 +117,7 @@ impl fmt::Display for AskError {
             Self::Unreachable(why) => write!(f, "no answer: {why}"),
             Self::Refused(why) => write!(f, "refused: {why}"),
             Self::NoModel => f.write_str("no model to answer with"),
+            Self::Invalid(why) => write!(f, "invalid request: {why}"),
             Self::Declined => f.write_str("the model declined to answer"),
             Self::Failed(why) => f.write_str(why),
         }
@@ -136,8 +137,91 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
+/// The model to ask when the configuration names none, as the provider
+/// lists them: ollama's first; the newest Claude Opus (models change
+/// often: none is written here), else Claude's newest; an OpenAI-like
+/// server's first. `None`: the llama.cpp server answers with its own.
+/// Blocking, a request of its own: the caller keeps the result.
+pub fn pick_model(question: &Question) -> Result<Option<String>, AskError> {
+    let agent = agent();
+    let base = question.url.trim_end_matches('/');
+    let listed = |url: &str, headers: &[(&str, &str)]| -> Result<Value, AskError> {
+        let mut response = send(&agent, "GET", url, headers, None)?;
+        let text = response
+            .body_mut()
+            .with_config()
+            .limit(1024 * 1024)
+            .read_to_string()
+            .map_err(|e| AskError::Failed(e.to_string()))?;
+        serde_json::from_str(&text).map_err(|e| AskError::Failed(e.to_string()))
+    };
+    let ids = |value: &Value| -> Vec<String> {
+        value["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| m["id"].as_str().map(str::to_owned))
+            .collect()
+    };
+    match question.provider {
+        Provider::Ollama => {
+            let tags = listed(&format!("{base}/api/tags"), &[])?;
+            tags["models"][0]["name"]
+                .as_str()
+                .map(|name| Some(name.to_owned()))
+                .ok_or(AskError::NoModel)
+        }
+        Provider::LlamaCpp | Provider::OpenAi => {
+            let auth = question.key.as_ref().map(|k| format!("Bearer {k}"));
+            let headers: Vec<(&str, &str)> = auth
+                .as_deref()
+                .map(|a| ("Authorization", a))
+                .into_iter()
+                .collect();
+            match listed(&v1(base, "models"), &headers) {
+                Ok(value) => match ids(&value).into_iter().next() {
+                    Some(id) => Ok(Some(id)),
+                    None if question.provider == Provider::LlamaCpp => Ok(None),
+                    None => Err(AskError::NoModel),
+                },
+                // llama.cpp's server needs no model named.
+                Err(_) if question.provider == Provider::LlamaCpp => Ok(None),
+                Err(err) => Err(err),
+            }
+        }
+        Provider::Claude => {
+            let Some(key) = &question.key else {
+                return Err(AskError::Refused("no key in the keyring".into()));
+            };
+            let headers = [
+                ("x-api-key", key.as_str()),
+                ("anthropic-version", ANTHROPIC_VERSION),
+            ];
+            // Listed newest first.
+            let all = ids(&listed(&format!("{base}/v1/models"), &headers)?);
+            all.iter()
+                .find(|id| id.starts_with("claude-opus"))
+                .or(all.first())
+                .map(|id| Some(id.clone()))
+                .ok_or(AskError::NoModel)
+        }
+    }
+}
+
+/// `path` under the OpenAI-like API's `/v1`: an address given with its
+/// version keeps it.
+fn v1(base: &str, path: &str) -> String {
+    if base.ends_with("/v1") {
+        format!("{base}/{path}")
+    } else {
+        format!("{base}/v1/{path}")
+    }
+}
+
 /// Asks `question`, giving each piece of the answer to `piece` as it
-/// comes; returns once it is all there, or early once `stop` is set.
+/// comes; returns once it is all there, or early once `stop` is set. The
+/// model is the question's: see [`pick_model`] for one the configuration
+/// does not name.
 pub fn ask(
     question: &Question,
     stop: &AtomicBool,
@@ -195,7 +279,10 @@ fn send(
         .reader()
         .read_to_string(&mut text);
     let said = error_message(&text).unwrap_or_else(|| format!("{url} answered {status}"));
+    let invalid = serde_json::from_str::<Value>(&text)
+        .is_ok_and(|v| v["error"]["type"] == "invalid_request_error");
     Err(match status {
+        400 if invalid => AskError::Invalid(said),
         401 | 403 => AskError::Refused(said),
         404 if said.contains("model") => AskError::NoModel,
         _ => AskError::Failed(said),
@@ -247,8 +334,7 @@ fn messages(question: &Question) -> Value {
     ])
 }
 
-/// ollama: `/api/chat`, a JSON object per line. Without a model named,
-/// the first it has.
+/// ollama: `/api/chat`, a JSON object per line.
 fn ollama(
     agent: &ureq::Agent,
     base: &str,
@@ -256,24 +342,10 @@ fn ollama(
     stop: &AtomicBool,
     piece: &mut dyn FnMut(&str),
 ) -> Result<(), AskError> {
-    let model = if question.model.is_empty() {
-        let mut tags = send(agent, "GET", &format!("{base}/api/tags"), &[], None)?;
-        let text = tags
-            .body_mut()
-            .with_config()
-            .limit(1024 * 1024)
-            .read_to_string()
-            .map_err(|e| AskError::Failed(e.to_string()))?;
-        let value: Value =
-            serde_json::from_str(&text).map_err(|e| AskError::Failed(e.to_string()))?;
-        value["models"][0]["name"]
-            .as_str()
-            .ok_or(AskError::NoModel)?
-            .to_owned()
-    } else {
-        question.model.clone()
-    };
-    let body = json!({ "model": model, "messages": messages(question), "stream": true });
+    if question.model.is_empty() {
+        return Err(AskError::NoModel);
+    }
+    let body = json!({ "model": question.model, "messages": messages(question), "stream": true });
     let response = send(agent, "POST", &format!("{base}/api/chat"), &[], Some(&body))?;
     lines(response, stop, |line| {
         if line.trim().is_empty() {
@@ -320,12 +392,7 @@ fn chat_completions(
     } else if question.provider.needs_key() {
         return Err(AskError::Refused("no key in the keyring".into()));
     }
-    // An address given with its version keeps it.
-    let url = if base.ends_with("/v1") {
-        format!("{base}/chat/completions")
-    } else {
-        format!("{base}/v1/chat/completions")
-    };
+    let url = v1(base, "chat/completions");
     let response = send(agent, "POST", &url, &headers, Some(&body))?;
     lines(response, stop, |line| {
         let Some(data) = sse_data(line) else {
@@ -352,7 +419,8 @@ fn chat_completions(
 
 /// Claude's Messages API, streamed: text comes in `content_block_delta`
 /// events. A decline is retried on another model by the server
-/// (`fallbacks`), else said.
+/// (`fallbacks`), else said. A model that refuses the request's options
+/// (effort, fallbacks: a newer one may) is asked once more without them.
 fn claude(
     agent: &ureq::Agent,
     base: &str,
@@ -363,33 +431,40 @@ fn claude(
     let Some(key) = &question.key else {
         return Err(AskError::Refused("no key in the keyring".into()));
     };
-    let model = if question.model.is_empty() {
-        CLAUDE_MODEL
-    } else {
-        &question.model
-    };
-    let body = json!({
-        "model": model,
+    if question.model.is_empty() {
+        return Err(AskError::NoModel);
+    }
+    let plain = json!({
+        "model": question.model,
         "max_tokens": MAX_TOKENS,
         "stream": true,
         "system": question.system,
         "messages": [{ "role": "user", "content": question.text }],
-        // A field's answer: quick rather than deep.
-        "output_config": { "effort": "low" },
-        "fallbacks": "default",
     });
+    let mut body = plain.clone();
+    // A field's answer: quick rather than deep.
+    body["output_config"] = json!({ "effort": "low" });
+    body["fallbacks"] = json!("default");
     let headers = [
         ("x-api-key", key.as_str()),
         ("anthropic-version", ANTHROPIC_VERSION),
+    ];
+    let with_beta = [
+        headers[0],
+        headers[1],
         ("anthropic-beta", "server-side-fallback-2026-07-01"),
     ];
-    let response = send(
-        agent,
-        "POST",
-        &format!("{base}/v1/messages"),
-        &headers,
-        Some(&body),
-    )?;
+    let url = format!("{base}/v1/messages");
+    let response = match send(agent, "POST", &url, &with_beta, Some(&body)) {
+        Err(AskError::Invalid(why)) => {
+            tracing::debug!(
+                why,
+                "Claude refused the request's options; asking without them"
+            );
+            send(agent, "POST", &url, &headers, Some(&plain))?
+        }
+        sent => sent?,
+    };
     lines(response, stop, |line| {
         let Some(data) = sse_data(line) else {
             return Ok(true);
@@ -487,6 +562,20 @@ mod tests {
         Ok(text)
     }
 
+    /// As the compositor asks: the model picked first when none is named.
+    fn picked_answer(q: &Question) -> Result<String, AskError> {
+        let mut q = q.clone();
+        if q.model.is_empty() {
+            q.model = pick_model(&q)?.unwrap_or_default();
+        }
+        answer(&q)
+    }
+
+    const CLAUDE_STREAM: &str = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{}}\n\n\
+         event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n\
+         event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" there\"}}\n\n\
+         event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
     #[test]
     fn ollama_answers_with_its_first_model() {
         let (url, asked) = serve(vec![
@@ -502,7 +591,7 @@ mod tests {
             ),
         ]);
         let q = question(Provider::Ollama, url, None);
-        assert_eq!(answer(&q).as_deref(), Ok("Because of the cache."));
+        assert_eq!(picked_answer(&q).as_deref(), Ok("Because of the cache."));
         let asked = asked.lock().expect("a lock");
         assert!(
             asked[1].contains("\"model\":\"llama3.2:latest\""),
@@ -531,22 +620,80 @@ mod tests {
     }
 
     #[test]
-    fn claude_sends_its_key_and_streams_text_deltas() {
-        let (url, asked) = serve(vec![reply(
-            "text/event-stream",
-            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{}}\n\n\
-             event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n\
-             event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" there\"}}\n\n\
-             event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
-        )]);
-        let q = question(Provider::Claude, url, Some("sk-test"));
-        assert_eq!(answer(&q).as_deref(), Ok("Hello there"));
+    fn claude_sends_its_key_and_the_model_named_as_is() {
+        let (url, asked) = serve(vec![reply("text/event-stream", CLAUDE_STREAM)]);
+        let mut q = question(Provider::Claude, url, Some("sk-test"));
+        q.model = "claude-sonnet-7".into();
+        assert_eq!(picked_answer(&q).as_deref(), Ok("Hello there"));
         let asked = asked.lock().expect("a lock");
+        assert_eq!(asked.len(), 1, "no listing for a model named: {asked:?}");
         let head = asked[0].to_lowercase();
         assert!(head.contains("x-api-key: sk-test"), "{head}");
         assert!(head.contains("anthropic-version: 2026-10-21"), "{head}");
-        assert!(asked[0].contains(CLAUDE_MODEL), "{asked:?}");
+        assert!(
+            asked[0].contains("\"model\":\"claude-sonnet-7\""),
+            "{asked:?}"
+        );
         assert!(format!("{q:?}").find("sk-test").is_none(), "never logged");
+    }
+
+    #[test]
+    fn without_a_model_claude_takes_the_newest_opus_it_lists() {
+        let (url, asked) = serve(vec![
+            reply(
+                "application/json",
+                r#"{"data":[{"id":"claude-sonnet-9"},{"id":"claude-opus-8-5"},{"id":"claude-opus-8"}],"has_more":false}"#,
+            ),
+            reply("text/event-stream", CLAUDE_STREAM),
+        ]);
+        let q = question(Provider::Claude, url, Some("sk-test"));
+        assert_eq!(pick_model(&q), Ok(Some("claude-opus-8-5".into())));
+        // Without an Opus, the newest.
+        let (url, _) = serve(vec![reply(
+            "application/json",
+            r#"{"data":[{"id":"claude-sonnet-9"},{"id":"claude-haiku-9"}]}"#,
+        )]);
+        let other = question(Provider::Claude, url, Some("sk-test"));
+        assert_eq!(pick_model(&other), Ok(Some("claude-sonnet-9".into())));
+        let asked = asked.lock().expect("a lock");
+        assert!(asked[0].starts_with("GET /v1/models"), "{asked:?}");
+        assert!(asked[0].to_lowercase().contains("x-api-key: sk-test"));
+    }
+
+    #[test]
+    fn a_request_claude_finds_wrong_is_asked_again_without_its_options() {
+        let refused = r#"{"type":"error","error":{"type":"invalid_request_error","message":"output_config: unknown field"}}"#;
+        let (url, asked) = serve(vec![
+            format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{refused}",
+                refused.len()
+            ),
+            reply("text/event-stream", CLAUDE_STREAM),
+        ]);
+        let mut q = question(Provider::Claude, url, Some("sk-test"));
+        q.model = "claude-opus-10".into();
+        assert_eq!(answer(&q).as_deref(), Ok("Hello there"));
+        let asked = asked.lock().expect("a lock");
+        assert_eq!(asked.len(), 2, "once more, only once");
+        assert!(asked[0].contains("effort") && asked[0].contains("fallbacks"));
+        assert!(asked[0].to_lowercase().contains("anthropic-beta:"));
+        for left_out in ["effort", "fallbacks", "anthropic-beta"] {
+            assert!(!asked[1].to_lowercase().contains(left_out), "{left_out}");
+        }
+    }
+
+    #[test]
+    fn openai_like_servers_take_their_first_listed_model() {
+        let (url, asked) = serve(vec![reply(
+            "application/json",
+            r#"{"object":"list","data":[{"id":"qwen3-8b"},{"id":"other"}]}"#,
+        )]);
+        let q = question(Provider::OpenAi, format!("{url}/v1"), Some("k"));
+        assert_eq!(pick_model(&q), Ok(Some("qwen3-8b".into())));
+        assert!(asked.lock().expect("a lock")[0].starts_with("GET /v1/models"));
+        // llama.cpp's server answers without one.
+        let nobody = question(Provider::LlamaCpp, "http://127.0.0.1:9".into(), None);
+        assert_eq!(pick_model(&nobody), Ok(None));
     }
 
     #[test]
@@ -555,12 +702,16 @@ mod tests {
             "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 47\r\nConnection: close\r\n\r\n{\"error\":{\"message\":\"invalid x-api-key\",\"t\":1}}"
                 .into(),
         ]);
-        let q = question(Provider::Claude, url, Some("wrong"));
+        let mut q = question(Provider::Claude, url, Some("wrong"));
+        q.model = "claude-opus-10".into();
         assert_eq!(
             answer(&q),
             Err(AskError::Refused("invalid x-api-key".into()))
         );
         let nobody = question(Provider::Ollama, "http://127.0.0.1:9".into(), None);
-        assert!(matches!(answer(&nobody), Err(AskError::Unreachable(_))));
+        assert!(matches!(
+            picked_answer(&nobody),
+            Err(AskError::Unreachable(_))
+        ));
     }
 }

@@ -62,7 +62,10 @@ fn a_slow_provider_streams_while_the_loop_keeps_its_budget() -> anyhow::Result<(
         motion: false,
         first_run: false,
     })?;
-    compositor.write_config(&format!("[ai]\nurl = \"{}\"\n", server.url()))?;
+    compositor.write_config(&format!(
+        "[ai]\nenabled = true\nurl = \"{}\"\n",
+        server.url()
+    ))?;
     compositor.advance(FRAME * 4)?;
     // Super+Space, "why?", Enter on "Ask “why?”".
     press(&mut compositor, &[125, 57])?;

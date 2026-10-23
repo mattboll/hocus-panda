@@ -20,6 +20,7 @@ config = """
 interface = "fr"
 
 [ai]
+enabled = true
 provider = "ollama"
 url = "{ai}"
 """
