@@ -1,8 +1,8 @@
 # Circle to ask (#46) with an answer that acts (#197): the answer to
 # Explain proposes handing it to a coding agent, the card's main button
-# as board D05 draws it ("Confier à un agent"), before Add to the notes
-# and Copy. Confirmed, the herdr agent (a stand-in of the test's own) gets
-# what was asked, the circled text and the answer.
+# as board D05 draws it ("Confier à un agent"), then "Ajouter à une note"
+# and "Copier", 44 px high. Confirmed, the herdr agent (a stand-in of the
+# test's own) gets what was asked, the circled text and the answer.
 description = "Circling to ask: an answer proposing an agent shows Confier à un agent first; confirmed, the agent gets the question, the circled text and the answer"
 outputs = ["1280x800"]
 shell = true
@@ -76,7 +76,7 @@ expect_ui = { label = "L'en-tête linux/input.h n'existe pas sur FreeBSD." }
 expect_ui = { label = "Confier à un agent" }
 
 [[step]]
-expect_ui = { label = "Ajouter aux notes" }
+expect_ui = { label = "Ajouter à une note" }
 
 [[step]]
 advance_ms = 300

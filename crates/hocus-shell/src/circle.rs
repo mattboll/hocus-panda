@@ -575,19 +575,20 @@ impl Circle {
                         vec![lang.stop().to_owned()],
                         vec![Press::Event(CircleEvent::StopAnswer)],
                     ),
-                    // What it proposes first, the main one first (#197).
+                    // What it proposes first, the main one first (#197),
+                    // then the note and Copy, as board D05 orders them.
                     answer::State::Done(_) => (
                         None,
                         card.offers
                             .iter()
                             .map(|o| o.label.clone())
-                            .chain([lang.copy().to_owned(), lang.add_to_notes().to_owned()])
+                            .chain([lang.add_to_a_note().to_owned(), lang.copy().to_owned()])
                             .collect(),
                         (0..card.offers.len())
                             .map(Press::Offer)
                             .chain([
-                                Press::Event(CircleEvent::CopyAnswer(plain.clone())),
-                                Press::Event(CircleEvent::NoteAnswer(plain)),
+                                Press::Event(CircleEvent::NoteAnswer(plain.clone())),
+                                Press::Event(CircleEvent::CopyAnswer(plain)),
                             ])
                             .collect(),
                     ),
@@ -605,6 +606,7 @@ impl Circle {
                     error,
                     buttons,
                     width: CARD - 48.0,
+                    compact: true,
                 };
                 (card, presses)
             }
@@ -848,6 +850,7 @@ fn confirmation(offer: &Offer, lang: Lang) -> (Card, Vec<Press>) {
         error: None,
         buttons,
         width: CARD - 48.0,
+        compact: true,
     };
     (card, presses)
 }
