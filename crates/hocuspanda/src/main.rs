@@ -81,6 +81,12 @@ struct Args {
     #[arg(long, value_name = "ADDRESS")]
     session_bus: Option<String>,
 
+    /// Read applications' accessibility trees, for agents, on this D-Bus
+    /// address. Default: the one the session bus gives (org.a11y.Bus),
+    /// when hocuspanda is the session or is given one.
+    #[arg(long, value_name = "ADDRESS")]
+    a11y_bus: Option<String>,
+
     /// Read the battery, the network and other system state from services
     /// on this D-Bus address instead of the system bus.
     #[arg(long, value_name = "ADDRESS")]
@@ -174,6 +180,7 @@ fn main() -> anyhow::Result<()> {
                 .then(|| std::env::var("DBUS_SESSION_BUS_ADDRESS").ok())
                 .flatten()
         }),
+        a11y_bus: args.a11y_bus,
         system_bus: args.system_bus,
         state_dir: None,
         session_services: args.session_services,

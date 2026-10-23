@@ -734,7 +734,17 @@ pub struct McpAgent {
 impl McpAgent {
     /// Whether it may act on a window of `app_id`.
     pub fn may_act_on(&self, app_id: &str) -> bool {
-        self.access == AgentAccess::Act && self.apps.iter().any(|p| glob(p, app_id))
+        self.access == AgentAccess::Act && self.of_its_apps(app_id)
+    }
+
+    /// Whether it may read the accessibility tree of a window of `app_id`
+    /// (#175): one of its apps, whatever its access.
+    pub fn may_read_tree(&self, app_id: &str) -> bool {
+        self.of_its_apps(app_id)
+    }
+
+    fn of_its_apps(&self, app_id: &str) -> bool {
+        self.apps.iter().any(|p| glob(p, app_id))
     }
 }
 
@@ -1948,6 +1958,12 @@ mod tests {
         assert!(helper.may_act_on("foot"));
         assert!(helper.may_act_on("org.mozilla.firefox"));
         assert!(!helper.may_act_on("org.keepassxc.KeePassXC"));
+        // Applications' trees: of its apps, whatever its access (#175).
+        assert!(helper.may_read_tree("org.mozilla.firefox"));
+        assert!(!reader.may_read_tree("foot"));
+        let mut looking = reader.clone();
+        looking.apps = vec!["foot".into()];
+        assert!(looking.may_read_tree("foot") && !looking.may_act_on("foot"));
         assert!(!helper.shell);
         assert!(c.agents.mcp_agent("stranger").is_none());
         // What is in effect reads back.

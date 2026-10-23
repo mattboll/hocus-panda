@@ -32,9 +32,10 @@ mcp = { tool = "list_windows", contains = ['"title": "Shopping list"'] }
 [[step]]
 mcp = { agent = "reader", tool = "capture", window = "notes", contains = ["400×300 pixels for 400×300 logical"] }
 
-# An application's own tree is not read: the tool says so.
+# An application's own tree is read for the agent's apps alone (#175):
+# this one has none.
 [[step]]
-mcp = { agent = "reader", tool = "accessibility_tree", window = "notes", contains = ["AT-SPI", '"title": "Shopping list"'] }
+mcp = { agent = "reader", tool = "accessibility_tree", window = "notes", error = 'may not read windows of "notes"' }
 
 [[step]]
 mcp = { agent = "reader", tool = "wait_for", arguments = { app_id = "notes", title = "Shopping" }, contains = ['"app_id": "notes"'] }

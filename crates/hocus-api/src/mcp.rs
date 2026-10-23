@@ -18,8 +18,8 @@ use std::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-    ActTarget, Action, ApiError, Button, Client, ClientError, ErrorCode, Point, Reply, Request,
-    Target, UiNode, WindowInfo,
+    ActTarget, Action, ApiError, AppTree, Button, Client, ClientError, ErrorCode, Point, Reply,
+    Request, Target, UiNode, WindowInfo,
 };
 
 /// Protocol revisions spoken, newest first; the newest is offered to a
@@ -49,10 +49,9 @@ const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
-/// What tells applications' windows apart from the shell for an agent.
-const NO_APP_TREE: &str = "Applications' own accessibility trees (AT-SPI) are not read: \
-     capture the window to see its content, and aim clicks at points of it, relative to its \
-     top-left corner in logical pixels.";
+/// What an agent does with a window that has no tree.
+const NO_APP_TREE: &str = "Capture the window to see its content, and aim clicks at points of \
+     it, relative to its top-left corner in logical pixels.";
 
 /// The server: what the client agreed on, and the connection to the
 /// compositor, made at the first tool call and made again if it drops.
@@ -219,9 +218,10 @@ impl Bridge {
                 "version": env!("CARGO_PKG_VERSION"),
             },
             "instructions": "The windows of a Hocuspanda desktop. List them, read the shell's \
-                interface, capture a window to see it, and, when this agent may act, click, type \
-                and scroll aimed at a window (points relative to its top-left corner, in logical \
-                pixels) or at a labelled element of the shell, with a pointer and a keyboard of \
+                interface and the applications' own accessibility trees, capture a window to see \
+                it, and, when this agent may act, click, type and scroll aimed at a window (points \
+                relative to its top-left corner, in logical pixels), at an element of its tree by \
+                label, or at a labelled element of the shell, with a pointer and a keyboard of \
                 your own: the user keeps theirs. Say what each action is for with `intent`, \
                 shown to the user before it happens; sensitive ones wait for the user's \
                 confirmation. Wait for a window or a label rather than sleeping. What agents do \
@@ -340,12 +340,11 @@ impl Bridge {
             }
             Some(id) => {
                 let window = self.window(id)?;
-                Ok(Done::data(json!({
-                    "source": "window",
-                    "window": window_json(&window),
-                    "elements": [],
-                    "note": NO_APP_TREE,
-                })))
+                let tree = match self.request(Request::WindowTree { window: id })? {
+                    Reply::AppTree(tree) => tree,
+                    other => return Err(unexpected(&other)),
+                };
+                Ok(Done::data(tree_json(&window, &tree)))
             }
         }
     }
@@ -403,7 +402,25 @@ impl Bridge {
 
     /// What `click` and `scroll` aim at.
     fn target(&self, args: &Args) -> Result<ActTarget, Failure> {
+        let label = args.str("label")?;
+        let role = args.str("role")?;
         match (args.u64("window")?, args.str("element")?) {
+            (Some(window), None) if label.is_some() || role.is_some() => {
+                if args.f64("x")?.is_some() || args.f64("y")?.is_some() {
+                    return Err("aim at a label or at x and y, not both".into());
+                }
+                let label = label.ok_or("label: which element of the window, by its label")?;
+                Ok(ActTarget::AppElement {
+                    window,
+                    role: role.map(str::to_owned),
+                    label: label.to_owned(),
+                })
+            }
+            (None, _) if label.is_some() => Err(
+                "label goes with window: an element of that window's tree; element is a label \
+                 of the shell"
+                    .into(),
+            ),
             (Some(window), None) => {
                 let at = match (args.f64("x")?, args.f64("y")?) {
                     (Some(x), Some(y)) => Some(Point { x, y }),
@@ -416,8 +433,8 @@ impl Bridge {
                 label: label.to_owned(),
             }),
             _ => Err(
-                "say which: window (an id, with x and y or its centre) or element (a \
-                      label of the shell), one of them"
+                "say which: window (an id, with x and y, a label of its tree, or its \
+                      centre) or element (a label of the shell), one of them"
                     .into(),
             ),
         }
@@ -597,6 +614,40 @@ fn describe(app_id: Option<&str>, title: Option<&str>, label: Option<&str>) -> S
     parts.join(" and ")
 }
 
+/// A window's tree for the agent: its elements with their places in the
+/// window, or why it has none.
+fn tree_json(window: &WindowInfo, tree: &AppTree) -> Value {
+    let mut data = json!({
+        "source": if tree.application.is_some() { "application" } else { "window" },
+        "window": window_json(window),
+        "elements": tree.elements,
+    });
+    match &tree.application {
+        Some(application) => {
+            data["application"] = application.clone().into();
+            if let Some(toolkit) = &tree.toolkit {
+                data["toolkit"] = toolkit.clone().into();
+            }
+            data["note"] = "Rectangles are relative to the window's top-left corner, in logical \
+                pixels, as the application says them; click and scroll aim at an element with \
+                window and label (and role when several share it)."
+                .into();
+        }
+        None => {
+            let why = tree
+                .missing
+                .as_deref()
+                .unwrap_or("it has no accessibility tree");
+            data["note"] =
+                format!("This window has no accessibility tree: {why}. {NO_APP_TREE}").into();
+        }
+    }
+    if let Some(partial) = &tree.partial {
+        data["partial"] = partial.clone().into();
+    }
+    data
+}
+
 fn window_json(w: &WindowInfo) -> Value {
     json!({
         "id": w.id,
@@ -673,7 +724,9 @@ impl Args<'_> {
 /// The tools, as `tools/list` describes them.
 fn tools() -> Vec<Value> {
     let window = json!({ "type": "integer", "minimum": 0, "description": "A window's id, from list_windows." });
-    let element = json!({ "type": "string", "description": "The label of an element of the shell, from accessibility_tree." });
+    let element = json!({ "type": "string", "description": "The label of an element of the shell, from accessibility_tree without a window." });
+    let label = json!({ "type": "string", "description": "With window: the label of an element of that window's tree, from accessibility_tree with the window; exact, else a part of it, ignoring case." });
+    let role = json!({ "type": "string", "description": "With window and label: the element's role (`push button`, `entry`), when several share the label." });
     let x = json!({ "type": "number", "description": "From the window's left edge, logical pixels; its centre when x and y are left out." });
     let y =
         json!({ "type": "number", "description": "From the window's top edge, logical pixels." });
@@ -693,10 +746,15 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "accessibility_tree",
             "title": "Accessibility tree",
-            "description": format!("Without a window: the shell's own interface as screen readers see it \
+            "description": "Without a window: the shell's own interface as screen readers see it \
                 (the column, dock, launcher, panels, toasts), depth first: role, label, rectangle in \
                 the global logical space, depth, focused, disabled, selected; labels are what click \
-                and scroll aim at with `element`. With a window: that window only. {NO_APP_TREE}"),
+                and scroll aim at with `element`. With a window: its application's own tree, as \
+                screen readers see it (AT-SPI), depth first: role, label, rectangle from the \
+                window's top-left corner, depth, states, and what fields hold (never a \
+                password's); click and scroll aim at its elements with `window` and `label`. A \
+                huge tree is cut, and `partial` says what was left out; a window whose \
+                application exposes none says so. Only the windows of this agent's apps.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "window": window },
@@ -724,9 +782,10 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "click",
             "title": "Click",
-            "description": "Clicks a point of a window, with this agent's own pointer (the user's \
+            "description": "Clicks a point of a window, or the centre of an element of its \
+                accessibility tree by label (and role), with this agent's own pointer (the user's \
                 pointer and keyboard stay theirs), or the centre of a labelled element of the \
-                shell. The window may be on a desktop no screen shows; a minimized one comes back \
+                shell; a label several elements share is refused, listing them. The window may be on a desktop no screen shows; a minimized one comes back \
                 on its desktop first. A ring and the intent show at the point a moment before the \
                 click; a sensitive one (a password manager, the settings…) waits until the user \
                 confirms it. Refused when the agent may not act on that window's app.",
@@ -736,6 +795,8 @@ fn tools() -> Vec<Value> {
                     "window": window,
                     "x": x,
                     "y": y,
+                    "label": label,
+                    "role": role,
                     "element": element,
                     "button": { "type": "string", "enum": ["left", "right", "middle"], "default": "left" },
                     "count": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1, "description": "2 for a double click." },
@@ -748,14 +809,16 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "scroll",
             "title": "Scroll",
-            "description": "Scrolls the wheel over a point of a window, or over a labelled element of \
-                the shell.",
+            "description": "Scrolls the wheel over a point of a window, an element of its tree by \
+                label, or a labelled element of the shell.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "window": window,
                     "x": x,
                     "y": y,
+                    "label": label,
+                    "role": role,
                     "element": element,
                     "dy": { "type": "number", "description": "Logical pixels, 15 per notch, down positive." },
                     "intent": intent,
@@ -986,6 +1049,61 @@ mod tests {
             answer["result"]["content"][0]["text"],
             "x and y go together"
         );
+        for (arguments, said) in [
+            (
+                r#"{"window":1,"label":"Send","x":3,"y":4}"#,
+                "aim at a label or at x and y, not both",
+            ),
+            (
+                r#"{"label":"Send"}"#,
+                "label goes with window: an element of that window's tree; element is a label of \
+                 the shell",
+            ),
+            (
+                r#"{"window":1,"role":"push button"}"#,
+                "label: which element of the window, by its label",
+            ),
+        ] {
+            let answer = ask(
+                &mut b,
+                &format!(
+                    r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"click","arguments":{arguments}}}}}"#
+                ),
+            );
+            assert_eq!(answer["result"]["content"][0]["text"], said, "{arguments}");
+        }
+    }
+
+    #[test]
+    fn a_window_without_a_tree_says_so_and_how_to_aim_instead() {
+        let window = WindowInfo {
+            id: 2,
+            app_id: Some("plain".into()),
+            title: Some("Plain".into()),
+            output: None,
+            geometry: crate::Rect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            focused: false,
+            visible: true,
+            state: crate::WindowState::Normal,
+            desktop: 1,
+            opacity: 1.0,
+            pinned: false,
+        };
+        let tree = AppTree {
+            window: 2,
+            missing: Some("its application is not on the accessibility bus".into()),
+            ..AppTree::default()
+        };
+        let data = tree_json(&window, &tree);
+        assert_eq!(data["source"], "window");
+        assert_eq!(data["elements"], json!([]));
+        let note = data["note"].as_str().unwrap_or_default();
+        assert!(note.starts_with("This window has no accessibility tree: its application is not on the accessibility bus. Capture"), "{note}");
     }
 
     #[test]

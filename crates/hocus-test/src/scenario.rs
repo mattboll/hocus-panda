@@ -476,6 +476,12 @@ pub struct OpenWindow {
     /// callbacks as applications are (#229).
     #[serde(default)]
     pub marks: bool,
+    /// Exposes an accessibility tree on a private accessibility bus the
+    /// compositor reads (#175), its elements drawn where the tree says:
+    /// `compose` (a subject, a password, Send, Send later, a disabled
+    /// Delete), its frame named as the window's title.
+    #[serde(default)]
+    pub accessible: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1268,6 +1274,8 @@ impl Scenario {
             mcp_sessions: Vec::new(),
             mcp_waiting: Vec::new(),
             glitches: 0,
+            a11y_apps: Vec::new(),
+            a11y: None,
             home,
         };
         run.request(Request::Subscribe)?;
@@ -1325,6 +1333,10 @@ struct Run<'a> {
     mcp_waiting: Vec<McpWaiting>,
     /// Glitch frames painted at the last `expect_glitch`.
     glitches: u64,
+    /// Applications exposing accessibility trees (#175), on their private
+    /// bus with its registry, made at the first.
+    a11y_apps: Vec<crate::atspi::FakeApp>,
+    a11y: Option<(crate::bus::PrivateBus, crate::atspi::FakeRegistry)>,
     /// The scenario's own home, last: the compositor is gone before it.
     home: Option<PrivateHome>,
 }
@@ -2453,6 +2465,10 @@ impl Run<'_> {
             height: open.size[1],
             argb: parse_color(&open.color)?,
         };
+        let elements = match open.accessible.as_deref() {
+            None => Vec::new(),
+            Some(tree) => self.accessible(open, tree)?,
+        };
         let before = self.compositor.window_count();
         self.clients.push(window.spawn_with(
             self.compositor.socket_path(),
@@ -2462,11 +2478,43 @@ impl Run<'_> {
                 title: open.title.clone(),
                 password: open.password,
                 marks: open.marks,
+                elements,
             },
         )?);
         self.compositor
             .dispatch_until(CLIENT_TIMEOUT, |c| c.window_count() > before)
             .context("the window did not appear")
+    }
+
+    /// Puts the window's application on the accessibility bus with its
+    /// tree, the bus and its registry made first if they are not; the
+    /// elements its window draws.
+    fn accessible(
+        &mut self,
+        open: &OpenWindow,
+        tree: &str,
+    ) -> anyhow::Result<Vec<crate::client::Drawn>> {
+        use crate::atspi::{FakeApp, FakeElement, FakeRegistry};
+        let title = open.title.clone().unwrap_or_default();
+        let window = match tree {
+            "compose" => FakeElement::compose(&title),
+            other => anyhow::bail!("no accessibility tree named {other:?}: compose"),
+        };
+        if self.a11y.is_none() {
+            let bus = crate::bus::PrivateBus::start()?;
+            let registry = FakeRegistry::start(&bus.address)?;
+            self.compositor.set_a11y_bus(&bus.address);
+            self.a11y = Some((bus, registry));
+        }
+        let address = self
+            .a11y
+            .as_ref()
+            .map(|(bus, _)| bus.address.clone())
+            .unwrap_or_default();
+        let drawn = window.drawn();
+        self.a11y_apps
+            .push(FakeApp::start(&address, &open.app_id, vec![window])?);
+        Ok(drawn)
     }
 
     fn open_x11(&mut self, open: &OpenWindow) -> anyhow::Result<()> {

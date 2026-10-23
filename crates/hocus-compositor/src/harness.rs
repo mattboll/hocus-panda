@@ -73,6 +73,8 @@ fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
         xwayland: harness.xwayland,
         shell: harness.shell,
         session_bus: harness.session_bus.clone(),
+        // A test gives its own (`set_a11y_bus`): never the session's.
+        a11y_bus: None,
         system_bus: harness.system_bus.clone(),
         session_services: false,
         // Private: tests never touch the developer's saved session.
@@ -257,6 +259,12 @@ impl Headless {
     /// The control socket.
     pub fn api_socket(&self) -> &Path {
         self.app.state.api.path()
+    }
+
+    /// Reads applications' accessibility trees (#175) on this (private,
+    /// test) bus from now on.
+    pub fn set_a11y_bus(&mut self, address: &str) {
+        self.app.state.set_a11y_bus(address.to_owned());
     }
 
     /// Where the session is saved.

@@ -3,6 +3,7 @@
 //! The calloop event loop owns every piece of state ([`State`]); nothing else
 //! holds a reference to it (see docs/architecture.md).
 
+mod a11y;
 mod act;
 mod actions;
 mod activity;
@@ -146,6 +147,9 @@ pub struct Options {
     pub shell: bool,
     /// Serves notifications on this session bus (with the shell).
     pub session_bus: Option<String>,
+    /// Reads applications' accessibility trees (#175) on this bus; when
+    /// `None`, the one the session bus says (`org.a11y.Bus`), if given.
+    pub a11y_bus: Option<String>,
     /// Reads the system's state (battery, network…) on this bus instead of
     /// the machine's system bus.
     pub system_bus: Option<String>,
@@ -274,6 +278,11 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     }
     state.loop_handle = Some(event_loop.handle());
     state.system_bus = options.system_bus.clone();
+    a11y::start(
+        &mut state,
+        options.a11y_bus.clone(),
+        options.session_bus.as_deref(),
+    );
     state.is_session = options.session_services || matches!(options.backend, Backend::Tty);
     lock::start(&event_loop.handle(), &mut state);
     leave::start(&event_loop.handle(), &mut state);

@@ -111,6 +111,9 @@ impl State {
         action: Action,
         intent: Option<String>,
     ) -> Option<Result<Reply, ApiError>> {
+        if matches!(target, ActTarget::AppElement { .. }) {
+            return self.act_on_element(connection, id, target, action, intent);
+        }
         match self.api.agent(connection).map(str::to_owned) {
             Some(name) => self.agent_act(connection, id, &name, target, action, intent),
             None => Some(self.carry_out(target, action)),
@@ -119,7 +122,11 @@ impl State {
 
     /// A test connection's action, through the session's own pointer and
     /// keyboard: the window comes forward first, as the user would bring it.
-    fn carry_out(&mut self, target: ActTarget, action: Action) -> Result<Reply, ApiError> {
+    pub(crate) fn carry_out(
+        &mut self,
+        target: ActTarget,
+        action: Action,
+    ) -> Result<Reply, ApiError> {
         if self.locked() {
             return Err(denied("the session is locked: agents do not act on it"));
         }
@@ -145,6 +152,12 @@ impl State {
                     ));
                 }
                 self.element_centre(&label)?
+            }
+            ActTarget::AppElement { .. } => {
+                return Err(ApiError::new(
+                    ErrorCode::BadRequest,
+                    "an application's element is found before it is aimed at",
+                ));
             }
         };
         let time = self.time_msec();

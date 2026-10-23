@@ -509,7 +509,20 @@ without unlocking leaves our lock screen: a crash never unlocks.
   (`[[agents.mcp]]`: read or act, which app ids, the shell or not), and
   that the session is not locked nor a password dialog open. Typed keys go
   straight to the window, past the shortcuts, through the layout in
-  effect. Applications' own accessibility trees (AT-SPI) are not read yet.
+  effect.
+- Applications' own accessibility trees (#175, `a11y.rs`, read by
+  `hocus_platform::atspi`): `window_tree` and an `act` aimed at an
+  `app_element` hand the window's description (its client's pid, app id,
+  title, size) to a reader thread started at the first request, and are
+  answered later. The reader connects to the accessibility bus (given, or
+  asked of the session bus's `org.a11y.Bus`), matches the window to an
+  application of the registry by pid then app id, and to a top-level
+  element by title, and reads its tree breadth first within limits of
+  elements, depth and time, leaving out what is not showing and never
+  reading a password field's text. Its result comes back through a
+  calloop channel; an element found by label becomes an `act` at its
+  centre, checked again, its rectangle kept for the ring. An agent reads
+  the trees of its apps alone.
 - Each agent connection gets a seat of its own (#43, `seat.rs`): a
   `wl_seat` made when it names itself and gone with it, whose pointer and
   keyboard have their own focus. Its input goes to its windows through

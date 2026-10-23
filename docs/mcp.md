@@ -15,7 +15,7 @@ An agent is named in the configuration, with what it may do:
 [[agents.mcp]]
 name = "assistant"
 access = "act"                    # "read" by default
-apps = ["foot", "org.mozilla.*"]  # app ids it may act on, globs; ["*"] for all
+apps = ["foot", "org.mozilla.*"]  # app ids it acts on (and whose trees it reads), globs; ["*"] for all
 shell = false                     # true: it may click the shell's own elements too
 ```
 
@@ -47,9 +47,9 @@ With Claude Code: `claude mcp add hocuspanda -- hocus mcp --agent assistant`.
 | Tool | Does |
 |---|---|
 | `list_windows` | the screens, and every window: id, title, app id, output, geometry (global logical pixels), focus, visibility, state, desktop |
-| `accessibility_tree` | the shell's interface (role, label, rectangle, depth, focused, disabled, selected); with `window`, that window alone: applications' own trees (AT-SPI) are not read yet |
+| `accessibility_tree` | the shell's interface (role, label, rectangle, depth, focused, disabled, selected); with `window`, its application's own tree (see below) |
 | `capture` | a PNG of a `window` (or an `output`), and how its pixels map to logical coordinates; a window on a desktop no screen shows, or minimized, as its application draws it: woken first (see below) |
-| `click` | `window` at `x`, `y` (from its top-left corner, logical pixels; its centre when left out), or `element` by label; `button`, `count`, `intent` |
+| `click` | `window` at `x`, `y` (from its top-left corner, logical pixels; its centre when left out), `window` and `label` (and `role`) for an element of its tree, or `element` by label for the shell's; `button`, `count`, `intent` |
 | `scroll` | the same aim, `dy` in logical pixels (15 per notch, down positive); `intent` |
 | `type` | `text` into `window`, with the keyboard layout in effect; `intent` |
 | `press_keys` | a combination into `window`: `Ctrl+A`, `Return`, `Shift+Tab`; `intent` |
@@ -61,6 +61,60 @@ it happens ("Sends the message"); without it, the desktop says it plainly
 ("Clicks in Shopping list"). Keys an agent types go to that window alone,
 never to the desktop's shortcuts. Refusals and failures come back as the
 tool's result, marked as an error, for the agent to read.
+
+## Applications' trees
+
+`accessibility_tree` with `window` gives what its application tells
+screen readers, over AT-SPI: its elements depth first, each with its role
+as AT-SPI names it (`push button`, `entry`, `password text`), its label,
+its rectangle from the window's top-left corner in logical pixels (as the
+application says it; none when it does not), its depth, whether it is
+focused, disabled, selected, checked (for check boxes and the like), and
+what a field holds (its first 200 characters).
+
+```json
+{ "role": "push button", "label": "Send", "rect": { "x": 284, "y": 244, "width": 100, "height": 40 },
+  "depth": 2, "focused": false, "disabled": false, "selected": false }
+```
+
+- A click or a scroll aims at an element with `window` and `label`: the
+  label exactly, else the one label that holds it (ignoring case), and
+  `role` when several share it. When several match, the action is
+  refused with them listed (`2 elements match "send": push button "Send
+  later" (at 16,244 140×40); push button "Send" …`); a disabled element,
+  or one whose application gives no place, is refused too. It lands at
+  the element's centre through the agent's seat, as a click at that point
+  would, and its ring surrounds the element. The journal names it
+  (`helper: click on "Send" of window 2 mail "Compose"`).
+- A password field's content is never read: its role and label only (role
+  `password text`, or a label that says password, passphrase, passcode,
+  PIN, mot de passe).
+- A tree is read within limits: 800 elements, 40 levels, 3 seconds, and
+  breadth first, so that a cut leaves out the deepest parts; `partial`
+  then says what was left out. What is not showing (a page of a stack
+  not shown, a tab in the background) is left out with what it holds.
+- A window whose application exposes no tree says so (`note`), and why:
+  the application is not on the accessibility bus, none of its windows
+  there is this one, or the bus is not reachable.
+- An agent reads the trees of its `apps` alone, read or act, and none
+  while the session is locked; a server started without `--agent` reads
+  them all, as any program of the session may on the accessibility bus
+  itself. Reading is not kept in the journal, which keeps actions.
+
+The window is matched to its application by the process that drew it,
+then by app id (a sandboxed application talks through a proxy), and to
+one of its top-level elements by its title (and size, when two share it).
+The compositor reads the accessibility bus the session's bus names
+(`org.a11y.Bus`), or the one `--a11y-bus ADDRESS` gives; nested in a
+session without `--session-bus`, none. Limits:
+
+- Some toolkits (Qt, Chromium and Electron, Firefox) expose their tree only
+  once accessibility is turned on for the session, as a screen reader
+  does; the compositor does not turn it on.
+- Places are the application's: a toolkit that counts its own shadow in
+  its window's coordinates is off by its width.
+- An element moved between the reading and the click is clicked where it
+  was.
 
 ## A seat of its own
 

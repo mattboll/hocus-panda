@@ -53,7 +53,7 @@ struct Kept {
 }
 
 /// What agents are told while stopped.
-fn stopped() -> ApiError {
+pub(crate) fn stopped() -> ApiError {
     ApiError::new(
         ErrorCode::PermissionDenied,
         "the user stopped every agent: requests are refused until they allow agents again",
@@ -182,7 +182,7 @@ impl State {
             },
         };
         let target = match target {
-            ActTarget::Window { window, .. } => {
+            ActTarget::Window { window, .. } | ActTarget::AppElement { window, .. } => {
                 let (title, app_id) = self
                     .windows
                     .get(&WindowId(*window))
@@ -192,6 +192,10 @@ impl State {
                     id: *window,
                     app_id,
                     title: title.filter(|t| !t.is_empty()),
+                    element: match target {
+                        ActTarget::AppElement { label, .. } => Some(label.clone()),
+                        _ => None,
+                    },
                 }
             }
             ActTarget::Element { label } => JournalTarget::Element {
@@ -310,10 +314,21 @@ fn wall(civil: &jiff::civil::DateTime) -> String {
 /// A window by its title, else its app id; an element by its label.
 fn target_words(target: &JournalTarget) -> String {
     match target {
-        JournalTarget::Window { id, app_id, title } => title
-            .clone()
-            .or_else(|| app_id.clone())
-            .unwrap_or_else(|| format!("#{id}")),
+        JournalTarget::Window {
+            id,
+            app_id,
+            title,
+            element,
+        } => {
+            let window = title
+                .clone()
+                .or_else(|| app_id.clone())
+                .unwrap_or_else(|| format!("#{id}"));
+            match element {
+                Some(label) => format!("“{label}” · {window}"),
+                None => window,
+            }
+        }
         JournalTarget::Element { label } => label.clone(),
     }
 }
