@@ -22,7 +22,10 @@ fn copies_are_kept_encrypted_and_secrets_never() -> anyhow::Result<()> {
     .spawn(compositor.socket_path())?;
     compositor.dispatch_until(Duration::from_secs(10), |c| c.window_count() == 1)?;
     client.copy("a note worth keeping")?;
-    compositor.dispatch(Duration::from_millis(100))?;
+    // Read before the secret replaces it: a copy replaced at once is not.
+    compositor.dispatch_until(Duration::from_secs(10), |c| {
+        c.clipboard_quiet() == (1, true)
+    })?;
     client.copy_secret("hunter2")?;
     let store = compositor.state_dir().join("clipboard");
     let deadline = Instant::now() + Duration::from_secs(10);
