@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Thunderbird
+GenericName=Mail
+MimeType=x-scheme-handler/mailto;message/rfc822;
+Exec=true %u

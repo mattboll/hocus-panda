@@ -281,6 +281,11 @@ impl App {
                 Ok(()) => Reply::Done,
                 Err(why) => return Some(Err(ApiError::new(ErrorCode::Failed, why))),
             },
+            Request::Notifications => Reply::Notifications(state.notifications_info()),
+            Request::SetDoNotDisturb { on } => {
+                state.set_dnd(on);
+                Reply::Done
+            }
             Request::Phone => Reply::Phone(state.phone_info()),
             Request::SendToPhone { paths } => {
                 let paths: Vec<std::path::PathBuf> =

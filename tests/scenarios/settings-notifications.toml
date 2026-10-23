@@ -1,0 +1,127 @@
+# Notifications (#67): do not disturb through the compositor, as quick
+# settings; each application's notifications as banners, in the column only,
+# or off; the history's length; holding them while the screen is shared.
+description = "Notifications: Mail set to the column only and Slack off, their next notifications so; do not disturb on, as quick settings show it; fifty kept in the column; not held while sharing any more; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+notify = { app = "Slack", summary = "Standup in five minutes" }
+
+[[step]]
+notify = { app = "Mail", summary = "Invoice 42" }
+
+[[step]]
+open_settings = { page = "notifications" }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+expect_settings = { label = "Mail: Banners", selected = true }
+
+[[step]]
+click_settings = "Mail: Column only"
+
+[[step]]
+expect_config_file = { contains = ["[notifications.apps]", "Mail = \"history\""] }
+
+[[step]]
+expect_settings = { label = "Mail: Column only", selected = true }
+
+[[step]]
+click_settings = "Slack: Off"
+
+[[step]]
+expect_config_file = { contains = ["Slack = \"off\""] }
+
+[[step]]
+notify = { app = "Mail", summary = "Invoice 43" }
+
+[[step]]
+expect_ui = { label = "Mail · Invoice 43" }
+
+[[step]]
+expect_ui = { label = "Invoice 43", shown = false }
+
+[[step]]
+notify = { app = "Slack", summary = "Lunch?" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Lunch?", shown = false }
+
+[[step]]
+expect_ui = { label = "Slack · Lunch?", shown = false }
+
+[[step]]
+scroll = -600
+
+# The first toasts go, uncovering the window.
+[[step]]
+advance_ms = 7000
+
+[[step]]
+click_settings = "Do not disturb"
+
+[[step]]
+expect_settings = { label = "Do not disturb", selected = true }
+
+[[step]]
+click_settings = "The column keeps: 50"
+
+[[step]]
+expect_config_file = { contains = ["[notifications]", "history = 50"] }
+
+[[step]]
+click_settings = "Hold while sharing"
+
+[[step]]
+expect_config_file = { contains = ["hold_while_sharing = false"] }
+
+[[step]]
+keys = "super+a"
+
+[[step]]
+expect_ui = { label = "Do not disturb", selected = true }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-notifications.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[notifications]
+history = 50
+hold_while_sharing = false
+
+[notifications.apps]
+Mail = "history"
+Slack = "off"
+"""
+
+[[step]]
+expect_settings = { label = "The column keeps: 50", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-notifications-light.png" }

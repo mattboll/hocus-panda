@@ -65,12 +65,22 @@ pub struct Scenario {
     /// (balanced), on a private system bus; never the machine's.
     #[serde(default)]
     pub devices: bool,
+    /// Stand-ins for AccountsService ("Alex Panda", no picture) and fprintd
+    /// (a reader, one finger enrolled), on a private system bus the
+    /// settings ask; never the machine's.
+    #[serde(default)]
+    pub accounts: bool,
     /// Programs the scenario runs; it is skipped where one is missing.
     #[serde(default)]
     pub needs: Vec<String>,
     /// Where the launcher reads desktop entries, relative to the scenario.
     #[serde(default)]
     pub data_dirs: Vec<PathBuf>,
+    /// The system's configuration directories (autostart entries,
+    /// `mimeapps.list`), relative to the scenario, which the settings read
+    /// after the user's own: a private one, written.
+    #[serde(default)]
+    pub config_dirs: Vec<PathBuf>,
     /// Windows move as in a session, for scenarios that sample motion;
     /// otherwise they appear and go at once.
     #[serde(default)]
@@ -166,6 +176,13 @@ pub enum Step {
     TimedatedRefuses(bool),
     /// The charger is plugged in (`true`) or pulled out, as UPower says.
     Charger(bool),
+    /// The account's stand-ins were asked this: `SetRealName NAME`,
+    /// `SetIconFile PATH`.
+    ExpectAccounts(String),
+    /// A file of the private configuration directory the settings write
+    /// (`mimeapps.list`, `autostart/x.desktop`): `{ name, contains?,
+    /// lacks? }`, once written.
+    ExpectXdgFile(ExpectFile),
     /// The devices' stand-ins were asked this: `WirelessEnabled false`,
     /// `Powered true`, `ActiveProfile power-saver`.
     ExpectDevices(String),
@@ -929,6 +946,8 @@ impl fmt::Display for Step {
             Self::TimedatedZone(zone) => write!(f, "timedated_zone {zone}"),
             Self::TimedatedRefuses(r) => write!(f, "timedated_refuses {r}"),
             Self::Charger(plugged) => write!(f, "charger {plugged}"),
+            Self::ExpectAccounts(asked) => write!(f, "expect_accounts {asked:?}"),
+            Self::ExpectXdgFile(e) => write!(f, "expect_xdg_file {}", e.name),
             Self::ExpectDevices(asked) => write!(f, "expect_devices {asked:?}"),
             Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
             Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
@@ -1033,7 +1052,7 @@ impl Scenario {
             None
         };
         // The system bus, with the stand-ins asked for alone on it.
-        let system_bus = if self.timedated.is_some() || self.devices {
+        let system_bus = if self.timedated.is_some() || self.devices || self.accounts {
             Some(crate::bus::PrivateBus::start()?)
         } else {
             None
@@ -1046,6 +1065,10 @@ impl Scenario {
         };
         let devices = match &system_bus {
             Some(bus) if self.devices => Some(crate::devices::FakeDevices::start(&bus.address)?),
+            _ => None,
+        };
+        let accounts = match &system_bus {
+            Some(bus) if self.accounts => Some(crate::accounts::FakeAccounts::start(&bus.address)?),
             _ => None,
         };
         let compositor = Headless::start_options(HarnessOptions {
@@ -1097,6 +1120,7 @@ impl Scenario {
             bus,
             timedated,
             devices,
+            accounts,
             system_bus,
             tray_apps: Vec::new(),
             phone: None,
@@ -1146,6 +1170,8 @@ struct Run<'a> {
     timedated: Option<crate::timedated::FakeTimedated>,
     /// The devices' stand-ins, the same.
     devices: Option<crate::devices::FakeDevices>,
+    /// The account's stand-ins, the same.
+    accounts: Option<crate::accounts::FakeAccounts>,
     system_bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
@@ -1261,6 +1287,38 @@ impl Run<'_> {
                 .as_ref()
                 .context("no devices: the scenario needs `devices = true`")?
                 .set_charger(*plugged),
+            Step::ExpectAccounts(expected) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let asked = self
+                        .accounts
+                        .as_ref()
+                        .context("no accounts: the scenario needs `accounts = true`")?
+                        .asked();
+                    if asked.contains(expected) {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("the account was asked {asked:?}, not {expected:?}");
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
+            Step::ExpectXdgFile(expected) => {
+                let path = self.xdg_home().join(&expected.name);
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                loop {
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    let ok = !text.is_empty()
+                        && expected.contains.iter().all(|c| text.contains(c.as_str()))
+                        && !expected.lacks.iter().any(|l| text.contains(l.as_str()));
+                    if ok {
+                        return Ok(());
+                    }
+                    anyhow::ensure!(Instant::now() < deadline, "{} is:\n{text}", expected.name);
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
             Step::ExpectDevices(expected) => {
                 let deadline = Instant::now() + SETTLE_TIMEOUT;
                 loop {
@@ -2563,6 +2621,12 @@ impl Run<'_> {
         }
     }
 
+    /// The user's configuration directory the settings write, beside the
+    /// compositor's own private configuration.
+    fn xdg_home(&self) -> PathBuf {
+        self.compositor.state_dir().with_file_name("xdg-config")
+    }
+
     fn open_settings(&mut self, open: &OpenSettings) -> anyhow::Result<()> {
         let wayland = self.compositor.socket_path().to_path_buf();
         let running = hocus_settings::client::spawn(hocus_settings::client::Options {
@@ -2583,6 +2647,23 @@ impl Run<'_> {
                 Some(bus) => hocus_settings::client::SystemBus::At(bus.address.clone()),
                 None => hocus_settings::client::SystemBus::Off,
             },
+            // A private directory of the user's, then the scenario's.
+            xdg: hocus_settings::client::Xdg::At(hocus_platform::mime::Dirs {
+                config: std::iter::once(self.xdg_home())
+                    .chain(
+                        self.scenario
+                            .config_dirs
+                            .iter()
+                            .map(|d| self.scenario.dir.join(d)),
+                    )
+                    .collect(),
+                data: self
+                    .scenario
+                    .data_dirs
+                    .iter()
+                    .map(|d| self.scenario.dir.join(d))
+                    .collect(),
+            }),
         })?;
         self.settings = Some(running);
         let deadline = Instant::now() + CLIENT_TIMEOUT;

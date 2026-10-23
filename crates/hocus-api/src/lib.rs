@@ -110,6 +110,13 @@ pub enum Request {
     SetHardware {
         change: HardwareChange,
     },
+    /// Do not disturb, and the applications that sent notifications this
+    /// session, for the settings' Notifications page (#67).
+    Notifications,
+    /// Turns do not disturb on or off, as quick settings do.
+    SetDoNotDisturb {
+        on: bool,
+    },
     /// The phone as the session knows it, through KDE Connect (#85).
     Phone,
     /// Sends files to the phone within reach, by absolute path.
@@ -261,6 +268,9 @@ impl Request {
             // What quick settings change, which any application of the
             // session may change through the same services.
             | Self::SetHardware { .. }
+            | Self::Notifications
+            // As quick settings: the user's own toasts.
+            | Self::SetDoNotDisturb { .. }
             | Self::Phone
             // Files of the user's own, to the user's own paired phone.
             | Self::SendToPhone { .. }
@@ -559,6 +569,7 @@ pub enum Reply {
     Shared(Option<String>),
     Updates(UpdatesInfo),
     Hardware(HardwareInfo),
+    Notifications(NotificationsInfo),
     Phone(PhoneInfo),
     Calendars(CalendarsInfo),
     Windows(Vec<WindowInfo>),
@@ -811,6 +822,18 @@ pub struct BatteryInfo {
     pub state: String,
 }
 
+/// Notifications as the session knows them (#67).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct NotificationsInfo {
+    /// Do not disturb: toasts are held, the history keeps them.
+    pub dnd: bool,
+    /// The applications that sent notifications this session, by the name
+    /// they give, the latest first.
+    pub apps: Vec<String>,
+    /// What the column's history holds now.
+    pub history: usize,
+}
+
 /// What [`Request::SetHardware`] changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "what", rename_all = "snake_case")]
@@ -1031,6 +1054,9 @@ pub enum Event {
     /// The sound, network, Bluetooth, power profile or battery changed
     /// (#67), as `Request::Hardware` says them.
     Hardware,
+    /// Do not disturb changed, or an application sent its first
+    /// notification of the session (#67).
+    Notifications,
     /// KDE Connect came or went, or the phones within reach changed
     /// (#85): its state, as [`PhoneInfo`] says it, and how many phones.
     Phone {

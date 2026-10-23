@@ -385,9 +385,7 @@ impl State {
                 QuickAction::Toggle(Tile::Bluetooth, on) => Some(Change::Bluetooth(on)),
                 QuickAction::Toggle(Tile::Airplane, on) => Some(Change::Airplane(on)),
                 QuickAction::Toggle(Tile::DoNotDisturb, on) => {
-                    if let Some(panel) = self.quick.as_mut() {
-                        panel.dnd = on;
-                    }
+                    self.set_dnd(on);
                     None
                 }
                 QuickAction::Toggle(Tile::NightLight, _) => {

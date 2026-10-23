@@ -1,0 +1,37 @@
+description = "With hold_while_sharing off, a notification shows while the screen is shared, and nothing is summed up after"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+config = """
+[notifications]
+hold_while_sharing = false
+"""
+
+[[step]]
+open = { app_id = "slides", size = [600, 400], color = "#e8e4da" }
+
+[[step]]
+share = true
+
+[[step]]
+frames = 2
+
+[[step]]
+notify = { app = "Mail", summary = "Salary review" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Salary review" }
+
+[[step]]
+stop_sharing = true
+
+[[step]]
+advance_ms = 2500
+
+[[step]]
+expect_ui = { label = "1 notification while you were sharing", shown = false }

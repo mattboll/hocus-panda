@@ -30,6 +30,7 @@ pub struct Config {
     pub night_light: NightLight,
     pub updates: Updates,
     pub phone: PhoneConfig,
+    pub notifications: NotificationsConfig,
     /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
     pub calendars: Vec<CalendarAccount>,
     pub dock: Dock,
@@ -957,6 +958,60 @@ impl Default for PhoneConfig {
     }
 }
 
+/// Notifications (#67): what toasts and the column's history do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotificationsConfig {
+    /// While the screen is shared, toasts are held, then summed up in one.
+    pub hold_while_sharing: bool,
+    /// How many the column's history keeps, 0 to 100.
+    pub history: u32,
+    /// Per application, by the name it gives: `show` (the default),
+    /// `history` (kept in the column, no toast) or `off` (dropped).
+    /// Critical ones always show.
+    pub apps: std::collections::BTreeMap<String, AppNotifications>,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            hold_while_sharing: true,
+            history: 20,
+            apps: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl NotificationsConfig {
+    /// What becomes of `app`'s notifications.
+    pub fn for_app(&self, app: &str) -> AppNotifications {
+        self.apps.get(app).copied().unwrap_or_default()
+    }
+}
+
+/// What becomes of an application's notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppNotifications {
+    /// A toast, then the history.
+    #[default]
+    Show,
+    /// The history only.
+    History,
+    /// Nothing.
+    Off,
+}
+
+impl AppNotifications {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Show => "show",
+            Self::History => "history",
+            Self::Off => "off",
+        }
+    }
+}
+
 /// Night light (#78): warmer colours in the evening.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -1419,6 +1474,10 @@ impl Config {
             let r = format!("{:?}", self.session.restore);
             return out_of_range("session.restore", r, "ask, always, never");
         }
+        if self.notifications.history > 100 {
+            let h = self.notifications.history.to_string();
+            return out_of_range("notifications.history", h, "0 to 100");
+        }
         if !(1..=168).contains(&self.updates.every_hours) {
             let h = self.updates.every_hours.to_string();
             return out_of_range("updates.every_hours", h, "1 to 168");
@@ -1830,5 +1889,21 @@ mod tests {
             Config::parse("[[outputs]]\nname = \"a\"\n\n[[outputs]]\nname = \"b\"\nscale = 9\n")
                 .expect_err("scale 9 is refused");
         assert!(err.0.starts_with("line 4: outputs[1].scale"), "{err}");
+    }
+
+    #[test]
+    fn applications_notifications_are_set_by_name() {
+        let c = Config::parse(
+            "[notifications]\nhistory = 50\n\n[notifications.apps]\nSlack = \"history\"\n\"Mail app\" = \"off\"\n",
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(c.notifications.history, 50);
+        assert!(c.notifications.hold_while_sharing);
+        assert_eq!(c.notifications.for_app("Slack"), AppNotifications::History);
+        assert_eq!(c.notifications.for_app("Mail app"), AppNotifications::Off);
+        assert_eq!(c.notifications.for_app("Chat"), AppNotifications::Show);
+        let err = Config::parse("[notifications]\nhistory = 500\n").expect_err("too many");
+        assert!(err.0.contains("notifications.history"), "{err}");
+        assert!(Config::parse("[notifications.apps]\nSlack = \"loud\"\n").is_err());
     }
 }

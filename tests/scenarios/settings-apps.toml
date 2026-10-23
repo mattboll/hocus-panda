@@ -1,0 +1,107 @@
+# Applications (#67): the default applications as the XDG mimeapps.list
+# files say them, the user's own written; the autostart entries turned off
+# or on in the user's copy of each; the last session's windows.
+description = "Applications: Web chosen over Firefox as the web browser in the user's mimeapps.list, an autostart entry turned off and another on in the user's copies, the last session's windows always reopened; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures/system/data"]
+config_dirs = ["../fixtures/system/config"]
+
+[[step]]
+open_settings = { page = "apps" }
+
+[[step]]
+expect_settings = { label = "Papers" }
+
+[[step]]
+click_settings = "Change: Web browser"
+
+[[step]]
+expect_settings = { label = "Web browser: Firefox", selected = true }
+
+[[step]]
+click_settings = "Web browser: Web"
+
+[[step]]
+expect_xdg_file = { name = "mimeapps.list", contains = ["[Default Applications]", "x-scheme-handler/https=org.gnome.Epiphany.desktop;", "x-scheme-handler/http=org.gnome.Epiphany.desktop;", "text/html=org.gnome.Epiphany.desktop;"] }
+
+[[step]]
+expect_settings = { label = "Web browser: Web", shown = false }
+
+[[step]]
+click_settings = "Change: Web browser"
+
+[[step]]
+expect_settings = { label = "Web browser: Web", selected = true }
+
+[[step]]
+click_settings = "Change: Web browser"
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+expect_settings = { label = "Tray helper", selected = true }
+
+[[step]]
+click_settings = "Tray helper"
+
+[[step]]
+expect_xdg_file = { name = "autostart/org.example.Tray.desktop", contains = ["Name=Tray helper", "Exec=true tray-helper", "Hidden=true"] }
+
+[[step]]
+expect_settings = { label = "Tray helper", selected = false }
+
+[[step]]
+click_settings = "Sync"
+
+[[step]]
+expect_xdg_file = { name = "autostart/org.example.Sync.desktop", contains = ["Hidden=false", "X-GNOME-Autostart-enabled=true"] }
+
+[[step]]
+expect_settings = { label = "Sync", selected = true }
+
+[[step]]
+click_settings = "Last session’s windows: Always"
+
+[[step]]
+expect_config_file = { contains = ["[session]", "restore = \"always\""] }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+scroll = -600
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-apps.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+expect_settings = { label = "Last session’s windows: Ask", selected = true }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-apps-light.png" }

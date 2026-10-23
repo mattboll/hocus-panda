@@ -144,6 +144,9 @@ enum Message {
         #[arg(long)]
         json: bool,
     },
+    /// Do not disturb, and the applications that sent notifications this
+    /// session.
+    Notifications,
     /// The phone, through KDE Connect: whether it runs, the phones within
     /// reach and their battery.
     Phone,
@@ -349,6 +352,7 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
         }
         Message::Desktops => print(client.request(Request::Desktops)?),
         Message::Hardware => print(client.request(Request::Hardware)?),
+        Message::Notifications => print(client.request(Request::Notifications)?),
         Message::Phone => print(client.request(Request::Phone)?),
         Message::AiKey { provider } => {
             // Read, never an argument: arguments show in the process list.

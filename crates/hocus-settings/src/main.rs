@@ -35,6 +35,7 @@ fn main() -> anyhow::Result<()> {
             lang: hocus_shell::Lang::from_env(),
             app_id: "hocus-settings".into(),
             system_bus: client::SystemBus::Machine,
+            xdg: client::Xdg::Machine,
         },
         None,
     )

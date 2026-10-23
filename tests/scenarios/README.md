@@ -22,6 +22,10 @@ dbus = false
 # (balanced), on a private system bus the compositor follows; never the
 # machine's. The sound is kept in memory then, never the machine's
 devices = false
+# Stand-ins for AccountsService ("Alex Panda", no picture) and fprintd (a
+# reader, one finger enrolled), on a private system bus the settings ask;
+# never the machine's
+accounts = false
 # A stand-in for timedated in this time zone, on a private system bus the
 # compositor and the settings follow; never the machine's. Without it the
 # settings cannot change the time zone
@@ -36,6 +40,10 @@ renderer = "pixman"
 needs = ["notify-send"]
 # Where the launcher reads desktop entries, relative to the scenario
 data_dirs = ["../fixtures"]
+# The system's configuration directories the settings read (autostart
+# entries, mimeapps.list), relative to the scenario, after the user's own:
+# a private one, which they write
+config_dirs = ["../fixtures/system/config"]
 # What started applications inherit instead of the test's environment
 # (PATH is added when missing; {scenario_dir} for stand-in programs)
 child_env = { LD_PRELOAD = "/tmp/not-a-library.so" }
@@ -88,7 +96,7 @@ Steps, one per `[[step]]` table:
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |
 | `tray_attention = { title, attention }` | it asks for attention, or stops |
 | `expect_tray = { title, asked = "clicked 2" }` | it was asked this: `activate`, `clicked N` (menu entry N, from 1) |
-| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `desktops`, `windows`, `keyboard`, `mouse`, `captures`, `clipboard`, `screens`, `sound`, `network`, `bluetooth`, `power`, `lock`…) or its home, and waits for its window |
+| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `desktops`, `windows`, `keyboard`, `mouse`, `captures`, `clipboard`, `screens`, `sound`, `network`, `bluetooth`, `power`, `lock`, `notifications`, `apps`, `accounts`, `account`…) or its home, and waits for its window |
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
@@ -120,6 +128,8 @@ Steps, one per `[[step]]` table:
 | `timedated_refuses = true` | the stand-in refuses to set the zone from now on, as polkit would (`false`: no longer) |
 | `charger = false` | the charger is pulled out (`true`: plugged in), as the UPower stand-in says |
 | `expect_devices = "WirelessEnabled false"` | the devices' stand-ins were asked this: `WirelessEnabled BOOL`, `Powered BOOL` (Bluetooth), `ActiveProfile NAME` |
+| `expect_accounts = "SetRealName Alex P."` | the account's stand-ins were asked this: `SetRealName NAME`, `SetIconFile PATH` |
+| `expect_xdg_file = { name, contains?, lacks? }` | a file of the user's private configuration directory the settings write (`mimeapps.list`, `autostart/NAME.desktop`) holds these strings, or lacks them |
 | `expect_config_file = { contains?, lacks? }` | the configuration file holds these strings, or lacks them (the settings app writes it) |
 | `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |

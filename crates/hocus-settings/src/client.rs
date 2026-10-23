@@ -67,8 +67,86 @@ pub struct Options {
     pub page: Option<Page>,
     pub lang: Lang,
     pub app_id: String,
-    /// Where timedated is, for the system's time zone.
+    /// Where timedated, AccountsService and fprintd are.
     pub system_bus: SystemBus,
+    /// Where the default applications and autostart entries are read and
+    /// written.
+    pub xdg: Xdg,
+}
+
+/// The XDG directories the Applications page reads and writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Xdg {
+    /// The user's and the machine's, from the environment.
+    Machine,
+    /// These (tests): the first configuration directory is the user's,
+    /// written; the others are only read.
+    At(hocus_platform::mime::Dirs),
+}
+
+impl Xdg {
+    fn dirs(&self) -> hocus_platform::mime::Dirs {
+        match self {
+            Self::Machine => hocus_platform::mime::Dirs::machine(),
+            Self::At(dirs) => dirs.clone(),
+        }
+    }
+}
+
+/// The default applications and autostart entries, read on this thread.
+fn read_apps(xdg: &Xdg) -> crate::catalogue::AppsState {
+    let dirs = xdg.dirs();
+    let lang = std::env::var("LANG").ok();
+    let entries = hocus_platform::apps::scan(&dirs.data, lang.as_deref());
+    crate::catalogue::AppsState::Known(crate::catalogue::Apps {
+        defaults: hocus_platform::mime::defaults(&dirs, &entries),
+        autostart: hocus_platform::apps::autostart_entries(&dirs.config),
+    })
+}
+
+/// Does `work` on a thread of its own, then reads the applications again
+/// and tells the window.
+fn apps_thread(xdg: Xdg, to_window: Sender<FromApi>, work: impl FnOnce(&Xdg) + Send + 'static) {
+    let spawned = std::thread::Builder::new()
+        .name("applications".into())
+        .spawn(move || {
+            work(&xdg);
+            let _ = to_window.send(FromApi::Apps(read_apps(&xdg)));
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "the applications will not be read");
+    }
+}
+
+/// Does `work` on a thread of its own (a change through AccountsService),
+/// then asks the services again and tells the window.
+fn account_thread(
+    bus: &SystemBus,
+    user: String,
+    to_window: Sender<FromApi>,
+    work: impl FnOnce(&Option<String>, &str) -> Result<(), String> + Send + 'static,
+) {
+    use hocus_platform::account::{AccountInfo, Fingerprint, UserState};
+    let Some(address) = bus.address() else {
+        let _ = to_window.send(FromApi::Account(AccountInfo {
+            user: UserState::Absent("no system bus".into()),
+            fingerprint: Fingerprint::NoService,
+        }));
+        return;
+    };
+    let spawned = std::thread::Builder::new()
+        .name("account".into())
+        .spawn(move || {
+            if let Err(why) = work(&address, &user) {
+                tracing::warn!(why, "the account stays as it was");
+                let _ = to_window.send(FromApi::AccountRefused(why));
+            }
+            let info = hocus_platform::account::read(&address, &user);
+            let _ = to_window.send(FromApi::Account(info));
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "the account will not be read");
+    }
 }
 
 /// The system bus timedated is on.
@@ -194,6 +272,12 @@ enum FromApi {
     Zone(SystemZone),
     /// Whether timedated took the zone asked for.
     ZoneSet(Result<String, String>),
+    /// The default applications and autostart entries, as read.
+    Apps(crate::catalogue::AppsState),
+    /// What AccountsService and fprintd say.
+    Account(hocus_platform::account::AccountInfo),
+    /// AccountsService refused a change, and why.
+    AccountRefused(String),
 }
 
 fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
@@ -224,6 +308,10 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 Ok(Reply::Hardware(hardware)) => hardware,
                 _ => Default::default(),
             };
+            let notifications = match requests.request(Request::Notifications) {
+                Ok(Reply::Notifications(notifications)) => notifications,
+                _ => Default::default(),
+            };
             let config = hocus_core::Config::parse(&info.toml)
                 .map_err(|e| anyhow::anyhow!("the configuration in effect: {e}"))?;
             let ctx = Context {
@@ -236,6 +324,10 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 user: info.user.clone(),
                 // timedated says it, not the compositor.
                 zone: SystemZone::Unknown,
+                notifications,
+                // The settings read these themselves.
+                apps: Default::default(),
+                account: Default::default(),
             };
             let path = info.path.map(PathBuf::from);
             let sent = to_window.send(FromApi::Context(Box::new((ctx, info.accent, path))));
@@ -248,6 +340,7 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 | Event::Updates { .. }
                 | Event::Calendars
                 | Event::Hardware
+                | Event::Notifications
                 | Event::OutputAdded { .. }
                 | Event::OutputRemoved { .. }
                 | Event::OutputChanged { .. } => {
@@ -318,11 +411,15 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     // The first frame waits for what is in effect.
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut early_zone = None;
+    let (mut early_apps, mut early_account) = (None, None);
+    apps_thread(options.xdg.clone(), zone_news.clone(), |_| {});
     let (ctx, accent, file) = loop {
         match from_api.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(FromApi::Context(what)) => break *what,
             Ok(FromApi::Zone(zone)) => early_zone = Some(zone),
-            Ok(FromApi::ZoneSet(_)) => {}
+            Ok(FromApi::ZoneSet(_) | FromApi::AccountRefused(_)) => {}
+            Ok(FromApi::Apps(apps)) => early_apps = Some(apps),
+            Ok(FromApi::Account(account)) => early_account = Some(account),
             Ok(FromApi::Gone(err)) => anyhow::bail!("the compositor did not answer: {err}"),
             Ok(FromApi::Open(_)) => {}
             Err(_) => anyhow::bail!("the compositor did not answer in time"),
@@ -339,6 +436,15 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     if let Some(zone) = early_zone {
         view.set_zone(zone);
     }
+    if let Some(apps) = early_apps {
+        view.set_apps(apps);
+    }
+    if let Some(account) = early_account {
+        view.set_account(account);
+    }
+    // The account is the compositor's user's.
+    let user = view.context().user.clone();
+    account_thread(&options.system_bus, user, zone_news.clone(), |_, _| Ok(()));
     view.open(options.page);
     // The language the file chose, once it is read.
     window.set_title(crate::words::SETTINGS.get(view.lang()));
@@ -371,6 +477,7 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         from_api,
         api: options.api.clone(),
         system_bus: options.system_bus.clone(),
+        xdg: options.xdg.clone(),
         zone_news,
     };
     while !app.closed {
@@ -433,7 +540,9 @@ struct App {
     /// The compositor's control socket, for one-off requests.
     api: PathBuf,
     system_bus: SystemBus,
-    /// Where timedated's answers come back.
+    xdg: Xdg,
+    /// Where the answers of timedated, AccountsService and the XDG files'
+    /// threads come back.
     zone_news: Sender<FromApi>,
 }
 
@@ -463,6 +572,9 @@ impl App {
                 }
                 FromApi::Zone(zone) => self.view.set_zone(zone),
                 FromApi::ZoneSet(result) => self.view.zone_set(result),
+                FromApi::Apps(apps) => self.view.set_apps(apps),
+                FromApi::Account(account) => self.view.set_account(account),
+                FromApi::AccountRefused(why) => self.view.account_refused(why),
             }
             self.needs_draw = true;
         }
@@ -561,6 +673,65 @@ impl App {
                     if let Err(err) = spawned {
                         tracing::warn!(%err, "could not change the setting");
                     }
+                }
+                Outcome::DoNotDisturb(on) => {
+                    let api = self.api.clone();
+                    let spawned = std::thread::Builder::new()
+                        .name("do not disturb".into())
+                        .spawn(move || {
+                            let request = Request::SetDoNotDisturb { on };
+                            if let Err(err) =
+                                Api::connect(&api).and_then(|mut c| c.request(request).map(drop))
+                            {
+                                tracing::warn!(%err, "could not change do not disturb");
+                            }
+                        });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not change do not disturb");
+                    }
+                }
+                // Files of the user's own: off the window's thread.
+                Outcome::SetDefaultApp { kind, app } => {
+                    apps_thread(self.xdg.clone(), self.zone_news.clone(), move |xdg| {
+                        if let Err(err) =
+                            hocus_platform::mime::set_default(&xdg.dirs(), &kind, &app)
+                        {
+                            tracing::warn!(%err, kind, app, "the default application stays");
+                        }
+                    });
+                }
+                Outcome::SetAutostart { id, on } => {
+                    apps_thread(self.xdg.clone(), self.zone_news.clone(), move |xdg| {
+                        let dirs = xdg.dirs().config;
+                        if let Err(err) = hocus_platform::apps::set_autostart(&dirs, &id, on) {
+                            tracing::warn!(%err, id, "the autostart entry stays");
+                        }
+                    });
+                }
+                // Off the window's thread: polkit may ask.
+                Outcome::SetRealName(name) => {
+                    let user = self.view.context().user.clone();
+                    account_thread(
+                        &self.system_bus,
+                        user,
+                        self.zone_news.clone(),
+                        move |bus, user| hocus_platform::account::set_real_name(bus, user, &name),
+                    );
+                }
+                Outcome::SetPicture(file) => {
+                    let user = self.view.context().user.clone();
+                    account_thread(
+                        &self.system_bus,
+                        user,
+                        self.zone_news.clone(),
+                        move |bus, user| {
+                            hocus_platform::account::set_icon_file(
+                                bus,
+                                user,
+                                std::path::Path::new(&file),
+                            )
+                        },
+                    );
                 }
                 Outcome::Identify => {
                     let api = self.api.clone();

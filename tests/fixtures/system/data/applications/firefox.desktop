@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Firefox
+GenericName=Web Browser
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+Exec=true %u

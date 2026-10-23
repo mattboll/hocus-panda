@@ -4,6 +4,7 @@
 
 use hocus_api::OutputInfo;
 use hocus_core::config::Config;
+use hocus_platform::account::UserState;
 use hocus_shell::{Lang, fuzzy};
 use hocus_ui::Accent;
 
@@ -150,6 +151,8 @@ impl Page {
                 | Self::Power
                 | Self::Lock
                 | Self::Language
+                | Self::Notifications
+                | Self::Apps
                 | Self::About
                 | Self::Welcome
         )
@@ -330,6 +333,44 @@ impl Page {
                 "wifi", "wi-fi", "internet", "wireless", "sans fil", "airplane", "avion",
             ],
             Bluetooth => &["headphones", "casque", "pairing", "appairer"],
+            Notifications => &[
+                "notification",
+                "toast",
+                "bulle",
+                "do not disturb",
+                "ne pas déranger",
+                "dnd",
+            ],
+            Apps => &[
+                "default",
+                "défaut",
+                "browser",
+                "navigateur",
+                "autostart",
+                "démarrage",
+                "mimeapps",
+            ],
+            Accounts => &[
+                "calendar",
+                "agenda",
+                "caldav",
+                "ics",
+                "subscription",
+                "abonnement",
+            ],
+            Account => &[
+                "user",
+                "utilisateur",
+                "avatar",
+                "picture",
+                "photo",
+                "fingerprint",
+                "empreinte",
+                "updates",
+                "mises à jour",
+                "password",
+                "mot de passe",
+            ],
             Lock => &[
                 "lock screen",
                 "écran de verrouillage",
@@ -548,6 +589,47 @@ impl Page {
                 }
                 said.join(" · ")
             }
+            Self::Notifications => {
+                let n = &ctx.notifications;
+                let column = words::in_the_column(n.history, lang);
+                if n.dnd {
+                    format!("{} · {column}", words::DND.get(lang))
+                } else {
+                    column
+                }
+            }
+            Self::Apps => match &ctx.apps {
+                AppsState::Known(apps) => {
+                    let started = apps.autostart.iter().filter(|a| a.enabled).count();
+                    let started = if ctx.config.session.autostart {
+                        started
+                    } else {
+                        0
+                    };
+                    let browser = apps
+                        .defaults
+                        .iter()
+                        .find(|d| d.kind == "web")
+                        .and_then(|d| apps.name(d.current.as_deref()?));
+                    match browser {
+                        Some(name) => format!("{name} · {}", words::at_start(started, lang)),
+                        None => words::at_start(started, lang),
+                    }
+                }
+                AppsState::Unknown => words::DEFAULT_APPS.get(lang).to_owned(),
+            },
+            Self::Accounts => words::calendars(ctx.config.calendars.len(), lang),
+            Self::Account => {
+                let name = match &ctx.account.user {
+                    UserState::Known(u) if !u.real_name.is_empty() => u.real_name.clone(),
+                    _ => ctx.user.clone(),
+                };
+                let u = &ctx.updates;
+                match u.updates.len() {
+                    0 => name,
+                    n => format!("{name} · {}", words::updates_ready(n, lang)),
+                }
+            }
             _ => words::NOT_YET.get(lang).into(),
         }
     }
@@ -640,6 +722,39 @@ pub struct Context {
     pub hardware: hocus_api::HardwareInfo,
     /// The account's name.
     pub user: String,
+    /// Do not disturb and the applications heard from, for Notifications.
+    pub notifications: hocus_api::NotificationsInfo,
+    /// The default applications and autostart, for Applications: read by
+    /// the settings themselves, not the compositor.
+    pub apps: AppsState,
+    /// What AccountsService and fprintd say, for the Account page.
+    pub account: hocus_platform::account::AccountInfo,
+}
+
+/// The default applications and autostart entries, as the XDG files say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AppsState {
+    /// Not read yet.
+    #[default]
+    Unknown,
+    Known(Apps),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Apps {
+    pub defaults: Vec<hocus_platform::mime::DefaultApp>,
+    pub autostart: Vec<hocus_platform::apps::Autostart>,
+}
+
+impl Apps {
+    /// An application's name, by its entry's id.
+    pub fn name(&self, id: &str) -> Option<String> {
+        self.defaults
+            .iter()
+            .flat_map(|d| d.choices.iter())
+            .find(|(i, _)| i == id)
+            .map(|(_, name)| name.clone())
+    }
 }
 
 /// A setting a search can lead to.
@@ -687,6 +802,17 @@ pub enum Setting {
     SleepAction,
     FullscreenAwake,
     LockOnIdle,
+    DoNotDisturb,
+    HoldWhileSharing,
+    NotificationHistory,
+    AppNotifications,
+    DefaultApps,
+    Autostart,
+    SessionRestore,
+    Calendars,
+    AccountName,
+    Fingerprint,
+    Updates,
 }
 
 impl Setting {
@@ -719,6 +845,13 @@ impl Setting {
                 Page::Power
             }
             Self::LockOnIdle => Page::Lock,
+            Self::DoNotDisturb
+            | Self::HoldWhileSharing
+            | Self::NotificationHistory
+            | Self::AppNotifications => Page::Notifications,
+            Self::DefaultApps | Self::Autostart | Self::SessionRestore => Page::Apps,
+            Self::Calendars => Page::Accounts,
+            Self::AccountName | Self::Fingerprint | Self::Updates => Page::Account,
         }
     }
 }
@@ -1148,6 +1281,7 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
         ),
     ];
     out.extend(hardware_entries(ctx, lang));
+    out.extend(system_entries(ctx, lang));
     for (combo, action) in &ctx.config.shortcuts().bindings {
         let combo = combo.to_string();
         let (label, _, _) = words::action(action, lang);
@@ -1281,6 +1415,155 @@ fn hardware_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<Stri
             ]
             .concat(),
             Page::Lock.summary(ctx, lang),
+        ),
+    ]
+}
+
+/// The System pages' settings.
+fn system_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, String)> {
+    let n = &ctx.config.notifications;
+    let both = |w: Words| vec![w.en.to_owned(), w.fr.to_owned()];
+    let words = |list: &[&str]| list.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+    let restore = match ctx.config.session.restore.as_str() {
+        "always" => words::ALWAYS,
+        "never" => words::NEVER,
+        _ => words::ASK,
+    };
+    vec![
+        (
+            Setting::DoNotDisturb,
+            words::DND.get(lang).to_owned(),
+            [
+                both(words::DND),
+                words(&["dnd", "silence", "quiet", "calme"]),
+            ]
+            .concat(),
+            on_off(ctx.notifications.dnd, lang),
+        ),
+        (
+            Setting::HoldWhileSharing,
+            words::HOLD_WHILE_SHARING.get(lang).to_owned(),
+            [
+                both(words::HOLD_WHILE_SHARING),
+                words(&[
+                    "share",
+                    "partage",
+                    "screencast",
+                    "presentation",
+                    "présentation",
+                ]),
+            ]
+            .concat(),
+            on_off(n.hold_while_sharing, lang),
+        ),
+        (
+            Setting::NotificationHistory,
+            words::HISTORY_KEEPS.get(lang).to_owned(),
+            [
+                both(words::HISTORY),
+                words(&["history", "historique", "notifications kept", "gardées"]),
+            ]
+            .concat(),
+            n.history.to_string(),
+        ),
+        (
+            Setting::AppNotifications,
+            Page::Notifications.label().get(lang).to_owned(),
+            [
+                both(words::APPLICATIONS),
+                words(&[
+                    "mute",
+                    "muet",
+                    "banner",
+                    "bannière",
+                    "per app",
+                    "par application",
+                ]),
+                n.apps.keys().cloned().collect(),
+            ]
+            .concat(),
+            n.apps.len().to_string(),
+        ),
+        (
+            Setting::DefaultApps,
+            words::DEFAULT_APPS.get(lang).to_owned(),
+            [
+                both(words::DEFAULT_APPS),
+                words(&[
+                    "browser",
+                    "navigateur",
+                    "mail",
+                    "courriel",
+                    "pdf",
+                    "open with",
+                    "ouvrir avec",
+                ]),
+            ]
+            .concat(),
+            Page::Apps.summary(ctx, lang),
+        ),
+        (
+            Setting::Autostart,
+            words::AUTOSTART.get(lang).to_owned(),
+            [
+                both(words::AUTOSTART),
+                both(words::AT_START),
+                words(&["autostart", "startup", "démarrage", "login", "connexion"]),
+            ]
+            .concat(),
+            on_off(ctx.config.session.autostart, lang),
+        ),
+        (
+            Setting::SessionRestore,
+            words::RESTORE.get(lang).to_owned(),
+            [
+                both(words::RESTORE),
+                words(&["restore", "restaurer", "reopen", "rouvrir", "session"]),
+            ]
+            .concat(),
+            restore.get(lang).to_owned(),
+        ),
+        (
+            Setting::Calendars,
+            words::CALENDARS.get(lang).to_owned(),
+            [
+                both(words::CALENDARS),
+                words(&["calendar", "agenda", "caldav", "ics"]),
+            ]
+            .concat(),
+            Page::Accounts.summary(ctx, lang),
+        ),
+        (
+            Setting::AccountName,
+            words::FULL_NAME.get(lang).to_owned(),
+            [
+                both(words::FULL_NAME),
+                both(words::AVATAR),
+                words(&["name", "nom", "avatar", "user", "utilisateur"]),
+            ]
+            .concat(),
+            ctx.user.clone(),
+        ),
+        (
+            Setting::Fingerprint,
+            words::FINGERPRINT.get(lang).to_owned(),
+            [
+                both(words::FINGERPRINT),
+                words(&["fprint", "finger", "doigt"]),
+            ]
+            .concat(),
+            String::new(),
+        ),
+        (
+            Setting::Updates,
+            words::LOOK_FOR_UPDATES.get(lang).to_owned(),
+            [
+                both(words::UPDATES),
+                both(words::LOOK_FOR_UPDATES),
+                words(&["update", "upgrade", "packages", "paquets"]),
+            ]
+            .concat(),
+            on_off(ctx.config.updates.enabled, lang),
         ),
     ]
 }
@@ -1460,6 +1743,59 @@ mod tests {
         assert_eq!(Page::Lock.summary(&c, Lang::En), "Locks after 5 min 30 s");
         c.config.idle.lock = false;
         assert_eq!(Page::Lock.summary(&c, Lang::En), "Not when idle");
+    }
+
+    #[test]
+    fn the_system_settings_are_found_in_either_language() {
+        let hits = search("ne pas déranger", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::DoNotDisturb), "{hits:?}");
+        let hits = search("browser", &ctx(), Lang::En);
+        assert_eq!(hits[0].page, Page::Apps, "{hits:?}");
+        let hits = search("empreinte", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::Fingerprint), "{hits:?}");
+        let hits = search("autostart", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::Autostart), "{hits:?}");
+        let hits = search("partage", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::HoldWhileSharing), "{hits:?}");
+        for page in [
+            Page::Notifications,
+            Page::Apps,
+            Page::Accounts,
+            Page::Account,
+        ] {
+            assert!(page.available(), "{page:?}");
+        }
+    }
+
+    #[test]
+    fn the_system_tiles_say_what_is_in_effect() {
+        let mut c = ctx();
+        c.user = "Alex".into();
+        assert_eq!(
+            Page::Notifications.summary(&c, Lang::En),
+            "Nothing in the column"
+        );
+        c.notifications.dnd = true;
+        c.notifications.history = 3;
+        assert_eq!(
+            Page::Notifications.summary(&c, Lang::Fr),
+            "Ne pas déranger · 3 dans la colonne"
+        );
+        assert_eq!(Page::Accounts.summary(&c, Lang::En), "No calendar");
+        assert_eq!(Page::Account.summary(&c, Lang::En), "Alex");
+        c.apps = AppsState::Known(Apps {
+            defaults: vec![hocus_platform::mime::DefaultApp {
+                kind: "web",
+                current: Some("firefox.desktop".into()),
+                choices: vec![("firefox.desktop".into(), "Firefox".into())],
+            }],
+            autostart: vec![hocus_platform::apps::Autostart {
+                id: "tray.desktop".into(),
+                name: "Tray".into(),
+                enabled: true,
+            }],
+        });
+        assert_eq!(Page::Apps.summary(&c, Lang::En), "Firefox · 1 at start");
     }
 
     #[test]
