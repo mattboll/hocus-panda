@@ -1,0 +1,73 @@
+# The Matrix theme's column (#155, docs/design/matrix-theme.md §14) opens
+# behind its band of rain when it comes to another screen and when the
+# session starts; with reduced motion it is there at once.
+description = "In the Matrix theme the column opens behind a band of rain on the screen it moves to when its screen is unplugged, and again when the session starts; with reduced motion it moves at once and nothing moves"
+outputs = ["1280x800", "1280x800+1280+0"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+unplug = "HEADLESS-1"
+
+[[step]]
+advance_ms = 90
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "matrix-column-moves.png" }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+# A new session: the column opens as it first shows.
+[[step]]
+restart = true
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+advance_ms = 60
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-column-starts.png" }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+# With reduced motion, on the other screen at once.
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+reduced_motion = true
+"""
+
+[[step]]
+unplug = "HEADLESS-1"
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "matrix-column-reduced.png" }
+
+[[step]]
+expect_idle = { for_ms = 1000 }

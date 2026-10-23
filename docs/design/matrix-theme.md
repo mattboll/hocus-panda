@@ -565,9 +565,11 @@ behind it. The rain continues off the right screen edge.
 - Open: Soft "terminal open" whoosh (80ms, rising noise sweep)
 - Close: Soft "terminal close" whoosh (80ms, falling noise sweep)
 
-As built: the sidebar is the column, which stays open; it goes under a
-fullscreen window and comes back after it, and that is when it closes
-and opens so. The band of rain is 40 px wide. Its permanent left line
+As built: the sidebar is the column, which stays open. It opens so when
+it first shows as the session starts, when it comes to another screen
+(its screen unplugged, another made primary) and when a fullscreen
+window over it goes; it closes so when one comes over it. The band of
+rain is 40 px wide. Its permanent left line
 is the theme's green border.
 
 ---
