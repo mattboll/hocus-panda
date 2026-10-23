@@ -46,7 +46,7 @@ click_settings = "Énergie"
 expect_settings = { label = "Profil d’énergie : Équilibré", selected = true }
 
 [[step]]
-expect_settings = { label = "Sur batterie : Assombrir les écrans après : 5 min", selected = true }
+expect_settings = { label = "Sur batterie : Assombrir les écrans après : 2 min", selected = true }
 
 [[step]]
 pointer_move = [330, 760]
