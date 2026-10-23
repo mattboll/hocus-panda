@@ -41,9 +41,8 @@ expect_adb = "pairing"
 [[step]]
 advance_ms = 300
 
-# The code is new each time: its pixels may differ, nothing else.
 [[step]]
-expect_screenshot = { output = "HEADLESS-1", reference = "phone-adb-pairing.png", pixel_tolerance = 0.03 }
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-adb-pairing.png" }
 
 [[step]]
 scan_pairing_code = true

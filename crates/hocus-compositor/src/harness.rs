@@ -87,6 +87,13 @@ fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
         },
     )?;
     started.app.state.instant_motion = !harness.motion;
+    started
+        .app
+        .state
+        .fix_pairing_code(hocus_platform::adb::Code {
+            name: "hocuspanda-test".into(),
+            password: "pandapassword".into(),
+        });
     Ok(started)
 }
 

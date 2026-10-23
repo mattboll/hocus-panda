@@ -72,6 +72,9 @@ struct AdbState {
     pairing: Option<Pairing>,
     /// The last pairing's number: answers to an older one are dropped.
     pairings: u64,
+    /// Tests pair with this code instead of a random one, so the QR code
+    /// draws the same each run.
+    fixed_code: Option<Code>,
 }
 
 #[derive(Debug)]
@@ -497,6 +500,12 @@ impl State {
         self.phone_changed();
     }
 
+    /// Pairs with `code` from now on instead of a fresh random one: for
+    /// tests.
+    pub fn fix_pairing_code(&mut self, code: Code) {
+        self.phone.adb.fixed_code = Some(code);
+    }
+
     /// "Pair over Wi-Fi" (or Try again): a fresh code, and a worker that
     /// waits for the phone to scan it.
     pub fn pair_phone(&mut self) {
@@ -507,7 +516,7 @@ impl State {
             return;
         }
         self.stop_pairing();
-        let code = match Code::new() {
+        let code = match self.phone.adb.fixed_code.clone().map_or_else(Code::new, Ok) {
             Ok(code) => code,
             Err(err) => {
                 tracing::warn!(%err, "no pairing code");
