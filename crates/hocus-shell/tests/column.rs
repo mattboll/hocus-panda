@@ -180,6 +180,7 @@ fn journal(stopped: bool) -> JournalView {
     };
     JournalView {
         stopped,
+        seats: Vec::new(),
         lines: vec![
             line(
                 Did::Click {
@@ -250,6 +251,57 @@ fn the_journal_shows_the_latest_opens_on_all_and_stops_every_agent() -> anyhow::
     column.set_state(&s);
     column.draw(Duration::ZERO);
     button(&column, "Autoriser à nouveau les agents")?;
+    Ok(())
+}
+
+#[test]
+fn an_agent_connected_shows_its_window_and_the_user_takes_over_and_hands_back() -> anyhow::Result<()>
+{
+    let mut column = Column::new(Theme::default(), Lang::En, 900.0, 1.0);
+    let mut s = state();
+    let seat = |taken| hocus_shell::journal::SeatLine {
+        agent: "helper".into(),
+        window: Some("Draft".into()),
+        taken,
+    };
+    s.journal = Some(JournalView {
+        seats: vec![seat(false)],
+        ..journal(false)
+    });
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    assert!(access.contains("helper · in Draft"), "{access}");
+    // The slot the compositor draws the window in, live.
+    let slot = rect_of(&column, "Window of helper")?;
+    let slots = column.seat_slots();
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].0, "helper");
+    assert_eq!(slots[0].1, slot);
+    let at = button(&column, "Take over")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::TakeOver("helper".into())]
+    );
+    s.journal = Some(JournalView {
+        seats: vec![seat(true)],
+        ..journal(false)
+    });
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    assert!(access.contains("helper · you took over"), "{access}");
+    let at = button(&column, "Hand back")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::HandBack("helper".into())]
+    );
+    // In French too.
+    let mut column = Column::new(Theme::default(), Lang::Fr, 900.0, 1.0);
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    button(&column, "Rendre la main")?;
+    rect_of(&column, "Fenêtre de helper")?;
     Ok(())
 }
 

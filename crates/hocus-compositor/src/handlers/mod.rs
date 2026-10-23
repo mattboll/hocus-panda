@@ -40,13 +40,22 @@ impl SeatHandler for State {
         &mut self.seat_state
     }
 
-    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+    /// The user's cursor, as the client under it sets it; an agent's
+    /// pointer is drawn the compositor's way (#43).
+    fn cursor_image(&mut self, seat: &Seat<Self>, image: CursorImageStatus) {
+        if *seat != self.seat {
+            return;
+        }
         self.cursor = image;
         self.needs_redraw = true;
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
-        self.protocols.keyboard_focus = focused.cloned();
+        // An agent's seat has its own focus, clipboard and selection
+        // (#43); what follows the user's keyboard does not follow it.
+        if *seat == self.seat {
+            self.protocols.keyboard_focus = focused.cloned();
+        }
         // The clipboard follows keyboard focus.
         let client = focused.and_then(|s| self.display_handle.get_client(s.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client.clone());
@@ -69,8 +78,13 @@ impl SelectionHandler for State {
         &mut self,
         ty: SelectionTarget,
         source: Option<SelectionSource>,
-        _seat: Seat<Self>,
+        seat: Seat<Self>,
     ) {
+        // An agent's seat has a clipboard of its own: never kept in the
+        // history, nor offered to X11.
+        if seat != self.seat {
+            return;
+        }
         // Kept in the history, read off the loop; asked once the selection
         // is in place, after this request. Asking reads whatever the
         // clipboard holds then: if a newer selection came meanwhile (a

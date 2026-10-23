@@ -62,11 +62,25 @@ pub struct JournalLine {
     pub refused: Option<String>,
 }
 
+/// An MCP agent connected now, with a seat of its own (#43).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SeatLine {
+    pub agent: String,
+    /// The window it acts in, by its title (or app id), when it has one:
+    /// the compositor shows it live in the slot.
+    pub window: Option<String>,
+    /// The user took over from it: its actions are refused until they
+    /// hand back.
+    pub taken: bool,
+}
+
 /// The column's journal section.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JournalView {
     /// Every agent is stopped: their requests are refused.
     pub stopped: bool,
+    /// The agents connected now, each with its window.
+    pub seats: Vec<SeatLine>,
     /// The latest entries, newest first, as many as the popover shows.
     pub lines: Vec<JournalLine>,
     /// Entries kept in all.
@@ -122,6 +136,26 @@ impl Lang {
                 self.pick("Agents allowed again", "Agents de nouveau autorisés"),
                 "",
             ),
+        }
+    }
+
+    /// The slot an agent's window shows in, for screen readers and tests.
+    pub fn window_of(self, agent: &str) -> String {
+        match self {
+            Self::En => format!("Window of {agent}"),
+            Self::Fr => format!("Fenêtre de {agent}"),
+        }
+    }
+
+    /// Where an agent is, in the column.
+    pub fn seat_line(self, seat: &SeatLine) -> String {
+        match (self, &seat.window, seat.taken) {
+            (Self::En, _, true) => format!("{} · you took over", seat.agent),
+            (Self::Fr, _, true) => format!("{} · vous avez la main", seat.agent),
+            (Self::En, Some(w), false) => format!("{} · in {w}", seat.agent),
+            (Self::Fr, Some(w), false) => format!("{} · dans {w}", seat.agent),
+            (Self::En, None, false) => format!("{} · connected", seat.agent),
+            (Self::Fr, None, false) => format!("{} · connecté", seat.agent),
         }
     }
 
@@ -260,9 +294,45 @@ fn dot(refused: bool) -> (Style, Kind) {
     )
 }
 
+/// What the section holds that the column answers to.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Filled {
+    pub button: Option<NodeId>,
+    /// The entries, the popover's anchor.
+    pub entries: Option<NodeId>,
+    /// Each agent's Take over or Hand back: the agent, and whether it is
+    /// taken over.
+    pub seats: Vec<(NodeId, String, bool)>,
+    /// Each agent's window slot.
+    pub slots: Vec<(String, NodeId)>,
+}
+
+/// The empty box an agent's window shows in, live: the compositor draws it.
+struct Slot;
+
+impl hocus_ui::tree::Draw for Slot {
+    fn draw(
+        &self,
+        canvas: &mut hocus_ui::Canvas,
+        rect: hocus_ui::Rect,
+        theme: &Theme,
+        _now: std::time::Duration,
+    ) {
+        canvas.fill_rect(rect, 10.0, theme.colors.background);
+        canvas.stroke_rect(rect, 10.0, 1.0, theme.colors.border);
+    }
+
+    fn size(&self) -> hocus_ui::Size {
+        hocus_ui::Size::new(0.0, SLOT)
+    }
+}
+
+/// The window slot's height.
+const SLOT: f32 = 120.0;
+
 /// Fills the section: its caption and the stop button, the stopped line,
-/// then the latest `rows` entries (one at least), which open the popover.
-/// The button, and the entries (the popover's anchor).
+/// each agent connected with its window and Take over, then the latest
+/// `rows` entries (one at least), which open the popover.
 pub(crate) fn fill(
     tree: &mut Tree,
     room: NodeId,
@@ -270,7 +340,7 @@ pub(crate) fn fill(
     lang: Lang,
     view: &JournalView,
     rows: usize,
-) -> (NodeId, NodeId) {
+) -> Filled {
     let missing = || unreachable!("adding to a node of this tree");
     let add = |tree: &mut Tree, parent, style, kind| {
         tree.add(parent, style, kind).unwrap_or_else(missing)
@@ -335,6 +405,83 @@ pub(crate) fn fill(
         );
     }
 
+    let mut filled = Filled {
+        button: Some(button),
+        ..Filled::default()
+    };
+    for seat in &view.seats {
+        let card = add(
+            tree,
+            room,
+            Style {
+                gap: 8.0,
+                padding: Insets::all(10.0),
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 12.0,
+                ..Look::default()
+            }),
+        );
+        if seat.window.is_some() {
+            let slot = add(
+                tree,
+                card,
+                Style {
+                    height: Length::Px(SLOT),
+                    ..Style::default()
+                },
+                Kind::Custom {
+                    draw: Box::new(Slot),
+                    label: Some(lang.window_of(&seat.agent)),
+                },
+            );
+            filled.slots.push((seat.agent.clone(), slot));
+        }
+        let line = add(tree, card, row(8.0), Kind::Box(Look::default()));
+        add(
+            tree,
+            line,
+            Style {
+                width: Length::Px(8.0),
+                height: Length::Px(8.0),
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Rgba(crate::seat::agent_color(theme, &seat.agent))),
+                radius: 4.0,
+                ..Look::default()
+            }),
+        );
+        add(
+            tree,
+            line,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
+            Kind::text_line(lang.seat_line(seat), small),
+        );
+        let (words, kind) = if seat.taken {
+            (lang.hand_back(), ButtonKind::Primary)
+        } else {
+            (lang.take_over(), ButtonKind::Plain)
+        };
+        let button = add(
+            tree,
+            line,
+            Style {
+                height: Length::Px(32.0),
+                padding: Insets::symmetric(0.0, 12.0),
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::Button(Button::new(words, kind, theme)),
+        );
+        filled.seats.push((button, seat.agent.clone(), seat.taken));
+    }
+
     let entries = add(
         tree,
         room,
@@ -380,7 +527,8 @@ pub(crate) fn fill(
             Kind::text_line(line.time.clone(), small.with_color(Paint::Muted)),
         );
     }
-    (button, entries)
+    filled.entries = Some(entries);
+    filled
 }
 
 /// The popover's height for `entries`: the head, then two lines each.

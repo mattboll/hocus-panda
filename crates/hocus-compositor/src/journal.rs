@@ -82,6 +82,10 @@ impl State {
         } else {
             Agents::Allowed
         });
+        // What agents wait on is refused too.
+        if stop {
+            self.refuse_pending(&stopped());
+        }
         tracing::info!(stopped = stop, "MCP agents stopped or allowed again");
         let (summary, body) = self.shell_lang().agents_toast(stop);
         self.shell_toast(summary, body);
@@ -101,7 +105,7 @@ impl State {
         }
         let agent = self.api.agent(connection).map(str::to_owned);
         match (agent, request) {
-            (Some(agent), Request::Act { target, action }) => {
+            (Some(agent), Request::Act { target, action, .. }) => {
                 let entry = self.journal_entry(&agent, target, action);
                 self.journal_keep(entry, Some(&stopped()));
                 Some(stopped())
@@ -114,6 +118,7 @@ impl State {
                     action: JournalAction::Connect,
                     target: None,
                     refused: None,
+                    confirmed: false,
                 };
                 self.journal_keep(
                     (civil.hour() as u8, civil.minute() as u8, entry),
@@ -145,6 +150,7 @@ impl State {
             },
             target: None,
             refused: None,
+            confirmed: false,
         };
         self.journal_met();
         self.journal_keep((civil.hour() as u8, civil.minute() as u8, entry), None);
@@ -198,6 +204,7 @@ impl State {
             action,
             target: Some(target),
             refused: None,
+            confirmed: false,
         };
         (civil.hour() as u8, civil.minute() as u8, entry)
     }
@@ -264,6 +271,7 @@ impl State {
             .collect();
         Some(JournalView {
             stopped,
+            seats: self.seat_lines(),
             lines,
             total: self.journal.entries.len(),
         })

@@ -4,8 +4,9 @@
 //! effect at each action and checked here, so that an agent's own client
 //! cannot widen them, and taking them away applies at once.
 //!
-//! Until agents get a seat of their own (idea 23), acting moves the
-//! session's pointer and gives the window the keyboard, as the user would.
+//! An agent acts through a seat of its own (#43, [`crate::seat`]); a test
+//! connection's input still goes through the session's pointer and
+//! keyboard, the window brought forward first, as the user's would.
 
 use hocus_api::{Access, ActTarget, Action, AgentInfo, ApiError, ConnectionId, ErrorCode, Reply};
 use hocus_core::{
@@ -15,11 +16,11 @@ use hocus_core::{
 use smithay::{
     backend::input::{ButtonState, KeyState},
     desktop::Window,
-    input::keyboard::{FilterResult, Keycode, Keysym, xkb},
+    input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xkb},
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{State, handlers::layer_shell::ABOVE, surface::title_and_app_id};
+use crate::{State, handlers::layer_shell::ABOVE};
 
 /// Evdev codes are offset by 8 in XKB.
 const XKB_OFFSET: u32 = 8;
@@ -92,52 +93,33 @@ impl State {
         };
         let info = info(agent);
         tracing::info!(agent = %info.name, access = ?info.access, "an MCP agent connected");
+        self.seat_join(connection, &name);
         self.api.set_agent(connection, name);
         self.journal_met();
         Ok(Reply::Agent(info))
     }
 
-    /// Carries out an agent's action, or a test connection's (which may do
-    /// anything: the server let it through with the test permission). An
-    /// agent's is kept in the journal (#176), carried out or refused.
+    /// Carries out an agent's action through its own seat, kept in the
+    /// journal (#176), or a test connection's (which may do anything: the
+    /// server let it through with the test permission). `None` while an
+    /// agent's waits: shown before a click, or for the user's confirmation.
     pub fn act(
         &mut self,
         connection: ConnectionId,
+        id: u64,
         target: ActTarget,
         action: Action,
-    ) -> Result<Reply, ApiError> {
-        let Some(name) = self.api.agent(connection).map(str::to_owned) else {
-            return self.carry_out(None, target, action);
-        };
-        // The window as it is before the action changes it.
-        let entry = self.journal_entry(&name, &target, &action);
-        let result = self.carry_out(Some(&name), target, action);
-        self.journal_keep(entry, result.as_ref().err());
-        result
+        intent: Option<String>,
+    ) -> Option<Result<Reply, ApiError>> {
+        match self.api.agent(connection).map(str::to_owned) {
+            Some(name) => self.agent_act(connection, id, &name, target, action, intent),
+            None => Some(self.carry_out(target, action)),
+        }
     }
 
-    fn carry_out(
-        &mut self,
-        agent: Option<&str>,
-        target: ActTarget,
-        action: Action,
-    ) -> Result<Reply, ApiError> {
-        let agent = match agent {
-            Some(name) => {
-                Some(self.config.agents.mcp_agent(name).cloned().ok_or_else(|| {
-                    denied(format!("agent {name:?} is no longer in [[agents.mcp]]"))
-                })?)
-            }
-            None => None,
-        };
-        if let Some(agent) = &agent
-            && agent.access != AgentAccess::Act
-        {
-            return Err(denied(format!(
-                "agent {:?} may only read: its access is \"read\" in [[agents.mcp]]",
-                agent.name
-            )));
-        }
+    /// A test connection's action, through the session's own pointer and
+    /// keyboard: the window comes forward first, as the user would bring it.
+    fn carry_out(&mut self, target: ActTarget, action: Action) -> Result<Reply, ApiError> {
         if self.locked() {
             return Err(denied("the session is locked: agents do not act on it"));
         }
@@ -147,16 +129,9 @@ impl State {
             ));
         }
         let typing = matches!(action, Action::Type { .. } | Action::Keys { .. });
-        // What is typed stays out of the log: it may be a password.
-        tracing::debug!(
-            agent = agent.as_ref().map(|a| a.name.as_str()),
-            ?target,
-            typing,
-            "an agent acts"
-        );
         let at = match target {
             ActTarget::Window { window, at } => {
-                let window = self.agent_window(agent.as_ref(), window)?;
+                let window = self.forward_window(window)?;
                 if typing {
                     return self.type_into(&window, &action).map(|()| Reply::Done);
                 }
@@ -168,15 +143,6 @@ impl State {
                         ErrorCode::BadRequest,
                         "typing goes to a window: aim at one",
                     ));
-                }
-                if let Some(agent) = &agent
-                    && !agent.shell
-                {
-                    return Err(denied(format!(
-                        "agent {:?} may not use the shell's interface: shell = true in \
-                         [[agents.mcp]] allows it",
-                        agent.name
-                    )));
                 }
                 self.element_centre(&label)?
             }
@@ -197,26 +163,14 @@ impl State {
         Ok(Reply::Done)
     }
 
-    /// The window `id`, brought forward, if the agent may act on it.
-    fn agent_window(&mut self, agent: Option<&McpAgent>, id: u64) -> Result<Window, ApiError> {
+    /// The window `id`, brought forward on whatever desktop it is,
+    /// minimized or not, as activating it would; it gets the keyboard.
+    fn forward_window(&mut self, id: u64) -> Result<Window, ApiError> {
         let window = self
             .windows
             .get(&WindowId(id))
             .map(|m| m.window.clone())
             .ok_or_else(|| ApiError::new(ErrorCode::NotFound, format!("no window with id {id}")))?;
-        if let Some(agent) = agent {
-            let (_, app_id) = title_and_app_id(&window);
-            let app_id = app_id.unwrap_or_default();
-            if !agent.may_act_on(&app_id) {
-                return Err(denied(format!(
-                    "agent {:?} may not act on windows of {app_id:?}: its apps in \
-                     [[agents.mcp]] do not match it",
-                    agent.name
-                )));
-            }
-        }
-        // On whatever desktop it is, minimized or not, as activating it
-        // would; it gets the keyboard.
         self.restore(WindowId(id), SERIAL_COUNTER.next_serial());
         Ok(window)
     }
@@ -266,11 +220,15 @@ impl State {
         }
     }
 
-    /// The centre of the shell's element labelled `label`.
-    fn element_centre(&self, label: &str) -> Result<Point<f64, Logical>, ApiError> {
+    /// The centre of the shell's element labelled `label`; never an
+    /// agent's own card.
+    pub(crate) fn element_centre(&self, label: &str) -> Result<Point<f64, Logical>, ApiError> {
+        let mut seats = Vec::new();
+        self.seat_ui(&mut seats);
         let node = self
             .shell_ui()
             .into_iter()
+            .filter(|n| !seats.contains(n))
             .find(|n| n.label.as_deref() == Some(label))
             .ok_or_else(|| {
                 ApiError::new(
@@ -301,30 +259,13 @@ impl State {
                 "the window did not get the keyboard",
             ));
         }
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return Err(ApiError::new(ErrorCode::Failed, "no keyboard"));
+        };
         // Every key is looked up before any is pressed: nothing half-typed.
         let chords: Vec<Vec<u32>> = match action {
-            Action::Type { text } => {
-                if text.chars().count() > MAX_TEXT {
-                    return Err(ApiError::new(
-                        ErrorCode::BadRequest,
-                        format!("at most {MAX_TEXT} characters at once"),
-                    ));
-                }
-                text.chars()
-                    .map(|c| {
-                        let stroke = self.stroke_for(char_keysym(c)).ok_or_else(|| {
-                            ApiError::new(
-                                ErrorCode::BadRequest,
-                                format!("no key of the keyboard layout in effect types {c:?}"),
-                            )
-                        })?;
-                        let mut chord = stroke.modifiers().to_vec();
-                        chord.push(stroke.code);
-                        Ok(chord)
-                    })
-                    .collect::<Result<_, ApiError>>()?
-            }
-            Action::Keys { keys } => vec![self.chord(keys)?],
+            Action::Type { text } => self.text_chords(&keyboard, text)?,
+            Action::Keys { keys } => vec![self.chord_on(&keyboard, keys)?],
             Action::Click { .. } | Action::Scroll { .. } => Vec::new(),
         };
         for chord in chords {
@@ -338,9 +279,40 @@ impl State {
         Ok(())
     }
 
+    /// The chords that type `text` on `keyboard`'s layout, modifiers first.
+    pub(crate) fn text_chords(
+        &mut self,
+        keyboard: &KeyboardHandle<State>,
+        text: &str,
+    ) -> Result<Vec<Vec<u32>>, ApiError> {
+        if text.chars().count() > MAX_TEXT {
+            return Err(ApiError::new(
+                ErrorCode::BadRequest,
+                format!("at most {MAX_TEXT} characters at once"),
+            ));
+        }
+        text.chars()
+            .map(|c| {
+                let stroke = self.stroke_for(keyboard, char_keysym(c)).ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::BadRequest,
+                        format!("no key of the keyboard layout in effect types {c:?}"),
+                    )
+                })?;
+                let mut chord = stroke.modifiers().to_vec();
+                chord.push(stroke.code);
+                Ok(chord)
+            })
+            .collect()
+    }
+
     /// The keys of a combination as the shortcuts write it (`Ctrl+A`,
-    /// `Shift+Tab`, `Return`), modifiers first.
-    fn chord(&mut self, keys: &str) -> Result<Vec<u32>, ApiError> {
+    /// `Shift+Tab`, `Return`), modifiers first, on `keyboard`'s layout.
+    pub(crate) fn chord_on(
+        &mut self,
+        keyboard: &KeyboardHandle<State>,
+        keys: &str,
+    ) -> Result<Vec<u32>, ApiError> {
         let combo: Combo = keys
             .parse()
             .map_err(|err: String| ApiError::new(ErrorCode::BadRequest, err))?;
@@ -367,7 +339,7 @@ impl State {
                         format!("{keys:?}: no key is named {name:?}"),
                     ));
                 }
-                let stroke = self.stroke_for(keysym).ok_or_else(|| {
+                let stroke = self.stroke_for(keyboard, keysym).ok_or_else(|| {
                     ApiError::new(
                         ErrorCode::BadRequest,
                         format!("{keys:?}: no key of the keyboard layout in effect is {name:?}"),
@@ -387,8 +359,7 @@ impl State {
 
     /// The key and level of the active layout that give `keysym`, the
     /// lowest level first.
-    fn stroke_for(&mut self, keysym: Keysym) -> Option<Stroke> {
-        let keyboard = self.seat.get_keyboard()?;
+    fn stroke_for(&mut self, keyboard: &KeyboardHandle<State>, keysym: Keysym) -> Option<Stroke> {
         keyboard.with_xkb_state(self, |context| {
             let xkb = context.xkb().lock().ok()?;
             let layout = xkb.active_layout().0;

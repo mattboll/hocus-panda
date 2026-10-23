@@ -366,7 +366,8 @@ impl State {
         }
         // Over the column, windows do not see the pointer.
         let over_shell = !pointer.is_grabbed()
-            && (self.alt_tab_pointer(location, None, SERIAL_COUNTER.next_serial())
+            && (self.seat_card_pointer(location, None)
+                || self.alt_tab_pointer(location, None, SERIAL_COUNTER.next_serial())
                 || self.dock_pointer(location, None)
                 || self.share_pointer(location, None)
                 || self.recording_pointer(location, None)
@@ -444,7 +445,8 @@ impl State {
         self.recording_click(at, pressed);
         if button == BTN_LEFT
             && !pointer.is_grabbed()
-            && (self.alt_tab_pointer(at, Some(pressed), serial)
+            && (self.seat_card_pointer(at, Some(pressed))
+                || self.alt_tab_pointer(at, Some(pressed), serial)
                 || self.dock_pointer(at, Some(pressed))
                 || self.share_pointer(at, Some(pressed))
                 || self.recording_pointer(at, Some(pressed))

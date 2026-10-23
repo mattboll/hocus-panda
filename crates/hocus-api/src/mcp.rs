@@ -29,6 +29,9 @@ pub const PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26
 /// How long a request to the compositor may take: a capture of a large
 /// window is encoded on a worker first.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long an action may take: a sensitive one waits for the user, five
+/// minutes at most (`[agents] confirm_timeout`), before it is refused.
+const ACT_TIMEOUT: Duration = Duration::from_secs(320);
 /// How often `wait_for` looks again.
 const POLL: Duration = Duration::from_millis(100);
 const WAIT_DEFAULT_MS: u64 = 10_000;
@@ -37,6 +40,8 @@ const WAIT_MAX_MS: u64 = 120_000;
 /// compositor keeps.
 const JOURNAL_DEFAULT: u64 = 50;
 const JOURNAL_MAX: u64 = 500;
+/// An intent is one line: longer is cut.
+const MAX_INTENT: usize = 120;
 
 /// JSON-RPC error codes.
 const PARSE_ERROR: i64 = -32700;
@@ -216,9 +221,12 @@ impl Bridge {
             "instructions": "The windows of a Hocuspanda desktop. List them, read the shell's \
                 interface, capture a window to see it, and, when this agent may act, click, type \
                 and scroll aimed at a window (points relative to its top-left corner, in logical \
-                pixels) or at a labelled element of the shell. Wait for a window or a label \
-                rather than sleeping. What agents do is kept in a journal the user reads (and \
-                the journal tool gives); the user may stop every agent at once.",
+                pixels) or at a labelled element of the shell, with a pointer and a keyboard of \
+                your own: the user keeps theirs. Say what each action is for with `intent`, \
+                shown to the user before it happens; sensitive ones wait for the user's \
+                confirmation. Wait for a window or a label rather than sleeping. What agents do \
+                is kept in a journal the user reads (and the journal tool gives); the user may \
+                stop every agent at once, or take over from one.",
         })
     }
 
@@ -415,8 +423,28 @@ impl Bridge {
         }
     }
 
-    fn act(&mut self, target: ActTarget, action: Action) -> Result<(), Failure> {
-        match self.request(Request::Act { target, action })? {
+    /// Acts, with the intent the agent gave (shown before it acts), and
+    /// waits as long as the user may take to confirm it.
+    fn act(&mut self, target: ActTarget, action: Action, args: &Args) -> Result<(), Failure> {
+        let intent = args
+            .str("intent")?
+            .map(str::trim)
+            .filter(|i| !i.is_empty())
+            .map(|i| i.chars().take(MAX_INTENT).collect());
+        self.client()?
+            .set_timeout(Some(ACT_TIMEOUT))
+            .map_err(|err| err.to_string())?;
+        let result = self.request(Request::Act {
+            target,
+            action,
+            intent,
+        });
+        if let Some(client) = self.client.as_ref() {
+            client
+                .set_timeout(Some(REQUEST_TIMEOUT))
+                .map_err(|err| err.to_string())?;
+        }
+        match result? {
             Reply::Done => Ok(()),
             other => Err(unexpected(&other)),
         }
@@ -431,14 +459,14 @@ impl Bridge {
             other => return Err(format!("no button {other:?}: left, right or middle").into()),
         };
         let count = args.u64("count")?.unwrap_or(1).clamp(1, 3) as u32;
-        self.act(target, Action::Click { button, count })?;
+        self.act(target, Action::Click { button, count }, args)?;
         Ok(Done::said("clicked"))
     }
 
     fn scroll(&mut self, args: &Args) -> Result<Done, Failure> {
         let target = self.target(args)?;
         let dy = args.f64("dy")?.ok_or("dy: how far, in logical pixels")?;
-        self.act(target, Action::Scroll { dy })?;
+        self.act(target, Action::Scroll { dy }, args)?;
         Ok(Done::said("scrolled"))
     }
 
@@ -450,6 +478,7 @@ impl Bridge {
             Action::Type {
                 text: text.to_owned(),
             },
+            args,
         )?;
         Ok(Done::said("typed"))
     }
@@ -462,6 +491,7 @@ impl Bridge {
             Action::Keys {
                 keys: keys.to_owned(),
             },
+            args,
         )?;
         Ok(Done::said("pressed"))
     }
@@ -647,6 +677,7 @@ fn tools() -> Vec<Value> {
     let x = json!({ "type": "number", "description": "From the window's left edge, logical pixels; its centre when x and y are left out." });
     let y =
         json!({ "type": "number", "description": "From the window's top edge, logical pixels." });
+    let intent = json!({ "type": "string", "maxLength": MAX_INTENT, "description": "What this does, in one short line for the user, shown before it happens: \"Sends the message\"." });
     let read = json!({ "readOnlyHint": true, "openWorldHint": false });
     let act = json!({ "readOnlyHint": false, "destructiveHint": true, "openWorldHint": false });
     vec![
@@ -691,10 +722,12 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "click",
             "title": "Click",
-            "description": "Clicks a point of a window, which is brought forward first (its desktop \
-                shown, restored if minimized), or the centre of a labelled element of the shell. \
-                Refused when the agent may not act on that window's app, or when something else \
-                covers the point.",
+            "description": "Clicks a point of a window shown on a screen, with this agent's own \
+                pointer (the user's pointer and keyboard stay theirs), or the centre of a labelled \
+                element of the shell. A ring and the intent show at the point a moment before the \
+                click; a sensitive one (a password manager, the settings…) waits until the user \
+                confirms it. Refused when the agent may not act on that window's app, or when the \
+                window is minimized or on a desktop not shown.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -704,6 +737,7 @@ fn tools() -> Vec<Value> {
                     "element": element,
                     "button": { "type": "string", "enum": ["left", "right", "middle"], "default": "left" },
                     "count": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1, "description": "2 for a double click." },
+                    "intent": intent,
                 },
                 "additionalProperties": false,
             },
@@ -722,6 +756,7 @@ fn tools() -> Vec<Value> {
                     "y": y,
                     "element": element,
                     "dy": { "type": "number", "description": "Logical pixels, 15 per notch, down positive." },
+                    "intent": intent,
                 },
                 "required": ["dy"],
                 "additionalProperties": false,
@@ -731,14 +766,16 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "type",
             "title": "Type text",
-            "description": "Gives a window the keyboard and types text into it with the keyboard \
-                layout in effect (line breaks are Return). The keys go to the window alone, never to \
-                the desktop's shortcuts.",
+            "description": "Gives a window this agent's own keyboard (the user's stays where it is) \
+                and types text into it with the keyboard layout in effect (line breaks are Return), \
+                wherever the window is. The keys go to the window alone, never to the desktop's \
+                shortcuts. Typing into a password field waits until the user confirms it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "window": window,
                     "text": { "type": "string", "maxLength": 4096 },
+                    "intent": intent,
                 },
                 "required": ["window", "text"],
                 "additionalProperties": false,
@@ -748,14 +785,15 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "press_keys",
             "title": "Press keys",
-            "description": "Gives a window the keyboard and presses a combination in it: `Ctrl+A`, \
-                `Return`, `Shift+Tab`, `Ctrl+Shift+T`, `Escape` (modifiers Ctrl, Shift, Alt, Super; \
-                keys by their XKB names). Never a shortcut of the desktop's.",
+            "description": "Gives a window this agent's own keyboard and presses a combination in \
+                it: `Ctrl+A`, `Return`, `Shift+Tab`, `Ctrl+Shift+T`, `Escape` (modifiers Ctrl, Shift, \
+                Alt, Super; keys by their XKB names). Never a shortcut of the desktop's.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "window": window,
                     "keys": { "type": "string" },
+                    "intent": intent,
                 },
                 "required": ["window", "keys"],
                 "additionalProperties": false,

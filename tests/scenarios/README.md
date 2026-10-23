@@ -73,7 +73,7 @@ Steps, one per `[[step]]` table:
 
 | Step | Does |
 |---|---|
-| `open = { app_id, size = [w, h], color = "#rrggbb", title?, inhibit_shortcuts?, inhibit_idle? }` | starts a test client with a solid window (titled `title`, untitled by default), waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard; `inhibit_idle` keeps the session awake while it is shown, as a video player does |
+| `open = { app_id, size = [w, h], color = "#rrggbb", title?, inhibit_shortcuts?, inhibit_idle?, password? }` | starts a test client with a solid window (titled `title`, untitled by default), waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard; `inhibit_idle` keeps the session awake while it is shown, as a video player does; `password` makes its field a password one, as its text inputs say (text-input-v3) when a keyboard comes in. It takes every seat, an agent's too |
 | `open_layer = { namespace, layer, anchor?, size = [w, h], exclusive_zone?, keyboard?, color }` | starts a layer-shell client (`background`, `bottom`, `top`, `overlay`; anchors among `top`, `bottom`, `left`, `right`; 0 for a length anchored at both ends; keyboard `none`, `exclusive`, `on_demand`), waits until it is shown; `expect_received` reads it by its namespace |
 | `close_layer = "namespace"` | closes that layer client |
 | `session_file = """…"""` | writes the saved session file (TOML, `[[window]]` with `app_id`, `title`, `command`, `output`, `desktop`, `geometry`, `state`, `pinned`); `{test_client}` is the test client program (`--app-id`, `--size`, `--color`, `--title`) |
@@ -101,7 +101,9 @@ Steps, one per `[[step]]` table:
 | `expect_phone_state = "absent"` | KDE Connect as the session found it, once so: `absent`, `stopped`, `running`, `off` |
 | `scan_pairing_code = true` | the phone scans the pairing QR code the popover shows (wireless adb): its name and password go to the adb stand-in, as `NAME PASSWORD` in `{runtime_dir}/adb-phone` |
 | `expect_adb = "ready"` | wireless adb as the session has it, once so, within seconds: `off`, `absent`, `ready`, `pairing` |
-| `mcp = { agent?, tool, window?, arguments? = { … }, contains? = […], error? }` | an MCP session (`hocus mcp`, #42) of its own, as agent `agent` of `[[agents.mcp]]` (or none), calls `tool` with `arguments`; `window` is an app id whose window's id goes in as the `window` argument; the result's text holds `contains`, or the tool fails with `error` in its message |
+| `mcp = { agent?, tool, window?, arguments? = { … }, contains? = […], error?, wait? }` | an MCP session (`hocus mcp`, #42) of its own, as agent `agent` of `[[agents.mcp]]` (or none), or that agent's lasting one when `mcp_session` opened it, calls `tool` with `arguments`; `window` is an app id whose window's id goes in as the `window` argument; the result's text holds `contains`, or the tool fails with `error` in its message. While it waits, an action shown before it lands (#43) moves the clock to when it does; one waiting for the user's confirmation needs `wait = false`: the step goes on once the action is in, and `expect_mcp` checks its result |
+| `mcp_session = "helper"`, `mcp_end = "helper"` | an MCP session as that agent that lasts until `mcp_end` or the end (its seat stays meanwhile), named at once; the step goes on once every window's application took its seat |
+| `expect_mcp = { agent?, contains? = […], error? }` | the result of the oldest `wait = false` call (that agent's), once it comes |
 | `expect_journal = { has? = […], lacks? = […], stopped? }` | the agents' journal (#176), as `hocus msg agents-journal` prints it, holds the strings of `has` in that order (each after the one before, on its line or a later one) and none of `lacks`; agents are stopped or not |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
 | `right_click_ui = "Chat"` | the same with the secondary button |
@@ -175,7 +177,7 @@ Steps, one per `[[step]]` table:
 | `expect_focus = "app_id"` | checks which window has keyboard focus |
 | `expect_stack = ["below", "above"]` | checks the shown windows, bottom to top |
 | `expect_shown = { output, desktop }` | checks which desktop an output shows, from 1 |
-| `expect_received = { app_id, event = "key 30 pressed" }` | checks the client got an event: `configure WxH`, `pointer_enter`, `pointer_leave`, `button CODE pressed`, `keyboard_enter`, `keyboard_leave`, `key CODE pressed`, `close` (and `released`) |
+| `expect_received = { app_id, event = "key 30 pressed" }` | checks the client got an event: `configure WxH`, `pointer_enter`, `pointer_leave`, `button CODE pressed`, `keyboard_enter`, `keyboard_leave`, `key CODE pressed`, `close` (and `released`); an MCP agent's seat's events end with its name, `key 30 pressed on agent-helper`, and a `password = true` window says `password_field on agent-helper` once its field told that seat it is a password one |
 | `expect_not_received = { app_id, event }` | checks the client never got an event |
 | `expect_pixel = { output, at = [x, y], color = "#rrggbb", tolerance? = 24, is? = true }` | checks one pixel of an output, in its pixels; `is = false` checks it is not that colour |
 | `expect_screenshot = { output, reference = "file.png", channel_tolerance? = 2, pixel_tolerance? = 0.0, cursor? = false }` | compares the output with a reference image next to the scenario; `cursor` draws the pointer's cursor too |

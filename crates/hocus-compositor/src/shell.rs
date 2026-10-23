@@ -370,6 +370,7 @@ impl State {
         self.refresh_wobbles();
         self.refresh_pandas();
         self.refresh_agents();
+        self.refresh_seats();
         self.refresh_activity();
         self.refresh_clipboard();
         self.refresh_dropdown();
@@ -549,6 +550,8 @@ impl State {
             ShellAction::Agent { key, ask } => self.agent_ask(&key, ask),
             ShellAction::StopAgents => self.set_agents_stopped(true),
             ShellAction::AllowAgents => self.set_agents_stopped(false),
+            ShellAction::TakeOver(agent) => self.take_over(&agent),
+            ShellAction::HandBack(agent) => self.hand_back(&agent),
             ShellAction::ShowDesktop { output, desktop } => {
                 if let Some(output) = self.find_output(&output)
                     && let Err(err) = self.show_desktop(&output, desktop.saturating_sub(1), serial)
@@ -702,6 +705,7 @@ impl State {
         self.boot_ui(&mut out);
         self.card_ui(&mut out);
         self.identify_ui(&mut out);
+        self.seat_ui(&mut out);
         self.leave_ui(&mut out);
         self.auth_ui(&mut out);
         self.circle_ui(&mut out);

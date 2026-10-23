@@ -47,6 +47,9 @@ pub struct Server {
     connections: HashMap<ConnectionId, Connection>,
     next_id: u64,
     agents: Agents,
+    /// Agent connections gone since the compositor last asked: their seats
+    /// go with them (#43).
+    departed: Vec<ConnectionId>,
 }
 
 /// Whether MCP agents are served (#176).
@@ -127,6 +130,7 @@ impl Server {
             connections: HashMap::new(),
             next_id: 0,
             agents: Agents::Allowed,
+            departed: Vec::new(),
         })
     }
 
@@ -158,6 +162,11 @@ impl Server {
         if let Some(c) = self.connections.get_mut(&connection) {
             c.role = Role::Agent(name);
         }
+    }
+
+    /// The agent connections gone since the last call, oldest first.
+    pub fn take_departed(&mut self) -> Vec<ConnectionId> {
+        std::mem::take(&mut self.departed)
     }
 
     /// Whether MCP agents are served or stopped.
@@ -248,9 +257,18 @@ impl Server {
 
     /// Forgets a connection; its loop source sees the shutdown and goes.
     fn drop_connection(&mut self, id: ConnectionId) {
-        if let Some(conn) = self.connections.remove(&id) {
+        if let Some(conn) = self.remove(id) {
             let _ = conn.stream.shutdown(Shutdown::Both);
         }
+    }
+
+    /// Forgets a connection; an agent's is told to the compositor.
+    fn remove(&mut self, id: ConnectionId) -> Option<Connection> {
+        let conn = self.connections.remove(&id)?;
+        if matches!(conn.role, Role::Agent(_)) {
+            self.departed.push(id);
+        }
+        Some(conn)
     }
 
     /// Reads what arrived and returns the complete lines; `None` when the
@@ -287,7 +305,7 @@ impl Server {
         if !open {
             // Requests sent just before hanging up are still answered, into
             // the void: what matters is that they are carried out.
-            self.connections.remove(&id);
+            self.remove(id);
         }
         Some(lines)
     }

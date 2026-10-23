@@ -198,6 +198,13 @@ impl State {
                     .map(SceneElement::Cursor),
             );
         }
+        // MCP agents' pointers, rings and cards (#43), over everything
+        // but the user's own pointer.
+        elements.extend(
+            self.seat_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         // Drawing on the screen (#86), over everything.
         elements.extend(self.ink_elements(renderer, output));
         let Some(area) = self.space.output_geometry(output) else {
@@ -412,6 +419,8 @@ impl State {
             elements.push(SceneElement::Frame(fading));
         }
         if let Some(column) = column {
+            // Each agent's window, live, in its slot of the journal (#43).
+            elements.extend(self.seat_slot_elements(renderer, output));
             elements.push(SceneElement::Frame(column));
             self.glass(&mut elements, renderer, output, column_glass, build);
         }

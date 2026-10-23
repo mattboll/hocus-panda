@@ -1,0 +1,77 @@
+description = "The column shows an agent's window live with Take over: the user's keyboard goes there and the agent's actions are refused until they hand back"
+shell = true
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+[[step]]
+open = { app_id = "editor", title = "Draft", size = [420, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "other", title = "Notes", size = [300, 200], color = "#ff6600" }
+
+[[step]]
+mcp_session = "helper"
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "a" } }
+
+# The journal shows the agent connected, its window in a slot, and the
+# button to take over.
+[[step]]
+expect_ui = { label = "helper · in Draft" }
+
+[[step]]
+expect_ui = { label = "Window of helper" }
+
+[[step]]
+advance_ms = 3000
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-seat-take-over.png" }
+
+[[step]]
+click_ui = "Take over"
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+expect_ui = { label = "helper · you took over" }
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "b" }, error = "the user took over from agent \"helper\"" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "key 48 pressed on agent-helper" }
+
+# The user's keys go there.
+[[step]]
+type = "c"
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 46 pressed" }
+
+[[step]]
+click_ui = "Hand back"
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "d" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 32 pressed on agent-helper" }
+
+[[step]]
+expect_journal = { has = [
+  'helper: type 1 character on window 1 editor "Draft"',
+  'helper: type 1 character on window 1 editor "Draft"; refused: the user took over',
+  'helper: type 1 character on window 1 editor "Draft"',
+] }

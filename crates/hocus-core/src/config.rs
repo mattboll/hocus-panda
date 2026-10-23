@@ -609,11 +609,37 @@ pub struct Agents {
     /// The agents' journal (#176) keeps the text MCP agents type; without
     /// it, only how many characters, since what is typed may be a secret.
     pub journal_text: bool,
+    /// How long an MCP agent's target ring and intent show before its
+    /// click lands (#43), milliseconds; 0 clicks at once.
+    pub show_before_click_ms: u32,
+    /// How long a sensitive action waits for the user to confirm it before
+    /// it is refused, seconds, from 5 to 300.
+    pub confirm_timeout_s: u32,
+    /// App ids (globs) whose windows an MCP agent acts on only once the
+    /// user confirms: password managers, the settings, a bank's app.
+    pub confirm_apps: Vec<String>,
     /// Agents that use the desktop through `hocus mcp --agent NAME` (#42):
     /// `[[agents.mcp]]`. None by default: an agent the configuration does
     /// not name may not act.
     pub mcp: Vec<McpAgent>,
 }
+
+/// The confirmation's wait, at least and at most: an agent's client waits
+/// for the answer, and gives up a little after the longest.
+pub const CONFIRM_TIMEOUT_S: std::ops::RangeInclusive<u32> = 5..=300;
+
+/// Applications whose windows an agent acts on only once confirmed, by
+/// default: the settings, and the usual password managers.
+pub const CONFIRM_APPS: &[&str] = &[
+    "hocus-settings",
+    "org.keepassxc.KeePassXC",
+    "com.bitwarden.desktop",
+    "Bitwarden",
+    "1Password",
+    "org.gnome.seahorse.Application",
+    "org.gnome.World.Secrets",
+    "org.kde.kwalletmanager*",
+];
 
 impl Default for Agents {
     fn default() -> Self {
@@ -622,8 +648,32 @@ impl Default for Agents {
             herdr_socket: String::new(),
             herdr: Vec::new(),
             journal_text: false,
+            show_before_click_ms: 600,
+            confirm_timeout_s: 60,
+            confirm_apps: CONFIRM_APPS.iter().map(|a| (*a).to_owned()).collect(),
             mcp: Vec::new(),
         }
+    }
+}
+
+impl Agents {
+    /// Whether an agent's action on a window of `app_id` waits for the
+    /// user's confirmation.
+    pub fn confirms(&self, app_id: &str) -> bool {
+        self.confirm_apps.iter().any(|p| glob(p, app_id))
+    }
+
+    /// How long a confirmation waits, within [`CONFIRM_TIMEOUT_S`].
+    pub fn confirm_timeout(&self) -> std::time::Duration {
+        let s = self
+            .confirm_timeout_s
+            .clamp(*CONFIRM_TIMEOUT_S.start(), *CONFIRM_TIMEOUT_S.end());
+        std::time::Duration::from_secs(u64::from(s))
+    }
+
+    /// How long a click shows before it lands, two seconds at most.
+    pub fn show_before_click(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(u64::from(self.show_before_click_ms.min(2000)))
     }
 }
 
@@ -1907,6 +1957,24 @@ mod tests {
         assert!(!c.agents.journal_text);
         let kept = Config::parse("[agents]\njournal_text = true\n[[agents.mcp]]\nname = \"x\"\n")?;
         assert!(kept.agents.journal_text);
+        // Shown before a click, confirmed on sensitive applications.
+        assert_eq!(
+            c.agents.show_before_click(),
+            std::time::Duration::from_millis(600)
+        );
+        assert!(c.agents.confirms("org.keepassxc.KeePassXC"));
+        assert!(c.agents.confirms("hocus-settings"));
+        assert!(!c.agents.confirms("foot"));
+        let own = Config::parse(
+            "[agents]\nconfirm_apps = [\"bank*\"]\nconfirm_timeout_s = 1\nshow_before_click_ms = 0\n",
+        )?;
+        assert!(own.agents.confirms("bank.example"));
+        assert!(!own.agents.confirms("hocus-settings"));
+        assert_eq!(
+            own.agents.confirm_timeout(),
+            std::time::Duration::from_secs(5)
+        );
+        assert!(own.agents.show_before_click().is_zero());
         assert_eq!(Config::parse(&kept.to_toml())?, kept);
         Ok(())
     }

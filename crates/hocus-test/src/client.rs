@@ -31,7 +31,6 @@ use smithay_client_toolkit::{
     delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
-    registry_handlers,
     shell::{
         WaylandSurface,
         xdg::{
@@ -90,6 +89,9 @@ pub struct ClientOptions {
     pub inhibit_shortcuts: bool,
     /// Keeps the session awake while it is shown, as a video player does.
     pub inhibit_idle: bool,
+    /// Its field is for a password: its text inputs say so (text-input-v3's
+    /// purpose) while it has a keyboard.
+    pub password: bool,
 }
 
 /// The text formats the test client copies and reads.
@@ -132,6 +134,12 @@ pub enum ClientEvent {
     Text(String),
     /// It holds an activation token, kept for later.
     Token,
+    /// Its text input said its field is for a password, as it got the
+    /// keyboard.
+    PasswordField,
+    /// An event of another seat than the first, by the seat's name: an MCP
+    /// agent's (#43).
+    OnSeat(String, Box<ClientEvent>),
 }
 
 impl fmt::Display for ClientEvent {
@@ -148,6 +156,8 @@ impl fmt::Display for ClientEvent {
             Self::Close => write!(f, "close"),
             Self::Text(text) => write!(f, "text {text}"),
             Self::Token => write!(f, "token"),
+            Self::PasswordField => write!(f, "password_field"),
+            Self::OnSeat(seat, event) => write!(f, "{event} on {seat}"),
         }
     }
 }
@@ -270,7 +280,20 @@ impl SolidWindow {
         let compositor = CompositorState::bind(&globals, &qh).context("no wl_compositor")?;
         let xdg_shell = XdgShell::bind(&globals, &qh).context("no xdg_wm_base")?;
         let shm = Shm::bind(&globals, &qh).context("no wl_shm")?;
-        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).context("no wl_seat")?;
+        // Every seat, the session's first (a test reads its events plain),
+        // an agent's own after it (#43); those that come later as they do.
+        let seats: Vec<(u32, u32)> = globals.contents().with_list(|list| {
+            list.iter()
+                .filter(|g| g.interface == "wl_seat")
+                .map(|g| (g.name, g.version))
+                .collect()
+        });
+        let mut bound = Vec::new();
+        for (i, (name, version)) in seats.iter().enumerate() {
+            let seat: wl_seat::WlSeat = globals.registry().bind(*name, (*version).min(7), &qh, i);
+            bound.push(seat);
+        }
+        let seat = bound.first().cloned().context("no wl_seat")?;
         let data_devices =
             DataDeviceManagerState::bind(&globals, &qh).context("no wl_data_device_manager")?;
         let data_device = data_devices.get_data_device(&qh, &seat);
@@ -298,10 +321,22 @@ impl SolidWindow {
         }
         let activation: Option<XdgActivationV1> = globals.bind(&qh, 1..=1, ()).ok();
         // Typing from the compositor: on while it has the keyboard.
-        let text_input = globals
+        let text_inputs = globals
             .bind::<ZwpTextInputManagerV3, _, _>(&qh, 1..=1, ())
-            .ok()
-            .map(|m| m.get_text_input(&seat, &qh, ()));
+            .ok();
+        let text_input = text_inputs
+            .as_ref()
+            .map(|m| m.get_text_input(&seat, &qh, 0));
+        // A password field says so on every seat that types into it.
+        let other_inputs = match (&text_inputs, options.password) {
+            (Some(m), true) => bound
+                .iter()
+                .enumerate()
+                .skip(1)
+                .map(|(i, s)| m.get_text_input(s, &qh, i))
+                .collect(),
+            _ => Vec::new(),
+        };
 
         let pool = SlotPool::new((self.width * self.height * 4) as usize, &shm)?;
         let mut client = Client {
@@ -322,6 +357,10 @@ impl SolidWindow {
             keep_token: false,
             kept: None,
             _text_input: text_input,
+            text_inputs,
+            other_inputs,
+            password: options.password,
+            seat_names: vec![String::new(); bound.len()],
             typed: None,
             serial: 0,
             drawn: None,
@@ -397,6 +436,13 @@ struct Client {
     kept: Option<String>,
     /// Kept alive: dropping it would not end it, but it is the client's own.
     _text_input: Option<ZwpTextInputV3>,
+    /// For the text inputs of seats that come later.
+    text_inputs: Option<ZwpTextInputManagerV3>,
+    other_inputs: Vec<ZwpTextInputV3>,
+    /// Its field is a password one.
+    password: bool,
+    /// Each seat's name, by the order it was bound in.
+    seat_names: Vec<String>,
     /// Text committed, recorded at the next `done`.
     typed: Option<String>,
     /// The last input serial, which taking the clipboard needs.
@@ -488,64 +534,90 @@ impl WindowHandler for Client {
     }
 }
 
-impl Dispatch<wl_seat::WlSeat, ()> for Client {
-    fn event(
-        _: &mut Self,
-        seat: &wl_seat::WlSeat,
-        event: wl_seat::Event,
-        _: &(),
-        _: &Connection,
-        qh: &QueueHandle<Self>,
-    ) {
-        if let wl_seat::Event::Capabilities {
-            capabilities: WEnum::Value(caps),
-        } = event
-        {
-            if caps.contains(wl_seat::Capability::Pointer) {
-                seat.get_pointer(qh, ());
-            }
-            if caps.contains(wl_seat::Capability::Keyboard) {
-                seat.get_keyboard(qh, ());
+impl Client {
+    /// Records `event` of seat `i`: plain for the first, by its name for
+    /// others.
+    fn record_on(&self, i: usize, event: ClientEvent) {
+        match i {
+            0 => self.record(event),
+            i => {
+                let name = self.seat_names.get(i).cloned().unwrap_or_default();
+                self.record(ClientEvent::OnSeat(name, Box::new(event)));
             }
         }
     }
 }
 
-impl Dispatch<wl_pointer::WlPointer, ()> for Client {
+impl Dispatch<wl_seat::WlSeat, usize> for Client {
     fn event(
         client: &mut Self,
-        _: &wl_pointer::WlPointer,
-        event: wl_pointer::Event,
-        _: &(),
+        seat: &wl_seat::WlSeat,
+        event: wl_seat::Event,
+        i: &usize,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { .. } => client.record(ClientEvent::PointerEnter),
-            wl_pointer::Event::Leave { .. } => client.record(ClientEvent::PointerLeave),
-            wl_pointer::Event::Button {
-                button,
-                state,
-                serial,
-                ..
+            wl_seat::Event::Capabilities {
+                capabilities: WEnum::Value(caps),
             } => {
-                client.serial = serial;
-                client.record(ClientEvent::Button {
-                    code: button,
-                    pressed: state == WEnum::Value(wl_pointer::ButtonState::Pressed),
-                });
+                if caps.contains(wl_seat::Capability::Pointer) {
+                    seat.get_pointer(qh, *i);
+                }
+                if caps.contains(wl_seat::Capability::Keyboard) {
+                    seat.get_keyboard(qh, *i);
+                }
+            }
+            wl_seat::Event::Name { name } => {
+                if let Some(n) = client.seat_names.get_mut(*i) {
+                    *n = name;
+                }
             }
             _ => {}
         }
     }
 }
 
-impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
+impl Dispatch<wl_pointer::WlPointer, usize> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        i: &usize,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { .. } => client.record_on(*i, ClientEvent::PointerEnter),
+            wl_pointer::Event::Leave { .. } => client.record_on(*i, ClientEvent::PointerLeave),
+            wl_pointer::Event::Button {
+                button,
+                state,
+                serial,
+                ..
+            } => {
+                if *i == 0 {
+                    client.serial = serial;
+                }
+                client.record_on(
+                    *i,
+                    ClientEvent::Button {
+                        code: button,
+                        pressed: state == WEnum::Value(wl_pointer::ButtonState::Pressed),
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_keyboard::WlKeyboard, usize> for Client {
     fn event(
         client: &mut Self,
         _: &wl_keyboard::WlKeyboard,
         event: wl_keyboard::Event,
-        _: &(),
+        i: &usize,
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
@@ -553,14 +625,19 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         // enough for tests.
         match event {
             wl_keyboard::Event::Enter { serial, .. } => {
-                client.serial = serial;
-                client.record(ClientEvent::KeyboardEnter);
+                if *i == 0 {
+                    client.serial = serial;
+                }
+                client.record_on(*i, ClientEvent::KeyboardEnter);
             }
-            wl_keyboard::Event::Leave { .. } => client.record(ClientEvent::KeyboardLeave),
-            wl_keyboard::Event::Key { key, state, .. } => client.record(ClientEvent::Key {
-                code: key,
-                pressed: state == WEnum::Value(wl_keyboard::KeyState::Pressed),
-            }),
+            wl_keyboard::Event::Leave { .. } => client.record_on(*i, ClientEvent::KeyboardLeave),
+            wl_keyboard::Event::Key { key, state, .. } => client.record_on(
+                *i,
+                ClientEvent::Key {
+                    code: key,
+                    pressed: state == WEnum::Value(wl_keyboard::KeyState::Pressed),
+                },
+            ),
             _ => {}
         }
     }
@@ -629,7 +706,40 @@ impl ProvidesRegistryState for Client {
         &mut self.registry
     }
 
-    registry_handlers![OutputState];
+    // By hand rather than `registry_handlers!`: an agent's seat comes
+    // while the window is open (#43), and is bound then.
+    fn runtime_add_global(
+        &mut self,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+        name: u32,
+        interface: &str,
+        version: u32,
+    ) {
+        <OutputState as smithay_client_toolkit::registry::RegistryHandler<Self>>::new_global(
+            self, conn, qh, name, interface, version,
+        );
+        if interface == "wl_seat" {
+            let i = self.seat_names.len();
+            self.seat_names.push(String::new());
+            let seat: wl_seat::WlSeat = self.registry.registry().bind(name, version.min(7), qh, i);
+            if let (Some(m), true) = (&self.text_inputs, self.password) {
+                self.other_inputs.push(m.get_text_input(&seat, qh, i));
+            }
+        }
+    }
+
+    fn runtime_remove_global(
+        &mut self,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+        name: u32,
+        interface: &str,
+    ) {
+        <OutputState as smithay_client_toolkit::registry::RegistryHandler<Self>>::remove_global(
+            self, conn, qh, name, interface,
+        );
+    }
 }
 
 impl DataDeviceHandler for Client {
@@ -768,19 +878,30 @@ impl Dispatch<ZwpTextInputManagerV3, ()> for Client {
     }
 }
 
-impl Dispatch<ZwpTextInputV3, ()> for Client {
+impl Dispatch<ZwpTextInputV3, usize> for Client {
     fn event(
         client: &mut Self,
         text_input: &ZwpTextInputV3,
         event: zwp_text_input_v3::Event,
-        _: &(),
-        _: &Connection,
+        i: &usize,
+        conn: &Connection,
         _: &QueueHandle<Self>,
     ) {
         match event {
             zwp_text_input_v3::Event::Enter { .. } => {
                 text_input.enable();
+                if client.password {
+                    text_input.set_content_type(
+                        zwp_text_input_v3::ContentHint::SensitiveData,
+                        zwp_text_input_v3::ContentPurpose::Password,
+                    );
+                }
                 text_input.commit();
+                // Said once the compositor can read it: a test goes on then.
+                if client.password {
+                    let _ = conn.flush();
+                    client.record_on(*i, ClientEvent::PasswordField);
+                }
             }
             zwp_text_input_v3::Event::Leave { .. } => {
                 text_input.disable();

@@ -1,0 +1,73 @@
+description = "Before an agent's click, a ring at the point and its intent in one line show a moment; then its pointer shows in its colour with its name, and hides once it rests"
+
+[[step]]
+config = """
+[agents]
+show_before_click_ms = 600
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["notes"]
+"""
+
+[[step]]
+open = { app_id = "notes", title = "Shopping list", size = [640, 420], color = "#1d2025" }
+
+[[step]]
+mcp_session = "helper"
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "notes", arguments = { x = 300, y = 200, intent = "Sends the message" }, wait = false }
+
+# Shown before it lands: the ring, the pointer, and what it means to do.
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_ui = { label = "helper · Sends the message" }
+
+[[step]]
+expect_not_received = { app_id = "notes", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-seat-intent.png" }
+
+[[step]]
+expect_mcp = { agent = "helper" }
+
+[[step]]
+expect_received = { app_id = "notes", event = "button 272 pressed on agent-helper" }
+
+# Without an intent of its own, a generic one.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "notes", arguments = { x = 100, y = 100 }, wait = false }
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_ui = { label = "helper · Clicks in Shopping list" }
+
+[[step]]
+expect_mcp = { agent = "helper" }
+
+# A moment later, its pointer with its name alone.
+[[step]]
+advance_ms = 2500
+
+[[step]]
+expect_ui = { label = "helper" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-seat-intent.cursor.png" }
+
+# At rest a while, it hides.
+[[step]]
+advance_ms = 10000
+
+[[step]]
+expect_ui = { label = "helper", shown = false }
+
+[[step]]
+expect_idle = { for_ms = 1000 }

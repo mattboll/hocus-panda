@@ -574,8 +574,12 @@ impl App {
                 state.set_agents_stopped(stopped);
                 Reply::Done
             }
-            Request::Act { target, action } => {
-                return Some(state.act(connection, target, action));
+            Request::Act {
+                target,
+                action,
+                intent,
+            } => {
+                return state.act(connection, id, target, action, intent);
             }
             Request::Screenshot { target, cursor } => {
                 return match self.capture(&target, cursor) {

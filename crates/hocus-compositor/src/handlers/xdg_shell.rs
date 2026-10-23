@@ -143,7 +143,9 @@ impl XdgShellHandler for State {
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
-        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+        // Moves and resizes take the user's pointer: an agent's click
+        // never starts one (#43).
+        let Some(seat) = Seat::<State>::from_resource(&seat).filter(|s| *s == self.seat) else {
             return;
         };
         let wl_surface = surface.wl_surface();
@@ -163,7 +165,7 @@ impl XdgShellHandler for State {
         serial: Serial,
         edges: xdg_toplevel::ResizeEdge,
     ) {
-        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+        let Some(seat) = Seat::<State>::from_resource(&seat).filter(|s| *s == self.seat) else {
             return;
         };
         let wl_surface = surface.wl_surface();

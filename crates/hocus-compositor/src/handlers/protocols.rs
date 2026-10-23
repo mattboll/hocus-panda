@@ -12,6 +12,7 @@
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::zwp_text_input_v3;
 use smithay::{
     delegate_alpha_modifier, delegate_content_type, delegate_cursor_shape,
     delegate_ext_data_control, delegate_fractional_scale, delegate_idle_inhibit,
@@ -93,6 +94,9 @@ pub struct Protocols {
     /// text-input-v3: the history and the emoji picker type into the
     /// focused application.
     pub _text_input: smithay::wayland::text_input::TextInputManagerState,
+    /// What each text input says its field is for: an agent typing into a
+    /// password field waits for the user (#43).
+    pub purposes: Purposes,
     pub fractional_scale: FractionalScaleManagerState,
     pub primary_selection: PrimarySelectionState,
     pub data_control: ExtDataControlState,
@@ -129,6 +133,7 @@ impl Protocols {
             // CLOCK_MONOTONIC, as the frame times.
             presentation: PresentationState::new::<State>(dh, 1),
             _text_input: smithay::wayland::text_input::TextInputManagerState::new::<State>(dh),
+            purposes: Purposes::default(),
             fractional_scale: FractionalScaleManagerState::new::<State>(dh),
             primary_selection,
             data_control,
@@ -186,9 +191,15 @@ impl XdgActivationHandler for State {
                 || token_data.timestamp.elapsed(),
                 |at| self.clock.now().saturating_sub(at),
             );
+        // A token from an agent's click never takes the user's keyboard
+        // (#43): the window asks for attention.
+        let by_agent = token_data
+            .serial
+            .as_ref()
+            .is_some_and(|(_, seat)| self.is_agent_wl_seat(seat));
         if let Some(id) = self.managed_id(&surface) {
             let shown = self.model.output_showing(id).is_some();
-            if age < ACTIVATION_PATIENCE && shown {
+            if age < ACTIVATION_PATIENCE && shown && !by_agent {
                 self.restore(id, SERIAL_COUNTER.next_serial());
             } else {
                 self.ask_attention(id);
@@ -333,7 +344,126 @@ delegate_relative_pointer!(State);
 delegate_pointer_gestures!(State);
 delegate_virtual_keyboard_manager!(State);
 delegate_presentation!(State);
-smithay::delegate_text_input_manager!(State);
+smithay::reexports::wayland_server::delegate_global_dispatch!(State: [
+    smithay::reexports::wayland_protocols::wp::text_input::zv3::server::zwp_text_input_manager_v3::ZwpTextInputManagerV3: ()
+] => smithay::wayland::text_input::TextInputManagerState);
+smithay::reexports::wayland_server::delegate_dispatch!(State: [
+    smithay::reexports::wayland_protocols::wp::text_input::zv3::server::zwp_text_input_manager_v3::ZwpTextInputManagerV3: ()
+] => smithay::wayland::text_input::TextInputManagerState);
+
+/// What a text input's field is for, as its client last committed it.
+#[derive(Debug, Default, Clone, Copy)]
+struct Purpose {
+    enabled: bool,
+    password: bool,
+    pending_enable: Option<bool>,
+    pending_password: Option<bool>,
+}
+
+/// Text inputs and their fields' purposes, by object.
+#[derive(Debug, Default)]
+pub struct Purposes {
+    inputs:
+        std::collections::HashMap<smithay::reexports::wayland_server::backend::ObjectId, Purpose>,
+}
+
+impl Purposes {
+    fn note(
+        &mut self,
+        id: smithay::reexports::wayland_server::backend::ObjectId,
+        request: &zwp_text_input_v3::Request,
+    ) {
+        use zwp_text_input_v3::{ContentPurpose, Request};
+        let p = self.inputs.entry(id).or_default();
+        match request {
+            Request::Enable => p.pending_enable = Some(true),
+            Request::Disable => p.pending_enable = Some(false),
+            Request::SetContentType { purpose, .. } => {
+                p.pending_password = Some(matches!(
+                    purpose.into_result(),
+                    Ok(ContentPurpose::Password | ContentPurpose::Pin)
+                ));
+            }
+            // Enabling starts the field afresh: a purpose not said again
+            // is the normal one.
+            Request::Commit => match p.pending_enable.take() {
+                Some(true) => {
+                    p.enabled = true;
+                    p.password = p.pending_password.take().unwrap_or(false);
+                }
+                Some(false) => {
+                    p.enabled = false;
+                    p.password = false;
+                    p.pending_password = None;
+                }
+                None => {
+                    if let Some(password) = p.pending_password.take() {
+                        p.password = password;
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
+impl
+    smithay::reexports::wayland_server::Dispatch<
+        zwp_text_input_v3::ZwpTextInputV3,
+        smithay::wayland::text_input::TextInputUserData,
+    > for State
+{
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &zwp_text_input_v3::ZwpTextInputV3,
+        request: zwp_text_input_v3::Request,
+        data: &smithay::wayland::text_input::TextInputUserData,
+        dh: &DisplayHandle,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
+    ) {
+        use smithay::reexports::wayland_server::Resource as _;
+        state.protocols.purposes.note(resource.id(), &request);
+        <smithay::wayland::text_input::TextInputManagerState as smithay::reexports::wayland_server::Dispatch<
+            zwp_text_input_v3::ZwpTextInputV3,
+            smithay::wayland::text_input::TextInputUserData,
+            Self,
+        >>::request(state, client, resource, request, data, dh, data_init);
+    }
+
+    fn destroyed(
+        state: &mut Self,
+        client: smithay::reexports::wayland_server::backend::ClientId,
+        resource: &zwp_text_input_v3::ZwpTextInputV3,
+        data: &smithay::wayland::text_input::TextInputUserData,
+    ) {
+        use smithay::reexports::wayland_server::Resource as _;
+        state.protocols.purposes.inputs.remove(&resource.id());
+        <smithay::wayland::text_input::TextInputManagerState as smithay::reexports::wayland_server::Dispatch<
+            zwp_text_input_v3::ZwpTextInputV3,
+            smithay::wayland::text_input::TextInputUserData,
+            Self,
+        >>::destroyed(state, client, resource, data);
+    }
+}
+
+impl State {
+    /// Whether `window`'s application says one of its fields with a text
+    /// input on is for a password (or a PIN), on any seat: as an agent
+    /// may type there, the field is taken as the one it types into.
+    pub(crate) fn password_field_in(&self, window: &smithay::desktop::Window) -> bool {
+        use smithay::{reexports::wayland_server::Resource as _, wayland::seat::WaylandFocus as _};
+        let Some(surface) = window.wl_surface() else {
+            return false;
+        };
+        let surface = surface.id();
+        self.protocols
+            .purposes
+            .inputs
+            .iter()
+            .any(|(id, p)| p.enabled && p.password && id.same_client_as(&surface))
+    }
+}
 
 impl State {
     /// Tells the windows on `output` that the frame drawn at `now` is on

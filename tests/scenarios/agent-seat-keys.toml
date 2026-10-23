@@ -1,0 +1,107 @@
+description = "Given an agent typing in its window, when the user types in another, then each window receives only its own seat's keys"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+[[step]]
+open = { app_id = "editor", title = "Draft", size = [400, 300], color = "#3399ff" }
+
+# The user works in the other window: it has their keyboard.
+[[step]]
+open = { app_id = "other", title = "Notes", size = [300, 200], color = "#ff6600" }
+
+# The agent connects and gets a seat of its own.
+[[step]]
+mcp_session = "helper"
+
+# The agent types x, the user y, the agent z, in turns.
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "x" } }
+
+[[step]]
+type = "y"
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "z" } }
+
+# The editor has the agent's keyboard and its keys alone.
+[[step]]
+expect_received = { app_id = "editor", event = "keyboard_enter on agent-helper" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 45 pressed on agent-helper" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 44 pressed on agent-helper" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "key 21 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "key 21 pressed on agent-helper" }
+
+# The other window has the user's keyboard and its keys alone.
+[[step]]
+expect_received = { app_id = "other", event = "key 21 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "other", event = "key 45 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "other", event = "key 45 pressed on agent-helper" }
+
+[[step]]
+expect_not_received = { app_id = "other", event = "keyboard_enter on agent-helper" }
+
+[[step]]
+expect_focus = "other"
+
+[[step]]
+expect_stack = ["editor", "other"]
+
+# The agent's pointer clicks its window, which stays behind; the user's
+# pointer and keyboard stay where they were.
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "editor", arguments = { x = 20, y = 20 } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "button 272 pressed" }
+
+[[step]]
+expect_focus = "other"
+
+[[step]]
+expect_stack = ["editor", "other"]
+
+# Gone with its session, its seat leaves the windows' keyboards.
+[[step]]
+mcp_end = "helper"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_received = { app_id = "editor", event = "keyboard_leave on agent-helper" }
+
+[[step]]
+type = "w"
+
+[[step]]
+expect_received = { app_id = "other", event = "key 17 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "key 17 pressed" }

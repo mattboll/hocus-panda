@@ -350,6 +350,28 @@ impl Headless {
         Ok(())
     }
 
+    /// How many MCP agents have a seat now (#43).
+    pub fn agent_seats(&self) -> usize {
+        self.app.state.seat_count()
+    }
+
+    /// Actions MCP agents wait on, and whether one waits for its window's
+    /// application to take the agent's seat.
+    pub fn agent_pending(&self) -> (usize, bool) {
+        self.app.state.seat_pending()
+    }
+
+    /// Whether every window's application took every agent's seat.
+    pub fn agent_seats_taken(&self) -> bool {
+        self.app.state.seats_taken()
+    }
+
+    /// When an MCP agent's action lands on its own (shown before a click),
+    /// and whether one waits for the user's confirmation instead (#43).
+    pub fn agent_deadline(&self) -> (Option<Duration>, bool) {
+        self.app.state.seat_deadline()
+    }
+
     /// Moves the virtual clock forward by `by`, drawing a frame at each frame
     /// boundary it crosses if something changed.
     pub fn advance(&mut self, by: Duration) -> anyhow::Result<()> {
