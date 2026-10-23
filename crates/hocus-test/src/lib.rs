@@ -3,6 +3,7 @@
 pub mod bus;
 pub mod caldav;
 pub mod client;
+pub mod devices;
 pub mod fuzz;
 pub mod herdr;
 pub mod image;

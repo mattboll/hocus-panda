@@ -21,9 +21,11 @@ use crate::{
     words::{self, ShortcutGroup},
 };
 
+mod hardware;
 mod personalise;
 mod work;
 
+use hardware::HardwarePage;
 use personalise::WallpaperPage;
 use work::{Field, Fields};
 
@@ -53,6 +55,9 @@ pub enum Outcome {
     Inhibit(bool),
     /// The system's time zone is set through timedated (polkit asks).
     SetTimeZone(String),
+    /// The sound, a radio or the power profile changes, through the
+    /// compositor, as quick settings change it.
+    Hardware(hocus_api::HardwareChange),
 }
 
 /// What a node does when clicked.
@@ -97,6 +102,8 @@ enum Target {
     Commit(Field),
     /// The system's time zone is set to this one.
     SetZone(String),
+    /// What the system's services hold changes.
+    Hardware(hocus_api::HardwareChange),
 }
 
 /// Which of a screen's choices are open.
@@ -328,6 +335,7 @@ pub struct SettingsView {
     wallpaper: WallpaperPage,
     /// The Work pages' fields.
     fields: Fields,
+    hardware: HardwarePage,
     /// Why the system did not take the time zone chosen last.
     zone_refused: Option<String>,
     dirty: bool,
@@ -408,6 +416,7 @@ impl SettingsView {
             accounts: AccountsPage::default(),
             wallpaper: WallpaperPage::default(),
             fields: Fields::default(),
+            hardware: HardwarePage::default(),
             zone_refused: None,
             dirty: true,
             now: Duration::ZERO,
@@ -770,6 +779,10 @@ impl SettingsView {
                         ))));
                     }
                 }
+                Event::Changed(id) if self.hardware.volume.is_some_and(|(s, _)| s == id) => {
+                    let value = self.tree.slider_value(id).unwrap_or(0.0);
+                    out.extend(self.volume_moved(value));
+                }
                 Event::Changed(id) if self.accounts.index(Some(id)).is_some() => {
                     if let Some(i) = self.accounts.index(Some(id)) {
                         self.accounts.values[i] =
@@ -865,6 +878,7 @@ impl SettingsView {
                     }
                     Some(Target::Identify) => out.push(Outcome::Identify),
                     Some(Target::Commit(field)) => out.extend(self.commit_field(field)),
+                    Some(Target::Hardware(change)) => out.push(Outcome::Hardware(change)),
                     Some(Target::SetZone(zone)) => {
                         self.zone_refused = None;
                         self.dirty = true;
@@ -1046,6 +1060,7 @@ impl SettingsView {
         self.field = None;
         self.scroller = None;
         self.text_size = None;
+        self.hardware.volume = None;
         self.tree.set_look(
             root,
             Look {
@@ -1550,6 +1565,11 @@ impl SettingsView {
             Page::Mouse => self.mouse(theme, body),
             Page::Captures => self.captures(theme, body),
             Page::Clipboard => self.clipboard(theme, body),
+            Page::Sound => self.sound(theme, body),
+            Page::Network => self.network(theme, body),
+            Page::Bluetooth => self.bluetooth(theme, body),
+            Page::Power => self.power(theme, body),
+            Page::Lock => self.lock(theme, body),
             Page::Language => self.language(theme, body),
             Page::Welcome => self.welcome(theme, body),
             Page::About => self.about(theme, body),
@@ -4422,5 +4442,91 @@ mod tests {
         );
         let out = click(&mut v, "Keep a history");
         assert_eq!(changes(&out), [("history".into(), Some("true".into()))]);
+    }
+
+    fn hardware_view(toml: &str, page: Page) -> SettingsView {
+        let mut v = page_view(toml, page, &[]);
+        let mut ctx = v.context().clone();
+        ctx.hardware = hocus_api::HardwareInfo {
+            known: true,
+            wifi: true,
+            network: Some("Bamboo grove".into()),
+            bluetooth: true,
+            volume: 40,
+            output_device: "Speakers".into(),
+            profile: "balanced".into(),
+            profiles: vec!["power-saver".into(), "balanced".into()],
+            ..Default::default()
+        };
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        v
+    }
+
+    fn hardware(out: &[Outcome]) -> Vec<hocus_api::HardwareChange> {
+        out.iter()
+            .filter_map(|o| match o {
+                Outcome::Hardware(c) => Some(c.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_services_are_changed_through_the_compositor() {
+        use hocus_api::HardwareChange as H;
+        let mut v = hardware_view("", Page::Sound);
+        assert!(find(&v.access(), "Volume 40%").is_some());
+        let out = click(&mut v, "Mute");
+        assert_eq!(hardware(&out), [H::Muted { on: true }]);
+        let mut v = hardware_view("", Page::Network);
+        assert!(find(&v.access(), "Joined: Bamboo grove").is_some());
+        let out = click(&mut v, "Wi-Fi");
+        assert_eq!(hardware(&out), [H::Wifi { on: false }]);
+        let mut v = hardware_view("", Page::Power);
+        // Only the profiles the machine offers.
+        assert!(find(&v.access(), "Power profile: Performance").is_none());
+        let out = click(&mut v, "Power profile: Saver");
+        assert_eq!(
+            hardware(&out),
+            [H::Profile {
+                profile: "power-saver".into()
+            }]
+        );
+        // Until the services answer, their switches do nothing.
+        let mut v = page_view("", Page::Bluetooth, &[]);
+        assert!(click(&mut v, "Bluetooth radio").is_empty());
+    }
+
+    #[test]
+    fn the_battery_s_delays_go_to_their_own_section() {
+        use crate::edit::Place;
+        let mut v = hardware_view("[idle]\ncurtain_after = 600\n", Page::Power);
+        // Left out on battery, the charger's.
+        let battery = find(&v.access(), "On battery: Dim the screens after: 10 min");
+        assert!(battery.expect("the battery's").selected);
+        let out = click(&mut v, "On battery: Dim the screens after: 1 min");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("idle.battery"),
+                "curtain_after".into(),
+                Some("60".into())
+            )]
+        );
+        let out = click(&mut v, "On the charger: Sleep after: 1 h");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("idle"),
+                "sleep_after".into(),
+                Some("3600".into())
+            )]
+        );
+        let mut v = page_view("", Page::Lock, &[]);
+        let out = click(&mut v, "Curtain before locking: 1 min");
+        assert_eq!(changes(&out), [("lock_after".into(), Some("60".into()))]);
+        let out = click(&mut v, "Lock after the curtain");
+        assert_eq!(changes(&out), [("lock".into(), Some("false".into()))]);
     }
 }

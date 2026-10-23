@@ -1,0 +1,94 @@
+# Network and Bluetooth (#67): the radios as NetworkManager and BlueZ say
+# them (stand-ins on a private system bus), switched through the
+# compositor as quick settings switch them.
+description = "The Network page shows the network joined and turns Wi-Fi off; the Bluetooth page turns Bluetooth off; both in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+devices = true
+
+[[step]]
+open_settings = { page = "network" }
+
+[[step]]
+expect_settings = { label = "Wi-Fi", selected = true }
+
+[[step]]
+expect_settings = { label = "Joined: Bamboo grove" }
+
+[[step]]
+click_settings = "Wi-Fi"
+
+[[step]]
+expect_devices = "WirelessEnabled false"
+
+[[step]]
+expect_settings = { label = "Wi-Fi", selected = false }
+
+[[step]]
+expect_settings = { label = "The radio is off" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-network.png" }
+
+[[step]]
+click_settings = "Bluetooth"
+
+[[step]]
+expect_settings = { label = "Bluetooth radio", selected = true }
+
+[[step]]
+click_settings = "Bluetooth radio"
+
+[[step]]
+expect_devices = "Powered false"
+
+[[step]]
+expect_settings = { label = "Bluetooth radio", selected = false }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-bluetooth.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+expect_settings = { label = "Nothing connects" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-bluetooth-light.png" }
+
+[[step]]
+click_settings = "Network"
+
+[[step]]
+expect_settings = { label = "Wi-Fi", selected = false }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-network-light.png" }

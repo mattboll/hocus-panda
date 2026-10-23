@@ -60,6 +60,11 @@ pub struct Scenario {
     /// A stand-in for timedated in this time zone, on a private system bus
     /// the compositor and the settings follow; never the machine's.
     pub timedated: Option<String>,
+    /// Stand-ins for UPower (a battery at 80 % on its charger),
+    /// NetworkManager (Wi-Fi on, joined), BlueZ (on) and power profiles
+    /// (balanced), on a private system bus; never the machine's.
+    #[serde(default)]
+    pub devices: bool,
     /// Programs the scenario runs; it is skipped where one is missing.
     #[serde(default)]
     pub needs: Vec<String>,
@@ -154,6 +159,11 @@ pub enum Step {
     /// The timedated stand-in refuses to set the zone from now on, as
     /// polkit would, or no longer.
     TimedatedRefuses(bool),
+    /// The charger is plugged in (`true`) or pulled out, as UPower says.
+    Charger(bool),
+    /// The devices' stand-ins were asked this: `WirelessEnabled false`,
+    /// `Powered true`, `ActiveProfile power-saver`.
+    ExpectDevices(String),
     /// KDE Connect as the session found it, once so: `absent`,
     /// `stopped`, `running`, `off`.
     ExpectPhoneState(String),
@@ -853,6 +863,8 @@ impl fmt::Display for Step {
             Self::ExpectTimedated(asked) => write!(f, "expect_timedated {asked:?}"),
             Self::TimedatedZone(zone) => write!(f, "timedated_zone {zone}"),
             Self::TimedatedRefuses(r) => write!(f, "timedated_refuses {r}"),
+            Self::Charger(plugged) => write!(f, "charger {plugged}"),
+            Self::ExpectDevices(asked) => write!(f, "expect_devices {asked:?}"),
             Self::ExpectUi(e) => write!(f, "expect_ui {:?}", e.label),
             Self::Copy(c) => write!(f, "copy {} {:?}", c.app_id, c.text),
             Self::ExpectClipboard(c) => write!(f, "expect_clipboard {} {:?}", c.app_id, c.text),
@@ -955,15 +967,20 @@ impl Scenario {
         } else {
             None
         };
-        // The system bus, with timedated alone on it.
-        let system_bus = match &self.timedated {
-            Some(_) => Some(crate::bus::PrivateBus::start()?),
-            None => None,
+        // The system bus, with the stand-ins asked for alone on it.
+        let system_bus = if self.timedated.is_some() || self.devices {
+            Some(crate::bus::PrivateBus::start()?)
+        } else {
+            None
         };
         let timedated = match (&system_bus, &self.timedated) {
             (Some(bus), Some(zone)) => {
                 Some(crate::timedated::FakeTimedated::start(&bus.address, zone)?)
             }
+            _ => None,
+        };
+        let devices = match &system_bus {
+            Some(bus) if self.devices => Some(crate::devices::FakeDevices::start(&bus.address)?),
             _ => None,
         };
         let compositor = Headless::start_options(HarnessOptions {
@@ -1014,6 +1031,7 @@ impl Scenario {
             lock_client: None,
             bus,
             timedated,
+            devices,
             system_bus,
             tray_apps: Vec::new(),
             phone: None,
@@ -1060,6 +1078,8 @@ struct Run<'a> {
     bus: Option<crate::bus::PrivateBus>,
     /// timedated's stand-in; before its bus, so that it goes first.
     timedated: Option<crate::timedated::FakeTimedated>,
+    /// The devices' stand-ins, the same.
+    devices: Option<crate::devices::FakeDevices>,
     system_bus: Option<crate::bus::PrivateBus>,
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
@@ -1167,6 +1187,28 @@ impl Run<'_> {
                     .context("no timedated: the scenario needs `timedated = \"ZONE\"`")?
                     .refuse(*refuse);
                 Ok(())
+            }
+            Step::Charger(plugged) => self
+                .devices
+                .as_ref()
+                .context("no devices: the scenario needs `devices = true`")?
+                .set_charger(*plugged),
+            Step::ExpectDevices(expected) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let asked = self
+                        .devices
+                        .as_ref()
+                        .context("no devices: the scenario needs `devices = true`")?
+                        .asked();
+                    if asked.contains(expected) {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("the devices were asked {asked:?}, not {expected:?}");
+                    }
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
             }
             Step::ExpectPhone(expected) => {
                 let runtime = self.compositor.runtime_dir().to_string_lossy().into_owned();

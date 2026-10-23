@@ -1,0 +1,61 @@
+# Sound (#67): the volume and muting go through the compositor to the
+# sound service, as quick settings change them (kept in memory off the
+# session: never the developer's PipeWire), and come back from it.
+description = "The Sound page sets the volume to half and mutes, which the column shows; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+devices = true
+
+[[step]]
+open_settings = { page = "sound" }
+
+[[step]]
+expect_settings = { label = "Volume 0%" }
+
+[[step]]
+expect_settings = { label = "Built-in speakers" }
+
+[[step]]
+click_settings = "Volume 0%"
+
+[[step]]
+expect_settings = { label = "Volume 50%" }
+
+[[step]]
+click_settings = "Mute"
+
+[[step]]
+expect_settings = { label = "Mute", selected = true }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-sound.png" }
+
+[[step]]
+click_settings = "Mute"
+
+[[step]]
+expect_settings = { label = "Mute", selected = false }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+expect_settings = { label = "Volume 50%" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-sound-light.png" }

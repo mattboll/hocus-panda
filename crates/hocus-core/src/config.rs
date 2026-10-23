@@ -1066,6 +1066,16 @@ pub struct Idle {
     pub lock_after: u32,
     /// Whether the curtain ends by locking; otherwise it only dims.
     pub lock: bool,
+    /// Seconds without input before the machine sleeps, locked first; 0
+    /// for never.
+    pub sleep_after: u32,
+    /// How it sleeps then.
+    pub sleep: Sleep,
+    /// A fullscreen window (a film, a game, a slideshow) keeps the session
+    /// awake, as an application asking would.
+    pub fullscreen_awake: bool,
+    /// On battery: the delays that differ from those above.
+    pub battery: BatteryDelays,
 }
 
 impl Default for Idle {
@@ -1074,6 +1084,70 @@ impl Default for Idle {
             curtain_after: 300,
             lock_after: 30,
             lock: true,
+            sleep_after: 0,
+            sleep: Sleep::Suspend,
+            fullscreen_awake: true,
+            battery: BatteryDelays::default(),
+        }
+    }
+}
+
+/// `[idle.battery]`: what it leaves out is as on the charger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BatteryDelays {
+    pub curtain_after: Option<u32>,
+    pub sleep_after: Option<u32>,
+}
+
+/// How the machine sleeps once idle long enough.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sleep {
+    #[default]
+    Suspend,
+    /// Where the machine can; it suspends otherwise.
+    Hibernate,
+}
+
+impl Sleep {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Suspend => "suspend",
+            Self::Hibernate => "hibernate",
+        }
+    }
+}
+
+/// Where the machine draws its power from, for the delays in effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PowerSource {
+    /// The charger, or no battery at all.
+    #[default]
+    Charger,
+    Battery,
+}
+
+/// The delays in effect, seconds; 0 for never.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Delays {
+    pub curtain_after: u32,
+    pub sleep_after: u32,
+}
+
+impl Idle {
+    /// The delays on this power source.
+    pub fn delays(&self, source: PowerSource) -> Delays {
+        let charger = Delays {
+            curtain_after: self.curtain_after,
+            sleep_after: self.sleep_after,
+        };
+        match source {
+            PowerSource::Charger => charger,
+            PowerSource::Battery => Delays {
+                curtain_after: self.battery.curtain_after.unwrap_or(charger.curtain_after),
+                sleep_after: self.battery.sleep_after.unwrap_or(charger.sleep_after),
+            },
         }
     }
 }
@@ -1431,6 +1505,37 @@ mod tests {
         // The zone is the system's now, not the file's.
         assert!(Config::parse("[clock]\ntime_zone = \"Asia/Tokyo\"\n").is_err());
         assert!(Config::parse("[clock]\nformat = \"13h\"\n").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn the_battery_s_delays_fall_back_on_the_charger_s() -> Result<(), ConfigError> {
+        let c = Config::parse(
+            "[idle]\ncurtain_after = 600\nsleep_after = 1800\nsleep = \"hibernate\"\n[idle.battery]\ncurtain_after = 60\n",
+        )?;
+        let on = |source| c.idle.delays(source);
+        assert_eq!(
+            on(PowerSource::Charger),
+            Delays {
+                curtain_after: 600,
+                sleep_after: 1800
+            }
+        );
+        assert_eq!(
+            on(PowerSource::Battery),
+            Delays {
+                curtain_after: 60,
+                sleep_after: 1800
+            }
+        );
+        assert_eq!(c.idle.sleep, Sleep::Hibernate);
+        let d = Idle::default();
+        assert!(d.fullscreen_awake && d.sleep_after == 0);
+        assert_eq!(
+            d.delays(PowerSource::Battery),
+            d.delays(PowerSource::Charger)
+        );
+        assert!(Config::parse("[idle]\nsleep = \"nap\"\n").is_err());
         Ok(())
     }
 

@@ -1,0 +1,106 @@
+# Power (#67): the battery and the power profile as the system's services
+# say them (stand-ins on a private system bus), and the idle delays on the
+# charger and on battery, written to [idle] and [idle.battery].
+description = "The Power page shows the battery, sets the saver profile through power-profiles-daemon, a minute's dimming on battery and ten on the charger, hibernating and fullscreen windows no longer keeping awake; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+devices = true
+
+[[step]]
+open_settings = { page = "power" }
+
+[[step]]
+expect_settings = { label = "80% · charging" }
+
+[[step]]
+expect_settings = { label = "Power profile: Balanced", selected = true }
+
+[[step]]
+click_settings = "Power profile: Saver"
+
+[[step]]
+expect_devices = "ActiveProfile power-saver"
+
+[[step]]
+expect_settings = { label = "Power profile: Saver", selected = true }
+
+[[step]]
+expect_settings = { label = "On battery: Dim the screens after: 5 min", selected = true }
+
+[[step]]
+click_settings = "On battery: Dim the screens after: 1 min"
+
+[[step]]
+expect_config_file = { contains = ["[idle.battery]", "curtain_after = 60"] }
+
+[[step]]
+click_settings = "On the charger: Dim the screens after: 10 min"
+
+[[step]]
+expect_config_file = { contains = ["[idle]", "curtain_after = 600"] }
+
+[[step]]
+expect_settings = { label = "On the charger: Dim the screens after: 10 min", selected = true }
+
+[[step]]
+expect_settings = { label = "On battery: Dim the screens after: 1 min", selected = true }
+
+[[step]]
+expect_settings = { label = "On battery: Sleep after: Never", selected = true }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+click_settings = "How it sleeps: Hibernate"
+
+[[step]]
+expect_config_file = { contains = ["sleep = \"hibernate\""] }
+
+[[step]]
+click_settings = "Fullscreen keeps awake"
+
+[[step]]
+expect_config_file = { contains = ["fullscreen_awake = false"] }
+
+[[step]]
+expect_settings = { label = "Fullscreen keeps awake", selected = false }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+scroll = -600
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-power.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[idle]
+sleep_after = 1800
+
+[idle.battery]
+sleep_after = 900
+"""
+
+[[step]]
+expect_settings = { label = "On the charger: Sleep after: 30 min", selected = true }
+
+[[step]]
+expect_settings = { label = "On battery: Sleep after: 15 min", selected = true }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-power-light.png" }

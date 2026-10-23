@@ -97,6 +97,13 @@ pub enum Request {
     Updates,
     /// Installs them, through polkit.
     InstallUpdates,
+    /// The machine's sound, network, Bluetooth and power as quick settings
+    /// know them, for the settings' Hardware pages (#67).
+    Hardware,
+    /// Changes one of them, as quick settings would.
+    SetHardware {
+        change: HardwareChange,
+    },
     /// The phone as the session knows it, through KDE Connect (#85).
     Phone,
     /// Sends files to the phone within reach, by absolute path.
@@ -239,6 +246,10 @@ impl Request {
             | Self::Updates
             // The system asks for the password itself.
             | Self::InstallUpdates
+            | Self::Hardware
+            // What quick settings change, which any application of the
+            // session may change through the same services.
+            | Self::SetHardware { .. }
             | Self::Phone
             // Files of the user's own, to the user's own paired phone.
             | Self::SendToPhone { .. }
@@ -408,6 +419,7 @@ pub enum Reply {
     /// What the user chose to share, or nothing.
     Shared(Option<String>),
     Updates(UpdatesInfo),
+    Hardware(HardwareInfo),
     Phone(PhoneInfo),
     Calendars(CalendarsInfo),
     Windows(Vec<WindowInfo>),
@@ -623,6 +635,68 @@ pub struct UpdatesInfo {
     pub error: Option<String>,
 }
 
+/// The machine's devices as quick settings know them (#67).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct HardwareInfo {
+    /// Whether the services were heard from yet; until then the rest is
+    /// not known.
+    pub known: bool,
+    pub wifi: bool,
+    /// The network joined, when connected.
+    pub network: Option<String>,
+    pub airplane: bool,
+    pub bluetooth: bool,
+    /// The device connected, when there is one.
+    pub bluetooth_device: Option<String>,
+    /// 0 to 100 (150 when raised past it elsewhere).
+    pub volume: u8,
+    pub muted: bool,
+    pub output_device: String,
+    pub input_device: String,
+    /// `power-saver`, `balanced` or `performance`.
+    pub profile: String,
+    /// Those the machine offers.
+    pub profiles: Vec<String>,
+    pub battery: Option<BatteryInfo>,
+    /// Whether the machine can hibernate, as logind says.
+    pub can_hibernate: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatteryInfo {
+    pub percent: u8,
+    /// While discharging.
+    pub minutes_left: Option<u32>,
+    /// `charging`, `discharging` (on battery), `full` or `not-charging`.
+    pub state: String,
+}
+
+/// What [`Request::SetHardware`] changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "what", rename_all = "snake_case")]
+pub enum HardwareChange {
+    Wifi {
+        on: bool,
+    },
+    Bluetooth {
+        on: bool,
+    },
+    Airplane {
+        on: bool,
+    },
+    /// 0 to 100.
+    Volume {
+        percent: u8,
+    },
+    Muted {
+        on: bool,
+    },
+    /// `power-saver`, `balanced` or `performance`.
+    Profile {
+        profile: String,
+    },
+}
+
 /// The phone as the session knows it (#85).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PhoneInfo {
@@ -810,6 +884,9 @@ pub enum Event {
         count: usize,
         state: String,
     },
+    /// The sound, network, Bluetooth, power profile or battery changed
+    /// (#67), as `Request::Hardware` says them.
+    Hardware,
     /// KDE Connect came or went, or the phones within reach changed
     /// (#85): its state, as [`PhoneInfo`] says it, and how many phones.
     Phone {
@@ -923,6 +1000,20 @@ mod tests {
             },
             r#"{"id":3,"request":"screenshot","target":{"output":"HEADLESS-1"},"cursor":false}"#,
         );
+    }
+
+    #[test]
+    fn a_hardware_change_says_what_it_is() {
+        round_trip(
+            &RequestLine {
+                id: 6,
+                request: Request::SetHardware {
+                    change: HardwareChange::Volume { percent: 40 },
+                },
+            },
+            r#"{"id":6,"request":"set_hardware","change":{"what":"volume","percent":40}}"#,
+        );
+        assert!(!Request::Hardware.agents_may());
     }
 
     #[test]

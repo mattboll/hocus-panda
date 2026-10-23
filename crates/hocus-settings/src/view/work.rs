@@ -189,7 +189,7 @@ impl SettingsView {
     /// A name, then choices: beside it when the window is wide, under it
     /// otherwise, so that they fit. Each is named "Name: choice" for
     /// screen readers; the choices' buttons.
-    fn named_choices(
+    pub(super) fn named_choices(
         &mut self,
         theme: &Theme,
         parent: NodeId,
@@ -238,7 +238,7 @@ impl SettingsView {
 
     /// The keys of these actions, one a line, with a way to the keyboard
     /// page beside the first.
-    fn keys_line(&mut self, theme: &Theme, parent: NodeId, actions: &[Action]) {
+    pub(super) fn keys_line(&mut self, theme: &Theme, parent: NodeId, actions: &[Action]) {
         let lang = self.lang;
         let shortcuts = self.ctx.config.shortcuts();
         for (i, action) in actions.iter().enumerate() {
@@ -335,7 +335,7 @@ impl SettingsView {
 
     /// Switch cards side by side when there is room, else one under
     /// another.
-    fn switches(&mut self, parent: NodeId) -> NodeId {
+    pub(super) fn switches(&mut self, parent: NodeId) -> NodeId {
         let wide = self.tree.size().w >= 1180.0;
         self.add(
             parent,

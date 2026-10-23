@@ -1105,3 +1105,203 @@ pub const SAVED: Words = Words::new("Saved", "Enregistrées");
 pub const COPIED: Words = Words::new("Copied", "Copiées");
 pub const NEITHER: Words = Words::new("Neither saved nor copied", "Ni enregistrées ni copiées");
 pub const DESKTOP_COUNT: Words = Words::new("Desktops per screen", "Bureaux par écran");
+
+// The Hardware pages.
+pub const UNKNOWN: Words = Words::new("Unknown", "Inconnu");
+pub const NO_SERVICE: Words = Words::new(
+    "Not heard from the system’s services yet: what they say shows here once they answer.",
+    "Les services du système n’ont pas encore répondu : ce qu’ils disent s’affiche ici dès qu’ils répondent.",
+);
+
+// Sound.
+pub const OUTPUT: Words = Words::new("Output", "Sortie");
+pub const INPUT: Words = Words::new("Input", "Entrée");
+pub const VOLUME: Words = Words::new("Volume", "Volume");
+pub const MUTE: Words = Words::new("Mute", "Couper le son");
+pub const MUTE_SUB: Words = Words::new(
+    "Nothing plays until it is on again",
+    "Plus rien ne joue jusqu’à ce qu’il revienne",
+);
+pub const MUTED: Words = Words::new("Muted", "Coupé");
+pub const OUTPUT_DEVICE: Words = Words::new("Output device", "Appareil de sortie");
+pub const INPUT_DEVICE: Words = Words::new("Microphone", "Micro");
+pub const NO_DEVICE: Words = Words::new("None known", "Aucun connu");
+pub const SOUND_NOTE: Words = Words::new(
+    "Through PipeWire: quick settings and the column show the same volume. The device is the system’s default; choosing another comes later.",
+    "Par PipeWire : les réglages rapides et la colonne montrent le même volume. L’appareil est celui du système par défaut ; en choisir un autre viendra plus tard.",
+);
+
+// Network.
+pub const WIRELESS: Words = Words::new("Wireless", "Sans fil");
+pub const AIRPLANE: Words = Words::new("Airplane mode", "Mode avion");
+pub const AIRPLANE_SUB: Words = Words::new("Wi-Fi and Bluetooth off", "Wi-Fi et Bluetooth coupés");
+pub const WIFI_SUB_OFF: Words = Words::new("The radio is off", "La radio est coupée");
+pub const NOT_CONNECTED: Words = Words::new("Not connected", "Non connecté");
+pub const NETWORK_NOTE: Words = Words::new(
+    "Through NetworkManager. Networks are joined with its own tools for now (nmtui, nmcli); a list here comes later.",
+    "Par NetworkManager. On rejoint un réseau avec ses propres outils pour l’instant (nmtui, nmcli) ; une liste ici viendra plus tard.",
+);
+
+/// "Joined: Bamboo grove".
+pub fn joined(network: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Joined: {network}"),
+        Lang::Fr => format!("Connecté : {network}"),
+    }
+}
+
+// Bluetooth.
+pub const BLUETOOTH: Words = Words::new("Bluetooth", "Bluetooth");
+/// Its switch, told apart from the page's name beside it.
+pub const BLUETOOTH_RADIO: Words = Words::new("Bluetooth radio", "Radio Bluetooth");
+pub const BLUETOOTH_SUB_OFF: Words = Words::new("Nothing connects", "Rien ne se connecte");
+pub const NO_BLUETOOTH_DEVICE: Words = Words::new("No device connected", "Aucun appareil connecté");
+pub const BLUETOOTH_NOTE: Words = Words::new(
+    "Through BlueZ. Devices are paired with its own tools for now (bluetoothctl); a list here comes later.",
+    "Par BlueZ. On appaire les appareils avec ses propres outils pour l’instant (bluetoothctl) ; une liste ici viendra plus tard.",
+);
+
+/// "Connected: Headphones".
+pub fn connected(device: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Connected: {device}"),
+        Lang::Fr => format!("Connecté : {device}"),
+    }
+}
+
+// Power.
+pub const BATTERY: Words = Words::new("Battery", "Batterie");
+pub const NO_BATTERY: Words = Words::new(
+    "No battery: the charger’s delays always apply.",
+    "Pas de batterie : les délais sur secteur s’appliquent toujours.",
+);
+pub const POWER_PROFILE: Words = Words::new("Power profile", "Profil d’énergie");
+pub const POWER_PROFILE_NOTE: Words = Words::new(
+    "On the power saver, moving wallpapers stand still and updates wait.",
+    "En économie, les fonds animés s’arrêtent et les mises à jour attendent.",
+);
+pub const DELAYS: Words = Words::new("Idle delays", "Délais d’inactivité");
+pub const ON_CHARGER: Words = Words::new("On the charger", "Sur secteur");
+pub const ON_BATTERY: Words = Words::new("On battery", "Sur batterie");
+pub const DIM_AFTER: Words = Words::new("Dim the screens after", "Assombrir les écrans après");
+pub const SLEEP_AFTER: Words = Words::new("Sleep after", "Mettre en veille après");
+pub const DELAYS_NOTE: Words = Words::new(
+    "Without input for that long. Plugging or unplugging the charger counts as being there: the other delays start from then.",
+    "Sans rien toucher pendant ce temps. Brancher ou débrancher le chargeur compte comme une présence : les autres délais partent de là.",
+);
+pub const SLEEP_HOW: Words = Words::new("How it sleeps", "Mise en veille");
+pub const SUSPEND: Words = Words::new("Suspend", "Veille");
+pub const HIBERNATE: Words = Words::new("Hibernate", "Hibernation");
+pub const SLEEP_NOTE: Words = Words::new(
+    "The session locks first. Hibernating keeps nothing powered, and needs swap set up for it.",
+    "La session se verrouille d’abord. L’hibernation n’alimente plus rien, et demande un swap prévu pour.",
+);
+pub const CANNOT_HIBERNATE: Words = Words::new(
+    "This machine cannot hibernate: it suspends instead.",
+    "Cette machine ne peut pas hiberner : elle se met en veille à la place.",
+);
+pub const KEEP_AWAKE: Words = Words::new("Kept awake", "Maintenu éveillé");
+pub const FULLSCREEN_AWAKE: Words =
+    Words::new("Fullscreen keeps awake", "Le plein écran maintient éveillé");
+pub const FULLSCREEN_AWAKE_SUB: Words = Words::new(
+    "A film, a game or slides hold the curtain and sleep off",
+    "Un film, un jeu ou des diapos retiennent le rideau et la veille",
+);
+pub const KEEP_AWAKE_NOTE: Words = Words::new(
+    "Applications asking (a video call, a player) always keep the session awake; the countdown starts again once they stop.",
+    "Les applications qui le demandent (un appel vidéo, un lecteur) maintiennent toujours la session éveillée ; le décompte reprend dès qu’elles s’arrêtent.",
+);
+pub const NEVER: Words = Words::new("Never", "Jamais");
+
+/// A power profile's name, by its power-profiles-daemon name.
+pub fn profile(name: &str) -> Words {
+    match name {
+        "power-saver" => Words::new("Saver", "Économie"),
+        "performance" => Words::new("Performance", "Performance"),
+        _ => Words::new("Balanced", "Équilibré"),
+    }
+}
+
+pub fn sleep_name(sleep: hocus_core::config::Sleep) -> Words {
+    match sleep {
+        hocus_core::config::Sleep::Suspend => SUSPEND,
+        hocus_core::config::Sleep::Hibernate => HIBERNATE,
+    }
+}
+
+/// "30 s", "5 min", "5 min 30 s", "1 h", "1 h 30"; 0 is never.
+pub fn duration(seconds: u32, lang: Lang) -> String {
+    let nb = match lang {
+        Lang::En => " ",
+        Lang::Fr => "\u{a0}",
+    };
+    let (h, m, s) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    match (h, m, s) {
+        (0, 0, 0) => NEVER.get(lang).to_owned(),
+        (0, 0, s) => format!("{s}{nb}s"),
+        (0, m, 0) => format!("{m}{nb}min"),
+        (0, m, s) => format!("{m}{nb}min {s}{nb}s"),
+        (h, 0, _) => format!("{h}{nb}h"),
+        (h, m, _) => format!("{h}{nb}h {m:02}"),
+    }
+}
+
+/// "On battery: Dim the screens after: 5 min", told apart from the
+/// charger's.
+pub fn on_source(source: Words, name: Words, value: &str, lang: Lang) -> String {
+    format!(
+        "{}{} {}",
+        source.get(lang),
+        if lang == Lang::Fr { " :" } else { ":" },
+        named_value(name, value, lang)
+    )
+}
+
+/// "80% · charging", "64% · about 3 h 50 left".
+pub fn battery_state(battery: &hocus_api::BatteryInfo, lang: Lang) -> String {
+    let percent = percent(u32::from(battery.percent), lang);
+    let state = match (battery.state.as_str(), battery.minutes_left, lang) {
+        ("discharging", Some(m), Lang::En) => format!("about {} h {:02} left", m / 60, m % 60),
+        ("discharging", Some(m), Lang::Fr) => {
+            format!("environ {}\u{a0}h {:02} restantes", m / 60, m % 60)
+        }
+        ("discharging", None, _) => ON_BATTERY.get(lang).to_lowercase(),
+        ("charging", _, Lang::En) => "charging".into(),
+        ("charging", _, Lang::Fr) => "en charge".into(),
+        ("full", _, Lang::En) => "charged".into(),
+        ("full", _, Lang::Fr) => "chargée".into(),
+        (_, _, _) => ON_CHARGER.get(lang).to_lowercase(),
+    };
+    format!("{percent} · {state}")
+}
+
+// Lock.
+pub const LOCKING: Words = Words::new("Locking", "Verrouillage");
+pub const LOCK_ON_IDLE: Words = Words::new("Lock after the curtain", "Verrouiller après le rideau");
+pub const LOCK_ON_IDLE_SUB: Words = Words::new(
+    "Otherwise the curtain only dims",
+    "Sinon le rideau ne fait qu’assombrir",
+);
+pub const CURTAIN_FOR: Words = Words::new("Curtain before locking", "Rideau avant de verrouiller");
+pub const LOCK_NOTE: Words = Words::new(
+    "The curtain falls after the Power page’s delay, with a countdown; any input lifts it.",
+    "Le rideau tombe après le délai de la page Énergie, avec un décompte ; toucher à quoi que ce soit le lève.",
+);
+pub const ALWAYS_LOCKED: Words = Words::new(
+    "The session always locks before the machine sleeps, and a crash never unlocks it.",
+    "La session se verrouille toujours avant la mise en veille, et un plantage ne la déverrouille jamais.",
+);
+pub const LOCK_SCREEN: Words = Words::new("Lock screen", "Écran de verrouillage");
+pub const LOCK_SCREEN_NOTE: Words = Words::new(
+    "The time, the account’s name and a warning when Caps Lock is on; the pandas sleep in its corner while they are shown.",
+    "L’heure, le nom du compte et un avertissement quand la touche Verr. Maj est active ; les pandas dorment dans son coin quand ils sont affichés.",
+);
+pub const NOT_ON_IDLE: Words = Words::new("Not when idle", "Pas à l’inactivité");
+
+/// "Locks after 5 min 30 s".
+pub fn locks_after(seconds: u32, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Locks after {}", duration(seconds, lang)),
+        Lang::Fr => format!("Verrouille après {}", duration(seconds, lang)),
+    }
+}

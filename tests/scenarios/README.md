@@ -17,6 +17,11 @@ xwayland = false
 shell = false
 # A private D-Bus bus for the compositor (notifications); never the session's
 dbus = false
+# Stand-ins for UPower (a battery at 80 % on its charger), NetworkManager
+# (Wi-Fi on, joined to "Bamboo grove"), BlueZ (on) and power profiles
+# (balanced), on a private system bus the compositor follows; never the
+# machine's. The sound is kept in memory then, never the machine's
+devices = false
 # A stand-in for timedated in this time zone, on a private system bus the
 # compositor and the settings follow; never the machine's. Without it the
 # settings cannot change the time zone
@@ -80,7 +85,7 @@ Steps, one per `[[step]]` table:
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |
 | `tray_attention = { title, attention }` | it asks for attention, or stops |
 | `expect_tray = { title, asked = "clicked 2" }` | it was asked this: `activate`, `clicked N` (menu entry N, from 1) |
-| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `desktops`, `windows`, `keyboard`, `mouse`, `captures`, `clipboard`, `screens`…) or its home, and waits for its window |
+| `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `desktops`, `windows`, `keyboard`, `mouse`, `captures`, `clipboard`, `screens`, `sound`, `network`, `bluetooth`, `power`, `lock`…) or its home, and waits for its window |
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
@@ -107,6 +112,8 @@ Steps, one per `[[step]]` table:
 | `expect_timedated = "SetTimezone Asia/Tokyo interactive"` | the timedated stand-in was asked this (`interactive`: polkit may ask) |
 | `timedated_zone = "America/New_York"` | the system's zone changes in the stand-in, as if set elsewhere |
 | `timedated_refuses = true` | the stand-in refuses to set the zone from now on, as polkit would (`false`: no longer) |
+| `charger = false` | the charger is pulled out (`true`: plugged in), as the UPower stand-in says |
+| `expect_devices = "WirelessEnabled false"` | the devices' stand-ins were asked this: `WirelessEnabled BOOL`, `Powered BOOL` (Bluetooth), `ActiveProfile NAME` |
 | `expect_config_file = { contains?, lacks? }` | the configuration file holds these strings, or lacks them (the settings app writes it) |
 | `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
 | `close = "app_id"` | asks the window to close, waits until it is gone |

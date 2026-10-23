@@ -21,6 +21,39 @@ pub struct Battery {
     pub percent: u8,
     /// Minutes left while discharging.
     pub minutes_left: Option<u32>,
+    pub charge: Charge,
+}
+
+impl Battery {
+    /// The charger is unplugged: the battery's delays apply.
+    pub fn on_battery(&self) -> bool {
+        self.charge == Charge::Discharging
+    }
+}
+
+/// What the battery is doing, as UPower says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Charge {
+    Charging,
+    /// On battery (or empty).
+    Discharging,
+    Full,
+    /// On the charger, neither charging nor full (held at a threshold).
+    #[default]
+    NotCharging,
+}
+
+impl Charge {
+    /// UPower's `State`: 1 charging, 2 discharging, 3 empty, 4 fully
+    /// charged, 5 pending charge, 6 pending discharge.
+    pub fn from_upower(state: u32) -> Self {
+        match state {
+            1 => Self::Charging,
+            2 | 3 | 6 => Self::Discharging,
+            4 => Self::Full,
+            _ => Self::NotCharging,
+        }
+    }
 }
 
 /// The state quick settings show.
