@@ -383,7 +383,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             }
         }
         let out = doc.to_string();
-        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        crate::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
     let table: &mut dyn toml_edit::TableLike = match &change.place {
@@ -667,7 +667,7 @@ mod tests {
         let socket = Change::herdr(0, "socket", Some("~/.config/herdr/web.sock".into()));
         let out = apply(text, &socket).expect("made");
         let out = apply(&out, &Change::herdr(0, "desktop", Some(2.into()))).expect("set");
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         assert_eq!(config.agents.herdr.len(), 1, "{out}");
         assert_eq!(config.agents.herdr[0].desktop, Some(2));
         assert!(config.agents.journal_text, "{out}");
