@@ -27,22 +27,42 @@ pub struct Server {
 impl Server {
     /// Serves the `.ics` files of `dir` to `user` with `password`.
     pub fn start(dir: PathBuf, user: &str, password: &str) -> std::io::Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0")?;
-        listener.set_nonblocking(true)?;
-        let url = format!("http://{}/dav/work/", listener.local_addr()?);
-        let stop = Arc::new(AtomicBool::new(false));
         let auth = format!(
             "Basic {}",
             base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"))
         );
+        Self::serve("caldav", "/dav/work/", move |request| {
+            if request.authorization.as_deref() != Some(auth.as_str()) && request.method != "GET" {
+                return ("401 Unauthorized", String::new());
+            }
+            match request.method.as_str() {
+                "PROPFIND" => ("207 Multi-Status", propfind()),
+                "REPORT" => ("207 Multi-Status", report("/dav/work/", &events(&dir))),
+                "GET" => ("200 OK", events(&dir).concat()),
+                _ => ("405 Method Not Allowed", String::new()),
+            }
+        })
+    }
+
+    /// Answers each request on 127.0.0.1 with `answer`, on a thread of its
+    /// own; the server's address is `path` there.
+    pub(crate) fn serve(
+        name: &str,
+        path: &str,
+        answer: impl Fn(&HttpRequest) -> (&'static str, String) + Send + 'static,
+    ) -> std::io::Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let url = format!("http://{}{path}", listener.local_addr()?);
+        let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
         let thread = std::thread::Builder::new()
-            .name("caldav".into())
+            .name(name.into())
             .spawn(move || {
                 while !stopped.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((stream, _)) => {
-                            if let Err(err) = serve(stream, &dir, &auth) {
+                            if let Err(err) = serve(stream, &answer) {
                                 tracing::debug!(%err, "a CalDAV request failed");
                             }
                         }
@@ -72,15 +92,31 @@ impl Drop for Server {
     }
 }
 
-fn serve(stream: TcpStream, dir: &PathBuf, auth: &str) -> std::io::Result<()> {
+/// What a request asked, as far as the stand-ins look.
+#[derive(Debug, Default)]
+pub(crate) struct HttpRequest {
+    pub method: String,
+    pub path: String,
+    pub authorization: Option<String>,
+    pub depth: String,
+}
+
+fn serve(
+    stream: TcpStream,
+    answer: &impl Fn(&HttpRequest) -> (&'static str, String),
+) -> std::io::Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    let method = line.split_whitespace().next().unwrap_or("").to_owned();
+    let mut words = line.split_whitespace();
+    let mut request = HttpRequest {
+        method: words.next().unwrap_or("").to_owned(),
+        path: words.next().unwrap_or("").to_owned(),
+        ..HttpRequest::default()
+    };
     let mut length = 0;
-    let mut authorized = false;
     loop {
         let mut header = String::new();
         reader.read_line(&mut header)?;
@@ -93,22 +129,14 @@ fn serve(stream: TcpStream, dir: &PathBuf, auth: &str) -> std::io::Result<()> {
         };
         match name.to_ascii_lowercase().as_str() {
             "content-length" => length = value.trim().parse().unwrap_or(0),
-            "authorization" => authorized = value.trim() == auth,
+            "authorization" => request.authorization = Some(value.trim().to_owned()),
+            "depth" => request.depth = value.trim().to_owned(),
             _ => {}
         }
     }
     let mut body = vec![0; length];
     reader.read_exact(&mut body)?;
-    let (status, text) = if !authorized && method != "GET" {
-        ("401 Unauthorized", String::new())
-    } else {
-        match method.as_str() {
-            "PROPFIND" => ("207 Multi-Status", propfind()),
-            "REPORT" => ("207 Multi-Status", report(&events(dir))),
-            "GET" => ("200 OK", events(dir).concat()),
-            _ => ("405 Method Not Allowed", String::new()),
-        }
-    };
+    let (status, text) = answer(&request);
     let mut stream = stream;
     write!(
         stream,
@@ -118,7 +146,7 @@ fn serve(stream: TcpStream, dir: &PathBuf, auth: &str) -> std::io::Result<()> {
     stream.flush()
 }
 
-fn events(dir: &PathBuf) -> Vec<String> {
+pub(crate) fn events(dir: &PathBuf) -> Vec<String> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|entries| {
             entries
@@ -145,7 +173,8 @@ fn propfind() -> String {
         .to_owned()
 }
 
-fn report(events: &[String]) -> String {
+/// The events as a REPORT's answer, each a resource below `at`.
+pub(crate) fn report(at: &str, events: &[String]) -> String {
     let escape = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -157,7 +186,7 @@ fn report(events: &[String]) -> String {
     );
     for (i, e) in events.iter().enumerate() {
         out.push_str(&format!(
-            "<d:response><d:href>/dav/work/{i}.ics</d:href><d:propstat><d:prop><cal:calendar-data>{}</cal:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>",
+            "<d:response><d:href>{at}{i}.ics</d:href><d:propstat><d:prop><cal:calendar-data>{}</cal:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>",
             escape(e)
         ));
     }

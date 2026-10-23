@@ -378,6 +378,28 @@ pub const UNREACHABLE: Words = Words::new(
     "Injoignable : ce qui était enregistré reste affiché",
 );
 
+pub const FROM_GOA: Words = Words::new(
+    "From GNOME Online Accounts",
+    "Depuis les comptes en ligne de GNOME",
+);
+pub const GOA_NEEDED: Words = Words::new(
+    "Google calendars need GNOME Online Accounts: install it and sign in to Google there, and the calendars show here.",
+    "Les agendas Google demandent les comptes en ligne de GNOME (GNOME Online Accounts) : installez-les et connectez-vous à Google, les agendas s’afficheront ici.",
+);
+pub const NO_GOOGLE_ACCOUNT: Words = Words::new(
+    "No Google account with its calendar on in GNOME Online Accounts.",
+    "Aucun compte Google avec son agenda activé dans les comptes en ligne de GNOME.",
+);
+pub const OPEN_GOA: Words = Words::new("Open Online Accounts", "Ouvrir les comptes en ligne");
+pub const GOA_ELSEWHERE: Words = Words::new(
+    "Google accounts are added and removed in GNOME Online Accounts, not here.",
+    "Les comptes Google s’ajoutent et se retirent dans les comptes en ligne de GNOME, pas ici.",
+);
+pub const GOOGLE_SIGN_IN_AGAIN: Words = Words::new(
+    "Google refused the sign-in: sign in again in GNOME Online Accounts",
+    "Google a refusé la connexion : reconnectez-vous dans les comptes en ligne de GNOME",
+);
+
 pub fn synced(events: usize, lang: Lang) -> String {
     match (lang, events) {
         (Lang::En, 1) => "Synced · 1 event".into(),

@@ -4,18 +4,26 @@
 //! meeting, with Join when it has a call; reminders come ten minutes and
 //! one minute before. An account taken out of the configuration takes its
 //! cached events and its password with it.
+//!
+//! Google accounts come from GNOME Online Accounts (#137), followed on the
+//! session bus: those with their calendar on sync like the others, with
+//! the token GOA hands out; one removed there, or its calendar switched
+//! off, takes its events and its cache with it. Until GOA first answered,
+//! their cache stays.
 
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsString,
     path::PathBuf,
     time::Duration,
 };
 
-use hocus_api::{CalendarStatus, CalendarsInfo, Event, EventInfo};
+use hocus_api::{CalendarStatus, CalendarsInfo, Event, EventInfo, OnlineAccountsInfo};
 use hocus_core::config::CalendarAccount;
 use hocus_platform::{
     calendar::{
         caldav::{self, FetchError, Source},
+        goa::{self, OnlineAccounts},
         ics::{self, Occurrence},
     },
     sealed::Sealed,
@@ -40,6 +48,10 @@ const REMIND: [i64; 2] = [10, 1];
 const JOIN_BEFORE: i64 = 10 * 60;
 /// The events kept: from yesterday to this many days ahead.
 const AHEAD_DAYS: i64 = 42;
+/// GNOME's settings, where online accounts are added and removed.
+const GOA_SETTINGS: &str = "gnome-control-center";
+/// Before a GOA account's id among the accounts.
+const GOA_ID: &str = "goa:";
 
 #[derive(Debug)]
 enum News {
@@ -49,6 +61,27 @@ enum News {
     Fetched(String, u64, Result<Vec<String>, FetchError>),
     /// The secrets kept now; a password was just stored, so sync again.
     Secrets { count: usize, stored: bool },
+    /// What GNOME Online Accounts holds, and whether its settings can be
+    /// opened.
+    Goa(OnlineAccounts, bool),
+}
+
+/// GNOME Online Accounts, as followed.
+#[derive(Debug, Default)]
+struct Goa {
+    /// The session bus it is looked for on; `None`: not looked for.
+    bus: Option<String>,
+    started: bool,
+    /// `None` until it first answered.
+    held: Option<OnlineAccounts>,
+    /// Google's CalDAV; a stand-in's in tests.
+    base: Option<String>,
+    /// GNOME's settings for it are installed.
+    settings: bool,
+}
+
+fn goa_id(account: &goa::GoogleAccount) -> String {
+    format!("{GOA_ID}{}", account.id)
 }
 
 #[derive(Debug, Default)]
@@ -59,9 +92,13 @@ pub struct Calendar {
     events: Vec<(String, Occurrence)>,
     errors: HashMap<String, FetchError>,
     synced: HashSet<String>,
-    /// The accounts configured, to see one come or go; unknown until the
-    /// configuration is read, and nothing is forgotten before.
+    /// The accounts configured and GOA's, to see one come or go; unknown
+    /// until the configuration is read, and nothing is forgotten before.
     known: Option<Vec<String>>,
+    /// GOA had not answered yet when they were known: its accounts'
+    /// caches stayed.
+    known_pending: bool,
+    goa: Goa,
     next_sync: Option<Duration>,
     /// Bumped at each sync: what an older one brings back is stale.
     generation: u64,
@@ -96,6 +133,7 @@ pub fn start(
         return;
     }
     state.calendar.news = Some(news.clone());
+    state.calendar.goa.bus = session_bus.map(str::to_owned);
     state.calendar.next_sync = Some(state.clock.now() + FIRST_SYNC);
     // Wakes the loop: syncs and reminders fall due on the clock.
     if !state.clock.is_virtual() {
@@ -155,8 +193,11 @@ impl State {
                 // What a sync brought meanwhile stays, and accounts gone
                 // stay gone.
                 let mut dropped = false;
+                let pending = self.goa_pending();
                 for (id, texts) in cached {
-                    if self.calendar.known.as_ref().is_none_or(|k| k.contains(&id)) {
+                    let kept = self.calendar.known.as_ref().is_none_or(|k| k.contains(&id))
+                        || (pending && id.starts_with(GOA_ID));
+                    if kept {
                         self.calendar.texts.entry(id).or_insert(texts);
                     } else {
                         dropped = true;
@@ -192,6 +233,16 @@ impl State {
                 if stored {
                     self.calendar.next_sync = Some(self.clock.now());
                 }
+            }
+            // Accounts that came or went are seen after the dispatch.
+            News::Goa(held, settings) => {
+                tracing::debug!(
+                    installed = held.installed,
+                    accounts = held.accounts.len(),
+                    "GNOME Online Accounts"
+                );
+                self.calendar.goa.held = Some(held);
+                self.calendar.goa.settings = settings;
             }
         }
         self.expand_calendar();
@@ -253,19 +304,16 @@ impl State {
         if self.config_path.is_some() && !self.config_read {
             return;
         }
-        let ids: Vec<String> = self
-            .config
-            .calendars
-            .iter()
-            .map(CalendarAccount::id)
-            .collect();
+        self.follow_goa();
+        let ids = self.calendar_ids();
+        let pending = self.goa_pending();
         let now = self.clock.now();
-        if self.calendar.known.as_ref() != Some(&ids) {
-            self.calendar_accounts_changed(ids);
+        if self.calendar.known.as_ref() != Some(&ids) || self.calendar.known_pending != pending {
+            self.calendar_accounts_changed(ids.clone());
             self.calendar.next_sync = Some(now);
         }
         let due = self.calendar.next_sync.is_some_and(|t| now >= t);
-        if due && !self.config.calendars.is_empty() {
+        if due && !ids.is_empty() {
             self.calendar.next_sync = Some(now + SYNC_EVERY);
             self.sync_calendars();
         }
@@ -276,22 +324,95 @@ impl State {
         self.remind();
     }
 
+    /// The configuration's accounts, then GOA's.
+    fn calendar_ids(&self) -> Vec<String> {
+        let goa = self.calendar.goa.held.iter().flat_map(|h| &h.accounts);
+        self.config
+            .calendars
+            .iter()
+            .map(CalendarAccount::id)
+            .chain(goa.map(goa_id))
+            .collect()
+    }
+
+    /// An account is configured, or GOA holds one with its calendar on.
+    pub fn calendar_set(&self) -> bool {
+        !self.config.calendars.is_empty()
+            || self
+                .calendar
+                .goa
+                .held
+                .as_ref()
+                .is_some_and(|h| !h.accounts.is_empty())
+    }
+
+    /// GOA is looked for and has not answered yet.
+    fn goa_pending(&self) -> bool {
+        self.calendar.goa.bus.is_some() && self.calendar.goa.held.is_none()
+    }
+
+    /// GOA is followed once the configuration is read, when the
+    /// compositor's children (GNOME's settings) are known.
+    fn follow_goa(&mut self) {
+        let goa = &mut self.calendar.goa;
+        let (false, Some(bus), Some(news)) =
+            (goa.started, goa.bus.clone(), self.calendar.news.clone())
+        else {
+            return;
+        };
+        goa.started = true;
+        let path = self
+            .child_env
+            .as_ref()
+            .and_then(|env| {
+                env.iter()
+                    .find(|(k, _)| k == "PATH")
+                    .map(|(_, v)| v.clone())
+            })
+            .or_else(|| std::env::var_os("PATH"));
+        let news = std::sync::Mutex::new(news);
+        let followed = goa::follow(bus, move |held| {
+            let settings = held.installed && on_path(path.as_ref(), GOA_SETTINGS);
+            if let Ok(news) = news.lock() {
+                let _ = news.send(News::Goa(held, settings));
+            }
+        });
+        if let Err(err) = followed {
+            tracing::warn!(%err, "Google calendars will not be followed");
+        }
+    }
+
+    /// Google's CalDAV for this session: the harness's stand-in in tests.
+    pub fn set_google_caldav(&mut self, base: Option<String>) {
+        self.calendar.goa.base = base;
+    }
+
+    /// GNOME's settings for online accounts, when installed.
+    pub fn open_online_accounts(&mut self) {
+        if self.calendar.goa.settings {
+            self.launch(GOA_SETTINGS, &["online-accounts".to_owned()]);
+        }
+    }
+
     /// Accounts gone take their events, their cache and their password;
-    /// the first time, those taken out while the session was off.
+    /// the first time, those taken out while the session was off. GOA's
+    /// stay until it first answered.
     fn calendar_accounts_changed(&mut self, ids: Vec<String>) {
         let first = self.calendar.known.is_none();
+        let pending = self.goa_pending();
         let mut gone: Vec<String> = self
             .calendar
             .known
             .iter()
             .flatten()
             .chain(self.calendar.texts.keys())
-            .filter(|k| !ids.contains(k))
+            .filter(|k| !ids.contains(k) && !(pending && k.starts_with(GOA_ID)))
             .cloned()
             .collect();
         gone.sort();
         gone.dedup();
         self.calendar.known = Some(ids.clone());
+        self.calendar.known_pending = pending;
         if gone.is_empty() && !first {
             return;
         }
@@ -350,6 +471,24 @@ impl State {
                 let fetched = caldav::fetch(&source, from, to)
                     .map(|calendars| calendars.into_iter().flat_map(|c| c.ics).collect());
                 let _ = news.send(News::Fetched(id, generation, fetched));
+            });
+        }
+        let goa = &self.calendar.goa;
+        let base = match (&goa.base, self.clock.is_virtual()) {
+            (Some(base), _) => base.clone(),
+            (None, false) => goa::GOOGLE_CALDAV.to_owned(),
+            // Tests never reach Google.
+            (None, true) => return,
+        };
+        let (Some(bus), Some(held)) = (goa.bus.clone(), goa.held.clone()) else {
+            return;
+        };
+        for account in held.accounts {
+            let (news, bus, base) = (news.clone(), bus.clone(), base.clone());
+            spawn("calendar sync", move || {
+                let fetched = goa::fetch(&bus, &account, &base, from, to)
+                    .map(|calendars| calendars.into_iter().flat_map(|c| c.ics).collect());
+                let _ = news.send(News::Fetched(goa_id(&account), generation, fetched));
             });
         }
     }
@@ -533,30 +672,48 @@ impl State {
         });
     }
 
+    fn calendar_status(&self, id: String, name: String) -> CalendarStatus {
+        CalendarStatus {
+            name,
+            events: self
+                .calendar
+                .events
+                .iter()
+                .filter(|(i, _)| *i == id)
+                .count(),
+            error: self.calendar.errors.get(&id).map(ToString::to_string),
+            refused: matches!(self.calendar.errors.get(&id), Some(FetchError::Refused(_))),
+            synced: self.calendar.synced.contains(&id),
+            id,
+        }
+    }
+
     pub fn calendars_info(&self) -> CalendarsInfo {
         let now = self.wall_now();
         let accounts = self
             .config
             .calendars
             .iter()
-            .map(|a| {
-                let id = a.id();
-                CalendarStatus {
-                    name: a.name.clone(),
-                    events: self
-                        .calendar
-                        .events
-                        .iter()
-                        .filter(|(i, _)| *i == id)
-                        .count(),
-                    error: self.calendar.errors.get(&id).map(ToString::to_string),
-                    refused: matches!(self.calendar.errors.get(&id), Some(FetchError::Refused(_))),
-                    synced: self.calendar.synced.contains(&id),
-                    id,
-                }
-            })
+            .map(|a| self.calendar_status(a.id(), a.name.clone()))
             .collect();
+        let goa = &self.calendar.goa;
+        let online = OnlineAccountsInfo {
+            state: match &goa.held {
+                None => "unknown",
+                Some(held) if held.installed => "installed",
+                Some(_) => "absent",
+            }
+            .into(),
+            accounts: goa
+                .held
+                .iter()
+                .flat_map(|h| &h.accounts)
+                .map(|a| self.calendar_status(goa_id(a), a.name.clone()))
+                .collect(),
+            settings: goa.settings,
+        };
         CalendarsInfo {
+            online,
             accounts,
             secrets: self.calendar.secrets_kept,
             events: self
@@ -572,6 +729,11 @@ impl State {
                 .collect(),
         }
     }
+}
+
+/// Whether `program` is in one of `path`'s directories; on GOA's thread.
+fn on_path(path: Option<&OsString>, program: &str) -> bool {
+    path.is_some_and(|p| std::env::split_paths(p).any(|d| d.join(program).is_file()))
 }
 
 fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {

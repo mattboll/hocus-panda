@@ -38,6 +38,7 @@ fn compositor(
         polkit_helper: None,
         motion: false,
         first_run: false,
+        google_caldav: None,
     })
 }
 
@@ -450,6 +451,7 @@ fn the_system_asks_for_a_password_over_everything() -> anyhow::Result<()> {
         polkit_helper: Some(helper),
         motion: false,
         first_run: false,
+        google_caldav: None,
     })?;
     let deadline = Instant::now() + Duration::from_secs(10);
     let (name, path) = loop {

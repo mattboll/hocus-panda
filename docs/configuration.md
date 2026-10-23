@@ -129,6 +129,8 @@ name = "Work"
 kind = "caldav"            # or "subscription": an ICS link, read as it is
 url = "https://dav.example.org/calendars/alex/"  # https (or webcal); plain http to this machine only
 user = "alex"              # the password is in the keyring, never here
+                           # Google calendars come from GNOME Online Accounts
+                           #   (sign in to Google there), not from this list
 
 [night_light]              # warmer colours in the evening (quick settings' tile)
 enabled = false

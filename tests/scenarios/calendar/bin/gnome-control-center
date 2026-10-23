@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stands for GNOME's settings: says which page it was asked to open.
+printf 'gnome-control-center %s\n' "$*" >> "$XDG_RUNTIME_DIR/opened"

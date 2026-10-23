@@ -70,6 +70,11 @@ pub struct Scenario {
     /// settings ask; never the machine's.
     #[serde(default)]
     pub accounts: bool,
+    /// A stand-in for GNOME Online Accounts on the scenario's private
+    /// session bus (never the session's), with a Google account signed in,
+    /// and one for Google's CalDAV on 127.0.0.1 serving the `.ics` files of
+    /// `dir` as its calendar: `{ identity, dir, running? = true }` (#137).
+    pub goa: Option<GoaFixture>,
     /// Programs the scenario runs; it is skipped where one is missing.
     #[serde(default)]
     pub needs: Vec<String>,
@@ -323,8 +328,18 @@ pub enum Step {
     /// reading it would fail, and show as `unreadable`.
     Unreadable(String),
     /// The calendars as the session knows them, once so: `{ events?,
-    /// secrets?, contains?, error? }`.
+    /// secrets?, contains?, error?, online?, online_accounts? }`.
     ExpectCalendars(ExpectCalendars),
+    /// The sealed calendar cache, opened, once so: `{ contains?, lacks? }`.
+    ExpectCalendarCache(ExpectCache),
+    /// Something changes in GNOME Online Accounts' stand-in: `run` (its
+    /// name taken), `sign_in`, `remove`, `calendar_off`, `calendar_on`,
+    /// `revoke` (Google refuses the token it holds until refreshed),
+    /// `break_tokens` (Google refuses every token).
+    Goa(GoaChange),
+    /// GOA's and Google's stand-ins were asked these, in this order, each
+    /// the start of a line of their log: `["GetAccessToken", "REPORT"]`.
+    ExpectGoa(Vec<String>),
     /// Opens the annotation window on a capture (`{runtime_dir}` is the
     /// compositor's temporary directory), and waits for it.
     OpenAnnotate(String),
@@ -614,6 +629,37 @@ pub struct CaldavStep {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct GoaFixture {
+    pub identity: String,
+    pub dir: PathBuf,
+    /// Its name taken from the start; otherwise once a `goa = "run"` step.
+    #[serde(default = "yes")]
+    pub running: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoaChange {
+    Run,
+    SignIn,
+    Remove,
+    CalendarOff,
+    CalendarOn,
+    Revoke,
+    BreakTokens,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectCache {
+    #[serde(default)]
+    pub contains: Vec<String>,
+    #[serde(default)]
+    pub lacks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CalendarPassword {
     pub id: String,
     pub password: String,
@@ -631,6 +677,10 @@ pub struct ExpectCalendars {
     pub contains: Vec<String>,
     /// Whether an account failed its last sync.
     pub error: Option<bool>,
+    /// GNOME Online Accounts: `unknown`, `absent` or `installed`.
+    pub online: Option<String>,
+    /// Its Google accounts with their calendar on.
+    pub online_accounts: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1033,6 +1083,9 @@ impl fmt::Display for Step {
             Self::ExpectSearch(e) => write!(f, "expect_search {e:?}"),
             Self::Unreadable(path) => write!(f, "unreadable {path:?}"),
             Self::ExpectCalendars(e) => write!(f, "expect_calendars {e:?}"),
+            Self::ExpectCalendarCache(e) => write!(f, "expect_calendar_cache {e:?}"),
+            Self::Goa(change) => write!(f, "goa {change:?}"),
+            Self::ExpectGoa(asked) => write!(f, "expect_goa {asked:?}"),
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
             Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
             Self::DragAnnotate(d) => write!(f, "drag_annotate {:?}", d.label),
@@ -1182,10 +1235,19 @@ impl Scenario {
                 .map(|s| s.parse())
                 .collect::<Result<_, _>>()?
         };
-        let bus = if self.dbus {
+        let bus = if self.dbus || self.goa.is_some() {
             Some(crate::bus::PrivateBus::start()?)
         } else {
             None
+        };
+        let goa = match (&bus, &self.goa) {
+            (Some(bus), Some(goa)) => Some(crate::goa::FakeGoa::start(
+                &bus.address,
+                &goa.identity,
+                self.dir.join(&goa.dir),
+                goa.running,
+            )?),
+            _ => None,
         };
         // The system bus, with the stand-ins asked for alone on it.
         let system_bus = if self.timedated.is_some() || self.devices || self.accounts {
@@ -1244,6 +1306,7 @@ impl Scenario {
             polkit_helper: None,
             motion: self.motion,
             first_run: self.first_run,
+            google_caldav: goa.as_ref().map(|g| g.google().to_owned()),
         })?;
         let mut run = Run {
             scenario: self,
@@ -1265,6 +1328,7 @@ impl Scenario {
             tray_apps: Vec::new(),
             phone: None,
             phone_posted: Vec::new(),
+            goa,
             asking: None,
             events: Vec::new(),
             caldav: None,
@@ -1311,6 +1375,8 @@ struct Run<'a> {
     /// KDE Connect's stand-in, and the notifications it posted.
     phone: Option<crate::phone::FakePhone>,
     phone_posted: Vec<String>,
+    /// GNOME Online Accounts' stand-in, and Google's.
+    goa: Option<crate::goa::FakeGoa>,
     bus: Option<crate::bus::PrivateBus>,
     /// timedated's stand-in; before its bus, so that it goes first.
     timedated: Option<crate::timedated::FakeTimedated>,
@@ -1916,6 +1982,29 @@ impl Run<'_> {
                 Ok(())
             }
             Step::ExpectCalendars(expected) => self.expect_calendars(expected),
+            Step::ExpectCalendarCache(expected) => self.expect_calendar_cache(expected),
+            Step::Goa(change) => {
+                let goa = self
+                    .goa
+                    .as_ref()
+                    .context("no GOA: the scenario needs `goa = { identity, dir }`")?;
+                match change {
+                    GoaChange::Run => goa.run(),
+                    GoaChange::SignIn => goa.sign_in(),
+                    GoaChange::Remove => goa.remove(),
+                    GoaChange::CalendarOff => goa.set_calendar(false),
+                    GoaChange::CalendarOn => goa.set_calendar(true),
+                    GoaChange::Revoke => {
+                        goa.revoke();
+                        Ok(())
+                    }
+                    GoaChange::BreakTokens => {
+                        goa.break_tokens();
+                        Ok(())
+                    }
+                }
+            }
+            Step::ExpectGoa(expected) => self.expect_goa(expected),
             Step::AiServer(a) => {
                 self.ai = Some(crate::ai::Server::start(crate::ai::Answers {
                     pieces: a.pieces.clone(),
@@ -2939,8 +3028,19 @@ impl Run<'_> {
             let Reply::Calendars(info) = self.request(Request::Calendars)? else {
                 anyhow::bail!("expected the calendars");
             };
-            let failed = info.accounts.iter().any(|a| a.error.is_some());
+            let failed = info
+                .accounts
+                .iter()
+                .chain(&info.online.accounts)
+                .any(|a| a.error.is_some());
             let ok = expected.events.is_none_or(|n| info.events.len() == n)
+                && expected
+                    .online
+                    .as_ref()
+                    .is_none_or(|o| *o == info.online.state)
+                && expected
+                    .online_accounts
+                    .is_none_or(|n| info.online.accounts.len() == n)
                 && expected.secrets.is_none_or(|n| info.secrets == n)
                 && expected.error.is_none_or(|e| e == failed)
                 && expected
@@ -2951,6 +3051,50 @@ impl Run<'_> {
                 return Ok(());
             }
             anyhow::ensure!(Instant::now() < deadline, "the calendars are {info:#?}");
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    /// The cache is written off the loop: waited for in real time.
+    fn expect_calendar_cache(&mut self, expected: &ExpectCache) -> anyhow::Result<()> {
+        let path = self.compositor.state_dir().join("calendar-cache");
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let text = hocus_platform::sealed::Sealed::new(&path)
+                .read()
+                .map_err(|e| anyhow::anyhow!(e))?
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .unwrap_or_default();
+            let ok = expected.contains.iter().all(|c| text.contains(c.as_str()))
+                && !expected.lacks.iter().any(|l| text.contains(l.as_str()));
+            if ok {
+                return Ok(());
+            }
+            anyhow::ensure!(Instant::now() < deadline, "the calendar cache is:\n{text}");
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    /// Syncs run on threads: waited for in real time.
+    fn expect_goa(&mut self, expected: &[String]) -> anyhow::Result<()> {
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let asked = self
+                .goa
+                .as_ref()
+                .context("no GOA: the scenario needs `goa = { identity, dir }`")?
+                .asked();
+            let mut lines = asked.iter();
+            if expected
+                .iter()
+                .all(|e| lines.any(|l| l.starts_with(e.as_str())))
+            {
+                return Ok(());
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "GOA and Google were asked {asked:#?}"
+            );
             self.compositor.dispatch(Duration::from_millis(10))?;
         }
     }

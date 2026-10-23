@@ -51,6 +51,9 @@ pub struct HarnessOptions {
     /// at once, so that a test that does not sample motion never catches
     /// one halfway.
     pub motion: bool,
+    /// Google's CalDAV is this stand-in's (#137). Without one, tests never
+    /// sync Google accounts: never Google itself.
+    pub google_caldav: Option<String>,
 }
 
 /// Starts a compositor for `harness`, its configuration file at `config`
@@ -90,6 +93,11 @@ fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
         },
     )?;
     started.app.state.instant_motion = !harness.motion;
+    // Before the first dispatch: no sync has started yet.
+    started
+        .app
+        .state
+        .set_google_caldav(harness.google_caldav.clone());
     started
         .app
         .state
@@ -181,6 +189,7 @@ impl Headless {
             polkit_helper: None,
             motion: false,
             first_run: false,
+            google_caldav: None,
         })
     }
 

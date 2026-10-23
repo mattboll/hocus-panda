@@ -1,0 +1,31 @@
+description = "Without GNOME Online Accounts, the Accounts and calendar page says Google calendars need it; with it but without GNOME's settings, where to add accounts"
+outputs = ["1280x800"]
+shell = true
+# Its name is taken only later: until then, not installed.
+goa = { identity = "alex.panda@gmail.com", dir = "calendar/google", running = false }
+# No GNOME settings to open.
+child_env = { PATH = "{scenario_dir}/calendar/google" }
+
+[[step]]
+expect_calendars = { online = "absent", online_accounts = 0, events = 0 }
+
+[[step]]
+open_settings = { page = "accounts" }
+
+[[step]]
+expect_settings = { label = "Google calendars need GNOME Online Accounts: install it and sign in to Google there, and the calendars show here." }
+
+[[step]]
+goa = "remove"
+
+[[step]]
+goa = "run"
+
+[[step]]
+expect_calendars = { online = "installed", online_accounts = 0 }
+
+[[step]]
+expect_settings = { label = "No Google account with its calendar on in GNOME Online Accounts." }
+
+[[step]]
+expect_settings = { label = "Google accounts are added and removed in GNOME Online Accounts, not here." }

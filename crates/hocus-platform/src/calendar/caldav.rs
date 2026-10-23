@@ -18,6 +18,20 @@ pub enum Source {
     },
     /// An ICS link, read as it is.
     Subscription { url: String },
+    /// A CalDAV account behind an OAuth access token (Google's, through
+    /// GNOME Online Accounts): found from `url`, and the token goes to
+    /// `url`'s own server only.
+    Bearer { url: String, token: Token },
+}
+
+/// An OAuth access token: never printed, never kept.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Token(pub String);
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(…)")
+    }
 }
 
 /// Why a fetch failed.
@@ -36,6 +50,8 @@ impl std::fmt::Display for FetchError {
         }
     }
 }
+
+impl std::error::Error for FetchError {}
 
 /// One calendar's events, as iCalendar texts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,35 +197,52 @@ fn join(base: &str, href: &str) -> String {
     if href.starts_with("http://") || href.starts_with("https://") {
         return href.to_owned();
     }
-    let origin_end = base
+    format!("{}{}", origin(base), href)
+}
+
+/// `scheme://host[:port]` of `url`.
+fn origin(url: &str) -> &str {
+    let end = url
         .find("://")
-        .and_then(|i| base[i + 3..].find('/').map(|j| i + 3 + j))
-        .unwrap_or(base.len());
-    format!("{}{}", &base[..origin_end], href)
+        .and_then(|i| url[i + 3..].find('/').map(|j| i + 3 + j))
+        .unwrap_or(url.len());
+    &url[..end]
 }
 
 struct Client {
     agent: ureq::Agent,
     auth: Option<String>,
+    /// A token goes to this origin only, whatever the server's answers
+    /// point at.
+    only: Option<String>,
 }
 
 impl Client {
     fn new(user: Option<(&str, &str)>) -> Self {
-        let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .allow_non_standard_methods(true)
-            .http_status_as_error(false)
-            .build()
-            .into();
         let auth = user.map(|(u, p)| {
             let token = base64::engine::general_purpose::STANDARD.encode(format!("{u}:{p}"));
             format!("Basic {token}")
         });
-        Self { agent, auth }
+        Self {
+            agent: agent(),
+            auth,
+            only: None,
+        }
+    }
+
+    fn bearer(token: &Token, url: &str) -> Self {
+        Self {
+            agent: agent(),
+            auth: Some(format!("Bearer {}", token.0)),
+            only: Some(origin(url).to_owned()),
+        }
     }
 
     fn send(&self, method: &str, url: &str, depth: &str, body: &str) -> Result<String, FetchError> {
         let failed = |e: &dyn std::fmt::Display| FetchError::Failed(format!("{url}: {e}"));
+        if self.only.as_deref().is_some_and(|o| o != origin(url)) {
+            return Err(failed(&"elsewhere than the account's server"));
+        }
         let mut request = ureq::http::Request::builder()
             .method(method)
             .uri(url)
@@ -228,11 +261,25 @@ impl Client {
         match status {
             200..=299 => Ok(text),
             401 | 403 => Err(FetchError::Refused(format!(
-                "{url}: the server refused the name or password"
+                "{url}: the server refused the {}",
+                if self.only.is_some() {
+                    "access token"
+                } else {
+                    "name or password"
+                }
             ))),
             s => Err(failed(&format!("the server answered {s}"))),
         }
     }
+}
+
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .allow_non_standard_methods(true)
+        .http_status_as_error(false)
+        .build()
+        .into()
 }
 
 /// The calendars of a CalDAV account: the address itself when it is one,
@@ -286,28 +333,36 @@ pub fn fetch(source: &Source, from: Timestamp, to: Timestamp) -> Result<Vec<Fetc
             url,
             user,
             password,
-        } => {
-            let client = Client::new(Some((user, password)));
-            let body = report(from, to);
-            let mut out = Vec::new();
-            for (calendar, name) in calendars(&client, url)? {
-                let answer = multistatus(&client.send("REPORT", &calendar, "1", &body)?);
-                out.push(Fetched {
-                    calendar: if name.trim().is_empty() {
-                        calendar
-                    } else {
-                        name
-                    },
-                    ics: answer
-                        .into_iter()
-                        .map(|r| r.data)
-                        .filter(|d| !d.is_empty())
-                        .collect(),
-                });
-            }
-            Ok(out)
-        }
+        } => account(&Client::new(Some((user, password))), url, from, to),
+        Source::Bearer { url, token } => account(&Client::bearer(token, url), url, from, to),
     }
+}
+
+/// Every calendar of the account at `url`, with the events of `from`..`to`.
+fn account(
+    client: &Client,
+    url: &str,
+    from: Timestamp,
+    to: Timestamp,
+) -> Result<Vec<Fetched>, FetchError> {
+    let body = report(from, to);
+    let mut out = Vec::new();
+    for (calendar, name) in calendars(client, url)? {
+        let answer = multistatus(&client.send("REPORT", &calendar, "1", &body)?);
+        out.push(Fetched {
+            calendar: if name.trim().is_empty() {
+                calendar
+            } else {
+                name
+            },
+            ics: answer
+                .into_iter()
+                .map(|r| r.data)
+                .filter(|d| !d.is_empty())
+                .collect(),
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
