@@ -15,6 +15,7 @@ pub mod polkit;
 pub mod power;
 pub mod quick;
 pub mod sealed;
+pub mod search;
 pub mod secrets;
 pub mod session;
 pub mod system;

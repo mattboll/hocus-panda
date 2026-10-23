@@ -100,6 +100,9 @@ pub enum Request {
     },
     /// Which AI providers have a key kept, never the keys (#67).
     Ai,
+    /// What the document search's indexer does (#45): never the
+    /// documents themselves.
+    Search,
     /// System updates waiting, and whether they are being looked for or
     /// installed (#84).
     Updates,
@@ -270,6 +273,8 @@ impl Request {
             | Self::AiSecret { .. }
             // Which providers have one, not the keys.
             | Self::Ai
+            // Counts only, never a document.
+            | Self::Search
             | Self::Updates
             // The system asks for the password itself.
             | Self::InstallUpdates
@@ -607,8 +612,27 @@ pub enum Reply {
     Agent(AgentInfo),
     AgentsJournal(AgentsJournal),
     Ai(AiInfo),
+    Search(SearchInfo),
     /// The request was carried out.
     Done,
+}
+
+/// What the document search's indexer does (#45).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SearchInfo {
+    /// `off`, `waiting` (to start, or for the next look at the folders),
+    /// `paused` (on battery), `indexing` or `ready`.
+    pub state: String,
+    pub documents: u64,
+    /// Documents with vectors, searched by meaning too.
+    pub embedded: u64,
+    /// Entries left out by the list of what is never read, in the last
+    /// look: they were not opened.
+    pub never_read: u64,
+    /// Entries that could not be read, in the last look.
+    pub unreadable: u64,
+    /// Search by meaning works.
+    pub meaning: bool,
 }
 
 /// What the session knows of the AI providers (#67): which have a key
@@ -1396,6 +1420,7 @@ mod tests {
             // An agent never allows itself again, nor reads the keys kept.
             Request::SetAgentsStopped { stopped: false },
             Request::Ai,
+            Request::Search,
         ] {
             assert!(!request.agents_may(), "{request:?}");
         }

@@ -361,6 +361,12 @@ impl State {
                     tracing::info!(url, "opening");
                     self.launch("xdg-open", &[url]);
                 }
+                LauncherEvent::Chosen(Choice::OpenFile(path)) => {
+                    self.close_launcher();
+                    // Not the path at info: a document's name says enough.
+                    tracing::debug!(path, "opening a document");
+                    self.launch("xdg-open", &[path]);
+                }
                 LauncherEvent::Chosen(Choice::Settings) => {
                     self.close_launcher();
                     self.open_settings(None);
@@ -683,6 +689,7 @@ impl State {
             qr: self.config.launcher.qr,
             intents: self.config.launcher.intents,
             ask: self.ai_source(),
+            documents: self.config.search.documents && self.search_running(),
         };
         let Some(panel) = self.launcher.as_mut() else {
             return;

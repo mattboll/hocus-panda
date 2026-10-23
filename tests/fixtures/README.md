@@ -14,3 +14,12 @@ mostly orange (with a blue corner), one blue.
 applications that open web links, mail, folders, text, pictures and PDF
 files (two web browsers), the system's `mimeapps.list` choosing some, and
 two autostart entries, one turned off the GNOME way.
+
+`search-home/` is the private home of the document search scenarios (#45),
+copied into a temporary directory by `home = "../fixtures/search-home"`:
+documents of every kind searched (Markdown, text, HTML, PDF, OpenDocument,
+Word) and a screenshot read by the OCR stand-in, beside what is never read
+(`.ssh` with a fake key, a project's `.env`, a `.pem` file; none holds a
+real secret). They were written from scratch by `make-search-home.py`
+(Python's standard library only), so they are the project's own; `.env` is
+added with `git add -f`, as many ignore files leave it out.

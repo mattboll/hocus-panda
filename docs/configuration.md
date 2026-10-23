@@ -190,6 +190,24 @@ model = ""                 # empty: asked of the provider at the first question 
                            # keys are in the keyring, never here: Settings → AI and agents, or
                            #   hocus msg ai-key claude < key.txt
 
+[search]                   # documents found from the command field, under "Documents" (#45)
+documents = true           # false: nothing is read, and the index kept is deleted
+folders = []               # e.g. ["~/Documents", "/srv/notes"]; empty: the documents, desktop and download
+                           #   folders (XDG user dirs), in the session only: nested or in tests, only the
+                           #   folders named here are searched
+screenshots = true         # the screenshots folder's pictures too, their text read by [screenshots] ocr
+exclude = []               # names left out, as globs: ["*.log", "drafts"]
+meaning = "local"          # search by meaning too, with vectors (embeddings) from the [ai] provider when it
+                           #   is on and can make them (ollama, llama.cpp's server, OpenAI-like; not
+                           #   Claude): "local" only from a model on this machine, "on" wherever [ai]
+                           #   points (the start of every document's text is sent there), "off" words only
+embedding_model = ""       # empty: the first model the provider lists with "embed" in its name
+                           #   (nomic-embed-text, mxbai-embed-large…); none: words only
+                           # never read, whatever this says: ~/.ssh, ~/.gnupg, keyrings, password stores
+                           #   (pass, KeePass .kdbx, Bitwarden, 1Password), browser and mail profiles,
+                           #   ~/.aws, ~/.kube, ~/.config/gcloud, hidden folders named for secrets, .env*,
+                           #   id_*, *.pem, *.key, *.p12, credentials*, secrets*; links are not followed
+
 [dock]                     # Super+D; shown on an empty desktop or after resting at the bottom edge
 enabled = true             # false: neither the dock nor its hint
 pinned = [                 # desktop entries, in order; those not installed are left out
@@ -286,6 +304,31 @@ positions = { DP-1 = [0, 0], eDP-1 = [320, 1440] }
 "Ctrl+Alt+Right" = "next-desktop all"
 "Alt+F4" = "none"            # removes a default
 ```
+
+## Document search
+
+`[search]` (#45) indexes the documents of its folders on two threads of
+their own, never the compositor's loop: text and Markdown, HTML, PDF (its
+text layer), OpenDocument and Word, Excel and PowerPoint files, and the
+screenshots folder's pictures through `[screenshots] ocr`. The indexer runs
+at the lowest priority (nice 19, which the I/O scheduler follows), in small
+batches with pauses between them, waits a minute after the session starts,
+waits while the laptop is on battery and goes on once on the charger, and
+looks at the folders again every half hour, reading only what changed (by
+date and size). Hidden files and folders are not searched; what is never
+read (see above) is not even opened, and symbolic links are never
+followed. The index (words, the start of each text for the line shown
+under a result, vectors) is kept in `$XDG_STATE_HOME/hocuspanda/search/`,
+readable by the user only; `documents = false` deletes it. `hocus msg
+search` says what the indexer does.
+
+Search by meaning sends the start of every document's text (a few
+thousand characters each) to the `[ai]` provider to get its vectors, and
+what is typed in the command field once typing stops. With `meaning =
+"local"` (the default) that happens only when the provider is on this
+machine; `meaning = "on"` lets a provider elsewhere (OpenAI…) read them.
+Claude makes no vectors: with it, documents are searched by their words.
+The settings' Search page is a later part of #67.
 
 ## Window rules
 

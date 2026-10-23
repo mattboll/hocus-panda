@@ -67,6 +67,11 @@ impl Provider {
     pub fn needs_key(self) -> bool {
         matches!(self, Self::OpenAi | Self::Claude)
     }
+
+    /// It makes embeddings (#45): Claude does not.
+    pub fn can_embed(self) -> bool {
+        self != Self::Claude
+    }
 }
 
 /// A question, and where it goes.
@@ -492,6 +497,127 @@ fn claude(
     })
 }
 
+/// A model that makes embeddings (#45), and where: ollama's
+/// `/api/embed`, or the `/v1/embeddings` OpenAI defined (which llama.cpp's
+/// server speaks when started with `--embeddings`).
+#[derive(Clone, PartialEq, Eq)]
+pub struct Embedder {
+    pub provider: Provider,
+    /// The provider's address, without a path.
+    pub url: String,
+    /// Empty: see [`pick_embedding_model`].
+    pub model: String,
+    pub key: Option<String>,
+}
+
+impl fmt::Debug for Embedder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Embedder")
+            .field("provider", &self.provider)
+            .field("url", &self.url)
+            .field("model", &self.model)
+            .field("key", &self.key.as_ref().map(|_| "…"))
+            .finish()
+    }
+}
+
+impl Embedder {
+    fn auth(&self) -> Option<String> {
+        self.key.as_ref().map(|k| format!("Bearer {k}"))
+    }
+}
+
+/// The model to embed with when the configuration names none: the first
+/// the provider lists that reads as one (`embed` in its name, or a known
+/// family). Blocking.
+pub fn pick_embedding_model(embedder: &Embedder) -> Result<String, AskError> {
+    let agent = agent();
+    let base = embedder.url.trim_end_matches('/');
+    let auth = embedder.auth();
+    let headers: Vec<(&str, &str)> = auth
+        .as_deref()
+        .map(|a| ("Authorization", a))
+        .into_iter()
+        .collect();
+    let (url, list, field) = match embedder.provider {
+        Provider::Ollama => (format!("{base}/api/tags"), "models", "name"),
+        Provider::LlamaCpp | Provider::OpenAi => (v1(base, "models"), "data", "id"),
+        Provider::Claude => return Err(AskError::NoModel),
+    };
+    let mut response = send(&agent, "GET", &url, &headers, None)?;
+    let text = response
+        .body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_string()
+        .map_err(|e| AskError::Failed(e.to_string()))?;
+    let value: Value = serde_json::from_str(&text).map_err(|e| AskError::Failed(e.to_string()))?;
+    let embeds = |name: &str| {
+        let name = name.to_lowercase();
+        ["embed", "bge", "minilm", "gte-", "e5-"]
+            .iter()
+            .any(|w| name.contains(w))
+    };
+    value[list]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m[field].as_str())
+        .find(|name| embeds(name))
+        .map(str::to_owned)
+        .ok_or(AskError::NoModel)
+}
+
+/// The vectors of `texts`, in their order, by the embedder's model.
+/// Blocking.
+pub fn embed(embedder: &Embedder, texts: &[String]) -> Result<Vec<Vec<f32>>, AskError> {
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let agent = agent();
+    let base = embedder.url.trim_end_matches('/');
+    let auth = embedder.auth();
+    let headers: Vec<(&str, &str)> = auth
+        .as_deref()
+        .map(|a| ("Authorization", a))
+        .into_iter()
+        .collect();
+    let body = json!({ "model": embedder.model, "input": texts });
+    let url = match embedder.provider {
+        Provider::Ollama => format!("{base}/api/embed"),
+        Provider::LlamaCpp | Provider::OpenAi => v1(base, "embeddings"),
+        Provider::Claude => return Err(AskError::NoModel),
+    };
+    let mut response = send(&agent, "POST", &url, &headers, Some(&body))?;
+    let text = response
+        .body_mut()
+        .with_config()
+        .limit(64 * 1024 * 1024)
+        .read_to_string()
+        .map_err(|e| AskError::Failed(e.to_string()))?;
+    let value: Value = serde_json::from_str(&text).map_err(|e| AskError::Failed(e.to_string()))?;
+    let vector = |v: &Value| -> Option<Vec<f32>> {
+        v.as_array()?
+            .iter()
+            .map(|x| x.as_f64().map(|x| x as f32))
+            .collect()
+    };
+    let vectors: Option<Vec<Vec<f32>>> = match embedder.provider {
+        Provider::Ollama => value["embeddings"]
+            .as_array()
+            .and_then(|all| all.iter().map(vector).collect::<Option<Vec<_>>>()),
+        _ => {
+            let mut data: Vec<&Value> = value["data"].as_array().into_iter().flatten().collect();
+            data.sort_by_key(|d| d["index"].as_u64().unwrap_or(0));
+            data.iter().map(|d| vector(&d["embedding"])).collect()
+        }
+    };
+    match vectors {
+        Some(v) if v.len() == texts.len() => Ok(v),
+        _ => Err(AskError::Failed(format!("{url}: no vectors in the answer"))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -694,6 +820,52 @@ mod tests {
         // llama.cpp's server answers without one.
         let nobody = question(Provider::LlamaCpp, "http://127.0.0.1:9".into(), None);
         assert_eq!(pick_model(&nobody), Ok(None));
+    }
+
+    #[test]
+    fn embeddings_come_in_order_from_ollama_and_openai_like_servers() {
+        let (url, asked) = serve(vec![
+            reply(
+                "application/json",
+                r#"{"models":[{"name":"llama3.2:latest"},{"name":"nomic-embed-text:latest"}]}"#,
+            ),
+            reply(
+                "application/json",
+                r#"{"embeddings":[[0.1,0.2],[0.3,0.4]]}"#,
+            ),
+        ]);
+        let mut e = Embedder {
+            provider: Provider::Ollama,
+            url,
+            model: String::new(),
+            key: None,
+        };
+        e.model = pick_embedding_model(&e).expect("a model");
+        assert_eq!(e.model, "nomic-embed-text:latest");
+        let v = embed(&e, &["a".into(), "b".into()]).expect("vectors");
+        assert_eq!(v, vec![vec![0.1, 0.2], vec![0.3, 0.4]]);
+        let asked = asked.lock().expect("a lock");
+        assert!(asked[1].starts_with("POST /api/embed"), "{asked:?}");
+        assert!(asked[1].contains(r#""input":["a","b"]"#), "{asked:?}");
+        let (url, asked) = serve(vec![reply(
+            "application/json",
+            r#"{"data":[{"index":1,"embedding":[2.0]},{"index":0,"embedding":[1.0]}]}"#,
+        )]);
+        let e = Embedder {
+            provider: Provider::OpenAi,
+            url: format!("{url}/v1"),
+            model: "text-embedding-3-small".into(),
+            key: Some("k".into()),
+        };
+        assert_eq!(
+            embed(&e, &["a".into(), "b".into()]),
+            Ok(vec![vec![1.0], vec![2.0]])
+        );
+        let asked = asked.lock().expect("a lock");
+        assert!(asked[0].starts_with("POST /v1/embeddings"), "{asked:?}");
+        assert!(asked[0].to_lowercase().contains("authorization: bearer k"));
+        assert!(!format!("{e:?}").contains("\"k\""), "never logged");
+        assert!(!Provider::Claude.can_embed());
     }
 
     #[test]

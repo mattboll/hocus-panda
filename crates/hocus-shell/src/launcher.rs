@@ -21,6 +21,11 @@
 //! or keep it in the notes. The other results stay below, under "Also".
 //! The actions it proposes (#197) come first: each shows what it will do,
 //! and runs only once confirmed.
+//!
+//! And documents (#45): what is typed is looked for in the documents
+//! indexed, off the loop; those found come under "Documents", after the
+//! applications, each with its folder and a line around the words that
+//! matched. Enter opens one with its default application.
 
 use std::time::Duration;
 
@@ -132,6 +137,17 @@ pub struct App {
     pub exec: Vec<String>,
 }
 
+/// A document the search found (#45).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Document {
+    pub path: String,
+    pub name: String,
+    /// The folder it is in, by its name.
+    pub folder: String,
+    /// A line around the words matched, those marked.
+    pub snippet: Vec<(String, bool)>,
+}
+
 /// What the user chose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Choice {
@@ -140,6 +156,8 @@ pub enum Choice {
     Copy(String),
     /// An address to open in the browser.
     Open(String),
+    /// A document, opened with its default application.
+    OpenFile(String),
     /// Something to show over the whole screen.
     Show(Showcase),
     /// The settings app.
@@ -322,6 +340,15 @@ pub struct Launcher {
     offers: Vec<Offer>,
     /// The proposal whose confirmation shows.
     confirming: Option<usize>,
+    /// Documents are searched for what is typed.
+    documents_on: bool,
+    /// Those found for the last query asked, or one before.
+    documents: Vec<Document>,
+    /// The last query asked for documents, and its id.
+    documents_query: String,
+    documents_asked: u64,
+    /// A query to ask, taken by the compositor.
+    documents_wanted: Option<(u64, String)>,
     now: Duration,
 }
 
@@ -494,6 +521,11 @@ impl Launcher {
             answer_changed: false,
             offers: Vec::new(),
             confirming: None,
+            documents_on: false,
+            documents: Vec::new(),
+            documents_query: String::new(),
+            documents_asked: 0,
+            documents_wanted: None,
             now: Duration::ZERO,
         }
     }
@@ -519,6 +551,8 @@ impl Launcher {
         fresh.notes = std::mem::take(&mut self.notes);
         fresh.ask = self.ask.take();
         fresh.asked = self.asked;
+        fresh.documents_on = self.documents_on;
+        fresh.documents_asked = self.documents_asked;
         *self = fresh;
     }
 
@@ -571,6 +605,32 @@ impl Launcher {
     pub fn set_providers(&mut self, enabled: &Enabled) {
         self.providers = providers(enabled);
         self.ask = enabled.ask.clone();
+        self.documents_on = enabled.documents;
+        if !enabled.documents {
+            self.documents.clear();
+        }
+    }
+
+    /// The query to look for in the documents, once: the compositor
+    /// hands it to the search.
+    pub fn take_documents_query(&mut self) -> Option<(u64, String)> {
+        self.documents_wanted.take()
+    }
+
+    /// The documents found for query `id`; those of an older query are
+    /// dropped. The line chosen stays chosen.
+    pub fn set_documents(&mut self, id: u64, documents: Vec<Document>) {
+        if id != self.documents_asked || !self.open || self.mode != Mode::Commands {
+            return;
+        }
+        if documents == self.documents {
+            return;
+        }
+        self.documents = documents;
+        let selected = self.selected;
+        self.search();
+        self.selected = selected.min(self.hits.len().saturating_sub(1));
+        self.show_selection();
     }
 
     /// Opens on an empty field.
@@ -764,6 +824,7 @@ impl Launcher {
                 if !query.is_empty() {
                     let cx = Context {
                         apps: &self.apps,
+                        documents: &self.documents,
                         lang: self.lang,
                     };
                     for provider in &self.providers {
@@ -899,16 +960,32 @@ impl Launcher {
             self.answer_tall = false;
             self.answer_scroll = 0.0;
         }
+        self.ask_documents(&query);
         self.hits = self.hits(&query);
         // Only the palette scrolls: it lists everything.
         if self.has_card() {
             self.hits.truncate(1 + MAX_ALSO);
         } else if !matches!(self.mode, Mode::Actions | Mode::Notes) {
-            self.hits.truncate(MAX_RESULTS);
+            fit(&mut self.hits, MAX_RESULTS);
         }
         self.selected = 0;
         self.first = 0;
         self.render();
+    }
+
+    /// Asks for the documents matching `query` when it changed; a query
+    /// too short to search shows none.
+    fn ask_documents(&mut self, query: &str) {
+        if !self.documents_on || self.mode != Mode::Commands || query.chars().count() < 2 {
+            self.documents.clear();
+            self.documents_query.clear();
+            return;
+        }
+        if query != self.documents_query {
+            self.documents_query = query.to_owned();
+            self.documents_asked += 1;
+            self.documents_wanted = Some((self.documents_asked, query.to_owned()));
+        }
     }
 
     /// Whether the first hit is drawn as the card: an answer, or a request
@@ -1024,6 +1101,7 @@ impl Launcher {
             None
         };
         self.fit(card.is_some());
+        let carded = card.is_some();
         for rule in [self.rule, self.also_rule] {
             self.tree.set_style(rule, rule_style(card.is_some()));
             self.tree.set_look(
@@ -1113,7 +1191,19 @@ impl Launcher {
                 ),
             );
         }
+        let mut captioned = false;
         for (index, hit) in hits {
+            if let Choice::OpenFile(path) = &hit.choice {
+                if !captioned && !carded {
+                    captioned = true;
+                    self.add_caption(self.lang.documents_caption(), &theme);
+                }
+                let document = self.documents.iter().find(|d| d.path == *path).cloned();
+                if let Some(document) = document {
+                    self.add_document_row(index, &document, row_height, &theme);
+                    continue;
+                }
+            }
             let (name, kind) = (hit.title.clone(), hit.kind.clone());
             let color = hit.color.unwrap_or(theme.colors.accent);
             let Some(row) = self.tree.add(
@@ -1204,6 +1294,139 @@ impl Launcher {
             self.row_hits.push(index);
         }
         self.show_selection();
+    }
+
+    /// A group's name above its rows, as "Also".
+    fn add_caption(&mut self, text: &str, theme: &Theme) {
+        if let Some(caption) = self.tree.add(
+            self.list,
+            Style {
+                padding: Insets {
+                    top: 4.0,
+                    bottom: 4.0,
+                    left: 16.0,
+                    ..Insets::default()
+                },
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        ) {
+            let _ = self.tree.add(
+                caption,
+                Style::default(),
+                Kind::text(text.to_uppercase(), theme.text.caption),
+            );
+        }
+    }
+
+    /// A document found: its name over a line around the words matched,
+    /// those in the text's colour; its folder on the right.
+    fn add_document_row(&mut self, index: usize, document: &Document, height: f32, theme: &Theme) {
+        let Some(row) = self.tree.add(
+            self.list,
+            Style {
+                direction: Direction::Row,
+                height: Length::Px(height),
+                padding: Insets::symmetric(0.0, 16.0),
+                gap: 12.0,
+                align: Align::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: (index == self.selected).then_some(Paint::SurfaceHover),
+                radius: theme.radii.medium,
+                ..Look::default()
+            }),
+        ) else {
+            return;
+        };
+        let line: String = document.snippet.iter().map(|(t, _)| t.as_str()).collect();
+        let said = self.lang.document(&document.name, &document.folder, &line);
+        self.tree.set_clickable(row, &said);
+        if let Some(square) = self.tree.add(
+            row,
+            Style {
+                width: Length::Px(26.0),
+                height: Length::Px(26.0),
+                align: Align::Center,
+                justify: hocus_ui::Justify::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Rgba(crate::providers::DOCUMENT_COLOR)),
+                radius: 7.0,
+                ..Look::default()
+            }),
+        ) && let Some(icon) = Icon::stroked(icons::FILE, 16.0, 1.8)
+        {
+            let _ = self.tree.add(
+                square,
+                Style::default(),
+                Kind::Icon {
+                    icon,
+                    color: Paint::Rgba(hocus_ui::Color::rgb(0xFF, 0xFF, 0xFF)),
+                    label: None,
+                },
+            );
+        }
+        let Some(text) = self.tree.add(
+            row,
+            Style {
+                width: Length::Fill,
+                gap: 2.0,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        ) else {
+            return;
+        };
+        let _ = self.tree.add(
+            text,
+            Style::default(),
+            Kind::text_line(document.name.clone(), theme.text.body.with_weight(600)),
+        );
+        if let Some(snippet) = self.tree.add(
+            text,
+            Style {
+                direction: Direction::Row,
+                clip: true,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        ) {
+            let pieces = document.snippet.len();
+            for (i, (piece, matched)) in document.snippet.iter().enumerate() {
+                let style = if *matched {
+                    theme.text.label.with_weight(700)
+                } else {
+                    theme.text.label.with_weight(400).with_color(Paint::Muted)
+                };
+                // The last piece takes what is left, cut with "…".
+                let width = if i + 1 == pieces {
+                    Length::Fill
+                } else {
+                    Length::Auto
+                };
+                let _ = self.tree.add(
+                    snippet,
+                    Style {
+                        width,
+                        ..Style::default()
+                    },
+                    Kind::text_line(piece.clone(), style),
+                );
+            }
+        }
+        let _ = self.tree.add(
+            row,
+            Style::default(),
+            Kind::text(
+                document.folder.clone(),
+                theme.text.label.with_weight(500).with_color(Paint::Muted),
+            ),
+        );
+        self.rows.push(row);
+        self.row_hits.push(index);
     }
 
     /// An action's keys as caps, or "no shortcut".
@@ -1711,6 +1934,49 @@ fn confirmation(offer: &Offer, lang: Lang) -> (Card, Vec<CardAction>) {
     )
 }
 
+/// The command field's results within `max` rows: with documents, a row
+/// goes to their caption, they keep up to three, and applications make
+/// room from the last.
+fn fit(hits: &mut Vec<Hit>, max: usize) {
+    const MAX_DOCUMENTS: usize = 3;
+    let is_document = |h: &Hit| matches!(h.choice, Choice::OpenFile(_));
+    let documents = hits.iter().filter(|h| is_document(h)).count();
+    if documents == 0 {
+        hits.truncate(max);
+        return;
+    }
+    let max = max - 1;
+    let keep = documents.min(MAX_DOCUMENTS).min(max);
+    let mut seen = 0;
+    hits.retain(|h| {
+        if is_document(h) {
+            seen += 1;
+            seen <= keep
+        } else {
+            true
+        }
+    });
+    while hits.len() > max {
+        match hits
+            .iter()
+            .rposition(|h| matches!(h.choice, Choice::Launch(_)))
+        {
+            Some(i) => {
+                hits.remove(i);
+            }
+            None => {
+                // Others before them: the documents' place stays.
+                match hits.iter().rposition(|h| !is_document(h)) {
+                    Some(i) => {
+                        hits.remove(i);
+                    }
+                    None => hits.truncate(max),
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2032,6 +2298,91 @@ mod tests {
         assert_eq!(y(&l, "• step 30"), last, "back to the top");
         assert_eq!(l.size(), size, "the card does not grow");
         assert!(!l.wheel(Point::new(2.0, 2.0), 50.0), "not outside the card");
+    }
+
+    fn document(name: &str) -> Document {
+        Document {
+            path: format!("/home/alex/Documents/{name}"),
+            name: name.into(),
+            folder: "Documents".into(),
+            snippet: vec![
+                ("The ".into(), false),
+                ("bamboo".into(), true),
+                (" harvest".into(), false),
+            ],
+        }
+    }
+
+    #[test]
+    fn documents_found_come_after_the_applications_and_enter_opens_one() {
+        let mut l = launcher();
+        l.set_providers(&Enabled {
+            documents: true,
+            ..Enabled::default()
+        });
+        l.open();
+        l.text("f");
+        assert_eq!(l.take_documents_query(), None, "one letter is too little");
+        l.text("i");
+        assert_eq!(l.take_documents_query(), Some((1, "fi".into())));
+        assert_eq!(l.take_documents_query(), None, "asked once");
+        l.text("l");
+        let (id, query) = l.take_documents_query().expect("asked again");
+        assert_eq!(query, "fil");
+        // An older query's answer is dropped.
+        l.set_documents(id - 1, vec![document("old.md")]);
+        assert!(l.documents.is_empty());
+        l.set_documents(id, vec![document("files.odt"), document("filters.pdf")]);
+        let dump = l.access().dump();
+        assert!(dump.contains("DOCUMENTS"), "{dump}");
+        assert!(
+            dump.contains("files.odt, in Documents: The bamboo harvest"),
+            "{dump}"
+        );
+        let kinds: Vec<&str> = l
+            .hits
+            .iter()
+            .map(|h| match h.choice {
+                Choice::Launch(_) => "app",
+                Choice::OpenFile(_) => "document",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["app", "document", "document", "other"]);
+        l.key(Key::Down);
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![LauncherEvent::Chosen(Choice::OpenFile(
+                "/home/alex/Documents/files.odt".into()
+            ))]
+        );
+    }
+
+    #[test]
+    fn documents_keep_their_place_among_many_applications() {
+        let mut hits: Vec<Hit> = (0..9)
+            .map(|i| Hit {
+                title: format!("App {i}"),
+                kind: String::new(),
+                color: None,
+                choice: Choice::Launch(app(&format!("App{i}"), None)),
+            })
+            .collect();
+        for name in ["a.md", "b.md", "c.md", "d.md"] {
+            hits.push(Hit {
+                title: name.into(),
+                kind: String::new(),
+                color: None,
+                choice: Choice::OpenFile(name.into()),
+            });
+        }
+        fit(&mut hits, MAX_RESULTS);
+        assert_eq!(hits.len(), MAX_RESULTS - 1, "a row for the caption");
+        let documents = hits
+            .iter()
+            .filter(|h| matches!(h.choice, Choice::OpenFile(_)))
+            .count();
+        assert_eq!(documents, 3);
     }
 
     #[test]

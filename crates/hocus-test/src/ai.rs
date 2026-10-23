@@ -4,8 +4,14 @@
 //! (`/v1/chat/completions`, which llama.cpp's server speaks) and Claude's
 //! Messages API (`/v1/messages`, refused without a key), lists its models
 //! (`/v1/models`, newest first: `claude-sonnet-9`, `claude-opus-9-1`,
-//! `claude-opus-9`, `claude-haiku-9`), and keeps what it was asked: path,
-//! headers, body.
+//! `claude-opus-9`, `claude-haiku-9`, then `text-embedding-test`), makes
+//! embeddings (`/api/embed` as ollama, which lists `test-embed` after
+//! `test-model`, and `/v1/embeddings`), and keeps what it was asked:
+//! path, headers, body.
+//!
+//! Its vectors stand for meaning crudely: each word counts in one of 64
+//! dimensions, and a few words of the same meaning, in English and
+//! French, share theirs ([`SYNONYMS`]).
 
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -102,6 +108,45 @@ impl Drop for Server {
     }
 }
 
+/// Words of one meaning, the first standing for all.
+pub const SYNONYMS: &[&[&str]] = &[
+    &["invoice", "facture", "bill", "receipt", "recu"],
+    &["holiday", "vacances", "vacation", "conges"],
+    &["car", "voiture", "automobile"],
+];
+
+/// The stand-in's vector of `text`.
+pub fn vector(text: &str) -> Vec<f32> {
+    let mut v = vec![0.0f32; 64];
+    for word in text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 2)
+    {
+        let word: String = word
+            .to_lowercase()
+            .chars()
+            .map(|c| match c {
+                'à' | 'â' => 'a',
+                'é' | 'è' | 'ê' => 'e',
+                'ç' => 'c',
+                'ô' => 'o',
+                c => c,
+            })
+            .collect();
+        // A word with a meaning of its own weighs more, as a model would.
+        let (word, weight) = SYNONYMS
+            .iter()
+            .find(|group| group.contains(&word.as_str()))
+            .map_or((word.clone(), 1.0), |group| (group[0].to_owned(), 3.0));
+        // FNV-1a: the same dimension for the same word, every time.
+        let hash = word.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
+        });
+        v[(hash % 64) as usize] += weight;
+    }
+    v
+}
+
 fn json_string(s: &str) -> String {
     serde_json::Value::String(s.to_owned()).to_string()
 }
@@ -161,15 +206,39 @@ fn serve(
             return whole(
                 &mut stream,
                 "200 OK",
-                r#"{"models":[{"name":"test-model"}]}"#,
+                r#"{"models":[{"name":"test-model"},{"name":"test-embed"}]}"#,
             );
         }
         "/v1/models" => {
             return whole(
                 &mut stream,
                 "200 OK",
-                r#"{"data":[{"id":"claude-sonnet-9","type":"model"},{"id":"claude-opus-9-1","type":"model"},{"id":"claude-opus-9","type":"model"},{"id":"claude-haiku-9","type":"model"}],"has_more":false}"#,
+                r#"{"data":[{"id":"claude-sonnet-9","type":"model"},{"id":"claude-opus-9-1","type":"model"},{"id":"claude-opus-9","type":"model"},{"id":"claude-haiku-9","type":"model"},{"id":"text-embedding-test","type":"model"}],"has_more":false}"#,
             );
+        }
+        "/api/embed" | "/v1/embeddings" => {
+            let asked: serde_json::Value =
+                serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+            let texts: Vec<String> = match &asked["input"] {
+                serde_json::Value::String(s) => vec![s.clone()],
+                serde_json::Value::Array(all) => all
+                    .iter()
+                    .filter_map(|t| t.as_str().map(str::to_owned))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let vectors: Vec<Vec<f32>> = texts.iter().map(|t| vector(t)).collect();
+            let answer = if path == "/api/embed" {
+                serde_json::json!({ "model": asked["model"], "embeddings": vectors })
+            } else {
+                let data: Vec<serde_json::Value> = vectors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| serde_json::json!({ "index": i, "embedding": v }))
+                    .collect();
+                serde_json::json!({ "data": data })
+            };
+            return whole(&mut stream, "200 OK", &answer.to_string());
         }
         "/api/chat" => (
             "application/x-ndjson",

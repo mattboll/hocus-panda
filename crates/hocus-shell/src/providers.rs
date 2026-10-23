@@ -9,7 +9,7 @@ use crate::{
     calc, fuzzy,
     i18n::Lang,
     intents,
-    launcher::{App, Choice, Showcase},
+    launcher::{App, Choice, Document, Showcase},
     toasts::app_color,
     units,
 };
@@ -29,6 +29,8 @@ pub struct Hit {
 #[derive(Debug)]
 pub struct Context<'a> {
     pub apps: &'a [App],
+    /// Documents found for the query (#45), as the search answered.
+    pub documents: &'a [Document],
     pub lang: Lang,
 }
 
@@ -54,6 +56,8 @@ pub struct Enabled {
     pub intents: bool,
     /// Who answers what is asked; `None`: nothing is offered to ask.
     pub ask: Option<Source>,
+    /// Documents searched for what is typed (#45).
+    pub documents: bool,
 }
 
 impl Default for Enabled {
@@ -68,6 +72,7 @@ impl Default for Enabled {
             qr: true,
             intents: true,
             ask: None,
+            documents: false,
         }
     }
 }
@@ -102,6 +107,9 @@ pub fn providers(enabled: &Enabled) -> Vec<Box<dyn Provider>> {
     out.push(Box::new(Settings));
     out.push(Box::new(SessionActions));
     out.push(Box::new(Apps));
+    if enabled.documents {
+        out.push(Box::new(Documents));
+    }
     if let Some(source) = &enabled.ask {
         out.push(Box::new(Ask {
             source: source.clone(),
@@ -378,6 +386,28 @@ impl Provider for Apps {
     }
 }
 
+/// The documents the search found for what is typed (#45), after the
+/// applications.
+struct Documents;
+
+/// Their square's colour.
+pub const DOCUMENT_COLOR: Color = Color::rgb(0x3E, 0x6E, 0xA8);
+
+impl Provider for Documents {
+    fn name(&self) -> &'static str {
+        "documents"
+    }
+
+    fn hits(&self, _query: &str, cx: &Context<'_>, out: &mut Vec<Hit>) {
+        out.extend(cx.documents.iter().map(|d| Hit {
+            title: d.name.clone(),
+            kind: d.folder.clone(),
+            color: Some(DOCUMENT_COLOR),
+            choice: Choice::OpenFile(d.path.clone()),
+        }));
+    }
+}
+
 /// `settings`, `réglages`: the settings app.
 struct Settings;
 
@@ -500,6 +530,7 @@ mod tests {
     fn hits(query: &str, enabled: &Enabled) -> Vec<Hit> {
         let cx = Context {
             apps: &[],
+            documents: &[],
             lang: Lang::En,
         };
         let mut out = Vec::new();

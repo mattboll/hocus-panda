@@ -1,0 +1,126 @@
+# Document search (#45): the documents of a folder of a private home (Markdown,
+# HTML, PDF, OpenDocument, Word) and the text of its screenshots (read by an
+# OCR stand-in) are found by their words from the command field, under
+# "Documents", with their folder and the words matched; Enter opens one with
+# its default application (xdg-open, a stand-in here).
+description = "Words typed in the command field find documents of every kind and screenshots by their text, and Enter opens the one chosen"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+home = "../fixtures/search-home"
+child_env = { PATH = "{scenario_dir}/circle/bin:/usr/bin:/bin" }
+
+[[step]]
+config = """
+[search]
+folders = ["{home}/Documents"]
+
+[screenshots]
+folder = "{home}/Pictures/Screenshots"
+ocr = "{scenario_dir}/circle/bin/ocr"
+"""
+
+[[step]]
+expect_search = { state = "ready", documents = 8, never_read = 3, unreadable = 0 }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "panda"
+
+# Under "Documents": the name, then a line with the words matched.
+[[step]]
+expect_ui = { label = "DOCUMENTS" }
+
+[[step]]
+expect_ui = { label = "Panda care.html, in Documents: Panda care Feed the pandas at dawn & dusk.", selected = true }
+
+[[step]]
+expect_ui = { label = "Quarterly report.pdf, in Documents: Quarterly report Visitors to the panda house rose by 12 percent." }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "search-documents.png" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "greenhouse"
+
+[[step]]
+expect_ui = { label = "Greenhouse minutes.odt, in Documents: Greenhouse minutes We agreed to water the ferns twice a week and to open the roof on warm days." }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "linux input"
+
+[[step]]
+expect_ui = { label = "Screenshot build error.png, in Screenshots: fatal error: 'linux/input.h' file not found" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "zookeeper"
+
+[[step]]
+expect_ui = { label = "Letter to the keeper.docx, in Documents: Dear keeper, Thank you for the zookeeper training last Tuesday.", selected = true }
+
+# Enter opens it with its default application.
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "DOCUMENTS", shown = false }
+
+[[step]]
+expect_runtime_file = { name = "xdg-open", lines = 1, contains = ["/Documents/Letter to the keeper.docx"] }
+
+# What is never read is not found: not even its name.
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "bamboo"
+
+[[step]]
+expect_ui = { label = "Bamboo harvest.md, in Documents: Bamboo harvest The spring harvest gave 340 kg of fresh shoots. Store them cool and dry." }
+
+[[step]]
+expect_ui = { label = "Invoice March.txt, in Documents: Invoice for 120 kg of bamboo shoots, delivered on 3 March." }
+
+[[step]]
+expect_ui = { label = "plan.md, in project: Plan the bamboo nursery." }
+
+[[step]]
+expect_ui = { label = "notes.txt", shown = false }
+
+[[step]]
+expect_ui = { label = "id_ed25519", shown = false }
+
+[[step]]
+expect_ui = { label = "server.pem", shown = false }
+
+[[step]]
+expect_budget = { max_ms = 100 }

@@ -47,6 +47,10 @@ config_dirs = ["../fixtures/system/config"]
 # What started applications inherit instead of the test's environment
 # (PATH is added when missing; {scenario_dir} for stand-in programs)
 child_env = { LD_PRELOAD = "/tmp/not-a-library.so" }
+# A home of its own: this folder (relative to the scenario) copied into a
+# fresh temporary directory, {home} in configuration and `unreadable` steps;
+# documents are searched there, never in the developer's
+home = "../fixtures/search-home"
 
 [[step]]
 open = { app_id = "back", size = [400, 300], color = "#3399ff" }
@@ -116,8 +120,10 @@ Steps, one per `[[step]]` table:
 | `herdr = { name?, agents = [{ name, status }] }` | a herdr of the test's own (never the user's) serves these agents (`working`, `blocked`, `done`, `idle`) on a socket in the compositor's runtime directory, `{herdr}` in later configuration; several have names, `{herdr:NAME}` |
 | `herdr_status = { agent, status, label? }` | an agent's status changes in the herdr serving it (agents' names are unique in a scenario) once the compositor follows that agent, with what its integration says (the question, while blocked) |
 | `expect_herdr = "agent.send_keys refacto enter"` | a herdr was asked this (`agent.focus NAME`, `agent.send_keys NAME KEYS`, `agent.prompt NAME TEXT`) |
-| `ai_server = { pieces = […], delay_ms?, first_ms? }` | an AI provider on 127.0.0.1 (ollama's API, OpenAI's chat completions, Claude's Messages API, which refuses without a key; `/v1/models` lists `claude-sonnet-9`, `claude-opus-9-1`, `claude-opus-9`, `claude-haiku-9`, newest first) answers every question with these pieces, `delay_ms` before each and `first_ms` more before the first; its address is `{ai}` in later configuration and `type` steps |
+| `ai_server = { pieces = […], delay_ms?, first_ms? }` | an AI provider on 127.0.0.1 (ollama's API, OpenAI's chat completions, Claude's Messages API, which refuses without a key; `/v1/models` lists `claude-sonnet-9`, `claude-opus-9-1`, `claude-opus-9`, `claude-haiku-9`, newest first) answers every question with these pieces, `delay_ms` before each and `first_ms` more before the first; it makes embeddings too (`/api/embed`, listing `test-embed`, and `/v1/embeddings`): a word counts in one of 64 dimensions, and "invoice", "facture", "bill"… share one, as "holiday" and "vacances", "car" and "voiture" do; its address is `{ai}` in later configuration and `type` steps |
 | `ai_key = { provider, key }` | an AI provider's key is kept, as `hocus msg ai-key` does (in a sealed file of the state directory: never the developer's keyring) |
+| `expect_search = { state?, documents?, embedded?, never_read?, unreadable?, meaning? }` | the document search's indexer (#45), once so, within 30 s of real time (it works on threads of its own): `off`, `waiting`, `paused` (on battery), `indexing` or `ready`; documents indexed, those with vectors, entries left out as never read (not opened) in its last look, entries that failed to read, whether search by meaning works |
+| `unreadable = "{home}/Documents/.ssh"` | makes a file or folder of the scenario's home unreadable (mode 000) until the end: reading it would fail, and count as `unreadable` |
 | `expect_ai = { path?, contains? = […], header? }` | the AI provider was asked, once so: on this path, its body holding these strings, with this header (`name: value`, the name in lower case) |
 | `calendar_password = { id, password }` | the settings keep this account's (`user@url`) password |
 | `expect_calendars = { events?, secrets?, contains? = […], error? }` | the calendars, once so: events from now on, passwords kept, events by title, whether an account failed its last sync |

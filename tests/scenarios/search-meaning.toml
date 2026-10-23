@@ -1,0 +1,84 @@
+# Document search by meaning (#45): with the AI on and a local model that
+# embeds (ollama's API, a stand-in on 127.0.0.1 whose vectors know that
+# "facture" and "invoice" mean the same), each document's start gets a
+# vector; a query is embedded once typing stops, and the documents close in
+# meaning are fused with those matching by words. With meaning off, words
+# alone: "facture" finds nothing.
+description = "With a local model that embeds, \"facture\" finds the invoice by its meaning; with meaning off, it does not"
+outputs = ["1280x800"]
+shell = true
+home = "../fixtures/search-home"
+
+[[step]]
+ai_server = { pieces = ["Not asked."] }
+
+[[step]]
+config = """
+[ai]
+enabled = true
+provider = "ollama"
+url = "{ai}"
+
+[search]
+folders = ["{home}/Documents"]
+"""
+
+[[step]]
+expect_search = { state = "ready", documents = 7, embedded = 7, meaning = true }
+
+[[step]]
+expect_ai = { path = "/api/embed", contains = ["test-embed", "Invoice for 120 kg of bamboo shoots"] }
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "facture"
+
+[[step]]
+expect_ui = { label = "Invoice March.txt, in Documents: Invoice for 120 kg of bamboo shoots, delivered on 3 March." }
+
+[[step]]
+expect_ai = { path = "/api/embed", contains = ["\"input\":[\"facture\"]"] }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "search-meaning.png" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+config = """
+[ai]
+enabled = true
+provider = "ollama"
+url = "{ai}"
+
+[search]
+folders = ["{home}/Documents"]
+meaning = "off"
+"""
+
+[[step]]
+expect_search = { state = "ready", meaning = false }
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "facture"
+
+[[step]]
+expect_ui = { label = "Search the web for “facture”" }
+
+[[step]]
+expect_ui = { label = "DOCUMENTS", shown = false }

@@ -3261,6 +3261,7 @@ mod tests {
     fn every_icon_parses() {
         for path in [
             icons::MINIMIZE,
+            icons::FILE,
             icons::MAXIMIZE,
             icons::RESTORE,
             icons::CLOSE,
