@@ -595,6 +595,11 @@ suspends and wakes.
   pointer, press keys, plug an output, advance virtual time) and
   expectations (scene state, focus, positions, screenshot within tolerance).
   They run headless on a virtual clock, so animations are deterministic.
+  Nothing then depends on real time: the timers that wake the loop when
+  something falls due are not set (what is due is seen as the clock
+  advances), and a moment starts from the compositor's own events (a frame
+  served, a key handled), not from when a client's thread got its request
+  in (#212).
   Each runs on its own compositor in-process, through the control API;
   the format is described in `tests/scenarios/README.md`.
 - **Test clients**: a small in-repo client that draws known colours and

@@ -1385,9 +1385,10 @@ impl Run<'_> {
                     .parent()
                     .context("no runtime directory")?
                     .to_path_buf();
-                std::fs::write(
-                    dir.join("adb-phone"),
-                    format!("{} {}\n", code.name, code.password),
+                // Whole: the stand-in reads it as soon as it is there.
+                hocus_compositor::write_whole(
+                    &dir.join("adb-phone"),
+                    format!("{} {}\n", code.name, code.password).as_bytes(),
                 )?;
                 Ok(())
             }
@@ -1514,12 +1515,11 @@ impl Run<'_> {
                     move || crate::screencopy::share(&socket, stop)
                 });
                 self.sharing = Some((stop, thread));
-                // Its first copy is asked for.
-                let until = Instant::now() + Duration::from_millis(100);
-                while Instant::now() < until {
-                    self.compositor.dispatch(Duration::from_millis(5))?;
-                }
-                Ok(())
+                // Its first copy is asked for, at this moment of the
+                // virtual clock however long its thread takes (#212).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, Headless::sharing)
+                    .context("the sharing tool never asked for a copy")
             }
             Step::AskShare(_) => {
                 let socket = self.compositor.api_socket().to_path_buf();

@@ -84,7 +84,7 @@ impl State {
                 let now = self.clock.now();
                 self.triggers.resting = Some((name, corner, now, false));
                 let delay = Duration::from_millis(u64::from(self.config.hot_corners.delay_ms));
-                if let Some(handle) = &self.loop_handle {
+                if let Some(handle) = self.waker() {
                     let woken = handle.insert_source(Timer::from_duration(delay), |_, _, app| {
                         app.state.needs_redraw = true;
                         TimeoutAction::Drop

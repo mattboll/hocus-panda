@@ -124,3 +124,77 @@ fn the_chooser_gets_the_screen_or_window_clicked_or_nothing() -> anyhow::Result<
     assert_eq!(answer(&mut compositor, asking)?, None);
     Ok(())
 }
+
+/// When sharing ends is timed from the frames the tool was given, not from
+/// when its thread got round to asking again (#212): the toast that sums
+/// up what was held comes at the same virtual time however late the tool
+/// asks.
+#[test]
+fn sharing_ends_on_the_compositors_time_not_the_tools() -> anyhow::Result<()> {
+    let prompt = summary_shown_at(0)?;
+    let late = summary_shown_at(30)?;
+    assert_eq!(prompt, late, "the summary came at a time the tool chose");
+    Ok(())
+}
+
+/// The virtual time the summary toast shows, the sharing tool asking for
+/// its second copy `late_frames` frames after its first was served.
+fn summary_shown_at(late_frames: u32) -> anyhow::Result<Duration> {
+    use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+    const SUMMARY: &str = "1 notification while you were sharing";
+    let mut compositor = Headless::start_options(hocus_compositor::HarnessOptions {
+        headless: HeadlessConfig {
+            renderer: RendererChoice::Pixman,
+            ..Default::default()
+        },
+        api_permission: hocus_api::Permission::Test,
+        watchdog: None,
+        xwayland: false,
+        shell: true,
+        session_bus: None,
+        system_bus: None,
+        data_dirs: None,
+        child_env: None,
+        polkit_helper: None,
+        motion: false,
+        first_run: false,
+    })?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let (pace, paced) = std::sync::mpsc::channel();
+    let tool = std::thread::spawn({
+        let socket = compositor.socket_path().to_path_buf();
+        let stop = stop.clone();
+        move || hocus_test::screencopy::share_paced(&socket, stop, Some(paced))
+    });
+    // Its first copy is asked for, then served with the next frame.
+    compositor.dispatch_until(CLIENT_TIMEOUT, Headless::sharing)?;
+    compositor.advance(FRAME * 2)?;
+    compositor.on_loop("test", |state| state.shell_toast("Held", "while sharing"));
+    settle(&mut compositor)?;
+    compositor.advance(FRAME * late_frames)?;
+    pace.send(())?;
+    settle(&mut compositor)?;
+    stop.store(true, Ordering::Relaxed);
+    let deadline = Instant::now() + CLIENT_TIMEOUT;
+    while !tool.is_finished() {
+        anyhow::ensure!(Instant::now() < deadline, "the tool never stopped");
+        compositor.dispatch(Duration::from_millis(5))?;
+    }
+    tool.join()
+        .map_err(|_| anyhow::anyhow!("the tool panicked"))??;
+    let deadline = compositor.now() + Duration::from_secs(5);
+    while find(&mut compositor, SUMMARY)?.is_none() {
+        anyhow::ensure!(compositor.now() < deadline, "no summary");
+        compositor.advance(FRAME)?;
+    }
+    Ok(compositor.now())
+}
+
+/// Lets the tool's requests in on real time, the virtual clock still.
+fn settle(compositor: &mut Headless) -> anyhow::Result<()> {
+    let until = Instant::now() + Duration::from_millis(100);
+    while Instant::now() < until {
+        compositor.dispatch(Duration::from_millis(5))?;
+    }
+    Ok(())
+}

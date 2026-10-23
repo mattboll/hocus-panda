@@ -254,7 +254,7 @@ impl State {
         if at_edge && self.dock.edge_since.is_none() {
             self.dock.edge_since = Some(now);
             // Woken when the rest is long enough.
-            if let Some(handle) = &self.loop_handle {
+            if let Some(handle) = self.waker() {
                 let woken = handle.insert_source(Timer::from_duration(REST), |_, _, app| {
                     app.state.needs_redraw = true;
                     TimeoutAction::Drop

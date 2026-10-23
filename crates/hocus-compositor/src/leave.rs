@@ -138,7 +138,7 @@ impl State {
             what,
             Stage::CountingDown(seconds),
         );
-        let tick = self.loop_handle.as_ref().and_then(|handle| {
+        let tick = self.waker().and_then(|handle| {
             handle
                 .insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, app| {
                     app.state.needs_redraw = true;

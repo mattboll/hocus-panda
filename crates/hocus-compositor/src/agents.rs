@@ -197,7 +197,7 @@ impl State {
         self.agent_changes(changes);
         // A rest waits to show: the loop wakes when it is due.
         let due = self.agents.board.deadline();
-        if let (Some(at), Some(handle)) = (due, &self.loop_handle)
+        if let (Some(at), Some(handle)) = (due, self.waker())
             && due != self.agents.waking
         {
             let timer = Timer::from_duration(at.saturating_sub(now));

@@ -20,6 +20,9 @@ use smithay::{
 
 use crate::{App, BackendState, State};
 
+/// How long each screen's name shows when identifying them.
+const IDENTIFY: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// What a backend knows of one of its screens, on or off.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Head {
@@ -513,18 +516,28 @@ impl State {
             })
             .collect();
         self.needs_redraw = true;
-        if let Some(handle) = &self.loop_handle {
-            let cleared = handle.insert_source(
-                Timer::from_duration(std::time::Duration::from_secs(3)),
-                |_, _, app| {
-                    app.state.identifying.clear();
-                    app.state.needs_redraw = true;
-                    TimeoutAction::Drop
-                },
-            );
-            if let Err(err) = cleared {
-                tracing::warn!(%err.error, "could not time the screens' names");
+        // On the compositor's clock, as every moment: a timer on real time
+        // would take them away whenever it fired, in a test too (#212).
+        self.identifying_until = Some(self.clock.now() + IDENTIFY);
+        if let Some(handle) = self.waker() {
+            let woken = handle.insert_source(Timer::from_duration(IDENTIFY), |_, _, _| {
+                TimeoutAction::Drop
+            });
+            if let Err(err) = woken {
+                tracing::warn!(%err.error, "the screens' names will go on the next event");
             }
+        }
+    }
+
+    /// After each dispatch: the screens' names go when their time is up.
+    pub fn refresh_identify(&mut self) {
+        if self
+            .identifying_until
+            .is_some_and(|until| self.clock.now() >= until)
+        {
+            self.identifying_until = None;
+            self.identifying.clear();
+            self.needs_redraw = true;
         }
     }
 

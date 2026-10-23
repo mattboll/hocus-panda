@@ -125,9 +125,15 @@ impl State {
         }
     }
 
-    /// Minutes the user's clock is ahead of UTC.
+    /// Minutes the user's clock is ahead of UTC, at the user's time (the
+    /// virtual one in tests, whose offset is then not the machine's day's).
     fn wall_offset_minutes(&self) -> i32 {
-        self.wall.zone().to_offset(jiff::Timestamp::now()).seconds() / 60
+        let zone = self.wall.zone();
+        self.wall_civil()
+            .to_zoned(zone.clone())
+            .map_or_else(|_| zone.to_offset(jiff::Timestamp::now()), |z| z.offset())
+            .seconds()
+            / 60
     }
 
     /// Whether night light shows now: the schedule, unless the user said
@@ -207,7 +213,7 @@ impl State {
         if self.comfort.night.ticking {
             return;
         }
-        let Some(handle) = &self.loop_handle else {
+        let Some(handle) = self.waker() else {
             return;
         };
         let ticking = handle.insert_source(Timer::from_duration(Duration::ZERO), |_, _, app| {

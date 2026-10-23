@@ -98,12 +98,14 @@ pub fn start(
     state.calendar.news = Some(news.clone());
     state.calendar.next_sync = Some(state.clock.now() + FIRST_SYNC);
     // Wakes the loop: syncs and reminders fall due on the clock.
-    let ticking = handle.insert_source(Timer::from_duration(FIRST_SYNC), |_, _, app| {
-        app.state.needs_redraw = true;
-        TimeoutAction::ToDuration(Duration::from_secs(30))
-    });
-    if let Err(err) = ticking {
-        tracing::warn!(%err.error, "reminders will come only when something happens");
+    if !state.clock.is_virtual() {
+        let ticking = handle.insert_source(Timer::from_duration(FIRST_SYNC), |_, _, app| {
+            app.state.needs_redraw = true;
+            TimeoutAction::ToDuration(Duration::from_secs(30))
+        });
+        if let Err(err) = ticking {
+            tracing::warn!(%err.error, "reminders will come only when something happens");
+        }
     }
     let Some(dir) = dir else {
         return;

@@ -58,6 +58,9 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
     state.updates.news = Some(news);
     state.updates.next_look = Some(state.clock.now() + FIRST_LOOK);
     // Wakes the loop now and then: looks fall due on the clock.
+    if state.clock.is_virtual() {
+        return;
+    }
     let ticking = handle.insert_source(Timer::from_duration(FIRST_LOOK), |_, _, app| {
         app.state.needs_redraw = true;
         TimeoutAction::ToDuration(Duration::from_secs(600))
