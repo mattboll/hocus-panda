@@ -1,7 +1,8 @@
 //! Google calendars through GNOME Online Accounts (#137). Without GOA the
 //! session shows nothing of it and logs nothing about it above debug; GOA
 //! started later is found then. A token Google refuses is renewed through
-//! GOA once, never more. Stand-ins on a private bus and 127.0.0.1 only:
+//! GOA once, never more. Following GOA, or not, never keeps the loop from
+//! sleeping. Stand-ins on a private bus and 127.0.0.1 only:
 //! never the session's bus, never Google. Needs `dbus-daemon`; skipped
 //! without it.
 
@@ -47,6 +48,10 @@ fn fixture() -> PathBuf {
 }
 
 fn compositor(bus: &PrivateBus, google: &str) -> anyhow::Result<Headless> {
+    start(Some(bus), Some(google))
+}
+
+fn start(bus: Option<&PrivateBus>, google: Option<&str>) -> anyhow::Result<Headless> {
     Headless::start_options(HarnessOptions {
         headless: HeadlessConfig {
             renderer: RendererChoice::Pixman,
@@ -56,15 +61,27 @@ fn compositor(bus: &PrivateBus, google: &str) -> anyhow::Result<Headless> {
         watchdog: None,
         xwayland: false,
         shell: true,
-        session_bus: Some(bus.address.clone()),
+        session_bus: bus.map(|b| b.address.clone()),
         system_bus: None,
         data_dirs: None,
         child_env: None,
         polkit_helper: None,
         motion: false,
         first_run: false,
-        google_caldav: Some(google.to_owned()),
+        google_caldav: google.map(str::to_owned),
     })
+}
+
+/// How many times the loop woke while nothing happened for `real`, each
+/// dispatch waiting 20 ms at most.
+fn wakes(compositor: &mut Headless, real: Duration) -> anyhow::Result<u32> {
+    let until = Instant::now() + real;
+    let mut n = 0;
+    while Instant::now() < until {
+        compositor.dispatch(Duration::from_millis(20))?;
+        n += 1;
+    }
+    Ok(n)
 }
 
 /// The calendars as the compositor says them, once `done` holds.
@@ -132,6 +149,33 @@ fn without_goa_nothing_shows_and_nothing_is_logged() -> anyhow::Result<()> {
     assert_eq!(info.online.accounts[0].name, ALEX);
     assert_eq!(info.online.accounts[0].id, format!("goa:{ACCOUNT_ID}"));
     assert!(info.online.accounts[0].synced);
+    Ok(())
+}
+
+/// The loop sleeps when nothing happens, GOA looked for or not: what
+/// follows it is never touched on each dispatch (a clone of a channel's
+/// sender, dropped, wakes the loop at once, which then spins).
+#[test]
+fn the_loop_sleeps_with_or_without_goa() -> anyhow::Result<()> {
+    // No session bus: GOA is not looked for.
+    let mut alone = start(None, None)?;
+    alone.dispatch(Duration::from_millis(100))?;
+    let n = wakes(&mut alone, Duration::from_millis(400))?;
+    assert!(
+        n <= 40,
+        "without a session bus the loop woke {n} times in 400 ms"
+    );
+    drop(alone);
+    if !installed("dbus-daemon") {
+        eprintln!("the rest skipped: no dbus-daemon");
+        return Ok(());
+    }
+    // GOA looked for and absent.
+    let bus = PrivateBus::start()?;
+    let mut compositor = start(Some(&bus), None)?;
+    wait_calendars(&mut compositor, |i| i.online.state == "absent")?;
+    let n = wakes(&mut compositor, Duration::from_millis(400))?;
+    assert!(n <= 40, "without GOA the loop woke {n} times in 400 ms");
     Ok(())
 }
 
