@@ -108,6 +108,7 @@ where
     /// The columns of glyphs of `area` falling off it, `p` of the way
     /// (in-cubic), each at its own pace, fading.
     fn collapse(&mut self, area: Rect, seed: u64, p: f32) {
+        self.within(area);
         if p >= 1.0 {
             return;
         }
@@ -135,6 +136,7 @@ where
     /// Columns of glyphs falling into `area` over black, `p` of the way
     /// down, each at its own pace.
     fn fill_down(&mut self, area: Rect, seed: u64, p: f32) -> Vec<Rect> {
+        self.within(area);
         let cw = f64::from(CELL.0);
         let cols = (area.size.w / cw).ceil() as u32;
         let mut behind = Vec::new();
@@ -341,12 +343,12 @@ impl State {
                 }
             }
         }
-        out.append(&mut brush.out);
+        out.extend(brush.take());
         let mut back = self.brush(brush.renderer, scale);
         for r in behind {
             back.solid(r, BLACK, 1.0);
         }
-        out.append(&mut back.out);
+        out.extend(back.take());
         for (window, r, alpha) in previews {
             if alpha > 0.0 {
                 out.extend(preview_elements(renderer, &window, r, scale, alpha));
@@ -377,7 +379,7 @@ impl State {
         }
         let dim = if overview { 1.0 } else { SWITCHER_DIM };
         brush.solid(screen, BLACK, dim * shows);
-        out.append(&mut brush.out);
+        out.extend(brush.take());
         out
     }
 
@@ -433,7 +435,7 @@ impl State {
             if t < 600.0 {
                 // It cascades over the desktop, which shows below it.
                 brush.cascade(screen, &Rain::dense(seed), 1.2 * t / 600.0, t, 1.0);
-                return brush.out;
+                return brush.finish();
             }
             // Dimmer once it has covered the desktop, for the lock to
             // read over it.
@@ -441,7 +443,7 @@ impl State {
             brush.rain(screen, &Rain::dense(seed), lock_rain(t), dim, |_| f64::MAX);
         }
         brush.solid(screen, BLACK, 1.0);
-        brush.out
+        brush.finish()
     }
 
     /// Unlocked in the Matrix theme: the rain speeds up over the lock,
@@ -486,7 +488,7 @@ impl State {
                 |_| f64::MAX,
             );
             brush.solid(screen, BLACK, 1.0);
-            out.append(&mut brush.out);
+            out.extend(brush.take());
             return out;
         }
         let mut brush = self.brush(renderer, scale);
@@ -495,7 +497,7 @@ impl State {
         } else {
             brush.solid(screen, GREEN, 0.25 * (1.0 - phase(t, 200.0, 300.0)));
         }
-        brush.out
+        brush.finish()
     }
 
     /// The boot screen in the Matrix theme: darkness and a cursor, the rain
@@ -538,7 +540,7 @@ impl State {
                 1.0 - out_quad(phase(l, 900.0, 1000.0))
             };
             brush.solid(screen, HEAD, a);
-            return brush.out;
+            return brush.finish();
         }
         if let Some(l) = l {
             let a = phase(l, 0.0, 100.0) * (1.0 - phase(l, 400.0, 850.0));
@@ -586,7 +588,7 @@ impl State {
                 true,
             );
         }
-        let mut out = std::mem::take(&mut brush.out);
+        let mut out: Vec<_> = brush.take().into_iter().collect();
         out.extend(
             panel
                 .element_with(renderer, output, Point::default(), Some(panel_alpha))
@@ -623,7 +625,7 @@ impl State {
             }
         }
         brush.solid(screen, BLACK, 1.0);
-        out.append(&mut brush.out);
+        out.extend(brush.take());
         out
     }
 }

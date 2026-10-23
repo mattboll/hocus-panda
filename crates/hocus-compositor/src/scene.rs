@@ -28,6 +28,7 @@ use crate::{
     decoration::{Rounded, hairline_elements, ring_elements, ring_elements_in, shadow_elements},
     desktops::{model_id, rect},
     handlers::layer_shell::LayerKind as Layer,
+    matrix_layers::LayerElement,
     window_mode::WindowMode,
 };
 
@@ -48,6 +49,8 @@ render_elements! {
     Tint=Rounded<SolidColorRenderElement>,
     /// A wallpaper that moves, painted by a shader (#108).
     Backdrop=TextureRenderElement<<R as RendererSuper>::TextureId>,
+    /// What a brush of the Matrix theme drew (#221).
+    Layer=LayerElement<R>,
 }
 
 /// What a scene is built for.
@@ -186,6 +189,7 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         self.ready_snapshots(renderer);
+        self.matrix_layers.begin(&output.name());
         let mut elements = Vec::new();
         if cursor {
             elements.extend(

@@ -9,7 +9,7 @@
 //! Each effect is a closed form of the time since it started, evaluated
 //! when the scene is drawn: nothing is queued per frame.
 
-use std::{collections::BTreeMap, sync::Mutex, time::Duration};
+use std::{collections::BTreeMap, panic::Location, sync::Mutex, time::Duration};
 
 use hocus_shell::matrix::{BLACK, CELL, GLOW, GREEN, HEAD, Rng, Sheet, hash};
 use hocus_ui::{Color, motion::Easing};
@@ -19,17 +19,21 @@ use smithay::{
         renderer::{
             Color32F, ImportAll, ImportMem, Renderer,
             element::{
-                Id, Kind,
+                Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
                 solid::SolidColorRenderElement,
             },
             utils::CommitCounter,
         },
     },
-    utils::{Logical, Point, Rectangle, Size, Transform},
+    utils::{Logical, Physical, Point, Rectangle, Size, Transform},
 };
 
-use crate::{State, scene::SceneElement};
+use crate::{
+    State,
+    matrix_layers::{Layers, Stroke},
+    scene::SceneElement,
+};
 
 /// The sheet's cells across and down; its last row holds the heads.
 pub(crate) const SHEET_COLS: u32 = 48;
@@ -232,12 +236,16 @@ impl Sheets {
     }
 }
 
-/// Collects an effect's elements, front first.
+/// Collects an effect's glyphs and colours, front first, and gives them
+/// as one element kept from frame to frame (see `matrix_layers`).
 pub(crate) struct Brush<'a, R: Renderer + ImportAll + ImportMem> {
     pub(crate) renderer: &'a mut R,
     sheet: SheetBuffer,
     pub(crate) scale: f64,
-    pub(crate) out: Vec<SceneElement<R>>,
+    layers: &'a Layers,
+    strokes: Vec<Stroke<R>>,
+    /// Where the effect draws, whatever it covers this frame.
+    extent: Option<Rectangle<i32, Physical>>,
 }
 
 impl<R> Brush<'_, R>
@@ -274,7 +282,7 @@ where
             Some((w, h).into()),
             Kind::Unspecified,
         ) {
-            Ok(element) => self.out.push(SceneElement::Frame(element)),
+            Ok(element) => self.strokes.push(Stroke::Glyphs(element)),
             Err(err) => tracing::warn!(?err, "could not draw the rain"),
         }
     }
@@ -349,14 +357,39 @@ where
         }
         let a = alpha.clamp(0.0, 1.0);
         let c = |v: u8| f32::from(v) / 255.0 * a;
-        self.out
-            .push(SceneElement::Solid(SolidColorRenderElement::new(
-                Id::new(),
+        self.strokes
+            .push(Stroke::Solid(SolidColorRenderElement::new(
+                self.layers.stroke_id(),
                 geometry,
                 CommitCounter::default(),
                 Color32F::new(c(color.r), c(color.g), c(color.b), a),
                 Kind::Unspecified,
             )));
+    }
+
+    /// The effect draws in `area` (output-local), whatever it covers
+    /// this frame: its element keeps that place as what it covers grows,
+    /// rather than be repainted whole each time it does.
+    pub(crate) fn within(&mut self, area: Rectangle<f64, Logical>) {
+        let area = area.to_physical_precise_round(self.scale);
+        self.extent = Some(self.extent.map_or(area, |e| e.merge(area)));
+    }
+
+    /// What was drawn since the last take, as one element: the same one,
+    /// from frame to frame, for the same place in the code.
+    #[track_caller]
+    pub(crate) fn take(&mut self) -> Option<SceneElement<R>> {
+        let strokes = std::mem::take(&mut self.strokes);
+        let extent = self.extent.take();
+        self.layers
+            .layer(Location::caller(), strokes, extent, self.scale)
+            .map(SceneElement::Layer)
+    }
+
+    /// What was drawn, as elements to show.
+    #[track_caller]
+    pub(crate) fn finish(mut self) -> Vec<SceneElement<R>> {
+        self.take().into_iter().collect()
     }
 
     /// A glowing line `width` wide just outside `rect`.
@@ -389,7 +422,7 @@ pub(crate) fn pick(seed: u64, n: u32, salt: u64) -> u64 {
 }
 
 impl State {
-    pub(crate) fn brush<'a, R>(&self, renderer: &'a mut R, scale: f64) -> Brush<'a, R>
+    pub(crate) fn brush<'a, R>(&'a self, renderer: &'a mut R, scale: f64) -> Brush<'a, R>
     where
         R: Renderer + ImportAll + ImportMem,
     {
@@ -397,7 +430,9 @@ impl State {
             renderer,
             sheet: self.matrix_sheets.get(scale),
             scale,
-            out: Vec::new(),
+            layers: &self.matrix_layers,
+            strokes: Vec::new(),
+            extent: None,
         }
     }
 
@@ -433,6 +468,7 @@ impl State {
         };
         let content = open.content_alpha(now);
         let mut glyphs = self.brush(renderer, scale);
+        glyphs.within(frame);
         let mut behind: Vec<(Rectangle<f64, Logical>, f32)> = Vec::new();
         let column_x = frame.loc.x + f64::from(centre) * cw;
         if t < 100.0 {
@@ -510,11 +546,12 @@ impl State {
                 glyphs.glyph(at, glyph, false, 1.0 - phase(t, 300.0, 500.0));
             }
         }
-        let mut out = std::mem::take(&mut glyphs.out);
+        let mut out: Vec<_> = glyphs.take().into_iter().collect();
         // The green over the window as it shows, and the phosphor glow
         // around it while the glyphs fill it.
         if (100.0..400.0).contains(&t) {
             let mut tint = self.brush(glyphs.renderer, scale);
+            tint.within(frame);
             let glow = 0.35 * phase(t, 100.0, 150.0) * if t < 250.0 { 1.0 } else { overlay / TINT };
             tint.outline(frame, 2.0, GLOW, glow);
             if content > 0.0 {
@@ -523,7 +560,7 @@ impl State {
             for (rect, alpha) in behind {
                 tint.solid(rect, BLACK, alpha * (1.0 - content));
             }
-            out.append(&mut tint.out);
+            out.extend(tint.take());
         }
         out
     }
@@ -554,6 +591,7 @@ impl State {
         let seed = close.seed;
         let green = SHEET_ROWS - 1;
         let mut front = self.brush(renderer, scale);
+        front.within(frame);
         let mut behind: Vec<(Rectangle<f64, Logical>, f32)> = Vec::new();
         // The picture shifts to green at first, and stays so.
         let tint = if t < 250.0 {
@@ -643,13 +681,13 @@ impl State {
             }
         }
         // Glyphs over black, over the green picture.
-        let mut out = std::mem::take(&mut front.out);
+        let mut out: Vec<_> = front.take().into_iter().collect();
         let mut back = self.brush(front.renderer, scale);
         for (rect, alpha) in behind {
             back.solid(rect, BLACK, alpha);
         }
         back.solid(frame, GREEN, tint);
-        out.append(&mut back.out);
+        out.extend(back.take());
         out
     }
 }

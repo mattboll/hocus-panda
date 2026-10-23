@@ -177,6 +177,187 @@ fn a_stuck_output_is_recovered_after_three_looks() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// One 1280×800 screen in the Matrix theme, with the shell and motion as in
+/// a session, its first frame drawn.
+fn matrix_screen() -> anyhow::Result<Headless> {
+    let mut compositor = Headless::start_options(hocus_compositor::HarnessOptions {
+        headless: HeadlessConfig {
+            outputs: vec![OutputSpec::new(1280, 800)],
+            renderer: RendererChoice::Pixman,
+        },
+        api_permission: Permission::Test,
+        watchdog: None,
+        xwayland: false,
+        shell: true,
+        session_bus: None,
+        system_bus: None,
+        data_dirs: None,
+        child_env: None,
+        polkit_helper: None,
+        motion: true,
+        first_run: false,
+    })?;
+    compositor.write_config("[appearance]\ntheme = \"matrix\"\n")?;
+    compositor.dispatch_until(CLIENT_TIMEOUT, Headless::wallpapers_ready)?;
+    compositor.advance(FRAME)?;
+    Ok(compositor)
+}
+
+/// Super+L.
+fn lock(compositor: &mut Headless) -> anyhow::Result<()> {
+    for (code, pressed) in [(125, true), (38, true), (38, false), (125, false)] {
+        compositor.request(Request::Key { code, pressed })?;
+    }
+    Ok(())
+}
+
+/// Something asks for a frame although nothing changed.
+fn ask_for_a_frame(compositor: &mut Headless) -> anyhow::Result<()> {
+    compositor.on_loop("redraw", |state| state.needs_redraw = true);
+    compositor.dispatch(Duration::ZERO)?;
+    compositor.advance(FRAME)
+}
+
+/// The share of the screen the last frame drawn repainted.
+fn damaged(compositor: &Headless) -> f64 {
+    let output = &compositor.outputs()[0];
+    output.damage as f64 / (f64::from(output.spec.width) * f64::from(output.spec.height))
+}
+
+/// Pixels where the screen's buffer, as the frames drawn left it, is not
+/// what a full redraw of the same moment draws.
+fn stale_pixels(compositor: &mut Headless) -> anyhow::Result<usize> {
+    let (shown, redrawn) = compositor.shown_and_redrawn("HEADLESS-1")?;
+    anyhow::ensure!(shown.len() == redrawn.len(), "sizes differ");
+    Ok(shown
+        .chunks(4)
+        .zip(redrawn.chunks(4))
+        .filter(|(a, b)| a[..3] != b[..3])
+        .count())
+}
+
+/// The Matrix theme's lock at rest (#221): its rain has stopped, and a
+/// frame asked for anyway repaints nothing.
+#[test]
+fn a_frame_asked_for_under_the_matrix_lock_at_rest_repaints_nothing() -> anyhow::Result<()> {
+    let mut compositor = matrix_screen()?;
+    lock(&mut compositor)?;
+    compositor.advance(Duration::from_secs(2))?;
+    let before = frames(&compositor);
+
+    for _ in 0..3 {
+        ask_for_a_frame(&mut compositor)?;
+    }
+
+    assert_eq!(
+        frames(&compositor),
+        before,
+        "a frame repainted {:.0}% of the screen",
+        100.0 * damaged(&compositor)
+    );
+    assert_eq!(stale_pixels(&mut compositor)?, 0);
+    Ok(())
+}
+
+/// The share of the screen each frame drawn between `from` and `to`
+/// (since `start`) repainted; every frame leaving the screen as a full
+/// redraw draws it.
+fn repainted(
+    compositor: &mut Headless,
+    start: Duration,
+    (from, to): (u64, u64),
+) -> anyhow::Result<Vec<f64>> {
+    let (from, to) = (
+        start + Duration::from_millis(from),
+        start + Duration::from_millis(to),
+    );
+    compositor.advance(from.saturating_sub(compositor.now()))?;
+    let mut shares = Vec::new();
+    while compositor.now() + FRAME <= to {
+        let before = frames(compositor);
+        compositor.advance(FRAME)?;
+        if frames(compositor) != before {
+            shares.push(damaged(compositor));
+            let stale = stale_pixels(compositor)?;
+            anyhow::ensure!(
+                stale == 0,
+                "{stale} pixels left stale at {:?}",
+                compositor.now()
+            );
+        }
+    }
+    eprintln!("repainted per frame: {shares:.3?}");
+    Ok(shares)
+}
+
+/// While the lock's rain cascades over the desktop, then slows to a stop
+/// (#221), a frame repaints the drops and the black they gain, not the
+/// screen: the drops are 8 pixels wide in columns 16 apart and the black
+/// grows by a few rows a frame, so they never reach half of it. (In
+/// between, the lock itself fades in, repainted whole.)
+#[test]
+fn the_matrix_lock_rain_repaints_only_its_drops() -> anyhow::Result<()> {
+    let mut compositor = matrix_screen()?;
+    let start = compositor.now();
+    lock(&mut compositor)?;
+    // Its first frame brings the lock: all of it is new.
+    compositor.advance(FRAME)?;
+
+    let cascade = repainted(&mut compositor, start, (FRAME.as_millis() as u64, 540))?;
+    let slowing = repainted(&mut compositor, start, (800, 1000))?;
+
+    assert!(cascade.len() >= 25, "the rain did not move: {cascade:?}");
+    assert!(slowing.len() >= 10, "the rain did not move: {slowing:?}");
+    let most = cascade.iter().chain(&slowing).copied().fold(0.0, f64::max);
+    assert!(
+        most < 0.5,
+        "a frame repainted {:.0}% of the screen",
+        100.0 * most
+    );
+    Ok(())
+}
+
+/// Behind Alt+Tab (#221) a few slow drops fall while it shows: a frame
+/// repaints them and not the screen. About one column in three has a
+/// drop, its glyphs 8 pixels wide in columns 28 apart, a third of the
+/// screen high at most: a tenth of it leaves room.
+#[test]
+fn the_matrix_switcher_rain_repaints_only_its_drops() -> anyhow::Result<()> {
+    let mut compositor = matrix_screen()?;
+    let mut clients = Vec::new();
+    for (app_id, argb) in [("mail", 0xff_e5_48_4d), ("editor", 0xff_33_cc_66)] {
+        let window = SolidWindow {
+            app_id: app_id.into(),
+            width: 600,
+            height: 420,
+            argb,
+        };
+        clients.push(window.spawn(compositor.socket_path())?);
+        let n = clients.len();
+        compositor.dispatch_until(CLIENT_TIMEOUT, |c| c.window_count() == n)?;
+    }
+    compositor.advance(Duration::from_millis(600))?;
+    compositor.request(Request::Key {
+        code: 56,
+        pressed: true,
+    })?;
+    for pressed in [true, false] {
+        compositor.request(Request::Key { code: 15, pressed })?;
+    }
+    let start = compositor.now();
+    // From when it has faded in over the dark.
+    let shares = repainted(&mut compositor, start, (300, 640))?;
+
+    assert!(shares.len() >= 10, "the rain did not move: {shares:?}");
+    let most = shares.iter().copied().fold(0.0, f64::max);
+    assert!(
+        most < 0.1,
+        "a frame repainted {:.0}% of the screen",
+        100.0 * most
+    );
+    Ok(())
+}
+
 /// Real time passing changes nothing on the screen (#212): what falls due
 /// does on the virtual clock, so a test waiting for a client between two
 /// steps sees the frames one that does not wait sees. The calendar's first
