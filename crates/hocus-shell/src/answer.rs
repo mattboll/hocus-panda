@@ -244,13 +244,16 @@ pub struct Card {
     /// The room for the buttons' row, logical pixels: they wrap onto
     /// another past it.
     pub width: f32,
+    /// Smaller buttons, as circling's card has them (board D05): 44 px
+    /// high rather than 48, 8 apart rather than 10.
+    pub compact: bool,
 }
 
 /// About how wide a button of `label` is, its padding included: enough to
 /// know when a row is full.
-fn button_width(theme: &Theme, label: &str) -> f32 {
+fn button_width(theme: &Theme, label: &str, padding: f32) -> f32 {
     let scale = theme.text.body.size / 14.0;
-    label.chars().count() as f32 * 8.6 * scale + 40.0
+    label.chars().count() as f32 * 8.6 * scale + 2.0 * padding
 }
 
 /// What [`fill`] made: the buttons in order, and the text's box and what
@@ -441,14 +444,19 @@ pub fn fill(tree: &mut Tree, room: NodeId, card: &Card) -> Filled {
             );
         }
     }
+    let (height, padding, gap) = if card.compact {
+        (44.0, 16.0, 8.0)
+    } else {
+        (48.0, 20.0, 10.0)
+    };
     let mut buttons = Vec::new();
     let mut row = None;
     let mut used = 0.0;
     for (i, label) in card.buttons.iter().enumerate() {
-        let wide = button_width(&theme, label);
+        let wide = button_width(&theme, label, padding);
         let row = match row {
-            Some(r) if used + 10.0 + wide <= card.width => {
-                used += 10.0 + wide;
+            Some(r) if used + gap + wide <= card.width => {
+                used += gap + wide;
                 r
             }
             _ => {
@@ -458,7 +466,7 @@ pub fn fill(tree: &mut Tree, room: NodeId, card: &Card) -> Filled {
                     room,
                     Style {
                         direction: Direction::Row,
-                        gap: 10.0,
+                        gap,
                         grow: 0.0,
                         ..Style::default()
                     },
@@ -475,8 +483,8 @@ pub fn fill(tree: &mut Tree, room: NodeId, card: &Card) -> Filled {
             tree,
             row,
             Style {
-                height: Length::Px(48.0),
-                padding: Insets::symmetric(0.0, 20.0),
+                height: Length::Px(height),
+                padding: Insets::symmetric(0.0, padding),
                 grow: 0.0,
                 ..Style::default()
             },

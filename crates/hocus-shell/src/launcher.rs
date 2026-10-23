@@ -949,6 +949,7 @@ impl Launcher {
                     error: None,
                     buttons: vec![intent.confirm(lang).into(), lang.cancel().into()],
                     width: PANEL,
+                    compact: false,
                 },
                 vec![CardAction::Confirm, CardAction::Cancel],
             )),
@@ -993,6 +994,7 @@ impl Launcher {
                         error,
                         buttons,
                         width: PANEL,
+                        compact: false,
                     },
                     actions,
                 ))
@@ -1703,6 +1705,7 @@ fn confirmation(offer: &Offer, lang: Lang) -> (Card, Vec<CardAction>) {
             error: None,
             buttons,
             width: PANEL,
+            compact: false,
         },
         actions,
     )

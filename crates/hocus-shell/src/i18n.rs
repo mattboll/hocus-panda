@@ -1197,6 +1197,11 @@ impl Lang {
         self.pick("Add to the notes", "Ajouter aux notes")
     }
 
+    /// Circling's card, as board D05 says it.
+    pub fn add_to_a_note(self) -> &'static str {
+        self.pick("Add to a note", "Ajouter à une note")
+    }
+
     pub fn added_to_notes(self) -> &'static str {
         self.pick("Added to the notes", "Ajouté aux notes")
     }
