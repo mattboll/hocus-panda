@@ -372,6 +372,7 @@ impl State {
         self.refresh_bars();
         self.refresh_toasts();
         self.refresh_launcher();
+        self.refresh_ai();
         self.refresh_quick();
         if self.shell.is_none() {
             return;

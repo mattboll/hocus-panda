@@ -267,6 +267,10 @@ impl App {
                 state.calendar_secret(account, secret);
                 Reply::Done
             }
+            Request::AiSecret { provider, secret } => match state.ai_secret(&provider, secret) {
+                Ok(()) => Reply::Done,
+                Err(why) => return Some(Err(ApiError::new(ErrorCode::BadRequest, why))),
+            },
             Request::Updates => Reply::Updates(state.updates_info()),
             Request::InstallUpdates => {
                 state.install_updates();

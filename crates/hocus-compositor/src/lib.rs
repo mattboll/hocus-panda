@@ -6,6 +6,7 @@
 mod act;
 mod actions;
 mod agents;
+mod ai;
 mod alt_tab;
 mod api;
 mod authorize;
@@ -292,6 +293,12 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     notes::start(&event_loop.handle(), &mut state, notes_file);
     clipboard::start(&event_loop.handle(), &mut state, state_dir.clone());
     calendar::start(
+        &event_loop.handle(),
+        &mut state,
+        state_dir.clone(),
+        options.session_bus.as_deref(),
+    );
+    ai::start(
         &event_loop.handle(),
         &mut state,
         state_dir.clone(),

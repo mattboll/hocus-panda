@@ -230,6 +230,21 @@ configuration; an account taken out of the configuration takes its cache
 and its password with it. Accounts count only once the configuration is
 read, so a session starting never forgets one.
 
+The command field (#44) understands short requests in English and French
+without a model (`hocus-shell::intents`: screenshots with a target and a
+delay, opening an application or a settings page, desktops, recording,
+focus mode, night light, notes) and shows each as a card to confirm before
+anything runs. A question goes to the provider `[ai]` names (ollama, a
+llama.cpp server, OpenAI's chat completions, Claude's Messages API) on a
+worker thread of its own, which reads the provider's key from the keyring
+(the Secret Service; a sealed file without one), asks with `ureq` and sends
+the answer back piece by piece through a channel; the loop only appends the
+pieces and lays the card out once per turn. Typing again, closing the field
+or Stop tells the worker to stop at the next piece, and what an older
+question brings back is dropped. Nested or in tests, a provider's usual
+address is never asked: only the one the configuration gives. The answer's
+card (`hocus-shell::answer`) is shared with circling to ask (#46).
+
 The phone (#85) goes through KDE Connect's daemon on the session bus,
 followed on a worker thread and never started by us: the session starts it
 from its autostart entry, with the environment its clipboard needs to reach

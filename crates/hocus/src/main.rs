@@ -147,6 +147,10 @@ enum Message {
     /// The phone, through KDE Connect: whether it runs, the phones within
     /// reach and their battery.
     Phone,
+    /// Keep an AI provider's key in the keyring (`claude`, `openai`,
+    /// `llamacpp`), read from the standard input: `hocus msg ai-key claude
+    /// < key.txt`. An empty one forgets it.
+    AiKey { provider: String },
     /// Send files to the phone within reach.
     SendToPhone {
         #[arg(required = true)]
@@ -346,6 +350,18 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
         Message::Desktops => print(client.request(Request::Desktops)?),
         Message::Hardware => print(client.request(Request::Hardware)?),
         Message::Phone => print(client.request(Request::Phone)?),
+        Message::AiKey { provider } => {
+            // Read, never an argument: arguments show in the process list.
+            let mut key = String::new();
+            std::io::stdin()
+                .read_line(&mut key)
+                .context("could not read the key")?;
+            client.request(Request::AiSecret {
+                provider,
+                secret: key.trim().to_owned(),
+            })?;
+            Ok(())
+        }
         Message::SendToPhone { files } => {
             let paths = files
                 .iter()

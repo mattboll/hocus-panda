@@ -48,6 +48,18 @@ enum Shot {
     },
 }
 
+/// What a delayed screenshot takes when it falls due.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Due {
+    Mode(ScreenshotMode),
+    /// The window of an application, by what its app id or desktop entry
+    /// says, lower case (#44), and its name as shown.
+    App {
+        matches: String,
+        name: String,
+    },
+}
+
 /// A region or window being chosen.
 #[derive(Debug)]
 struct Picking {
@@ -80,7 +92,7 @@ pub struct Screenshots {
     wanted: Vec<Shot>,
     picking: Option<Picking>,
     /// A delayed one, due on the compositor's clock.
-    due: Option<(Duration, ScreenshotMode)>,
+    due: Option<(Duration, Due)>,
     /// What was taken, flashing: output, local rectangle, start.
     flashes: Vec<(String, Rectangle<i32, Logical>, Duration)>,
     flash_buffer: smithay::backend::renderer::element::solid::SolidColorBuffer,
@@ -111,20 +123,7 @@ impl State {
     /// window is chosen.
     pub fn screenshot(&mut self, mode: ScreenshotMode, delay: u32) {
         if delay > 0 {
-            self.shots.due = Some((self.clock.now() + Duration::from_secs(delay.into()), mode));
-            // Wakes the loop then; the clock decides.
-            if let Some(handle) = &self.loop_handle {
-                let woken = handle.insert_source(
-                    Timer::from_duration(Duration::from_secs(delay.into())),
-                    |_, _, app| {
-                        app.state.needs_redraw = true;
-                        TimeoutAction::Drop
-                    },
-                );
-                if let Err(err) = woken {
-                    tracing::warn!(%err.error, "could not time the screenshot");
-                }
-            }
+            self.screenshot_later(Due::Mode(mode), delay);
             return;
         }
         match mode {
@@ -138,6 +137,63 @@ impl State {
             ScreenshotMode::Window => self.start_picking(PickMode::Window),
         }
         self.needs_redraw = true;
+    }
+
+    /// A screenshot of `app`'s window (as an intent says it: "slack"), now
+    /// or after `delay` seconds; the window is found when it is taken.
+    pub fn screenshot_app(&mut self, matches: String, name: String, delay: u32) {
+        if delay > 0 {
+            self.screenshot_later(Due::App { matches, name }, delay);
+            return;
+        }
+        match self.window_of_app(&matches) {
+            Some(id) => self.shots.wanted.push(Shot::Window(id)),
+            None => {
+                let lang = self.shell_lang();
+                self.shell_toast(&lang.no_window_of(&name), "");
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    /// The window of the application `app` names, the one on top first:
+    /// its app id (`slack`, `com.slack.Slack`) or its desktop entry's name.
+    fn window_of_app(&self, app: &str) -> Option<WindowId> {
+        let wanted = app.to_lowercase();
+        let squashed = wanted.replace(' ', "");
+        let named = |app_id: &str| {
+            let id = app_id.to_lowercase();
+            id == squashed
+                || id.rsplit('.').next() == Some(squashed.as_str())
+                || self
+                    .launcher
+                    .as_ref()
+                    .and_then(|l| l.app_for(app_id))
+                    .is_some_and(|a| a.name.to_lowercase() == wanted)
+        };
+        self.space
+            .elements()
+            .rev()
+            .filter_map(|w| Some((model_id(w)?, crate::surface::title_and_app_id(w).1?)))
+            .find(|(_, app_id)| named(app_id))
+            .map(|(id, _)| id)
+    }
+
+    fn screenshot_later(&mut self, due: Due, delay: u32) {
+        self.shots.due = Some((self.clock.now() + Duration::from_secs(delay.into()), due));
+        // Wakes the loop then; the clock decides.
+        if let Some(handle) = &self.loop_handle {
+            let woken = handle.insert_source(
+                Timer::from_duration(Duration::from_secs(delay.into())),
+                |_, _, app| {
+                    app.state.needs_redraw = true;
+                    TimeoutAction::Drop
+                },
+            );
+            if let Err(err) = woken {
+                tracing::warn!(%err.error, "could not time the screenshot");
+            }
+        }
     }
 
     fn start_picking(&mut self, mode: PickMode) {
@@ -387,11 +443,14 @@ impl State {
     /// the flash draw.
     pub fn refresh_screenshots(&mut self) {
         let now = self.clock.now();
-        if let Some((due, mode)) = self.shots.due
+        if let Some((due, what)) = self.shots.due.clone()
             && now >= due
         {
             self.shots.due = None;
-            self.screenshot(mode, 0);
+            match what {
+                Due::Mode(mode) => self.screenshot(mode, 0),
+                Due::App { matches, name } => self.screenshot_app(matches, name, 0),
+            }
         }
         if let Some(picking) = &mut self.shots.picking {
             for (_, panel) in &mut picking.panels {

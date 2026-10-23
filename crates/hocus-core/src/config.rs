@@ -19,6 +19,8 @@ pub struct Config {
     pub appearance: Appearance,
     pub wallpaper: Wallpaper,
     pub launcher: Launcher,
+    /// The model questions typed in the command field go to (#44).
+    pub ai: Ai,
     pub dropdown: Dropdown,
     pub settings: Settings,
     pub idle: Idle,
@@ -1213,6 +1215,9 @@ pub struct Launcher {
     pub search_engine: String,
     pub large_type: bool,
     pub qr: bool,
+    /// Requests in English or French ("capture de slack dans 3 secondes"),
+    /// understood without a model and confirmed before anything runs.
+    pub intents: bool,
 }
 
 impl Default for Launcher {
@@ -1225,8 +1230,77 @@ impl Default for Launcher {
             search_engine: "https://duckduckgo.com/?q={}".into(),
             large_type: true,
             qr: true,
+            intents: true,
         }
     }
+}
+
+/// The providers a question can go to.
+pub const AI_PROVIDERS: [&str; 4] = ["ollama", "llamacpp", "openai", "claude"];
+
+/// Questions asked in the command field (#44): the answer streams into
+/// it. Local models first; a provider's key is in the keyring, never here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Ai {
+    /// Offers to ask what is typed; false: never, and nothing is sent.
+    pub enabled: bool,
+    /// `ollama`, `llamacpp` (its server), `openai` (or any server speaking
+    /// its chat completions) or `claude`.
+    pub provider: String,
+    /// The provider's address; empty: its usual one, which only the
+    /// session uses (nested or in tests, nothing is asked without one).
+    pub url: String,
+    /// The model; empty: ollama's first one, the llama.cpp server's own,
+    /// Claude's default. OpenAI needs one.
+    pub model: String,
+}
+
+impl Default for Ai {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: "ollama".into(),
+            url: String::new(),
+            model: String::new(),
+        }
+    }
+}
+
+impl Ai {
+    /// Questions never travel in the clear: https, or plain http to this
+    /// machine only.
+    pub fn url_is_safe(&self) -> bool {
+        self.url.is_empty() || https_or_local(&self.url)
+    }
+
+    /// A model on this machine: the question stays here.
+    pub fn is_local(&self) -> bool {
+        match self.provider.as_str() {
+            "ollama" | "llamacpp" => self.url.is_empty() || local_url(&self.url),
+            _ => local_url(&self.url),
+        }
+    }
+}
+
+/// `http://localhost`, `http://127.0.0.1` or `http://[::1]`, any port.
+fn local_url(url: &str) -> bool {
+    let local = [
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://[::1]",
+        "https://localhost",
+        "https://127.0.0.1",
+        "https://[::1]",
+    ];
+    local.iter().any(|w| {
+        url.strip_prefix(w)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
+    })
+}
+
+fn https_or_local(url: &str) -> bool {
+    url.starts_with("https://") || local_url(url)
 }
 
 /// `#rrggbb` as RGB.
@@ -1436,6 +1510,18 @@ impl Config {
                 "launcher.search_engine",
                 e,
                 "an http(s) address with {} where the words go",
+            );
+        }
+        if !AI_PROVIDERS.contains(&self.ai.provider.as_str()) {
+            let p = format!("{:?}", self.ai.provider);
+            return out_of_range("ai.provider", p, &AI_PROVIDERS.join(", "));
+        }
+        if !self.ai.url_is_safe() {
+            let u = format!("{:?}", self.ai.url);
+            return out_of_range(
+                "ai.url",
+                u,
+                "an https:// address, or http:// to this machine",
             );
         }
         if self.decorations.accent != "theme" && self.accent().is_none() {
@@ -1703,6 +1789,21 @@ mod tests {
         assert_eq!(rule.blur, Some(true));
         assert_eq!(config.rule_for("chat-home", "").blur, None);
         assert_eq!(config.rule_for("editor", ""), Rule::default());
+        Ok(())
+    }
+
+    #[test]
+    fn questions_go_to_known_providers_and_never_in_the_clear() -> Result<(), ConfigError> {
+        let local = Config::parse("[ai]\nurl = \"http://127.0.0.1:11434\"\n")?;
+        assert!(local.ai.is_local());
+        let claude = Config::parse("[ai]\nprovider = \"claude\"\n")?;
+        assert!(!claude.ai.is_local(), "the cloud");
+        assert!(Config::default().ai.is_local(), "ollama by default");
+        let err = Config::parse("[ai]\nprovider = \"skynet\"\n").expect_err("unknown");
+        assert!(err.0.contains("ai.provider"), "{err}");
+        let err = Config::parse("[ai]\nprovider = \"openai\"\nurl = \"http://example.org\"\n")
+            .expect_err("plain http elsewhere");
+        assert!(err.0.contains("ai.url"), "{err}");
         Ok(())
     }
 

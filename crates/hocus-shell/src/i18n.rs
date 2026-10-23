@@ -1139,6 +1139,107 @@ impl Lang {
     pub fn copied_paste(self) -> &'static str {
         self.pick("Copied: paste it", "Copié : collez-le")
     }
+
+    /// A screenshot of an application that has no window.
+    pub fn no_window_of(self, app: &str) -> String {
+        match self {
+            Self::En => format!("No {app} window to capture"),
+            Self::Fr => format!("Aucune fenêtre de {app} à capturer"),
+        }
+    }
+
+    /// The other results, under an answer or a confirmation.
+    pub fn also(self) -> &'static str {
+        self.pick("Also", "Aussi")
+    }
+
+    /// An intent's caption: it waits to be confirmed.
+    pub fn intent_caption(self) -> &'static str {
+        self.pick("Action · to confirm", "Action · à confirmer")
+    }
+
+    pub fn intent_kind(self) -> &'static str {
+        self.pick("Action", "Action")
+    }
+
+    pub fn ask(self, question: &str) -> String {
+        match self {
+            Self::En => format!("Ask “{question}”"),
+            Self::Fr => format!("Demander «\u{202f}{question}\u{202f}»"),
+        }
+    }
+
+    pub fn copy(self) -> &'static str {
+        self.pick("Copy", "Copier")
+    }
+
+    pub fn add_to_notes(self) -> &'static str {
+        self.pick("Add to the notes", "Ajouter aux notes")
+    }
+
+    pub fn added_to_notes(self) -> &'static str {
+        self.pick("Added to the notes", "Ajouté aux notes")
+    }
+
+    pub fn ask_again(self) -> &'static str {
+        self.pick("Ask again", "Redemander")
+    }
+
+    /// While the first words of an answer are awaited.
+    pub fn thinking(self) -> &'static str {
+        self.pick("Thinking…", "Réflexion…")
+    }
+
+    pub fn answer_stopped(self) -> &'static str {
+        self.pick("Stopped.", "Arrêtée.")
+    }
+
+    /// Why no answer came, in the user's words.
+    pub fn ai_unreachable(self, url: &str) -> String {
+        match self {
+            Self::En => format!("Nothing answered at {url}. Is the model running?"),
+            Self::Fr => format!("Rien n’a répondu à {url}. Le modèle est-il lancé\u{202f}?"),
+        }
+    }
+
+    pub fn ai_refused(self, why: &str) -> String {
+        match self {
+            Self::En => {
+                format!("The provider refused the key ({why}). Set it with “hocus msg ai-key”.")
+            }
+            Self::Fr => format!(
+                "Le fournisseur a refusé la clé ({why}). Elle se règle avec «\u{202f}hocus msg ai-key\u{202f}»."
+            ),
+        }
+    }
+
+    pub fn ai_no_model(self) -> &'static str {
+        self.pick(
+            "No model to answer with: name one in [ai] model.",
+            "Aucun modèle pour répondre\u{202f}: nommez-en un dans [ai] model.",
+        )
+    }
+
+    pub fn ai_declined(self) -> &'static str {
+        self.pick(
+            "The model declined to answer.",
+            "Le modèle a refusé de répondre.",
+        )
+    }
+
+    pub fn ai_no_address(self) -> &'static str {
+        self.pick(
+            "No provider address: set [ai] url.",
+            "Pas d’adresse de fournisseur\u{202f}: réglez [ai] url.",
+        )
+    }
+
+    pub fn ai_failed(self, why: &str) -> String {
+        match self {
+            Self::En => format!("The answer failed: {why}"),
+            Self::Fr => format!("La réponse a échoué\u{202f}: {why}"),
+        }
+    }
 }
 
 #[cfg(test)]

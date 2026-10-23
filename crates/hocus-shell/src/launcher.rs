@@ -14,6 +14,11 @@
 //! And the action palette (Super+P, #68): every action, with its keys as
 //! caps and what it acts on, recent ones first; searched by name in either
 //! language, or by keys typed ("Maj+S") or pressed.
+//!
+//! And the AI (#44): a request understood offline ("capture de slack dans
+//! 3 secondes") shows as a card to confirm before it runs; a question can
+//! be asked, and its answer streams into the card, with buttons to copy it
+//! or keep it in the notes. The other results stay below, under "Also".
 
 use std::time::Duration;
 
@@ -24,9 +29,12 @@ use hocus_ui::{
 };
 
 use crate::{
+    answer::{self, Answer, Card, Source},
     column::View,
     i18n::Lang,
     icons,
+    intents::Intent,
+    panda::Mood,
     providers::{Context, Enabled, Hit, Provider, providers},
 };
 
@@ -49,6 +57,58 @@ fn hint_style(shown: bool) -> Style {
     }
 }
 
+/// The line under the field, with a card.
+fn rule_style(shown: bool) -> Style {
+    Style {
+        height: Length::Px(if shown { 1.0 } else { 0.0 }),
+        grow: 0.0,
+        ..Style::default()
+    }
+}
+
+/// The card's room under the field.
+fn panel_style(shown: bool) -> Style {
+    Style {
+        padding: if shown {
+            Insets::symmetric(24.0, 28.0)
+        } else {
+            Insets::default()
+        },
+        gap: 16.0,
+        height: if shown { Length::Auto } else { Length::Px(0.0) },
+        clip: true,
+        ..Style::default()
+    }
+}
+
+/// The results: the whole list, or a few under the card.
+fn list_style(card: bool) -> Style {
+    Style {
+        padding: if card {
+            Insets {
+                top: 14.0,
+                right: 12.0,
+                bottom: 16.0,
+                left: 12.0,
+            }
+        } else {
+            Insets::symmetric(12.0, 12.0)
+        },
+        ..Style::default()
+    }
+}
+
+/// A long answer's text, cut.
+fn cut_style() -> Style {
+    Style {
+        gap: 8.0,
+        clip: true,
+        grow: 0.0,
+        height: Length::Px(ANSWER_MAX),
+        ..Style::default()
+    }
+}
+
 /// The card's width, from the design.
 pub const WIDTH: f32 = 860.0;
 /// Room around the card for its shadow.
@@ -56,6 +116,13 @@ pub const ROOM: f32 = 40.0;
 const FIELD: f32 = 76.0;
 const ROW: f32 = 48.0;
 const MAX_RESULTS: usize = 8;
+/// Under an answer or a confirmation: the other results, fewer and closer.
+const MAX_ALSO: usize = 3;
+const ALSO_ROW: f32 = 44.0;
+/// The card's height with an answer: the field, the answer, "Also".
+const TALL: f32 = FIELD + 1.0 + 470.0 + 210.0;
+/// A longer answer is cut there; Copy takes it all.
+const ANSWER_MAX: f32 = 300.0;
 
 /// An application the launcher can start.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +166,12 @@ pub enum Choice {
     ToggleNote(usize),
     /// The notes, opened from the command field.
     OpenNotes,
+    /// A request understood offline, confirmed (#44).
+    Intent(Intent),
+    /// What is typed, asked to the AI.
+    Ask(String),
+    /// The answer shown: Enter acts on it.
+    Answer,
 }
 
 /// A line of the notes, as the card shows it.
@@ -151,6 +224,25 @@ pub enum LauncherEvent {
     Forget(String),
     /// The note at this place in the file goes.
     RemoveNote(usize),
+    /// A question for the AI; its answer comes back by `id` through
+    /// [`Launcher::answer_news`].
+    Ask {
+        id: u64,
+        question: String,
+    },
+    /// An answer, kept in the notes.
+    NoteAnswer(String),
+}
+
+/// What a button of the card does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CardAction {
+    Confirm,
+    Cancel,
+    Copy,
+    Note,
+    Stop,
+    Retry,
 }
 
 /// Where the launcher's parts are, logical from its corner, for the Matrix
@@ -199,6 +291,27 @@ pub struct Launcher {
     /// The hint under the list in the history and the picker, and its box.
     hint: NodeId,
     hint_box: NodeId,
+    /// The line under the field and the card's room, shown with an answer
+    /// or a confirmation.
+    rule: NodeId,
+    panel: NodeId,
+    /// The line between the card and "Also".
+    also_rule: NodeId,
+    /// The card's buttons, and what they do.
+    card_buttons: Vec<(NodeId, CardAction)>,
+    /// Which hit each row shows.
+    row_hits: Vec<usize>,
+    /// The answer's text box, to cut a long one.
+    answer_text: Option<NodeId>,
+    /// The answer is too long for the card: its text is cut.
+    answer_cut: bool,
+    /// Who answers questions, if anyone.
+    ask: Option<Source>,
+    answer: Option<Answer>,
+    /// The last question's id.
+    asked: u64,
+    /// The answer changed since it was drawn.
+    answer_changed: bool,
     now: Duration,
 }
 
@@ -309,15 +422,17 @@ impl Launcher {
                 ),
             )
             .unwrap_or_else(missing);
+        let rule = tree
+            .add(card, rule_style(false), Kind::Box(Look::default()))
+            .unwrap_or_else(missing);
+        let panel = tree
+            .add(card, panel_style(false), Kind::Box(Look::default()))
+            .unwrap_or_else(missing);
+        let also_rule = tree
+            .add(card, rule_style(false), Kind::Box(Look::default()))
+            .unwrap_or_else(missing);
         let list = tree
-            .add(
-                card,
-                Style {
-                    padding: Insets::symmetric(12.0, 12.0),
-                    ..Style::default()
-                },
-                Kind::Box(Look::default()),
-            )
+            .add(card, list_style(false), Kind::Box(Look::default()))
             .unwrap_or_else(missing);
         // Only in the history and the picker: commands have no hint.
         let hint_box = tree
@@ -355,6 +470,17 @@ impl Launcher {
             chip_text,
             hint,
             hint_box,
+            rule,
+            panel,
+            also_rule,
+            card_buttons: Vec::new(),
+            row_hits: Vec::new(),
+            answer_text: None,
+            answer_cut: false,
+            ask: None,
+            answer: None,
+            asked: 0,
+            answer_changed: false,
             now: Duration::ZERO,
         }
     }
@@ -378,6 +504,8 @@ impl Launcher {
         fresh.shortcuts = std::mem::take(&mut self.shortcuts);
         fresh.action_recents = std::mem::take(&mut self.action_recents);
         fresh.notes = std::mem::take(&mut self.notes);
+        fresh.ask = self.ask.take();
+        fresh.asked = self.asked;
         *self = fresh;
     }
 
@@ -424,6 +552,7 @@ impl Launcher {
     /// Which providers run, from the configuration.
     pub fn set_providers(&mut self, enabled: &Enabled) {
         self.providers = providers(enabled);
+        self.ask = enabled.ask.clone();
     }
 
     /// Opens on an empty field.
@@ -436,6 +565,7 @@ impl Launcher {
     pub fn open_mode(&mut self, mode: Mode) {
         self.open = true;
         self.mode = mode;
+        self.answer = None;
         self.tree.set_field_value(self.field, "");
         self.tree.set_focus(Some(self.field));
         let keys = match mode {
@@ -619,6 +749,19 @@ impl Launcher {
                     for provider in &self.providers {
                         provider.hits(query, &cx, &mut hits);
                     }
+                    // The answer to what is typed takes the place of asking it.
+                    if let Some(answer) = self.answer.as_ref().filter(|a| a.question == query) {
+                        hits.retain(|h| !matches!(h.choice, Choice::Ask(_) | Choice::Intent(_)));
+                        hits.insert(
+                            0,
+                            Hit {
+                                title: answer.caption(self.lang),
+                                kind: String::new(),
+                                color: None,
+                                choice: Choice::Answer,
+                            },
+                        );
+                    }
                     // Notes that say it open the notes.
                     let q = crate::fuzzy::fold(query);
                     if q.chars().count() >= 3 {
@@ -728,9 +871,16 @@ impl Launcher {
     /// Fills the list from what is typed.
     fn search(&mut self) {
         let query = self.query().trim().to_owned();
+        // Typing again leaves the answer.
+        if self.answer.as_ref().is_some_and(|a| a.question != query) {
+            self.answer = None;
+            self.answer_cut = false;
+        }
         self.hits = self.hits(&query);
         // Only the palette scrolls: it lists everything.
-        if !matches!(self.mode, Mode::Actions | Mode::Notes) {
+        if self.has_card() {
+            self.hits.truncate(1 + MAX_ALSO);
+        } else if !matches!(self.mode, Mode::Actions | Mode::Notes) {
             self.hits.truncate(MAX_RESULTS);
         }
         self.selected = 0;
@@ -738,7 +888,85 @@ impl Launcher {
         self.render();
     }
 
-    /// Shows `MAX_RESULTS` hits from `first`.
+    /// Whether the first hit is drawn as the card: an answer, or a request
+    /// to confirm.
+    fn has_card(&self) -> bool {
+        self.mode == Mode::Commands
+            && self
+                .hits
+                .first()
+                .is_some_and(|h| matches!(h.choice, Choice::Answer | Choice::Intent(_)))
+    }
+
+    /// Taller with a card, as short as before without.
+    fn fit(&mut self, card: bool) {
+        let height = if card {
+            TALL
+        } else {
+            FIELD + MAX_RESULTS as f32 * ROW + 2.0 * 12.0
+        };
+        let size = Size::new(WIDTH + 2.0 * ROOM, height + 2.0 * ROOM);
+        if self.tree.size() != size {
+            let scale = self.tree.scale();
+            self.tree.resize(size, scale);
+            self.surface = Surface::new(size, scale);
+        }
+    }
+
+    /// What the card shows for the first hit.
+    fn card_for(&self, hit: &Hit) -> Option<(Card, Vec<CardAction>)> {
+        let lang = self.lang;
+        match &hit.choice {
+            Choice::Intent(intent) => Some((
+                Card {
+                    mood: Mood::Wait,
+                    caption: lang.intent_caption().into(),
+                    blocks: vec![answer::Block::Paragraph(intent.title(lang))],
+                    chips: intent.facts(lang),
+                    error: None,
+                    buttons: vec![intent.confirm(lang).into(), lang.cancel().into()],
+                },
+                vec![CardAction::Confirm, CardAction::Cancel],
+            )),
+            Choice::Answer => {
+                let a = self.answer.as_ref()?;
+                let mut blocks = answer::blocks(&a.text);
+                if blocks.is_empty() && a.state == answer::State::Streaming {
+                    blocks.push(answer::Block::Paragraph(lang.thinking().into()));
+                }
+                let (error, buttons, actions) = match &a.state {
+                    answer::State::Streaming => {
+                        (None, vec![lang.stop().into()], vec![CardAction::Stop])
+                    }
+                    answer::State::Done(_) => (
+                        None,
+                        vec![lang.copy().into(), lang.add_to_notes().into()],
+                        vec![CardAction::Copy, CardAction::Note],
+                    ),
+                    answer::State::Failed(why) => (
+                        Some(why.clone()),
+                        vec![lang.ask_again().into()],
+                        vec![CardAction::Retry],
+                    ),
+                };
+                Some((
+                    Card {
+                        mood: a.mood(),
+                        caption: a.caption(lang),
+                        blocks,
+                        chips: Vec::new(),
+                        error,
+                        buttons,
+                    },
+                    actions,
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    /// Shows `MAX_RESULTS` hits from `first`; or the card for the first,
+    /// and a few others under "Also".
     fn render(&mut self) {
         for row in std::mem::take(&mut self.rows) {
             self.tree.remove(row);
@@ -746,16 +974,90 @@ impl Launcher {
         for child in self.tree.children(self.list) {
             self.tree.remove(child);
         }
+        for child in self.tree.children(self.panel) {
+            self.tree.remove(child);
+        }
+        self.card_buttons.clear();
+        self.row_hits.clear();
+        self.answer_text = None;
+        let card = if self.has_card() {
+            self.hits.first().and_then(|h| self.card_for(h))
+        } else {
+            None
+        };
+        self.fit(card.is_some());
+        for rule in [self.rule, self.also_rule] {
+            self.tree.set_style(rule, rule_style(card.is_some()));
+            self.tree.set_look(
+                rule,
+                Look {
+                    background: card.is_some().then_some(Paint::Border),
+                    ..Look::default()
+                },
+            );
+        }
+        self.tree.set_style(self.panel, panel_style(card.is_some()));
+        self.tree.set_style(self.list, list_style(card.is_some()));
+        if card.is_some() && self.hits.len() <= 1 {
+            // Nothing else: no "Also".
+            self.tree.set_style(self.also_rule, rule_style(false));
+            self.tree.set_style(
+                self.list,
+                Style {
+                    height: Length::Px(0.0),
+                    ..Style::default()
+                },
+            );
+        }
+        let theme = self.tree.theme().clone();
+        let (start, shown, row_height) = match &card {
+            Some(_) => (1, MAX_ALSO, ALSO_ROW),
+            None => (self.first, MAX_RESULTS, ROW),
+        };
+        if let Some((card, actions)) = card {
+            let filled = answer::fill(&mut self.tree, self.panel, &card);
+            self.card_buttons = filled.buttons.into_iter().zip(actions).collect();
+            if self
+                .hits
+                .first()
+                .is_some_and(|h| h.choice == Choice::Answer)
+            {
+                self.answer_text = Some(filled.text);
+                if self.answer_cut {
+                    self.tree.set_style(filled.text, cut_style());
+                }
+            }
+            if self.hits.len() > 1
+                && let Some(caption) = self.tree.add(
+                    self.list,
+                    Style {
+                        padding: Insets {
+                            bottom: 6.0,
+                            left: 16.0,
+                            ..Insets::default()
+                        },
+                        ..Style::default()
+                    },
+                    Kind::Box(Look::default()),
+                )
+            {
+                let _ = self.tree.add(
+                    caption,
+                    Style::default(),
+                    Kind::text(self.lang.also().to_uppercase(), theme.text.caption),
+                );
+            }
+        }
         let query = self.query().trim().to_owned();
-        let hits: Vec<Hit> = self
+        let hits: Vec<(usize, Hit)> = self
             .hits
             .iter()
-            .skip(self.first)
-            .take(MAX_RESULTS)
             .cloned()
+            .enumerate()
+            .skip(start)
+            .take(shown)
             .collect();
-        let theme = self.tree.theme().clone();
-        if hits.is_empty() && !query.is_empty() {
+        if hits.is_empty() && !query.is_empty() && start == 0 {
             let _ = self.tree.add(
                 self.list,
                 Style {
@@ -770,21 +1072,21 @@ impl Launcher {
                 ),
             );
         }
-        for (i, hit) in hits.into_iter().enumerate() {
+        for (index, hit) in hits {
             let (name, kind) = (hit.title.clone(), hit.kind.clone());
             let color = hit.color.unwrap_or(theme.colors.accent);
             let Some(row) = self.tree.add(
                 self.list,
                 Style {
                     direction: Direction::Row,
-                    height: Length::Px(ROW),
+                    height: Length::Px(row_height),
                     padding: Insets::symmetric(0.0, 16.0),
                     gap: 12.0,
                     align: Align::Center,
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: (i == 0).then_some(Paint::SurfaceHover),
+                    background: (index == self.selected).then_some(Paint::SurfaceHover),
                     radius: theme.radii.medium,
                     ..Look::default()
                 }),
@@ -858,6 +1160,7 @@ impl Launcher {
                 self.add_caps(row, action, &theme);
             }
             self.rows.push(row);
+            self.row_hits.push(index);
         }
         self.show_selection();
     }
@@ -917,17 +1220,19 @@ impl Launcher {
 
     /// Marks the chosen row, scrolling the list to it.
     fn show_selection(&mut self) {
-        if self.selected < self.first {
-            self.first = self.selected;
-            return self.render();
-        }
-        if self.selected >= self.first + MAX_RESULTS {
-            self.first = self.selected + 1 - MAX_RESULTS;
-            return self.render();
+        if !self.has_card() {
+            if self.selected < self.first {
+                self.first = self.selected;
+                return self.render();
+            }
+            if self.selected >= self.first + MAX_RESULTS {
+                self.first = self.selected + 1 - MAX_RESULTS;
+                return self.render();
+            }
         }
         let theme = self.tree.theme().clone();
         for (i, row) in self.rows.iter().enumerate() {
-            let chosen = self.first + i == self.selected;
+            let chosen = self.row_hits.get(i) == Some(&self.selected);
             self.tree.set_look(
                 *row,
                 Look {
@@ -1034,6 +1339,7 @@ impl Launcher {
                 self.show_selection();
                 Vec::new()
             }
+            Key::Enter if self.mode == Mode::Commands => self.act(self.selected),
             Key::Enter => {
                 let chosen = self.choose(self.selected);
                 if chosen.is_some() {
@@ -1058,7 +1364,9 @@ impl Launcher {
     /// The card, without the room for its shadow, relative to the surface.
     fn card(&self) -> Rect {
         let s = self.tree.size();
-        Rect::new(0.0, 0.0, s.w, s.h).inset(Insets::all(ROOM))
+        self.tree
+            .rect(self.card)
+            .unwrap_or_else(|| Rect::new(0.0, 0.0, s.w, s.h).inset(Insets::all(ROOM)))
     }
 
     pub fn hit(&self, at: Point) -> bool {
@@ -1083,6 +1391,17 @@ impl Launcher {
             let Event::Activated(node) = event else {
                 continue;
             };
+            if let Some((_, action)) = self.card_buttons.iter().find(|(b, _)| *b == node) {
+                events.extend(self.card_action(*action));
+                continue;
+            }
+            if self.mode == Mode::Commands
+                && let Some(i) = self.rows.iter().position(|r| *r == node)
+                && let Some(index) = self.row_hits.get(i).copied()
+            {
+                events.extend(self.act(index));
+                continue;
+            }
             if let Some(i) = self.rows.iter().position(|r| *r == node)
                 && let Some(chosen) = self.choose(self.first + i)
             {
@@ -1100,8 +1419,117 @@ impl Launcher {
 
     pub fn draw(&mut self, now: Duration) -> Vec<PixelRect> {
         self.now = now;
-        let damage = self.tree.update(now);
+        // What streamed in since the last turn, laid out once.
+        if self.answer_changed && self.open {
+            self.answer_changed = false;
+            self.render();
+        }
+        let mut damage = self.tree.update(now);
+        if let Some(text) = self.answer_text
+            && !self.answer_cut
+            && self.tree.rect(text).is_some_and(|r| r.h > ANSWER_MAX)
+        {
+            self.answer_cut = true;
+            self.tree.set_style(text, cut_style());
+            damage.extend(self.tree.update(now));
+        }
         self.surface.draw(&mut self.tree, &damage)
+    }
+
+    /// Enter on a hit, or a click on its row, in the command field.
+    fn act(&mut self, index: usize) -> Vec<LauncherEvent> {
+        let Some(hit) = self.hits.get(index) else {
+            return Vec::new();
+        };
+        match hit.choice.clone() {
+            Choice::Ask(question) => self.start_answer(question),
+            Choice::Answer => {
+                let primary = self.card_buttons.first().map(|(_, a)| *a);
+                primary.map(|a| self.card_action(a)).unwrap_or_default()
+            }
+            chosen => {
+                self.close();
+                vec![LauncherEvent::Chosen(chosen)]
+            }
+        }
+    }
+
+    /// Asks `question` again or for the first time: its answer shows in
+    /// the card as it comes.
+    fn start_answer(&mut self, question: String) -> Vec<LauncherEvent> {
+        let Some(source) = self.ask.clone() else {
+            return Vec::new();
+        };
+        self.asked += 1;
+        self.answer = Some(Answer::new(question.clone(), source));
+        self.answer_cut = false;
+        self.search();
+        vec![LauncherEvent::Ask {
+            id: self.asked,
+            question,
+        }]
+    }
+
+    fn card_action(&mut self, action: CardAction) -> Vec<LauncherEvent> {
+        let text = self.answer.as_ref().map(Answer::plain).unwrap_or_default();
+        match action {
+            CardAction::Confirm => match self.hits.first().map(|h| h.choice.clone()) {
+                Some(intent @ Choice::Intent(_)) => {
+                    self.close();
+                    vec![LauncherEvent::Chosen(intent)]
+                }
+                _ => Vec::new(),
+            },
+            CardAction::Cancel => {
+                self.close();
+                vec![LauncherEvent::Closed]
+            }
+            CardAction::Copy => {
+                self.close();
+                vec![LauncherEvent::Chosen(Choice::Copy(text))]
+            }
+            CardAction::Note => {
+                self.close();
+                vec![LauncherEvent::NoteAnswer(text)]
+            }
+            CardAction::Stop => {
+                if let Some(a) = self.answer.as_mut() {
+                    a.apply(answer::News::Failed(self.lang.answer_stopped().into()));
+                }
+                self.render();
+                Vec::new()
+            }
+            CardAction::Retry => {
+                let question = self.answer.as_ref().map(|a| a.question.clone());
+                question.map(|q| self.start_answer(q)).unwrap_or_default()
+            }
+        }
+    }
+
+    /// More of the answer to question `id`, its end, or why it stopped;
+    /// an older question's is dropped.
+    pub fn answer_news(&mut self, id: u64, news: answer::News) {
+        if id != self.asked {
+            return;
+        }
+        if let Some(answer) = self.answer.as_mut() {
+            answer.apply(news);
+            self.answer_changed = true;
+        }
+    }
+
+    /// The question whose answer is awaited, while the card waits for it.
+    pub fn awaited(&self) -> Option<u64> {
+        let streaming = self
+            .answer
+            .as_ref()
+            .is_some_and(|a| a.state == answer::State::Streaming);
+        (self.open && streaming).then_some(self.asked)
+    }
+
+    /// The answer shown, if any.
+    pub fn answer(&self) -> Option<&Answer> {
+        self.answer.as_ref()
     }
 
     pub fn view(&self) -> View<'_> {
@@ -1308,6 +1736,72 @@ mod tests {
                 Action::Screenshot { .. }
             )))
         ));
+    }
+
+    #[test]
+    fn a_request_shows_as_a_card_to_confirm_and_runs_on_enter() {
+        let mut l = launcher();
+        l.set_apps(vec![app("Slack", None)]);
+        l.text("capture de slack dans 3 secondes");
+        let dump = l.access().dump();
+        assert!(dump.contains("Screenshot of Slack in 3\u{a0}s"), "{dump}");
+        assert!(dump.contains("Delay: 3\u{a0}s"), "{dump}");
+        assert_eq!(l.size().h, TALL + 2.0 * ROOM, "the card makes room");
+        assert!(matches!(
+            l.key(Key::Enter).as_slice(),
+            [LauncherEvent::Chosen(Choice::Intent(Intent::CaptureApp {
+                delay: 3,
+                ..
+            }))]
+        ));
+        assert!(!l.is_open());
+    }
+
+    #[test]
+    fn a_question_is_asked_and_its_answer_streams_into_the_card() {
+        let mut l = launcher();
+        l.set_providers(&Enabled {
+            ask: Some(Source::Local),
+            ..Enabled::default()
+        });
+        l.open();
+        l.text("why is the build slow?");
+        assert!(matches!(
+            l.hits.first().map(|h| &h.choice),
+            Some(Choice::Ask(_))
+        ));
+        let asked = l.key(Key::Enter);
+        assert_eq!(
+            asked,
+            vec![LauncherEvent::Ask {
+                id: 1,
+                question: "why is the build slow?".into()
+            }]
+        );
+        assert!(l.is_open(), "the answer comes in the field");
+        assert_eq!(l.awaited(), Some(1));
+        l.answer_news(1, answer::News::Text("The cache is **off**.".into()));
+        l.answer_news(7, answer::News::Text("an older question's".into()));
+        l.answer_news(1, answer::News::Done(Duration::from_secs(3)));
+        l.draw(Duration::ZERO);
+        let dump = l.access().dump();
+        assert!(dump.contains("The cache is off."), "{dump}");
+        assert!(!dump.contains("older"), "{dump}");
+        assert_eq!(l.awaited(), None, "nothing more awaited");
+        // Enter copies it.
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![LauncherEvent::Chosen(Choice::Copy(
+                "The cache is off.".into()
+            ))]
+        );
+        // Typing again leaves the answer.
+        l.open();
+        l.text("why?");
+        l.key(Key::Enter);
+        l.text("x");
+        assert_eq!(l.awaited(), None);
+        assert!(l.answer().is_none());
     }
 
     #[test]

@@ -3,4 +3,3 @@
 
 pub mod caldav;
 pub mod ics;
-pub mod secrets;

@@ -1,0 +1,63 @@
+# Offline intents (#44): a request typed in French is understood without a
+# model and shown as a card to confirm; nothing runs before Enter. Then
+# Slack's window is captured three seconds later.
+description = "\"capture de slack dans 3 secondes\" shows the screenshot of Slack with its 3 s delay to confirm; Enter starts the delay, and Slack's window is captured 3 s later"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+
+[screenshots]
+save = false
+"""
+
+[[step]]
+open = { app_id = "slack", size = [500, 300], color = "#4a154b" }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "capture de slack dans 3 secondes"
+
+[[step]]
+expect_ui = { label = "Capture de Slack dans 3 s" }
+
+[[step]]
+expect_ui = { label = "Fenêtre : Slack" }
+
+[[step]]
+expect_ui = { label = "Délai : 3 s" }
+
+[[step]]
+expect_ui = { label = "Lancer le délai" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "intent-screenshot-french.png" }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Capture de Slack dans 3 s", shown = false }
+
+[[step]]
+advance_ms = 3100
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_event = { type = "screenshot", has = "\"width\":500,\"height\":300" }
+
+[[step]]
+expect_ui = { label = "Capture prise" }
