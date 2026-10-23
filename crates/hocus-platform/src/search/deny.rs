@@ -4,7 +4,7 @@
 //! name before anything else is asked of it, its type included: a denied
 //! entry is never opened, not even for its first bytes.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 /// Places under the home never read, as paths from it.
 const HOME: &[&str] = &[
@@ -134,13 +134,35 @@ pub fn denied_name(name: &str) -> bool {
 }
 
 /// Whether `path` (absolute) is never read: one of its parts has a denied
-/// name, or it is in a denied place of `home`.
+/// name, or it is in a denied place of `home`. `..` is resolved first, so
+/// `Documents/../.config/gcloud` is the place it names.
 pub fn denied(path: &Path, home: Option<&Path>) -> bool {
+    let path = lexical(path);
     let named = path.components().any(|c| match c {
         Component::Normal(name) => denied_name(&name.to_string_lossy()),
         _ => false,
     });
-    named || home.is_some_and(|home| HOME.iter().any(|place| path.starts_with(home.join(place))))
+    named
+        || home.is_some_and(|home| {
+            let home = lexical(home);
+            HOME.iter().any(|place| path.starts_with(home.join(place)))
+        })
+}
+
+/// `path` with `.` and `..` resolved by its words alone (links are never
+/// followed, so the words are what is read).
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -186,6 +208,23 @@ mod tests {
         ] {
             assert!(!denied_name(name), "{name} is not");
         }
+    }
+
+    #[test]
+    fn a_place_named_through_dot_dot_is_still_denied() {
+        let home = Path::new("/home/alex");
+        assert!(denied(
+            Path::new("/home/alex/Documents/../.config/gcloud/configurations/config_default"),
+            Some(home)
+        ));
+        assert!(denied(
+            Path::new("/home/alex/Documents/./../.config/gcloud"),
+            Some(home)
+        ));
+        assert!(!denied(
+            Path::new("/home/alex/Documents/../Documents/notes.md"),
+            Some(home)
+        ));
     }
 
     #[test]
