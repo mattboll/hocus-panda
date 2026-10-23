@@ -558,3 +558,73 @@ fn an_agent_reads_the_trees_of_its_apps_windows_alone() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// The session's `org.a11y.Status`, as at-spi's bus launcher has it.
+struct Status {
+    enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[zbus::interface(name = "org.a11y.Status")]
+impl Status {
+    #[zbus(property)]
+    fn is_enabled(&self) -> bool {
+        self.enabled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[zbus(property)]
+    fn set_is_enabled(&mut self, on: bool) {
+        self.enabled.store(on, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn wait_enabled(enabled: &std::sync::atomic::AtomicBool, wanted: bool) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while enabled.load(std::sync::atomic::Ordering::SeqCst) != wanted {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "IsEnabled never became {wanted}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
+}
+
+/// While agents are there the session's accessibility is on, so that the
+/// toolkits that wait for it expose their trees; it is set back once they
+/// left, and only if it was off before.
+#[test]
+fn accessibility_is_on_while_agents_are_there() -> anyhow::Result<()> {
+    use hocus_platform::atspi::{Bus, Toggle};
+    use std::sync::{Arc, atomic::AtomicBool};
+
+    let session = PrivateBus::start()?;
+    let enabled = Arc::new(AtomicBool::new(false));
+    let _status = zbus::block_on(
+        zbus::connection::Builder::address(session.address.as_str())
+            .serve_at(
+                "/org/a11y/bus",
+                Status {
+                    enabled: enabled.clone(),
+                },
+            )
+            .name("org.a11y.Bus")
+            .build(),
+    )?;
+    let toggle = Toggle::start(&Bus::Session(session.address.clone()))?
+        .ok_or_else(|| anyhow::anyhow!("no toggle on a session bus"))?;
+    toggle.agents(true);
+    wait_enabled(&enabled, true)?;
+    toggle.agents(false);
+    wait_enabled(&enabled, false)?;
+
+    // On before the agents came: it stays on after they went.
+    enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+    toggle.agents(true);
+    toggle.agents(false);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(enabled.load(std::sync::atomic::Ordering::SeqCst));
+
+    // No session bus: nothing to follow.
+    assert!(Toggle::start(&Bus::Unknown)?.is_none());
+    Ok(())
+}

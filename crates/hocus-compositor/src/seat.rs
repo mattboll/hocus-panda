@@ -269,6 +269,9 @@ impl State {
             keymap: None,
             view: None,
         });
+        if self.seats.list.len() == 1 {
+            self.a11y_agents(true);
+        }
     }
 
     /// The seat of an agent's connection goes with it, and what it waited
@@ -316,6 +319,9 @@ impl State {
                 .push((global, self.clock.now() + GLOBAL_LINGER));
         }
         tracing::info!(agent = gone.name, "an agent's seat went");
+        if self.seats.list.is_empty() {
+            self.a11y_agents(false);
+        }
         self.needs_redraw = true;
     }
 

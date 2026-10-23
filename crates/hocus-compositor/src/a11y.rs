@@ -33,6 +33,8 @@ pub struct A11y {
     bus: Bus,
     /// Started at the first request.
     reader: Option<Reader>,
+    /// The session's accessibility, on while agents are there.
+    toggle: Option<atspi::Toggle>,
     next: u64,
     waiting: HashMap<u64, Waiting>,
 }
@@ -42,6 +44,7 @@ impl Default for A11y {
         Self {
             bus: Bus::Unknown,
             reader: None,
+            toggle: None,
             next: 0,
             waiting: HashMap::new(),
         }
@@ -89,6 +92,13 @@ pub fn start(state: &mut State, a11y_bus: Option<String>, session_bus: Option<&s
         (None, Some(session)) => Bus::Session(session.to_owned()),
         (None, None) => Bus::Unknown,
     };
+    state.a11y.toggle = match atspi::Toggle::start(&state.a11y.bus) {
+        Ok(toggle) => toggle,
+        Err(err) => {
+            tracing::warn!(%err, "could not follow the accessibility status");
+            None
+        }
+    };
 }
 
 impl State {
@@ -97,6 +107,14 @@ impl State {
     pub fn set_a11y_bus(&mut self, address: String) {
         self.a11y.bus = Bus::Address(address);
         self.a11y.reader = None;
+    }
+
+    /// Agents came or all went: the session's accessibility follows, so
+    /// that the toolkits that wait for it expose their trees.
+    pub(crate) fn a11y_agents(&mut self, there: bool) {
+        if let Some(toggle) = &self.a11y.toggle {
+            toggle.agents(there);
+        }
     }
 
     /// A window's own tree, answered once read; `Some` when refused.

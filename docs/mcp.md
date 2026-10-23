@@ -110,7 +110,10 @@ session without `--session-bus`, none. Limits:
 
 - Some toolkits (Qt, Chromium and Electron, Firefox) expose their tree only
   once accessibility is turned on for the session, as a screen reader
-  does; the compositor does not turn it on.
+  does. The compositor turns it on (`org.a11y.Status.IsEnabled`) while an
+  agent is connected, and back off once the last one left, only if it was
+  off before; those applications then work a little more. An application
+  already running may need a moment, or a restart, to expose its tree.
 - Places are the application's: a toolkit that counts its own shadow in
   its window's coordinates is off by its width.
 - An element moved between the reading and the click is clicked where it
