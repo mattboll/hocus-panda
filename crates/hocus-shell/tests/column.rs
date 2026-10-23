@@ -431,12 +431,14 @@ fn other_desktops_agents_show_in_a_line_each_and_give_room_back_first() -> anyho
         account.bottom() <= height - 16.0 + 0.5,
         "the account at {account:?} leaves the column, {height} tall"
     );
-    // The lines went, then the notifications, while both agents of this
-    // desktop show in full; the summary and the dots still tell.
+    // The lines went before anything else, notifications but one, while
+    // both agents of this desktop show in full; the summary and the dots
+    // still tell.
     let access = column.access().dump();
     assert!(!access.contains("Docs · 1 at work"), "{access}");
     assert!(!access.contains("3 other desktops"), "{access}");
-    assert!(!access.contains("Mail · Message"), "{access}");
+    assert!(!access.contains("Mail · Message 2"), "{access}");
+    assert!(access.contains("Show refacto"), "{access}");
     assert!(access.contains("Yes to refacto"), "{access}");
     assert!(access.contains("tests · Works · 1 min"), "{access}");
     assert!(access.contains("2 wait for an answer"), "{access}");
@@ -449,6 +451,66 @@ fn other_desktops_agents_show_in_a_line_each_and_give_room_back_first() -> anyho
         access.contains("\"1 waiting · 1 at work · 1 done\""),
         "{access}"
     );
+    Ok(())
+}
+
+#[test]
+fn on_a_laptop_screen_a_waiting_agent_and_the_meeting_fit_with_the_account() -> anyhow::Result<()> {
+    // 1280×800, less the margins.
+    let height = 768.0;
+    let mut column = Column::new(Theme::default(), Lang::En, height, 1.0);
+    let mut s = state();
+    s.agents = Some(agents(true));
+    s.meeting = Some(Meeting {
+        title: "Design review".into(),
+        when: "In 12 min".into(),
+        progress: 80,
+        join: true,
+    });
+    s.calendar_set = true;
+    column.set_state(&s);
+    column.draw(Duration::from_secs(600));
+    common::expect_reference(&column.view(), "column-laptop-agents.png")?;
+    let account = rect_of(&column, "Account: Camille")?;
+    let size = column.size();
+    assert!(
+        account.x >= 0.0
+            && account.y >= 0.0
+            && account.right() <= size.w
+            && account.bottom() <= size.h - 16.0 + 0.5,
+        "the account at {account:?} leaves the column, {size:?}"
+    );
+    // The meeting on one line, the waiting agent in short: still joined,
+    // still answered.
+    let at = button(&column, "Join")?;
+    assert_eq!(click(&mut column, at), vec![Action::JoinMeeting]);
+    for (name, ask) in [
+        ("Yes to refacto", AgentAsk::Yes),
+        ("No to refacto", AgentAsk::No),
+    ] {
+        let at = button(&column, name)?;
+        assert_eq!(
+            click(&mut column, at),
+            vec![Action::Agent {
+                key: "w1:p1".into(),
+                ask
+            }]
+        );
+    }
+    let at = button(&column, "refacto · Waits for an answer: “Push the branch?”")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::Agent {
+            key: "w1:p1".into(),
+            ask: AgentAsk::Show
+        }]
+    );
+    // With room, the card and the row as the design draws them.
+    column.resize(1000.0, 1.0);
+    column.draw(Duration::from_secs(600));
+    let access = column.access().dump();
+    assert!(access.contains("Show refacto"), "{access}");
+    assert!(access.contains("\"In 12 min\""), "{access}");
     Ok(())
 }
 

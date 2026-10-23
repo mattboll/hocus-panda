@@ -419,7 +419,6 @@ struct Nodes {
     time: NodeId,
     /// The meeting card, its ring, and its Join or Details.
     meeting: NodeId,
-    ring: NodeId,
     meeting_button: Option<NodeId>,
     /// The coding agents' room.
     agents: NodeId,
@@ -559,20 +558,38 @@ impl Column {
     /// Shows as many notifications, journal entries and agents as there is
     /// room for, the account inside the card: the notifications go first,
     /// down to one, then the journal's entries, down to one, then the
-    /// other desktops' agents' lines, then the notifications altogether,
-    /// then the agents shown in full, down to one.
+    /// other desktops' agents' lines, then the meeting card and the
+    /// waiting agents' rows are said in short, then the notifications go
+    /// altogether, then the agents shown in full, down to one; what that
+    /// gave back goes to the notifications again.
     fn fit_room(&mut self) {
         let mut want = Fit::MOST;
         loop {
             self.fit_to(want);
             self.tree.layout();
             if self.account_inside() {
-                return;
+                break;
             }
             match want.less(&self.state) {
                 Some(less) => want = less,
                 None => return,
             }
+        }
+        // What an agent's row gave may leave room for notifications again.
+        let most = NOTIFICATIONS.min(self.state.notifications.len().max(1));
+        while want.notifications < most {
+            let more = Fit {
+                notifications: want.notifications + 1,
+                ..want
+            };
+            self.fit_to(more);
+            self.tree.layout();
+            if !self.account_inside() {
+                self.fit_to(want);
+                self.tree.layout();
+                return;
+            }
+            want = more;
         }
     }
 
@@ -601,6 +618,17 @@ impl Column {
             let (button, entries) =
                 crate::journal::fill(&mut self.tree, n.journal, &theme, lang, view, want.journal);
             (self.nodes.journal_button, self.nodes.journal_entries) = (Some(button), Some(entries));
+        }
+        if want.compact_meeting != self.fit.compact_meeting {
+            self.nodes.meeting_button = fill_meeting(
+                &mut self.tree,
+                n.meeting,
+                &theme,
+                lang,
+                self.state.meeting.as_ref(),
+                self.state.calendar_set,
+                want.compact_meeting,
+            );
         }
         if want.agents != self.fit.agents
             && let Some(view) = &self.state.agents
@@ -770,18 +798,6 @@ impl Column {
             };
         }
         if all || old.meeting != state.meeting || old.calendar_set != state.calendar_set {
-            let progress = state.meeting.as_ref().map_or(0, |m| m.progress.min(100));
-            t.set_draw(
-                n.ring,
-                Box::new(Ring {
-                    progress: f32::from(progress) / 100.0,
-                }),
-            );
-            for child in t.children(n.meeting) {
-                if child != n.ring {
-                    t.remove(child);
-                }
-            }
             let theme = t.theme().clone();
             self.nodes.meeting_button = fill_meeting(
                 t,
@@ -790,6 +806,7 @@ impl Column {
                 lang,
                 state.meeting.as_ref(),
                 state.calendar_set,
+                fit.compact_meeting,
             );
         }
         if all || old.time != state.time {
@@ -1314,6 +1331,8 @@ struct Fit {
     notifications: usize,
     journal: usize,
     agents: crate::agents::Fit,
+    /// The meeting card on one line.
+    compact_meeting: bool,
 }
 
 impl Fit {
@@ -1321,12 +1340,14 @@ impl Fit {
         notifications: NOTIFICATIONS,
         journal: crate::journal::ROWS,
         agents: crate::agents::Fit::MOST,
+        compact_meeting: false,
     };
 
     /// One less: a notification while more than one shows, else a journal
     /// entry while more than one shows, else an other desktop's agents'
-    /// line, else the notifications altogether, else an agent shown in
-    /// full; `None` when nothing gives more.
+    /// line, else the meeting card on one line, else the waiting agents'
+    /// rows in short, else the notifications altogether, else an agent
+    /// shown in full; `None` when nothing gives more.
     fn less(self, state: &ColumnState) -> Option<Self> {
         // "Nothing new" takes a line too.
         let notifications = self.notifications.min(state.notifications.len().max(1));
@@ -1347,32 +1368,37 @@ impl Fit {
                 ..self
             });
         }
-        // Then the other desktops' agents share a line; then the
-        // notifications' section goes altogether; last, the agents shown in
-        // full go down to one.
+        // Then the other desktops' agents share a line, which goes; the
+        // meeting card takes one line; the waiting agents' rows are said
+        // in short; the notifications' section goes altogether; last, the
+        // agents shown in full go down to one.
+        let less = Self {
+            notifications,
+            journal,
+            ..self
+        };
         let agents = state.agents.as_ref();
-        if let Some(agents) = agents
-            .filter(|a| self.agents.lines.min(a.others.len()) > 0)
-            .and_then(|a| self.agents.less(a))
-        {
+        if let Some(agents) = agents.and_then(|a| self.agents.less_lines(a)) {
+            return Some(Self { agents, ..less });
+        }
+        if !self.compact_meeting {
             return Some(Self {
-                notifications,
-                journal,
-                agents,
+                compact_meeting: true,
+                ..less
             });
+        }
+        if let Some(agents) = agents.and_then(|a| self.agents.less_compact(a)) {
+            return Some(Self { agents, ..less });
         }
         if notifications > 0 {
             return Some(Self {
                 notifications: 0,
-                journal,
-                ..self
+                ..less
             });
         }
-        agents.and_then(|a| self.agents.less(a)).map(|agents| Self {
-            notifications,
-            journal,
-            agents,
-        })
+        agents
+            .and_then(|a| self.agents.less_rows(a))
+            .map(|agents| Self { agents, ..less })
     }
 }
 
@@ -1560,15 +1586,6 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
             radius: theme.radii.large,
             ..Look::default()
         }),
-    );
-    let ring = add(
-        tree,
-        meeting,
-        Style::default(),
-        Kind::Custom {
-            draw: Box::new(Ring { progress: 0.0 }),
-            label: None,
-        },
     );
 
     // The active window and this screen's desktops.
@@ -1828,7 +1845,6 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         phone_ring: None,
         time,
         meeting,
-        ring,
         meeting_button: None,
         agents,
         card,
@@ -1839,7 +1855,9 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
     }
 }
 
-/// The meeting card's words and button, after its ring.
+/// The meeting card: its ring, its words and its Join or Details, as board
+/// Bureau draws it; `compact`, one line (when · title, and the button) for
+/// a column short of room.
 fn fill_meeting(
     tree: &mut Tree,
     card: NodeId,
@@ -1847,8 +1865,62 @@ fn fill_meeting(
     lang: Lang,
     meeting: Option<&Meeting>,
     calendar_set: bool,
+    compact: bool,
 ) -> Option<NodeId> {
     let missing = || unreachable!("adding to a node of this tree");
+    for child in tree.children(card) {
+        tree.remove(child);
+    }
+    tree.set_style(
+        card,
+        Style {
+            direction: Direction::Row,
+            gap: if compact { 10.0 } else { 14.0 },
+            align: Align::Center,
+            padding: if compact {
+                Insets::symmetric(8.0, 14.0)
+            } else {
+                Insets::all(14.0)
+            },
+            ..Style::default()
+        },
+    );
+    if compact {
+        let line = match meeting {
+            Some(m) => format!("{} · {}", m.when, m.title),
+            None => lang.no_meeting().to_owned(),
+        };
+        let paint = if meeting.is_some() {
+            Paint::Text
+        } else {
+            Paint::Muted
+        };
+        tree.add(
+            card,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
+            Kind::text_line(line, theme.text.title.with_weight(600).with_color(paint)),
+        )
+        .unwrap_or_else(missing);
+        if !calendar_set {
+            return None;
+        }
+        return Some(meeting_button(tree, card, theme, lang, meeting, 36.0));
+    }
+    let progress = meeting.map_or(0, |m| m.progress.min(100));
+    tree.add(
+        card,
+        Style::default(),
+        Kind::Custom {
+            draw: Box::new(Ring {
+                progress: f32::from(progress) / 100.0,
+            }),
+            label: None,
+        },
+    )
+    .unwrap_or_else(missing);
     let words = tree
         .add(
             card,
@@ -1884,6 +1956,18 @@ fn fill_meeting(
     if !calendar_set {
         return None;
     }
+    Some(meeting_button(tree, card, theme, lang, meeting, 44.0))
+}
+
+/// Join when the meeting has a call and starts soon, else Details.
+fn meeting_button(
+    tree: &mut Tree,
+    card: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    meeting: Option<&Meeting>,
+    height: f32,
+) -> NodeId {
     let (label, kind) = match meeting {
         Some(m) if m.join => (lang.join(), ButtonKind::Primary),
         _ => (lang.details(), ButtonKind::Plain),
@@ -1891,12 +1975,13 @@ fn fill_meeting(
     tree.add(
         card,
         Style {
-            height: Length::Px(44.0),
+            height: Length::Px(height),
             padding: Insets::symmetric(0.0, 12.0),
             ..Style::default()
         },
         Kind::Button(Button::new(label, kind, theme)),
     )
+    .unwrap_or_else(|| unreachable!("adding to a node of this tree"))
 }
 
 /// The to-dos' room above the notifications: some, or none.
