@@ -15,6 +15,7 @@ mod bars;
 mod blur;
 mod calendar;
 mod capture;
+mod circle;
 mod clipboard;
 mod clock;
 mod comfort;
@@ -377,6 +378,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         app.state.refresh_shell();
         app.serve_captures();
         app.serve_screenshots();
+        app.serve_circle();
         app.serve_recording();
         app.apply_gamma();
         app.settle_outputs();

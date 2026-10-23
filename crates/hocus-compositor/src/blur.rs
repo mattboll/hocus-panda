@@ -57,6 +57,7 @@ pub enum Surface {
     Leave,
     Share,
     Welcome,
+    Circle,
 }
 
 /// What has glass behind it.

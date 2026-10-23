@@ -11,6 +11,7 @@ pub mod authorize;
 pub mod boot;
 pub mod calc;
 pub mod checkbox;
+pub mod circle;
 pub mod column;
 pub mod dock;
 pub mod emoji;

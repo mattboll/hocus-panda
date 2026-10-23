@@ -1114,6 +1114,26 @@ impl Lang {
         self.pick("No text found", "Aucun texte trouvé")
     }
 
+    /// Under the circle's menu, while what was chosen waits for the text.
+    pub fn reading_text(self) -> &'static str {
+        self.pick("Reading the text…", "Lecture du texte…")
+    }
+
+    pub fn no_text_circled(self) -> &'static str {
+        self.pick(
+            "No text found in the circled area",
+            "Aucun texte trouvé dans la zone entourée",
+        )
+    }
+
+    /// The program that reads text in pictures is missing.
+    pub fn no_text_reader(self, program: &str) -> String {
+        match self {
+            Self::En => format!("Reading the text needs {program}"),
+            Self::Fr => format!("Lire le texte demande {program}"),
+        }
+    }
+
     pub fn history_hint(self) -> &'static str {
         self.pick(
             "Enter pastes · Tab pins · Delete forgets",

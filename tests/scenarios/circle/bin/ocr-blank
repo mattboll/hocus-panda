@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stands for tesseract finding no text in the picture.
+exit 0

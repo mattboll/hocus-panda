@@ -363,6 +363,7 @@ impl State {
         self.refresh_dock();
         self.refresh_corners();
         self.refresh_ink();
+        self.refresh_circle();
         self.refresh_wobbles();
         self.refresh_pandas();
         self.refresh_agents();
@@ -698,6 +699,7 @@ impl State {
         self.identify_ui(&mut out);
         self.leave_ui(&mut out);
         self.auth_ui(&mut out);
+        self.circle_ui(&mut out);
         self.picker_ui(&mut out);
         self.alt_tab_ui(&mut out);
         self.dock_ui(&mut out);

@@ -1,0 +1,75 @@
+# Circle to ask (#46): Super+Shift and a left drag draw a loop around part
+# of a window; let go, the menu shows under it while its text is read (a
+# stand-in for tesseract reads a known line). The AI is off: no Explain,
+# Translate nor question field. "Copy the text" puts the line on the
+# clipboard and closes it all.
+description = "Super+Shift and a drag circle part of the screen; with the AI off the menu offers Search, Copy the text and Note, and Copy the text puts the circled text on the clipboard"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[screenshots]
+ocr = "{scenario_dir}/circle/bin/ocr"
+"""
+
+[[step]]
+open = { app_id = "log", size = [900, 560], color = "#15171b" }
+
+[[step]]
+pointer_move = [140, 313]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+key_down = "shift"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_path = [[140, 313], [134, 340], [178, 365], [267, 384], [383, 393], [508, 392], [619, 380], [697, 359], [730, 333], [710, 307], [642, 285], [538, 270], [414, 266], [294, 273], [197, 290], [158, 314], [151, 339], [193, 363]]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "shift"
+
+[[step]]
+key_up = "super"
+
+# Neither the drawing pen (#86) nor the window saw the drag.
+[[step]]
+expect_not_received = { app_id = "log", event = "button 272 pressed" }
+
+[[step]]
+expect_ui = { label = "Copy the text", inside = [306, 400, 424, 120] }
+
+[[step]]
+expect_ui = { label = "Explain", shown = false }
+
+[[step]]
+expect_ui = { label = "Translate", shown = false }
+
+[[step]]
+expect_ui = { label = "Ask something else about the circled area", shown = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "circle-copy-text.png" }
+
+[[step]]
+click_ui = "Copy the text"
+
+[[step]]
+expect_ui = { label = "Copy the text", shown = false }
+
+[[step]]
+expect_clipboard = { app_id = "log", text = "fatal error: 'linux/input.h' file not found" }
+
+[[step]]
+expect_not_received = { app_id = "log", event = "button 272 pressed" }

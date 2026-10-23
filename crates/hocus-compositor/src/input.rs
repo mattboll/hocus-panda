@@ -49,6 +49,7 @@ impl State {
             || self.card_open()
             || self.leave_open()
             || self.auth_open()
+            || self.circle_open()
             || self.picking()
             || self.alt_tab_open()
     }
@@ -205,7 +206,11 @@ impl State {
         );
         self.super_fired();
         match handled {
-            Some(Handled::Shortcut(action)) => self.run_action(&action, serial),
+            Some(Handled::Shortcut(action)) => {
+                // A circle's menu gives way to what was asked for.
+                self.close_circle();
+                self.run_action(&action, serial);
+            }
             Some(Handled::PaletteKeys(combo)) => self.palette_keys(&combo),
             Some(Handled::Vt(vt)) => {
                 use smithay::backend::session::Session as _;
@@ -230,6 +235,9 @@ impl State {
             }
             Some(Handled::Panel(sym, modifiers)) if self.auth_open() => {
                 self.auth_key(sym, &modifiers);
+            }
+            Some(Handled::Panel(sym, modifiers)) if self.circle_open() => {
+                self.circle_key(sym, &modifiers);
             }
             Some(Handled::Panel(sym, _)) if self.leave_open() => {
                 self.leave_key(sym);
@@ -341,6 +349,7 @@ impl State {
         let location = self.constrained(from, location);
         self.corner_pointer(location);
         self.ink_motion(location);
+        self.circle_motion(location);
         if !pointer.is_grabbed() {
             let focus = pointer
                 .current_focus()
@@ -363,6 +372,7 @@ impl State {
                 || self.recording_pointer(location, None)
                 || self.picker_pointer(location, None)
                 || self.auth_pointer(location, None)
+                || self.circle_pointer_motion(location)
                 || self.leave_pointer(location, None)
                 || self.card_pointer(location, None)
                 || self.showcase_pointer(None)
@@ -422,6 +432,11 @@ impl State {
         // Super with a button is no longer Super alone (#86); with the
         // left one it draws on the screen, and no client sees it.
         self.super_spoiled();
+        // With Shift too, it circles something to ask about it (#46).
+        if !pointer.is_grabbed() && self.circle_button(at, button, pressed) {
+            self.needs_redraw = true;
+            return;
+        }
         if !pointer.is_grabbed() && self.ink_button(at, button, pressed) {
             self.needs_redraw = true;
             return;
@@ -520,8 +535,8 @@ impl State {
         };
         self.activity();
         self.super_spoiled();
-        if self.opacity_wheel(amount(Axis::Vertical)) || self.launcher_wheel(amount(Axis::Vertical))
-        {
+        let dy = amount(Axis::Vertical);
+        if self.opacity_wheel(dy) || self.circle_wheel(dy) || self.launcher_wheel(dy) {
             return;
         }
         let mut frame = AxisFrame::new(event.time_msec()).source(source);
@@ -548,7 +563,7 @@ impl State {
     pub fn scroll(&mut self, dy: f64, time_msec: u32) {
         self.activity();
         self.super_spoiled();
-        if self.opacity_wheel(dy) || self.launcher_wheel(dy) {
+        if self.opacity_wheel(dy) || self.circle_wheel(dy) || self.launcher_wheel(dy) {
             return;
         }
         let frame = AxisFrame::new(time_msec)

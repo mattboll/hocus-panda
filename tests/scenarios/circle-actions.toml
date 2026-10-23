@@ -1,0 +1,158 @@
+# Circle to ask (#46), the AI off: a click elsewhere closes the menu and no
+# window sees it; Note adds the circled text to the notes; Search looks it
+# up with the launcher's search engine (xdg-open, a stand-in here); Super
+# and a drag still draw on the screen (#86). The keys are set apart in the
+# configuration.
+description = "A click elsewhere closes the circle's menu unseen by windows; Note adds the circled text to the notes, Search opens the web search for it, and the configured keys circle while Super alone still draws"
+outputs = ["1280x800"]
+shell = true
+child_env = { PATH = "{scenario_dir}/circle/bin:/usr/bin:/bin" }
+
+[[step]]
+config = """
+[screenshots]
+ocr = "{scenario_dir}/circle/bin/ocr"
+
+[circle]
+modifiers = "Super+Ctrl"
+"""
+
+[[step]]
+open = { app_id = "log", size = [900, 560], color = "#15171b" }
+
+[[step]]
+pointer_move = [140, 313]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+key_down = "ctrl"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_path = [[140, 313], [134, 340], [178, 365], [267, 384], [383, 393], [508, 392], [619, 380], [697, 359], [730, 333], [710, 307], [642, 285], [538, 270], [414, 266], [294, 273], [197, 290], [158, 314], [151, 339], [193, 363]]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "ctrl"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "Note" }
+
+# A click elsewhere: gone, and the window got neither the press nor the
+# release.
+[[step]]
+pointer_move = [850, 600]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_ui = { label = "Note", shown = false }
+
+[[step]]
+expect_not_received = { app_id = "log", event = "button 272 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "log", event = "button 272 released" }
+
+# Again, to note it.
+[[step]]
+pointer_move = [140, 313]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+key_down = "ctrl"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_path = [[140, 313], [134, 340], [178, 365], [267, 384], [383, 393], [508, 392], [619, 380], [697, 359], [730, 333], [710, 307], [642, 285], [538, 270], [414, 266], [294, 273], [197, 290], [158, 314], [151, 339], [193, 363]]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "ctrl"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+click_ui = "Note"
+
+[[step]]
+expect_ui = { label = "Note", shown = false }
+
+[[step]]
+expect_state_file = { name = "notes.md", contains = ["fatal error: 'linux/input.h' file not found"] }
+
+# Again, to search it.
+[[step]]
+pointer_move = [140, 313]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+key_down = "ctrl"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_path = [[140, 313], [134, 340], [178, 365], [267, 384], [383, 393], [508, 392], [619, 380], [697, 359], [730, 333], [710, 307], [642, 285], [538, 270], [414, 266], [294, 273], [197, 290], [158, 314], [151, 339], [193, 363]]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "ctrl"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+click_ui = "Search"
+
+[[step]]
+expect_runtime_file = { name = "xdg-open", contains = ["xdg-open https://duckduckgo.com/?q=fatal+error%3A+%27linux%2Finput.h%27+file+not+found"] }
+
+# Super alone with a drag draws, and circles nothing.
+[[step]]
+pointer_move = [400, 300]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_path = [[480, 340], [560, 320]]
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_ui = { label = "Note", shown = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_pixel = { output = "HEADLESS-1", at = [520, 330], color = "#15171b", tolerance = 8, is = false }
+
+[[step]]
+key_up = "super"

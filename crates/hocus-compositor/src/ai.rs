@@ -1,8 +1,9 @@
-//! Questions asked in the command field (#44): each goes to the provider
-//! the configuration names on a worker thread of its own, which reads the
-//! key from the keyring and sends the answer back piece by piece through a
-//! channel; the loop only adds the pieces to the card. Typing again,
-//! closing the field or Stop tells the worker to stop at the next piece.
+//! Questions asked in the command field (#44), or about a circled area
+//! (#46): each goes to the provider the configuration names on a worker
+//! thread of its own, which reads the key from the keyring and sends the
+//! answer back piece by piece through a channel; the loop only adds the
+//! pieces to the card. Typing again, closing the field or the circle, or
+//! Stop tells the worker to stop at the next piece.
 //!
 //! Without a model named, the worker asks the provider which it has at
 //! the first question (the newest Claude Opus, ollama's first…), and the
@@ -33,12 +34,19 @@ use smithay::reexports::calloop::{LoopHandle, channel};
 
 use crate::{App, State};
 
+/// Who asked, and gets the answer: the command field, or a circle (#46).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asker {
+    Launcher,
+    Circle,
+}
+
 /// What the workers send back.
 #[derive(Debug)]
 enum News {
-    Piece(u64, String),
-    Done(u64),
-    Failed(u64, AskError),
+    Piece(Asker, u64, String),
+    Done(Asker, u64),
+    Failed(Asker, u64, AskError),
     /// The model a provider at an address picked, kept for the session.
     Model(Provider, String, String),
     /// A key was stored, or not.
@@ -48,6 +56,7 @@ enum News {
 /// The question being answered.
 #[derive(Debug)]
 struct Asking {
+    asker: Asker,
     id: u64,
     stop: Arc<AtomicBool>,
     since: Duration,
@@ -149,17 +158,25 @@ impl State {
 
     /// Asks `question` (the command field's question `id`) on a worker.
     pub fn ask_ai(&mut self, id: u64, question: String) {
+        let system = answer::instructions(self.shell_lang());
+        self.ask_ai_for(Asker::Launcher, id, system, question);
+    }
+
+    /// Asks `question` for `asker`, the model told `system` first; the
+    /// answer goes back to it by `id`.
+    pub fn ask_ai_for(&mut self, asker: Asker, id: u64, system: String, question: String) {
         self.stop_asking();
         let lang = self.shell_lang();
         let Some(news) = self.ai.news.clone() else {
             return;
         };
         let Some((provider, url)) = self.ai_provider() else {
-            self.answer_news(id, AnswerNews::Failed(lang.ai_no_address().into()));
+            self.answer_news(asker, id, AnswerNews::Failed(lang.ai_no_address().into()));
             return;
         };
         let stop = Arc::new(AtomicBool::new(false));
         self.ai.asking = Some(Asking {
+            asker,
             id,
             stop: stop.clone(),
             since: self.clock.now(),
@@ -175,7 +192,7 @@ impl State {
             url,
             model,
             key: None,
-            system: answer::instructions(lang),
+            system,
             text: question,
         };
         tracing::info!(provider = provider.name(), "asking");
@@ -199,31 +216,36 @@ impl State {
                     // The server answers with its own.
                     Ok(None) => {}
                     Err(err) => {
-                        let _ = news.send(News::Failed(id, err));
+                        let _ = news.send(News::Failed(asker, id, err));
                         return;
                     }
                 }
             }
             let sender = news.clone();
             let asked = ai::ask(&question, &stop, |piece| {
-                let _ = sender.send(News::Piece(id, piece.to_owned()));
+                let _ = sender.send(News::Piece(asker, id, piece.to_owned()));
             });
             let _ = news.send(match asked {
-                Ok(()) => News::Done(id),
-                Err(err) => News::Failed(id, err),
+                Ok(()) => News::Done(asker, id),
+                Err(err) => News::Failed(asker, id, err),
             });
         });
     }
 
-    fn stop_asking(&mut self) {
+    pub(crate) fn stop_asking(&mut self) {
         if let Some(asking) = self.ai.asking.take() {
             asking.stop.store(true, Ordering::Relaxed);
         }
     }
 
-    fn answer_news(&mut self, id: u64, news: AnswerNews) {
-        if let Some(panel) = self.launcher.as_mut() {
-            panel.launcher.answer_news(id, news);
+    fn answer_news(&mut self, asker: Asker, id: u64, news: AnswerNews) {
+        match asker {
+            Asker::Launcher => {
+                if let Some(panel) = self.launcher.as_mut() {
+                    panel.launcher.answer_news(id, news);
+                }
+            }
+            Asker::Circle => self.circle_answer_news(id, news),
         }
         self.needs_redraw = true;
     }
@@ -231,24 +253,31 @@ impl State {
     fn ai_news(&mut self, news: News) {
         let lang = self.shell_lang();
         match news {
-            News::Piece(id, text) => self.answer_news(id, AnswerNews::Text(text)),
-            News::Done(id) => {
+            News::Piece(asker, id, text) => self.answer_news(asker, id, AnswerNews::Text(text)),
+            News::Done(asker, id) => {
                 let took = match self.ai.asking.take() {
-                    Some(a) if a.id == id => self.clock.now().saturating_sub(a.since),
+                    Some(a) if a.asker == asker && a.id == id => {
+                        self.clock.now().saturating_sub(a.since)
+                    }
                     other => {
                         self.ai.asking = other;
                         Duration::ZERO
                     }
                 };
-                self.answer_news(id, AnswerNews::Done(took));
+                self.answer_news(asker, id, AnswerNews::Done(took));
             }
-            News::Failed(id, err) => {
+            News::Failed(asker, id, err) => {
                 tracing::warn!(%err, "no answer");
-                if self.ai.asking.as_ref().is_some_and(|a| a.id == id) {
+                if self
+                    .ai
+                    .asking
+                    .as_ref()
+                    .is_some_and(|a| a.asker == asker && a.id == id)
+                {
                     self.ai.asking = None;
                 }
                 let url = self.ai_provider().map(|(_, u)| u).unwrap_or_default();
-                self.answer_news(id, AnswerNews::Failed(said(&err, &url, lang)));
+                self.answer_news(asker, id, AnswerNews::Failed(said(&err, &url, lang)));
             }
             News::Model(provider, url, model) => {
                 tracing::info!(provider = provider.name(), model, "AI model picked");
@@ -288,7 +317,13 @@ impl State {
 
     /// After each dispatch: a question no longer awaited is stopped.
     pub fn refresh_ai(&mut self) {
-        let awaited = self.launcher.as_ref().and_then(|p| p.launcher.awaited());
+        let Some(asker) = self.ai.asking.as_ref().map(|a| a.asker) else {
+            return;
+        };
+        let awaited = match asker {
+            Asker::Launcher => self.launcher.as_ref().and_then(|p| p.launcher.awaited()),
+            Asker::Circle => self.circle_awaited(),
+        };
         if self
             .ai
             .asking

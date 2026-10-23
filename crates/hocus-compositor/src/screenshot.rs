@@ -85,6 +85,8 @@ enum Done {
     },
     Failed(String),
     Text(Option<String>),
+    /// A circled area's text (#46), by the circle's serial.
+    Circled(u64, crate::circle::Text),
 }
 
 #[derive(Debug, Default)]
@@ -570,7 +572,19 @@ impl State {
                 self.shell_toast(lang.text_copied(), "");
             }
             Done::Text(None) => self.shell_toast(lang.no_text_found(), ""),
+            Done::Circled(serial, text) => self.circle_read(serial, text),
         }
+    }
+
+    /// How a circle's worker hands its text back to the loop (#46): on the
+    /// screenshots' channel, as their text read is.
+    pub(crate) fn circle_reader(
+        &self,
+    ) -> Option<impl Fn(u64, crate::circle::Text) + Send + 'static> {
+        let done = self.shots.done.clone()?;
+        Some(move |serial, text| {
+            let _ = done.send(Done::Circled(serial, text));
+        })
     }
 
     /// A toast about a file: its Open and Delete act on it.
@@ -638,7 +652,7 @@ impl App {
         }
     }
 
-    fn capture_output(&mut self, output: &Output) -> anyhow::Result<Pixels> {
+    pub(crate) fn capture_output(&mut self, output: &Output) -> anyhow::Result<Pixels> {
         let state = &self.state;
         match &mut self.backend {
             BackendState::Winit(b) => b.capture_output(output, state, false),
@@ -885,7 +899,7 @@ fn save(dir: &Path, name: &str, png: &[u8]) -> Result<PathBuf, String> {
 }
 
 /// Whether `program` runs: a path to it, or a name on `PATH`.
-fn on_path(program: &str) -> bool {
+pub(crate) fn on_path(program: &str) -> bool {
     if program.contains('/') {
         return Path::new(program).is_file();
     }
@@ -895,13 +909,13 @@ fn on_path(program: &str) -> bool {
 
 /// The text in a picture, through tesseract or what replaces it; `None`
 /// when there is none.
-fn read_text(program: &str, path: &Path) -> Option<String> {
+pub(crate) fn read_text(program: &str, path: &Path) -> Option<String> {
     let out = Command::new(program).arg(path).arg("-").output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     (out.status.success() && !text.is_empty()).then_some(text)
 }
 
-fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
+pub(crate) fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
     if let Err(err) = std::thread::Builder::new().name(name.into()).spawn(work) {
         tracing::warn!(%err, "could not start a thread");
     }

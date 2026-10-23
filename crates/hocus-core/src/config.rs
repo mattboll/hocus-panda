@@ -40,6 +40,8 @@ pub struct Config {
     pub clock: Clock,
     pub hot_corners: HotCorners,
     pub gestures: Gestures,
+    /// Circling something on screen to ask about it (#46).
+    pub circle: Circle,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -873,6 +875,34 @@ impl Default for Gestures {
     }
 }
 
+/// Circle to ask (#46): a left drag with these keys held draws a loop
+/// around anything on screen; its text is read (`[screenshots] ocr`) and
+/// offered to copy, search, note, or ask the AI about when it is on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Circle {
+    pub enabled: bool,
+    /// The keys held with the left button. Super alone draws on the
+    /// screen (#86), hence Shift too by default.
+    pub modifiers: String,
+}
+
+impl Default for Circle {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            modifiers: "Super+Shift".into(),
+        }
+    }
+}
+
+impl Circle {
+    /// The keys to hold; `None` when off.
+    pub fn held(&self) -> Option<crate::Modifiers> {
+        self.enabled.then(|| self.modifiers.parse().ok()).flatten()
+    }
+}
+
 /// A calendar account or subscription; its password is in the keyring.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1506,6 +1536,13 @@ impl Config {
                 return out_of_range(key, format!("{value:?}"), "HH:MM");
             }
         }
+        match self.circle.modifiers.parse::<crate::Modifiers>() {
+            Ok(m) if m != crate::Modifiers::default() => {}
+            _ => {
+                let m = format!("{:?}", self.circle.modifiers);
+                return out_of_range("circle.modifiers", m, "keys such as \"Super+Shift\"");
+            }
+        }
         if !(10..=60).contains(&self.recording.fps) {
             let f = self.recording.fps.to_string();
             return out_of_range("recording.fps", f, "10 to 60");
@@ -1780,6 +1817,22 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(error, "line 2: windows.gaps.outer = 100: expected 0 to 64");
         assert!(Config::parse("[decorations]\naccent = \"green\"\n").is_err());
+    }
+
+    #[test]
+    fn circling_holds_the_keys_named_and_needs_one() -> Result<(), ConfigError> {
+        let held = Config::default().circle.held();
+        assert!(held.is_some_and(|m| m.logo && m.shift && !m.ctrl && !m.alt));
+        let config = Config::parse("[circle]\nmodifiers = \"ctrl + Alt\"\n")?;
+        assert!(config.circle.held().is_some_and(|m| m.ctrl && m.alt));
+        let off = Config::parse("[circle]\nenabled = false\n")?;
+        assert_eq!(off.circle.held(), None);
+        for wrong in ["\"\"", "\"Super+\"", "\"Super+Hyper\""] {
+            let err = Config::parse(&format!("[circle]\nmodifiers = {wrong}\n"))
+                .expect_err("not modifiers");
+            assert!(err.0.starts_with("line 2: circle.modifiers"), "{err}");
+        }
+        Ok(())
     }
 
     #[test]
