@@ -101,7 +101,7 @@ advance_ms = 7000
 pointer_move = [500, 500]
 
 [[step]]
-scroll = 600
+scroll = 1300
 
 [[step]]
 click_settings = "Keys held: Ctrl+Alt"
@@ -113,7 +113,7 @@ expect_config_file = { contains = ["[circle]", "modifiers = \"Ctrl+Alt\""] }
 expect_settings = { label = "Keys held: Ctrl+Alt", selected = true }
 
 [[step]]
-scroll = -2000
+scroll = -3000
 
 [[step]]
 config = """

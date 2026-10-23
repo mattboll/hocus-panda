@@ -1,7 +1,8 @@
 //! AI and agents (#67): the AI the command field and circles ask (#44),
 //! herdr's coding agents and their desktops (#41, #192), the agents that
 //! use the desktop and the key that stops them (#176), and circle to ask
-//! (#46). No board draws it: it keeps board R2's template, captioned
+//! (#46), with how they show before acting and what asks the user first
+//! (#43, #229). No board draws it: it keeps board R2's template, captioned
 //! sections of choices, switch cards and fields written with Enter. The
 //! provider's key goes to the compositor's keyring, never to the file, and
 //! is never shown back: only whether one is kept.
@@ -10,6 +11,12 @@ use hocus_core::{Action, Modifiers};
 
 use super::*;
 use crate::catalogue::{OPENAI_URL, PROVIDERS, openai_like};
+
+/// How long an agent's click shows before it lands, offered,
+/// milliseconds.
+const SHOW_BEFORE: [u32; 5] = [0, 300, 600, 1000, 2000];
+/// How long a sensitive action waits for the user, offered, seconds.
+const CONFIRM_WAITS: [u32; 4] = [30, 60, 120, 300];
 
 /// The keys offered to hold while circling: Super alone draws (#86).
 const CIRCLE_KEYS: [&str; 4] = ["Super+Shift", "Super+Ctrl", "Super+Alt", "Ctrl+Alt"];
@@ -543,6 +550,138 @@ impl SettingsView {
         );
         self.stop_key(theme, section);
         self.note(theme, section, words::STOP_NOTE);
+        self.agents_show(theme, section);
+        self.confirm_apps(theme, section);
+    }
+
+    /// How long an agent's click shows before it lands (#43).
+    fn agents_show(&mut self, theme: &Theme, section: NodeId) {
+        let lang = self.lang;
+        let ms = self.ctx.config.agents.show_before_click_ms;
+        let holder = self.add(section, fill_width(column(8.0)), Kind::Box(Look::default()));
+        let mut offered = SHOW_BEFORE.to_vec();
+        if !offered.contains(&ms) {
+            offered.push(ms);
+            offered.sort_unstable();
+        }
+        let choices = offered
+            .iter()
+            .map(|o| {
+                let target =
+                    Target::Set(Change::new("agents", "show_before_click_ms", i64::from(*o)));
+                (words::shown_for(*o, lang), *o == ms, target)
+            })
+            .collect();
+        self.named_choices(theme, holder, words::SHOW_BEFORE_CLICK, choices);
+        self.note(theme, holder, words::SHOW_NOTE);
+        self.highlighted(holder, &Setting::ShowBeforeClick, Look::default());
+    }
+
+    /// What asks the user first (#43): how long it waits for them, and the
+    /// applications, each removable, with a field to add one.
+    fn confirm_apps(&mut self, theme: &Theme, section: NodeId) {
+        let lang = self.lang;
+        let agents = self.ctx.config.agents.clone();
+        let holder = self.add(
+            section,
+            fill_width(column(10.0)),
+            Kind::Box(Look::default()),
+        );
+        let wait = agents.confirm_timeout().as_secs() as u32;
+        let mut offered = CONFIRM_WAITS.to_vec();
+        if !offered.contains(&wait) {
+            offered.push(wait);
+            offered.sort_unstable();
+        }
+        let choices = offered
+            .iter()
+            .map(|o| {
+                let target = Target::Set(Change::new("agents", "confirm_timeout_s", i64::from(*o)));
+                (words::duration(*o, lang), *o == wait, target)
+            })
+            .collect();
+        self.named_choices(theme, holder, words::CONFIRM_TIMEOUT, choices);
+
+        self.field_name(theme, holder, words::CONFIRM_APPS);
+        if agents.confirm_apps.is_empty() {
+            self.note(theme, holder, words::NO_CONFIRM_APPS);
+        } else {
+            let card = self.add(
+                holder,
+                Style {
+                    padding: Insets::symmetric(6.0, 16.0),
+                    ..fill_width(column(0.0))
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    radius: 16.0,
+                    ..Look::default()
+                }),
+            );
+            let mono = hocus_ui::TextStyle {
+                typeface: hocus_ui::Typeface::Mono,
+                ..theme.text.body
+            };
+            for (i, app) in agents.confirm_apps.iter().enumerate() {
+                let line = self.add(
+                    card,
+                    Style {
+                        height: Length::Px(44.0),
+                        align: Align::Center,
+                        ..fill_width(row(12.0))
+                    },
+                    Kind::Box(Look::default()),
+                );
+                let name = self.add(
+                    line,
+                    fill_width(Style::default()),
+                    Kind::Box(Look::default()),
+                );
+                self.line(name, app, mono);
+                let remove = Button::new(words::REMOVE.get(lang), ButtonKind::Plain, theme)
+                    .with_name(words::remove_app(app, lang));
+                let b = self.add(
+                    line,
+                    Style {
+                        height: Length::Px(32.0),
+                        padding: Insets::symmetric(0.0, 14.0),
+                        ..Style::default()
+                    },
+                    Kind::Button(remove),
+                );
+                let mut left = agents.confirm_apps.clone();
+                left.remove(i);
+                self.targets
+                    .insert(b, Target::Set(super::work::confirm_apps_change(&left)));
+            }
+        }
+        let line = self.add(holder, fill_width(row(10.0)), Kind::Box(Look::default()));
+        self.text_field(
+            theme,
+            line,
+            Field::NewConfirmApp,
+            (
+                words::NEW_CONFIRM_APP.get(lang),
+                words::NEW_CONFIRM_APP_HINT.get(lang),
+            ),
+            "",
+        );
+        let add = self.add(
+            line,
+            Style {
+                height: Length::Px(44.0),
+                padding: Insets::symmetric(0.0, 18.0),
+                ..Style::default()
+            },
+            Kind::Button(
+                Button::new(words::ADD.get(lang), ButtonKind::Primary, theme)
+                    .with_name(words::ADD_CONFIRM_APP.get(lang)),
+            ),
+        );
+        self.targets
+            .insert(add, Target::Commit(Field::NewConfirmApp));
+        self.note(theme, holder, words::CONFIRM_NOTE);
+        self.highlighted(holder, &Setting::ConfirmApps, Look::default());
     }
 
     /// The stop key, as the shortcuts have it, and a way to change it.

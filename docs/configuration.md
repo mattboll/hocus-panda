@@ -225,9 +225,10 @@ herdr_socket = ""          # one herdr whose agents belong to no desktop (shown 
                            #   the session only
 journal_text = false       # true: the agents' journal keeps what MCP agents type; otherwise how many characters
 show_before_click_ms = 600 # an MCP agent's ring and intent show this long before its click lands; 0: at once
+                           #   (these three also in Settings → AI and agents)
 confirm_timeout_s = 60     # a sensitive action waits this long for you to confirm it (5 to 300), then is refused
 confirm_apps = [           # app ids (globs) an MCP agent acts on only once you confirm; typing into a
-  "hocus-settings",        #   password field waits too (docs/mcp.md)
+  "hocus-settings",        #   password field waits too (docs/mcp.md); [] for none
   "org.keepassxc.KeePassXC", "com.bitwarden.desktop", "Bitwarden", "1Password",
   "org.gnome.seahorse.Application", "org.gnome.World.Secrets", "org.kde.kwalletmanager*",
 ]

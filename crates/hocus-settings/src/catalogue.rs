@@ -937,6 +937,8 @@ pub enum Setting {
     AiKey,
     Herdr,
     JournalText,
+    ShowBeforeClick,
+    ConfirmApps,
     StopAgents,
     Circle,
     Documents,
@@ -990,6 +992,8 @@ impl Setting {
             | Self::AiKey
             | Self::Herdr
             | Self::JournalText
+            | Self::ShowBeforeClick
+            | Self::ConfirmApps
             | Self::StopAgents
             | Self::Circle => Page::Agents,
             Self::Documents
@@ -1787,6 +1791,36 @@ fn agents_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String
             ]
             .concat(),
             on_off(ctx.config.agents.journal_text, lang),
+        ),
+        (
+            Setting::ShowBeforeClick,
+            words::SHOW_BEFORE_CLICK.get(lang).to_owned(),
+            [
+                both(words::SHOW_BEFORE_CLICK),
+                words(&["ring", "cercle", "intent", "intention", "mcp", "agents"]),
+            ]
+            .concat(),
+            words::shown_for(ctx.config.agents.show_before_click_ms, lang),
+        ),
+        (
+            Setting::ConfirmApps,
+            words::CONFIRM_APPS.get(lang).to_owned(),
+            [
+                both(words::CONFIRM_APPS),
+                both(words::CONFIRM_TIMEOUT),
+                words(&[
+                    "confirm",
+                    "confirmer",
+                    "confirmation",
+                    "sensitive",
+                    "sensible",
+                    "password manager",
+                    "gestionnaire de mots de passe",
+                    "agents",
+                ]),
+            ]
+            .concat(),
+            ctx.config.agents.confirm_apps.len().to_string(),
         ),
         (
             Setting::StopAgents,

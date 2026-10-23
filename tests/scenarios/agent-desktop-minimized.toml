@@ -1,0 +1,85 @@
+description = "Given a minimized window of the agent's, when the agent acts on it, then it comes back on its own desktop without taking the keyboard: in its place where that desktop shows, unseen on another"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+[[step]]
+open = { app_id = "editor", title = "Draft", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "notes", title = "Notes", size = [300, 200], color = "#ff6600" }
+
+[[step]]
+set_state = { app_id = "editor", state = "minimized" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "minimized", visible = false }
+
+[[step]]
+mcp_session = "helper"
+
+# A click brings it back where it was, under the user's window, which
+# keeps the keyboard.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "editor", arguments = { x = 20, y = 20 } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal", visible = true }
+
+[[step]]
+expect_focus = "notes"
+
+[[step]]
+expect_stack = ["editor", "notes"]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-desktop-minimized.png" }
+
+# Minimized on desktop 2 while desktop 1 shows, typing brings it back
+# there, unseen: Alex stays where they are.
+[[step]]
+send = { app_id = "editor", output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+set_state = { app_id = "editor", state = "minimized" }
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "x" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 45 pressed on agent-helper" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal", visible = false }
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_focus = "notes"
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal", visible = true }
+
+[[step]]
+expect_journal = { has = [
+  'helper: click on window 1 editor "Draft"',
+  'helper: type 1 character on window 1 editor "Draft"',
+] }

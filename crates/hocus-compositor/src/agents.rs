@@ -340,6 +340,11 @@ impl State {
         if self.desktop_is_shown(desktop) {
             return None;
         }
+        self.desktop_label(desktop)
+    }
+
+    /// What a desktop is called: its name, else its number on its screen.
+    pub(crate) fn desktop_label(&self, desktop: DesktopId) -> Option<String> {
         self.desktop_name(desktop).or_else(|| {
             let home = &self.model.desktop(desktop)?.home;
             let n = self

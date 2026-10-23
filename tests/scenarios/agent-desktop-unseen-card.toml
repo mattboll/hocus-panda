@@ -1,0 +1,58 @@
+description = "Given a sensitive action on an agent's window on desktop 2 while desktop 1 shows, then its card shows alone on desktop 1, saying where the window is, and allowed, the action lands there"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[agents]
+confirm_apps = ["editor"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+[[step]]
+open = { app_id = "editor", title = "Draft", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+send = { app_id = "editor", output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+open = { app_id = "notes", title = "Notes", size = [300, 200], color = "#ff6600" }
+
+[[step]]
+mcp_session = "helper"
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "editor", arguments = { x = 120, y = 80, intent = "Sends the draft" }, wait = false }
+
+[[step]]
+advance_ms = 1000
+
+# The card alone: no pointer, no ring where the window is not.
+[[step]]
+expect_ui = { label = "In editor, which asks you first · Desktop 2, not shown" }
+
+[[step]]
+expect_ui = { label = "helper · Sends the draft", shown = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-desktop-unseen-card.png" }
+
+[[step]]
+click_ui = "Allow"
+
+[[step]]
+expect_mcp = { agent = "helper" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_focus = "notes"

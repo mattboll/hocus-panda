@@ -43,6 +43,8 @@ pub(super) enum Field {
     EmbeddingModel,
     /// The web search's address.
     SearchEngine,
+    /// An application whose windows agents act in once confirmed.
+    NewConfirmApp,
 }
 
 /// The Work pages' fields between builds.
@@ -79,6 +81,12 @@ impl Fields {
     pub(super) fn leave(&mut self) {
         self.drafts.clear();
     }
+}
+
+/// `[agents] confirm_apps` as `apps`.
+pub(super) fn confirm_apps_change(apps: &[String]) -> Change {
+    let list: toml_edit::Array = apps.iter().map(String::as_str).collect();
+    Change::new("agents", "confirm_apps", list)
 }
 
 /// Gaps offered, logical pixels.
@@ -228,6 +236,15 @@ impl SettingsView {
                 return vec![Outcome::Change(Box::new(Change::herdr(
                     index, "socket", value,
                 )))];
+            }
+            Field::NewConfirmApp => {
+                self.fields.forget(&field);
+                let mut apps = self.ctx.config.agents.confirm_apps.clone();
+                if typed.is_empty() || apps.contains(&typed) {
+                    return Vec::new();
+                }
+                apps.push(typed);
+                return vec![Outcome::Change(Box::new(confirm_apps_change(&apps)))];
             }
             Field::ScreenshotFolder => Change {
                 value,

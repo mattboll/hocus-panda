@@ -1,0 +1,197 @@
+# AI and agents (#229): how long an agent's click shows before it lands,
+# how long a sensitive action waits for the user, and the applications
+# that ask first ([agents] show_before_click_ms, confirm_timeout_s,
+# confirm_apps), written by the page and applied at once.
+description = "AI and agents: an agent's click shown first, the wait for the user's answer and the applications asking first, set from the page and applied at once; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["*"]
+"""
+
+[[step]]
+open = { app_id = "notes", title = "Notes", size = [300, 200], color = "#ff6600" }
+
+[[step]]
+mcp_session = "helper"
+
+[[step]]
+open_settings = { page = "agents" }
+
+[[step]]
+expect_settings = { label = "Shows before a click: 0.6 s", selected = true }
+
+[[step]]
+expect_settings = { label = "Waits for your answer: 1 min", selected = true }
+
+[[step]]
+expect_settings = { label = "Remove org.keepassxc.KeePassXC" }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 1050
+
+[[step]]
+click_settings = "Shows before a click: At once"
+
+[[step]]
+expect_config_file = { contains = ["[agents]", "show_before_click_ms = 0"] }
+
+[[step]]
+expect_settings = { label = "Shows before a click: At once", selected = true }
+
+[[step]]
+click_settings = "Waits for your answer: 30 s"
+
+[[step]]
+expect_config_file = { contains = ["confirm_timeout_s = 30"] }
+
+[[step]]
+click_settings = "Remove org.keepassxc.KeePassXC"
+
+[[step]]
+expect_config_file = { contains = ["confirm_apps = [", "\"hocus-settings\""], lacks = ["org.keepassxc.KeePassXC"] }
+
+[[step]]
+click_settings = "New application asking first"
+
+[[step]]
+type = "notes"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["\"notes\"]"] }
+
+[[step]]
+expect_settings = { label = "Remove notes" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-agents-seat.png" }
+
+# Applied at once: an agent's click in the notes now waits for the user,
+# refused after 30 s.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "notes", wait = false }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_ui = { label = "HELPER WILL CLICK · SENSITIVE ACTION" }
+
+[[step]]
+advance_ms = 30000
+
+[[step]]
+expect_mcp = { agent = "helper", error = "did not confirm it within 30 s" }
+
+# Removed from the list, its clicks land at once: nothing shows first,
+# the virtual clock standing still.
+[[step]]
+click_settings = "Remove notes"
+
+[[step]]
+expect_config_file = { lacks = ["\"notes\""] }
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "notes", wait = false }
+
+[[step]]
+expect_received = { app_id = "notes", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_mcp = { agent = "helper" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[keyboard]
+layouts = ["us"]
+
+[agents]
+show_before_click_ms = 0
+confirm_timeout_s = 30
+confirm_apps = ["hocus-settings", "notes"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["*"]
+"""
+
+[[step]]
+expect_settings = { label = "Remove notes" }
+
+# The agent's pointer gone.
+[[step]]
+advance_ms = 11000
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-agents-seat-light.png" }
+
+# In French.
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[language]
+interface = "fr"
+
+[keyboard]
+layouts = ["us"]
+
+[agents]
+show_before_click_ms = 0
+confirm_timeout_s = 30
+confirm_apps = ["hocus-settings", "notes"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["*"]
+"""
+
+[[step]]
+expect_settings = { label = "Montre avant un clic : Aussitôt", selected = true }
+
+[[step]]
+expect_settings = { label = "Attend votre réponse : 30\u00a0s", selected = true }
+
+[[step]]
+expect_settings = { label = "Retirer notes" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-agents-seat-french.png" }

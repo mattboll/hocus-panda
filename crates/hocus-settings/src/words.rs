@@ -1737,6 +1737,34 @@ pub const JOURNAL_TEXT_SUB: Words = Words::new(
     "Otherwise only how many characters: it may be a secret",
     "Sinon seulement le nombre de caractères : ce peut être un secret",
 );
+pub const SHOW_BEFORE_CLICK: Words = Words::new("Shows before a click", "Montre avant un clic");
+pub const AT_ONCE: Words = Words::new("At once", "Aussitôt");
+pub const SHOW_NOTE: Words = Words::new(
+    "Its ring and what it means to do, at the point, before the click lands.",
+    "Son cercle et ce qu’il compte faire, au point visé, avant que le clic ne parte.",
+);
+pub const CONFIRM_TIMEOUT: Words = Words::new("Waits for your answer", "Attend votre réponse");
+pub const CONFIRM_APPS: Words = Words::new("Asks you first in", "Vous demande d’abord dans");
+pub const CONFIRM_NOTE: Words = Words::new(
+    "There an agent’s click, typing or keys wait on a card you answer, as typing into a password field does; scrolling does not. Unanswered in time, it is refused.",
+    "Là, le clic, la saisie ou les touches d’un agent attendent sur une carte à laquelle vous répondez, comme une saisie dans un champ de mot de passe ; le défilement non. Sans réponse à temps, c’est refusé.",
+);
+pub const NO_CONFIRM_APPS: Words = Words::new(
+    "No application: only password fields ask you first.",
+    "Aucune application : seuls les champs de mot de passe vous demandent d’abord.",
+);
+pub const NEW_CONFIRM_APP: Words = Words::new(
+    "New application asking first",
+    "Nouvelle application qui demande d’abord",
+);
+pub const NEW_CONFIRM_APP_HINT: Words = Words::new(
+    "An app id, or a pattern: my.bank.*, then Enter",
+    "Un app id, ou un motif : ma.banque.*, puis Entrée",
+);
+pub const ADD_CONFIRM_APP: Words = Words::new(
+    "Add the application asking first",
+    "Ajouter l’application qui demande d’abord",
+);
 pub const AGENTS_ALLOWED: Words = Words::new(
     "They act as [[agents.mcp]] allows them",
     "Ils agissent comme [[agents.mcp]] le leur permet",
@@ -1797,6 +1825,34 @@ pub fn of_herdr(what: Words, socket: &str, lang: Lang) -> String {
 /// "Remove web.sock".
 pub fn remove_herdr(socket: &str, lang: Lang) -> String {
     remove_named(socket, lang)
+}
+
+/// "Remove my.bank.*" (an application asking first).
+pub fn remove_app(app: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Remove {app}"),
+        Lang::Fr => format!("Retirer {app}"),
+    }
+}
+
+/// How long an agent's click shows first: "At once", "0.6 s", "1 s".
+pub fn shown_for(ms: u32, lang: Lang) -> String {
+    if ms == 0 {
+        return AT_ONCE.get(lang).to_owned();
+    }
+    let s = if ms.is_multiple_of(1000) {
+        (ms / 1000).to_string()
+    } else {
+        let s = format!("{}", f64::from(ms) / 1000.0);
+        match lang {
+            Lang::En => s,
+            Lang::Fr => s.replace('.', ","),
+        }
+    };
+    match lang {
+        Lang::En => format!("{s} s"),
+        Lang::Fr => format!("{s}\u{a0}s"),
+    }
 }
 
 /// "2 herdr".

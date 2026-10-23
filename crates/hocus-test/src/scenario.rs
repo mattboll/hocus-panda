@@ -472,6 +472,10 @@ pub struct OpenWindow {
     /// Its field is for a password, as its text inputs say (#43).
     #[serde(default)]
     pub password: bool,
+    /// Draws a white mark for each key and button pressed, paced on frame
+    /// callbacks as applications are (#229).
+    #[serde(default)]
+    pub marks: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -503,6 +507,9 @@ pub struct McpCall {
     /// The step waits for the result (by default), or goes on.
     #[serde(default = "yes")]
     pub wait: bool,
+    /// The image of the result (a capture) is this reference, next to the
+    /// scenario.
+    pub image: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -2454,6 +2461,7 @@ impl Run<'_> {
                 inhibit_idle: open.inhibit_idle,
                 title: open.title.clone(),
                 password: open.password,
+                marks: open.marks,
             },
         )?);
         self.compositor
@@ -2559,37 +2567,13 @@ impl Run<'_> {
             "jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": { "name": call.tool, "arguments": arguments },
         });
-        let lasting = self
-            .mcp_sessions
-            .iter()
-            .any(|s| Some(&s.agent) == call.agent.as_ref());
-        let fresh = (!lasting).then(|| self.compositor.agent_seats());
-        let answer = match self
-            .mcp_sessions
-            .iter()
-            .find(|s| Some(&s.agent) == call.agent.as_ref())
-        {
-            Some(session) => {
-                let (tx, rx) = std::sync::mpsc::channel();
-                session
-                    .calls
-                    .send((params, tx))
-                    .map_err(|_| anyhow::anyhow!("the MCP session ended"))?;
-                rx
-            }
-            None => {
-                let socket = self.compositor.api_socket().to_path_buf();
-                let agent = call.agent.clone();
-                let (tx, rx) = std::sync::mpsc::channel();
-                std::thread::spawn(move || {
-                    let mut bridge = hocus_api::mcp::Bridge::new(socket, agent);
-                    mcp_initialize(&mut bridge);
-                    let _ = tx.send(bridge.handle(params));
-                });
-                rx
-            }
-        };
         if !call.wait {
+            anyhow::ensure!(
+                call.image.is_none(),
+                "an image is compared once the call is answered: not with wait = false"
+            );
+            let fresh = self.mcp_fresh(call);
+            let answer = self.mcp_send(call, params)?;
             // Once it is in, past its window's application taking the seat,
             // or answered: later steps move the clock.
             let (before, _) = self.compositor.agent_pending();
@@ -2618,9 +2602,73 @@ impl Run<'_> {
             });
             return Ok(());
         }
-        let answer = self.mcp_answer(&answer)?;
-        self.mcp_gone(fresh)?;
-        mcp_check(&answer, call.error.as_deref(), &call.contains)
+        // An application draws on its own time: an image is taken again
+        // until it is the reference, for a moment; recorded once that
+        // moment passed.
+        let deadline = Instant::now() + SETTLE_TIMEOUT;
+        if self.options.bless && call.image.is_some() {
+            while Instant::now() < deadline {
+                self.compositor.dispatch(Duration::from_millis(20))?;
+            }
+        }
+        loop {
+            let fresh = self.mcp_fresh(call);
+            let answer = self.mcp_send(call, params.clone())?;
+            let answer = self.mcp_answer(&answer)?;
+            self.mcp_gone(fresh)?;
+            mcp_check(&answer, call.error.as_deref(), &call.contains)?;
+            let Some(reference) = &call.image else {
+                return Ok(());
+            };
+            let actual = Image::from_png(&mcp_image(&answer)?)?;
+            match self.compare_reference(&actual, reference, None, &format!("{} image", call.tool))
+            {
+                Err(err) if Instant::now() < deadline => {
+                    tracing::debug!(%err, "the image is not the reference yet");
+                    self.compositor.dispatch(Duration::from_millis(20))?;
+                }
+                done => return done,
+            }
+        }
+    }
+
+    /// The agents' seats there were before a call in a session of its own.
+    fn mcp_fresh(&self, call: &McpCall) -> Option<usize> {
+        let lasting = self
+            .mcp_sessions
+            .iter()
+            .any(|s| Some(&s.agent) == call.agent.as_ref());
+        (!lasting).then(|| self.compositor.agent_seats())
+    }
+
+    /// Sends a call through the agent's lasting session when one is open,
+    /// else in a session of its own; its answer comes on the receiver.
+    fn mcp_send(
+        &mut self,
+        call: &McpCall,
+        params: serde_json::Value,
+    ) -> anyhow::Result<std::sync::mpsc::Receiver<Option<serde_json::Value>>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        match self
+            .mcp_sessions
+            .iter()
+            .find(|s| Some(&s.agent) == call.agent.as_ref())
+        {
+            Some(session) => session
+                .calls
+                .send((params, tx))
+                .map_err(|_| anyhow::anyhow!("the MCP session ended"))?,
+            None => {
+                let socket = self.compositor.api_socket().to_path_buf();
+                let agent = call.agent.clone();
+                std::thread::spawn(move || {
+                    let mut bridge = hocus_api::mcp::Bridge::new(socket, agent);
+                    mcp_initialize(&mut bridge);
+                    let _ = tx.send(bridge.handle(params));
+                });
+            }
+        }
+        Ok(rx)
     }
 
     /// A session of its own ends with its call: its seat goes before the
@@ -3495,9 +3543,13 @@ impl Run<'_> {
         let deadline = Instant::now() + SETTLE_TIMEOUT;
         let r = loop {
             let nodes = self.ui()?;
+            // A button first; else any element so labelled (a card's text).
+            let labelled = |n: &&hocus_api::UiNode| n.label.as_deref() == Some(label);
             if let Some(node) = nodes
                 .iter()
-                .find(|n| n.role == "button" && n.label.as_deref() == Some(label))
+                .filter(labelled)
+                .find(|n| n.role == "button")
+                .or_else(|| nodes.iter().find(labelled))
             {
                 break node.rect;
             }
@@ -3893,28 +3945,6 @@ impl Run<'_> {
             anyhow::bail!("expected a screenshot, got {reply:?}");
         };
         let actual = Image::from_png(&shot.png()?)?;
-        let reference = self.scenario.dir.join(&expected.reference);
-        if self.options.bless {
-            actual.save(&reference)?;
-            return Ok(());
-        }
-        let stem = expected
-            .reference
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "screenshot".into());
-        let artifacts = self.options.artifacts.join(&self.scenario.name);
-        let actual_path = artifacts.join(format!("{stem}.actual.png"));
-        if !reference.exists() {
-            actual.save(&actual_path)?;
-            anyhow::bail!(
-                "no reference image at {}; the actual one is in {}. Run with HOCUS_BLESS=1 to \
-                 record it",
-                reference.display(),
-                actual_path.display()
-            );
-        }
-        let wanted = Image::load(&reference)?;
         let tolerance = Tolerance {
             channel: expected
                 .channel_tolerance
@@ -3923,7 +3953,45 @@ impl Run<'_> {
                 .pixel_tolerance
                 .unwrap_or(Tolerance::default().pixels),
         };
-        let Some(difference) = actual.compare(&wanted, tolerance) else {
+        self.compare_reference(
+            &actual,
+            &expected.reference,
+            Some(tolerance),
+            &format!("screenshot of {}", expected.output),
+        )
+    }
+
+    /// `actual` is the reference image next to the scenario (recorded
+    /// with HOCUS_BLESS); otherwise the images go to the artifacts.
+    fn compare_reference(
+        &self,
+        actual: &Image,
+        reference: &Path,
+        tolerance: Option<Tolerance>,
+        what: &str,
+    ) -> anyhow::Result<()> {
+        let path = self.scenario.dir.join(reference);
+        if self.options.bless {
+            actual.save(&path)?;
+            return Ok(());
+        }
+        let stem = reference
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "screenshot".into());
+        let artifacts = self.options.artifacts.join(&self.scenario.name);
+        let actual_path = artifacts.join(format!("{stem}.actual.png"));
+        if !path.exists() {
+            actual.save(&actual_path)?;
+            anyhow::bail!(
+                "no reference image at {}; the actual one is in {}. Run with HOCUS_BLESS=1 to \
+                 record it",
+                path.display(),
+                actual_path.display()
+            );
+        }
+        let wanted = Image::load(&path)?;
+        let Some(difference) = actual.compare(&wanted, tolerance.unwrap_or_default()) else {
             return Ok(());
         };
         actual.save(&actual_path)?;
@@ -3932,9 +4000,8 @@ impl Run<'_> {
             diff.save(&artifacts.join(format!("{stem}.diff.png")))?;
         }
         anyhow::bail!(
-            "screenshot of {} differs from {}: {difference}; images in {}",
-            expected.output,
-            reference.display(),
+            "{what} differs from {}: {difference}; images in {}",
+            path.display(),
             artifacts.display()
         )
     }
@@ -4065,6 +4132,17 @@ fn mcp_initialize(bridge: &mut hocus_api::mcp::Bridge) {
         },
     }));
     bridge.handle(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+}
+
+/// The PNG a tool's answer holds (a capture's).
+fn mcp_image(answer: &serde_json::Value) -> anyhow::Result<Vec<u8>> {
+    use base64::Engine as _;
+    let data = answer["result"]["content"]
+        .as_array()
+        .and_then(|c| c.iter().find(|c| c["type"] == "image"))
+        .and_then(|c| c["data"].as_str())
+        .with_context(|| format!("no image in {answer}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
 }
 
 /// A tool's answer failed with `error` in its message, or succeeded; its

@@ -1,0 +1,87 @@
+description = "Given an agent's window on desktop 2 while desktop 1 shows, when the agent clicks and types in it, then the window receives them, its picture updates in the agent's capture, and desktop 1 is untouched; desktop 2 shown, what the agent did shows, with its pointer"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+# The agent's window, which draws a mark for each key and click on its
+# next frame callback, works on desktop 2; Alex stays on desktop 1.
+[[step]]
+open = { app_id = "editor", title = "Draft", size = [400, 300], color = "#3399ff", marks = true }
+
+[[step]]
+send = { app_id = "editor", output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+open = { app_id = "notes", title = "Notes", size = [300, 200], color = "#ff6600" }
+
+[[step]]
+expect_window = { app_id = "editor", visible = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-desktop-unseen.png" }
+
+[[step]]
+mcp_session = "helper"
+
+# Its capture before: nothing drawn yet.
+[[step]]
+mcp = { agent = "helper", tool = "capture", window = "editor", image = "agent-desktop-before.png" }
+
+# A click and three keys, where no screen shows the window.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "editor", arguments = { x = 200, y = 150, intent = "Places the cursor" } }
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "abc" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 46 pressed on agent-helper" }
+
+# The application draws on the frame callbacks the compositor sends it
+# meanwhile: the agent's capture shows the four marks.
+[[step]]
+advance_ms = 500
+
+[[step]]
+mcp = { agent = "helper", tool = "capture", window = "editor", image = "agent-desktop-capture.png" }
+
+# Desktop 1 is untouched: the same picture (no pointer, no ring), the
+# user's keyboard where it was, none of the agent's keys.
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-desktop-unseen.png" }
+
+[[step]]
+expect_focus = "notes"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_not_received = { app_id = "notes", event = "key 30 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "notes", event = "key 30 pressed on agent-helper" }
+
+# Going to desktop 2 shows what the agent did, and its pointer there.
+[[step]]
+keys = "super+2"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-desktop-shown.png" }

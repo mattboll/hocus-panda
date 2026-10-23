@@ -1,5 +1,7 @@
 //! A test client: one window filled with a solid colour, which records the
-//! events it receives, and can copy text to the clipboard and read it.
+//! events it receives, and can copy text to the clipboard and read it. It
+//! may draw a mark for each key and button it gets, pacing its drawing on
+//! frame callbacks as applications do.
 
 use std::{
     fmt,
@@ -92,6 +94,10 @@ pub struct ClientOptions {
     /// Its field is for a password: its text inputs say so (text-input-v3's
     /// purpose) while it has a keyboard.
     pub password: bool,
+    /// Draws a white square for each key and button pressed, of any seat:
+    /// at once when its last frame was shown, else at the next frame
+    /// callback.
+    pub marks: bool,
 }
 
 /// The text formats the test client copies and reads.
@@ -360,6 +366,7 @@ impl SolidWindow {
             text_inputs,
             other_inputs,
             password: options.password,
+            marks: options.marks.then(Marks::default),
             seat_names: vec![String::new(); bound.len()],
             typed: None,
             serial: 0,
@@ -413,6 +420,20 @@ struct Shared {
     clipboard: Arc<Mutex<Option<String>>>,
 }
 
+/// Marks drawn for the keys and buttons pressed, and the frames asked for.
+#[derive(Debug, Default)]
+struct Marks {
+    count: u32,
+    /// A frame callback was asked for and has not come: drawing waits.
+    waiting: bool,
+    /// Marks came meanwhile.
+    dirty: bool,
+}
+
+/// A mark's side and the gap between two, buffer pixels.
+const MARK: u32 = 16;
+const MARK_GAP: u32 = 8;
+
 struct Client {
     spec: SolidWindow,
     registry: RegistryState,
@@ -441,6 +462,8 @@ struct Client {
     other_inputs: Vec<ZwpTextInputV3>,
     /// Its field is a password one.
     password: bool,
+    /// The marks it draws, when asked to.
+    marks: Option<Marks>,
     /// Each seat's name, by the order it was bound in.
     seat_names: Vec<String>,
     /// Text committed, recorded at the next `done`.
@@ -482,7 +505,7 @@ impl Client {
         self.copied = Some((source, text));
     }
 
-    fn draw(&mut self, (width, height): (u32, u32)) -> anyhow::Result<()> {
+    fn draw(&mut self, (width, height): (u32, u32), qh: &QueueHandle<Self>) -> anyhow::Result<()> {
         let argb = self.spec.argb;
         let (buffer, canvas) = self.pool.create_buffer(
             width as i32,
@@ -493,11 +516,53 @@ impl Client {
         for pixel in canvas.as_chunks_mut::<4>().0 {
             *pixel = argb.to_le_bytes();
         }
+        // The marks in rows from the top left corner.
+        if let Some(marks) = &mut self.marks {
+            let per_row = (width.saturating_sub(MARK_GAP) / (MARK + MARK_GAP)).max(1);
+            for i in 0..marks.count {
+                let x0 = MARK_GAP + (i % per_row) * (MARK + MARK_GAP);
+                let y0 = MARK_GAP + (i / per_row) * (MARK + MARK_GAP);
+                for y in y0..(y0 + MARK).min(height) {
+                    for x in x0..(x0 + MARK).min(width) {
+                        let at = ((y * width + x) * 4) as usize;
+                        if let Some(pixel) = canvas.get_mut(at..at + 4) {
+                            pixel.copy_from_slice(&0xffff_ffff_u32.to_le_bytes());
+                        }
+                    }
+                }
+            }
+            marks.waiting = true;
+            marks.dirty = false;
+        }
         let surface = self.window.wl_surface();
+        if self.marks.is_some() {
+            surface.frame(qh, surface.clone());
+        }
         surface.damage_buffer(0, 0, width as i32, height as i32);
         buffer.attach_to(surface)?;
         self.window.commit();
         Ok(())
+    }
+
+    /// A key or a button pressed: one more mark, drawn now or at the next
+    /// frame callback.
+    fn mark(&mut self, qh: &QueueHandle<Self>) {
+        let Some(marks) = &mut self.marks else {
+            return;
+        };
+        marks.count += 1;
+        marks.dirty = true;
+        if !marks.waiting {
+            self.redraw(qh);
+        }
+    }
+
+    fn redraw(&mut self, qh: &QueueHandle<Self>) {
+        let size = self.drawn.unwrap_or((self.spec.width, self.spec.height));
+        if let Err(err) = self.draw(size, qh) {
+            eprintln!("test client could not draw: {err:#}");
+            self.closed = true;
+        }
     }
 }
 
@@ -510,7 +575,7 @@ impl WindowHandler for Client {
     fn configure(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _: &Window,
         configure: WindowConfigure,
         _: u32,
@@ -526,10 +591,7 @@ impl WindowHandler for Client {
         };
         if self.drawn != Some(size) {
             self.drawn = Some(size);
-            if let Err(err) = self.draw(size) {
-                eprintln!("test client could not draw: {err:#}");
-                self.closed = true;
-            }
+            self.redraw(qh);
         }
     }
 }
@@ -585,7 +647,7 @@ impl Dispatch<wl_pointer::WlPointer, usize> for Client {
         event: wl_pointer::Event,
         i: &usize,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         match event {
             wl_pointer::Event::Enter { .. } => client.record_on(*i, ClientEvent::PointerEnter),
@@ -599,13 +661,17 @@ impl Dispatch<wl_pointer::WlPointer, usize> for Client {
                 if *i == 0 {
                     client.serial = serial;
                 }
+                let pressed = state == WEnum::Value(wl_pointer::ButtonState::Pressed);
                 client.record_on(
                     *i,
                     ClientEvent::Button {
                         code: button,
-                        pressed: state == WEnum::Value(wl_pointer::ButtonState::Pressed),
+                        pressed,
                     },
                 );
+                if pressed {
+                    client.mark(qh);
+                }
             }
             _ => {}
         }
@@ -619,7 +685,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, usize> for Client {
         event: wl_keyboard::Event,
         i: &usize,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         // The keymap's file descriptor is dropped with the event: codes are
         // enough for tests.
@@ -631,13 +697,13 @@ impl Dispatch<wl_keyboard::WlKeyboard, usize> for Client {
                 client.record_on(*i, ClientEvent::KeyboardEnter);
             }
             wl_keyboard::Event::Leave { .. } => client.record_on(*i, ClientEvent::KeyboardLeave),
-            wl_keyboard::Event::Key { key, state, .. } => client.record_on(
-                *i,
-                ClientEvent::Key {
-                    code: key,
-                    pressed: state == WEnum::Value(wl_keyboard::KeyState::Pressed),
-                },
-            ),
+            wl_keyboard::Event::Key { key, state, .. } => {
+                let pressed = state == WEnum::Value(wl_keyboard::KeyState::Pressed);
+                client.record_on(*i, ClientEvent::Key { code: key, pressed });
+                if pressed {
+                    client.mark(qh);
+                }
+            }
             _ => {}
         }
     }
@@ -662,7 +728,16 @@ impl CompositorHandler for Client {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    /// The last frame was shown: marks that came meanwhile are drawn.
+    fn frame(&mut self, _: &Connection, qh: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
+        let Some(marks) = &mut self.marks else {
+            return;
+        };
+        marks.waiting = false;
+        if marks.dirty {
+            self.redraw(qh);
+        }
+    }
 
     fn surface_enter(
         &mut self,

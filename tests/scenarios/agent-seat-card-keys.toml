@@ -1,0 +1,119 @@
+description = "Given the confirmation card clicked, when Enter is pressed, then the action runs; before a click, Enter typed in another window does nothing to it; Escape refuses; a press elsewhere takes the keyboard back"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["*"]
+"""
+
+# A password manager asks first ([agents] confirm_apps); Alex types in
+# another window.
+[[step]]
+open = { app_id = "org.keepassxc.KeePassXC", title = "Passwords", size = [500, 340], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "notes", title = "Notes", size = [300, 200], color = "#ff6600" }
+
+[[step]]
+mcp_session = "helper"
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "org.keepassxc.KeePassXC", arguments = { x = 120, y = 80, intent = "Deletes the entry “Bank”" }, wait = false }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_ui = { label = "HELPER WILL CLICK · SENSITIVE ACTION" }
+
+# Enter typed before the card was clicked goes to Alex's window: the card
+# still waits.
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_received = { app_id = "notes", event = "key 28 pressed" }
+
+[[step]]
+advance_ms = 500
+
+[[step]]
+expect_ui = { label = "Allow" }
+
+[[step]]
+expect_not_received = { app_id = "org.keepassxc.KeePassXC", event = "button 272 pressed on agent-helper" }
+
+# Clicked, the card has the keyboard (Allow shows it): Enter allows.
+[[step]]
+click_ui = "Deletes the entry “Bank”"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "agent-seat-card-keys.png" }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_mcp = { agent = "helper" }
+
+[[step]]
+expect_received = { app_id = "org.keepassxc.KeePassXC", event = "button 272 pressed on agent-helper" }
+
+[[step]]
+expect_ui = { label = "Allow", shown = false }
+
+[[step]]
+expect_journal = { has = ['helper: click on window 1 org.keepassxc.KeePassXC "Passwords"; confirmed by the user'] }
+
+# Escape refuses.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "org.keepassxc.KeePassXC", arguments = { button = "right" }, wait = false }
+
+[[step]]
+click_ui = "In org.keepassxc.KeePassXC, which asks you first"
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_mcp = { agent = "helper", error = "the user refused it" }
+
+[[step]]
+expect_not_received = { app_id = "org.keepassxc.KeePassXC", event = "button 273 pressed on agent-helper" }
+
+# A press elsewhere takes the keyboard back: Escape goes to Alex's window,
+# and the card waits still.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "org.keepassxc.KeePassXC", arguments = { x = 300, y = 200 }, wait = false }
+
+[[step]]
+click_ui = "In org.keepassxc.KeePassXC, which asks you first"
+
+[[step]]
+pointer_move = [760, 320]
+
+[[step]]
+click = "left"
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_received = { app_id = "notes", event = "key 1 pressed" }
+
+[[step]]
+expect_ui = { label = "Allow" }
+
+[[step]]
+click_ui = "Refuse"
+
+[[step]]
+expect_mcp = { agent = "helper", error = "the user refused it" }
