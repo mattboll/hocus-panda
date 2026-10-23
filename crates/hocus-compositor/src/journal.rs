@@ -7,7 +7,8 @@
 //! once an agent connected. It lives in memory alone: nothing per entry
 //! goes to a file or to the log above debug.
 //!
-//! `stop-agents` (and the column's button) refuses every request of every
+//! `stop-agents` (and the column's button, and the settings' through
+//! `set_agents_stopped`) refuses every request of every
 //! agent connection, reading included, and new agents naming themselves,
 //! until allowed again; their events are held too. It lasts the session.
 
@@ -84,6 +85,7 @@ impl State {
         tracing::info!(stopped = stop, "MCP agents stopped or allowed again");
         let (summary, body) = self.shell_lang().agents_toast(stop);
         self.shell_toast(summary, body);
+        self.emit(|_| hocus_api::Event::AgentsStopped { stopped: stop });
     }
 
     /// The refusal of a request while agents are stopped: every request of

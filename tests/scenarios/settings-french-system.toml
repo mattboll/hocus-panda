@@ -1,4 +1,4 @@
-description = "French chosen on Language and region: the System pages speak it at once, without restart"
+description = "French chosen on Language and region: the System pages, AI and agents among them, speak it at once, without restart"
 outputs = ["1280x800"]
 shell = true
 dbus = true
@@ -45,6 +45,18 @@ click_settings = "Notifications"
 
 [[step]]
 expect_settings = { label = "Ne pas déranger", selected = false }
+
+[[step]]
+click_settings = "IA et agents"
+
+[[step]]
+expect_settings = { label = "Interroger l’IA", selected = false }
+
+[[step]]
+expect_settings = { label = "Fournisseur : ollama", selected = true }
+
+[[step]]
+expect_settings = { label = "ollama n’a pas besoin de clé." }
 
 [[step]]
 click_settings = "Applications"

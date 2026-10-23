@@ -34,6 +34,8 @@ pub enum Place {
     /// The `[[rules]]` entry at this index, in file order; one past the
     /// last makes a new one.
     Rule(usize),
+    /// The `[[agents.herdr]]` entry at this index, the same.
+    Herdr(usize),
 }
 
 impl Change {
@@ -127,6 +129,24 @@ impl Change {
     pub fn forget_rule(index: usize) -> Self {
         Self {
             place: Place::Rule(index),
+            key: String::new(),
+            value: None,
+        }
+    }
+
+    /// A key of the herdr at `index`; `None` takes it out.
+    pub fn herdr(index: usize, key: &'static str, value: Option<Value>) -> Self {
+        Self {
+            place: Place::Herdr(index),
+            key: key.into(),
+            value,
+        }
+    }
+
+    /// The herdr at `index` goes.
+    pub fn forget_herdr(index: usize) -> Self {
+        Self {
+            place: Place::Herdr(index),
             key: String::new(),
             value: None,
         }
@@ -341,6 +361,27 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
         hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
+    if let (Place::Herdr(index), "", None) = (&change.place, change.key.as_str(), &change.value) {
+        if let Some(agents) = doc.get_mut("agents").and_then(Item::as_table_mut) {
+            if let Some(tables) = agents
+                .get_mut("herdr")
+                .and_then(Item::as_array_of_tables_mut)
+            {
+                if *index < tables.len() {
+                    tables.remove(*index);
+                }
+                if tables.is_empty() {
+                    agents.remove("herdr");
+                }
+            }
+            if agents.is_empty() {
+                doc.remove("agents");
+            }
+        }
+        let out = doc.to_string();
+        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        return Ok(out);
+    }
     let table: &mut dyn toml_edit::TableLike = match &change.place {
         Place::Section(section) => made(doc.as_table_mut(), section)?,
         Place::Output(name) => entry(
@@ -397,6 +438,29 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             tables
                 .get_mut(*index)
                 .ok_or_else(|| EditError::Invalid(format!("no rule {index}")))?
+        }
+        Place::Herdr(index) => {
+            let agents = doc.entry("agents").or_insert_with(|| {
+                // `[[agents.herdr]]` alone needs no `[agents]` above.
+                let mut table = Table::new();
+                table.set_implicit(true);
+                Item::Table(table)
+            });
+            let agents = agents
+                .as_table_mut()
+                .ok_or_else(|| EditError::Invalid("agents is not a section".into()))?;
+            let item = agents
+                .entry("herdr")
+                .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()));
+            let tables = item
+                .as_array_of_tables_mut()
+                .ok_or_else(|| EditError::Invalid("agents.herdr is not a list of tables".into()))?;
+            if *index == tables.len() {
+                tables.push(Table::new());
+            }
+            tables
+                .get_mut(*index)
+                .ok_or_else(|| EditError::Invalid(format!("no herdr {index}")))?
         }
         Place::WallpaperScreen(output) => {
             let wallpaper = doc.entry("wallpaper").or_insert_with(|| {
@@ -591,6 +655,29 @@ mod tests {
         assert_eq!(out, "[windows]\nsnap = false  # mine\n");
         // Past the end: refused, nothing made.
         assert!(apply("", &Change::rule(3, "app_id", Some("x".into()))).is_err());
+    }
+
+    #[test]
+    fn herdr_sockets_are_made_tied_to_a_desktop_and_taken_out() {
+        let text = "[agents]\njournal_text = true  # mine\n";
+        let socket = Change::herdr(0, "socket", Some("~/.config/herdr/web.sock".into()));
+        let out = apply(text, &socket).expect("made");
+        let out = apply(&out, &Change::herdr(0, "desktop", Some(2.into()))).expect("set");
+        let config = hocus_core::Config::parse(&out).expect("valid");
+        assert_eq!(config.agents.herdr.len(), 1, "{out}");
+        assert_eq!(config.agents.herdr[0].desktop, Some(2));
+        assert!(config.agents.journal_text, "{out}");
+        let out = apply(&out, &Change::herdr(0, "desktop", None)).expect("any desktop");
+        assert!(!out.contains("desktop"), "{out}");
+        let out = apply(&out, &Change::forget_herdr(0)).expect("gone");
+        assert_eq!(out, text);
+        // With no [agents] at all, none is written above it.
+        let out = apply("", &socket).expect("made");
+        assert_eq!(
+            out,
+            "[[agents.herdr]]\nsocket = \"~/.config/herdr/web.sock\"\n"
+        );
+        assert_eq!(apply(&out, &Change::forget_herdr(0)).expect("gone"), "");
     }
 
     #[test]

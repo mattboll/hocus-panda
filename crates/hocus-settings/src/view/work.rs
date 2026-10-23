@@ -28,6 +28,13 @@ pub(super) enum Field {
     RealName,
     /// The account's picture's file, the same.
     Picture,
+    /// The AI provider's address and model.
+    AiUrl,
+    AiModel,
+    /// The AI provider's key: for the keyring, never shown back.
+    AiKey,
+    /// The socket of a herdr to add.
+    NewHerdr,
 }
 
 /// The Work pages' fields between builds.
@@ -114,7 +121,11 @@ impl SettingsView {
                 height: Length::Px(28.0),
                 ..Style::default()
             },
-            Kind::TextField(Box::new(TextField::new(name, hint, theme.text.body))),
+            Kind::TextField(Box::new(if field == Field::AiKey {
+                TextField::new(name, hint, theme.text.body).secret()
+            } else {
+                TextField::new(name, hint, theme.text.body)
+            })),
         );
         let shown = self
             .fields
@@ -159,6 +170,48 @@ impl SettingsView {
                 } else {
                     Outcome::SetPicture(typed)
                 }];
+            }
+            // The key goes to the keyring: nothing typed is kept here.
+            Field::AiKey => {
+                self.fields.forget(&field);
+                if typed.is_empty() {
+                    return Vec::new();
+                }
+                let provider = self.ctx.config.ai.provider.clone();
+                return vec![Outcome::AiKey {
+                    provider,
+                    key: typed,
+                }];
+            }
+            Field::AiUrl => {
+                let ai = hocus_core::config::Ai {
+                    url: typed.clone(),
+                    ..Default::default()
+                };
+                // In the clear to another machine: not written, said why.
+                self.system.bad_address = !ai.url_is_safe();
+                if self.system.bad_address {
+                    self.fields.type_into(field.clone(), typed);
+                    return Vec::new();
+                }
+                Change {
+                    value,
+                    ..Change::new("ai", "url", "")
+                }
+            }
+            Field::AiModel => Change {
+                value,
+                ..Change::new("ai", "model", "")
+            },
+            Field::NewHerdr => {
+                self.fields.forget(&field);
+                if value.is_none() {
+                    return Vec::new();
+                }
+                let index = self.ctx.config.agents.herdr.len();
+                return vec![Outcome::Change(Box::new(Change::herdr(
+                    index, "socket", value,
+                )))];
             }
             Field::ScreenshotFolder => Change {
                 value,

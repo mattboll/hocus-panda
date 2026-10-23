@@ -1,0 +1,138 @@
+# AI and agents (#67): herdr's sockets with their desktops (#192), what the
+# agents' journal keeps, the key and the button that stop every agent
+# (#176), and the keys held to circle (#46); the AI's provider and its key.
+description = "AI and agents: a herdr socket added and tied to its desktop, the journal keeping typed text, every agent stopped from the settings as the column's button does and allowed again, circling with Ctrl+Alt; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[ai]
+enabled = true
+provider = "claude"
+"""
+
+[[step]]
+open_settings = { page = "agents" }
+
+[[step]]
+expect_settings = { label = "Provider: Claude", selected = true }
+
+[[step]]
+expect_settings = { label = "No key" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-agents.png" }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 700
+
+[[step]]
+click_settings = "New herdr socket"
+
+[[step]]
+type = "~/.config/herdr/website.sock"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["[[agents.herdr]]", "socket = \"~/.config/herdr/website.sock\""] }
+
+[[step]]
+expect_settings = { label = "Desktop of ~/.config/herdr/website.sock: None", selected = true }
+
+[[step]]
+click_settings = "Desktop of ~/.config/herdr/website.sock: 2"
+
+[[step]]
+expect_config_file = { contains = ["desktop = 2"] }
+
+[[step]]
+expect_settings = { label = "Desktop 2" }
+
+[[step]]
+click_settings = "Journal keeps typed text"
+
+[[step]]
+expect_config_file = { contains = ["journal_text = true"] }
+
+[[step]]
+click_settings = "Stop all agents"
+
+[[step]]
+expect_journal = { stopped = true }
+
+[[step]]
+expect_settings = { label = "Stopped: their requests are refused" }
+
+# The toast saying so goes.
+[[step]]
+advance_ms = 7000
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-agents-herdr.png" }
+
+[[step]]
+click_settings = "Allow agents"
+
+[[step]]
+expect_journal = { stopped = false }
+
+[[step]]
+advance_ms = 7000
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+click_settings = "Keys held: Ctrl+Alt"
+
+[[step]]
+expect_config_file = { contains = ["[circle]", "modifiers = \"Ctrl+Alt\""] }
+
+[[step]]
+expect_settings = { label = "Keys held: Ctrl+Alt", selected = true }
+
+[[step]]
+scroll = -2000
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[ai]
+enabled = true
+provider = "claude"
+"""
+
+[[step]]
+expect_settings = { label = "No key" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-agents-light.png" }

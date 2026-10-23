@@ -21,6 +21,7 @@ use crate::{
     words::{self, ShortcutGroup},
 };
 
+mod agents;
 mod hardware;
 mod personalise;
 mod system;
@@ -78,6 +79,14 @@ pub enum Outcome {
     SetRealName(String),
     /// The account's picture, from this file, through AccountsService.
     SetPicture(String),
+    /// An AI provider's key, for the compositor's keyring; empty, it is
+    /// forgotten.
+    AiKey {
+        provider: String,
+        key: String,
+    },
+    /// Every MCP agent stopped, or allowed again, through the compositor.
+    StopAgents(bool),
 }
 
 /// What a node does when clicked.
@@ -135,6 +144,11 @@ enum Target {
         id: String,
         on: bool,
     },
+    /// The questions go to another server speaking OpenAI's API.
+    OpenAiLike,
+    /// The key of this provider is forgotten.
+    ForgetKey(String),
+    StopAgents(bool),
 }
 
 /// Which of a screen's choices are open.
@@ -479,10 +493,15 @@ impl SettingsView {
         }
         if ctx.config != self.ctx.config {
             self.fields.leave();
+            self.system.bad_address = false;
         }
         // The settings read these themselves, not the compositor.
         ctx.apps = std::mem::take(&mut self.ctx.apps);
         ctx.account = std::mem::take(&mut self.ctx.account);
+        // OpenAI's API on a server whose address is now written.
+        if ctx.config.ai.provider != "openai" || !ctx.config.ai.url.is_empty() {
+            self.system.openai_like = false;
+        }
         self.ctx = ctx;
         // A language chosen here is spoken at once.
         self.lang = lang_of(&self.ctx.config, self.session_lang);
@@ -553,6 +572,8 @@ impl SettingsView {
             self.wallpaper.leave();
             self.fields.leave();
             self.system.open = None;
+            self.system.openai_like = false;
+            self.system.bad_address = false;
         }
         self.screen = screen;
         self.typing = screen == Screen::Home;
@@ -932,6 +953,12 @@ impl SettingsView {
                     Some(Target::Autostart { id, on }) => {
                         out.push(Outcome::SetAutostart { id, on });
                     }
+                    Some(Target::OpenAiLike) => out.extend(self.choose_openai_like()),
+                    Some(Target::ForgetKey(provider)) => out.push(Outcome::AiKey {
+                        provider,
+                        key: String::new(),
+                    }),
+                    Some(Target::StopAgents(stop)) => out.push(Outcome::StopAgents(stop)),
                     Some(Target::SetZone(zone)) => {
                         self.zone_refused = None;
                         self.dirty = true;
@@ -1632,7 +1659,8 @@ impl SettingsView {
             Page::Accounts => self.accounts(theme, body),
             Page::Notifications => self.notifications(theme, body),
             Page::Apps => self.apps(theme, body),
-            Page::Agents | Page::Search => {}
+            Page::Agents => self.agents(theme, body),
+            Page::Search => {}
         }
     }
 
@@ -4578,6 +4606,217 @@ mod tests {
         let out = click(&mut v, "Look every: 1 day");
         assert_eq!(changes(&out), [("every_hours".into(), Some("24".into()))]);
         let out = click(&mut v, "Look for updates");
+        assert_eq!(changes(&out), [("enabled".into(), Some("false".into()))]);
+    }
+
+    fn with_config(v: &mut SettingsView, toml: &str, keys: Option<Vec<String>>) {
+        let mut ctx = v.context().clone();
+        ctx.config = hocus_core::Config::parse(toml).expect("a configuration");
+        ctx.ai.keys = keys;
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+    }
+
+    #[test]
+    fn the_ai_its_provider_address_and_key_are_set() {
+        let mut v = page_view(
+            "[ai]\nurl = \"http://127.0.0.1:11434\"\nmodel = \"llama3\"\n",
+            Page::Agents,
+            &[],
+        );
+        assert!(find(&v.access(), "ollama needs no key.").is_some());
+        assert!(find(&v.access(), "Provider: ollama").expect("it").selected);
+        let out = click(&mut v, "Ask the AI");
+        assert_eq!(changes(&out), [("enabled".into(), Some("true".into()))]);
+        // The chosen one again changes nothing.
+        assert!(changes(&click(&mut v, "Provider: ollama")).is_empty());
+        // Another: its own address and model, not ollama's.
+        let out = click(&mut v, "Provider: Claude");
+        assert_eq!(
+            changes(&out),
+            [
+                ("provider".into(), Some("\"claude\"".into())),
+                ("url".into(), None),
+                ("model".into(), None)
+            ]
+        );
+        with_config(&mut v, "[ai]\nprovider = \"claude\"\n", None);
+        assert!(find(&v.access(), "Reading the keyring…").is_some());
+        with_config(&mut v, "[ai]\nprovider = \"claude\"\n", Some(Vec::new()));
+        assert!(find(&v.access(), "No key").is_some());
+        assert!(find(&v.access(), "Remove the key").is_none());
+        click(&mut v, "Provider key");
+        v.text("sk-panda");
+        let out = v.key(Key::Enter);
+        assert!(
+            matches!(out.as_slice(), [Outcome::AiKey { provider, key }] if provider == "claude" && key == "sk-panda"),
+            "{out:?}"
+        );
+        v.draw(Duration::ZERO);
+        let field = v.fields.node(&Field::AiKey).expect("the field");
+        assert_eq!(v.tree.field_value(field), Some(""), "never kept here");
+        with_config(
+            &mut v,
+            "[ai]\nprovider = \"claude\"\n",
+            Some(vec!["claude".into()]),
+        );
+        assert!(find(&v.access(), "A key is kept").is_some());
+        let out = click(&mut v, "Remove the key");
+        assert!(
+            matches!(out.as_slice(), [Outcome::AiKey { provider, key }] if provider == "claude" && key.is_empty()),
+            "{out:?}"
+        );
+        // In the clear to another machine: not written.
+        click(&mut v, "AI address");
+        v.text("http://example.org");
+        assert!(v.key(Key::Enter).is_empty());
+        v.draw(Duration::ZERO);
+        assert!(
+            find(
+                &v.access(),
+                "Not written: an https:// address, or http:// to this machine."
+            )
+            .is_some()
+        );
+        click(&mut v, "AI address");
+        for _ in 0.."http://example.org".len() {
+            v.key(Key::Backspace);
+        }
+        v.text("https://llm.example.org");
+        let out = v.key(Key::Enter);
+        assert_eq!(
+            changes(&out),
+            [("url".into(), Some("\"https://llm.example.org\"".into()))]
+        );
+        // OpenAI's API elsewhere: chosen until its address is typed.
+        let out = click(&mut v, "Provider: OpenAI-compatible");
+        assert_eq!(
+            changes(&out),
+            [("provider".into(), Some("\"openai\"".into()))]
+        );
+        with_config(&mut v, "[ai]\nprovider = \"openai\"\n", Some(Vec::new()));
+        assert!(
+            find(&v.access(), "Provider: OpenAI-compatible")
+                .expect("it")
+                .selected
+        );
+        assert!(!find(&v.access(), "Provider: OpenAI").expect("it").selected);
+        with_config(
+            &mut v,
+            "[ai]\nprovider = \"openai\"\nurl = \"http://127.0.0.1:1234\"\n",
+            Some(Vec::new()),
+        );
+        assert!(
+            find(&v.access(), "Provider: OpenAI-compatible")
+                .expect("it")
+                .selected
+        );
+        let out = click(&mut v, "Provider: OpenAI");
+        assert_eq!(
+            changes(&out),
+            [
+                ("provider".into(), Some("\"openai\"".into())),
+                ("url".into(), None)
+            ]
+        );
+    }
+
+    #[test]
+    fn herdr_sockets_the_journal_the_stop_and_the_circle_are_set() {
+        use crate::edit::Place;
+        let mut v = page_view("", Page::Agents, &[]);
+        let mut ctx = v.context().clone();
+        ctx.screens = vec![screen("HEADLESS-1", 4), screen("HEADLESS-2", 2)];
+        v.set_context(ctx);
+        v.scroll(700.0);
+        v.draw(Duration::ZERO);
+        assert!(
+            find(
+                &v.access(),
+                "No herdr named: the session looks for herdr’s own socket, ~/.config/herdr/herdr.sock."
+            )
+            .is_some()
+        );
+        click(&mut v, "New herdr socket");
+        v.text("~/web.sock");
+        let out = v.key(Key::Enter);
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Herdr(0),
+                "socket".into(),
+                Some("\"~/web.sock\"".into())
+            )]
+        );
+        let mut ctx = v.context().clone();
+        ctx.config = hocus_core::Config::parse(
+            "[agents]\nherdr_socket = \"~/old.sock\"\n\n[[agents.herdr]]\nsocket = \"~/web.sock\"\n",
+        )
+        .expect("valid");
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        assert!(
+            find(&v.access(), "Desktop of ~/web.sock: None")
+                .expect("it")
+                .selected
+        );
+        // The primary screen's desktops, the first's without one.
+        assert!(find(&v.access(), "Desktop of ~/web.sock: 4").is_some());
+        assert!(find(&v.access(), "Desktop of ~/web.sock: 5").is_none());
+        let out = click(&mut v, "Desktop of ~/web.sock: 3");
+        assert_eq!(
+            values(&out),
+            [(Place::Herdr(0), "desktop".into(), Some("3".into()))]
+        );
+        let out = click(&mut v, "Screen of ~/web.sock: HEADLESS-2");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Herdr(0),
+                "output".into(),
+                Some("\"HEADLESS-2\"".into())
+            )]
+        );
+        let out = click(&mut v, "Remove ~/old.sock");
+        assert_eq!(
+            values(&out),
+            [(Place::Section("agents"), "herdr_socket".into(), None)]
+        );
+        let out = click(&mut v, "Remove ~/web.sock");
+        assert_eq!(places(&out), [Place::Herdr(0)]);
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Journal keeps typed text");
+        assert_eq!(
+            changes(&out),
+            [("journal_text".into(), Some("true".into()))]
+        );
+        let out = click(&mut v, "Stop all agents");
+        assert!(
+            matches!(out.as_slice(), [Outcome::StopAgents(true)]),
+            "{out:?}"
+        );
+        let mut ctx = v.context().clone();
+        ctx.agents_stopped = true;
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Stopped: their requests are refused").is_some());
+        let out = click(&mut v, "Allow agents");
+        assert!(
+            matches!(out.as_slice(), [Outcome::StopAgents(false)]),
+            "{out:?}"
+        );
+        assert!(
+            find(&v.access(), "Keys held: Super+Shift")
+                .expect("it")
+                .selected
+        );
+        let out = click(&mut v, "Keys held: Ctrl+Alt");
+        assert_eq!(
+            changes(&out),
+            [("modifiers".into(), Some("\"Ctrl+Alt\"".into()))]
+        );
+        let out = click(&mut v, "Circle to ask");
         assert_eq!(changes(&out), [("enabled".into(), Some("false".into()))]);
     }
 }

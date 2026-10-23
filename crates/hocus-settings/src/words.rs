@@ -1500,3 +1500,161 @@ pub fn calendars(n: usize, lang: Lang) -> String {
         (Lang::Fr, n) => format!("{n} agendas"),
     }
 }
+
+// AI and agents.
+pub const AI_CAPTION: Words = Words::new("AI", "IA");
+pub const ASK_AI: Words = Words::new("Ask the AI", "Interroger l’IA");
+pub const ASK_AI_SUB: Words = Words::new(
+    "Questions typed in the command field, and circled areas",
+    "Les questions du champ de commande, et les zones entourées",
+);
+pub const AI_OFF: Words = Words::new("AI off", "IA désactivée");
+pub const PROVIDER: Words = Words::new("Provider", "Fournisseur");
+pub const OPENAI_LIKE: Words = Words::new("OpenAI-compatible", "Compatible OpenAI");
+pub const ADDRESS: Words = Words::new("Address", "Adresse");
+pub const ADDRESS_OF_SERVER: Words = Words::new(
+    "https://…, or http://127.0.0.1:…, then Enter",
+    "https://…, ou http://127.0.0.1:…, puis Entrée",
+);
+pub const ADDRESS_NOTE: Words = Words::new(
+    "https, or http to this machine only: questions never travel in the clear. Enter writes it.",
+    "https, ou http vers cette machine seulement : les questions ne circulent jamais en clair. Entrée l’enregistre.",
+);
+pub const BAD_ADDRESS: Words = Words::new(
+    "Not written: an https:// address, or http:// to this machine.",
+    "Non enregistrée : une adresse https://, ou http:// vers cette machine.",
+);
+pub const MODEL: Words = Words::new("Model", "Modèle");
+// The fields' names, apart from the names shown above them.
+pub const AI_ADDRESS: Words = Words::new("AI address", "Adresse de l’IA");
+pub const AI_MODEL: Words = Words::new("AI model", "Modèle de l’IA");
+pub const AI_KEY: Words = Words::new("Provider key", "Clé du fournisseur");
+pub const MODEL_HINT: Words = Words::new(
+    "Empty: the provider’s newest",
+    "Vide : le plus récent du fournisseur",
+);
+pub const MODEL_NOTE: Words = Words::new(
+    "Left empty, the provider is asked at the first question, and its newest model kept for the session.",
+    "Laissé vide, le fournisseur est interrogé à la première question, et son modèle le plus récent gardé pour la session.",
+);
+pub const KEY: Words = Words::new("Key", "Clé");
+pub const KEY_KEPT: Words = Words::new("A key is kept", "Une clé est gardée");
+pub const NO_KEY: Words = Words::new("No key", "Aucune clé");
+pub const KEY_NOT_READ: Words = Words::new("Reading the keyring…", "Lecture du trousseau…");
+pub const KEY_HINT: Words = Words::new("Paste the key, then Enter", "Collez la clé, puis Entrée");
+pub const KEY_HINT_REPLACE: Words = Words::new(
+    "Another key replaces it, then Enter",
+    "Une autre clé la remplace, puis Entrée",
+);
+pub const KEEP: Words = Words::new("Keep", "Garder");
+pub const KEEP_KEY: Words = Words::new("Keep the key", "Garder la clé");
+pub const REMOVE_KEY: Words = Words::new("Remove the key", "Retirer la clé");
+pub const KEY_NOTE: Words = Words::new(
+    "In the keyring, never in the configuration file; never shown again.",
+    "Dans le trousseau, jamais dans le fichier de configuration ; plus jamais affichée.",
+);
+pub const KEY_IF_ASKED: Words = Words::new(
+    "Only if the server asks for one. In the keyring, never in the configuration file; never shown again.",
+    "Seulement si le serveur en demande une. Dans le trousseau, jamais dans le fichier de configuration ; plus jamais affichée.",
+);
+pub const NO_KEY_NEEDED: Words =
+    Words::new("ollama needs no key.", "ollama n’a pas besoin de clé.");
+pub const HERDR_NOTE: Words = Words::new(
+    "Each herdr’s agents show in full on its desktop and in a line elsewhere; the desktop’s badge says when one waits.",
+    "Les agents de chaque herdr s’affichent en entier sur son bureau, en une ligne ailleurs ; le badge du bureau dit quand l’un attend.",
+);
+pub const NO_HERDR: Words = Words::new(
+    "No herdr named: the session looks for herdr’s own socket, ~/.config/herdr/herdr.sock.",
+    "Aucun herdr nommé : la session cherche le socket de herdr lui-même, ~/.config/herdr/herdr.sock.",
+);
+pub const ANY_DESKTOP: Words = Words::new("Wherever you are", "Là où vous êtes");
+pub const NO_DESKTOP: Words = Words::new("None", "Aucun");
+pub const AGENTS_IN_COLUMN: Words = Words::new("In the column", "Dans la colonne");
+pub const DESKTOP: Words = Words::new("Desktop", "Bureau");
+pub const OLD_SOCKET: Words = Words::new(
+    "herdr_socket: wherever you are",
+    "herdr_socket : là où vous êtes",
+);
+pub const NEW_HERDR: Words = Words::new("New herdr socket", "Nouveau socket herdr");
+pub const NEW_HERDR_HINT: Words = Words::new(
+    "~/.config/herdr/project.sock, then Enter",
+    "~/.config/herdr/projet.sock, puis Entrée",
+);
+pub const ADD_HERDR: Words = Words::new("Add the herdr socket", "Ajouter le socket herdr");
+pub const MCP_AGENTS: Words =
+    Words::new("Agents using the desktop", "Agents qui utilisent le bureau");
+pub const JOURNAL_TEXT: Words =
+    Words::new("Journal keeps typed text", "Le journal garde le texte tapé");
+pub const JOURNAL_TEXT_SUB: Words = Words::new(
+    "Otherwise only how many characters: it may be a secret",
+    "Sinon seulement le nombre de caractères : ce peut être un secret",
+);
+pub const AGENTS_ALLOWED: Words = Words::new(
+    "They act as [[agents.mcp]] allows them",
+    "Ils agissent comme [[agents.mcp]] le leur permet",
+);
+pub const AGENTS_STOPPED: Words = Words::new(
+    "Stopped: their requests are refused",
+    "Arrêtés : leurs demandes sont refusées",
+);
+pub const STOP_KEY: Words = Words::new("Stop key", "Touche d’arrêt");
+pub const CHANGE_STOP_KEY: Words = Words::new("Change the stop key", "Changer la touche d’arrêt");
+pub const STOP_ALL: Words = Words::new("Stop all agents", "Arrêter tous les agents");
+pub const ALLOW_AGENTS: Words = Words::new("Allow agents", "Autoriser les agents");
+pub const STOP_NOTE: Words = Words::new(
+    "The same as the key and the column’s button, until the session ends. herdr’s agents are not stopped.",
+    "Comme la touche et le bouton de la colonne, jusqu’à la fin de la session. Les agents de herdr ne sont pas arrêtés.",
+);
+pub const AGENTS_STOPPED_SHORT: Words = Words::new("Agents stopped", "Agents arrêtés");
+pub const CIRCLE: Words = Words::new("Circle to ask", "Entourer pour demander");
+pub const KEYS_HELD: Words = Words::new("Keys held", "Touches tenues");
+pub const CIRCLE_NOTE: Words = Words::new(
+    "Its text is read, then copied, searched or noted; explained, translated or asked about while the AI is on. Super alone draws on the screen.",
+    "Son texte est lu, puis copié, cherché ou noté ; expliqué, traduit ou interrogé quand l’IA est activée. Super seule dessine sur l’écran.",
+);
+
+/// "Hold Super+Shift and circle with the left button".
+pub fn circle_how(keys: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Hold {keys} and draw a loop with the left button"),
+        Lang::Fr => format!("Tenir {keys} et tracer une boucle avec le bouton gauche"),
+    }
+}
+
+/// "Empty: http://127.0.0.1:11434".
+pub fn empty_is(address: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Empty: {address}"),
+        Lang::Fr => format!("Vide : {address}"),
+    }
+}
+
+/// "Desktop 3", "Desktop 3 · DP-1".
+pub fn on_desktop(desktop: u32, output: Option<&str>, lang: Lang) -> String {
+    let desktop = format!("{} {desktop}", DESKTOP.get(lang));
+    match output {
+        Some(output) => format!("{desktop} · {output}"),
+        None => desktop,
+    }
+}
+
+/// The name of one herdr's choices: "Desktop of web.sock".
+pub fn of_herdr(what: Words, socket: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{} of {socket}", what.en),
+        Lang::Fr => format!("{} de {socket}", what.fr),
+    }
+}
+
+/// "Remove web.sock".
+pub fn remove_herdr(socket: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Remove {socket}"),
+        Lang::Fr => format!("Retirer {socket}"),
+    }
+}
+
+/// "2 herdr".
+pub fn herdr_count(n: usize) -> String {
+    format!("{n} herdr")
+}

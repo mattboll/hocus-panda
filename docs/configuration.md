@@ -178,7 +178,7 @@ qr = true                  # qr <words>
 intents = true             # "capture de slack dans 3 secondes", "open the keyboard settings": understood
                            #   offline in English and French, shown to confirm before anything runs
 
-[ai]                       # questions typed in the command field; the answer streams into it
+[ai]                       # questions typed in the command field; the answer streams into it (Settings → AI and agents)
 enabled = false            # off until turned on: nothing about the AI shows, nothing is sent
 provider = "ollama"        # ollama, llamacpp (its server), openai (or any server speaking its chat
                            #   completions: LM Studio, vLLM…), claude
@@ -187,7 +187,8 @@ url = ""                   # empty: the provider's usual address (ollama http://
 model = ""                 # empty: asked of the provider at the first question and kept for the session:
                            #   the newest Claude Opus it lists, ollama's or an OpenAI-like server's first
                            #   model, the llama.cpp server's own
-                           # keys are in the keyring, never here: hocus msg ai-key claude < key.txt
+                           # keys are in the keyring, never here: Settings → AI and agents, or
+                           #   hocus msg ai-key claude < key.txt
 
 [dock]                     # Super+D; shown on an empty desktop or after resting at the bottom edge
 enabled = true             # false: neither the dock nor its hint
@@ -199,7 +200,7 @@ pinned = [                 # desktop entries, in order; those not installed are 
 [pandas]                   # they show what happens; they move a moment when it changes, then hold still
 enabled = true             # false: no panda anywhere (also from quick settings, for the session)
 
-[agents]                   # coding agents in the column, from herdr; one waiting asks in a toast
+[agents]                   # coding agents in the column, from herdr; one waiting asks in a toast (Settings → AI and agents)
 enabled = true
 herdr_socket = ""          # one herdr whose agents belong to no desktop (shown wherever you are); empty,
                            #   and no [[agents.herdr]]: $XDG_CONFIG_HOME/herdr/herdr.sock, looked for by

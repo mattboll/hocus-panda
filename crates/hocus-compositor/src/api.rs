@@ -271,6 +271,7 @@ impl App {
                 Ok(()) => Reply::Done,
                 Err(why) => return Some(Err(ApiError::new(ErrorCode::BadRequest, why))),
             },
+            Request::Ai => Reply::Ai(state.ai_info()),
             Request::Updates => Reply::Updates(state.updates_info()),
             Request::InstallUpdates => {
                 state.install_updates();
@@ -568,6 +569,10 @@ impl App {
             }
             Request::Agent { name } => return Some(state.name_agent(connection, name)),
             Request::AgentsJournal => Reply::AgentsJournal(state.agents_journal(connection)),
+            Request::SetAgentsStopped { stopped } => {
+                state.set_agents_stopped(stopped);
+                Reply::Done
+            }
             Request::Act { target, action } => {
                 return Some(state.act(connection, target, action));
             }

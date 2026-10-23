@@ -51,6 +51,8 @@ enum News {
     Model(Provider, String, String),
     /// A key was stored, or not.
     Stored(Result<String, String>),
+    /// The providers with a key kept, as read.
+    Keys(Result<Vec<String>, String>),
 }
 
 /// The question being answered.
@@ -69,6 +71,8 @@ pub struct Ai {
     secrets: Option<Secrets>,
     /// The model picked for a provider at an address, for the session.
     model: Option<(Provider, String, String)>,
+    /// The providers with a key kept, for the settings; `None` until read.
+    keys: Option<Vec<String>>,
 }
 
 pub fn start(
@@ -97,6 +101,7 @@ pub fn start(
         fallback: dir.join("ai-secrets"),
         attribute: "ai-provider",
     });
+    state.read_ai_keys();
 }
 
 fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
@@ -283,8 +288,35 @@ impl State {
                 tracing::info!(provider = provider.name(), model, "AI model picked");
                 self.ai.model = Some((provider, url, model));
             }
-            News::Stored(Ok(provider)) => tracing::info!(provider, "AI key kept"),
+            News::Stored(Ok(provider)) => {
+                tracing::info!(provider, "AI key kept or forgotten");
+                self.read_ai_keys();
+            }
             News::Stored(Err(err)) => tracing::warn!(err, "the AI key was not kept"),
+            News::Keys(Ok(keys)) => {
+                if self.ai.keys.as_ref() != Some(&keys) {
+                    self.ai.keys = Some(keys);
+                    self.emit(|_| hocus_api::Event::Ai);
+                }
+            }
+            News::Keys(Err(err)) => tracing::warn!(err, "the AI keys kept were not read"),
+        }
+    }
+
+    /// Reads which providers have a key, on a worker: the settings say it.
+    fn read_ai_keys(&self) {
+        let (Some(secrets), Some(news)) = (self.ai.secrets.clone(), self.ai.news.clone()) else {
+            return;
+        };
+        spawn("ai keys", move || {
+            let _ = news.send(News::Keys(secrets.ids()));
+        });
+    }
+
+    /// Which providers have a key kept, never the keys.
+    pub fn ai_info(&self) -> hocus_api::AiInfo {
+        hocus_api::AiInfo {
+            keys: self.ai.keys.clone(),
         }
     }
 
@@ -300,7 +332,7 @@ impl State {
             let name = provider.name();
             let done = if secret.is_empty() {
                 // Forgets this one, keeps the others.
-                let others: Vec<String> = ["openai", "llamacpp", "claude"]
+                let others: Vec<String> = ["ollama", "openai", "llamacpp", "claude"]
                     .iter()
                     .filter(|p| **p != name)
                     .map(|p| (*p).to_owned())
