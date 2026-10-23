@@ -3,7 +3,9 @@
 //! stack reflows with springs, a thin line counts down their time and stops
 //! while the pointer is over them; critical ones stay until dismissed. A
 //! toast whose actions include [`REPLY`] takes a reply typed into it, and
-//! waits while it is typed.
+//! waits while it is typed. In the Matrix theme a toast comes in where it
+//! goes, the compositor typing it in over its place, and says where the
+//! ones that go were, for their glyphs to scatter from there.
 
 use std::{collections::VecDeque, time::Duration};
 
@@ -118,6 +120,16 @@ struct Card {
     paused_left: Option<Duration>,
 }
 
+/// How a new toast comes in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Entrance {
+    /// From the screen's edge.
+    #[default]
+    Slide,
+    /// Where it goes, at once: the Matrix theme materializes it there.
+    InPlace,
+}
+
 /// The toasts of one screen: their tree, pixels and timers.
 pub struct Toasts {
     lang: Lang,
@@ -131,6 +143,9 @@ pub struct Toasts {
     /// The toast a reply is typed in: it has the keyboard.
     replying: Option<u32>,
     now: Duration,
+    entrance: Entrance,
+    /// Toasts gone since asked last, and where their cards were.
+    gone: Vec<(u32, Rect)>,
 }
 
 impl std::fmt::Debug for Toasts {
@@ -192,7 +207,25 @@ impl Toasts {
             hovered: None,
             replying: None,
             now: Duration::ZERO,
+            entrance: Entrance::Slide,
+            gone: Vec::new(),
         }
+    }
+
+    pub fn set_entrance(&mut self, entrance: Entrance) {
+        self.entrance = entrance;
+    }
+
+    /// Where the card of toast `id` is, from the corner, once laid out.
+    pub fn card_rect(&mut self, id: u32) -> Option<Rect> {
+        self.tree.layout();
+        let card = self.cards.iter().find(|c| c.toast.id == id)?;
+        self.tree.rect(card.card)
+    }
+
+    /// The toasts gone since the last call, and where their cards were.
+    pub fn take_gone(&mut self) -> Vec<(u32, Rect)> {
+        std::mem::take(&mut self.gone)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -273,12 +306,14 @@ impl Toasts {
         });
         self.history.truncate(HISTORY);
         // It slides in from the edge while the others make room.
-        let id = self.cards[0].card;
-        self.tree.jump(id, Property::OffsetX, WIDTH + ROOM);
-        self.tree.jump(id, Property::Opacity, 0.0);
-        let enter = Curve::Ease(Easing::OutCubic, motion::STANDARD);
-        self.tree.animate(id, Property::OffsetX, 0.0, enter);
-        self.tree.animate(id, Property::Opacity, 1.0, enter);
+        if self.entrance == Entrance::Slide {
+            let id = self.cards[0].card;
+            self.tree.jump(id, Property::OffsetX, WIDTH + ROOM);
+            self.tree.jump(id, Property::Opacity, 0.0);
+            let enter = Curve::Ease(Easing::OutCubic, motion::STANDARD);
+            self.tree.animate(id, Property::OffsetX, 0.0, enter);
+            self.tree.animate(id, Property::Opacity, 1.0, enter);
+        }
         self.reflow(&before);
         while self.cards.len() > MAX {
             let last = self.cards.len() - 1;
@@ -316,6 +351,11 @@ impl Toasts {
     /// Removes the card at `i`; the others close the gap.
     fn take(&mut self, i: usize) {
         let card = self.cards.remove(i);
+        if let Some(rect) = self.tree.rect(card.card) {
+            // Kept for the compositor, which takes them after each change.
+            self.gone.truncate(MAX * 2);
+            self.gone.push((card.toast.id, rect));
+        }
         let before: Vec<(NodeId, f32)> = self
             .cards
             .iter()
@@ -824,5 +864,29 @@ mod tests {
     #[test]
     fn an_application_keeps_its_colour() {
         assert_eq!(app_color("mail"), app_color("mail"));
+    }
+
+    #[test]
+    fn in_place_a_toast_does_not_slide_and_says_where_it_was() {
+        let mut toasts = Toasts::new(Theme::default(), Lang::En, 800.0, 1.0);
+        toasts.set_entrance(Entrance::InPlace);
+        let toast = Toast {
+            id: 7,
+            app: "Mail".into(),
+            summary: "Lunch".into(),
+            body: String::new(),
+            actions: Vec::new(),
+            critical: false,
+            timeout: None,
+        };
+        let now = Duration::from_secs(1);
+        toasts.show(toast, now);
+        toasts.draw(now);
+        assert!(!toasts.is_animating(now), "no slide");
+        let rect = toasts.card_rect(7).expect("laid out");
+        assert_eq!(rect.x, ROOM);
+        assert!(toasts.close(7));
+        assert_eq!(toasts.take_gone(), vec![(7, rect)]);
+        assert!(toasts.take_gone().is_empty());
     }
 }

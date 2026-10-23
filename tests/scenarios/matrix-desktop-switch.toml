@@ -1,0 +1,55 @@
+# The Matrix theme's desktop switch (#155, docs/design/matrix-theme.md §9):
+# the desktop left behind breaks into glyphs from the screen's edges in,
+# which rain off in the switch's way, the new desktop under them.
+description = "In the Matrix theme switching desktops turns the windows left behind to glyphs from the edges in, which rain away to the left for the next desktop; then nothing is drawn"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+open = { app_id = "editor", size = [700, 450], color = "#3399ff" }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+open = { app_id = "mail", size = [500, 300], color = "#e5484d" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+keys = "super+1"
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-desktop-breaks.png" }
+
+[[step]]
+advance_ms = 120
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-desktop-rains.png" }
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+advance_ms = 1500
+
+[[step]]
+expect_idle = { for_ms = 2000 }

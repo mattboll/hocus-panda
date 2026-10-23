@@ -16,7 +16,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            ImportMem, Renderer,
+            ImportAll, ImportMem, Renderer,
             element::{
                 Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
@@ -31,6 +31,7 @@ use crate::{
     State,
     blur::{Spot, Surface, spots},
     desktops::title_and_app_id,
+    scene::SceneElement,
     window_mode::WindowMode,
 };
 
@@ -102,6 +103,11 @@ pub struct Shell {
 type ColumnPart<R> = Option<MemoryRenderBufferRenderElement<R>>;
 
 impl Shell {
+    /// Whether it has an output to be on.
+    pub(crate) fn is_placed(&self) -> bool {
+        self.on.is_some()
+    }
+
     pub fn set_theme(&mut self, theme: Theme) {
         self.column.set_theme(theme);
     }
@@ -594,11 +600,43 @@ impl State {
         let fading = shell.fading.as_ref().and_then(|(buffer, size, fade)| {
             element(buffer, local, *size, Some(fade.value(now).clamp(0.0, 1.0)))
         });
-        let column = shell.buffer.as_ref().and_then(|buffer| {
-            let view = shell.column.view();
-            element(buffer, local, (view.width, view.height), None)
-        });
+        // Coming or going in the Matrix theme, it is drawn in rain.
+        let column = shell
+            .buffer
+            .as_ref()
+            .filter(|_| self.matrix_column_moment().is_none())
+            .and_then(|buffer| {
+                let view = shell.column.view();
+                element(buffer, local, (view.width, view.height), None)
+            });
         (popover, fading, column)
+    }
+
+    /// The column coming or going in the Matrix theme's rain on `output`
+    /// (#155), even under a fullscreen window it goes for. Front first.
+    pub fn matrix_column_on<R>(&self, renderer: &mut R, output: &Output) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let Some(shell) = &self.shell else {
+            return Vec::new();
+        };
+        let (Some((name, area, scale)), Some(buffer)) = (&shell.on, &shell.buffer) else {
+            return Vec::new();
+        };
+        if *name != output.name() || self.matrix_column_moment().is_none() {
+            return Vec::new();
+        }
+        let rect = column_rect(*area);
+        let view = shell.column.view();
+        let column = crate::matrix_shell::rect(
+            f64::from(rect.loc.x - area.loc.x),
+            f64::from(rect.loc.y - area.loc.y),
+            f64::from(view.width) / scale,
+            f64::from(view.height) / scale,
+        );
+        self.matrix_column_elements(renderer, buffer, column, f64::from(area.size.w), *scale)
     }
 
     /// The column's panels on glass, and its popover's, on `output`.

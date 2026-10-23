@@ -621,6 +621,11 @@ impl Lang {
         }
     }
 
+    /// The Matrix theme's boot, once everything is back, in large letters.
+    pub fn system_ready(self) -> &'static str {
+        self.pick("SYSTEM READY", "SYSTÈME PRÊT")
+    }
+
     /// The curtain's countdown.
     pub fn locking_in(self, seconds: u32) -> String {
         match self {

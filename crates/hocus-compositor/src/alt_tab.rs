@@ -3,10 +3,17 @@
 //! own; Tab, Shift+Tab and the arrows move the choice, which glides; letting
 //! the modifier go, Enter or a click picks it, Escape gives up. A pinch with
 //! three fingers or more opens it for every screen. Each card shows its
-//! window live: the window's own surfaces drawn small in it.
+//! window live: the window's own surfaces drawn small in it. In the Matrix
+//! theme the switcher and the overview come and go in rain
+//! (`matrix_screens`).
 
 use hocus_core::{WindowId, shortcuts::Scope};
-use hocus_shell::window_switcher::{Card, WindowSwitcher};
+use std::time::Duration;
+
+use hocus_shell::{
+    matrix::Variant,
+    window_switcher::{Card, WindowSwitcher},
+};
 use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, Texture,
@@ -32,30 +39,54 @@ enum Held {
     Super,
 }
 
+/// What it was opened as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Shown {
+    /// Alt+Tab, Super+Tab: held while choosing.
+    Switcher,
+    /// Every screen's windows until one is picked: Super alone, a corner,
+    /// a pinch.
+    Overview,
+}
+
 /// One screen's grid.
 #[derive(Debug)]
-struct View {
-    output: String,
+pub(crate) struct View {
+    pub(crate) output: String,
     /// Its corner, logical, from the output's.
-    place: Point<i32, Logical>,
-    panel: Panel<WindowSwitcher>,
+    pub(crate) place: Point<i32, Logical>,
+    pub(crate) panel: Panel<WindowSwitcher>,
     /// Its cards' places in the list.
-    first: usize,
-    count: usize,
+    pub(crate) first: usize,
+    pub(crate) count: usize,
 }
 
 #[derive(Debug)]
-struct Open {
+pub(crate) struct Open {
     /// Every window listed, in order, with its screen.
-    entries: Vec<(WindowId, String)>,
-    selected: usize,
+    pub(crate) entries: Vec<(WindowId, String)>,
+    pub(crate) selected: usize,
     held: Option<Held>,
-    views: Vec<View>,
+    pub(crate) views: Vec<View>,
+    pub(crate) shown: Shown,
+    pub(crate) since: Duration,
+    /// The choice moved from this card then.
+    pub(crate) moved: Option<(usize, Duration)>,
+}
+
+/// Closed in the Matrix theme: it goes in its own way a moment.
+#[derive(Debug)]
+pub(crate) struct Closing {
+    pub(crate) open: Open,
+    pub(crate) since: Duration,
+    /// The window picked, if one was.
+    pub(crate) picked: Option<usize>,
 }
 
 #[derive(Debug, Default)]
 pub struct AltTab {
-    open: Option<Open>,
+    pub(crate) open: Option<Open>,
+    pub(crate) closing: Option<Closing>,
     /// A pinch's fingers and how far it closed (1 where it began).
     pinch: Option<(u32, f64)>,
 }
@@ -111,10 +142,10 @@ impl State {
             Some(m) if m.alt => Some(Held::Alt),
             _ => None,
         };
-        self.open_alt_tab(scope, held);
+        self.open_alt_tab(scope, held, Shown::Switcher);
     }
 
-    fn open_alt_tab(&mut self, scope: Scope, held: Option<Held>) {
+    fn open_alt_tab(&mut self, scope: Scope, held: Option<Held>, shown: Shown) {
         let pointer = self.output_under_pointer();
         let mut outputs: Vec<Output> = match scope {
             Scope::PointerOutput => pointer.iter().cloned().collect(),
@@ -140,6 +171,13 @@ impl State {
         let focused = self.model.focused();
         let selected = usize::from(entries.len() > 1 && entries.first().map(|e| e.0) == focused);
         let theme = self.theme();
+        let variant = if self.matrix_look() {
+            Variant::Matrix
+        } else {
+            Variant::Plain
+        };
+        let now = self.clock.now();
+        let typed = self.matrix_moves();
         let mut views = Vec::new();
         for (output, first, count) in spans {
             if count == 0 {
@@ -166,13 +204,18 @@ impl State {
             let mine = (first..first + count)
                 .contains(&selected)
                 .then(|| selected - first);
-            let switcher = WindowSwitcher::new(
+            let mut switcher = WindowSwitcher::new(
                 theme.clone(),
                 output.current_scale().fractional_scale() as f32,
                 &cards,
                 mine,
                 width,
+                variant,
             );
+            // The Matrix theme types the titles in.
+            if typed {
+                switcher.type_titles(now);
+            }
             let size = WindowSwitcher::size(cards.len(), width);
             let place = Point::from((
                 ((area.size.w as f32 - size.w) / 2.0).round() as i32,
@@ -188,13 +231,33 @@ impl State {
                 count,
             });
         }
+        self.alt_tab.closing = None;
         self.alt_tab.open = Some(Open {
             entries,
             selected,
             held,
             views,
+            shown,
+            since: now,
+            moved: None,
         });
         self.needs_redraw = true;
+    }
+
+    /// It closes, `picked` the card chosen: in the Matrix theme it goes in
+    /// its own way.
+    fn alt_tab_close(&mut self, picked: Option<usize>) -> Option<WindowId> {
+        let open = self.alt_tab.open.take()?;
+        self.needs_redraw = true;
+        let id = picked.and_then(|i| open.entries.get(i)).map(|(id, _)| *id);
+        if self.matrix_moves() {
+            self.alt_tab.closing = Some(Closing {
+                open,
+                since: self.clock.now(),
+                picked,
+            });
+        }
+        id
     }
 
     /// Moves the choice by `step` through the list, round.
@@ -208,10 +271,15 @@ impl State {
     }
 
     fn alt_tab_select(&mut self, index: usize) {
+        let now = self.clock.now();
         let Some(open) = &mut self.alt_tab.open else {
             return;
         };
+        let old = open.selected;
         open.selected = index.min(open.entries.len().saturating_sub(1));
+        if open.selected != old {
+            open.moved = Some((old, now));
+        }
         for view in &mut open.views {
             let mine = (view.first..view.first + view.count)
                 .contains(&open.selected)
@@ -242,8 +310,7 @@ impl State {
             Keysym::Up => self.alt_tab_step(-columns),
             Keysym::Return | Keysym::KP_Enter | Keysym::space => self.alt_tab_pick(serial),
             Keysym::Escape => {
-                self.alt_tab.open = None;
-                self.needs_redraw = true;
+                self.alt_tab_close(None);
             }
             _ => {}
         }
@@ -260,14 +327,13 @@ impl State {
 
     /// The choice is made: that window, focused, its desktop shown.
     pub fn alt_tab_pick(&mut self, serial: Serial) {
-        let Some(open) = self.alt_tab.open.take() else {
+        let Some(selected) = self.alt_tab.open.as_ref().map(|o| o.selected) else {
             return;
         };
-        self.needs_redraw = true;
-        let Some((id, _)) = open.entries.get(open.selected) else {
+        let Some(id) = self.alt_tab_close(Some(selected)) else {
             return;
         };
-        if let Some(window) = self.windows.get(id).map(|m| m.window.clone()) {
+        if let Some(window) = self.windows.get(&id).map(|m| m.window.clone()) {
             self.focus(Some(&window), serial);
         }
     }
@@ -301,8 +367,7 @@ impl State {
                 self.alt_tab_pick(serial);
             }
             (Some(true), None) => {
-                self.alt_tab.open = None;
-                self.needs_redraw = true;
+                self.alt_tab_close(None);
             }
             _ => {}
         }
@@ -327,7 +392,7 @@ impl State {
             return;
         };
         if !cancelled && fingers >= 3 && scale < 0.8 && self.alt_tab.open.is_none() {
-            self.open_alt_tab(Scope::AllOutputs, None);
+            self.open_alt_tab(Scope::AllOutputs, None, Shown::Overview);
         }
     }
 
@@ -335,10 +400,9 @@ impl State {
     /// pick or Escape; asked again, it closes.
     pub fn toggle_overview(&mut self) {
         if self.alt_tab.open.is_some() {
-            self.alt_tab.open = None;
-            self.needs_redraw = true;
+            self.alt_tab_close(None);
         } else {
-            self.open_alt_tab(Scope::AllOutputs, None);
+            self.open_alt_tab(Scope::AllOutputs, None, Shown::Overview);
         }
     }
 
@@ -346,6 +410,17 @@ impl State {
     /// and closed windows taken out.
     pub fn refresh_alt_tab(&mut self) {
         let now = self.clock.now();
+        if let Some(closing) = &self.alt_tab.closing {
+            let gone = closing
+                .open
+                .entries
+                .iter()
+                .any(|(id, _)| !self.windows.contains_key(id));
+            if gone || !crate::matrix_screens::closing_runs(closing, now) {
+                self.alt_tab.closing = None;
+            }
+            self.needs_redraw = true;
+        }
         let gone = self.alt_tab.open.as_ref().is_some_and(|o| {
             o.entries
                 .iter()
@@ -377,6 +452,10 @@ impl State {
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        // The Matrix theme's own, coming, there, going (#155).
+        if self.matrix_look() {
+            return self.matrix_switcher_elements(renderer, output);
+        }
         let Some(open) = &self.alt_tab.open else {
             return Vec::new();
         };
@@ -403,7 +482,7 @@ impl State {
                     .into(),
                 (f64::from(slot.w), f64::from(slot.h)).into(),
             );
-            elements.extend(preview_elements(renderer, &window, slot, scale));
+            elements.extend(preview_elements(renderer, &window, slot, scale, 1.0));
         }
         if let Some(e) = view.panel.element(renderer, output, view.place) {
             elements.push(SceneElement::Frame(e));
@@ -446,11 +525,12 @@ impl State {
 
 /// A window drawn small in `slot` (logical, from the output's corner),
 /// kept in proportion and centred, its corners rounded.
-fn preview_elements<R>(
+pub(crate) fn preview_elements<R>(
     renderer: &mut R,
     window: &Window,
     slot: Rectangle<f64, Logical>,
     scale: f64,
+    alpha: f32,
 ) -> Vec<SceneElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -470,7 +550,7 @@ where
     let origin = corner - geometry.loc.to_f64().to_physical_precise_round(scale);
     let clip = Rectangle::new(at, geometry.size.to_f64()).to_physical_precise_round(scale);
     let content: Vec<WaylandSurfaceRenderElement<R>> =
-        window.render_elements(renderer, origin, Scale::from(scale), 1.0);
+        window.render_elements(renderer, origin, Scale::from(scale), alpha);
     let radius = (6.0 * scale / k).round() as i32;
     content
         .into_iter()

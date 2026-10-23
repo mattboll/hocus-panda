@@ -141,6 +141,7 @@ impl crate::State {
             || self.snapshots_moving(now)
             || self.wobbles_moving()
             || self.matrix_motions_moving(now)
+            || self.matrix_shell_moving(now)
     }
 
     /// How windows come and go in the theme configured.
@@ -171,6 +172,7 @@ impl crate::State {
     pub fn refresh_motion(&mut self) {
         self.settle_snapshots();
         self.refresh_matrix_motions();
+        self.refresh_matrix_shell();
         if self.animating(self.clock.now()) || self.backdrops_moving() {
             self.needs_redraw = true;
         }

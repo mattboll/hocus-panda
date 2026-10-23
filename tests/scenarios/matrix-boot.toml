@@ -1,0 +1,91 @@
+# The Matrix theme's boot (#155, docs/design/matrix-theme.md §16), sampled
+# while one window never comes back, so that it waits its longest.
+description = "In the Matrix theme the boot screen starts dark with a cursor, the rain wakes from the top, the terminal lists the windows over slow rain, OK as they come back, a strip of glyphs filling; once done, SYSTEM READY in large glyphs with a ripple, the rain speeds up, a flash, and the desktop"
+outputs = ["1280x800"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[appearance]
+theme = "matrix"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+session_file = """
+[[window]]
+app_id = "editor"
+title = "notes.txt"
+command = ["{test_client}", "--app-id", "editor", "--size", "500x300", "--color", "#3399ff"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [100, 100, 500, 300]
+state = "normal"
+
+[[window]]
+app_id = "sleepy"
+title = "never"
+command = ["/bin/sh", "-c", "exit 0"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [0, 0, 300, 200]
+state = "normal"
+"""
+
+[[step]]
+offer_session = true
+
+[[step]]
+click_ui = "Put everything back"
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+[[step]]
+advance_ms = 150
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-boot-dark.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-boot-wake.png" }
+
+[[step]]
+advance_ms = 900
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-boot-terminal.png" }
+
+[[step]]
+expect_ui = { label = "> editor" }
+
+# The sleepy one never comes: it goes after a few seconds.
+[[step]]
+advance_ms = 3700
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-boot-ready.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "matrix-boot-dissolve.png" }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_ui = { label = "> editor", shown = false }
+
+[[step]]
+expect_idle = { for_ms = 1000 }

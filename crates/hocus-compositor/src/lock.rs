@@ -17,7 +17,10 @@ use std::{collections::BTreeMap, time::Duration};
 
 use hocus_api::UiNode;
 use hocus_platform::auth::{Auth, Checker, Pam};
-use hocus_shell::lock::{Check, Curtain, LockScreen};
+use hocus_shell::{
+    lock::{Check, Curtain, LockScreen},
+    matrix::Variant,
+};
 use hocus_ui::{
     Key, Size as UiSize,
     motion::{Animated, Curve, Easing, LARGE, STANDARD},
@@ -42,7 +45,7 @@ use smithay::{
         wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
         wayland_server::{Resource, protocol::wl_output::WlOutput},
     },
-    utils::{Logical, Physical, Point, SERIAL_COUNTER, Scale, Size},
+    utils::{Logical, Physical, Point, Rectangle, SERIAL_COUNTER, Scale, Size},
     wayland::session_lock::{
         LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
     },
@@ -104,10 +107,32 @@ pub struct Locking {
     timer: Option<(RegistrationToken, Duration)>,
     /// Writes and removes the locked marker, in order, off the loop.
     marker: Option<std::sync::mpsc::Sender<bool>>,
-    /// Our lock screen fading in over the desktop it hides (#48).
-    entering: Option<Animated>,
-    /// Unlocked: our lock screens parting from the centre, 0 to 1.
-    parting: Option<(Animated, BTreeMap<String, Panel<LockScreen>>)>,
+    /// Our lock screen coming over the desktop it hides (#48).
+    entering: Option<Moment>,
+    /// Unlocked: our lock screens going from the desktop.
+    parting: Option<(Moment, BTreeMap<String, Panel<LockScreen>>)>,
+    /// The Matrix theme: when a password was last refused, for the lock to
+    /// shake (#155).
+    pub(crate) refused: Option<Duration>,
+}
+
+/// How our lock screen comes and goes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Moment {
+    /// Fading in; unlocked, its halves parting from the centre (0 to 1).
+    Plain(Animated),
+    /// In the Matrix theme, since then: rain cascades over the desktop;
+    /// unlocked, it speeds up and flashes (#155).
+    Matrix(Duration),
+}
+
+impl Moment {
+    pub(crate) fn is_running(&self, now: Duration, total: Duration) -> bool {
+        match self {
+            Self::Plain(a) => a.is_running(now),
+            Self::Matrix(since) => now.saturating_sub(*since) < total,
+        }
+    }
 }
 
 impl std::fmt::Debug for Locking {
@@ -140,6 +165,7 @@ impl Locking {
             marker: None,
             entering: None,
             parting: None,
+            refused: None,
         }
     }
 }
@@ -244,14 +270,16 @@ impl State {
         tracing::info!("locking");
         self.locking.phase = Phase::Locked;
         self.locking.by = By::Us;
-        if self.lock_moves() {
+        if self.matrix_moves() {
+            self.locking.entering = Some(Moment::Matrix(self.clock.now()));
+        } else if self.lock_moves() {
             let mut fade = Animated::new(0.0);
             fade.set(
                 1.0,
                 Curve::Ease(Easing::OutCubic, STANDARD),
                 self.clock.now(),
             );
-            self.locking.entering = Some(fade);
+            self.locking.entering = Some(Moment::Plain(fade));
         }
         self.lock_began();
     }
@@ -285,16 +313,20 @@ impl State {
         self.locking.lock_surfaces.clear();
         self.locking.last_activity = self.clock.now();
         self.locking.entering = None;
+        self.locking.refused = None;
         let screens = std::mem::take(&mut self.locking.screens);
-        // Ours parts from the centre on the desktop it hid.
-        if ours && self.lock_moves() && !screens.is_empty() {
+        // Ours parts from the centre on the desktop it hid; in the Matrix
+        // theme, its rain speeds up and flashes.
+        if ours && self.matrix_moves() && !screens.is_empty() {
+            self.locking.parting = Some((Moment::Matrix(self.clock.now()), screens));
+        } else if ours && self.lock_moves() && !screens.is_empty() {
             let mut open = Animated::new(0.0);
             open.set(
                 1.0,
                 Curve::Ease(Easing::InOutCubic, LARGE),
                 self.clock.now(),
             );
-            self.locking.parting = Some((open, screens));
+            self.locking.parting = Some((Moment::Plain(open), screens));
         }
         self.apply_focus(SERIAL_COUNTER.next_serial());
         self.needs_redraw = true;
@@ -309,6 +341,9 @@ impl State {
         } else {
             for screen in self.locking.screens.values_mut() {
                 screen.view.set_check(Check::Failed);
+            }
+            if self.matrix_moves() {
+                self.locking.refused = Some(self.clock.now());
             }
             self.needs_redraw = true;
         }
@@ -579,6 +614,11 @@ impl State {
         }
         let ours = self.locked() && !self.client_lock();
         if ours {
+            let variant = if self.matrix_look() {
+                Variant::Matrix
+            } else {
+                Variant::Plain
+            };
             let user = self.user.clone();
             let time = self.wall_time();
             let caps = self
@@ -594,6 +634,7 @@ impl State {
                         *scale,
                         &user,
                         pandas,
+                        variant,
                     ))
                 });
                 panel.view.resize(*size, *scale);
@@ -654,19 +695,89 @@ impl State {
             );
             return (elements, Vec::new());
         }
-        let alpha = self
+        let now = self.clock.now();
+        let alpha = self.locking.entering.as_ref().map(|m| match m {
+            Moment::Plain(fade) => fade.value(now).clamp(0.0, 1.0),
+            Moment::Matrix(since) => crate::matrix_screens::lock_shows(*since, now),
+        });
+        let Some(panel) = self.locking.screens.get(&output.name()) else {
+            return (Vec::new(), Vec::new());
+        };
+        // Refused in the Matrix theme: the padlock and the field shake.
+        let shaken = self
             .locking
-            .entering
-            .as_ref()
-            .map(|f| f.value(self.clock.now()).clamp(0.0, 1.0));
-        let ours = self
-            .locking
-            .screens
-            .get(&output.name())
-            .and_then(|p| p.element_with(renderer, output, Point::default(), alpha))
-            .into_iter()
-            .collect();
+            .refused
+            .map(|since| crate::matrix_screens::shake(since, now))
+            .filter(|dx| *dx != 0.0)
+            .zip(panel.view.band());
+        let ours = match shaken {
+            Some((dx, band)) => {
+                let size = self
+                    .space
+                    .output_geometry(output)
+                    .map_or((band.w.round() as i32, 0), |g| (g.size.w, g.size.h));
+                // Above the band, the band moved, below it; none less
+                // than nothing on a screen too small for it.
+                let top = (band.y.round() as i32).clamp(0, size.1);
+                let h = (band.h.round() as i32).clamp(0, size.1 - top);
+                let below = size.1 - top - h;
+                [
+                    (Rectangle::new((0, 0).into(), (size.0, top).into()), 0),
+                    (
+                        Rectangle::new((0, top).into(), (size.0, h).into()),
+                        dx.round() as i32,
+                    ),
+                    (
+                        Rectangle::new((0, top + h).into(), (size.0, below).into()),
+                        0,
+                    ),
+                ]
+                .into_iter()
+                .filter_map(|(part, dx)| {
+                    panel.element_part(
+                        renderer,
+                        output,
+                        part.loc + Point::from((dx, 0)),
+                        part,
+                        alpha,
+                    )
+                })
+                .collect()
+            }
+            None => panel
+                .element_with(renderer, output, Point::default(), alpha)
+                .into_iter()
+                .collect(),
+        };
         (Vec::new(), ours)
+    }
+
+    /// Our lock screen on `output`, for the Matrix theme's padlock and
+    /// rain (#155).
+    pub(crate) fn lock_screen_on(&self, output: &Output) -> Option<&Panel<LockScreen>> {
+        if !self.locked() || self.client_lock() {
+            return None;
+        }
+        self.locking.screens.get(&output.name())
+    }
+
+    /// Since when our lock screen comes in the Matrix theme, if it does.
+    pub(crate) fn lock_matrix_since(&self) -> Option<Duration> {
+        match self.locking.entering {
+            Some(Moment::Matrix(since)) => Some(since),
+            _ => None,
+        }
+    }
+
+    /// Unlocked in the Matrix theme: since when, and the screen left.
+    pub(crate) fn unlock_matrix_on(
+        &self,
+        output: &Output,
+    ) -> Option<(Duration, &Panel<LockScreen>)> {
+        match &self.locking.parting {
+            Some((Moment::Matrix(since), screens)) => Some((*since, screens.get(&output.name())?)),
+            _ => None,
+        }
     }
 
     /// Whether the lock's moments move: not in tests that do not sample
@@ -677,31 +788,38 @@ impl State {
 
     /// Our lock screen still fading in: the desktop shows under it.
     pub fn lock_entering(&self) -> bool {
-        self.locking
-            .entering
-            .as_ref()
-            .is_some_and(|f| f.is_running(self.clock.now()))
+        let now = self.clock.now();
+        self.locking.entering.as_ref().is_some_and(|m| match m {
+            Moment::Plain(fade) => fade.is_running(now),
+            // Until the rain has covered it.
+            Moment::Matrix(since) => {
+                now.saturating_sub(*since) < crate::matrix_screens::LOCK_COVERED
+            }
+        })
     }
 
     /// After each dispatch: frames while the lock fades in or parts, and
     /// the parted screens gone once open.
     fn refresh_lock_moments(&mut self) {
         let now = self.clock.now();
-        if let Some(fade) = &self.locking.entering {
-            if fade.is_running(now) {
-                self.needs_redraw = true;
-            } else {
+        use crate::matrix_screens::{LOCK_IN, REFUSED, UNLOCK};
+        if let Some(moment) = &self.locking.entering {
+            if !moment.is_running(now, LOCK_IN) {
                 self.locking.entering = None;
-                self.needs_redraw = true;
             }
+            self.needs_redraw = true;
         }
-        if let Some((open, _)) = &self.locking.parting {
-            if open.is_running(now) {
-                self.needs_redraw = true;
-            } else {
+        if let Some((moment, _)) = &self.locking.parting {
+            if !moment.is_running(now, UNLOCK) {
                 self.locking.parting = None;
-                self.needs_redraw = true;
             }
+            self.needs_redraw = true;
+        }
+        if let Some(since) = self.locking.refused {
+            if now.saturating_sub(since) >= REFUSED {
+                self.locking.refused = None;
+            }
+            self.needs_redraw = true;
         }
     }
 
@@ -716,7 +834,7 @@ impl State {
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        let Some((open, screens)) = &self.locking.parting else {
+        let Some((Moment::Plain(open), screens)) = &self.locking.parting else {
             return Vec::new();
         };
         let (Some(panel), Some(g)) = (

@@ -62,6 +62,9 @@ pub struct LauncherPanel {
     providers_from: u64,
     /// Actions run from the palette, newest first.
     action_recents: Vec<hocus_core::Action>,
+    /// Where its parts were last drawn while open: the Matrix theme rains
+    /// them away once it closes (#155).
+    drawn_parts: Option<hocus_shell::launcher::Parts>,
 }
 
 /// Something shown over a whole screen.
@@ -126,6 +129,7 @@ pub fn start(
         showcase: None,
         providers_from: 0,
         action_recents: Vec::new(),
+        drawn_parts: None,
     });
 }
 
@@ -246,6 +250,7 @@ impl State {
             panel.buffer = None;
         }
         panel.on = place;
+        let was_open = panel.launcher.is_open();
         panel.launcher.open();
         if let Some(sender) = panel.apps.clone() {
             let dirs = panel.dirs.clone();
@@ -264,12 +269,23 @@ impl State {
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial());
         }
+        // The Matrix theme jacks in (#155).
+        if !was_open {
+            self.matrix_launcher(crate::matrix_shell::Moment::Open, None);
+        }
         self.needs_redraw = true;
     }
 
     pub fn close_launcher(&mut self) {
+        let mut closed = None;
         if let Some(panel) = self.launcher.as_mut() {
+            // It may have closed itself (Escape) before saying so.
+            closed = panel.drawn_parts.take();
             panel.launcher.close();
+        }
+        // Its text rains away in the Matrix theme (#155).
+        if let Some(parts) = closed {
+            self.matrix_launcher(crate::matrix_shell::Moment::Close, Some(parts));
         }
         self.apply_focus(SERIAL_COUNTER.next_serial());
         self.needs_redraw = true;
@@ -605,9 +621,11 @@ impl State {
             return;
         }
         if !panel.launcher.is_open() {
+            panel.drawn_parts = None;
             return;
         }
         let damage = panel.launcher.draw(now);
+        panel.drawn_parts = panel.launcher.parts();
         let view = panel.launcher.view();
         let mut changed = !damage.is_empty();
         match &mut panel.buffer {
@@ -667,7 +685,7 @@ impl State {
         else {
             return Vec::new();
         };
-        if !panel.launcher.is_open() || *name != output.name() {
+        if !panel.launcher.is_open() || *name != output.name() || self.matrix_launcher_playing() {
             return Vec::new();
         }
         let view = panel.launcher.view();
@@ -697,6 +715,49 @@ impl State {
                 Vec::new()
             }
         }
+    }
+
+    /// The launcher in the Matrix theme on `output` (#155): behind it, the
+    /// dim and the rain; as it opens or closes, its parts coming or going.
+    /// Front first.
+    pub fn matrix_launcher_on<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Vec<crate::scene::SceneElement<R>>
+    where
+        R: Renderer + smithay::backend::renderer::ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        if !self.matrix_look() {
+            return Vec::new();
+        }
+        let Some(panel) = &self.launcher else {
+            return Vec::new();
+        };
+        let (Some((name, _, scale)), Some(buffer), Some(origin)) =
+            (&panel.on, &panel.buffer, self.launcher_origin())
+        else {
+            return Vec::new();
+        };
+        if *name != output.name() || panel.showcase.is_some() {
+            return Vec::new();
+        }
+        let Some(output_area) = self.space.output_geometry(output) else {
+            return Vec::new();
+        };
+        let open = panel.launcher.is_open();
+        let parts = open.then(|| panel.launcher.parts()).flatten();
+        let at = origin - output_area.loc.to_f64();
+        self.matrix_launcher_elements(
+            renderer,
+            buffer,
+            at,
+            output_area.size.to_f64(),
+            parts,
+            open,
+            *scale,
+        )
     }
 
     pub fn launcher_ui(&self, out: &mut Vec<UiNode>) {

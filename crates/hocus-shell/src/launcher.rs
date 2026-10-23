@@ -153,10 +153,23 @@ pub enum LauncherEvent {
     RemoveNote(usize),
 }
 
+/// Where the launcher's parts are, logical from its corner, for the Matrix
+/// theme to type them in and rain them away.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Parts {
+    pub card: Rect,
+    /// The command field's row.
+    pub head: Rect,
+    /// The results shown, top first.
+    pub rows: Vec<Rect>,
+}
+
 pub struct Launcher {
     lang: Lang,
     tree: Tree,
     surface: Surface,
+    card: NodeId,
+    head: NodeId,
     field: NodeId,
     list: NodeId,
     /// What answers the query, best first; `rows` shows `MAX_RESULTS` of
@@ -321,6 +334,8 @@ impl Launcher {
             lang,
             tree,
             surface: Surface::new(size, scale),
+            card,
+            head,
             field,
             list,
             hits: Vec::new(),
@@ -1096,6 +1111,19 @@ impl Launcher {
             height: self.surface.height(),
             at: Point::default(),
         }
+    }
+
+    /// Where its card, field and results are, as last drawn.
+    pub fn parts(&self) -> Option<Parts> {
+        let card = self.tree.rect(self.card)?;
+        let head = self.tree.rect(self.head)?;
+        let rows = self
+            .rows
+            .iter()
+            .filter_map(|r| self.tree.rect(*r))
+            .filter(|r| r.h > 0.0 && r.y < card.y + card.h)
+            .collect();
+        Some(Parts { card, head, rows })
     }
 
     /// Its see-through panels, from its corner, for the compositor to blur

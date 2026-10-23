@@ -17,9 +17,10 @@
   final state.
 - **Performance budget**: effects run as GPU shaders in the compositor, under
   2 ms per frame at 1920×1080, and nothing is drawn when nothing moves.
-- **As built**: the window effects (§1 to §8) are drawn with the elements
-  every renderer has (the window's picture stretched, plain colours, rows
-  of glyphs from a sheet), so that pixman and the scenarios show them too.
+- **As built**: the window effects (§1 to §8) and the shell's (§9 to §16)
+  are drawn with the elements every renderer has (the window's picture
+  stretched, parts of the shell's pictures, plain colours, rows of glyphs
+  from a sheet), so that pixman and the scenarios show them too.
   What needs a shader is left for the GPU: true RGB channel separation,
   bloom, scanlines and vignette; the phosphor glow is a faint wider line,
   the green shift a tint. Sounds are not played yet.
@@ -337,6 +338,15 @@ the regular slide with a thematically unified effect.
 - Digital "whoosh" with character cascade undertone (200ms, band-limited
   noise with rhythmic modulation suggesting rapid character rendering).
 
+As built: the windows of the desktop left behind turn, cell by cell from
+the screen's edges in, to glyphs on black over their live picture
+(0-150 ms), then their columns rain off (150-300 ms) and fade (to
+350 ms); 10 to 15 stragglers drift 150 ms longer. The glyphs are the
+rain's green, not each block's colour (that needs the picture's pixels,
+a shader's work), and cells are the sheet's, 8×14. The switcher of the
+screen's desktops shows as with the slide. A three-finger swipe keeps
+the strip, which follows the fingers.
+
 ---
 
 ## 10. Overview / Expose Mode Enter/Exit
@@ -375,6 +385,16 @@ returns to normal size and position.
   harmonics)
 - Exit: Quick "focus" click (30ms, 2kHz pulse)
 
+As built: the overview is the switcher of every screen (Super alone, a
+hot corner, a pinch). Entering, glyphs fall over each window (100 ms),
+then a block of them springs from the window's place to its card,
+giving way to the live preview; the cards themselves fade in. Its titles
+are the theme's monospace, each card with the theme's thin green border.
+Picked, the window springs back from its card to its place, its border
+glowing and fading; the other cards fall as rain. Escape lets them all
+fall. The rain behind falls while it is open, as the live previews
+already ask for frames.
+
 ---
 
 ## 11. Alt-Tab Switcher
@@ -410,6 +430,10 @@ and 100% brightness).
 ### Sound Effects
 - Each tab press: Subtle "tick" (15ms, 1.8kHz sine)
 - Confirm (modifier release): "Lock" sound (30ms, 2.2kHz double-pulse)
+
+As built: the glow follows the card's ring as it glides (150 ms,
+out-cubic, as in every theme); the trace runs between the cards'
+middles. Scanlines are the GPU's (#169).
 
 ---
 
@@ -455,6 +479,18 @@ to pure green.
   square waves)
 - Failed: "Access denied" buzz (150ms, 90Hz square wave, 2 pulses)
 
+As built: the lock screen keeps its clock, date and field; the padlock
+(12×16 glyphs) takes the place of the initial. The rain cascades down
+in 600 ms, the desktop showing under its front, then the lock fades in
+(to 800 ms) while the rain slows to a stop by 1000 ms and dims: it stays
+still behind the lock, so that a locked screen draws nothing. The
+field's caret is the field's own. Refused, the padlock and the field
+shake three times within 200 ms under red scanlines, the rain red for
+300 ms. Unlocked: the rain speeds up to three times over 150 ms, a
+flash fades in 50 ms (out-quad), and the desktop's green in 100 ms. A
+lock client's own screen is left as it draws it. Vignette and its pulse
+are the GPU's (#169).
+
 ---
 
 ## 13. Notification Toast Appear/Dismiss
@@ -490,6 +526,10 @@ impression of the notification "dispersing into the matrix."
 - Appear: Brief "incoming data" blip (40ms, 3kHz sine pulse)
 - Dismiss: None
 
+As built: the toast comes where it goes (no slide); its card is left out
+where it is not typed yet. The green left border is the theme's green
+border all round, as the boards draw it.
+
 ---
 
 ## 14. Sidebar (Raven) Open/Close
@@ -524,6 +564,11 @@ behind it. The rain continues off the right screen edge.
 ### Sound Effects
 - Open: Soft "terminal open" whoosh (80ms, rising noise sweep)
 - Close: Soft "terminal close" whoosh (80ms, falling noise sweep)
+
+As built: the sidebar is the column, which stays open; it goes under a
+fullscreen window and comes back after it, and that is when it closes
+and opens so. The band of rain is 40 px wide. Its permanent left line
+is the theme's green border.
 
 ---
 
@@ -564,6 +609,11 @@ to its center point. The background rain clears.
 - Open: "Login" sequence -- two short beeps (50ms each, 1kHz and 1.5kHz)
   followed by a soft hum
 - Close: Quick "logout" descending tone (60ms, 1.5kHz to 800Hz)
+
+As built: the cursor blinks where the field will be; the rest of the
+card fades in with the results. The rain behind stands still once it is
+open (nothing is drawn at rest); with reduced motion the dim stays,
+without rain.
 
 ---
 
@@ -614,6 +664,16 @@ black, progress bar, scanline sweep):
 - Phase 3: Ascending chord (C major in square waves, 200ms)
 - Phase 4: Brief white noise burst (50ms) then silence
 
+As built: the boot screen shows only while a saved session is put back
+and goes as soon as everything is back (at most 5 s), so the phases run
+on its own clock and are cut short when it is quick: darkness and a
+cursor (to 300 ms), the rain waking from the top (to 800 ms), then the
+logo, the name and a terminal listing the windows put back, `OK` bright
+as each comes, over slow rain, the progress bar a strip of glyphs. Once
+done: SYSTEM READY (`SYSTÈME PRÊT` in French; accents dropped in the
+glyph letters) with its ripple (400 ms), the dissolve (to 850 ms), the
+flash (to 1000 ms). The pandas at work stay in their corner.
+
 ---
 
 ## Reduce Motion Behavior
@@ -627,5 +687,8 @@ When reduced motion is on, ALL Matrix theme animations MUST:
 As built, windows then move as in every theme with reduced motion: short
 fades where they are (opening, closing, minimizing, restoring, maximizing),
 a snap at once, no trail, no flashes. The resize glow and readout stay:
-they are colour and information, not motion.
+they are colour and information, not motion. The shell keeps its colours
+without rain: the lock is black with its padlock, Alt+Tab and the
+overview over black, the launcher over its dim, the boot's strip filling;
+everything comes and goes at once, as in every theme.
 

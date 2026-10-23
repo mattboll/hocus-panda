@@ -72,6 +72,9 @@ pub struct State {
     pub matrix_sheets: crate::matrix::Sheets,
     /// The Matrix theme's window motions after opening and closing (#154).
     pub matrix_motions: crate::matrix_windows::Motions,
+    /// The Matrix theme's shell moments: desktops, toasts, column,
+    /// launcher (#155).
+    pub matrix_shell: crate::matrix_shell::Moments,
     /// Wallpapers that move, painted by shaders (#108).
     pub backdrops: crate::backdrop::Backdrops,
     /// Frosted glass behind panels, blurred by shaders (#37).
@@ -259,6 +262,7 @@ impl State {
             textures: Textures::default(),
             matrix_sheets: Default::default(),
             matrix_motions: Default::default(),
+            matrix_shell: Default::default(),
             backdrops: Default::default(),
             blurs: Default::default(),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),

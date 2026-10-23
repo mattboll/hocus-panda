@@ -211,6 +211,8 @@ impl State {
                 ))
             }));
             elements.extend(ours.into_iter().map(SceneElement::Frame));
+            // The Matrix theme's padlock and rain behind it (#155).
+            elements.extend(self.matrix_lock_elements(renderer, output));
             // Our lock fading in shows the desktop under it a moment.
             if !self.lock_entering() {
                 return elements;
@@ -222,12 +224,15 @@ impl State {
                 .into_iter()
                 .map(SceneElement::Frame),
         );
-        // The boot screen while the session is put back (#48).
+        elements.extend(self.matrix_unlock_elements(renderer, output));
+        // The boot screen while the session is put back (#48), in the
+        // Matrix theme with its rain (#155).
         elements.extend(
             self.boot_elements(renderer, output)
                 .into_iter()
                 .map(SceneElement::Frame),
         );
+        elements.extend(self.matrix_boot_elements(renderer, output));
         // What to share, asked by a portal.
         if let Some(panel) = self.share_elements(renderer, output) {
             elements.push(SceneElement::Frame(panel));
@@ -361,12 +366,16 @@ impl State {
                 build,
             );
         }
+        // The Matrix theme's launcher: its parts coming or going, the dim
+        // and the rain behind it (#155).
+        elements.extend(self.matrix_launcher_on(renderer, output));
         let (sheet, dim) = self.quick_elements(renderer, output);
         if !sheet.is_empty() {
             elements.extend(sheet.into_iter().map(SceneElement::Frame));
             self.glass(&mut elements, renderer, output, self.quick_glass(), build);
         }
         elements.extend(dim.map(SceneElement::Solid));
+        elements.extend(self.matrix_toasts_on(renderer, output));
         let toasts = self.toast_elements(renderer, output);
         if !toasts.is_empty() {
             elements.extend(toasts.into_iter().map(SceneElement::Frame));
@@ -391,6 +400,7 @@ impl State {
             elements.push(SceneElement::Frame(column));
             self.glass(&mut elements, renderer, output, column_glass, build);
         }
+        elements.extend(self.matrix_column_on(renderer, output));
         let switcher = self.switcher_elements(renderer, output);
         if !switcher.is_empty() {
             elements.extend(switcher);
@@ -424,6 +434,8 @@ impl State {
         }
         // Windows closing and minimizing (#34), over the others.
         elements.extend(self.snapshot_elements(renderer, output));
+        // The Matrix theme's desktop left behind, raining away (#155).
+        elements.extend(self.matrix_desktop_elements(renderer, output));
         let focused = self.focused_window();
         // Switching desktops (#36): the shown desktop's windows move with
         // the strip, and those of the desktops passing by are drawn where
