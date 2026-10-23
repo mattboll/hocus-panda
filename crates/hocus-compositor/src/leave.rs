@@ -373,6 +373,18 @@ impl State {
         card.panel.element(renderer, output, Point::default())
     }
 
+    /// Its panel on glass, on the output it shows on.
+    pub(crate) fn leave_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+        match self.leaver.card.as_ref() {
+            Some(card) if card.output == output.name() => crate::blur::spots(
+                crate::blur::Surface::Leave,
+                Default::default(),
+                &card.panel.view.glass(),
+            ),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn leave_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
         let Some(card) = &self.leaver.card else {
             return;

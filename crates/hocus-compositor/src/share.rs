@@ -234,6 +234,18 @@ impl State {
         picking.panel.element(renderer, output, Point::default())
     }
 
+    /// Its panel on glass, on the output it shows on.
+    pub(crate) fn share_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+        match self.share.as_ref() {
+            Some(picking) if picking.output == output.name() => crate::blur::spots(
+                crate::blur::Surface::Share,
+                Default::default(),
+                &picking.panel.view.glass(),
+            ),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn share_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
         let Some(picking) = &self.share else {
             return;

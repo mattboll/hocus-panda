@@ -85,7 +85,7 @@ impl Switcher {
                     ..Style::default()
                 },
                 Kind::Box(Look {
-                    background: Some(Paint::Surface),
+                    background: Some(Paint::Glass),
                     border: Some(Paint::Border),
                     radius: 18.0,
                     shadow: 14.0,
@@ -142,6 +142,12 @@ impl Switcher {
     pub fn draw(&mut self, now: Duration) -> Vec<PixelRect> {
         let damage = self.tree.update(now);
         self.surface.draw(&mut self.tree, &damage)
+    }
+
+    /// Its see-through panels, from its corner, for the compositor to blur
+    /// what is behind them (#37, #162).
+    pub fn glass(&self) -> Vec<hocus_ui::Glass> {
+        self.tree.glass()
     }
 
     pub fn view(&self) -> View<'_> {

@@ -50,6 +50,13 @@ pub enum Surface {
     Toasts,
     Quick,
     Launcher,
+    Dock,
+    DesktopSwitcher,
+    WindowSwitcher,
+    Authorize,
+    Leave,
+    Share,
+    Welcome,
 }
 
 /// What has glass behind it.

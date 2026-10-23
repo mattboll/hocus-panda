@@ -411,6 +411,23 @@ impl State {
         elements
     }
 
+    /// The switcher's panel on glass, under its previews.
+    pub(crate) fn alt_tab_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+        let Some(open) = &self.alt_tab.open else {
+            return Vec::new();
+        };
+        open.views
+            .iter()
+            .find(|v| v.output == output.name())
+            .map_or_else(Vec::new, |view| {
+                crate::blur::spots(
+                    crate::blur::Surface::WindowSwitcher,
+                    view.place.to_f64(),
+                    &view.panel.view.glass(),
+                )
+            })
+    }
+
     /// The cards, for the control API.
     pub fn alt_tab_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
         let Some(open) = &self.alt_tab.open else {

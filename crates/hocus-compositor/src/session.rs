@@ -628,6 +628,18 @@ impl State {
             .element(renderer, output, smithay::utils::Point::default())
     }
 
+    /// Its panel on glass, on the output it shows on.
+    pub(crate) fn card_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+        match self.sessions.card.as_ref() {
+            Some(card) if card.output == output.name() => crate::blur::spots(
+                crate::blur::Surface::Welcome,
+                Default::default(),
+                &card.panel.view.glass(),
+            ),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn card_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
         let Some(card) = &self.sessions.card else {
             return;

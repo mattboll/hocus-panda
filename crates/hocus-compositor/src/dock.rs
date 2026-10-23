@@ -49,6 +49,9 @@ pub struct Dock {
     items: Vec<Item>,
     panel: Option<(String, Point<i32, Logical>, Panel<DockView>)>,
     hint: Option<Panel<DockHint>>,
+    /// The theme it was drawn in: glass, the accent and the hour's shadow
+    /// come with it.
+    theme: Option<hocus_ui::Theme>,
     shown: Option<Shown>,
     /// Asked by the shortcut, until asked again.
     toggled: bool,
@@ -187,7 +190,13 @@ impl State {
                 .any(|(a, b)| a.app != b.app);
         let theme = self.theme();
         let scale = output.current_scale().fractional_scale() as f32;
+        let restyled = self.dock.theme.as_ref() != Some(&theme);
+        if restyled {
+            self.dock.theme = Some(theme.clone());
+            self.dock.hint = None;
+        }
         if changed
+            || restyled
             || self
                 .dock
                 .panel
@@ -322,6 +331,22 @@ impl State {
     }
 
     /// On its screen: the dock, or the hint where it hides.
+    /// The dock's panel on glass, while it shows on `output`.
+    pub(crate) fn dock_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+        match &self.dock.panel {
+            Some((name, place, panel))
+                if *name == output.name() && self.dock.shown.is_some() && !self.locked() =>
+            {
+                crate::blur::spots(
+                    crate::blur::Surface::Dock,
+                    place.to_f64(),
+                    &panel.view.glass(),
+                )
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn dock_elements<R>(&self, renderer: &mut R, output: &Output) -> Vec<SceneElement<R>>
     where
         R: smithay::backend::renderer::Renderer
