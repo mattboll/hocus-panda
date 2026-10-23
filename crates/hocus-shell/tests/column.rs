@@ -7,6 +7,7 @@ use hocus_shell::{
     WallTime,
     agents::{AgentAsk, AgentState, AgentsView, Board},
     column::{Agenda, Meeting, PhoneLine},
+    journal::{Did, JournalLine, JournalView, Pressed},
 };
 use hocus_ui::{Input, Point, Role, Theme};
 
@@ -25,6 +26,7 @@ fn state() -> ColumnState {
         calendar_set: false,
         agenda: Default::default(),
         agents: None,
+        journal: None,
         time: WallTime {
             hour: 14,
             minute: 37,
@@ -162,6 +164,89 @@ fn the_agents_show_and_the_waiting_one_is_answered() -> anyhow::Result<()> {
     let access = column.access().dump();
     assert!(!access.contains("Panda"), "{access}");
     assert!(access.contains("11 others at rest in herdr"), "{access}");
+    Ok(())
+}
+
+fn journal(stopped: bool) -> JournalView {
+    let line = |did, target: &str, refused: Option<&str>| JournalLine {
+        agent: "helper".into(),
+        did,
+        target: target.into(),
+        time: "14:37".into(),
+        refused: refused.map(str::to_owned),
+    };
+    JournalView {
+        stopped,
+        lines: vec![
+            line(
+                Did::Click {
+                    button: Pressed::Left,
+                    count: 1,
+                },
+                "Passwords",
+                Some("agent \"helper\" may not act on windows of \"other\""),
+            ),
+            line(
+                Did::Type {
+                    characters: 4,
+                    text: None,
+                },
+                "Shopping list",
+                None,
+            ),
+            line(Did::Keys(Some("Ctrl+S".into())), "Shopping list", None),
+            line(Did::Scroll { down: true }, "Shopping list", None),
+        ],
+        total: 4,
+    }
+}
+
+#[test]
+fn the_journal_shows_the_latest_opens_on_all_and_stops_every_agent() -> anyhow::Result<()> {
+    let mut column = Column::new(Theme::default(), Lang::En, 900.0, 1.0);
+    let mut s = state();
+    s.journal = Some(journal(false));
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    assert!(
+        access.contains("helper · Click refused · Passwords"),
+        "{access}"
+    );
+    // Three in the column, newest first; the fourth only in the popover.
+    assert!(!access.contains("Scrolled down"), "{access}");
+    let at = button(&column, "Stop every agent")?;
+    assert_eq!(click(&mut column, at), vec![Action::StopAgents]);
+    let at = button(&column, "Agents' journal")?;
+    assert!(click(&mut column, at).is_empty());
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    assert!(
+        access.contains("helper · Scrolled down · Shopping list"),
+        "{access}"
+    );
+    assert!(access.contains("4 actions this session"), "{access}");
+    // Why it was refused, as a sentence (the dump quotes it).
+    assert!(
+        access.contains("\"Agent \\\"helper\\\" may not act"),
+        "{access}"
+    );
+    // Stopped: said, and the button allows them again.
+    s.journal = Some(journal(true));
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    assert!(
+        access.contains("Stopped: their requests are refused"),
+        "{access}"
+    );
+    let at = button(&column, "Allow agents again")?;
+    assert_eq!(click(&mut column, at), vec![Action::AllowAgents]);
+    // In French too.
+    let mut column = Column::new(Theme::default(), Lang::Fr, 900.0, 1.0);
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    button(&column, "Autoriser à nouveau les agents")?;
     Ok(())
 }
 

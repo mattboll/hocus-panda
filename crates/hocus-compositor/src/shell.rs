@@ -315,6 +315,7 @@ impl State {
             calendar_set: !self.config.calendars.is_empty(),
             agenda: self.agenda(),
             agents: self.agents_view(),
+            journal: self.journal_view(),
         }
     }
 
@@ -532,6 +533,8 @@ impl State {
             ShellAction::TrayMenu(key) => self.tray_menu(key),
             ShellAction::TrayChosen { key, id } => self.tray_chosen(key, id),
             ShellAction::Agent { key, ask } => self.agent_ask(&key, ask),
+            ShellAction::StopAgents => self.set_agents_stopped(true),
+            ShellAction::AllowAgents => self.set_agents_stopped(false),
             ShellAction::ShowDesktop { output, desktop } => {
                 if let Some(output) = self.find_output(&output)
                     && let Err(err) = self.show_desktop(&output, desktop.saturating_sub(1), serial)

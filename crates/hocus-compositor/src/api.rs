@@ -247,6 +247,10 @@ impl App {
         request: Request,
     ) -> Option<Result<Reply, ApiError>> {
         let state = &mut self.state;
+        // Stopped agents are refused whatever they ask (#176).
+        if let Some(refusal) = state.agents_gate(connection, &request) {
+            return Some(Err(refusal));
+        }
         let reply = match request {
             Request::Version => Reply::Version(VersionInfo {
                 protocol: hocus_api::PROTOCOL_VERSION,
@@ -554,6 +558,7 @@ impl App {
                 Reply::Done
             }
             Request::Agent { name } => return Some(state.name_agent(connection, name)),
+            Request::AgentsJournal => Reply::AgentsJournal(state.agents_journal()),
             Request::Act { target, action } => {
                 return Some(state.act(connection, target, action));
             }

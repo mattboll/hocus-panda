@@ -153,6 +153,15 @@ impl State {
                 // A window may hold the shortcuts back while it has the
                 // keyboard (keyboard-shortcuts-inhibit).
                 let combo = combo_of(modifiers, &keysym);
+                // Stopping the agents is never held back: not by a window
+                // that holds the shortcuts, nor by an open panel.
+                if combo
+                    .as_ref()
+                    .and_then(|c| state.shortcuts.action(c))
+                    .is_some_and(|a| *a == Action::StopAgents)
+                {
+                    return FilterResult::Intercept(Handled::Shortcut(Action::StopAgents));
+                }
                 // In the palette, a combination is a search: shortcuts and
                 // keys with Super, Ctrl or Alt; its own closes it.
                 if state.palette_open()

@@ -137,6 +137,13 @@ enum Message {
     /// The sound, network, Bluetooth, power profile and battery, as quick
     /// settings know them.
     Hardware,
+    /// What MCP agents did this session, oldest first, one line each, and
+    /// whether they are stopped.
+    AgentsJournal {
+        /// The entries as JSON instead.
+        #[arg(long)]
+        json: bool,
+    },
     /// The phone, through KDE Connect: whether it runs, the phones within
     /// reach and their battery.
     Phone,
@@ -378,6 +385,18 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
                         r.height,
                         indent = n.depth as usize * 2
                     );
+                }
+                Ok(())
+            }
+            other => print(other),
+        },
+        Message::AgentsJournal { json } => match client.request(Request::AgentsJournal)? {
+            Reply::AgentsJournal(journal) if !json => {
+                if journal.stopped {
+                    out!("Agents are stopped: their requests are refused until allowed again.");
+                }
+                for entry in &journal.entries {
+                    out!("{entry}");
                 }
                 Ok(())
             }

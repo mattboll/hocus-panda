@@ -80,6 +80,7 @@ Steps, one per `[[step]]` table:
 | `expect_phone = "reply r1 On my way"` | the phone was asked this: `ring`, `reply ID TEXT`, `clipboard TEXT`, `share URL`, `browse` |
 | `expect_phone_state = "absent"` | KDE Connect as the session found it, once so: `absent`, `stopped`, `running`, `off` |
 | `mcp = { agent?, tool, window?, arguments? = { … }, contains? = […], error? }` | an MCP session (`hocus mcp`, #42) of its own, as agent `agent` of `[[agents.mcp]]` (or none), calls `tool` with `arguments`; `window` is an app id whose window's id goes in as the `window` argument; the result's text holds `contains`, or the tool fails with `error` in its message |
+| `expect_journal = { has? = […], lacks? = […], stopped? }` | the agents' journal (#176), as `hocus msg agents-journal` prints it, holds the strings of `has` in that order (each after the one before, on its line or a later one) and none of `lacks`; agents are stopped or not |
 | `click_ui = "Close"` | clicks the shell's button with this label or accessible name (`hocus msg ui` lists them) |
 | `right_click_ui = "Chat"` | the same with the secondary button |
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |

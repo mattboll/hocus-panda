@@ -34,6 +34,7 @@ mod headless;
 mod idle_notify;
 mod ink;
 mod input;
+mod journal;
 mod launcher;
 mod leave;
 mod lock;

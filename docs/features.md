@@ -257,6 +257,7 @@ The column on the right of the screen is the chosen form (see
 - The AI acts on the desktop, each action confirmed
 - Desktop tools shared between the AI and MCP: windows, desktops, screenshot, launch, notify, file search, agenda
 - MCP server (`hocus mcp`): windows, the shell's accessibility tree, window captures, clicks, typing and scrolls aimed at a window or a labelled element, waiting for a state; per-agent rights (read or act, which apps), enforced by the compositor
+- Agents' journal: what each MCP agent did (when, which action, on which window, refused or not; typed text only on request), in the column, `hocus msg agents-journal` and the `journal` tool; one key (Super+Shift+Escape) or the column's button stops every agent at once until allowed again
 - Offline intents
 - Document search: text, HTML, PDF, office files, OCR of screenshots; words + meaning; secrets excluded (never index `~/.ssh`, keyrings, password stores…); paused on battery
 - AI answers inside the command field rather than in a separate window

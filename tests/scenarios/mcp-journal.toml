@@ -1,0 +1,108 @@
+description = "Given an agent that clicked and typed, when the journal opens, then it lists both, in order, with the window; typed text is kept only when asked"
+shell = true
+
+[[step]]
+config = """
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["notes"]
+"""
+
+[[step]]
+open = { app_id = "other", title = "Passwords", size = [300, 200], color = "#ff6600" }
+
+[[step]]
+open = { app_id = "notes", title = "Shopping list", size = [400, 300], color = "#3399ff" }
+
+# Until an agent connects, the column has no journal.
+[[step]]
+expect_ui = { label = "Agents' journal", shown = false }
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "notes", arguments = { x = 20, y = 20 } }
+
+[[step]]
+advance_ms = 61000
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "notes", arguments = { text = "Milk" } }
+
+[[step]]
+mcp = { agent = "helper", tool = "press_keys", window = "notes", arguments = { keys = "Ctrl+S" } }
+
+# Refused, and kept as such.
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "other", error = "may not act on windows of \"other\"" }
+
+# In order, with the window; what was typed is not kept, only its length.
+[[step]]
+expect_journal = { has = [
+  'helper: click on window',
+  'notes "Shopping list"',
+  'helper: type 4 characters on window',
+  'helper: keys Ctrl+S on window',
+  'helper: click on window',
+  'other "Passwords"; refused: agent "helper" may not act on windows of "other"',
+], lacks = ["Milk"] }
+
+# Agents read it as a tool.
+[[step]]
+mcp = { agent = "helper", tool = "journal", contains = [
+  '14:37:00 helper: click on window',
+  'helper: type 4 characters on window',
+] }
+
+# The column shows the last few, newest first, and the button that stops
+# every agent.
+[[step]]
+expect_ui = { label = "Agents' journal" }
+
+[[step]]
+expect_ui = { label = "Stop every agent" }
+
+[[step]]
+expect_ui = { label = "helper · Click refused · Passwords" }
+
+[[step]]
+expect_ui = { label = "helper · Typed 4 characters · Shopping list" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "mcp-journal-column.png" }
+
+# The journal opens on a click: every entry kept, with the reasons.
+[[step]]
+click_ui = "Agents' journal"
+
+[[step]]
+expect_ui = { label = "helper · Clicked · Shopping list" }
+
+[[step]]
+expect_ui = { label = "Agent \"helper\" may not act on windows of \"other\": its apps in [[agents.mcp]] do not match it" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "mcp-journal-popover.png" }
+
+# Asked for, the text is kept.
+[[step]]
+config = """
+[agents]
+journal_text = true
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["notes"]
+"""
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "notes", arguments = { text = "Eggs" } }
+
+[[step]]
+expect_journal = { has = ['helper: type 4 characters on window', 'helper: type "Eggs" on window'], lacks = ["Milk"] }

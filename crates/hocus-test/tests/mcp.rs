@@ -247,3 +247,99 @@ fn an_agent_connection_makes_only_the_requests_agents_may() -> anyhow::Result<()
     );
     Ok(())
 }
+
+/// What a tool said, as text.
+fn said(answer: &Value) -> &str {
+    answer["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+}
+
+#[test]
+fn given_the_stop_key_pressed_when_a_connected_agent_tries_to_act_then_it_is_refused_until_allowed_again()
+-> anyhow::Result<()> {
+    let (mut compositor, client, id) = desktop()?;
+    let socket = compositor.api_socket().to_path_buf();
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let (done, waited) = std::sync::mpsc::channel::<()>();
+
+    // One session throughout, as an agent stays connected.
+    let session = std::thread::spawn(move || {
+        let mut bridge = Bridge::new(socket, Some("helper".into()));
+        for message in initialize() {
+            bridge.handle(message);
+        }
+        let click = || call(0, "click", json!({ "window": id, "x": 20, "y": 20 }));
+        let mut answers =
+            vec![bridge.handle(call(1, "type", json!({ "window": id, "text": "ab" })))];
+        // Stopped.
+        let _ = done.send(());
+        let _ = wait.recv();
+        answers.push(bridge.handle(click()));
+        answers.push(bridge.handle(call(2, "journal", json!({}))));
+        // Allowed again.
+        let _ = done.send(());
+        let _ = wait.recv();
+        answers.push(bridge.handle(click()));
+        answers.push(bridge.handle(call(3, "journal", json!({}))));
+        answers
+    });
+    let step = |compositor: &mut Headless, stop: bool| -> anyhow::Result<()> {
+        compositor.dispatch_until(TIMEOUT, |_| waited.try_recv().is_ok())?;
+        compositor.on_loop("the stop key", move |state| state.set_agents_stopped(stop));
+        compositor.dispatch(Duration::from_millis(10))?;
+        go.send(())?;
+        Ok(())
+    };
+    step(&mut compositor, true)?;
+    step(&mut compositor, false)?;
+    compositor.dispatch_until(TIMEOUT, |_| session.is_finished())?;
+    let answers: Vec<Value> = session
+        .join()
+        .map_err(|_| anyhow::anyhow!("the MCP session panicked"))?
+        .into_iter()
+        .map(|a| a.unwrap_or_default())
+        .collect();
+
+    let [typed, refused, unread, clicked, journal] = &answers[..] else {
+        anyhow::bail!("expected five answers, got {answers:?}");
+    };
+    assert_eq!(typed["result"]["isError"], false, "{typed}");
+    for refusal in [refused, unread] {
+        assert_eq!(refusal["result"]["isError"], true, "{refusal}");
+        assert!(
+            said(refusal).starts_with("refused: the user stopped every agent"),
+            "{refusal}"
+        );
+    }
+    assert_eq!(clicked["result"]["isError"], false, "{clicked}");
+    compositor.dispatch_until(TIMEOUT, |_| clicks(&client) == 1)?;
+
+    // In order, with the window, the refusal between.
+    let lines: Vec<&str> = said(journal).lines().collect();
+    let window = format!("on window {id} test.notes \"Notes\"");
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        lines[0].ends_with(&format!("helper: type 2 characters {window}")),
+        "{lines:?}"
+    );
+    assert!(
+        lines[1].contains(&format!(
+            "helper: click {window}; refused: the user stopped"
+        )),
+        "{lines:?}"
+    );
+    assert!(
+        lines[2].ends_with(&format!("helper: click {window}")),
+        "{lines:?}"
+    );
+    assert_eq!(journal["result"]["structuredContent"]["stopped"], false);
+
+    // The user reads it with the read permission.
+    let Reply::AgentsJournal(read) = compositor.request(Request::AgentsJournal)? else {
+        anyhow::bail!("expected the journal");
+    };
+    assert_eq!(read.entries.len(), 3);
+    assert!(!read.stopped);
+    Ok(())
+}
