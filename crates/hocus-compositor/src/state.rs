@@ -74,6 +74,8 @@ pub struct State {
     pub textures: Textures,
     /// The Matrix theme's glyphs, once per scale.
     pub matrix_sheets: crate::matrix::Sheets,
+    /// What the Matrix theme's brushes drew, kept from frame to frame.
+    pub matrix_layers: crate::matrix_layers::Layers,
     /// The Matrix theme's window motions after opening and closing (#154).
     pub matrix_motions: crate::matrix_windows::Motions,
     /// The Matrix theme's shell moments: desktops, toasts, column,
@@ -275,6 +277,7 @@ impl State {
             style: Style::default(),
             textures: Textures::default(),
             matrix_sheets: Default::default(),
+            matrix_layers: Default::default(),
             matrix_motions: Default::default(),
             matrix_shell: Default::default(),
             backdrops: Default::default(),

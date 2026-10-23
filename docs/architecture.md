@@ -147,7 +147,13 @@ without background, the padlock's place, the progress bar's) and say
 where their parts are; what is drawn is parts of their pictures, glyphs
 and plain colours, each a closed form of the time since it began. Rain
 that stays (behind the lock, the launcher) stands still; nothing is drawn
-once a moment is over. The theme's wallpaper is
+once a moment is over. What one brush draws in a scene (hundreds of
+glyphs and colours) is one element (`matrix_layers`), kept from frame to
+frame by where in the code it is taken: the same id, a commit that moves
+only when its strokes change, and as damage only the strokes that came,
+went or changed (of a colour that grew, what it gained), so a redraw
+over still rain repaints nothing and moving rain only its drops (#221).
+The theme's wallpaper is
 its still rain, drawn with the other wallpapers on their worker thread.
 Wallpapers that move (#108, `rain` and `stars`) are GLES shaders: before
 a GLES backend draws an output, the wallpaper is painted into a texture

@@ -12,7 +12,7 @@ use smithay::{
         allocator::Fourcc,
         egl::{EGLContext, EGLDevice, EGLDisplay},
         renderer::{
-            Bind, ImportAll, ImportMem, Offscreen, Renderer, Texture,
+            Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             damage::OutputDamageTracker,
             element::RenderElementStates,
             gles::{GlesRenderer, GlesTexture},
@@ -29,7 +29,7 @@ use smithay::{
         pixman,
         wayland_server::backend::GlobalId,
     },
-    utils::Transform,
+    utils::{Physical, Rectangle, Transform},
 };
 
 use hocus_api::Event;
@@ -83,6 +83,8 @@ pub struct OutputInfo {
     pub position: (i32, i32),
     /// Frames that drew something.
     pub frames: u64,
+    /// Physical pixels the last frame drawn repainted.
+    pub damage: u64,
 }
 
 pub struct HeadlessBackend {
@@ -124,6 +126,8 @@ struct CanvasOutput<T> {
     target: T,
     damage_tracker: OutputDamageTracker,
     frames: u64,
+    /// Physical pixels the last frame drawn repainted.
+    damage: u64,
     /// The frame drawn and not presented yet: presentation is immediate,
     /// unless the output is stalled.
     flip: Flip,
@@ -252,6 +256,7 @@ where
             position,
             target,
             frames: 0,
+            damage: 0,
             flip: Flip::Idle,
             stalled: false,
         });
@@ -325,11 +330,27 @@ where
         .render_output(renderer, &mut framebuffer, 1, &elements, BACKGROUND)
         .inspect_err(|err| tracing::warn!(output = out.output.name(), ?err, "rendering failed"))
         .ok()?;
-    let drawn = result.damage.is_some_and(|damage| !damage.is_empty());
+    let damage = result.damage.map_or(0, |damage| area(damage));
+    let drawn = damage > 0;
     if drawn {
         out.frames += 1;
+        out.damage = damage;
     }
     Some((result.states, drawn))
+}
+
+/// The pixels `rects` cover, each counted once.
+fn area(rects: &[Rectangle<i32, Physical>]) -> u64 {
+    let mut seen: Vec<Rectangle<i32, Physical>> = Vec::with_capacity(rects.len());
+    let mut total = 0;
+    for rect in rects {
+        total += Rectangle::subtract_rects_many([*rect], seen.iter().copied())
+            .iter()
+            .map(|r| r.size.w.max(0) as u64 * r.size.h.max(0) as u64)
+            .sum::<u64>();
+        seen.push(*rect);
+    }
+    total
 }
 
 fn create_output(
@@ -561,6 +582,7 @@ impl HeadlessBackend {
                     spec: out.spec,
                     position: out.position,
                     frames: out.frames,
+                    damage: out.damage,
                 })
                 .collect()
         }
@@ -586,6 +608,39 @@ impl HeadlessBackend {
                 state,
                 cursor,
             ),
+        }
+    }
+
+    /// What `output`'s buffer holds: every frame drawn so far, each over
+    /// the last where it was damaged.
+    pub fn shown(&mut self, output: &Output) -> anyhow::Result<Pixels> {
+        fn read<R, T>(canvas: &mut Canvas<R, T>, output: &Output) -> anyhow::Result<Pixels>
+        where
+            R: Renderer + Bind<T> + ExportMem,
+            R::Error: Send + Sync + 'static,
+        {
+            let out = canvas
+                .outputs
+                .iter_mut()
+                .find(|o| o.output == *output)
+                .with_context(|| format!("no output named {}", output.name()))?;
+            let (width, height) = (out.spec.width, out.spec.height);
+            let framebuffer = canvas.renderer.bind(&mut out.target)?;
+            let mapping = canvas.renderer.copy_framebuffer(
+                &framebuffer,
+                Rectangle::from_size((width, height).into()),
+                Fourcc::Abgr8888,
+            )?;
+            let rgba = canvas.renderer.map_texture(&mapping)?.to_vec();
+            Ok(Pixels {
+                width: width as u32,
+                height: height as u32,
+                rgba,
+            })
+        }
+        match &mut self.renderers {
+            Renderers::Gles(canvas) => read(canvas, output),
+            Renderers::Pixman(canvas) => read(canvas, output),
         }
     }
 

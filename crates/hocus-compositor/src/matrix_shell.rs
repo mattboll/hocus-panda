@@ -268,6 +268,7 @@ where
         alpha: f32,
         bottom: impl Fn(u32) -> f64,
     ) {
+        self.within(area);
         if alpha <= 0.0 {
             return;
         }
@@ -301,6 +302,7 @@ where
     /// black above it, the rain falling there; the leading drops at the
     /// front. Over what is below the front, nothing.
     pub(crate) fn cascade(&mut self, area: Rect, rain: &Rain, p: f32, t: f32, alpha: f32) {
+        self.within(area);
         let ch = f64::from(CELL.1);
         let inset = ((rain.step - f64::from(CELL.0)) / 2.0).max(0.0);
         let front = |i: u32| {
@@ -340,6 +342,7 @@ where
     /// Rows of glyphs over black in `area`, as far as `width` from its left
     /// edge, a bright cursor at their end while `cursor`.
     pub(crate) fn typed(&mut self, area: Rect, width: f64, seed: u64, alpha: f32, cursor: bool) {
+        self.within(area);
         let ch = f64::from(CELL.1);
         let width = width.clamp(0.0, area.size.w);
         if width <= 0.0 || alpha <= 0.0 {
@@ -373,6 +376,7 @@ where
     /// Glyphs flying out of `area` from `count` places in it, `age` of
     /// their `life` milliseconds, accelerating, falling a little.
     pub(crate) fn scatter(&mut self, area: Rect, count: usize, seed: u64, age: f32, life: f32) {
+        self.within(area);
         if !(0.0..life).contains(&age) {
             return;
         }
@@ -887,12 +891,12 @@ impl State {
                 }
             }
         }
-        let mut out = std::mem::take(&mut brush.out);
+        let mut out: Vec<_> = brush.take().into_iter().collect();
         let mut back = self.brush(brush.renderer, scale);
         for r in behind {
             back.solid(r, BLACK, 1.0);
         }
-        out.append(&mut back.out);
+        out.extend(back.take());
         // The windows left behind, under their glyphs, while they turn.
         for (window, frame) in live {
             let radius = if self.decorated(&window) {
@@ -989,7 +993,7 @@ impl State {
                 }
             }
         }
-        brush.out
+        brush.finish()
     }
 
     // The column.
@@ -1065,7 +1069,7 @@ impl State {
         if moment == Moment::Close && t >= 50.0 {
             brush.solid(shown, GREEN, 0.3);
         }
-        let mut out = std::mem::take(&mut brush.out);
+        let mut out: Vec<_> = brush.take().into_iter().collect();
         if shown.size.w > 0.0 {
             let part = rect(shown.loc.x - left, 0.0, shown.size.w, shown.size.h);
             out.extend(
@@ -1205,7 +1209,7 @@ impl State {
                         parts_out.push((r, body));
                     }
                 }
-                out.append(&mut brush.out);
+                out.extend(brush.take());
                 for (r, a) in parts_out {
                     let part = rect(r.loc.x - at.x, r.loc.y - at.y, r.size.w, r.size.h);
                     out.extend(
@@ -1221,7 +1225,7 @@ impl State {
                 let mut rows: Vec<Rect> = parts.rows.iter().map(|r| shift(*r)).collect();
                 rows.push(head);
                 brush.fall(&rows, seed_of("launcher"), t / 250.0, 260.0);
-                out.append(&mut brush.out);
+                out.extend(brush.take());
                 let q = 1.0 - Easing::OutCubic.apply(phase(t, 0.0, 200.0));
                 let w = head.size.w * f64::from(q);
                 let r = rect(
@@ -1249,7 +1253,7 @@ impl State {
             brush.rain(whole, &rain, t, 0.6 * back, |_| f64::MAX);
         }
         brush.solid(whole, BLACK, LAUNCHER_DIM * back);
-        out.append(&mut brush.out);
+        out.extend(brush.take());
         out
     }
 }

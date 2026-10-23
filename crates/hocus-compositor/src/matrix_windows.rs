@@ -29,11 +29,7 @@ use hocus_ui::{
     motion::{Easing, LARGE, Spring},
 };
 use smithay::{
-    backend::renderer::{
-        Color32F, ImportAll, ImportMem, Renderer, Texture,
-        element::{Id, Kind, solid::SolidColorRenderElement},
-        utils::CommitCounter,
-    },
+    backend::renderer::{Color32F, ImportAll, ImportMem, Renderer, Texture},
     desktop::Window,
     output::Output,
     utils::{Logical, Point, Rectangle},
@@ -44,6 +40,7 @@ use crate::{
     decoration::Rounded,
     desktops::rect,
     matrix::{Brush, millis, phase},
+    matrix_layers::Layers,
     motion::Look,
     scene::SceneElement,
     shell::Panel,
@@ -254,8 +251,11 @@ fn zone_lines(zone: Zone, area: hocus_core::Rect, gap: u32) -> Vec<Rectangle<f64
     }
 }
 
-/// A plain colour in `rect` (output-local), its corners cut as a window's.
+/// A plain colour in `rect` (output-local), its corners cut as a window's:
+/// the same element from frame to frame for the same place in the code.
+#[track_caller]
 pub(crate) fn tint<R>(
+    layers: &Layers,
     rect: Rectangle<f64, Logical>,
     color: Color,
     alpha: f32,
@@ -272,12 +272,11 @@ where
     }
     let a = alpha.clamp(0.0, 1.0);
     let c = |v: u8| f32::from(v) / 255.0 * a;
-    let solid = SolidColorRenderElement::new(
-        Id::new(),
+    let solid = layers.solid(
+        std::panic::Location::caller(),
         geometry,
-        CommitCounter::default(),
         Color32F::new(c(color.r), c(color.g), c(color.b), a),
-        Kind::Unspecified,
+        scale,
     );
     let radius = (radius.min(rect.size.h / 2.0).min(rect.size.w / 2.0) * scale).round() as i32;
     Some(SceneElement::Tint(Rounded::new(solid, geometry, radius)))
@@ -408,8 +407,22 @@ impl State {
                        rect: Rectangle<f64, Logical>,
                        green: f32,
                        white: f32| {
-            out.extend(tint(rect, HEAD, white, switch.radius, scale));
-            out.extend(tint(rect, GREEN, green, switch.radius, scale));
+            out.extend(tint(
+                &self.matrix_layers,
+                rect,
+                HEAD,
+                white,
+                switch.radius,
+                scale,
+            ));
+            out.extend(tint(
+                &self.matrix_layers,
+                rect,
+                GREEN,
+                green,
+                switch.radius,
+                scale,
+            ));
             let radius = (switch.radius.min(rect.size.h / 2.0) * scale).round() as i32;
             let clip = rect.to_physical_precise_round(scale);
             out.extend(
@@ -434,7 +447,7 @@ impl State {
                     1.0,
                 );
                 brush.disc(icon, 6.0 * f64::from(1.0 - q), HEAD, 1.0 - q);
-                out.append(&mut brush.out);
+                out.extend(brush.take());
             } else if t >= 150.0 && !light {
                 // The line opens up and down into the window, a scanline
                 // sweeping it once as it warms up; its green settles.
@@ -445,7 +458,7 @@ impl State {
                     let y = rect.loc.y + f64::from(p) * rect.size.h;
                     brush.beam(left, right, y - 1.0, 0.9);
                 }
-                out.append(&mut brush.out);
+                out.extend(brush.take());
                 let green = if t < 350.0 {
                     0.15 + 0.45 * (1.0 - p)
                 } else {
@@ -495,7 +508,7 @@ impl State {
             let (l, r, y) = line(t);
             brush.beam(l, r, y, 1.0);
         }
-        out.append(&mut brush.out);
+        out.extend(brush.take());
         out
     }
 
@@ -596,7 +609,7 @@ impl State {
                 }
             }
         }
-        brush.out
+        brush.finish()
     }
 
     /// The guide lines of `zone` on `output` show: dragged into it, or
@@ -696,7 +709,14 @@ impl State {
         let r = (radius * scale).round() as i32;
         let mut out = Vec::new();
         for (rect, alpha) in ghosts {
-            out.extend(tint(rect, GREEN, 0.7 * alpha, radius, scale));
+            out.extend(tint(
+                &self.matrix_layers,
+                rect,
+                GREEN,
+                0.7 * alpha,
+                radius,
+                scale,
+            ));
             let clip = rect.to_physical_precise_round(scale);
             out.extend(
                 picture
@@ -872,7 +892,7 @@ impl State {
                 brush.dashed(Rectangle::new(l.loc - origin, l.size), color, line, glow);
             }
         }
-        out.append(&mut brush.out);
+        out.extend(brush.take());
         out
     }
 }

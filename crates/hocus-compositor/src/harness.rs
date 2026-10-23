@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::Context;
 use hocus_api::{ClientError, Event, Permission, Reply, Request, RequestLine, ServerLine};
 use smithay::reexports::calloop::EventLoop;
 
@@ -275,6 +276,25 @@ impl Headless {
         self.backend()
             .map(HeadlessBackend::outputs)
             .unwrap_or_default()
+    }
+
+    /// What `output` shows, as the frames drawn so far left its buffer, and
+    /// the same moment drawn afresh in full: RGBA both. They differ where a
+    /// frame did not repaint what changed.
+    pub fn shown_and_redrawn(&mut self, output: &str) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+        let App { state, backend } = &mut self.app;
+        let BackendState::Headless(headless) = backend else {
+            anyhow::bail!("not headless");
+        };
+        let output = state
+            .space
+            .outputs()
+            .find(|o| o.name() == output)
+            .cloned()
+            .with_context(|| format!("no output named {output}"))?;
+        let shown = headless.shown(&output)?;
+        let redrawn = headless.capture_output(&output, state, true)?;
+        Ok((shown.rgba, redrawn.rgba))
     }
 
     /// Time on the virtual clock since the start.
