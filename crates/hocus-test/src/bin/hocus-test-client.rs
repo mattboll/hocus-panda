@@ -21,6 +21,9 @@ struct Args {
     /// As the settings take it: written in the starts file.
     #[arg(long)]
     page: Option<String>,
+    /// Its window's title; none by default.
+    #[arg(long)]
+    title: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -43,7 +46,13 @@ fn main() -> anyhow::Result<()> {
         height: h.parse()?,
         argb: 0xff00_0000 | rgb,
     }
-    .spawn(&socket)?;
+    .spawn_with(
+        &socket,
+        hocus_test::client::ClientOptions {
+            title: args.title,
+            ..Default::default()
+        },
+    )?;
     while !client.is_finished() {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }

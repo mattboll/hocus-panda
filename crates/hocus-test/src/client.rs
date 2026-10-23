@@ -75,6 +75,10 @@ enum Command {
     CopyThenSecret(String, String),
     /// Asks the compositor to bring its window forward (xdg-activation).
     Activate,
+    /// Takes an activation token and keeps it, to use it late.
+    TakeToken,
+    /// Asks to come forward with the token kept.
+    UseToken,
 }
 
 /// What a test client does besides showing its window.
@@ -126,6 +130,8 @@ pub enum ClientEvent {
     Close,
     /// Text typed into it through text-input (the history, emoji).
     Text(String),
+    /// It holds an activation token, kept for later.
+    Token,
 }
 
 impl fmt::Display for ClientEvent {
@@ -141,6 +147,7 @@ impl fmt::Display for ClientEvent {
             Self::Key { code, pressed: p } => write!(f, "key {code} {}", pressed(*p)),
             Self::Close => write!(f, "close"),
             Self::Text(text) => write!(f, "text {text}"),
+            Self::Token => write!(f, "token"),
         }
     }
 }
@@ -183,6 +190,21 @@ impl TestClient {
     pub fn activate(&self) -> anyhow::Result<()> {
         self.commands
             .send(Command::Activate)
+            .context("the test client is gone")
+    }
+
+    /// Takes an activation token and keeps it ([`ClientEvent::Token`]
+    /// once it has it).
+    pub fn take_token(&self) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::TakeToken)
+            .context("the test client is gone")
+    }
+
+    /// Asks for its window to come forward with the token it kept.
+    pub fn use_token(&self) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::UseToken)
             .context("the test client is gone")
     }
 
@@ -297,6 +319,8 @@ impl SolidWindow {
             sources: Vec::new(),
             seat: seat.clone(),
             activation,
+            keep_token: false,
+            kept: None,
             _text_input: text_input,
             typed: None,
             serial: 0,
@@ -313,6 +337,17 @@ impl SolidWindow {
                         client.copy(secret, true, &qh);
                     }
                     Command::Activate => client.ask_activation(&qh),
+                    Command::TakeToken => {
+                        client.keep_token = true;
+                        client.ask_activation(&qh);
+                    }
+                    Command::UseToken => {
+                        if let (Some(token), Some(activation)) =
+                            (client.kept.take(), &client.activation)
+                        {
+                            activation.activate(token, client.window.wl_surface());
+                        }
+                    }
                 }
             }
             queue.flush()?;
@@ -357,6 +392,9 @@ struct Client {
     sources: Vec<(CopyPasteSource, String)>,
     seat: wl_seat::WlSeat,
     activation: Option<XdgActivationV1>,
+    /// The next token is kept, not used at once.
+    keep_token: bool,
+    kept: Option<String>,
     /// Kept alive: dropping it would not end it, but it is the client's own.
     _text_input: Option<ZwpTextInputV3>,
     /// Text committed, recorded at the next `done`.
@@ -835,7 +873,10 @@ impl Dispatch<XdgActivationTokenV1, ()> for Client {
         _: &QueueHandle<Self>,
     ) {
         if let xdg_activation_token_v1::Event::Done { token: name } = event {
-            if let Some(activation) = &client.activation {
+            if std::mem::take(&mut client.keep_token) {
+                client.kept = Some(name);
+                client.record(ClientEvent::Token);
+            } else if let Some(activation) = &client.activation {
                 activation.activate(name, client.window.wl_surface());
             }
             token.destroy();

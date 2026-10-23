@@ -5,7 +5,8 @@ use std::time::Duration;
 use hocus_shell::{
     Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, TrayApp, TrayMenuEntry,
     WallTime,
-    agents::{AgentAsk, AgentState, AgentsView, Board},
+    activity::Badge,
+    agents::{AgentAsk, AgentState, AgentsView, Board, Elsewhere},
     column::{AdbLine, Agenda, Meeting, PairStage, Pairing, PhoneLine},
     journal::{Did, JournalLine, JournalView, Pressed},
 };
@@ -45,12 +46,14 @@ fn state() -> ColumnState {
                 count: 4,
                 shown: 1,
                 name: String::new(),
+                ..ScreenDesktops::default()
             },
             ScreenDesktops {
                 output: "eDP-1".into(),
                 count: 1,
                 shown: 1,
                 name: String::new(),
+                ..ScreenDesktops::default()
             },
         ],
         layout: "FR".into(),
@@ -113,7 +116,7 @@ fn agents(pandas: bool) -> AgentsView {
             None,
         ));
     }
-    board.replace(list, Duration::ZERO);
+    board.replace(0, list, Duration::ZERO);
     let now = Duration::from_secs(180);
     board.set(
         "w1:p1",
@@ -122,7 +125,7 @@ fn agents(pandas: bool) -> AgentsView {
         now,
     );
     board
-        .view(now + Duration::from_secs(60), pandas, false)
+        .view(now + Duration::from_secs(60), pandas, false, &[])
         .expect("agents")
 }
 
@@ -320,6 +323,132 @@ fn on_a_laptop_screen_the_account_stays_in_the_column_and_the_lists_give_room_ba
     column.resize(1400.0, 1.0);
     column.draw(Duration::ZERO);
     assert_eq!(column.access().dump(), access);
+    Ok(())
+}
+
+/// One agent waiting and one at work on the desktop shown, and three
+/// project desktops with a herdr each (#192).
+fn agents_by_desktop() -> AgentsView {
+    let mut board = Board::default();
+    let agent = |key: &str, name: &str, state| (key.to_owned(), name.to_owned(), state, None);
+    board.replace(
+        0,
+        vec![
+            agent("0/1", "refacto", AgentState::Work),
+            agent("0/2", "tests", AgentState::Work),
+        ],
+        Duration::ZERO,
+    );
+    board.replace(
+        1,
+        vec![agent("1/1", "deploy", AgentState::Work)],
+        Duration::ZERO,
+    );
+    board.replace(
+        2,
+        vec![
+            agent("2/1", "blog", AgentState::Done),
+            agent("2/2", "seo", AgentState::Rest),
+        ],
+        Duration::ZERO,
+    );
+    board.replace(
+        3,
+        vec![agent("3/1", "manual", AgentState::Work)],
+        Duration::ZERO,
+    );
+    let now = Duration::from_secs(60);
+    board.set(
+        "0/1",
+        AgentState::Wait,
+        Some("Push the branch?".into()),
+        now,
+    );
+    board.set("1/1", AgentState::Wait, None, now);
+    let elsewhere = |source: usize, name: &str| Elsewhere {
+        name: name.into(),
+        output: "DP-1".into(),
+        desktop: source + 1,
+        sources: vec![source],
+    };
+    board
+        .view(
+            now,
+            true,
+            false,
+            &[
+                elsewhere(1, "Chapitô"),
+                elsewhere(2, "Website"),
+                elsewhere(3, "Docs"),
+            ],
+        )
+        .expect("agents")
+}
+
+#[test]
+fn other_desktops_agents_show_in_a_line_each_and_give_room_back_first() -> anyhow::Result<()> {
+    let mut s = state();
+    s.agents = Some(agents_by_desktop());
+    s.screens[0].names = ["Me", "Chapitô", "Website", "Docs"]
+        .map(String::from)
+        .to_vec();
+    s.screens[0].badges = vec![Badge::None, Badge::Waits, Badge::Done, Badge::None];
+    // Room enough: every desktop in a line, and a click goes there.
+    let mut tall = Column::new(Theme::default(), Lang::En, 1400.0, 1.0);
+    tall.set_state(&s);
+    tall.draw(Duration::from_secs(600));
+    let access = tall.access().dump();
+    for line in [
+        "Chapitô · 1 waiting",
+        "Website · 1 done",
+        "Docs · 1 at work",
+        "refacto · Waits for an answer: “Push the branch?”",
+        "Desktop 1 of 4 on this screen · Chapitô: an agent waits for an answer · Website: an agent is done",
+    ] {
+        assert!(access.contains(line), "{line:?} in {access}");
+    }
+    assert!(access.contains("2 wait for an answer"), "{access}");
+    let at = button(&tall, "Website · 1 done")?;
+    assert_eq!(
+        click(&mut tall, at),
+        vec![Action::ShowDesktop {
+            output: "DP-1".into(),
+            desktop: 3
+        }]
+    );
+    // Less room, with notifications: the lines share one before the
+    // agents shown in full give any.
+    let height = 900.0;
+    let mut column = Column::new(Theme::default(), Lang::En, height, 1.0);
+    s.notifications = (1..=5)
+        .map(|i| ("Mail".to_owned(), format!("Message {i}")))
+        .collect();
+    column.set_state(&s);
+    column.draw(Duration::from_secs(600));
+    common::expect_reference(&column.view(), "column-agents-by-desktop.png")?;
+    let account = rect_of(&column, "Account: Camille")?;
+    assert!(
+        account.bottom() <= height - 16.0 + 0.5,
+        "the account at {account:?} leaves the column, {height} tall"
+    );
+    // The lines went, then the notifications, while both agents of this
+    // desktop show in full; the summary and the dots still tell.
+    let access = column.access().dump();
+    assert!(!access.contains("Docs · 1 at work"), "{access}");
+    assert!(!access.contains("3 other desktops"), "{access}");
+    assert!(!access.contains("Mail · Message"), "{access}");
+    assert!(access.contains("Yes to refacto"), "{access}");
+    assert!(access.contains("tests · Works · 1 min"), "{access}");
+    assert!(access.contains("2 wait for an answer"), "{access}");
+    // A little more room: they share a line.
+    column.resize(990.0, 1.0);
+    column.draw(Duration::from_secs(600));
+    let access = column.access().dump();
+    assert!(access.contains("\"3 other desktops\""), "{access}");
+    assert!(
+        access.contains("\"1 waiting · 1 at work · 1 done\""),
+        "{access}"
+    );
     Ok(())
 }
 

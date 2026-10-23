@@ -82,6 +82,8 @@ pub struct Protocols {
     pub idle_inhibit: IdleInhibitManagerState,
     /// Surfaces that keep the session awake while shown.
     pub inhibiting: HashSet<WlSurface>,
+    /// When each activation token was made, on the compositor's clock.
+    pub token_times: std::collections::HashMap<String, Duration>,
     pub shortcuts_inhibit: KeyboardShortcutsInhibitState,
     /// The surface with the keyboard, as last told: the keyboard cannot
     /// be asked from within its own key filter.
@@ -120,6 +122,7 @@ impl Protocols {
             activation: XdgActivationState::new::<State>(dh),
             idle_inhibit: IdleInhibitManagerState::new::<State>(dh),
             inhibiting: HashSet::new(),
+            token_times: Default::default(),
             shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<State>(dh),
             keyboard_focus: None,
             foreign: XdgForeignState::new::<State>(dh),
@@ -154,18 +157,39 @@ impl XdgActivationHandler for State {
         &mut self.protocols.activation
     }
 
+    /// Notes when a token was made, on the compositor's clock (tests move
+    /// it); tokens never used are forgotten after a minute.
+    fn token_created(&mut self, token: XdgActivationToken, _data: XdgActivationTokenData) -> bool {
+        let now = self.clock.now();
+        self.protocols
+            .token_times
+            .retain(|_, at| now.saturating_sub(*at) < 6 * ACTIVATION_PATIENCE);
+        self.protocols.token_times.insert(token.to_string(), now);
+        true
+    }
+
     /// A recent token brings its window forward, on whatever desktop it
-    /// is; an old one does nothing.
+    /// is; with an old one the window asks for attention instead (#192).
     fn request_activation(
         &mut self,
         token: XdgActivationToken,
         token_data: XdgActivationTokenData,
         surface: WlSurface,
     ) {
-        if token_data.timestamp.elapsed() < ACTIVATION_PATIENCE
-            && let Some(id) = self.managed_id(&surface)
-        {
-            self.restore(id, SERIAL_COUNTER.next_serial());
+        let age = self
+            .protocols
+            .token_times
+            .remove(&token.to_string())
+            .map_or_else(
+                || token_data.timestamp.elapsed(),
+                |at| self.clock.now().saturating_sub(at),
+            );
+        if let Some(id) = self.managed_id(&surface) {
+            if age < ACTIVATION_PATIENCE {
+                self.restore(id, SERIAL_COUNTER.next_serial());
+            } else {
+                self.ask_attention(id);
+            }
         }
         self.protocols.activation.remove_token(&token);
     }

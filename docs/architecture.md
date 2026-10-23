@@ -118,7 +118,8 @@ Switching desktops (#36) slides a strip of the screen's desktops on that
 screen only: the model switches at once and only the picture moves, the
 windows of the desktops passing by drawn where they wait. A three-finger
 swipe holds the strip under the fingers and lets it spring to the nearest
-desktop; the switcher shows the screen's desktops meanwhile.
+desktop; the switcher shows the screen's desktops meanwhile, with their
+names under them when they have some (#192).
 The Matrix theme (#50) has windows of its own: one materializes from a
 column of glyphs that fills its place row by row, one closing glitches,
 turns to glyphs and drains off as rain. Like the magic lamp, these are
@@ -316,6 +317,20 @@ brings forward the terminal herdr's client runs in, found by its
 processes. Only the session looks for herdr's default socket; nested or in
 tests, only a socket the configuration names is used.
 
+Desktops per project (#192): several herdr can be followed, each through
+its own client, each tied to a desktop (`[[agents.herdr]]`); an agent's key
+on the board is its herdr's and its pane's. The column shows in full the
+agents of the desktop its screen shows (and of a herdr tied to none), every
+other desktop's in a line with its counts, which goes there when clicked;
+short of room, those lines share one, then go, before the agents shown in
+full give any. The desktops not shown carry a badge wherever the
+desktops are drawn (the column's dots and its desktops popover, the
+switcher's strip, Alt+Tab and the overview): an agent waiting, a window
+asking for attention, an agent done since a screen last showed its
+desktop. A window asks for attention when it asks to come forward with an
+activation token too old to let it (tokens are timed on the compositor's
+clock), until it has the keyboard.
+
 Notes (#79) are one Markdown file, read and written whole on worker
 threads (written to a new file, then renamed over the old one); lines the
 notes do not understand are kept as they were. The file is read again each
@@ -386,6 +401,11 @@ the next start a card offers to put everything back, to choose which
 applications, or to start fresh (`[session] restore`); the applications
 start again and their windows go back where they were as they come; one
 that cannot start, or whose window never comes, is reported in a toast.
+Several windows of one application (three browser windows on three
+project desktops, #192) are told apart by the title each had when saved:
+a window coming back takes the place saved with its title, else the first
+of its application still waiting, in the order they were opened, so a
+title that changed meanwhile never keeps a window from coming back.
 XDG autostart entries start too. Only the session itself saves, restores
 and autostarts: nested or headless, the developer's session is never
 touched.

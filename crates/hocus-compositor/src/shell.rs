@@ -292,6 +292,8 @@ impl State {
                 count: o.desktops.len(),
                 shown: o.desktops.iter().position(|d| *d == o.shown).unwrap_or(0) + 1,
                 name: self.desktop_name(o.shown).unwrap_or_default(),
+                names: self.desktop_names(&o.name),
+                badges: self.desktop_badges(&o.name),
             })
             .collect();
         screens.sort_by_key(|s| Some(&s.output) != first.as_ref());
@@ -367,6 +369,7 @@ impl State {
         self.refresh_wobbles();
         self.refresh_pandas();
         self.refresh_agents();
+        self.refresh_activity();
         self.refresh_clipboard();
         self.refresh_dropdown();
         self.refresh_appearance();
@@ -702,6 +705,7 @@ impl State {
         self.circle_ui(&mut out);
         self.picker_ui(&mut out);
         self.alt_tab_ui(&mut out);
+        self.switcher_ui(&mut out);
         self.dock_ui(&mut out);
         self.pandas_ui(&mut out);
         self.recording_ui(&mut out);

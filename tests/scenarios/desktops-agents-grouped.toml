@@ -1,0 +1,118 @@
+description = "Two herdr tied to desktops 2 and 3: the column groups the agents by desktop, the current one first and every other in a line of its own; when an agent of the second waits for an answer, the column shows it under desktop 3's name and desktop 3's dot carries the waiting badge; a click on the line goes there"
+outputs = ["1600x1000/3"]
+shell = true
+
+# Two herdr of the test's own, never the user's.
+[[step]]
+herdr = { name = "chapito", agents = [
+  { name = "refacto", status = "working" },
+  { name = "tests", status = "idle" },
+] }
+
+[[step]]
+herdr = { name = "website", agents = [
+  { name = "deploy", status = "working" },
+] }
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+desktop_names = ["Me", "Chapitô", "Website"]
+
+[[agents.herdr]]
+socket = "{herdr:chapito}"
+desktop = 2
+
+[[agents.herdr]]
+socket = "{herdr:website}"
+desktop = 3
+"""
+
+# On "Me", which has no agents of its own: each project in a line.
+[[step]]
+expect_ui = { label = "Chapitô · 1 at work" }
+
+[[step]]
+expect_ui = { label = "Website · 1 at work" }
+
+[[step]]
+expect_ui = { label = "refacto · Works", shown = false }
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3" }
+
+# deploy asks: under Website's name, in the waiting colour, and
+# Website's dot says so.
+[[step]]
+herdr_status = { agent = "deploy", status = "blocked", label = "Publish the site?" }
+
+[[step]]
+expect_ui = { label = "Website · 1 waiting" }
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3 · Website: an agent waits for an answer" }
+
+[[step]]
+expect_ui = { label = "deploy · Waits for an answer: “Publish the site?”", shown = false }
+
+# The toast asks too, wherever Alex is.
+[[step]]
+expect_ui = { label = "herdr · deploy" }
+
+[[step]]
+advance_ms = 4500
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktops-agents-grouped.png" }
+
+# A click on the line goes there: its agents in full, the others in lines.
+[[step]]
+click_ui = "Website · 1 waiting"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 3 }
+
+[[step]]
+expect_ui = { label = "deploy · Waits for an answer: “Publish the site?”" }
+
+[[step]]
+expect_ui = { label = "Chapitô · 1 at work" }
+
+[[step]]
+expect_ui = { label = "Website · 1 waiting", shown = false }
+
+[[step]]
+expect_ui = { label = "Website · desktop 3 of 3" }
+
+# The answer goes to the second herdr.
+[[step]]
+click_ui = "Yes to deploy"
+
+[[step]]
+expect_herdr = "agent.send_keys deploy enter"
+
+[[step]]
+herdr_status = { agent = "deploy", status = "working" }
+
+[[step]]
+expect_ui = { label = "deploy · Works" }
+
+# On Chapitô, its own agents in full.
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_ui = { label = "refacto · Works" }
+
+[[step]]
+expect_ui = { label = "Website · 1 at work" }
+
+[[step]]
+expect_ui = { label = "1 other at rest in herdr" }
+
+[[step]]
+click_ui = "refacto · Works"
+
+[[step]]
+expect_herdr = "agent.focus refacto"

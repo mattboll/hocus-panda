@@ -11,7 +11,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 
 ## 1. Session
 
-- Save and restore the session: applications relaunched in place, desktops and state
+- Save and restore the session: applications relaunched in place, desktops and state; several windows of one application each back on its own desktop
 - XDG autostart
 - Log out, power off, reboot, suspend, hibernate `[linux]`
 - Emergency logout, protected, that works even when locked
@@ -61,6 +61,8 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Send a window to the other screen, on its shown desktop or a chosen one
 - Unplugged screen: its desktops join a remaining screen and go back when it is plugged again (to try; if annoying, gather its windows on one desktop instead)
 - Theme per desktop (colours, accent, wallpaper): you know at a glance where you are
+- Named desktops: the switcher's strip, the column, Alt+Tab and the overview show their names
+- Activity of the other desktops: a badge on a desktop with an agent waiting, an agent done since you last visited it, or a window asking for attention (strip, column, overview)
 - No permanent desktop indicator taking room: the switcher appears when you switch
 
 ## 4. Overview, Alt+Tab, corners, gestures
@@ -265,6 +267,7 @@ The column on the right of the screen is the chosen form (see
 - Circle to ask: a loop drawn around anything on screen (Super+Shift + drag) offers Explain, Search, Translate, Copy the text, Note and a question of one's own; the answer streams into a card beside it
 - Better semantic search in French
 - Coding agents (agent managers such as herdr, any Claude Code session): list with a panda per agent, preview, notifications with reply buttons, halo, jump to the agent that waits
+- Desktops per project: several herdr, each tied to a desktop; the column shows the current desktop's agents in full and every other desktop's in a line with its counts (working, waiting, done), which goes there
 
 ## 18. Calendar
 

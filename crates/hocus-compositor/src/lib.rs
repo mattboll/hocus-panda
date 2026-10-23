@@ -5,6 +5,7 @@
 
 mod act;
 mod actions;
+mod activity;
 mod agents;
 mod ai;
 mod alt_tab;

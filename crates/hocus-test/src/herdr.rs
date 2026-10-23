@@ -64,9 +64,9 @@ pub struct Server {
 
 impl Server {
     /// Serves `agents` (name and status: `working`, `blocked`, `idle`,
-    /// `done`) on `herdr.sock` in `dir`; their panes are `w1:p1`, `w1:p2`…
-    pub fn start(dir: &Path, agents: &[(String, String)]) -> std::io::Result<Self> {
-        let path = dir.join("herdr.sock");
+    /// `done`) on the socket `path`; their panes are `w1:p1`, `w1:p2`…
+    pub fn start(path: &Path, agents: &[(String, String)]) -> std::io::Result<Self> {
+        let path = path.to_path_buf();
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path)?;
         listener.set_nonblocking(true)?;
@@ -112,6 +112,13 @@ impl Server {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Whether it serves an agent of this name.
+    pub fn has(&self, name: &str) -> bool {
+        self.shared
+            .lock()
+            .is_ok_and(|s| s.agents.iter().any(|a| a.name == name))
     }
 
     /// Whether a connection follows this agent's status.

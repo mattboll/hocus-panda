@@ -1,0 +1,71 @@
+description = "Three windows of one application on desktops 1, 2 and 3: saved and put back, each comes back on its own desktop, told apart by its title, whatever order they come in; saved again, the session still says where each was"
+outputs = ["1600x1000/3"]
+
+[[step]]
+session_file = """
+[[window]]
+app_id = "browser"
+title = "Me — Browser"
+command = ["{test_client}", "--app-id", "browser", "--size", "700x450", "--color", "#3399ff", "--title", "Me — Browser"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [100, 100, 700, 450]
+state = "normal"
+
+[[window]]
+app_id = "browser"
+title = "Chapitô — Browser"
+command = ["{test_client}", "--app-id", "browser", "--size", "700x450", "--color", "#e5484d", "--title", "Chapitô — Browser"]
+output = "HEADLESS-1"
+desktop = 2
+geometry = [300, 200, 700, 450]
+state = "normal"
+
+[[window]]
+app_id = "browser"
+title = "Website — Browser"
+command = ["{test_client}", "--app-id", "browser", "--size", "700x450", "--color", "#33cc66", "--title", "Website — Browser"]
+output = "HEADLESS-1"
+desktop = 3
+geometry = [500, 300, 700, 450]
+state = "normal"
+"""
+
+[[step]]
+config = """
+[session]
+restore = "always"
+"""
+
+[[step]]
+offer_session = true
+
+[[step]]
+expect_window = { app_id = "browser", title = "Me — Browser", visible = true, geometry = [100, 100, 700, 450] }
+
+[[step]]
+expect_window = { app_id = "browser", title = "Chapitô — Browser", visible = false }
+
+[[step]]
+expect_window = { app_id = "browser", title = "Website — Browser", visible = false }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_window = { app_id = "browser", title = "Chapitô — Browser", visible = true, geometry = [300, 200, 700, 450] }
+
+[[step]]
+expect_window = { app_id = "browser", title = "Me — Browser", visible = false }
+
+[[step]]
+keys = "super+3"
+
+[[step]]
+expect_window = { app_id = "browser", title = "Website — Browser", visible = true, geometry = [500, 300, 700, 450] }
+
+[[step]]
+save_session = true
+
+[[step]]
+expect_session_file = { contains = ["title = \"Me — Browser\"", "title = \"Chapitô — Browser\"", "title = \"Website — Browser\"", "desktop = 3"] }

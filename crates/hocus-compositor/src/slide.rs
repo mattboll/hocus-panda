@@ -9,7 +9,7 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use hocus_core::OutputName;
-use hocus_shell::switcher::{Block, Switcher};
+use hocus_shell::switcher::{Block, Desk, Switcher};
 use hocus_ui::motion::{Animated, Curve, Easing, STANDARD, Spring};
 use smithay::{
     desktop::Window,
@@ -124,6 +124,8 @@ impl State {
             return;
         };
         let (w, h) = (f64::from(area.size.w), f64::from(area.size.h.max(1)));
+        let names = self.desktop_names(&name);
+        let badges = self.desktop_badges(&name);
         let blocks: Vec<Vec<Block>> = out
             .desktops
             .iter()
@@ -160,15 +162,24 @@ impl State {
             .position(|d| *d == out.shown)
             .unwrap_or(0);
         let aspect = (w / h) as f32;
+        let desks: Vec<Desk> = blocks
+            .into_iter()
+            .enumerate()
+            .map(|(i, blocks)| Desk {
+                blocks,
+                name: names.get(i).cloned().unwrap_or_default(),
+                badge: badges.get(i).copied().unwrap_or_default(),
+            })
+            .collect();
         let switcher = Switcher::new(
             self.theme(),
             self.shell_lang(),
             output.current_scale().fractional_scale() as f32,
             aspect,
-            &blocks,
+            &desks,
             shown,
         );
-        let size = Switcher::size(blocks.len(), aspect);
+        let size = Switcher::size(desks.len(), aspect, Switcher::named(&desks));
         let mut panel = Panel::new(switcher);
         panel.upload(&[]);
         let place = Point::from((
@@ -241,6 +252,19 @@ impl State {
     pub fn slides_with(&self, window: &Window, output: &Output) -> bool {
         model_id(window).is_some_and(|id| !self.model.is_pinned(id))
             && self.output_of(window) == Some(output)
+    }
+
+    /// The desktop switchers showing, for the control API.
+    pub fn switcher_ui(&self, out: &mut Vec<hocus_api::UiNode>) {
+        for (name, slide) in &self.slides.by_output {
+            if let (Some((place, panel)), Some(area)) = (
+                &slide.switcher,
+                self.find_output(name)
+                    .and_then(|o| self.space.output_geometry(&o)),
+            ) {
+                crate::shell::flatten(&panel.view.access(), area.loc + *place, 0, out);
+            }
+        }
     }
 
     /// The switcher on `output`, while it shows.

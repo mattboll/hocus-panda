@@ -200,8 +200,16 @@ enabled = true             # false: no panda anywhere (also from quick settings,
 
 [agents]                   # coding agents in the column, from herdr; one waiting asks in a toast
 enabled = true
-herdr_socket = ""          # empty: $XDG_CONFIG_HOME/herdr/herdr.sock, looked for by the session only
+herdr_socket = ""          # one herdr whose agents belong to no desktop (shown wherever you are); empty,
+                           #   and no [[agents.herdr]]: $XDG_CONFIG_HOME/herdr/herdr.sock, looked for by
+                           #   the session only
 journal_text = false       # true: the agents' journal keeps what MCP agents type; otherwise how many characters
+
+[[agents.herdr]]           # a project's herdr: its agents in full on its desktop, in a line elsewhere,
+                           #   and its desktop's badge says when one waits or is done
+socket = "~/.config/herdr/website.sock"
+desktop = 3                # from 1; left out: wherever you are, as herdr_socket's
+output = "DP-1"            # that desktop's screen; the primary one when left out
 
 [[agents.mcp]]             # an AI agent using the desktop through `hocus mcp --agent NAME` (docs/mcp.md)
 name = "assistant"         # what it names itself; a name not listed here is refused
@@ -262,8 +270,8 @@ vrr = false                # adaptive sync, where the screen and GPU can
 primary = true             # where unplugged screens' desktops and windows go
 desktops = 1               # its own desktops, 1 to 8 (desktops.per_output otherwise)
 desktop_names = ["Mail", "Code"]  # its desktops' names, in order (at most 8, 32 characters each); one
-                           #   empty or left out goes by its number. Shown in the column and to bars
-                           #   (ext-workspace)
+                           #   empty or left out goes by its number. Shown in the column, the
+                           #   switcher's strip, Alt+Tab, the overview, and to bars (ext-workspace)
 mirror = "eDP-1"           # shows that screen's picture, scaled to fit; its own desktops wait
 
 [[layouts]]                # how a set of screens is placed (the Screens page writes them)

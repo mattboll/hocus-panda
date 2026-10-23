@@ -1,0 +1,105 @@
+description = "Desktops named Me, Chapitô and Website: switching desktops, the switcher strip shows the names under its desktops; the column's desktop line, Alt+Tab and the overview show them too"
+outputs = ["1600x1000/3"]
+shell = true
+motion = true
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+desktop_names = ["Me", "Chapitô", "Website"]
+
+[shortcuts]
+"Super+O" = "overview"
+"""
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3" }
+
+[[step]]
+open = { app_id = "chat", size = [500, 400], color = "#3399ff", title = "Chat" }
+
+[[step]]
+keys = "super+2"
+
+[[step]]
+open = { app_id = "browser", size = [700, 450], color = "#e5484d", title = "Chapitô — Browser" }
+
+[[step]]
+open = { app_id = "terminal", size = [600, 380], color = "#2b2f36", title = "herdr" }
+
+[[step]]
+advance_ms = 1500
+
+# The strip, mid-way back to Me: every desktop by its name.
+[[step]]
+keys = "super+1"
+
+[[step]]
+advance_ms = 120
+
+[[step]]
+expect_ui = { label = "Me", inside = [0, 700, 1600, 300] }
+
+[[step]]
+expect_ui = { label = "Chapitô", inside = [0, 700, 1600, 300] }
+
+[[step]]
+expect_ui = { label = "Website", inside = [0, 700, 1600, 300] }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktops-named-strip.png" }
+
+[[step]]
+advance_ms = 1500
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3" }
+
+# Alt+Tab on Chapitô: its name over its windows, the screen's other
+# desktops beside it.
+[[step]]
+keys = "super+2"
+
+[[step]]
+advance_ms = 1500
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+keys = "15"
+
+[[step]]
+expect_ui = { label = "Chapitô", selected = true }
+
+[[step]]
+expect_ui = { label = "Website", selected = false }
+
+[[step]]
+advance_ms = 600
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktops-named-alt-tab.png" }
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+advance_ms = 600
+
+# The overview says the same.
+[[step]]
+keys = "super+o"
+
+[[step]]
+expect_ui = { label = "Chapitô", selected = true }
+
+[[step]]
+expect_ui = { label = "Me", selected = false }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Chapitô", shown = false }
