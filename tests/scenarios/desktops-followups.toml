@@ -1,0 +1,54 @@
+description = "A desktop's look names it on every screen unless the screen names it itself; a window on a desktop no screen shows that asks to come forward, even with a fresh token, asks for attention instead; a waiting agent's toast names its desktop when it is not shown"
+outputs = ["1600x1000/3"]
+shell = true
+
+[[step]]
+herdr = { name = "chapito", agents = [
+  { name = "refacto", status = "working" },
+] }
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+desktop_names = ["Me", "Chapitô"]
+
+[[desktops.looks]]
+desktop = 2
+name = "Elsewhere"
+
+[[desktops.looks]]
+desktop = 3
+name = "Website"
+
+[[agents.herdr]]
+socket = "{herdr:chapito}"
+desktop = 2
+"""
+
+# The screen's own name wins over the look's.
+[[step]]
+expect_ui = { label = "Chapitô · 1 at work" }
+
+# A fresh token, but its desktop is not shown: no switch, attention.
+[[step]]
+open = { app_id = "chat", size = [500, 400], color = "#3399ff", title = "Chat" }
+
+[[step]]
+send = { app_id = "chat", output = "HEADLESS-1", desktop = 3 }
+
+[[step]]
+activate = "chat"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3 · Website: a window asks for attention" }
+
+# The agent waits on Chapitô while Me shows: its toast says where.
+[[step]]
+herdr_status = { agent = "refacto", status = "blocked", label = "Run the migration?" }
+
+[[step]]
+expect_ui = { label = "herdr · refacto · Chapitô" }

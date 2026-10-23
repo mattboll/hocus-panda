@@ -168,8 +168,10 @@ impl XdgActivationHandler for State {
         true
     }
 
-    /// A recent token brings its window forward, on whatever desktop it
-    /// is; with an old one the window asks for attention instead (#192).
+    /// A recent token brings its window forward when a screen shows its
+    /// desktop; on another desktop, or with an old token, the window asks
+    /// for attention instead, and Alex goes there when they choose
+    /// (#192, #218).
     fn request_activation(
         &mut self,
         token: XdgActivationToken,
@@ -185,7 +187,8 @@ impl XdgActivationHandler for State {
                 |at| self.clock.now().saturating_sub(at),
             );
         if let Some(id) = self.managed_id(&surface) {
-            if age < ACTIVATION_PATIENCE {
+            let shown = self.model.output_showing(id).is_some();
+            if age < ACTIVATION_PATIENCE && shown {
                 self.restore(id, SERIAL_COUNTER.next_serial());
             } else {
                 self.ask_attention(id);

@@ -58,7 +58,7 @@ expect_ui = { label = "deploy · Waits for an answer: “Publish the site?”", 
 
 # The toast asks too, wherever Alex is.
 [[step]]
-expect_ui = { label = "herdr · deploy" }
+expect_ui = { label = "herdr · deploy · Website" }
 
 [[step]]
 advance_ms = 4500
