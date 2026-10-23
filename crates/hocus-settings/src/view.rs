@@ -23,10 +23,12 @@ use crate::{
 
 mod hardware;
 mod personalise;
+mod system;
 mod work;
 
 use hardware::HardwarePage;
 use personalise::WallpaperPage;
+use system::SystemPage;
 use work::{Field, Fields};
 
 /// What the window shows.
@@ -58,6 +60,24 @@ pub enum Outcome {
     /// The sound, a radio or the power profile changes, through the
     /// compositor, as quick settings change it.
     Hardware(hocus_api::HardwareChange),
+    /// Do not disturb on or off, through the compositor.
+    DoNotDisturb(bool),
+    /// This application opens this kind of file from now on (the user's
+    /// `mimeapps.list`).
+    SetDefaultApp {
+        kind: String,
+        app: String,
+    },
+    /// This autostart entry starts with the session, or not (the user's
+    /// copy of it).
+    SetAutostart {
+        id: String,
+        on: bool,
+    },
+    /// The account's full name, through AccountsService.
+    SetRealName(String),
+    /// The account's picture, from this file, through AccountsService.
+    SetPicture(String),
 }
 
 /// What a node does when clicked.
@@ -104,6 +124,17 @@ enum Target {
     SetZone(String),
     /// What the system's services hold changes.
     Hardware(hocus_api::HardwareChange),
+    DoNotDisturb(bool),
+    /// The choices of this kind of file show, or no longer.
+    OpenKind(&'static str),
+    DefaultApp {
+        kind: &'static str,
+        app: String,
+    },
+    Autostart {
+        id: String,
+        on: bool,
+    },
 }
 
 /// Which of a screen's choices are open.
@@ -336,6 +367,7 @@ pub struct SettingsView {
     /// The Work pages' fields.
     fields: Fields,
     hardware: HardwarePage,
+    system: SystemPage,
     /// Why the system did not take the time zone chosen last.
     zone_refused: Option<String>,
     dirty: bool,
@@ -417,6 +449,7 @@ impl SettingsView {
             wallpaper: WallpaperPage::default(),
             fields: Fields::default(),
             hardware: HardwarePage::default(),
+            system: SystemPage::default(),
             zone_refused: None,
             dirty: true,
             now: Duration::ZERO,
@@ -447,6 +480,9 @@ impl SettingsView {
         if ctx.config != self.ctx.config {
             self.fields.leave();
         }
+        // The settings read these themselves, not the compositor.
+        ctx.apps = std::mem::take(&mut self.ctx.apps);
+        ctx.account = std::mem::take(&mut self.ctx.account);
         self.ctx = ctx;
         // A language chosen here is spoken at once.
         self.lang = lang_of(&self.ctx.config, self.session_lang);
@@ -516,6 +552,7 @@ impl SettingsView {
             self.group = None;
             self.wallpaper.leave();
             self.fields.leave();
+            self.system.open = None;
         }
         self.screen = screen;
         self.typing = screen == Screen::Home;
@@ -879,6 +916,22 @@ impl SettingsView {
                     Some(Target::Identify) => out.push(Outcome::Identify),
                     Some(Target::Commit(field)) => out.extend(self.commit_field(field)),
                     Some(Target::Hardware(change)) => out.push(Outcome::Hardware(change)),
+                    Some(Target::DoNotDisturb(on)) => out.push(Outcome::DoNotDisturb(on)),
+                    Some(Target::OpenKind(kind)) => {
+                        self.system.open = (self.system.open != Some(kind)).then_some(kind);
+                        self.dirty = true;
+                    }
+                    Some(Target::DefaultApp { kind, app }) => {
+                        self.system.open = None;
+                        self.dirty = true;
+                        out.push(Outcome::SetDefaultApp {
+                            kind: kind.to_owned(),
+                            app,
+                        });
+                    }
+                    Some(Target::Autostart { id, on }) => {
+                        out.push(Outcome::SetAutostart { id, on });
+                    }
                     Some(Target::SetZone(zone)) => {
                         self.zone_refused = None;
                         self.dirty = true;
@@ -1577,7 +1630,9 @@ impl SettingsView {
             Page::Screens => self.screens(theme, body),
             Page::Account => self.account(theme, body),
             Page::Accounts => self.accounts(theme, body),
-            _ => {}
+            Page::Notifications => self.notifications(theme, body),
+            Page::Apps => self.apps(theme, body),
+            Page::Agents | Page::Search => {}
         }
     }
 
@@ -1764,138 +1819,6 @@ impl SettingsView {
             )),
         );
         self.targets.insert(add, Target::AddCalendar);
-    }
-
-    /// Board R1's "Account and updates": who, which version, and the
-    /// system's updates with Install.
-    fn account(&mut self, theme: &Theme, body: NodeId) {
-        let lang = self.lang;
-        self.tree.set_style(body, fill_width(column(26.0)));
-        let who = self.section(theme, body, words::ACCOUNT);
-        let line = self.add(who, fill_width(row(14.0)), Kind::Box(Look::default()));
-        let initial: String = self
-            .ctx
-            .user
-            .chars()
-            .take(1)
-            .flat_map(char::to_uppercase)
-            .collect();
-        let avatar = self.add(
-            line,
-            Style {
-                width: Length::Px(44.0),
-                height: Length::Px(44.0),
-                align: Align::Center,
-                justify: Justify::Center,
-                ..Style::default()
-            },
-            Kind::Box(Look {
-                background: Some(Paint::Accent),
-                radius: 22.0,
-                ..Look::default()
-            }),
-        );
-        self.line(
-            avatar,
-            &initial,
-            theme
-                .text
-                .title
-                .with_weight(700)
-                .with_color(Paint::OnAccent),
-        );
-        let names = self.add(line, column(2.0), Kind::Box(Look::default()));
-        let user = self.ctx.user.clone();
-        self.line(names, &user, theme.text.title.with_weight(700));
-        self.line(
-            names,
-            &words::version(env!("CARGO_PKG_VERSION"), lang),
-            theme.text.body.with_color(Paint::Muted),
-        );
-
-        let section = self.section(theme, body, words::UPDATES);
-        let updates = self.ctx.updates.clone();
-        let head = self.add(section, fill_width(row(12.0)), Kind::Box(Look::default()));
-        let (said, paint) = match (
-            updates.state.as_str(),
-            &updates.error,
-            updates.updates.len(),
-        ) {
-            ("unsupported", _, _) => (words::NO_MANAGER.get(lang).to_owned(), Paint::Muted),
-            ("checking", _, _) => (words::CHECKING.get(lang).to_owned(), Paint::Muted),
-            ("installing", _, n) => (words::installing(n, lang), Paint::Muted),
-            (_, Some(err), _) => (err.clone(), Paint::Waiting),
-            (_, None, 0) => (words::UP_TO_DATE.get(lang).to_owned(), Paint::Muted),
-            (_, None, n) => (words::updates_ready(n, lang), Paint::Text),
-        };
-        let text = self.add(
-            head,
-            Style {
-                width: Length::Fill,
-                ..Style::default()
-            },
-            Kind::Box(Look::default()),
-        );
-        self.line(
-            text,
-            &said,
-            theme.text.body.with_weight(600).with_color(paint),
-        );
-        if updates.state == "idle" && !updates.updates.is_empty() {
-            let install = self.add(
-                head,
-                Style {
-                    height: Length::Px(40.0),
-                    padding: Insets::symmetric(0.0, 18.0),
-                    ..Style::default()
-                },
-                Kind::Button(Button::new(
-                    words::INSTALL_ALL.get(lang),
-                    ButtonKind::Primary,
-                    theme,
-                )),
-            );
-            self.targets.insert(install, Target::InstallUpdates);
-        }
-        if updates.updates.is_empty() {
-            return;
-        }
-        let list = self.add(
-            section,
-            Style {
-                padding: Insets::symmetric(6.0, 18.0),
-                ..fill_width(column(0.0))
-            },
-            Kind::Box(Look {
-                background: Some(Paint::SurfaceHover),
-                radius: 16.0,
-                ..Look::default()
-            }),
-        );
-        for u in &updates.updates {
-            let line = self.add(
-                list,
-                Style {
-                    height: Length::Px(40.0),
-                    ..fill_width(row(16.0))
-                },
-                Kind::Box(Look::default()),
-            );
-            let name = self.add(
-                line,
-                Style {
-                    width: Length::Fill,
-                    ..Style::default()
-                },
-                Kind::Box(Look::default()),
-            );
-            self.line(name, &u.name, theme.text.body.with_weight(600));
-            let version = match &u.from {
-                Some(from) => format!("{from} → {}", u.to),
-                None => u.to.clone(),
-            };
-            self.line(line, &version, theme.text.label.with_color(Paint::Muted));
-        }
     }
 
     fn section(&mut self, theme: &Theme, parent: NodeId, title: words::Words) -> NodeId {
@@ -4528,5 +4451,133 @@ mod tests {
         assert_eq!(changes(&out), [("lock_after".into(), Some("60".into()))]);
         let out = click(&mut v, "Lock after the curtain");
         assert_eq!(changes(&out), [("lock".into(), Some("false".into()))]);
+    }
+
+    #[test]
+    fn each_application_s_notifications_and_do_not_disturb_are_set() {
+        use crate::edit::Place;
+        let mut v = page_view(
+            "[notifications.apps]\nChat = \"off\"\n",
+            Page::Notifications,
+            &[],
+        );
+        let mut ctx = v.context().clone();
+        ctx.notifications.apps = vec!["Slack".into()];
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Slack: Banners").expect("Slack").selected);
+        assert!(find(&v.access(), "Chat: Off").expect("Chat").selected);
+        let out = click(&mut v, "Do not disturb");
+        assert!(
+            matches!(out.as_slice(), [Outcome::DoNotDisturb(true)]),
+            "{out:?}"
+        );
+        let out = click(&mut v, "The column keeps: 50");
+        assert_eq!(changes(&out), [("history".into(), Some("50".into()))]);
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Slack: Column only");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("notifications.apps"),
+                "Slack".into(),
+                Some("\"history\"".into())
+            )]
+        );
+        // Back to banners, the key goes.
+        let out = click(&mut v, "Chat: Banners");
+        assert_eq!(
+            values(&out),
+            [(Place::Section("notifications.apps"), "Chat".into(), None)]
+        );
+    }
+
+    #[test]
+    fn default_applications_are_chosen_and_autostart_turned_off() {
+        let mut v = page_view("", Page::Apps, &[]);
+        assert!(find(&v.access(), "Reading the applications…").is_some());
+        v.set_apps(catalogue::AppsState::Known(catalogue::Apps {
+            defaults: vec![hocus_platform::mime::DefaultApp {
+                kind: "web",
+                current: Some("firefox.desktop".into()),
+                choices: vec![
+                    ("firefox.desktop".into(), "Firefox".into()),
+                    ("web.desktop".into(), "Web".into()),
+                ],
+            }],
+            autostart: vec![hocus_platform::apps::Autostart {
+                id: "tray.desktop".into(),
+                name: "Tray".into(),
+                enabled: true,
+            }],
+        }));
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Web browser: Web").is_none());
+        click(&mut v, "Change: Web browser");
+        assert!(
+            find(&v.access(), "Web browser: Firefox")
+                .expect("it")
+                .selected
+        );
+        let out = click(&mut v, "Web browser: Web");
+        assert!(
+            matches!(out.as_slice(), [Outcome::SetDefaultApp { kind, app }] if kind == "web" && app == "web.desktop"),
+            "{out:?}"
+        );
+        assert!(find(&v.access(), "Web browser: Web").is_none(), "closed");
+        let out = click(&mut v, "Tray");
+        assert!(
+            matches!(out.as_slice(), [Outcome::SetAutostart { id, on: false }] if id == "tray.desktop"),
+            "{out:?}"
+        );
+        let out = click(&mut v, "Last session’s windows: Always");
+        assert_eq!(
+            changes(&out),
+            [("restore".into(), Some("\"always\"".into()))]
+        );
+    }
+
+    #[test]
+    fn the_account_s_name_goes_to_accounts_service_and_updates_are_set() {
+        use hocus_platform::account::{AccountInfo, Fingerprint, User, UserState};
+        let mut v = page_view("", Page::Account, &[]);
+        let mut ctx = v.context().clone();
+        ctx.user = "alex".into();
+        v.set_context(ctx);
+        assert!(find(&v.access(), "Full name").is_none(), "not asked yet");
+        v.set_account(AccountInfo {
+            user: UserState::Known(User {
+                real_name: "Alex Panda".into(),
+                icon_file: None,
+                picture: None,
+            }),
+            fingerprint: Fingerprint::Reader {
+                name: "Panda Touch".into(),
+                fingers: vec!["right-index-finger".into()],
+            },
+        });
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "alex · Hocuspanda 0.1.0").is_some());
+        assert!(find(&v.access(), "Panda Touch · 1 finger enrolled").is_some());
+        click(&mut v, "Full name");
+        for _ in 0.."Alex Panda".len() {
+            v.key(Key::Backspace);
+        }
+        v.text("Alex P.");
+        let out = v.key(Key::Enter);
+        assert!(
+            matches!(out.as_slice(), [Outcome::SetRealName(n)] if n == "Alex P."),
+            "{out:?}"
+        );
+        v.account_refused("Not authorized".into());
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Not authorized").is_some());
+        v.scroll(10_000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Look every: 1 day");
+        assert_eq!(changes(&out), [("every_hours".into(), Some("24".into()))]);
+        let out = click(&mut v, "Look for updates");
+        assert_eq!(changes(&out), [("enabled".into(), Some("false".into()))]);
     }
 }

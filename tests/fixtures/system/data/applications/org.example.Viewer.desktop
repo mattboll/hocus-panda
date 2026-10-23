@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Image Viewer
+MimeType=image/png;image/jpeg;image/gif;image/webp;
+Exec=true %F

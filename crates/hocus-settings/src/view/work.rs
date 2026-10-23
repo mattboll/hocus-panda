@@ -24,6 +24,10 @@ pub(super) enum Field {
         output: String,
         index: usize,
     },
+    /// The account's full name, written through AccountsService.
+    RealName,
+    /// The account's picture's file, the same.
+    Picture,
 }
 
 /// The Work pages' fields between builds.
@@ -80,7 +84,7 @@ fn rule_pattern(rule: &Rule, lang: Lang) -> String {
 
 impl SettingsView {
     /// A field of a Work page, showing what was typed or the file's value.
-    fn text_field(
+    pub(super) fn text_field(
         &mut self,
         theme: &Theme,
         parent: NodeId,
@@ -141,6 +145,21 @@ impl SettingsView {
         self.tree.set_focus(None);
         let value = (!typed.is_empty()).then(|| toml_edit::Value::from(typed.as_str()));
         let change = match &field {
+            // Not the file's: AccountsService's, which says it back.
+            // What was typed stays until it says it back.
+            Field::RealName | Field::Picture => {
+                self.system.refused = None;
+                if typed.is_empty() {
+                    self.fields.forget(&field);
+                    return Vec::new();
+                }
+                self.fields.type_into(field.clone(), typed.clone());
+                return vec![if field == Field::RealName {
+                    Outcome::SetRealName(typed)
+                } else {
+                    Outcome::SetPicture(typed)
+                }];
+            }
             Field::ScreenshotFolder => Change {
                 value,
                 ..Change::new("screenshots", "folder", "")
@@ -196,6 +215,18 @@ impl SettingsView {
         name: words::Words,
         choices: Vec<(String, bool, Target)>,
     ) -> Vec<NodeId> {
+        let name = name.get(self.lang);
+        self.choices_named(theme, parent, name, choices)
+    }
+
+    /// The same, its name said as it comes (an application's).
+    pub(super) fn choices_named(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        name: &str,
+        choices: Vec<(String, bool, Target)>,
+    ) -> Vec<NodeId> {
         let lang = self.lang;
         let wide = self.tree.size().w >= 1180.0;
         let line = if wide {
@@ -206,12 +237,12 @@ impl SettingsView {
                     width: Length::Px(170.0),
                     ..Style::default()
                 },
-                Kind::text_line(name.get(lang), theme.text.body),
+                Kind::text_line(name, theme.text.body),
             );
             line
         } else {
             let holder = self.add(parent, fill_width(column(8.0)), Kind::Box(Look::default()));
-            self.line(holder, name.get(lang), theme.text.body.with_weight(600));
+            self.line(holder, name, theme.text.body.with_weight(600));
             self.add(holder, row(8.0), Kind::Box(Look::default()))
         };
         choices
@@ -230,7 +261,7 @@ impl SettingsView {
                 );
                 self.targets.insert(b, target);
                 self.tree
-                    .set_name(b, &words::named_value(name, &label, lang));
+                    .set_name(b, &words::name_value(name, &label, lang));
                 b
             })
             .collect()

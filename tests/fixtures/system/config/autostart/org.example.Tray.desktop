@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Tray helper
+Exec=true tray-helper

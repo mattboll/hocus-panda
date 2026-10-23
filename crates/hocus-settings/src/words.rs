@@ -937,9 +937,14 @@ pub fn pixels(n: u32) -> String {
 }
 
 pub fn named_value(name: Words, value: &str, lang: Lang) -> String {
+    name_value(name.get(lang), value, lang)
+}
+
+/// The same, the name said as it comes (an application's).
+pub fn name_value(name: &str, value: &str, lang: Lang) -> String {
     match lang {
-        Lang::En => format!("{}: {value}", name.get(lang)),
-        Lang::Fr => format!("{} : {value}", name.get(lang)),
+        Lang::En => format!("{name}: {value}"),
+        Lang::Fr => format!("{name} : {value}"),
     }
 }
 
@@ -1303,5 +1308,195 @@ pub fn locks_after(seconds: u32, lang: Lang) -> String {
     match lang {
         Lang::En => format!("Locks after {}", duration(seconds, lang)),
         Lang::Fr => format!("Verrouille après {}", duration(seconds, lang)),
+    }
+}
+
+// The System pages.
+
+// Notifications.
+pub const DND: Words = Words::new("Do not disturb", "Ne pas déranger");
+pub const DND_SUB: Words = Words::new(
+    "Notifications wait in the column; critical ones still show",
+    "Les notifications attendent dans la colonne ; les critiques s’affichent quand même",
+);
+pub const DND_NOTE: Words = Words::new(
+    "The same as quick settings’ tile, until the session ends.",
+    "Le même que la tuile des réglages rapides, jusqu’à la fin de la session.",
+);
+pub const SHARING: Words = Words::new("While the screen is shared", "Pendant un partage d’écran");
+pub const HOLD_WHILE_SHARING: Words =
+    Words::new("Hold while sharing", "Retenir pendant le partage");
+pub const HOLD_WHILE_SHARING_SUB: Words = Words::new(
+    "Nothing private shows; one notification sums them up after",
+    "Rien de privé ne s’affiche ; une seule notification les résume ensuite",
+);
+pub const HISTORY: Words = Words::new("History", "Historique");
+pub const HISTORY_KEEPS: Words = Words::new("The column keeps", "La colonne garde");
+pub const HISTORY_NOTE: Words = Words::new(
+    "The latest first; older ones go. Clear empties it from the column.",
+    "Les plus récentes d’abord ; les plus anciennes s’en vont. Effacer la vide depuis la colonne.",
+);
+pub const NONE: Words = Words::new("None", "Aucune");
+pub const APPLICATIONS: Words = Words::new("Applications", "Applications");
+pub const SHOW_TOASTS: Words = Words::new("Banners", "Bannières");
+pub const COLUMN_ONLY: Words = Words::new("Column only", "Colonne seule");
+pub const NO_APP_YET: Words = Words::new(
+    "No application has sent a notification yet this session: each one shows here once it has.",
+    "Aucune application n’a encore envoyé de notification dans cette session : chacune s’affiche ici dès qu’elle l’a fait.",
+);
+pub const APPS_NOTE: Words = Words::new(
+    "By the name each application gives. Critical notifications always show.",
+    "Selon le nom que donne chaque application. Les notifications critiques s’affichent toujours.",
+);
+pub const NOTIFICATIONS_SOUND_NOTE: Words = Words::new(
+    "Notifications make no sound here: there is nothing to silence.",
+    "Les notifications ne font aucun son ici : il n’y a rien à couper.",
+);
+
+/// What becomes of an application's notifications, in words.
+pub fn app_mode(mode: hocus_core::config::AppNotifications) -> Words {
+    use hocus_core::config::AppNotifications as M;
+    match mode {
+        M::Show => SHOW_TOASTS,
+        M::History => COLUMN_ONLY,
+        M::Off => OFF,
+    }
+}
+
+/// "3 in the column".
+pub fn in_the_column(n: usize, lang: Lang) -> String {
+    match (lang, n) {
+        (Lang::En, 0) => "Nothing in the column".into(),
+        (Lang::En, n) => format!("{n} in the column"),
+        (Lang::Fr, 0) => "Rien dans la colonne".into(),
+        (Lang::Fr, n) => format!("{n} dans la colonne"),
+    }
+}
+
+// Applications.
+pub const DEFAULT_APPS: Words = Words::new("Default applications", "Applications par défaut");
+pub const DEFAULT_APPS_NOTE: Words = Words::new(
+    "Written in mimeapps.list, which every application that opens files or links reads.",
+    "Écrites dans mimeapps.list, que lisent toutes les applications qui ouvrent des fichiers ou des liens.",
+);
+pub const NONE_SET: Words = Words::new("None set", "Aucune choisie");
+pub const NO_APP_FOR: Words = Words::new(
+    "No application installed opens these",
+    "Aucune application installée ne les ouvre",
+);
+pub const NOT_READ_YET: Words =
+    Words::new("Reading the applications…", "Lecture des applications…");
+pub const AT_START: Words = Words::new("At the start of the session", "Au début de la session");
+pub const AUTOSTART: Words = Words::new("Start applications", "Démarrer les applications");
+pub const AUTOSTART_SUB: Words = Words::new(
+    "Those of the autostart folders, below",
+    "Celles des dossiers de démarrage, ci-dessous",
+);
+pub const STARTS: Words = Words::new("Starts with the session", "Démarre avec la session");
+pub const DOES_NOT_START: Words = Words::new("Does not start", "Ne démarre pas");
+pub const NO_AUTOSTART: Words = Words::new(
+    "No application asks to start with the session.",
+    "Aucune application ne demande à démarrer avec la session.",
+);
+pub const AUTOSTART_NOTE: Words = Words::new(
+    "Turned off in your own copy of the entry (~/.config/autostart), as every desktop reads it.",
+    "Désactivée dans votre propre copie de l’entrée (~/.config/autostart), que lisent tous les bureaux.",
+);
+pub const RESTORE: Words = Words::new("Last session’s windows", "Fenêtres de la dernière session");
+pub const ASK: Words = Words::new("Ask", "Demander");
+pub const ALWAYS: Words = Words::new("Always", "Toujours");
+
+/// A kind of file, by its name in `hocus_platform::mime::KINDS`.
+pub fn app_kind(kind: &str) -> Words {
+    match kind {
+        "web" => Words::new("Web browser", "Navigateur web"),
+        "mail" => Words::new("Mail", "Courriel"),
+        "files" => Words::new("Files", "Fichiers"),
+        "text" => Words::new("Text", "Texte"),
+        "images" => Words::new("Images", "Images"),
+        "video" => Words::new("Videos", "Vidéos"),
+        "music" => Words::new("Music", "Musique"),
+        "pdf" => Words::new("PDF documents", "Documents PDF"),
+        _ => Words::new("Other", "Autre"),
+    }
+}
+
+/// "2 at start".
+pub fn at_start(n: usize, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{n} at start"),
+        Lang::Fr => format!("{n} au démarrage"),
+    }
+}
+
+// Account.
+pub const FULL_NAME: Words = Words::new("Full name", "Nom complet");
+pub const AVATAR: Words = Words::new("Picture", "Photo");
+pub const AVATAR_HINT: Words = Words::new(
+    "/home/…/picture.png, then Enter",
+    "/home/…/photo.png, puis Entrée",
+);
+pub const ACCOUNT_NOTE: Words = Words::new(
+    "Through AccountsService: Enter writes the name or the picture (a PNG file, which it copies).",
+    "Par AccountsService : Entrée enregistre le nom ou la photo (un fichier PNG, qu’il copie).",
+);
+pub const NO_ACCOUNTS_SERVICE: Words = Words::new(
+    "AccountsService is not there: the name and the picture are changed with the system’s own tools.",
+    "AccountsService est absent : le nom et la photo se changent avec les outils du système.",
+);
+pub const PASSWORD: Words = Words::new("Password", "Mot de passe");
+pub const PASSWORD_NOTE: Words = Words::new(
+    "Changed with passwd in a terminal for now: the system asks for the current one first.",
+    "Se change avec passwd dans un terminal pour l’instant : le système demande d’abord l’actuel.",
+);
+pub const FINGERPRINT: Words = Words::new("Fingerprint", "Empreinte");
+pub const NO_FPRINTD: Words = Words::new(
+    "fprintd is not there: no fingerprint is read.",
+    "fprintd est absent : aucune empreinte n’est lue.",
+);
+pub const NO_READER: Words = Words::new("No fingerprint reader", "Aucun lecteur d’empreintes");
+pub const FINGERPRINT_NOTE: Words = Words::new(
+    "Fingers are enrolled with fprintd-enroll for now; enrolling here comes later.",
+    "On enregistre un doigt avec fprintd-enroll pour l’instant ; l’enregistrement ici viendra plus tard.",
+);
+pub const LOOK_FOR_UPDATES: Words = Words::new("Look for updates", "Chercher les mises à jour");
+pub const LOOK_FOR_UPDATES_SUB: Words = Words::new(
+    "The column says when some are ready",
+    "La colonne prévient quand il y en a",
+);
+pub const LOOK_EVERY: Words = Words::new("Look every", "Chercher toutes les");
+pub const DAY: Words = Words::new("1 day", "1 jour");
+pub const WEEK: Words = Words::new("1 week", "1 semaine");
+
+/// "1 finger enrolled".
+pub fn fingers(n: usize, lang: Lang) -> String {
+    match (lang, n) {
+        (Lang::En, 0) => "No finger enrolled".into(),
+        (Lang::En, 1) => "1 finger enrolled".into(),
+        (Lang::En, n) => format!("{n} fingers enrolled"),
+        (Lang::Fr, 0) => "Aucun doigt enregistré".into(),
+        (Lang::Fr, 1) => "1 doigt enregistré".into(),
+        (Lang::Fr, n) => format!("{n} doigts enregistrés"),
+    }
+}
+
+/// How often updates are looked for: "6 h", "1 day".
+pub fn every(hours: u32, lang: Lang) -> String {
+    match hours {
+        24 => DAY.get(lang).to_owned(),
+        168 => WEEK.get(lang).to_owned(),
+        h => duration(h * 3600, lang),
+    }
+}
+
+/// "2 calendars".
+pub fn calendars(n: usize, lang: Lang) -> String {
+    match (lang, n) {
+        (Lang::En, 0) => "No calendar".into(),
+        (Lang::En, 1) => "1 calendar".into(),
+        (Lang::En, n) => format!("{n} calendars"),
+        (Lang::Fr, 0) => "Aucun agenda".into(),
+        (Lang::Fr, 1) => "1 agenda".into(),
+        (Lang::Fr, n) => format!("{n} agendas"),
     }
 }

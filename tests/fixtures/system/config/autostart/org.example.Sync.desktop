@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Sync
+Exec=true sync-client
+X-GNOME-Autostart-enabled=false

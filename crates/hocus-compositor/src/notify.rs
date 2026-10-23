@@ -5,7 +5,8 @@
 
 use std::time::Duration;
 
-use hocus_api::UiNode;
+use hocus_api::{NotificationsInfo, UiNode};
+use hocus_core::config::AppNotifications;
 use hocus_platform::notifications::{CloseReason, Expiry, Incoming, Notifications, Urgency};
 use hocus_shell::{
     Lang, Toast, ToastEvent, Toasts,
@@ -45,6 +46,9 @@ pub struct ToastPanel {
     buffer: Option<MemoryRenderBuffer>,
     pointer_inside: bool,
     pressed: bool,
+    /// The applications that sent notifications this session, the latest
+    /// first: the settings set what becomes of each.
+    seen_apps: Vec<String>,
 }
 
 impl ToastPanel {
@@ -68,6 +72,8 @@ const SUMMARY: u32 = u32::MAX;
 /// reach them.
 const SHELL_IDS: u32 = u32::MAX - 1;
 const SHELL_IDS_END: u32 = u32::MAX - 10_000;
+/// The name the shell's own toasts give.
+const SHELL_APP: &str = "Hocuspanda";
 
 /// Serves notifications on the bus at `address`; toasts are shown even if
 /// the bus is not there (nothing then sends any).
@@ -86,7 +92,11 @@ pub fn start(
         buffer: None,
         pointer_inside: false,
         pressed: false,
+        seen_apps: Vec::new(),
     };
+    panel
+        .toasts
+        .set_history_limit(state.config.notifications.history as usize);
     if let Some(address) = address {
         let (sender, receiver) = channel::channel::<Incoming>();
         let sender = std::sync::Mutex::new(sender);
@@ -144,6 +154,14 @@ impl State {
         }
         let now = self.clock.now();
         let dnd = self.dnd();
+        let rules = &self.config.notifications;
+        let hold_while_sharing = rules.hold_while_sharing;
+        // The shell's own (a summary, a capture saved) are not an
+        // application's to silence.
+        let mode = match &incoming {
+            Incoming::Notify(n) if n.app != SHELL_APP => rules.for_app(&n.app),
+            _ => AppNotifications::Show,
+        };
         // In the Matrix theme a toast is typed in where it goes (#155).
         let entrance = if self.matrix_moves() {
             hocus_shell::toasts::Entrance::InPlace
@@ -152,7 +170,7 @@ impl State {
         };
         let mut typed_in = None;
         // While the screen is shared, nothing private shows on it.
-        let sharing = self.sharing();
+        let sharing = self.sharing() && hold_while_sharing;
         // A first toast goes where the user works; the others join it.
         let place = self
             .toasts
@@ -163,8 +181,14 @@ impl State {
         let Some(panel) = self.toasts.as_mut() else {
             return;
         };
+        let mut first_from_app = false;
         let events = match incoming {
             Incoming::Notify(n) => {
+                if n.app != SHELL_APP && !n.app.is_empty() {
+                    first_from_app = !panel.seen_apps.contains(&n.app);
+                    panel.seen_apps.retain(|a| *a != n.app);
+                    panel.seen_apps.insert(0, n.app.clone());
+                }
                 let shown = hocus_api::Event::Notification {
                     id: n.id,
                     app: n.app.clone(),
@@ -181,11 +205,15 @@ impl State {
                     panel.on = Some(place);
                 }
                 let toast = toast_of(n);
+                // Critical ones always show; an application set off is
+                // dropped, and one set to the history only goes there.
+                if mode == AppNotifications::Off && !toast.critical {
+                    Vec::new()
                 // Do not disturb holds all but critical ones: the column's
                 // history keeps them.
-                if (dnd || sharing) && !toast.critical {
+                } else if (dnd || sharing || mode == AppNotifications::History) && !toast.critical {
                     panel.toasts.remember(&toast);
-                    if sharing && !dnd {
+                    if sharing && !dnd && mode == AppNotifications::Show {
                         self.screen_capture.held += 1;
                     }
                     Vec::new()
@@ -210,6 +238,9 @@ impl State {
                 Vec::new()
             }
         };
+        if first_from_app {
+            self.emit(|_| hocus_api::Event::Notifications);
+        }
         if let Some(id) = typed_in {
             self.matrix_toast_shown(id);
         }
@@ -259,7 +290,7 @@ impl State {
         body: &str,
         actions: Vec<(String, String)>,
     ) -> Option<u32> {
-        self.shell_toast_as(None, "Hocuspanda", summary, body, actions)
+        self.shell_toast_as(None, SHELL_APP, summary, body, actions)
     }
 
     /// A toast the shell shows for another (a phone's notification): a
@@ -389,7 +420,7 @@ impl State {
         self.on_notification(Incoming::Notify(
             hocus_platform::notifications::Notification {
                 id,
-                app: "Hocuspanda".into(),
+                app: SHELL_APP.into(),
                 summary,
                 body,
                 actions: Vec::new(),
@@ -447,6 +478,40 @@ impl State {
                 ToastEvent::Replied(id, _) => server.closed(id, CloseReason::Dismissed),
             }
         }
+    }
+
+    /// Do not disturb and the applications heard from, for the settings.
+    pub fn notifications_info(&self) -> NotificationsInfo {
+        NotificationsInfo {
+            dnd: self.dnd(),
+            apps: self
+                .toasts
+                .as_ref()
+                .map(|p| p.seen_apps.clone())
+                .unwrap_or_default(),
+            history: self.notification_count(),
+        }
+    }
+
+    /// Do not disturb on or off, from quick settings or the settings.
+    pub fn set_dnd(&mut self, on: bool) {
+        let Some(panel) = self.quick.as_mut() else {
+            return;
+        };
+        if panel.dnd != on {
+            panel.dnd = on;
+            self.emit(|_| hocus_api::Event::Notifications);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// The history keeps as many as the configuration says.
+    pub fn apply_notifications_config(&mut self) {
+        let limit = self.config.notifications.history as usize;
+        if let Some(panel) = self.toasts.as_mut() {
+            panel.toasts.set_history_limit(limit);
+        }
+        self.needs_redraw = true;
     }
 
     /// How many notifications the history holds.

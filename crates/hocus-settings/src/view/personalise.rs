@@ -254,7 +254,20 @@ impl SettingsView {
         target: Option<Target>,
         setting: Option<&Setting>,
     ) -> NodeId {
-        let lang = self.lang;
+        let name = name.get(self.lang);
+        self.switch_card_named(theme, parent, (name, sub), on, target, setting)
+    }
+
+    /// The same, its name said as it comes (an application's).
+    pub(super) fn switch_card_named(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        (name, sub): (&str, &str),
+        on: bool,
+        target: Option<Target>,
+        setting: Option<&Setting>,
+    ) -> NodeId {
         let look = Look {
             background: Some(Paint::SurfaceHover),
             radius: 16.0,
@@ -272,14 +285,14 @@ impl SettingsView {
         let works = target.is_some();
         let ink = if works { Paint::Text } else { Paint::Muted };
         if let Some(target) = target {
-            self.tree.set_clickable(card, name.get(lang));
+            self.tree.set_clickable(card, name);
             self.tree.set_selected_box(card, on);
             self.targets.insert(card, target);
         }
         let words_box = self.add(card, fill_width(column(1.0)), Kind::Box(Look::default()));
         self.line(
             words_box,
-            name.get(lang),
+            name,
             theme.text.title.with_weight(700).with_color(ink),
         );
         self.line(

@@ -26,6 +26,7 @@ pub const ROOM: f32 = 24.0;
 const GAP: f32 = 10.0;
 /// Toasts shown at once; older ones go to the history.
 const MAX: usize = 5;
+/// What the history keeps unless told otherwise.
 const HISTORY: usize = 20;
 
 /// A notification to show.
@@ -139,6 +140,8 @@ pub struct Toasts {
     /// Top first.
     cards: Vec<Card>,
     history: VecDeque<Past>,
+    /// How many the history keeps.
+    history_limit: usize,
     hovered: Option<u32>,
     /// The toast a reply is typed in: it has the keyboard.
     replying: Option<u32>,
@@ -204,6 +207,7 @@ impl Toasts {
             stack,
             cards: Vec::new(),
             history: VecDeque::new(),
+            history_limit: HISTORY,
             hovered: None,
             replying: None,
             now: Duration::ZERO,
@@ -304,7 +308,7 @@ impl Toasts {
             app: toast.app.clone(),
             summary: toast.summary.clone(),
         });
-        self.history.truncate(HISTORY);
+        self.history.truncate(self.history_limit);
         // It slides in from the edge while the others make room.
         if self.entrance == Entrance::Slide {
             let id = self.cards[0].card;
@@ -330,7 +334,13 @@ impl Toasts {
             app: toast.app.clone(),
             summary: toast.summary.clone(),
         });
-        self.history.truncate(HISTORY);
+        self.history.truncate(self.history_limit);
+    }
+
+    /// The history keeps `limit` at most from now on.
+    pub fn set_history_limit(&mut self, limit: usize) {
+        self.history_limit = limit;
+        self.history.truncate(limit);
     }
 
     pub fn clear_history(&mut self) {

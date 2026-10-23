@@ -1,0 +1,62 @@
+description = "French chosen on Language and region: the System pages speak it at once, without restart"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+accounts = true
+data_dirs = ["../fixtures/system/data"]
+config_dirs = ["../fixtures/system/config"]
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+click_settings = "Français"
+
+[[step]]
+expect_config_file = { contains = ["interface = \"fr\""] }
+
+[[step]]
+keys = "escape"
+
+# The System family is the home's last.
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+frames = 2
+
+[[step]]
+click_settings = "Comptes et agenda"
+
+[[step]]
+expect_settings = { label = "Aucun agenda pour l’instant : ajoutez un compte CalDAV ou un lien d’abonnement." }
+
+[[step]]
+click_settings = "Compte et mises à jour"
+
+[[step]]
+expect_settings = { label = "Panda Touch · 1 doigt enregistré" }
+
+[[step]]
+click_settings = "Notifications"
+
+[[step]]
+expect_settings = { label = "Ne pas déranger", selected = false }
+
+[[step]]
+click_settings = "Applications"
+
+[[step]]
+expect_settings = { label = "Changer : Navigateur web" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-french-system.png" }

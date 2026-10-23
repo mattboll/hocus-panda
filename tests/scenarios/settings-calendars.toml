@@ -1,4 +1,4 @@
-description = "A calendar added in the settings: its password goes to the keyring, never the configuration; it syncs, says so, and goes with Remove"
+description = "A calendar added in the settings: its password goes to the keyring, never the configuration; it syncs, says so, and goes with Remove; in the dark and light themes"
 outputs = ["1280x800"]
 shell = true
 
@@ -52,6 +52,27 @@ frames = 2
 
 [[step]]
 expect_screenshot = { output = "HEADLESS-1", reference = "settings-calendars.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[[calendars]]
+name = "Work"
+kind = "caldav"
+url = "{caldav}"
+user = "alex"
+"""
+
+[[step]]
+expect_settings = { label = "Synced · 10 events" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-calendars-light.png" }
 
 [[step]]
 click_settings = "Remove"

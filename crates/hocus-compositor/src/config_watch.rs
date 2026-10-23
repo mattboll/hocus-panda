@@ -151,7 +151,11 @@ impl State {
         let keyboard_changed = first || self.config.keyboard != config.keyboard;
         let outputs_changed =
             self.config.outputs != config.outputs || self.config.layouts != config.layouts;
+        let notifications_changed = self.config.notifications != config.notifications;
         self.config = config;
+        if notifications_changed {
+            self.apply_notifications_config();
+        }
         if outputs_changed {
             self.outputs_config_changed();
         }

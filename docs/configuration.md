@@ -77,7 +77,8 @@ image = "~/Pictures/wide.png"
 
 [session]                  # the last session, at start
 restore = "ask"            # ask (a card), always, never
-autostart = true           # start the XDG autostart entries
+autostart = true           # start the XDG autostart entries; Settings → Applications turns one
+                           #   off in the user's copy (~/.config/autostart), as every desktop reads it
 
 [idle]                     # nobody at the keyboard (on the charger, or without a battery)
 curtain_after = 300        # seconds before the curtain dims the screens (0: never)
@@ -114,6 +115,13 @@ enabled = true             # its line in the column (battery, Ring), its popover
 notifications = true       # its notifications as toasts, with a reply typed into them
 adb = false                # wireless debugging when adb is installed: pairing by a QR code,
                            #   mirroring its screen when scrcpy is installed too
+
+[notifications]            # toasts and the column's history (Settings → Notifications)
+hold_while_sharing = true  # held while the screen is shared, then summed up in one toast
+history = 20               # how many the column keeps, 0 to 100
+
+[notifications.apps]       # per application, by the name it gives: show (the default),
+Chat = "history"           #   history (the column only, no toast) or off; critical ones always show
 
 [[calendars]]              # one per account or subscription (Settings → Accounts and calendar)
 name = "Work"

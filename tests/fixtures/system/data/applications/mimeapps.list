@@ -1,0 +1,6 @@
+[Default Applications]
+x-scheme-handler/https=firefox.desktop;
+x-scheme-handler/http=firefox.desktop;
+text/html=firefox.desktop;
+inode/directory=org.example.Files.desktop;
+application/pdf=org.example.Papers.desktop;
