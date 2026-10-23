@@ -20,6 +20,8 @@ mdns)
 pair)
     read -r name password < "$dir/adb-phone"
     if [ "$2" = 127.0.0.1:37001 ] && [ "$3" = "$password" ]; then
+        # As long as a phone on the network may take.
+        sleep "${ADB_PAIR_DELAY:-0}"
         : > "$dir/adb-paired"
         echo "Successfully paired to 127.0.0.1:37001 [guid=adb-1A2B3C-xYz]"
     else

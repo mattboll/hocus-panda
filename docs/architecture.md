@@ -256,7 +256,11 @@ scans it and advertises a `_adb-tls-pairing._tcp` service under that name
 over mDNS; a worker polls adb's own discovery (`adb mdns services`) for it,
 runs `adb pair` with the password, then `adb connect` to the debugging port
 the phone advertises next (`_adb-tls-connect._tcp`), unless adb joined it
-by itself. Asking adb rather than browsing mDNS ourselves keeps one view of
+by itself. Closing the popover before the phone scanned the code cancels
+the pairing (the worker stops, the code is forgotten); once it scanned,
+`adb pair` is under way and the phone ends paired whatever we do, so the
+pairing goes on and a toast says how it ended, the popover being closed.
+Asking adb rather than browsing mDNS ourselves keeps one view of
 the network and needs no daemon or crate of our own. Every adb command runs
 on that worker with a time limit. "Mirror its screen" starts scrcpy for the
 device adb reaches (`scrcpy -s SERIAL`), as any program the user starts;

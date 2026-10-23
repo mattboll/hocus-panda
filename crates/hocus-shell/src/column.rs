@@ -996,6 +996,14 @@ impl Column {
         self.popover_changed = true;
     }
 
+    /// Whether the phone's popover is open: a pairing shown in it stops
+    /// once it closes.
+    pub fn phone_popover_open(&self) -> bool {
+        self.popover
+            .as_ref()
+            .is_some_and(|p| p.kind == PopoverKind::Phone)
+    }
+
     pub fn close_popover(&mut self) {
         if self.popover.take().is_some() {
             self.popover_changed = true;

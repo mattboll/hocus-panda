@@ -1,0 +1,73 @@
+description = "A pairing code no one sees is cancelled when the phone's popover closes; closed once the phone scanned it, the pairing goes on and a toast says the phone paired"
+outputs = ["1280x800"]
+shell = true
+# The stand-in adb takes a second to pair, as a phone on the network may.
+child_env = { PATH = "{scenario_dir}/phone/bin:/usr/bin:/bin", ADB_PAIR_DELAY = "1" }
+
+[[step]]
+config = """
+[phone]
+adb = true
+"""
+
+[[step]]
+expect_adb = "ready"
+
+[[step]]
+click_ui = "Phone"
+
+[[step]]
+click_ui = "Pair over Wi-Fi"
+
+[[step]]
+expect_adb = "pairing"
+
+# Closed before the phone scanned: the code is forgotten.
+[[step]]
+pointer_move = [300, 300]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_adb = "ready"
+
+[[step]]
+click_ui = "Phone"
+
+[[step]]
+expect_ui = { label = "Pair over Wi-Fi" }
+
+[[step]]
+expect_ui = { label = "QR code to scan with the phone", shown = false }
+
+# Closed once it scanned: adb pairs all the same, and says so in a toast.
+[[step]]
+click_ui = "Pair over Wi-Fi"
+
+[[step]]
+scan_pairing_code = true
+
+[[step]]
+expect_ui = { label = "Pairing…" }
+
+[[step]]
+pointer_move = [300, 300]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_adb = "ready"
+
+[[step]]
+expect_ui = { label = "Dismiss: Paired with Pixel 8" }
+
+[[step]]
+expect_runtime_file = { name = "adb", contains = ["pair 127.0.0.1:37001 ", "connect 127.0.0.1:41001"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "phone-adb-closed.png" }
