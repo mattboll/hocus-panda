@@ -259,6 +259,14 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             G::System,
             EVERYWHERE,
         ),
+        A::StopAgents => (
+            w(
+                "Stop every AI agent, or allow them again",
+                "Arrêter tous les agents IA, ou les autoriser à nouveau",
+            ),
+            G::Launcher,
+            EVERYWHERE,
+        ),
         A::ShowDesktop => (
             w(
                 "Show the desktop, or the windows again",
@@ -367,6 +375,7 @@ pub fn catalog() -> Vec<Action> {
         A::SwitchLayout,
         A::Launcher,
         A::Palette,
+        A::StopAgents,
         A::QuickSettings,
         A::Dropdown,
         A::Settings,

@@ -99,6 +99,9 @@ pub struct ColumnState {
     pub agenda: Agenda,
     /// Coding agents (#41); none without an agent manager.
     pub agents: Option<crate::agents::AgentsView>,
+    /// What MCP agents did (#176), once one connected; or that they are
+    /// stopped.
+    pub journal: Option<crate::journal::JournalView>,
 }
 
 /// The meeting card, as board Bureau draws it.
@@ -199,6 +202,10 @@ pub enum Action {
         key: String,
         ask: crate::agents::AgentAsk,
     },
+    /// Every MCP agent stopped at once (#176).
+    StopAgents,
+    /// Allowed again.
+    AllowAgents,
 }
 
 /// An application in the tray.
@@ -332,6 +339,11 @@ struct Nodes {
     meeting_button: Option<NodeId>,
     /// The coding agents' room.
     agents: NodeId,
+    /// The agents' journal's room, its stop button, and its entries (which
+    /// open the popover).
+    journal: NodeId,
+    journal_button: Option<NodeId>,
+    journal_entries: Option<NodeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,6 +354,7 @@ enum PopoverKind {
     TrayMenu,
     Agenda,
     Phone,
+    Journal,
 }
 
 /// A popover: its own tree and pixels, placed by the column.
@@ -555,6 +568,19 @@ impl Column {
                 .map(|view| crate::agents::fill(t, n.agents, &theme, lang, view))
                 .unwrap_or_default();
         }
+        if all || old.journal != state.journal {
+            let shown = state.journal.as_ref();
+            t.set_style(n.journal, crate::journal::room(shown.is_some()));
+            for child in t.children(n.journal) {
+                t.remove(child);
+            }
+            let theme = t.theme().clone();
+            (self.nodes.journal_button, self.nodes.journal_entries) =
+                match shown.map(|view| crate::journal::fill(t, n.journal, &theme, lang, view)) {
+                    Some((button, entries)) => (Some(button), Some(entries)),
+                    None => (None, None),
+                };
+        }
         if all || old.updates != state.updates {
             t.set_style(n.updates, tasks_room(state.updates.is_some()));
             for child in t.children(n.updates) {
@@ -742,6 +768,20 @@ impl Column {
                 self.open(PopoverKind::Phone);
             }
         }
+        // An open journal follows the agents; it closes when it goes.
+        if !all
+            && old.journal != state.journal
+            && self
+                .popover
+                .as_ref()
+                .is_some_and(|p| p.kind == PopoverKind::Journal)
+        {
+            if state.journal.is_none() {
+                self.close_popover();
+            } else {
+                self.open(PopoverKind::Journal);
+            }
+        }
         // An open tray follows its applications; it closes with the last.
         if !all
             && old.tray != state.tray
@@ -806,6 +846,10 @@ impl Column {
                 Some(line) => line,
                 None => return,
             },
+            PopoverKind::Journal => match self.nodes.journal_entries {
+                Some(entries) => entries,
+                None => return,
+            },
         };
         let anchor = self.tree.rect(anchor).unwrap_or_default();
         let (mut tree, targets) = match kind {
@@ -829,6 +873,10 @@ impl Column {
                 Some(p) => phone_popover(&theme, self.lang, p, scale),
                 None => return,
             },
+            PopoverKind::Journal => match &self.state.journal {
+                Some(view) => journal_popover(&theme, self.lang, view, scale),
+                None => return,
+            },
         };
         let first = tree.update(self.now);
         let size = tree.size();
@@ -838,7 +886,8 @@ impl Column {
             | PopoverKind::Tray
             | PopoverKind::TrayMenu
             | PopoverKind::Agenda
-            | PopoverKind::Phone => anchor.y - SHADOW_ROOM,
+            | PopoverKind::Phone
+            | PopoverKind::Journal => anchor.y - SHADOW_ROOM,
             PopoverKind::Account => anchor.bottom() + SHADOW_ROOM - size.h,
         };
         let y = y.clamp(-MARGIN, (self.tree.size().h + MARGIN - size.h).max(-MARGIN));
@@ -985,6 +1034,15 @@ impl Column {
                 actions.push(Action::RingPhone);
             } else if Some(id) == n.phone_line {
                 self.toggle(PopoverKind::Phone);
+            } else if Some(id) == n.journal_button {
+                let stopped = self.state.journal.as_ref().is_some_and(|j| j.stopped);
+                actions.push(if stopped {
+                    Action::AllowAgents
+                } else {
+                    Action::StopAgents
+                });
+            } else if Some(id) == n.journal_entries {
+                self.toggle(PopoverKind::Journal);
             } else if Some(id) == n.stop_sharing {
                 actions.push(Action::StopSharing);
             } else if n.tray.is_some_and(|(_, chip)| chip == id) {
@@ -1316,6 +1374,12 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         crate::agents::room(false),
         Kind::Box(Look::default()),
     );
+    let journal = add(
+        tree,
+        feed,
+        crate::journal::room(false),
+        Kind::Box(Look::default()),
+    );
     let tasks = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     // Board D13: the phone, the updates, then the notifications.
     let phone = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
@@ -1450,6 +1514,9 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         ring,
         meeting_button: None,
         agents,
+        journal,
+        journal_button: None,
+        journal_entries: None,
     }
 }
 
@@ -1729,6 +1796,19 @@ fn fill_phone(
         )
         .unwrap_or_else(missing);
     (open, ring)
+}
+
+/// The agents' journal, every entry the column holds.
+fn journal_popover(
+    theme: &Theme,
+    lang: Lang,
+    view: &crate::journal::JournalView,
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    let height = crate::journal::popover_height(view.lines.len());
+    let (mut tree, card) = popover_tree(theme, 320.0, height, scale);
+    crate::journal::fill_popover(&mut tree, card, theme, lang, view);
+    (tree, Vec::new())
 }
 
 /// The phone's popover: its name and battery, then what it can do.

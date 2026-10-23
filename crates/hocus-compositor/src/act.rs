@@ -93,18 +93,36 @@ impl State {
         let info = info(agent);
         tracing::info!(agent = %info.name, access = ?info.access, "an MCP agent connected");
         self.api.set_agent(connection, name);
+        self.journal_met();
         Ok(Reply::Agent(info))
     }
 
     /// Carries out an agent's action, or a test connection's (which may do
-    /// anything: the server let it through with the test permission).
+    /// anything: the server let it through with the test permission). An
+    /// agent's is kept in the journal (#176), carried out or refused.
     pub fn act(
         &mut self,
         connection: ConnectionId,
         target: ActTarget,
         action: Action,
     ) -> Result<Reply, ApiError> {
-        let agent = match self.api.agent(connection) {
+        let Some(name) = self.api.agent(connection).map(str::to_owned) else {
+            return self.carry_out(None, target, action);
+        };
+        // The window as it is before the action changes it.
+        let entry = self.journal_entry(&name, &target, &action);
+        let result = self.carry_out(Some(&name), target, action);
+        self.journal_keep(entry, result.as_ref().err());
+        result
+    }
+
+    fn carry_out(
+        &mut self,
+        agent: Option<&str>,
+        target: ActTarget,
+        action: Action,
+    ) -> Result<Reply, ApiError> {
+        let agent = match agent {
             Some(name) => {
                 Some(self.config.agents.mcp_agent(name).cloned().ok_or_else(|| {
                     denied(format!("agent {name:?} is no longer in [[agents.mcp]]"))

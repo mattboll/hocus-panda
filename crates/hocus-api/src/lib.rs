@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub use client::{Client, ClientError};
-pub use server::{ConnectionId, Handler, Server};
+pub use server::{Agents, ConnectionId, Handler, Server};
 
 /// Version of the protocol, raised on incompatible changes.
 pub const PROTOCOL_VERSION: u32 = 0;
@@ -230,6 +230,9 @@ pub enum Request {
         target: ActTarget,
         action: Action,
     },
+    /// What MCP agents did this session, oldest first, and whether they
+    /// are stopped (#176).
+    AgentsJournal,
 }
 
 impl Request {
@@ -262,6 +265,8 @@ impl Request {
             | Self::Desktops
             | Self::Ui
             | Self::Screenshot { .. }
+            // What agents did: the user's to read, and the agents' own.
+            | Self::AgentsJournal
             // Showing the settings window changes nothing by itself.
             | Self::OpenSettings { .. } => Permission::Observe,
             Self::Scene
@@ -305,6 +310,7 @@ impl Request {
                 | Self::Subscribe
                 | Self::Agent { .. }
                 | Self::Act { .. }
+                | Self::AgentsJournal
         )
     }
 }
@@ -362,6 +368,124 @@ pub struct AgentInfo {
     pub apps: Vec<String>,
     /// Whether it may click the shell's own interface.
     pub shell: bool,
+}
+
+/// What MCP agents did (#176), oldest first: the last few hundred entries
+/// of the session.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentsJournal {
+    /// The user stopped every agent: their requests are refused until
+    /// allowed again.
+    pub stopped: bool,
+    pub entries: Vec<JournalEntry>,
+}
+
+/// One action of an agent, carried out or refused.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JournalEntry {
+    /// When, as the user reads it: the local date and time,
+    /// `2026-10-21T14:37:05`.
+    pub at: String,
+    pub agent: String,
+    pub action: JournalAction,
+    pub target: JournalTarget,
+    /// Why it was refused; `None` when carried out.
+    #[serde(default)]
+    pub refused: Option<String>,
+}
+
+/// What an agent did, as the journal keeps it: typed text only when the
+/// configuration asks for it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JournalAction {
+    Click {
+        button: Button,
+        count: u32,
+    },
+    Scroll {
+        dy: f64,
+    },
+    Type {
+        characters: usize,
+        /// What was typed, when `[agents] journal_text` keeps it.
+        #[serde(default)]
+        text: Option<String>,
+    },
+    /// The combination pressed; `None` when it is not kept (the session
+    /// locked, or a password asked for).
+    Keys {
+        #[serde(default)]
+        keys: Option<String>,
+    },
+}
+
+/// What an agent aimed at, as it was then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JournalTarget {
+    Window {
+        id: u64,
+        #[serde(default)]
+        app_id: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+    },
+    /// An element of the shell, by its label.
+    Element { label: String },
+}
+
+impl std::fmt::Display for JournalEntry {
+    /// One line: `2026-10-21 14:37:05 helper: type 4 characters on window
+    /// 3 notes "Shopping list"`, then why it was refused.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}: ", self.at.replacen('T', " ", 1), self.agent)?;
+        match &self.action {
+            JournalAction::Click { button, count } => {
+                let times = match count {
+                    0 | 1 => "",
+                    2 => "double ",
+                    _ => "triple ",
+                };
+                let button = match button {
+                    Button::Left => "",
+                    Button::Right => "right ",
+                    Button::Middle => "middle ",
+                };
+                write!(f, "{times}{button}click")?;
+            }
+            JournalAction::Scroll { dy } => {
+                let way = if *dy < 0.0 { "up" } else { "down" };
+                write!(f, "scroll {way} {}", dy.abs())?;
+            }
+            JournalAction::Type {
+                text: Some(text), ..
+            } => write!(f, "type {text:?}")?,
+            JournalAction::Type {
+                characters: 1,
+                text: None,
+            } => write!(f, "type 1 character")?,
+            JournalAction::Type { characters, .. } => write!(f, "type {characters} characters")?,
+            JournalAction::Keys { keys: Some(keys) } => write!(f, "keys {keys}")?,
+            JournalAction::Keys { keys: None } => write!(f, "keys (not kept)")?,
+        }
+        match &self.target {
+            JournalTarget::Window { id, app_id, title } => {
+                write!(f, " on window {id}")?;
+                if let Some(app_id) = app_id {
+                    write!(f, " {app_id}")?;
+                }
+                if let Some(title) = title {
+                    write!(f, " {title:?}")?;
+                }
+            }
+            JournalTarget::Element { label } => write!(f, " on the shell's {label:?}")?,
+        }
+        if let Some(why) = &self.refused {
+            write!(f, "; refused: {why}")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -431,6 +555,7 @@ pub enum Reply {
     Ui(Vec<UiNode>),
     /// The agent this connection is now.
     Agent(AgentInfo),
+    AgentsJournal(AgentsJournal),
     /// The request was carried out.
     Done,
 }
@@ -1093,6 +1218,58 @@ mod tests {
             },
             r#"{"id":6,"request":"agent","name":"helper"}"#,
         );
+    }
+
+    #[test]
+    fn a_journal_entry_reads_as_one_line() {
+        let entry = JournalEntry {
+            at: "2026-10-21T14:37:05".into(),
+            agent: "helper".into(),
+            action: JournalAction::Type {
+                characters: 4,
+                text: None,
+            },
+            target: JournalTarget::Window {
+                id: 3,
+                app_id: Some("notes".into()),
+                title: Some("Shopping list".into()),
+            },
+            refused: None,
+        };
+        assert_eq!(
+            entry.to_string(),
+            "2026-10-21 14:37:05 helper: type 4 characters on window 3 notes \"Shopping list\""
+        );
+        let refused = JournalEntry {
+            action: JournalAction::Click {
+                button: Button::Right,
+                count: 2,
+            },
+            target: JournalTarget::Element {
+                label: "Close".into(),
+            },
+            refused: Some("agents are stopped".into()),
+            ..entry.clone()
+        };
+        assert_eq!(
+            refused.to_string(),
+            "2026-10-21 14:37:05 helper: double right click on the shell's \"Close\"; refused: \
+             agents are stopped"
+        );
+        let keys = JournalEntry {
+            action: JournalAction::Keys { keys: None },
+            ..entry
+        };
+        assert!(keys.to_string().contains("keys (not kept) on window 3"));
+        round_trip(
+            &RequestLine {
+                id: 7,
+                request: Request::AgentsJournal,
+            },
+            r#"{"id":7,"request":"agents_journal"}"#,
+        );
+        assert!(Request::AgentsJournal.agents_may());
+        assert_eq!(Request::AgentsJournal.permission(), Permission::Observe);
     }
 
     #[test]

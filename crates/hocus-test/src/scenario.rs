@@ -129,6 +129,11 @@ pub enum Step {
     /// its own, as an agent of `[[agents.mcp]]`, and checks the result:
     /// `{ agent?, tool, window?, arguments?, contains?, error? }`.
     Mcp(McpCall),
+    /// The agents' journal (#176), as `hocus msg agents-journal` prints it:
+    /// `{ has? = […], lacks? = […], stopped? }`, the lines holding `has` in
+    /// that order (one after the other, a later string on the same line or
+    /// a later one), none holding `lacks`; whether agents are stopped.
+    ExpectJournal(ExpectJournal),
     /// The same with the secondary button.
     RightClickUi(String),
     /// A tray application registers on the private bus: `{ title, color,
@@ -391,6 +396,16 @@ pub struct OpenWindow {
     /// Its title; none by default.
     #[serde(default)]
     pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectJournal {
+    #[serde(default)]
+    pub has: Vec<String>,
+    #[serde(default)]
+    pub lacks: Vec<String>,
+    pub stopped: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -803,6 +818,7 @@ impl fmt::Display for Step {
             Self::OpenX11(open) => write!(f, "open_x11 {}", open.app_id),
             Self::ClickUi(label) => write!(f, "click_ui {label:?}"),
             Self::Mcp(call) => write!(f, "mcp {}", call.tool),
+            Self::ExpectJournal(_) => write!(f, "expect_journal"),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
             Self::Share(_) => write!(f, "share"),
@@ -1110,6 +1126,7 @@ impl Run<'_> {
             Step::ExpectClipboard(expected) => self.expect_clipboard(expected),
             Step::ClickUi(label) => self.click_ui(label, Button::Left),
             Step::Mcp(call) => self.mcp(call),
+            Step::ExpectJournal(expected) => self.expect_journal(expected),
             Step::RightClickUi(label) => self.click_ui(label, Button::Right),
             Step::TrayApp(t) => {
                 let [_, r, g, b] = parse_color(&t.color)?.to_be_bytes();
@@ -2055,6 +2072,42 @@ impl Run<'_> {
             }
             self.compositor.dispatch(Duration::from_millis(10))?;
         }
+    }
+
+    fn expect_journal(&mut self, expected: &ExpectJournal) -> anyhow::Result<()> {
+        let Reply::AgentsJournal(journal) = self.request(Request::AgentsJournal)? else {
+            anyhow::bail!("expected the agents' journal");
+        };
+        let lines: Vec<String> = journal.entries.iter().map(ToString::to_string).collect();
+        let all = lines.join("\n");
+        if let Some(stopped) = expected.stopped {
+            anyhow::ensure!(
+                journal.stopped == stopped,
+                "agents are {}stopped",
+                if journal.stopped { "" } else { "not " }
+            );
+        }
+        // Each string from where the one before it was found.
+        let (mut line, mut column) = (0, 0);
+        for wanted in &expected.has {
+            let found = lines.iter().enumerate().skip(line).find_map(|(i, l)| {
+                let from = if i == line { column } else { 0 };
+                l.get(from..)
+                    .and_then(|rest| rest.find(wanted.as_str()))
+                    .map(|at| (i, from + at + wanted.len()))
+            });
+            let Some(next) = found else {
+                anyhow::bail!("the journal lacks {wanted:?} there, in order:\n{all}");
+            };
+            (line, column) = next;
+        }
+        for unwanted in &expected.lacks {
+            anyhow::ensure!(
+                !all.contains(unwanted.as_str()),
+                "the journal holds {unwanted:?}:\n{all}"
+            );
+        }
+        Ok(())
     }
 
     /// One MCP session: initialized, one tool called, from a thread of its

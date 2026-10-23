@@ -94,6 +94,9 @@ pub enum Action {
     Welcome,
     /// The version, licences and credits (#82).
     About,
+    /// Every MCP agent stopped at once, its requests refused (#176), or
+    /// allowed again.
+    StopAgents,
     /// A screenshot (#69), after `delay` seconds.
     Screenshot {
         mode: ScreenshotMode,
@@ -201,6 +204,7 @@ impl fmt::Display for Action {
             Self::ShowDesktop => write!(f, "show-desktop"),
             Self::Welcome => write!(f, "welcome"),
             Self::About => write!(f, "about"),
+            Self::StopAgents => write!(f, "stop-agents"),
             Self::Screenshot { mode, delay: 0 } => write!(f, "screenshot {mode}"),
             Self::Screenshot { mode, delay } => write!(f, "screenshot {mode} {delay}"),
             Self::SwitchWindows(s) => write!(f, "switch-windows{}", scope(s)),
@@ -284,6 +288,7 @@ impl FromStr for Action {
             "show-desktop" => bare(Self::ShowDesktop),
             "welcome" => bare(Self::Welcome),
             "about" => bare(Self::About),
+            "stop-agents" => bare(Self::StopAgents),
             "screenshot" => {
                 let mut words = rest.split_whitespace();
                 let mode = words.next().unwrap_or("screen").parse()?;
@@ -438,6 +443,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Shift+S", Action::screenshot(ScreenshotMode::Region)),
         ("Alt+Tab", Action::SwitchWindows(Scope::PointerOutput)),
         ("Super+Tab", Action::SwitchWindows(Scope::AllOutputs)),
+        ("Super+Shift+Escape", Action::StopAgents),
     ]
     .into_iter()
     .map(|(combo, action)| (combo.to_string(), action))
@@ -542,6 +548,21 @@ mod tests {
         for (_, action) in defaults() {
             assert_eq!(action.to_string().parse(), Ok(action));
         }
+    }
+
+    #[test]
+    fn no_two_defaults_share_keys_and_one_stops_the_agents() {
+        let mut seen = std::collections::BTreeSet::new();
+        for (keys, action) in defaults() {
+            assert!(
+                seen.insert(combo(&keys)),
+                "{keys} is bound twice, to {action}"
+            );
+        }
+        assert_eq!(
+            Shortcuts::resolve([]).action(&combo("Super+Shift+Esc")),
+            Some(&Action::StopAgents)
+        );
     }
 
     #[test]

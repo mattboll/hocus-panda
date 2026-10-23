@@ -178,6 +178,7 @@ enabled = true             # false: no panda anywhere (also from quick settings,
 [agents]                   # coding agents in the column, from herdr; one waiting asks in a toast
 enabled = true
 herdr_socket = ""          # empty: $XDG_CONFIG_HOME/herdr/herdr.sock, looked for by the session only
+journal_text = false       # true: the agents' journal keeps what MCP agents type; otherwise how many characters
 
 [[agents.mcp]]             # an AI agent using the desktop through `hocus mcp --agent NAME` (docs/mcp.md)
 name = "assistant"         # what it names itself; a name not listed here is refused
@@ -321,6 +322,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `show-desktop` | the desktop of the screen under the pointer, its windows out of the way, or back |
 | `welcome` | the first session's welcome again: language, keyboard, theme, and where to go next |
 | `about` | Hocuspanda's version, licences and credits |
+| `stop-agents` | stops every MCP agent at once: their requests are refused, reading included, until the same key (or the column's button) allows them again; works even while a window holds the shortcuts back or a panel is open; not kept across sessions ([mcp](mcp.md)) |
 | `spawn COMMAND` | runs a command through the shell |
 | `quit` | ends the session at once, without asking windows to close |
 | `none` | removes a default shortcut |
@@ -362,4 +364,5 @@ Defaults:
 | Super+Comma | `settings` |
 | Super+L | `lock` |
 | Alt+Tab / Super+Tab | `switch-windows` / `switch-windows all` |
+| Super+Shift+Escape | `stop-agents` |
 | Ctrl+Alt+BackSpace | `quit` |

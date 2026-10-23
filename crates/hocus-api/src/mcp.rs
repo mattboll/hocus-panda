@@ -33,6 +33,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(100);
 const WAIT_DEFAULT_MS: u64 = 10_000;
 const WAIT_MAX_MS: u64 = 120_000;
+/// Journal entries given when not asked for a number, and at most: all the
+/// compositor keeps.
+const JOURNAL_DEFAULT: u64 = 50;
+const JOURNAL_MAX: u64 = 500;
 
 /// JSON-RPC error codes.
 const PARSE_ERROR: i64 = -32700;
@@ -213,7 +217,8 @@ impl Bridge {
                 interface, capture a window to see it, and, when this agent may act, click, type \
                 and scroll aimed at a window (points relative to its top-left corner, in logical \
                 pixels) or at a labelled element of the shell. Wait for a window or a label \
-                rather than sleeping.",
+                rather than sleeping. What agents do is kept in a journal the user reads (and \
+                the journal tool gives); the user may stop every agent at once.",
         })
     }
 
@@ -238,6 +243,7 @@ impl Bridge {
             "type" => self.type_text(&args),
             "press_keys" => self.press_keys(&args),
             "wait_for" => self.wait_for(&args),
+            "journal" => self.journal(&args),
             other => return Err((INVALID_PARAMS, format!("unknown tool {other:?}"))),
         };
         Ok(match outcome {
@@ -517,6 +523,36 @@ impl Bridge {
     }
 }
 
+impl Bridge {
+    /// What agents did, oldest first: one line each for the agent to
+    /// read, and the entries as data.
+    fn journal(&mut self, args: &Args) -> Result<Done, Failure> {
+        let limit = args
+            .u64("limit")?
+            .unwrap_or(JOURNAL_DEFAULT)
+            .clamp(1, JOURNAL_MAX) as usize;
+        let agent = args.str("agent")?.map(str::to_owned);
+        let journal = match self.request(Request::AgentsJournal)? {
+            Reply::AgentsJournal(journal) => journal,
+            other => return Err(unexpected(&other)),
+        };
+        let mut entries: Vec<_> = journal
+            .entries
+            .into_iter()
+            .filter(|e| agent.as_ref().is_none_or(|a| e.agent == *a))
+            .collect();
+        entries.drain(..entries.len().saturating_sub(limit));
+        let mut lines: Vec<String> = entries.iter().map(ToString::to_string).collect();
+        if lines.is_empty() {
+            lines.push("Nothing yet.".into());
+        }
+        Ok(Done {
+            content: vec![text(&lines.join("\n"))],
+            structured: Some(json!({ "stopped": journal.stopped, "entries": entries })),
+        })
+    }
+}
+
 fn describe(app_id: Option<&str>, title: Option<&str>, label: Option<&str>) -> String {
     let mut parts = Vec::new();
     if let Some(a) = app_id {
@@ -745,6 +781,24 @@ fn tools() -> Vec<Value> {
             },
             "annotations": read,
         }),
+        json!({
+            "name": "journal",
+            "title": "Agents' journal",
+            "description": "What agents did on this desktop this session, oldest first, one line \
+                each: when (the user's local time), which agent, the action (click, scroll, type, \
+                keys), on which window or element of the shell, and why it was refused if it was. \
+                Typed text is kept only when the user's configuration asks for it; otherwise, how \
+                many characters.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "minimum": 1, "maximum": JOURNAL_MAX, "default": JOURNAL_DEFAULT, "description": "The last so many entries." },
+                    "agent": { "type": "string", "description": "Only this agent's entries." },
+                },
+                "additionalProperties": false,
+            },
+            "annotations": read,
+        }),
     ]
 }
 
@@ -856,7 +910,8 @@ mod tests {
                 "scroll",
                 "type",
                 "press_keys",
-                "wait_for"
+                "wait_for",
+                "journal"
             ]
         );
         for tool in tools {

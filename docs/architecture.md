@@ -369,6 +369,11 @@ without unlocking leaves our lock screen: a crash never unlocks.
   open, and that nothing covers the point. Typed keys go straight to the
   window with the keyboard, past the shortcuts, through the layout in
   effect. Applications' own accessibility trees (AT-SPI) are not read yet.
+- The agents' journal (#176) keeps each `act` of an agent connection, carried
+  out or refused, with the window as it was and the user's local time; the
+  control server holds whether agents are stopped (`stop-agents`), and the
+  compositor then refuses every request of an agent connection, and new
+  `agent` requests, before anything else; events stop reaching them too.
 - Agents will get their own seat (pointer and keyboard) through the API:
   see the agent seat idea in [ideas](ideas.md). Until then, acting moves the
   session's pointer and keyboard focus.

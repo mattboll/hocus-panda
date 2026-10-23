@@ -593,6 +593,9 @@ pub struct Agents {
     /// (`$XDG_CONFIG_HOME/herdr/herdr.sock`), which only the session
     /// looks for.
     pub herdr_socket: String,
+    /// The agents' journal (#176) keeps the text MCP agents type; without
+    /// it, only how many characters, since what is typed may be a secret.
+    pub journal_text: bool,
     /// Agents that use the desktop through `hocus mcp --agent NAME` (#42):
     /// `[[agents.mcp]]`. None by default: an agent the configuration does
     /// not name may not act.
@@ -604,6 +607,7 @@ impl Default for Agents {
         Self {
             enabled: true,
             herdr_socket: String::new(),
+            journal_text: false,
             mcp: Vec::new(),
         }
     }
@@ -1577,6 +1581,11 @@ mod tests {
         // What is in effect reads back.
         assert_eq!(Config::parse(&c.to_toml())?, c);
         assert!(Config::parse("[[agents.mcp]]\nname = \"x\"\naccess = \"all\"\n").is_err());
+        // The journal keeps what agents type only when asked.
+        assert!(!c.agents.journal_text);
+        let kept = Config::parse("[agents]\njournal_text = true\n[[agents.mcp]]\nname = \"x\"\n")?;
+        assert!(kept.agents.journal_text);
+        assert_eq!(Config::parse(&kept.to_toml())?, kept);
         Ok(())
     }
 

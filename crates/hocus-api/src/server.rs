@@ -46,6 +46,17 @@ pub struct Server {
     owner: u32,
     connections: HashMap<ConnectionId, Connection>,
     next_id: u64,
+    agents: Agents,
+}
+
+/// Whether MCP agents are served (#176).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Agents {
+    #[default]
+    Allowed,
+    /// The user stopped every agent: the compositor refuses their
+    /// requests, and events no longer reach them, until allowed again.
+    Stopped,
 }
 
 #[derive(Debug)]
@@ -115,6 +126,7 @@ impl Server {
             owner: rustix::process::getuid().as_raw(),
             connections: HashMap::new(),
             next_id: 0,
+            agents: Agents::Allowed,
         })
     }
 
@@ -148,6 +160,16 @@ impl Server {
         }
     }
 
+    /// Whether MCP agents are served or stopped.
+    pub fn agents(&self) -> Agents {
+        self.agents
+    }
+
+    /// Stops every agent, or allows them again; not kept across sessions.
+    pub fn set_agents(&mut self, agents: Agents) {
+        self.agents = agents;
+    }
+
     /// Whether anyone listens to events: building them can be skipped.
     pub fn has_subscribers(&self) -> bool {
         self.connections.values().any(|c| c.subscribed)
@@ -165,12 +187,14 @@ impl Server {
         self.send(connection, &line);
     }
 
-    /// Sends `event` to every subscribed connection.
+    /// Sends `event` to every subscribed connection; stopped agents get
+    /// none.
     pub fn broadcast(&mut self, event: &Event) {
+        let stopped = self.agents == Agents::Stopped;
         let subscribed: Vec<_> = self
             .connections
             .iter()
-            .filter(|(_, c)| c.subscribed)
+            .filter(|(_, c)| c.subscribed && !(stopped && matches!(c.role, Role::Agent(_))))
             .map(|(id, _)| *id)
             .collect();
         if subscribed.is_empty() {

@@ -1,0 +1,90 @@
+description = "Given the stop key pressed, when an agent tries to act, then it is refused until allowed again; the column's button does the same"
+shell = true
+
+[[step]]
+config = """
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+
+[[agents.mcp]]
+name = "reader"
+"""
+
+# A window that holds the shortcuts back does not hold this one.
+[[step]]
+open = { app_id = "editor", title = "Draft", size = [400, 300], color = "#3399ff", inhibit_shortcuts = true }
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "a" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 30 pressed" }
+
+[[step]]
+keys = "super+shift+escape"
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "key 1 pressed" }
+
+[[step]]
+expect_journal = { stopped = true }
+
+[[step]]
+expect_ui = { label = "Allow agents again" }
+
+# Every request of an agent is refused, reading too, and a new agent
+# cannot name itself.
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "b" }, error = "the user stopped every agent" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "key 48 pressed" }
+
+[[step]]
+mcp = { agent = "helper", tool = "list_windows", error = "the user stopped every agent" }
+
+[[step]]
+mcp = { agent = "reader", tool = "journal", error = "the user stopped every agent" }
+
+# Each of these sessions was refused as it named itself: nothing reached a
+# window, so nothing more is kept. An agent already connected has its
+# actions kept as refused (crates/hocus-test/tests/mcp.rs).
+[[step]]
+expect_journal = { has = ['helper: type 1 character on window 1 editor "Draft"'], lacks = ["refused"], stopped = true }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "mcp-stopped.png" }
+
+# The same key allows them again.
+[[step]]
+keys = "super+shift+escape"
+
+[[step]]
+expect_journal = { stopped = false }
+
+[[step]]
+mcp = { agent = "helper", tool = "type", window = "editor", arguments = { text = "c" } }
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 46 pressed" }
+
+# The column's button stops them, and allows them again.
+[[step]]
+click_ui = "Stop every agent"
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "editor", error = "the user stopped every agent" }
+
+[[step]]
+click_ui = "Allow agents again"
+
+[[step]]
+mcp = { agent = "helper", tool = "click", window = "editor" }
+
+[[step]]
+expect_received = { app_id = "editor", event = "button 272 pressed" }
