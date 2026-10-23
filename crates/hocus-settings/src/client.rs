@@ -219,6 +219,11 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 Reply::Calendars(calendars) => calendars,
                 _ => Default::default(),
             };
+            // A compositor without quick settings says nothing of them.
+            let hardware = match requests.request(Request::Hardware) {
+                Ok(Reply::Hardware(hardware)) => hardware,
+                _ => Default::default(),
+            };
             let config = hocus_core::Config::parse(&info.toml)
                 .map_err(|e| anyhow::anyhow!("the configuration in effect: {e}"))?;
             let ctx = Context {
@@ -227,6 +232,7 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 screens,
                 updates,
                 calendars,
+                hardware,
                 user: info.user.clone(),
                 // timedated says it, not the compositor.
                 zone: SystemZone::Unknown,
@@ -241,6 +247,7 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 Event::ConfigApplied
                 | Event::Updates { .. }
                 | Event::Calendars
+                | Event::Hardware
                 | Event::OutputAdded { .. }
                 | Event::OutputRemoved { .. }
                 | Event::OutputChanged { .. } => {
@@ -534,6 +541,25 @@ impl App {
                         });
                     if let Err(err) = spawned {
                         tracing::warn!(%err, "could not set the time zone");
+                    }
+                }
+                // Off the window's thread: the compositor hands it to the
+                // service, which answers with the new state in its time.
+                Outcome::Hardware(change) => {
+                    let api = self.api.clone();
+                    let spawned =
+                        std::thread::Builder::new()
+                            .name("hardware".into())
+                            .spawn(move || {
+                                let request = Request::SetHardware { change };
+                                if let Err(err) = Api::connect(&api)
+                                    .and_then(|mut c| c.request(request).map(drop))
+                                {
+                                    tracing::warn!(%err, "could not change the setting");
+                                }
+                            });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not change the setting");
                     }
                 }
                 Outcome::Identify => {

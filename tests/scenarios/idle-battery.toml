@@ -1,0 +1,84 @@
+# Power (#67): the delays of [idle.battery] apply once the charger is
+# pulled out (UPower, a stand-in on a private system bus, says so); the
+# unplugging counts as someone there. With fullscreen_awake off, a
+# fullscreen window holds nothing off.
+description = "On the charger nothing dims for ten minutes; unplugged, the battery's minute dims and two minutes sleep, a fullscreen window holding nothing off; plugged back, the charger's delays again"
+outputs = ["1280x800"]
+shell = true
+devices = true
+
+[[step]]
+config = """
+[idle]
+curtain_after = 600
+fullscreen_awake = false
+
+[idle.battery]
+curtain_after = 60
+sleep_after = 120
+"""
+
+[[step]]
+open = { app_id = "film", size = [500, 400], color = "#202830" }
+
+[[step]]
+set_state = { app_id = "film", state = "fullscreen" }
+
+[[step]]
+advance_ms = 120000
+
+[[step]]
+expect_ui = { label = "Locking in 29\u00a0s", shown = false }
+
+[[step]]
+expect_ui = { label = "Password", shown = false }
+
+[[step]]
+charger = false
+
+[[step]]
+expect_ui = { label = "Battery 80%" }
+
+# The unplugging was someone there: a minute from then.
+[[step]]
+advance_ms = 59000
+
+[[step]]
+expect_ui = { label = "Locking in 30\u00a0s", shown = false }
+
+[[step]]
+advance_ms = 2500
+
+[[step]]
+expect_ui = { label = "Locking in 29\u00a0s" }
+
+[[step]]
+advance_ms = 60000
+
+[[step]]
+expect_event = { type = "leaving", has = "\"action\":\"suspend\"" }
+
+# Locked by then; plugged back, the charger's ten minutes from now.
+[[step]]
+expect_ui = { label = "Password" }
+
+[[step]]
+type = "panda"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "Password", shown = false }
+
+[[step]]
+charger = true
+
+[[step]]
+advance_ms = 300000
+
+[[step]]
+expect_ui = { label = "Locking in 29\u00a0s", shown = false }
+
+[[step]]
+expect_ui = { label = "Password", shown = false }

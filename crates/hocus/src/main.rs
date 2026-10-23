@@ -134,6 +134,9 @@ enum Message {
     Desktops,
     /// The shell's interface: roles, labels and places of its elements.
     Ui,
+    /// The sound, network, Bluetooth, power profile and battery, as quick
+    /// settings know them.
+    Hardware,
     /// The phone, through KDE Connect: whether it runs, the phones within
     /// reach and their battery.
     Phone,
@@ -334,6 +337,7 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
             Ok(())
         }
         Message::Desktops => print(client.request(Request::Desktops)?),
+        Message::Hardware => print(client.request(Request::Hardware)?),
         Message::Phone => print(client.request(Request::Phone)?),
         Message::SendToPhone { files } => {
             let paths = files

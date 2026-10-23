@@ -3,14 +3,15 @@
 //! NetworkManager, BlueZ, PipeWire (through `wpctl`) and the backlight
 //! (sysfs, set through logind). Each source runs on a thread of its own;
 //! a missing service leaves its part as it was. Nothing here ever runs on
-//! the compositor's loop.
+//! the compositor's loop. Off the session (tests on a private bus), the
+//! sound and the backlight are kept in memory.
 
 use std::{future::poll_fn, path::PathBuf, pin::Pin, process::Command, sync::mpsc, time::Duration};
 
 use futures_core::Stream;
 use zbus::{Connection, OwnedObjectPath, Proxy, Variant, fdo::PropertiesProxy};
 
-use crate::quick::{Battery, Change, Profile, State};
+use crate::quick::{Battery, Change, Charge, Profile, State};
 
 /// How often what has no signal (sound, backlight) is read again.
 const POLL: Duration = Duration::from_secs(2);
@@ -19,6 +20,18 @@ const POLL: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone, Default)]
 pub struct Buses {
     pub system: Option<String>,
+    pub devices: Devices,
+}
+
+/// Where the sound and the backlight are, which no bus serves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Devices {
+    /// The machine's: PipeWire through `wpctl`, the backlight in sysfs.
+    #[default]
+    Machine,
+    /// Kept in memory: a test beside a live session reads and changes
+    /// neither the developer's sound nor their screen.
+    Memory,
 }
 
 /// A part of the state, as a source last read it.
@@ -37,6 +50,7 @@ enum Update {
         volume: u8,
         muted: bool,
         device: String,
+        input: String,
     },
     Brightness(Vec<(String, u8)>),
 }
@@ -64,6 +78,11 @@ impl System {
         let mut state = crate::quick::stub_state(&[]);
         state.wifi = false;
         state.volume = 0;
+        let devices = buses.devices;
+        if devices == Devices::Memory {
+            state.output_device = "Built-in speakers".into();
+            state.input_device = "Built-in microphone".into();
+        }
         let backlit = screens
             .iter()
             .find(|s| ["eDP", "LVDS", "DSI"].iter().any(|p| s.starts_with(p)))
@@ -80,7 +99,7 @@ impl System {
                         // Shown once the system took it: a refused change
                         // (polkit, a missing service) leaves what is true.
                         Message::Change(change) => {
-                            if act(&actions, &change, backlight_for.as_deref()) {
+                            if act(&actions, &change, backlight_for.as_deref(), devices) {
                                 state.apply_change(change);
                             }
                         }
@@ -106,10 +125,12 @@ impl System {
                     }
                 })?;
         }
-        let tx = messages.clone();
-        std::thread::Builder::new()
-            .name("system poll".into())
-            .spawn(move || poll(backlit, tx))?;
+        if devices == Devices::Machine {
+            let tx = messages.clone();
+            std::thread::Builder::new()
+                .name("system poll".into())
+                .spawn(move || poll(backlit, tx))?;
+        }
         Ok(Self { messages })
     }
 
@@ -134,10 +155,12 @@ fn apply(state: &mut State, update: Update) {
             volume,
             muted,
             device,
+            input,
         } => {
             state.volume = volume;
             state.muted = muted;
             state.output_device = device;
+            state.input_device = input;
         }
         Update::Brightness(b) => state.brightness = b,
     }
@@ -197,11 +220,13 @@ async fn battery(buses: Buses, tx: mpsc::Sender<Message>) -> zbus::Result<()> {
         let percent: f64 = device.get_property("Percentage").await?;
         let state: u32 = device.get_property("State").await.unwrap_or(0);
         let to_empty: i64 = device.get_property("TimeToEmpty").await.unwrap_or(0);
-        // 2: discharging.
-        let minutes_left = (state == 2 && to_empty > 0).then_some((to_empty / 60) as u32);
+        let charge = Charge::from_upower(state);
+        let minutes_left =
+            (charge == Charge::Discharging && to_empty > 0).then_some((to_empty / 60) as u32);
         Ok(Update::Battery(Some(Battery {
             percent: percent.round().clamp(0.0, 100.0) as u8,
             minutes_left,
+            charge,
         })))
     })
     .await
@@ -317,25 +342,28 @@ fn wpctl(args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// `Volume: 0.40 [MUTED]`, and the sink's description.
+/// `Volume: 0.40 [MUTED]`, and the sink's and the source's descriptions.
 fn sound() -> Option<Update> {
     let line = wpctl(&["get-volume", "@DEFAULT_AUDIO_SINK@"])?;
     let (volume, muted) = parse_volume(&line)?;
-    let device = wpctl(&["inspect", "@DEFAULT_AUDIO_SINK@"])
-        .and_then(|text| {
-            text.lines()
-                .find_map(|l| {
-                    l.trim()
-                        .trim_start_matches("* ")
-                        .strip_prefix("node.description = ")
-                })
-                .map(|d| d.trim_matches('"').to_owned())
-        })
-        .unwrap_or_default();
+    let described = |node: &str| {
+        wpctl(&["inspect", node])
+            .and_then(|text| {
+                text.lines()
+                    .find_map(|l| {
+                        l.trim()
+                            .trim_start_matches("* ")
+                            .strip_prefix("node.description = ")
+                    })
+                    .map(|d| d.trim_matches('"').to_owned())
+            })
+            .unwrap_or_default()
+    };
     Some(Update::Sound {
         volume,
         muted,
-        device,
+        device: described("@DEFAULT_AUDIO_SINK@"),
+        input: described("@DEFAULT_AUDIO_SOURCE@"),
     })
 }
 
@@ -376,8 +404,14 @@ fn backlight_dir() -> Option<PathBuf> {
 
 /// Carries a change out on the system; whether it was taken (failures are
 /// logged).
-fn act(buses: &Buses, change: &Change, _backlit: Option<&str>) -> bool {
+fn act(buses: &Buses, change: &Change, _backlit: Option<&str>, devices: Devices) -> bool {
     let result = match change {
+        // Kept as asked, touching nothing.
+        Change::Volume(_) | Change::Muted(_) | Change::Brightness(..)
+            if devices == Devices::Memory =>
+        {
+            Ok(())
+        }
         Change::Volume(v) => run_wpctl(&[
             "set-volume",
             "@DEFAULT_AUDIO_SINK@",

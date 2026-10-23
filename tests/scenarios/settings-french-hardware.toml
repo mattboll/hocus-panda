@@ -1,0 +1,58 @@
+description = "French chosen on Language and region: the Hardware pages speak it at once, without restart"
+outputs = ["1280x800"]
+shell = true
+devices = true
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+click_settings = "Français"
+
+[[step]]
+expect_config_file = { contains = ["interface = \"fr\""] }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+click_settings = "Son"
+
+[[step]]
+expect_settings = { label = "Couper le son", selected = false }
+
+[[step]]
+click_settings = "Réseau"
+
+[[step]]
+expect_settings = { label = "Connecté : Bamboo grove" }
+
+[[step]]
+click_settings = "Bluetooth"
+
+[[step]]
+expect_settings = { label = "Aucun appareil connecté" }
+
+[[step]]
+click_settings = "Verrouillage"
+
+[[step]]
+expect_settings = { label = "Verrouiller après le rideau", selected = true }
+
+[[step]]
+click_settings = "Énergie"
+
+[[step]]
+expect_settings = { label = "Profil d’énergie : Équilibré", selected = true }
+
+[[step]]
+expect_settings = { label = "Sur batterie : Assombrir les écrans après : 5 min", selected = true }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-french-hardware.png" }

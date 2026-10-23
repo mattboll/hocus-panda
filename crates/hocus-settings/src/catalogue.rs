@@ -144,6 +144,11 @@ impl Page {
                 | Self::Mouse
                 | Self::Captures
                 | Self::Clipboard
+                | Self::Sound
+                | Self::Network
+                | Self::Bluetooth
+                | Self::Power
+                | Self::Lock
                 | Self::Language
                 | Self::About
                 | Self::Welcome
@@ -307,9 +312,33 @@ impl Page {
             Clipboard => &[
                 "copy", "copier", "paste", "coller", "emoji", "émoji", "smiley",
             ],
-            Sound => &["audio", "volume"],
-            Power => &["battery", "batterie", "sleep", "veille"],
-            Network => &["wifi", "wi-fi", "internet"],
+            Sound => &[
+                "audio",
+                "volume",
+                "speaker",
+                "haut-parleur",
+                "microphone",
+                "micro",
+                "mute",
+                "muet",
+            ],
+            Power => &[
+                "battery", "batterie", "sleep", "veille", "suspend", "charger", "chargeur",
+                "énergie",
+            ],
+            Network => &[
+                "wifi", "wi-fi", "internet", "wireless", "sans fil", "airplane", "avion",
+            ],
+            Bluetooth => &["headphones", "casque", "pairing", "appairer"],
+            Lock => &[
+                "lock screen",
+                "écran de verrouillage",
+                "verrouiller",
+                "curtain",
+                "rideau",
+                "password",
+                "mot de passe",
+            ],
             _ => &[],
         }
     }
@@ -459,6 +488,55 @@ impl Page {
                     words::OFF.get(lang).to_owned()
                 }
             }
+            Self::Sound => {
+                let h = &ctx.hardware;
+                match (h.known, h.muted) {
+                    (false, _) => words::UNKNOWN.get(lang).to_owned(),
+                    (true, true) => words::MUTED.get(lang).to_owned(),
+                    (true, false) => words::percent(u32::from(h.volume), lang),
+                }
+            }
+            Self::Network => {
+                let h = &ctx.hardware;
+                if !h.known {
+                    words::UNKNOWN.get(lang).to_owned()
+                } else if h.airplane {
+                    words::AIRPLANE.get(lang).to_owned()
+                } else if !h.wifi {
+                    format!("Wi-Fi · {}", words::OFF.get(lang))
+                } else {
+                    match &h.network {
+                        Some(name) => format!("Wi-Fi · {name}"),
+                        None => format!("Wi-Fi · {}", words::NOT_CONNECTED.get(lang)),
+                    }
+                }
+            }
+            Self::Bluetooth => {
+                let h = &ctx.hardware;
+                match (h.known, h.bluetooth, &h.bluetooth_device) {
+                    (false, _, _) => words::UNKNOWN.get(lang).to_owned(),
+                    (true, true, Some(device)) => device.clone(),
+                    (true, on, _) => on_off(on, lang),
+                }
+            }
+            Self::Power => {
+                let profile = words::profile(&ctx.hardware.profile).get(lang);
+                match &ctx.hardware.battery {
+                    Some(b) => {
+                        format!("{} · {profile}", words::percent(u32::from(b.percent), lang))
+                    }
+                    None if ctx.hardware.known => profile.to_owned(),
+                    None => words::UNKNOWN.get(lang).to_owned(),
+                }
+            }
+            Self::Lock => {
+                let i = &ctx.config.idle;
+                if !i.lock || i.curtain_after == 0 {
+                    words::NOT_ON_IDLE.get(lang).to_owned()
+                } else {
+                    words::locks_after(i.curtain_after + i.lock_after, lang)
+                }
+            }
             Self::Accessibility => {
                 let a = &ctx.config.appearance;
                 let mut said = vec![words::percent(a.text_size, lang)];
@@ -558,6 +636,8 @@ pub struct Context {
     pub updates: hocus_api::UpdatesInfo,
     /// Calendar accounts, for the Accounts page.
     pub calendars: hocus_api::CalendarsInfo,
+    /// The sound, network, Bluetooth and power, for the Hardware pages.
+    pub hardware: hocus_api::HardwareInfo,
     /// The account's name.
     pub user: String,
 }
@@ -598,6 +678,15 @@ pub enum Setting {
     Dock,
     Pandas,
     Magnifier,
+    Volume,
+    Wifi,
+    Airplane,
+    Bluetooth,
+    PowerProfile,
+    IdleDelays,
+    SleepAction,
+    FullscreenAwake,
+    LockOnIdle,
 }
 
 impl Setting {
@@ -623,6 +712,13 @@ impl Setting {
             Self::Dock => Page::ColumnDock,
             Self::Pandas => Page::Pandas,
             Self::Magnifier => Page::Accessibility,
+            Self::Volume => Page::Sound,
+            Self::Wifi | Self::Airplane => Page::Network,
+            Self::Bluetooth => Page::Bluetooth,
+            Self::PowerProfile | Self::IdleDelays | Self::SleepAction | Self::FullscreenAwake => {
+                Page::Power
+            }
+            Self::LockOnIdle => Page::Lock,
         }
     }
 }
@@ -1051,6 +1147,7 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
             ctx.config.keyboard.layouts.join(", ").to_uppercase(),
         ),
     ];
+    out.extend(hardware_entries(ctx, lang));
     for (combo, action) in &ctx.config.shortcuts().bindings {
         let combo = combo.to_string();
         let (label, _, _) = words::action(action, lang);
@@ -1070,6 +1167,122 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
         ));
     }
     out
+}
+
+/// The Hardware pages' settings.
+fn hardware_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, String)> {
+    let h = &ctx.hardware;
+    let i = &ctx.config.idle;
+    let both = |w: Words| vec![w.en.to_owned(), w.fr.to_owned()];
+    let words = |list: &[&str]| list.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+    vec![
+        (
+            Setting::Volume,
+            words::VOLUME.get(lang).to_owned(),
+            [
+                both(words::VOLUME),
+                both(words::MUTE),
+                words(&["sound", "son", "speaker", "haut-parleur", "audio"]),
+            ]
+            .concat(),
+            Page::Sound.summary(ctx, lang),
+        ),
+        (
+            Setting::Wifi,
+            "Wi-Fi".to_owned(),
+            words(&["wifi", "wireless", "sans fil", "internet", "réseau"]),
+            Page::Network.summary(ctx, lang),
+        ),
+        (
+            Setting::Airplane,
+            words::AIRPLANE.get(lang).to_owned(),
+            [both(words::AIRPLANE), words(&["flight", "vol", "radio"])].concat(),
+            on_off(h.airplane, lang),
+        ),
+        (
+            Setting::Bluetooth,
+            "Bluetooth".to_owned(),
+            words(&["bluetooth", "headphones", "casque", "écouteurs"]),
+            Page::Bluetooth.summary(ctx, lang),
+        ),
+        (
+            Setting::PowerProfile,
+            words::POWER_PROFILE.get(lang).to_owned(),
+            [
+                both(words::POWER_PROFILE),
+                words(&[
+                    "profile",
+                    "profil",
+                    "performance",
+                    "saver",
+                    "économie",
+                    "balanced",
+                    "équilibré",
+                ]),
+            ]
+            .concat(),
+            words::profile(&h.profile).get(lang).to_owned(),
+        ),
+        (
+            Setting::IdleDelays,
+            words::DELAYS.get(lang).to_owned(),
+            [
+                both(words::DELAYS),
+                both(words::DIM_AFTER),
+                both(words::ON_BATTERY),
+                words(&[
+                    "delay",
+                    "délai",
+                    "dim",
+                    "assombrir",
+                    "idle",
+                    "inactivité",
+                    "battery",
+                    "batterie",
+                ]),
+            ]
+            .concat(),
+            words::duration(i.curtain_after, lang),
+        ),
+        (
+            Setting::SleepAction,
+            words::SLEEP_HOW.get(lang).to_owned(),
+            [
+                both(words::SLEEP_HOW),
+                both(words::SLEEP_AFTER),
+                words(&["suspend", "hibernate", "hiberner", "veille", "sleep"]),
+            ]
+            .concat(),
+            words::sleep_name(i.sleep).get(lang).to_owned(),
+        ),
+        (
+            Setting::FullscreenAwake,
+            words::FULLSCREEN_AWAKE.get(lang).to_owned(),
+            [
+                both(words::FULLSCREEN_AWAKE),
+                words(&[
+                    "fullscreen",
+                    "plein écran",
+                    "video",
+                    "vidéo",
+                    "film",
+                    "awake",
+                ]),
+            ]
+            .concat(),
+            on_off(i.fullscreen_awake, lang),
+        ),
+        (
+            Setting::LockOnIdle,
+            words::LOCK_ON_IDLE.get(lang).to_owned(),
+            [
+                both(words::LOCK_ON_IDLE),
+                words(&["lock", "verrouiller", "curtain", "rideau", "screen saver"]),
+            ]
+            .concat(),
+            Page::Lock.summary(ctx, lang),
+        ),
+    ]
 }
 
 /// What `query` finds, the best first: a setting's own name beats its
@@ -1203,6 +1416,50 @@ mod tests {
         for page in Family::Work.pages() {
             assert!(page.available(), "{page:?}");
         }
+    }
+
+    #[test]
+    fn the_hardware_settings_are_found_in_either_language() {
+        let hits = search("veille", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].page, Page::Power, "{hits:?}");
+        let hits = search("mode avion", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::Airplane), "{hits:?}");
+        let hits = search("volume", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::Volume), "{hits:?}");
+        let hits = search("maintient éveillé", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::FullscreenAwake), "{hits:?}");
+        let hits = search("hibernate", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::SleepAction), "{hits:?}");
+        let hits = search("verrouillage", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].page, Page::Lock, "{hits:?}");
+        for page in Family::Hardware.pages() {
+            assert!(page.available(), "{page:?}");
+        }
+    }
+
+    #[test]
+    fn the_hardware_tiles_say_what_is_in_effect() {
+        let mut c = ctx();
+        assert_eq!(Page::Sound.summary(&c, Lang::En), "Unknown");
+        c.hardware = hocus_api::HardwareInfo {
+            known: true,
+            wifi: true,
+            network: Some("Bamboo grove".into()),
+            volume: 40,
+            profile: "balanced".into(),
+            battery: Some(hocus_api::BatteryInfo {
+                percent: 80,
+                minutes_left: None,
+                state: "charging".into(),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(Page::Sound.summary(&c, Lang::En), "40%");
+        assert_eq!(Page::Network.summary(&c, Lang::En), "Wi-Fi · Bamboo grove");
+        assert_eq!(Page::Power.summary(&c, Lang::Fr), "80\u{202f}% · Équilibré");
+        assert_eq!(Page::Lock.summary(&c, Lang::En), "Locks after 5 min 30 s");
+        c.config.idle.lock = false;
+        assert_eq!(Page::Lock.summary(&c, Lang::En), "Not when idle");
     }
 
     #[test]

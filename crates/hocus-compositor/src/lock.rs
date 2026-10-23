@@ -1,8 +1,10 @@
 //! Idle, the curtain and the lock (#29). Without input, the curtain dims
-//! every screen with a countdown, then the session locks; idle inhibitors
-//! and fullscreen windows hold it off, and the countdown starts again when
-//! they stop. Locked, the screens show only the lock: a lock client's
-//! surfaces (ext-session-lock), or our own lock screen, which checks the
+//! every screen with a countdown, then the session locks, and later the
+//! machine sleeps if asked to; on battery, the delays of `[idle.battery]`
+//! apply. Idle inhibitors and fullscreen windows (unless told otherwise)
+//! hold it off, and the countdown starts again when they stop. Locked, the
+//! screens show only the lock: a lock client's surfaces
+//! (ext-session-lock), or our own lock screen, which checks the
 //! password through PAM on a worker thread. A lock client that goes away
 //! without unlocking leaves our lock screen: a crash never unlocks.
 //!
@@ -84,6 +86,9 @@ pub struct Locking {
     last_activity: Duration,
     /// The last input alone, for idle notifications that ignore holds.
     last_input: Duration,
+    /// The machine was put to sleep for the idle that began then: once
+    /// for each.
+    slept_for: Option<Duration>,
     state: SessionLockManagerState,
     lock_surfaces: BTreeMap<String, LockSurface>,
     curtains: BTreeMap<String, Panel<Curtain>>,
@@ -121,6 +126,7 @@ impl Locking {
             by: By::Us,
             last_activity: Duration::ZERO,
             last_input: Duration::ZERO,
+            slept_for: None,
             state: SessionLockManagerState::new::<State, _>(dh, trusted),
             lock_surfaces: BTreeMap::new(),
             curtains: BTreeMap::new(),
@@ -212,6 +218,17 @@ impl State {
             self.locking.phase = Phase::Unlocked;
             self.needs_redraw = true;
         }
+    }
+
+    /// The charger was plugged or unplugged: someone is there, and the
+    /// delays of the other source count from now.
+    pub fn power_source_changed(&mut self, source: hocus_core::config::PowerSource) {
+        tracing::info!(?source, "power source changed: its idle delays apply");
+        self.locking.last_activity = self.clock.now();
+        if matches!(self.locking.phase, Phase::Curtain { .. }) {
+            self.locking.phase = Phase::Unlocked;
+        }
+        self.needs_redraw = true;
     }
 
     /// The last activity (holds included) and the last input.
@@ -390,11 +407,12 @@ impl State {
             }
         }
         let idle = self.config.idle;
+        let delays = idle.delays(self.power_source());
         let idle_for = now.saturating_sub(self.locking.last_activity);
         match self.locking.phase {
             Phase::Unlocked
-                if idle.curtain_after > 0
-                    && idle_for >= Duration::from_secs(u64::from(idle.curtain_after)) =>
+                if delays.curtain_after > 0
+                    && idle_for >= Duration::from_secs(u64::from(delays.curtain_after)) =>
             {
                 tracing::info!("idle: the curtain falls");
                 self.locking.phase = Phase::Curtain { since: now };
@@ -408,6 +426,21 @@ impl State {
                 self.lock_now();
             }
             _ => {}
+        }
+        if delays.sleep_after > 0
+            && idle_for >= Duration::from_secs(u64::from(delays.sleep_after))
+            && self.locking.slept_for != Some(self.locking.last_activity)
+        {
+            self.locking.slept_for = Some(self.locking.last_activity);
+            // Hibernating only where the machine can, as the session menu.
+            let power = match idle.sleep {
+                hocus_core::config::Sleep::Hibernate if self.leaver.caps.hibernate => {
+                    hocus_platform::power::Power::Hibernate
+                }
+                _ => hocus_platform::power::Power::Suspend,
+            };
+            tracing::info!(?power, "idle: the machine sleeps");
+            self.sleep_now(power);
         }
         self.refresh_idle_notifications();
         self.tell_session();
@@ -427,17 +460,18 @@ impl State {
             .inhibiting
             .iter()
             .any(|s| s.is_alive() && shown(s))
-            || self.space.outputs().any(|o| self.fullscreen_on(o))
+            || (self.config.idle.fullscreen_awake
+                && self.space.outputs().any(|o| self.fullscreen_on(o)))
             || self.locking.dbus_inhibitors > 0
     }
 
     /// The next moment something happens without input: the curtain, the
     /// lock, a second of the countdown, an idle notification.
     fn next_deadline(&self) -> Option<Duration> {
-        let idle = self.config.idle;
+        let delays = self.config.idle.delays(self.power_source());
         let mut next = match self.locking.phase {
-            Phase::Unlocked if idle.curtain_after > 0 => Some(
-                self.locking.last_activity + Duration::from_secs(u64::from(idle.curtain_after)),
+            Phase::Unlocked if delays.curtain_after > 0 => Some(
+                self.locking.last_activity + Duration::from_secs(u64::from(delays.curtain_after)),
             ),
             Phase::Curtain { since } => {
                 let elapsed = self.clock.now().saturating_sub(since);
@@ -446,7 +480,10 @@ impl State {
             }
             _ => None,
         };
-        if let Some(n) = self.next_idle_notification() {
+        let sleep = (delays.sleep_after > 0
+            && self.locking.slept_for != Some(self.locking.last_activity))
+        .then(|| self.locking.last_activity + Duration::from_secs(u64::from(delays.sleep_after)));
+        for n in [self.next_idle_notification(), sleep].into_iter().flatten() {
             next = Some(next.map_or(n, |d| d.min(n)));
         }
         next

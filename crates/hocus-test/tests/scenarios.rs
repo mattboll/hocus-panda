@@ -33,7 +33,8 @@ fn main() -> std::process::ExitCode {
                 // a scenario is skipped.
                 let skip = Scenario::load(&file).is_ok_and(|s| {
                     (s.xwayland && !installed("Xwayland"))
-                        || (s.dbus && !installed("dbus-daemon"))
+                        || ((s.dbus || s.devices || s.timedated.is_some())
+                            && !installed("dbus-daemon"))
                         || (s.renderer == ScenarioRenderer::Gles && !render_node())
                         || s.needs.iter().any(|n| !installed(n))
                 });

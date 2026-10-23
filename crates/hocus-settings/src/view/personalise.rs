@@ -238,6 +238,22 @@ impl SettingsView {
         change: Option<Change>,
         setting: Option<&Setting>,
     ) -> NodeId {
+        let sub = sub.get(self.lang);
+        let target = change.map(Target::Set);
+        self.switch_card_to(theme, parent, (name, sub), on, target, setting)
+    }
+
+    /// The same, doing what `target` says when clicked (greyed without),
+    /// its second line said as it comes (a network's name).
+    pub(super) fn switch_card_to(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        (name, sub): (words::Words, &str),
+        on: bool,
+        target: Option<Target>,
+        setting: Option<&Setting>,
+    ) -> NodeId {
         let lang = self.lang;
         let look = Look {
             background: Some(Paint::SurfaceHover),
@@ -253,12 +269,12 @@ impl SettingsView {
             },
             Kind::Box(look),
         );
-        let works = change.is_some();
+        let works = target.is_some();
         let ink = if works { Paint::Text } else { Paint::Muted };
-        if let Some(change) = change {
+        if let Some(target) = target {
             self.tree.set_clickable(card, name.get(lang));
             self.tree.set_selected_box(card, on);
-            self.targets.insert(card, Target::Set(change));
+            self.targets.insert(card, target);
         }
         let words_box = self.add(card, fill_width(column(1.0)), Kind::Box(Look::default()));
         self.line(
@@ -268,7 +284,7 @@ impl SettingsView {
         );
         self.line(
             words_box,
-            sub.get(lang),
+            sub,
             theme.text.caption.with_weight(500).with_color(Paint::Muted),
         );
         self.add(

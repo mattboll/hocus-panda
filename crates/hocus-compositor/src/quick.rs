@@ -3,8 +3,9 @@
 //! pointer for the sheet while open. Its values come from the platform's
 //! quick settings service (a stub until M3), on its own thread.
 
-use hocus_api::UiNode;
-use hocus_platform::quick::{self, Change, Profile, Quick};
+use hocus_api::{BatteryInfo, HardwareChange, HardwareInfo, UiNode};
+use hocus_core::config::PowerSource;
+use hocus_platform::quick::{self, Change, Charge, Profile, Quick};
 use hocus_shell::{
     Lang, QuickAction, QuickState, Sheet, Tile,
     quick::{MARGIN, ROOM, WIDTH, tiles_in_order},
@@ -62,12 +63,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, lang: Lang) {
     let (sender, receiver) = channel::channel::<quick::State>();
     let inserted = handle.insert_source(receiver, |event, _, app| {
         if let channel::Event::Msg(platform) = event {
-            app.timed("quick settings", |app| {
-                if let Some(panel) = app.state.quick.as_mut() {
-                    panel.platform = Some(platform);
-                }
-                app.state.needs_redraw = true;
-            });
+            app.timed("quick settings", |app| app.state.quick_news(platform));
         }
     });
     if let Err(err) = inserted {
@@ -84,8 +80,16 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, lang: Lang) {
     // settings would change the developer's sound and screens. Tests give
     // a private bus, or get a stub.
     let service = if state.is_session || state.system_bus.is_some() {
-        let buses = hocus_platform::system::Buses {
+        use hocus_platform::system::{Buses, Devices};
+        let buses = Buses {
             system: state.system_bus.clone(),
+            // No bus says the sound or the backlight: off the session they
+            // would be the developer's.
+            devices: if state.is_session {
+                Devices::Machine
+            } else {
+                Devices::Memory
+            },
         };
         Quick::system(buses, &screens, sink)
     } else {
@@ -106,7 +110,117 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, lang: Lang) {
     });
 }
 
+/// Where the machine draws its power from, in a state of the service.
+fn source_of(platform: &quick::State) -> PowerSource {
+    match &platform.battery {
+        Some(b) if b.on_battery() => PowerSource::Battery,
+        _ => PowerSource::Charger,
+    }
+}
+
+fn profile_name(profile: Profile) -> &'static str {
+    match profile {
+        Profile::Saver => "power-saver",
+        Profile::Balanced => "balanced",
+        Profile::Performance => "performance",
+    }
+}
+
 impl State {
+    /// What the service says now: shown, told to the event stream, and,
+    /// when the charger is plugged or unplugged, the other delays.
+    fn quick_news(&mut self, platform: quick::State) {
+        let Some(panel) = self.quick.as_mut() else {
+            return;
+        };
+        let was = panel.platform.as_ref().map(source_of);
+        let now = source_of(&platform);
+        let changed = panel.platform.as_ref() != Some(&platform);
+        panel.platform = Some(platform);
+        if changed {
+            self.emit(|_| hocus_api::Event::Hardware);
+        }
+        if was.is_some_and(|was| was != now) {
+            self.power_source_changed(now);
+        }
+        self.needs_redraw = true;
+    }
+
+    /// The charger, unless UPower says the battery is discharging.
+    pub fn power_source(&self) -> PowerSource {
+        self.quick
+            .as_ref()
+            .and_then(|q| q.platform.as_ref())
+            .map_or(PowerSource::Charger, source_of)
+    }
+
+    /// The machine's devices, for the settings' Hardware pages.
+    pub fn hardware_info(&self) -> HardwareInfo {
+        let can_hibernate = self.leaver.caps.hibernate;
+        let Some(p) = self.quick.as_ref().and_then(|q| q.platform.as_ref()) else {
+            return HardwareInfo {
+                can_hibernate,
+                ..HardwareInfo::default()
+            };
+        };
+        let offered = [Profile::Saver, Profile::Balanced, Profile::Performance];
+        HardwareInfo {
+            known: true,
+            wifi: p.wifi,
+            network: p.network.clone(),
+            airplane: p.airplane,
+            bluetooth: p.bluetooth,
+            bluetooth_device: p.bluetooth_device.clone(),
+            volume: p.volume,
+            muted: p.muted,
+            output_device: p.output_device.clone(),
+            input_device: p.input_device.clone(),
+            profile: profile_name(p.profile).into(),
+            profiles: offered
+                .into_iter()
+                .zip(p.profiles)
+                .filter(|(_, has)| *has)
+                .map(|(profile, _)| profile_name(profile).into())
+                .collect(),
+            battery: p.battery.as_ref().map(|b| BatteryInfo {
+                percent: b.percent,
+                minutes_left: b.minutes_left,
+                state: match b.charge {
+                    Charge::Charging => "charging",
+                    Charge::Discharging => "discharging",
+                    Charge::Full => "full",
+                    Charge::NotCharging => "not-charging",
+                }
+                .into(),
+            }),
+            can_hibernate,
+        }
+    }
+
+    /// A change asked by the settings, carried out as quick settings do.
+    pub fn set_hardware(&mut self, change: HardwareChange) -> Result<(), String> {
+        let change = match change {
+            HardwareChange::Wifi { on } => Change::Wifi(on),
+            HardwareChange::Bluetooth { on } => Change::Bluetooth(on),
+            HardwareChange::Airplane { on } => Change::Airplane(on),
+            HardwareChange::Volume { percent } => Change::Volume(percent.min(100)),
+            HardwareChange::Muted { on } => Change::Muted(on),
+            HardwareChange::Profile { profile } => Change::Profile(match profile.as_str() {
+                "power-saver" => Profile::Saver,
+                "balanced" => Profile::Balanced,
+                "performance" => Profile::Performance,
+                other => return Err(format!("no power profile named {other}")),
+            }),
+        };
+        let service = self
+            .quick
+            .as_ref()
+            .and_then(|q| q.service.as_ref())
+            .ok_or("no quick settings service")?;
+        service.change(change);
+        Ok(())
+    }
+
     pub fn quick_open(&self) -> bool {
         self.quick.as_ref().is_some_and(|q| q.sheet.is_open())
     }

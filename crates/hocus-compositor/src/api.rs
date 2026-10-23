@@ -268,6 +268,11 @@ impl App {
                 state.install_updates();
                 Reply::Done
             }
+            Request::Hardware => Reply::Hardware(state.hardware_info()),
+            Request::SetHardware { change } => match state.set_hardware(change) {
+                Ok(()) => Reply::Done,
+                Err(why) => return Some(Err(ApiError::new(ErrorCode::Failed, why))),
+            },
             Request::Phone => Reply::Phone(state.phone_info()),
             Request::SendToPhone { paths } => {
                 let paths: Vec<std::path::PathBuf> =

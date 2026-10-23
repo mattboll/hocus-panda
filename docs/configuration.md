@@ -79,10 +79,17 @@ image = "~/Pictures/wide.png"
 restore = "ask"            # ask (a card), always, never
 autostart = true           # start the XDG autostart entries
 
-[idle]                     # nobody at the keyboard
+[idle]                     # nobody at the keyboard (on the charger, or without a battery)
 curtain_after = 300        # seconds before the curtain dims the screens (0: never)
 lock_after = 30            # seconds of curtain before the session locks
 lock = true                # false: the curtain only dims
+sleep_after = 0            # seconds before the machine sleeps, locked first (0: never)
+sleep = "suspend"          # or "hibernate", where the machine can (it suspends otherwise)
+fullscreen_awake = true    # a fullscreen window keeps the session awake, as applications asking do
+
+[idle.battery]             # on battery (UPower says the charger is out): what differs; plugging or
+curtain_after = 60         #   unplugging the charger counts as input, the other delays start from then
+sleep_after = 900
 
 [clipboard]                # the history (Super+V)
 history = true             # keeps what is copied; never what password managers mark secret

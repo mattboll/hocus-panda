@@ -1,0 +1,71 @@
+# Lock (#67): locking after the curtain or not, and how long the curtain
+# shows first; the session counts down from it.
+description = "The Lock page gives the curtain a minute before locking, which it then counts down; turned off, the curtain only dims; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open_settings = { page = "lock" }
+
+[[step]]
+expect_settings = { label = "Lock after the curtain", selected = true }
+
+[[step]]
+expect_settings = { label = "Curtain before locking: 30 s", selected = true }
+
+[[step]]
+click_settings = "Curtain before locking: 1 min"
+
+[[step]]
+expect_config_file = { contains = ["[idle]", "lock_after = 60"] }
+
+[[step]]
+expect_settings = { label = "Curtain before locking: 1 min", selected = true }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-lock.png" }
+
+[[step]]
+advance_ms = 301500
+
+[[step]]
+expect_ui = { label = "Locking in 59\u00a0s" }
+
+[[step]]
+pointer_move = [600, 400]
+
+[[step]]
+click_settings = "Lock after the curtain"
+
+[[step]]
+expect_config_file = { contains = ["lock = false"] }
+
+[[step]]
+expect_settings = { label = "Curtain before locking: 1 min", shown = false }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[idle]
+lock = false
+"""
+
+[[step]]
+expect_settings = { label = "Lock after the curtain", selected = false }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-lock-light.png" }
