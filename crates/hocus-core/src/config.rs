@@ -21,6 +21,8 @@ pub struct Config {
     pub launcher: Launcher,
     /// The model questions typed in the command field go to (#44).
     pub ai: Ai,
+    /// Documents found from the command field (#45).
+    pub search: Search,
     pub dropdown: Dropdown,
     pub settings: Settings,
     pub idle: Idle,
@@ -1376,6 +1378,60 @@ impl Default for Launcher {
             intents: true,
         }
     }
+}
+
+/// Document search from the command field (#45): an index of the words
+/// (and, with a model that can, the meaning) of the documents in some
+/// folders, kept in the state directory. What is never read (`~/.ssh`,
+/// keyrings, password stores, keys…) is not configurable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Search {
+    /// Documents show in the command field; false: nothing is read, and
+    /// the index kept is deleted.
+    pub documents: bool,
+    /// The folders indexed (`~/` for the home); empty: the documents,
+    /// desktop and download folders (in the session only: nested or in
+    /// tests, nothing without folders named).
+    pub folders: Vec<String>,
+    /// The screenshots folder's pictures too, their text read by
+    /// `[screenshots] ocr`.
+    pub screenshots: bool,
+    /// Names left out besides those never read, as globs (`*.log`).
+    pub exclude: Vec<String>,
+    /// Search by meaning, through embeddings from the `[ai]` provider
+    /// when it is on and can make them (Claude cannot).
+    pub meaning: Meaning,
+    /// The model making them; empty: the first the provider lists with
+    /// "embed" in its name.
+    pub embedding_model: String,
+}
+
+impl Default for Search {
+    fn default() -> Self {
+        Self {
+            documents: true,
+            folders: Vec::new(),
+            screenshots: true,
+            exclude: Vec::new(),
+            meaning: Meaning::Local,
+            embedding_model: String::new(),
+        }
+    }
+}
+
+/// Whose model may read the documents to search them by meaning: their
+/// text goes to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Meaning {
+    /// A model on this machine only.
+    #[default]
+    Local,
+    /// The `[ai]` provider, wherever it is.
+    On,
+    /// Words only.
+    Off,
 }
 
 /// The providers a question can go to.

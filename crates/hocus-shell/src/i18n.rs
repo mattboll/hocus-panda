@@ -1173,6 +1173,20 @@ impl Lang {
         self.pick("Also", "Aussi")
     }
 
+    /// The group of documents found in the command field (#45).
+    pub fn documents_caption(self) -> &'static str {
+        self.pick("Documents", "Documents")
+    }
+
+    /// A document found, for screen readers: its name, its folder, the
+    /// line around the words matched.
+    pub fn document(self, name: &str, folder: &str, line: &str) -> String {
+        match self {
+            Self::En => format!("{name}, in {folder}: {line}"),
+            Self::Fr => format!("{name}, dans {folder}\u{a0}: {line}"),
+        }
+    }
+
     /// An intent's caption: it waits to be confirmed.
     pub fn intent_caption(self) -> &'static str {
         self.pick("Action · to confirm", "Action · à confirmer")

@@ -20,5 +20,6 @@ pub const POWER: &str = "M12 3v8M6.3 6.3a8 8 0 1 0 11.4 0";
 pub const SHIELD: &str = "M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z";
 pub const MOON: &str = "M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z";
 pub const SEARCH: &str = "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4";
+pub const FILE: &str = "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6";
 pub const TRAY: &str = "M4 6h16v12H4zM8 10h2M12 10h2M16 10h0";
 pub const MORE: &str = "M5 12h0M12 12h0M19 12h0";

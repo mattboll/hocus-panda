@@ -140,6 +140,8 @@ pub struct State {
     pub calendar: crate::calendar::Calendar,
     /// Questions to the AI (#44).
     pub ai: crate::ai::Ai,
+    /// Document search (#45).
+    pub search: crate::search::SearchState,
     /// Notes and to-dos (#79).
     pub notes: crate::notes::NotesState,
     /// Focus mode, the magnifier, night light (#78).
@@ -330,6 +332,7 @@ impl State {
             phone: Default::default(),
             calendar: Default::default(),
             ai: Default::default(),
+            search: Default::default(),
             gamma_wanted: Vec::new(),
             share: None,
             clipboard: Default::default(),

@@ -294,6 +294,25 @@ and are offered only while the AI is on; Copy the text, Note and Search
 holds the keyboard and the pointer: Escape, or a press anywhere else that
 no client sees, closes it all.
 
+Document search (#45) lives in `hocus-platform::search`: an indexer thread
+at nice 19 walks the configured folders a few entries at a time with pauses
+between batches, reads what changed since the index was kept (by date and
+size), and waits while on battery (the power source quick settings know,
+from UPower); a searcher thread answers the command field's queries from
+the index, the newest only. The text comes from readers of our own, small
+and fuzzed: plain text, HTML without its markup, PDF's text layer (objects
+found by scanning, object streams, Flate, ToUnicode maps), and office files
+(a minimal ZIP reader and quick-xml); screenshots' text through the OCR
+program. The index is an inverted index of folded words ranked by BM25,
+the last word taken as a prefix; with a model that embeds (ollama's
+`/api/embed`, `/v1/embeddings`), the start of each text has a few
+quantized vectors, and both rankings are fused (reciprocal rank fusion).
+What is never read (`search::deny`) is checked on an entry's name before
+its type is even asked, and again by the one gate every open goes through;
+symbolic links are never followed. The loop only sends the configuration,
+the power source and the query, and hands what comes back to the launcher,
+which shows it under "Documents".
+
 The phone (#85) goes through KDE Connect's daemon on the session bus,
 followed on a worker thread and never started by us: the session starts it
 from its autostart entry, with the environment its clipboard needs to reach
@@ -605,9 +624,17 @@ guarded by these rules (#134):
 - **Calendar passwords (#75)** live in the keyring, never in the
   configuration, and travel only over https (plain http is refused but to
   this machine); the cache of events is sealed.
+- **Search never reads secrets (#45).** The document indexer never opens
+  `~/.ssh`, `~/.gnupg`, keyrings, password stores, cloud credentials,
+  browser profiles, hidden folders named for secrets, `.env*`, `id_*` or
+  key files, whatever the configuration names; the list is in the code
+  (`hocus-platform::search::deny`), not in the configuration. Its index is
+  readable by the user only. Vectors of documents go to a model on this
+  machine unless `[search] meaning = "on"`.
 - **Parsers are fuzzed** on every build (`robustness` tests): the
   configuration, the session file, shortcuts and actions, the control API's
-  lines through the real server.
+  lines through the real server, and the document search's readers (PDF,
+  ZIP, office XML, HTML) and index file.
 
 ## Testing
 

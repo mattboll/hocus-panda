@@ -129,8 +129,13 @@ fn said(err: &AskError, url: &str, lang: Lang) -> String {
 }
 
 impl State {
+    /// Where the AI keeps its keys, for the document search's vectors.
+    pub(crate) fn ai_secrets(&self) -> Option<Secrets> {
+        self.ai.secrets.clone()
+    }
+
     /// The provider, and its address; `None` when nothing may be asked.
-    fn ai_provider(&self) -> Option<(Provider, String)> {
+    pub(crate) fn ai_provider(&self) -> Option<(Provider, String)> {
         let config = &self.config.ai;
         if !config.enabled {
             return None;

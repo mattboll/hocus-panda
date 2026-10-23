@@ -272,6 +272,7 @@ impl App {
                 Err(why) => return Some(Err(ApiError::new(ErrorCode::BadRequest, why))),
             },
             Request::Ai => Reply::Ai(state.ai_info()),
+            Request::Search => Reply::Search(state.search_info()),
             Request::Updates => Reply::Updates(state.updates_info()),
             Request::InstallUpdates => {
                 state.install_updates();

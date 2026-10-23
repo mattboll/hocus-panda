@@ -82,6 +82,9 @@ crash.
   log enough to tell a driver failure from ours.
 - **Search never reads secrets.** Document indexing never reads `~/.ssh`,
   keyrings, password stores or dot-directories with secrets, whatever the
-  configuration says.
+  configuration says (#45: the list is `hocus-platform::search::deny`; an
+  entry is refused by its name before even its type is asked, and the
+  `search-secrets` scenario makes such files unreadable to show none is
+  opened).
 - **Launched applications get a clean environment** (no `LD_PRELOAD` and the
   like inherited from the desktop).

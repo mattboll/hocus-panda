@@ -62,6 +62,7 @@ mod recording;
 mod scene;
 mod screen_capture;
 mod screenshot;
+mod search;
 mod session;
 mod settings;
 mod share;
@@ -317,6 +318,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
             options.session_bus.as_deref(),
             options.data_dirs.clone(),
         );
+        search::start(&event_loop.handle(), &mut state, state_dir.as_deref());
         first_run::start(&event_loop.handle(), &mut state, state_dir);
     }
     if options.xwayland {

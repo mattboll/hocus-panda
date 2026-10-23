@@ -96,6 +96,11 @@ pub struct Scenario {
     /// What started applications inherit (`PATH` is added if missing),
     /// instead of the test's own environment; `{scenario_dir}` in values.
     pub child_env: Option<std::collections::BTreeMap<String, String>>,
+    /// A home of the scenario's own: this folder (relative to the
+    /// scenario) copied into a fresh temporary directory, `{home}` in
+    /// configuration and `unreadable` steps. Documents are searched there,
+    /// never in the developer's.
+    pub home: Option<PathBuf>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
     /// The file's name without extension.
@@ -294,6 +299,12 @@ pub enum Step {
     /// The AI provider was asked, once so: `{ path?, contains? = […],
     /// header? }` (a header as `name: value`, the name in lower case).
     ExpectAi(ExpectAi),
+    /// The document search's indexer, once so: `{ state?, documents?,
+    /// embedded?, never_read?, unreadable?, meaning? }` (#45).
+    ExpectSearch(ExpectSearch),
+    /// A file or folder of the private home made unreadable (mode 000):
+    /// reading it would fail, and show as `unreadable`.
+    Unreadable(String),
     /// The calendars as the session knows them, once so: `{ events?,
     /// secrets?, contains?, error? }`.
     ExpectCalendars(ExpectCalendars),
@@ -630,6 +641,17 @@ pub struct ExpectAi {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ExpectSearch {
+    pub state: Option<String>,
+    pub documents: Option<u64>,
+    pub embedded: Option<u64>,
+    pub never_read: Option<u64>,
+    pub unreadable: Option<u64>,
+    pub meaning: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HerdrStep {
     /// Several herdr have names: `{herdr:NAME}` is the socket of one.
     pub name: Option<String>,
@@ -925,6 +947,8 @@ impl fmt::Display for Step {
             Self::AiServer(a) => write!(f, "ai_server with {} pieces", a.pieces.len()),
             Self::AiKey(k) => write!(f, "ai_key {}", k.provider),
             Self::ExpectAi(e) => write!(f, "expect_ai {e:?}"),
+            Self::ExpectSearch(e) => write!(f, "expect_search {e:?}"),
+            Self::Unreadable(path) => write!(f, "unreadable {path:?}"),
             Self::ExpectCalendars(e) => write!(f, "expect_calendars {e:?}"),
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
             Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
@@ -1083,6 +1107,10 @@ impl Scenario {
             Some(bus) if self.accounts => Some(crate::accounts::FakeAccounts::start(&bus.address)?),
             _ => None,
         };
+        let home = match &self.home {
+            Some(fixture) => Some(PrivateHome::copy(&self.dir.join(fixture))?),
+            None => None,
+        };
         let compositor = Headless::start_options(HarnessOptions {
             headless: HeadlessConfig {
                 outputs,
@@ -1143,6 +1171,7 @@ impl Scenario {
             herdrs: Vec::new(),
             ai: None,
             blurs: 0,
+            home,
         };
         run.request(Request::Subscribe)?;
         for (n, step) in self.steps.iter().enumerate() {
@@ -1193,6 +1222,56 @@ struct Run<'a> {
     ai: Option<crate::ai::Server>,
     /// Blurs computed at the last `expect_blur`.
     blurs: u64,
+    /// The scenario's own home, last: the compositor is gone before it.
+    home: Option<PrivateHome>,
+}
+
+/// A copy of a fixture folder in a fresh temporary directory: the home of
+/// a scenario. What a step made unreadable is made readable again before
+/// it goes.
+struct PrivateHome {
+    dir: tempfile::TempDir,
+    locked: Vec<PathBuf>,
+}
+
+impl PrivateHome {
+    fn copy(fixture: &Path) -> anyhow::Result<Self> {
+        fn copy_into(from: &Path, to: &Path) -> std::io::Result<()> {
+            std::fs::create_dir_all(to)?;
+            for entry in std::fs::read_dir(from)? {
+                let entry = entry?;
+                let target = to.join(entry.file_name());
+                if entry.file_type()?.is_dir() {
+                    copy_into(&entry.path(), &target)?;
+                } else {
+                    std::fs::copy(entry.path(), &target)?;
+                }
+            }
+            Ok(())
+        }
+        let dir = tempfile::Builder::new().prefix("hocus-home-").tempdir()?;
+        copy_into(fixture, dir.path())
+            .with_context(|| format!("could not copy {}", fixture.display()))?;
+        Ok(Self {
+            dir,
+            locked: Vec::new(),
+        })
+    }
+
+    fn path(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
+impl Drop for PrivateHome {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        // The innermost last locked, unlocked first.
+        for path in self.locked.iter().rev() {
+            let mode = if path.is_dir() { 0o700 } else { 0o600 };
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+        }
+    }
 }
 
 impl Run<'_> {
@@ -1761,6 +1840,17 @@ impl Run<'_> {
                     self.compositor.dispatch(Duration::from_millis(10))?;
                 }
             }
+            Step::ExpectSearch(expected) => self.expect_search(expected),
+            Step::Unreadable(path) => {
+                use std::os::unix::fs::PermissionsExt;
+                let home = self.home.as_mut().context("no home for the scenario")?;
+                let path = PathBuf::from(path.replace("{home}", &home.path().to_string_lossy()));
+                anyhow::ensure!(path.starts_with(home.path()), "only in the scenario's home");
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
+                    .with_context(|| format!("could not lock {}", path.display()))?;
+                home.locked.push(path);
+                Ok(())
+            }
             Step::ExpectRecording(expected) => self.expect_recording(expected),
             Step::Swipe(swipe) => {
                 use hocus_api::SwipePhase;
@@ -2048,6 +2138,9 @@ impl Run<'_> {
                 }
                 if let Some(client) = &self.options.test_client {
                     text = text.replace("{test_client}", &client.to_string_lossy());
+                }
+                if let Some(home) = &self.home {
+                    text = text.replace("{home}", &home.path().to_string_lossy());
                 }
                 self.compositor.write_config(&text)?;
                 Ok(())
@@ -3204,6 +3297,28 @@ impl Run<'_> {
     }
 
     /// The shell redraws after each dispatch: it gets a moment.
+    /// The indexer works on threads of its own, on real time: it may
+    /// take a few seconds on a loaded machine.
+    fn expect_search(&mut self, expected: &ExpectSearch) -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let Reply::Search(info) = self.request(Request::Search)? else {
+                anyhow::bail!("expected the search's state");
+            };
+            let ok = expected.state.as_ref().is_none_or(|s| *s == info.state)
+                && expected.documents.is_none_or(|n| n == info.documents)
+                && expected.embedded.is_none_or(|n| n == info.embedded)
+                && expected.never_read.is_none_or(|n| n == info.never_read)
+                && expected.unreadable.is_none_or(|n| n == info.unreadable)
+                && expected.meaning.is_none_or(|m| m == info.meaning);
+            if ok {
+                return Ok(());
+            }
+            anyhow::ensure!(Instant::now() < deadline, "the search is {info:?}");
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
     fn expect_ui(&mut self, expected: &ExpectUi) -> anyhow::Result<()> {
         let deadline = Instant::now() + SETTLE_TIMEOUT;
         loop {

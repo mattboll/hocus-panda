@@ -1,0 +1,59 @@
+# Document search is paused on battery (#45): the laptop unplugged (UPower, a
+# stand-in on a private system bus, says so), the indexer due waits and reads
+# nothing; on the charger it runs, and the documents are found.
+description = "On battery the indexer waits and nothing is found; plugged in, it runs and the documents are found"
+outputs = ["1280x800"]
+shell = true
+devices = true
+home = "../fixtures/search-home"
+
+[[step]]
+charger = false
+
+[[step]]
+expect_ui = { label = "Battery 80%" }
+
+[[step]]
+config = """
+[search]
+folders = ["{home}/Documents"]
+"""
+
+[[step]]
+expect_search = { state = "paused", documents = 0 }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "bamboo"
+
+[[step]]
+expect_ui = { label = "Search the web for “bamboo”" }
+
+[[step]]
+expect_ui = { label = "DOCUMENTS", shown = false }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_search = { state = "paused", documents = 0 }
+
+[[step]]
+charger = true
+
+[[step]]
+expect_search = { state = "ready", documents = 7 }
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "bamboo"
+
+[[step]]
+expect_ui = { label = "Invoice March.txt, in Documents: Invoice for 120 kg of bamboo shoots, delivered on 3 March." }

@@ -376,6 +376,7 @@ impl State {
         self.refresh_appearance();
         self.refresh_bars();
         self.refresh_toasts();
+        self.refresh_search();
         self.refresh_launcher();
         self.refresh_ai();
         self.refresh_quick();
