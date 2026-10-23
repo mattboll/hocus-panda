@@ -206,6 +206,8 @@ enum Command {
     /// Off: the index kept there goes.
     Off(Option<PathBuf>),
     Battery(bool),
+    /// The folders are looked at again now, not at the next half hour.
+    Again,
 }
 
 /// The search service; dropping it stops its threads.
@@ -267,6 +269,13 @@ impl Search {
     /// On battery the indexer waits; on the charger it goes on.
     pub fn set_battery(&self, battery: bool) {
         let _ = self.commands.send(Command::Battery(battery));
+    }
+
+    /// Looks at the folders again now rather than at the next half hour,
+    /// reading only what changed; nothing while one look goes on, while
+    /// turned off or on battery (it goes on once on the charger).
+    pub fn look_again(&self) {
+        let _ = self.commands.send(Command::Again);
     }
 
     /// Looks for `text`; the answer comes as [`News::Found`] with `id`.
@@ -504,6 +513,11 @@ impl Indexer {
                     tracing::info!(battery, "document search follows the power");
                 }
                 self.battery = battery;
+            }
+            Command::Again => {
+                if self.settings.is_some() && matches!(self.work, Work::Until(_)) {
+                    self.work = Work::Until(Instant::now());
+                }
             }
             Command::Off(store) => {
                 self.settings = None;

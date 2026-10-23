@@ -263,7 +263,7 @@ The column on the right of the screen is the chosen form (see
 - Agent seat: each MCP agent has its own pointer and keyboard (a seat of its own, focus independent from the user's), its pointer drawn in its colour with its name; before a click a ring and its intent in one line; sensitive actions (password managers, the settings, `[agents] confirm_apps`, typing into a password field) wait for the user's confirmation on a card; the column shows its window live with Take over and Hand back
 - Agents' journal: what each MCP agent did (when, which action, on which window, refused or not; typed text only on request), in the column, `hocus msg agents-journal` and the `journal` tool; one key (Super+Shift+Escape) or the column's button stops every agent at once until allowed again
 - Offline intents
-- Document search: text, HTML, PDF, office files, OCR of screenshots; words + meaning; secrets excluded (never index `~/.ssh`, keyrings, password stores…); paused on battery; found under "Documents" in the command field (`[search]`, `hocus msg search`)
+- Document search: text, HTML, PDF, office files, OCR of screenshots; words + meaning; secrets excluded (never index `~/.ssh`, keyrings, password stores…); paused on battery; found under "Documents" in the command field (`[search]`, Settings → Search, `hocus msg search`, `search-again`)
 - AI answers inside the command field rather than in a separate window
 - Circle to ask: a loop drawn around anything on screen (Super+Shift + drag) offers Explain, Search, Translate, Copy the text, Note and a question of one's own; the answer streams into a card beside it
 - Better semantic search in French

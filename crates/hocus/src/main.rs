@@ -140,6 +140,10 @@ enum Message {
     /// What the document search's indexer does: off, waiting, paused (on
     /// battery), indexing or ready, and how many documents.
     Search,
+    /// The document search's folders looked at again now rather than at
+    /// the next half hour: only what changed is read. Says the indexer's
+    /// state after.
+    SearchAgain,
     /// What MCP agents did this session, oldest first, one line each, and
     /// whether they are stopped.
     AgentsJournal {
@@ -356,6 +360,10 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
         Message::Desktops => print(client.request(Request::Desktops)?),
         Message::Hardware => print(client.request(Request::Hardware)?),
         Message::Search => print(client.request(Request::Search)?),
+        Message::SearchAgain => {
+            client.request(Request::SearchAgain)?;
+            print(client.request(Request::Search)?)
+        }
         Message::Notifications => print(client.request(Request::Notifications)?),
         Message::Phone => print(client.request(Request::Phone)?),
         Message::AiKey { provider } => {

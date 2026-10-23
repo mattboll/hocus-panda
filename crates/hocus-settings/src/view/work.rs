@@ -35,6 +35,14 @@ pub(super) enum Field {
     AiKey,
     /// The socket of a herdr to add.
     NewHerdr,
+    /// A folder for the document search to read, and a name for it to
+    /// leave out.
+    NewSearchFolder,
+    NewExclude,
+    /// The model making the documents' vectors.
+    EmbeddingModel,
+    /// The web search's address.
+    SearchEngine,
 }
 
 /// The Work pages' fields between builds.
@@ -202,6 +210,14 @@ impl SettingsView {
             Field::AiModel => Change {
                 value,
                 ..Change::new("ai", "model", "")
+            },
+            Field::NewSearchFolder | Field::NewExclude => {
+                return self.commit_list_entry(&field, &typed);
+            }
+            Field::SearchEngine => return self.commit_engine(&typed),
+            Field::EmbeddingModel => Change {
+                value,
+                ..Change::new("search", "embedding_model", "")
             },
             Field::NewHerdr => {
                 self.fields.forget(&field);

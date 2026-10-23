@@ -6,7 +6,8 @@
 use std::{
     path::PathBuf,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, Weak,
+        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, Sender, channel},
     },
     thread::JoinHandle,
@@ -54,6 +55,10 @@ use crate::{
     view::{BluetoothAction, Listed, Outcome, Pairing, Screen, SettingsView, WifiAction},
 };
 
+/// How often the indexer is asked what it does while the Search page
+/// shows.
+const SEARCH_EVERY: Duration = Duration::from_secs(2);
+
 /// The window's size before the compositor says otherwise.
 const SIZE: (u32, u32) = (1200, 820);
 const BTN_LEFT: u32 = 0x110;
@@ -75,6 +80,10 @@ pub struct Options {
     /// The time zone database, whose `zone1970.tab` places the cities of
     /// the map.
     pub zoneinfo: PathBuf,
+    /// The user's home, for `~/` in the Search page's folders and the
+    /// places never read under it; only its path is read, never what is in
+    /// it.
+    pub home: Option<PathBuf>,
 }
 
 /// The XDG directories the Applications page reads and writes.
@@ -491,9 +500,11 @@ enum FromApi {
     BluetoothDone(Result<(), String>),
     /// What a pairing asks.
     Ask(hocus_platform::bluetooth::Ask),
+    /// What the document search's indexer does.
+    Search(hocus_api::SearchInfo),
 }
 
-fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
+fn api_thread(path: PathBuf, home: Option<PathBuf>, to_window: Sender<FromApi>) {
     let result = (|| -> anyhow::Result<()> {
         let mut requests = Api::connect(&path)?;
         let mut events = Api::connect(&path)?;
@@ -533,6 +544,10 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 Ok(Reply::AgentsJournal(journal)) => journal.stopped,
                 _ => false,
             };
+            let search = match requests.request(Request::Search) {
+                Ok(Reply::Search(search)) => search,
+                _ => Default::default(),
+            };
             let config = hocus_core::Config::parse(&info.toml)
                 .map_err(|e| anyhow::anyhow!("the configuration in effect: {e}"))?;
             let ctx = Context {
@@ -551,6 +566,8 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 account: Default::default(),
                 ai,
                 agents_stopped,
+                search,
+                home: home.clone(),
             };
             let path = info.path.map(PathBuf::from);
             let sent = to_window.send(FromApi::Context(Box::new((ctx, info.accent, path))));
@@ -571,6 +588,14 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 | Event::OutputChanged { .. } => {
                     fetch(&mut requests)?;
                 }
+                // Only what the indexer does: its counts and its last look.
+                Event::Search { .. } => {
+                    if let Ok(Reply::Search(info)) = requests.request(Request::Search)
+                        && to_window.send(FromApi::Search(info)).is_err()
+                    {
+                        return Ok(());
+                    }
+                }
                 Event::OpenSettings { page } => {
                     if to_window.send(FromApi::Open(page)).is_err() {
                         return Ok(());
@@ -582,6 +607,48 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
     })();
     if let Err(err) = result {
         let _ = to_window.send(FromApi::Gone(format!("{err:#}")));
+    }
+}
+
+/// While the Search page shows, what the indexer does, asked every few
+/// seconds on a thread of its own: it counts documents and says when it
+/// last looked, which no event tells. The thread ends with the window.
+fn follow_search(api: PathBuf, shown: Weak<AtomicBool>, to_window: Sender<FromApi>) {
+    let spawned = std::thread::Builder::new()
+        .name("settings search".into())
+        .spawn(move || {
+            let mut client: Option<Api> = None;
+            loop {
+                std::thread::sleep(SEARCH_EVERY);
+                let Some(shown) = shown.upgrade() else {
+                    return;
+                };
+                if !shown.load(Ordering::Relaxed) {
+                    continue;
+                }
+                drop(shown);
+                if client.is_none() {
+                    client = Api::connect(&api).ok();
+                }
+                let Some(api) = client.as_mut() else {
+                    continue;
+                };
+                match api.request(Request::Search) {
+                    Ok(Reply::Search(info)) => {
+                        if to_window.send(FromApi::Search(info)).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::debug!(%err, "the indexer's state is asked again");
+                        client = None;
+                    }
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "the indexer's state will not follow");
     }
 }
 
@@ -631,7 +698,8 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         .name("settings api".into())
         .spawn({
             let path = options.api.clone();
-            move || api_thread(path, to_window)
+            let home = options.home.clone();
+            move || api_thread(path, home, to_window)
         })?;
     // The first frame waits for what is in effect.
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -644,7 +712,7 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         match from_api.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(FromApi::Context(what)) => break *what,
             Ok(FromApi::Zone(zone)) => early_zone = Some(zone),
-            Ok(FromApi::ZoneSet(_) | FromApi::AccountRefused(_)) => {}
+            Ok(FromApi::ZoneSet(_) | FromApi::AccountRefused(_) | FromApi::Search(_)) => {}
             Ok(FromApi::Apps(apps)) => early_apps = Some(apps),
             Ok(FromApi::Account(account)) => early_account = Some(account),
             Ok(FromApi::Places(places)) => early_places = Some(places),
@@ -688,6 +756,13 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     // The language the file chose, once it is read.
     window.set_title(crate::words::SETTINGS.get(view.lang()));
 
+    let search_shown = Arc::new(AtomicBool::new(false));
+    follow_search(
+        options.api.clone(),
+        Arc::downgrade(&search_shown),
+        zone_news.clone(),
+    );
+
     let pool = SlotPool::new((SIZE.0 * SIZE.1 * 4) as usize, &shm)?;
     let mut app = App {
         registry: RegistryState::new(&globals),
@@ -721,10 +796,13 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         network: None,
         bluetooth: None,
         answer: None,
+        search_shown,
     };
     while !app.closed {
         app.take_api_news();
         app.follow_page();
+        app.search_shown
+            .store(app.view.shows_search(), Ordering::Relaxed);
         if app.configured && app.needs_draw && !app.frame_pending {
             app.draw(&qh)?;
         }
@@ -798,6 +876,8 @@ struct App {
     bluetooth: Option<Worker<BluetoothAction>>,
     /// The answer a pairing waits for.
     answer: Option<hocus_platform::bluetooth::Answer>,
+    /// The Search page shows: the indexer's state is followed.
+    search_shown: Arc<AtomicBool>,
 }
 
 impl App {
@@ -895,6 +975,7 @@ impl App {
                     };
                     self.view.set_pairing(pairing);
                 }
+                FromApi::Search(info) => self.view.set_search(info),
             }
             self.needs_draw = true;
         }
@@ -1030,6 +1111,32 @@ impl App {
                         });
                     if let Err(err) = spawned {
                         tracing::warn!(%err, "could not stop or allow the agents");
+                    }
+                }
+                // Off the window's thread; what the indexer does then
+                // shows at once.
+                Outcome::SearchAgain => {
+                    let api = self.api.clone();
+                    let tx = self.zone_news.clone();
+                    let spawned = std::thread::Builder::new()
+                        .name("search again".into())
+                        .spawn(move || {
+                            let asked = Api::connect(&api).and_then(|mut c| {
+                                c.request(Request::SearchAgain)?;
+                                c.request(Request::Search)
+                            });
+                            match asked {
+                                Ok(Reply::Search(info)) => {
+                                    let _ = tx.send(FromApi::Search(info));
+                                }
+                                Ok(_) => {}
+                                Err(err) => {
+                                    tracing::warn!(%err, "the folders were not looked at again");
+                                }
+                            }
+                        });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "the folders were not looked at again");
                     }
                 }
                 Outcome::DoNotDisturb(on) => {
