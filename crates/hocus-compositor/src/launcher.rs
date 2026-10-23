@@ -313,6 +313,16 @@ impl State {
         if !panel.launcher.is_open() {
             return false;
         }
+        // A long answer scrolls a page at a time.
+        if matches!(
+            sym,
+            Keysym::Page_Up | Keysym::Page_Down | Keysym::KP_Page_Up | Keysym::KP_Page_Down
+        ) {
+            let down = matches!(sym, Keysym::Page_Down | Keysym::KP_Page_Down);
+            panel.launcher.page(down);
+            self.needs_redraw = true;
+            return true;
+        }
         let events = match key_of(sym) {
             Some(key) => panel.launcher.key(key),
             None => {
@@ -526,6 +536,28 @@ impl State {
             (location.x - origin.x) as f32,
             (location.y - origin.y) as f32,
         ))
+    }
+
+    /// The wheel over the open launcher's card scrolls a long answer;
+    /// whether it did.
+    pub fn launcher_wheel(&mut self, dy: f64) -> bool {
+        if !self.launcher_open() || dy == 0.0 {
+            return false;
+        }
+        let Some(location) = self.seat.get_pointer().map(|p| p.current_location()) else {
+            return false;
+        };
+        let Some(at) = self.launcher_local(location) else {
+            return false;
+        };
+        let scrolled = self
+            .launcher
+            .as_mut()
+            .is_some_and(|panel| panel.launcher.wheel(at, dy as f32));
+        if scrolled {
+            self.needs_redraw = true;
+        }
+        scrolled
     }
 
     /// While open, the launcher takes the pointer everywhere.

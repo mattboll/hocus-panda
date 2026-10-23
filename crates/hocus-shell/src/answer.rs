@@ -238,12 +238,25 @@ pub struct Card {
     pub buttons: Vec<String>,
 }
 
-/// What [`fill`] made: the buttons in order, and the box of the text, to
-/// cut a long answer.
+/// What [`fill`] made: the buttons in order, and the text's box and what
+/// it holds, to scroll a long answer.
 #[derive(Debug, Clone)]
 pub struct Filled {
     pub buttons: Vec<NodeId>,
+    /// The text's box: given a height, it shows that much and clips.
     pub text: NodeId,
+    /// The text itself, moved up in the box to scroll.
+    pub content: NodeId,
+}
+
+/// The text's box of a long answer: `height` high, its text scrolled in it.
+pub fn text_box(height: f32) -> Style {
+    Style {
+        clip: true,
+        grow: 0.0,
+        height: Length::Px(height),
+        ..Style::default()
+    }
 }
 
 /// The size of the board's text against the theme's body text, so that
@@ -301,12 +314,21 @@ pub fn fill(tree: &mut Tree, room: NodeId, card: &Card) -> Filled {
             sized(&theme, 13.0, 700, 1.3, Paint::Accent),
         ),
     );
-    let text = add(
+    let viewport = add(
         tree,
         room,
         Style {
-            gap: 8.0,
             clip: true,
+            grow: 0.0,
+            ..Style::default()
+        },
+        Kind::Box(Look::default()),
+    );
+    let text = add(
+        tree,
+        viewport,
+        Style {
+            gap: 8.0,
             grow: 0.0,
             ..Style::default()
         },
@@ -436,7 +458,11 @@ pub fn fill(tree: &mut Tree, room: NodeId, card: &Card) -> Filled {
             ));
         }
     }
-    Filled { buttons, text }
+    Filled {
+        buttons,
+        text: viewport,
+        content: text,
+    }
 }
 
 #[cfg(test)]

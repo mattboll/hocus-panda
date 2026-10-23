@@ -1,0 +1,74 @@
+# AI in the command field (#44): a long answer scrolls inside the card,
+# with the wheel over it or Page Up and Page Down; the card keeps its size.
+description = "A long answer scrolls inside the card with the wheel or Page Down, and Page Up brings it back"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+ai_server = { delay_ms = 5, pieces = [
+  "The build is slow because three things changed this morning.\n\n",
+  "1. The compilation cache is off since the sccache update.\n",
+  "2. The configuration still expects RUSTC_WRAPPER.\n",
+  "3. Incremental builds were turned off in the release profile.\n",
+  "4. The linker went back to the default one.\n",
+  "5. Two crates now build their C code from scratch.\n",
+  "6. The test suite runs on four threads instead of eight.\n",
+  "7. Debug information is generated in full.\n",
+  "8. The documentation is built with every check.\n\n",
+  "To put it back:\n\n",
+  "```sh\nexport RUSTC_WRAPPER=sccache\nsccache --start-server\ncargo build --timings\n```\n\n",
+  "Then compare the timings with yesterday's report.",
+] }
+
+[[step]]
+config = """
+[ai]
+enabled = true
+url = "{ai}"
+"""
+
+[[step]]
+pointer_move = [470, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "why is the build slow?"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Then compare the timings with yesterday's report." }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "ai-answer-scroll.top.png" }
+
+# The wheel over the card scrolls the answer, not what is under it.
+[[step]]
+scroll = 150
+
+[[step]]
+key = 109
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "ai-answer-scroll.down.png" }
+
+[[step]]
+key = 104
+
+[[step]]
+key = 104
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "ai-answer-scroll.top.png" }
