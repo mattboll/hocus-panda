@@ -1,0 +1,37 @@
+description = "Given an agent's window on a desktop no screen shows, which waits for a frame callback to draw what came last, when the agent captures it before any action, then the capture wakes it and shows its latest drawing"
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["us"]
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+apps = ["editor"]
+"""
+
+# Alex types two keys in the window, which draws the first mark at once and
+# waits for its next frame callback to draw the second; no frame goes out
+# before it is sent to desktop 2, where no screen shows it.
+[[step]]
+open = { app_id = "editor", title = "Draft", size = [400, 300], color = "#3399ff", marks = true }
+
+[[step]]
+type = "ab"
+
+[[step]]
+expect_received = { app_id = "editor", event = "key 48 pressed" }
+
+[[step]]
+send = { app_id = "editor", output = "HEADLESS-1", desktop = 2 }
+
+[[step]]
+mcp_session = "helper"
+
+# The agent's first capture, before it did anything: both marks.
+[[step]]
+mcp = { agent = "helper", tool = "capture", window = "editor", image = "agent-desktop-capture-first.png" }
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }

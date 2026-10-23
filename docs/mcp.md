@@ -48,7 +48,7 @@ With Claude Code: `claude mcp add hocuspanda -- hocus mcp --agent assistant`.
 |---|---|
 | `list_windows` | the screens, and every window: id, title, app id, output, geometry (global logical pixels), focus, visibility, state, desktop |
 | `accessibility_tree` | the shell's interface (role, label, rectangle, depth, focused, disabled, selected); with `window`, that window alone: applications' own trees (AT-SPI) are not read yet |
-| `capture` | a PNG of a `window` (or an `output`), and how its pixels map to logical coordinates; a window on a desktop no screen shows, or minimized, as its application last drew it |
+| `capture` | a PNG of a `window` (or an `output`), and how its pixels map to logical coordinates; a window on a desktop no screen shows, or minimized, as its application draws it: woken first (see below) |
 | `click` | `window` at `x`, `y` (from its top-left corner, logical pixels; its centre when left out), or `element` by label; `button`, `count`, `intent` |
 | `scroll` | the same aim, `dy` in logical pixels (15 per notch, down positive); `intent` |
 | `type` | `text` into `window`, with the keyboard layout in effect; `intent` |
@@ -106,9 +106,12 @@ Limits:
 An agent may work on a desktop no screen shows, desktop 2 say, while the
 user stays on desktop 1: its windows there keep living as if shown. They
 keep their size and state; while the agent drives one (it acted on it in
-the last ten seconds, or an action waits), the compositor sends its
-application a frame callback ten times a second, so that it draws what
-the agent does, and the agent's `capture` of that window shows it. Nothing
+the last ten seconds, captured it, or an action waits), the compositor
+sends its application a frame callback ten times a second, so that it
+draws what the agent does, and the agent's `capture` of that window shows
+it. A capture there, even before any action, first sends the window a
+frame callback when its application waits for one, and waits for it to
+draw (200 ms at most): it shows what the application has to show now. Nothing
 is drawn on a screen for them, and nothing at all once no agent drives a
 window there: the cost is an application drawing at most ten times a
 second while an agent works in it, and one wake of the compositor each
@@ -145,7 +148,7 @@ they are refused, and nothing is done. Either way the journal keeps them
 Scrolling never waits. The keys an agent types never reach the desktop's
 shortcuts (locking, the stop key), so those are not on the list. The card
 takes the user's pointer; it takes their keyboard only once they clicked
-it (Allow shows it): then Enter presses Allow (Tab moves to the other
+it (Allow shows it; the card says `Enter · Esc`): then Enter presses Allow (Tab moves to the other
 buttons), Escape refuses, and a press elsewhere gives the keyboard back.
 An Enter typed in another window before that never answers it.
 

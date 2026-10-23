@@ -31,6 +31,10 @@ advance_ms = 1000
 [[step]]
 expect_ui = { label = "HELPER WILL CLICK · SENSITIVE ACTION" }
 
+# The keys that answer it once clicked, as board D04 says them.
+[[step]]
+expect_ui = { label = "Enter · Esc" }
+
 # Enter typed before the card was clicked goes to Alex's window: the card
 # still waits.
 [[step]]

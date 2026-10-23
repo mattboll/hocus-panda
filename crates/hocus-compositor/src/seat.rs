@@ -72,6 +72,9 @@ const DRIVEN_FOR: Duration = Duration::from_secs(10);
 /// How often such a window gets one: enough for an agent's captures to
 /// follow, little for its application to draw.
 const UNSEEN_FRAME: Duration = Duration::from_millis(100);
+/// How long an agent's capture of such a window waits for its application
+/// to draw, once woken, before it is taken as it is.
+const CAPTURE_WAIT: Duration = Duration::from_millis(200);
 
 impl crate::shell::Pixels for SeatView {
     fn pixels(&self) -> hocus_shell::column::View<'_> {
@@ -95,6 +98,22 @@ pub struct Seats {
     /// When windows agents drive that no screen shows get their next frame
     /// callback, while there are some.
     unseen_frame: Option<Duration>,
+    /// Agents' captures of such windows, waiting for them to draw.
+    captures: Vec<CaptureWait>,
+}
+
+/// An agent's capture of a window no screen shows, woken to draw first.
+#[derive(Debug, Clone)]
+pub(crate) struct CaptureWait {
+    pub connection: ConnectionId,
+    /// The request waiting for its reply.
+    pub id: u64,
+    pub window: WindowId,
+    pub cursor: bool,
+    /// Taken as it is then.
+    until: Duration,
+    /// Its application drew since.
+    drawn: bool,
 }
 
 #[derive(Debug)]
@@ -117,6 +136,8 @@ struct AgentSeat {
     taken: bool,
     /// The window it acts in.
     window: Option<WindowId>,
+    /// The window it captured last, and when: driven too, for a while.
+    watched: Option<(WindowId, Duration)>,
     /// The configuration its keyboard's layouts come from.
     keymap: Option<u64>,
     /// What it shows, and the key it was made for.
@@ -241,6 +262,7 @@ impl State {
             pending: None,
             taken: false,
             window: None,
+            watched: None,
             keymap: None,
             view: None,
         });
@@ -953,11 +975,15 @@ impl State {
     /// shows, each with the output that shows its desktop once shown.
     fn unseen_driven(&self, now: Duration) -> Vec<(Window, Output)> {
         let mut out: Vec<(Window, Output)> = Vec::new();
-        for seat in &self.seats.list {
-            let driving = seat.pending.is_some() || now.saturating_sub(seat.last) < DRIVEN_FOR;
-            let Some(id) = seat.window.filter(|_| driving && !seat.taken) else {
-                continue;
-            };
+        let driven = self.seats.list.iter().filter(|s| !s.taken).flat_map(|s| {
+            let acting = s.pending.is_some() || now.saturating_sub(s.last) < DRIVEN_FOR;
+            let watching = s
+                .watched
+                .filter(|(_, at)| now.saturating_sub(*at) < DRIVEN_FOR)
+                .map(|(id, _)| id);
+            [s.window.filter(|_| acting), watching]
+        });
+        for id in driven.flatten() {
             let Some(managed) = self.windows.get(&id) else {
                 continue;
             };
@@ -966,17 +992,109 @@ impl State {
             {
                 continue;
             }
-            let output = self
-                .model
-                .desktop_of(id)
-                .and_then(|d| self.model.host_of(d))
-                .and_then(|o| self.find_output(&o.name.0))
-                .or_else(|| self.space.outputs().next().cloned());
-            if let Some(output) = output {
+            if let Some(output) = self.host_output(id) {
                 out.push((managed.window.clone(), output));
             }
         }
         out
+    }
+
+    /// The output that shows a window's desktop, or would: its host.
+    fn host_output(&self, id: WindowId) -> Option<Output> {
+        self.model
+            .desktop_of(id)
+            .and_then(|d| self.model.host_of(d))
+            .and_then(|o| self.find_output(&o.name.0))
+            .or_else(|| self.space.outputs().next().cloned())
+    }
+
+    /// An agent captures window `id` (#229): it drives it for a while, as
+    /// an action does. Where no screen shows it and its application waits
+    /// for a frame callback, it gets one now, and the capture waits for it
+    /// to draw (at most [`CAPTURE_WAIT`]): whether it waits.
+    pub(crate) fn agent_watch(&mut self, connection: ConnectionId, id: WindowId) -> bool {
+        let now = self.clock.now();
+        let Some(seat) = self.agent_seat(connection) else {
+            return false;
+        };
+        seat.watched = Some((id, now));
+        let Some(window) = self.windows.get(&id).map(|m| m.window.clone()) else {
+            return false;
+        };
+        if self.space.element_location(&window).is_some() {
+            return false;
+        }
+        let Some(output) = self.host_output(id) else {
+            return false;
+        };
+        let mut asked = false;
+        window.with_surfaces(|_, data| {
+            use smithay::wayland::compositor::SurfaceAttributes;
+            asked |= !data
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .current()
+                .frame_callbacks
+                .is_empty();
+        });
+        window.send_frame(&output, now, None, |_, _| Some(output.clone()));
+        self.wake_for_seats();
+        asked
+    }
+
+    /// A capture waits for its window to draw.
+    pub(crate) fn capture_wait(
+        &mut self,
+        connection: ConnectionId,
+        id: u64,
+        window: WindowId,
+        cursor: bool,
+    ) {
+        self.seats.captures.push(CaptureWait {
+            connection,
+            id,
+            window,
+            cursor,
+            until: self.clock.now() + CAPTURE_WAIT,
+            drawn: false,
+        });
+        self.wake_for_seats();
+    }
+
+    /// A surface committed: a capture waiting on its window goes on.
+    pub(crate) fn capture_committed(&mut self, root: &WlSurface) {
+        if self.seats.captures.is_empty() {
+            return;
+        }
+        let Some(id) = self.managed_id(root) else {
+            return;
+        };
+        for wait in &mut self.seats.captures {
+            if wait.window == id {
+                wait.drawn = true;
+            }
+        }
+    }
+
+    /// The captures that may be taken now: their window drew, went, or
+    /// the wait is over.
+    pub(crate) fn captures_due(&mut self) -> Vec<CaptureWait> {
+        if self.seats.captures.is_empty() {
+            return Vec::new();
+        }
+        let now = self.clock.now();
+        let windows = &self.windows;
+        let (due, kept) = std::mem::take(&mut self.seats.captures)
+            .into_iter()
+            .partition(|w| w.drawn || now >= w.until || !windows.contains_key(&w.window));
+        self.seats.captures = kept;
+        due
+    }
+
+    /// When the earliest capture waiting for its window is taken anyway,
+    /// for the test harness.
+    pub fn capture_deadline(&self) -> Option<Duration> {
+        self.seats.captures.iter().map(|w| w.until).min()
     }
 
     /// A waiting action goes on to what it waits on next, checked again
@@ -1378,6 +1496,7 @@ impl State {
             .flatten()
             .chain(self.seats.retired.iter().map(|(_, at)| *at))
             .chain(self.seats.unseen_frame)
+            .chain(self.seats.captures.iter().map(|w| w.until))
             .filter(|at| *at > now)
             .min();
         if next == self.seats.waking {

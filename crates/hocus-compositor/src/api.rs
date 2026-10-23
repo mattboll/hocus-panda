@@ -586,6 +586,18 @@ impl App {
                 return state.act(connection, id, target, action, intent);
             }
             Request::Screenshot { target, cursor } => {
+                // An agent's capture of a window no screen shows wakes it
+                // to draw first (#229).
+                if let Target::Window(window) = target
+                    && self.state.api.agent(connection).is_some()
+                    && self
+                        .state
+                        .agent_watch(connection, hocus_core::WindowId(window))
+                {
+                    self.state
+                        .capture_wait(connection, id, hocus_core::WindowId(window), cursor);
+                    return None;
+                }
                 return match self.capture(&target, cursor) {
                     Ok(pixels) => {
                         encode_in_worker(self.state.screenshots.clone(), connection, id, pixels)
@@ -601,6 +613,26 @@ impl App {
 }
 
 impl App {
+    /// After each dispatch: agents' captures that waited for their window
+    /// to draw are taken.
+    pub fn serve_agent_captures(&mut self) {
+        for wait in self.state.captures_due() {
+            match self.capture(&Target::Window(wait.window.0), wait.cursor) {
+                Ok(pixels) => {
+                    if let Err(err) = encode_in_worker(
+                        self.state.screenshots.clone(),
+                        wait.connection,
+                        wait.id,
+                        pixels,
+                    ) {
+                        self.state.api.reply(wait.connection, wait.id, Err(err));
+                    }
+                }
+                Err(err) => self.state.api.reply(wait.connection, wait.id, Err(err)),
+            }
+        }
+    }
+
     fn capture(&mut self, target: &Target, cursor: bool) -> Result<Pixels, ApiError> {
         let state = &self.state;
         let result = match target {

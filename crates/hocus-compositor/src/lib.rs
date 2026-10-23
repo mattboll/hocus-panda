@@ -384,6 +384,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     event_loop.run(None, &mut app, |app| {
         app.state.refresh_shell();
         app.serve_captures();
+        app.serve_agent_captures();
         app.serve_screenshots();
         app.serve_circle();
         app.serve_recording();
