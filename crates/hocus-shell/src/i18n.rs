@@ -1214,6 +1214,37 @@ impl Lang {
         self.pick("Stopped.", "Arrêtée.")
     }
 
+    /// An action an answer proposed (#197), confirmed once agents were
+    /// stopped.
+    pub fn ai_action_stopped(self) -> &'static str {
+        self.pick(
+            "Not done: agents are stopped",
+            "Pas fait\u{a0}: les agents sont arrêtés",
+        )
+    }
+
+    pub fn handed_to(self, agent: &str) -> String {
+        match self {
+            Self::En => format!("Handed to {agent}"),
+            Self::Fr => format!("Confié à {agent}"),
+        }
+    }
+
+    pub fn agent_gone(self) -> &'static str {
+        self.pick("The agent is no longer there", "L’agent n’est plus là")
+    }
+
+    pub fn config_changed(self) -> &'static str {
+        self.pick("Configuration changed", "Configuration modifiée")
+    }
+
+    pub fn config_not_changed(self) -> &'static str {
+        self.pick(
+            "The configuration was not changed",
+            "La configuration n’a pas été modifiée",
+        )
+    }
+
     /// Why no answer came, in the user's words.
     pub fn ai_unreachable(self, url: &str) -> String {
         match self {

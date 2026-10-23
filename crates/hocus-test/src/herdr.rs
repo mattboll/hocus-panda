@@ -176,7 +176,7 @@ impl Server {
     }
 
     /// What it was asked: `agent.focus refacto`, `agent.send_keys refacto
-    /// enter`…, agents by name.
+    /// enter`, `agent.prompt refacto TEXT`…, agents by name.
     pub fn asked(&self) -> Vec<String> {
         self.shared
             .lock()
@@ -277,6 +277,14 @@ fn answer(request: &Value, shared: &Mutex<Shared>, connection: &UnixStream) -> O
                 .asked
                 .push(format!("agent.send_keys {name} {}", keys.join(" ")));
             json!({ "type": "ok" })
+        }
+        "agent.prompt" => {
+            let Some(name) = name_of(&shared, target) else {
+                return Some(error(id, "agent_not_found"));
+            };
+            let text = params.get("text").and_then(Value::as_str).unwrap_or("");
+            shared.asked.push(format!("agent.prompt {name} {text}"));
+            json!({ "type": "agent_prompted" })
         }
         "events.subscribe" => {
             let panes = params

@@ -52,7 +52,7 @@ A Cargo workspace; names may move as the code lands.
 
 | Crate | Role | Depends on smithay |
 |---|---|---|
-| `hocus-core` | Pure model: windows, desktops per screen, outputs layout, focus, snapping, placement, rules. Deterministic and unit-tested | no |
+| `hocus-core` | Pure model: windows, desktops per screen, outputs layout, focus, snapping, placement, rules; the configuration, read and written one key at a time with the file's comments kept (the settings app and the AI's proposals share the writer). Deterministic and unit-tested | no |
 | `hocus-compositor` | smithay glue: protocols, backends, input, rendering, XWayland | yes |
 | `hocus-ui` | Small retained widget toolkit drawn into textures: layout, text, theme tokens, springs, hit testing, accessibility tree | no |
 | `hocus-shell` | The desktop's own UI built on `hocus-ui`: widget column, dock, launcher, notifications, quick settings, menus, lock screen, pandas | no |
@@ -251,6 +251,27 @@ or Stop tells the worker to stop at the next piece, and what an older
 question brings back is dropped. Nested or in tests, a provider's usual
 address is never asked: only the one the configuration gives. The answer's
 card (`hocus-shell::answer`) is shared with circling to ask (#46).
+
+An answer may propose actions (#197), from a fixed set the shell knows
+(`hocus-shell::proposals`): open a settings page, set one configuration key
+among a list of plain looks and habits (nothing that runs a program, names
+a file or an address, or weakens the lock), run a request the command field
+understands offline, or hand the question and the answer (and what was
+circled) to a herdr agent. The model is told the set in its instructions
+and ends its answer with a fenced `hocus-actions` block, one JSON object per
+line; the card never shows the block, and each line is read strictly: an
+unknown action, page, key or value, a request not understood, a malformed
+line are dropped, and three at most are kept. They come first under the
+answer, the main one first; choosing one shows what it will do (a diff of
+the configuration file as last read, the text an agent gets) and it runs
+only on a second, explicit choice; Cancel goes back to the answer. A
+configuration change goes through the settings app's own writer
+(`hocus-core::config_edit`), on a worker thread, so the file keeps its
+comments and the watcher applies it. A question handed to an agent goes to
+its herdr as a prompt (`agent.prompt`) and into the agents' journal as that
+agent's. While agents are stopped (#176), nothing is offered, and what was
+offered before does not run. Only herdr's agents are offered for now, not
+MCP agents.
 
 Circling to ask (#46) is a left drag with `[circle] modifiers` held
 (Super+Shift: Super alone draws on the screen, #86). One sheet the size of
@@ -454,7 +475,8 @@ without unlocking leaves our lock screen: a crash never unlocks.
   window with the keyboard, past the shortcuts, through the layout in
   effect. Applications' own accessibility trees (AT-SPI) are not read yet.
 - The agents' journal (#176) keeps each `act` of an agent connection, carried
-  out or refused, with the window as it was and the user's local time; the
+  out or refused, with the window as it was and the user's local time, and
+  each question the user hands a coding agent from an AI's answer (#197); the
   control server holds whether agents are stopped (`stop-agents`), and the
   compositor then refuses every request of an agent connection, and new
   `agent` requests (kept in the journal too), before anything else; events

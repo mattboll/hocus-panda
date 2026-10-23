@@ -115,7 +115,7 @@ Steps, one per `[[step]]` table:
 | `caldav_stop = true` | the CalDAV server goes, as the network would |
 | `herdr = { name?, agents = [{ name, status }] }` | a herdr of the test's own (never the user's) serves these agents (`working`, `blocked`, `done`, `idle`) on a socket in the compositor's runtime directory, `{herdr}` in later configuration; several have names, `{herdr:NAME}` |
 | `herdr_status = { agent, status, label? }` | an agent's status changes in the herdr serving it (agents' names are unique in a scenario) once the compositor follows that agent, with what its integration says (the question, while blocked) |
-| `expect_herdr = "agent.send_keys refacto enter"` | a herdr was asked this (`agent.focus NAME`, `agent.send_keys NAME KEYS`) |
+| `expect_herdr = "agent.send_keys refacto enter"` | a herdr was asked this (`agent.focus NAME`, `agent.send_keys NAME KEYS`, `agent.prompt NAME TEXT`) |
 | `ai_server = { pieces = […], delay_ms?, first_ms? }` | an AI provider on 127.0.0.1 (ollama's API, OpenAI's chat completions, Claude's Messages API, which refuses without a key; `/v1/models` lists `claude-sonnet-9`, `claude-opus-9-1`, `claude-opus-9`, `claude-haiku-9`, newest first) answers every question with these pieces, `delay_ms` before each and `first_ms` more before the first; its address is `{ai}` in later configuration and `type` steps |
 | `ai_key = { provider, key }` | an AI provider's key is kept, as `hocus msg ai-key` does (in a sealed file of the state directory: never the developer's keyring) |
 | `expect_ai = { path?, contains? = […], header? }` | the AI provider was asked, once so: on this path, its body holding these strings, with this header (`name: value`, the name in lower case) |

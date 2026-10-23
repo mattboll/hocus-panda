@@ -27,4 +27,3 @@ wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
 
 [dev-dependencies]
 png = "0.18.1"
-tempfile = "3.27.0"

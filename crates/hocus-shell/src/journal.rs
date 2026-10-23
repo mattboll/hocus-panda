@@ -40,6 +40,12 @@ pub enum Did {
     Keys(Option<String>),
     /// It named itself (kept when refused).
     Connect,
+    /// The user handed it a question and an AI's answer (#197); the text
+    /// when the configuration keeps it.
+    Prompt {
+        characters: usize,
+        text: Option<String>,
+    },
 }
 
 /// One entry, newest first in [`JournalView::lines`].
@@ -141,6 +147,7 @@ impl Lang {
                 Did::Type { .. } => self.pick("Typing refused", "Saisie refusée"),
                 Did::Keys(_) => self.pick("Keys refused", "Touches refusées"),
                 Did::Connect => self.pick("Connection refused", "Connexion refusée"),
+                Did::Prompt { .. } => self.pick("Question refused", "Question refusée"),
             }
             .into();
         }
@@ -181,6 +188,16 @@ impl Lang {
             },
             Did::Keys(None) => self.pick("Pressed keys", "A appuyé sur des touches").into(),
             Did::Connect => self.pick("Connected", "S’est connecté").into(),
+            Did::Prompt {
+                text: Some(text), ..
+            } => match fr {
+                false => format!("Was handed “{text}”"),
+                true => format!("A reçu «\u{a0}{text}\u{a0}»"),
+            },
+            Did::Prompt { characters, .. } => match fr {
+                false => format!("Was handed a question, {characters} characters"),
+                true => format!("A reçu une question, {characters} caractères"),
+            },
         }
     }
 

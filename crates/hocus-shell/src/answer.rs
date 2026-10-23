@@ -102,9 +102,14 @@ impl Answer {
         }
     }
 
+    /// The text as shown: without the actions it proposes (#197).
+    pub fn shown(&self) -> &str {
+        crate::proposals::shown(&self.text)
+    }
+
     /// The text without its Markdown marks, for the clipboard and notes.
     pub fn plain(&self) -> String {
-        blocks(&self.text)
+        blocks(self.shown())
             .iter()
             .map(|b| match b {
                 Block::Paragraph(t) | Block::Item(t) | Block::Code(t) => t.as_str(),
@@ -236,6 +241,16 @@ pub struct Card {
     pub error: Option<String>,
     /// The first is the main one.
     pub buttons: Vec<String>,
+    /// The room for the buttons' row, logical pixels: they wrap onto
+    /// another past it.
+    pub width: f32,
+}
+
+/// About how wide a button of `label` is, its padding included: enough to
+/// know when a row is full.
+fn button_width(theme: &Theme, label: &str) -> f32 {
+    let scale = theme.text.body.size / 14.0;
+    label.chars().count() as f32 * 8.6 * scale + 40.0
 }
 
 /// What [`fill`] made: the buttons in order, and the text's box and what
@@ -427,36 +442,46 @@ pub fn fill(tree: &mut Tree, room: NodeId, card: &Card) -> Filled {
         }
     }
     let mut buttons = Vec::new();
-    if !card.buttons.is_empty() {
-        let row = add(
+    let mut row = None;
+    let mut used = 0.0;
+    for (i, label) in card.buttons.iter().enumerate() {
+        let wide = button_width(&theme, label);
+        let row = match row {
+            Some(r) if used + 10.0 + wide <= card.width => {
+                used += 10.0 + wide;
+                r
+            }
+            _ => {
+                used = wide;
+                *row.insert(add(
+                    tree,
+                    room,
+                    Style {
+                        direction: Direction::Row,
+                        gap: 10.0,
+                        grow: 0.0,
+                        ..Style::default()
+                    },
+                    Kind::Box(Look::default()),
+                ))
+            }
+        };
+        let kind = if i == 0 {
+            ButtonKind::Primary
+        } else {
+            ButtonKind::Plain
+        };
+        buttons.push(add(
             tree,
-            room,
+            row,
             Style {
-                direction: Direction::Row,
-                gap: 10.0,
+                height: Length::Px(48.0),
+                padding: Insets::symmetric(0.0, 20.0),
                 grow: 0.0,
                 ..Style::default()
             },
-            Kind::Box(Look::default()),
-        );
-        for (i, label) in card.buttons.iter().enumerate() {
-            let kind = if i == 0 {
-                ButtonKind::Primary
-            } else {
-                ButtonKind::Plain
-            };
-            buttons.push(add(
-                tree,
-                row,
-                Style {
-                    height: Length::Px(48.0),
-                    padding: Insets::symmetric(0.0, 20.0),
-                    grow: 0.0,
-                    ..Style::default()
-                },
-                Kind::button(label.as_str(), kind, &theme),
-            ));
-        }
+            Kind::button(label.as_str(), kind, &theme),
+        ));
     }
     Filled {
         buttons,

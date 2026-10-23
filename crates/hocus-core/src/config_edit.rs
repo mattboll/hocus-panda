@@ -1,10 +1,14 @@
 //! Changes to the configuration file: one key at a time, the rest of the
 //! file as the user wrote it (comments, order, layout). A change that
-//! would make the file invalid is not written.
+//! would make the file invalid is not written. The settings app writes
+//! through it, and so do the AI's proposals once confirmed (#197).
 
 use std::{io, path::Path};
 
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
+
+/// A value of the file, as a change sets it.
+pub use toml_edit::Value;
 
 /// One key of one table set to a value, or taken out.
 #[derive(Debug, Clone)]
@@ -302,7 +306,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             }
         }
         let out = doc.to_string();
-        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        crate::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
     let is_calendar = |t: &Table, url: &str, user: &str| {
@@ -322,7 +326,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             }
         }
         let out = doc.to_string();
-        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        crate::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
     let is_screen =
@@ -345,7 +349,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             }
         }
         let out = doc.to_string();
-        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        crate::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
     if let (Place::Rule(index), "", None) = (&change.place, change.key.as_str(), &change.value) {
@@ -358,7 +362,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
             }
         }
         let out = doc.to_string();
-        hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+        crate::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(out);
     }
     if let (Place::Herdr(index), "", None) = (&change.place, change.key.as_str(), &change.value) {
@@ -500,7 +504,7 @@ pub fn apply(text: &str, change: &Change) -> Result<String, EditError> {
         }
     }
     let out = doc.to_string();
-    hocus_core::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
+    crate::Config::parse(&out).map_err(|e| EditError::Invalid(e.to_string()))?;
     Ok(out)
 }
 
@@ -532,12 +536,12 @@ mod tests {
         let link = "webcal://example.org/holidays.ics";
         let out = apply(&out, &Change::calendar(link, "", "name", "Holidays")).expect("added");
         let out = apply(&out, &Change::calendar(link, "", "kind", "subscription")).expect("set");
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         assert_eq!(config.calendars.len(), 2, "{out}");
         assert_eq!(config.calendars[0].name, "Work");
         assert_eq!(config.calendars[1].kind, "subscription");
         let out = apply(&out, &Change::forget_calendar(url, "alex")).expect("taken out");
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         assert_eq!(config.calendars.len(), 1, "{out}");
         assert!(out.contains("# mine"), "the rest of the file stays: {out}");
         // In the clear to another machine: refused.
@@ -596,7 +600,7 @@ mod tests {
         let renamed = Change::layout(&["DP-1".into(), "eDP-1".into()], "name", "Home");
         let out = apply(&out, &renamed).expect("applied");
         assert_eq!(out.matches("[[layouts]]").count(), 1, "{out}");
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         let layout = config.layout_for(&["eDP-1", "DP-1"]).expect("found");
         assert_eq!(layout.name, "Home");
         assert_eq!(layout.positions.get("eDP-1"), Some(&[0, 1440]));
@@ -610,7 +614,7 @@ mod tests {
         let colour = Change::wallpaper(Some("DP-1"), "colour", Some("#203040".into()));
         let out = apply(&out, &colour).expect("applied");
         assert_eq!(out.matches("[[wallpaper.screens]]").count(), 1, "{out}");
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         let spec = config.wallpaper.for_output("DP-1");
         assert_eq!(
             (spec.kind.as_str(), spec.colour.as_deref()),
@@ -642,13 +646,13 @@ mod tests {
             "[windows]\nsnap = false  # mine\n\n[[rules]]\napp_id = \"chat*\"\ndesktop = 2\n";
         let out = apply(text, &Change::rule(1, "app_id", Some("editor".into()))).expect("made");
         let out = apply(&out, &Change::rule(1, "maximized", Some(true.into()))).expect("set");
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         assert_eq!(config.rules.len(), 2, "{out}");
         assert_eq!(config.rules[1].maximized, Some(true));
         let out = apply(&out, &Change::rule(1, "maximized", None)).expect("taken out");
         assert!(!out.contains("maximized"), "{out}");
         let out = apply(&out, &Change::forget_rule(0)).expect("gone");
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         assert_eq!(config.rules.len(), 1, "{out}");
         assert_eq!(config.rules[0].app_id.as_deref(), Some("editor"));
         let out = apply(&out, &Change::forget_rule(0)).expect("gone");
@@ -689,7 +693,7 @@ mod tests {
             out,
             "[windows]\nsnap = false\n\n[windows.gaps]\ninner = 8\n"
         );
-        let config = hocus_core::Config::parse(&out).expect("valid");
+        let config = crate::Config::parse(&out).expect("valid");
         assert_eq!((config.windows.gaps.inner, config.windows.snap), (8, false));
         let out = apply(&out, &Change::new("windows.gaps", "outer", 4)).expect("set");
         assert_eq!(out.matches("[windows.gaps]").count(), 1, "{out}");

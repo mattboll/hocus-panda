@@ -343,6 +343,13 @@ impl Board {
         self.agents.iter().find(|t| t.key == key).map(|t| t.shown)
     }
 
+    /// Every agent in the board's order: its key, its name, its manager.
+    pub fn agents(&self) -> impl Iterator<Item = (&str, &str, usize)> + '_ {
+        self.agents
+            .iter()
+            .map(|t| (t.key.as_str(), t.name.as_str(), t.source))
+    }
+
     /// Each manager's agents' states, as shown: source and state.
     pub fn states(&self) -> impl Iterator<Item = (usize, AgentState)> + '_ {
         self.agents.iter().map(|t| (t.source, t.shown))

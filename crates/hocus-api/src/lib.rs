@@ -452,6 +452,13 @@ pub enum JournalAction {
     /// The agent named itself; kept when refused, as while agents are
     /// stopped.
     Connect,
+    /// The user handed it a question and an AI's answer (#197): a coding
+    /// agent's prompt, its text when `[agents] journal_text` keeps it.
+    Prompt {
+        characters: usize,
+        #[serde(default)]
+        text: Option<String>,
+    },
 }
 
 /// What an agent aimed at, as it was then.
@@ -503,6 +510,12 @@ impl std::fmt::Display for JournalEntry {
             JournalAction::Keys { keys: Some(keys) } => write!(f, "keys {keys}")?,
             JournalAction::Keys { keys: None } => write!(f, "keys (not kept)")?,
             JournalAction::Connect => write!(f, "connect")?,
+            JournalAction::Prompt {
+                text: Some(text), ..
+            } => write!(f, "prompted {text:?}")?,
+            JournalAction::Prompt { characters, .. } => {
+                write!(f, "prompted with {characters} characters")?;
+            }
         }
         match &self.target {
             None => {}

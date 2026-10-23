@@ -326,6 +326,10 @@ impl State {
                     c.panel.view.answer_news(AnswerNews::Failed(stopped));
                 }
             }
+            CircleEvent::Run(run) => {
+                self.close_circle();
+                self.run_proposal(run);
+            }
             CircleEvent::Retry(asked) => {
                 if let Some(Text::Read(text)) = self.circles.circle.as_ref().map(|c| &c.reading) {
                     let text = text.clone();
@@ -396,7 +400,10 @@ impl State {
         };
         c.asked = id;
         c.panel.view.ask(asked.clone(), source);
-        let system = asked.instructions(lang);
+        let mut system = asked.instructions(lang);
+        if asked.proposes() {
+            system.push_str(&hocus_shell::proposals::instructions());
+        }
         let question = asked.text(text);
         self.ask_ai_for(Asker::Circle, id, system, question);
     }
@@ -405,6 +412,31 @@ impl State {
     pub fn circle_answer_news(&mut self, id: u64, news: AnswerNews) {
         if let Some(c) = self.circles.circle.as_mut().filter(|c| c.asked == id) {
             c.panel.view.answer_news(news);
+        }
+    }
+
+    /// The card's answer to question `id` is all there: what it proposes
+    /// is offered under it (#197), an agent getting the circled text too.
+    pub(crate) fn offer_circle_proposals(&mut self, id: u64) {
+        let lang = self.shell_lang();
+        let Some(c) = self.circles.circle.as_ref().filter(|c| c.asked == id) else {
+            return;
+        };
+        let Some((asked, answer)) = c.panel.view.answer() else {
+            return;
+        };
+        if !asked.proposes() || !matches!(answer.state, hocus_shell::answer::State::Done(_)) {
+            return;
+        }
+        let circled = match &c.reading {
+            Text::Read(text) => Some(text.as_str()),
+            _ => None,
+        };
+        let prompt =
+            hocus_shell::proposals::prompt(lang, &asked.question(lang), circled, &answer.plain());
+        let offers = self.proposal_offers(&answer.text, &prompt);
+        if let Some(c) = self.circles.circle.as_mut().filter(|c| c.asked == id) {
+            c.panel.view.set_offers(offers);
         }
     }
 

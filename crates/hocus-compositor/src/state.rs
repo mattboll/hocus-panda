@@ -64,6 +64,10 @@ pub struct State {
     pub config_generation: u64,
     /// A configuration was read and applied: what it lists is known.
     pub config_read: bool,
+    /// The configuration file's text as last read and applied, for the
+    /// AI's proposals to show their change as a diff (#197); `None` until
+    /// then.
+    pub config_text: Option<String>,
     pub config_watch: Option<ConfigWatch>,
     /// How windows are decorated, and the textures that draws with.
     pub style: Style,
@@ -266,6 +270,7 @@ impl State {
             shortcuts: Config::default().shortcuts(),
             config_generation: 0,
             config_read: false,
+            config_text: None,
             config_watch: None,
             style: Style::default(),
             textures: Textures::default(),

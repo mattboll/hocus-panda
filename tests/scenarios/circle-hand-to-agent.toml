@@ -1,0 +1,119 @@
+# Circle to ask (#46) with an answer that acts (#197): the answer to
+# Explain proposes handing it to a coding agent, the card's main button
+# as board D05 draws it ("Confier à un agent"), before Add to the notes
+# and Copy. Confirmed, the herdr agent (a stand-in of the test's own) gets
+# what was asked, the circled text and the answer.
+description = "Circling to ask: an answer proposing an agent shows Confier à un agent first; confirmed, the agent gets the question, the circled text and the answer"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+herdr = { agents = [{ name = "freebsd", status = "idle" }] }
+
+[[step]]
+ai_server = { delay_ms = 30, pieces = [
+  "L'en-tête linux/input.h n'existe pas sur FreeBSD.\n\n",
+  "Le module d'entrée inclut directement un en-tête Linux. Sur FreeBSD, les codes ",
+  "de touches viennent de evdev-proto, installé à part, sous un autre chemin.\n\n",
+  "```sh\npkg install evdev-proto\n# puis inclure dev/evdev/input.h\n```\n\n",
+  "```hocus-actions\n{\"action\":\"agent\"}\n```\n",
+] }
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+
+[screenshots]
+ocr = "{scenario_dir}/circle/bin/ocr"
+
+[agents]
+herdr_socket = "{herdr}"
+
+[ai]
+enabled = true
+provider = "ollama"
+url = "{ai}"
+"""
+
+[[step]]
+expect_ui = { label = "1 au repos" }
+
+[[step]]
+open = { app_id = "log", size = [900, 560], color = "#15171b" }
+
+[[step]]
+pointer_move = [140, 313]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+key_down = "shift"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_path = [[140, 313], [134, 340], [178, 365], [267, 384], [383, 393], [508, 392], [619, 380], [697, 359], [730, 333], [710, 307], [642, 285], [538, 270], [414, 266], [294, 273], [197, 290], [158, 314], [151, 339], [193, 363]]
+
+[[step]]
+release = "left"
+
+[[step]]
+key_up = "shift"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+click_ui = "Expliquer"
+
+[[step]]
+expect_ui = { label = "L'en-tête linux/input.h n'existe pas sur FreeBSD." }
+
+[[step]]
+expect_ui = { label = "Confier à un agent" }
+
+[[step]]
+expect_ui = { label = "Ajouter aux notes" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "circle-hand-to-agent.png" }
+
+[[step]]
+click_ui = "Confier à un agent"
+
+[[step]]
+expect_ui = { label = "Donner à freebsd" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "circle-hand-to-agent.confirm.png" }
+
+[[step]]
+click_ui = "Donner à freebsd"
+
+[[step]]
+expect_herdr = """
+agent.prompt freebsd Explique le texte entouré.
+
+Entouré à l’écran\u00a0:
+fatal error: 'linux/input.h' file not found
+
+Une IA a répondu\u00a0:
+L'en-tête linux/input.h n'existe pas sur FreeBSD.
+Le module d'entrée inclut directement un en-tête Linux. Sur FreeBSD, les codes de touches viennent de evdev-proto, installé à part, sous un autre chemin.
+pkg install evdev-proto
+# puis inclure dev/evdev/input.h"""
+
+[[step]]
+expect_journal = { has = ["freebsd: prompted with"] }
+
+[[step]]
+expect_ui = { label = "Confier à un agent", shown = false }

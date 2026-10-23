@@ -8,6 +8,7 @@ mod actions;
 mod activity;
 mod agents;
 mod ai;
+mod ai_actions;
 mod alt_tab;
 mod api;
 mod authorize;
