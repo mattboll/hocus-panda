@@ -283,6 +283,8 @@ fn on_a_laptop_screen_the_account_stays_in_the_column_and_the_lists_give_room_ba
         name: "Pixel 8".into(),
         battery: Some(82),
         charging: false,
+        connect: true,
+        adb: None,
     });
     column.set_state(&s);
     column.draw(Duration::ZERO);
