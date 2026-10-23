@@ -281,6 +281,12 @@ impl State {
                 build,
             );
         }
+        // The window menu at the pointer (#40).
+        elements.extend(
+            self.radial_elements(renderer, output)
+                .into_iter()
+                .map(SceneElement::Frame),
+        );
         // A circled area, its menu and the answer (#46).
         if let Some(panel) = self.circle_elements(renderer, output) {
             elements.push(SceneElement::Frame(panel));

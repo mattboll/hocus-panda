@@ -60,6 +60,7 @@ mod pandas;
 mod phone;
 mod pointing;
 mod quick;
+mod radial;
 mod recording;
 mod scene;
 mod screen_capture;

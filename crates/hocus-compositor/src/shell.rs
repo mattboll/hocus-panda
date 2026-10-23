@@ -367,6 +367,7 @@ impl State {
         self.refresh_corners();
         self.refresh_ink();
         self.refresh_circle();
+        self.refresh_radial();
         self.refresh_wobbles();
         self.refresh_pandas();
         self.refresh_agents();
@@ -708,6 +709,7 @@ impl State {
         self.seat_ui(&mut out);
         self.leave_ui(&mut out);
         self.auth_ui(&mut out);
+        self.radial_ui(&mut out);
         self.circle_ui(&mut out);
         self.picker_ui(&mut out);
         self.alt_tab_ui(&mut out);

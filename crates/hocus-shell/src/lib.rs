@@ -33,6 +33,7 @@ pub mod picker;
 pub mod proposals;
 pub mod providers;
 pub mod quick;
+pub mod radial;
 pub mod readout;
 pub mod recording;
 pub mod seat;

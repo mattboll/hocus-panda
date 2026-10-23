@@ -1,0 +1,100 @@
+# The radial menu (#40) left open by a click: the arrows go round it, Enter
+# picks, Escape closes it with nothing done; a press elsewhere closes it
+# too, unseen by the window.
+description = "The radial menu left open by a click takes the keys: an arrow lights an action, Enter does it, Escape closes the menu with nothing done; over the column it does not open"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "editor", size = [800, 500], color = "#3399ff" }
+
+# Over the shell's column, nothing.
+[[step]]
+pointer_move = [1100, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "Always on top", shown = false }
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+keys = "down"
+
+[[step]]
+expect_ui = { label = "Minimize", selected = true }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Always on top", shown = false }
+
+[[step]]
+expect_window = { app_id = "editor", visible = true, state = "normal" }
+
+# A press elsewhere closes it; the window gets neither the press nor its
+# release.
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+pointer_move = [300, 600]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_ui = { label = "Always on top", shown = false }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "button 272 pressed" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "button 272 released" }
+
+# Down, Enter: minimized.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+keys = "down"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_window = { app_id = "editor", visible = false }

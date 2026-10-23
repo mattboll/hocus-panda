@@ -1,0 +1,79 @@
+# The radial menu (#40) as board D01 draws it, in French: eight actions
+# around the pointer, clockwise from the top, the one aimed at lit with a
+# dotted line to it, Close in red at the top left. At rest, open, nothing
+# is redrawn.
+description = "The radial menu shows its eight actions around the pointer in French, the one held toward lit, as the board draws it; open, it costs nothing at rest"
+outputs = ["1280x800", "1280x800"]
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+"""
+
+[[step]]
+open = { app_id = "doc", size = [1000, 700], color = "#2a2f38" }
+
+[[step]]
+pointer_move = [640, 420]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+expect_ui = { label = "Agrandir" }
+
+[[step]]
+expect_ui = { label = "Épingler" }
+
+[[step]]
+expect_ui = { label = "Écran suivant" }
+
+[[step]]
+expect_ui = { label = "Bureau…" }
+
+[[step]]
+expect_ui = { label = "Réduire" }
+
+[[step]]
+expect_ui = { label = "Au-dessus" }
+
+[[step]]
+expect_ui = { label = "Ancrer" }
+
+[[step]]
+expect_ui = { label = "Fermer" }
+
+# Slowly up: Agrandir lights up.
+[[step]]
+pointer_move = [640, 380]
+
+[[step]]
+pointer_move = [640, 350]
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_ui = { label = "Agrandir", selected = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "radial-open.png" }
+
+[[step]]
+expect_idle = { for_ms = 500 }
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_window = { app_id = "doc", state = "maximized" }

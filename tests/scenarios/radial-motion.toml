@@ -1,0 +1,56 @@
+# The radial menu (#40) unfolds from the pointer, then holds still; with
+# reduced motion it is there at once.
+description = "The radial menu unfolds over a few frames then holds still; with reduced motion it shows at once"
+outputs = ["1280x800"]
+motion = true
+
+[[step]]
+open = { app_id = "editor", size = [800, 500], color = "#3399ff" }
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+expect_frames = { for_ms = 150, at_least = 5 }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_idle = { for_ms = 1000 }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+config = """
+[appearance]
+reduced_motion = true
+"""
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_idle = { for_ms = 500 }
+
+[[step]]
+expect_ui = { label = "Maximize" }

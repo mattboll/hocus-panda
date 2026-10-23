@@ -1,0 +1,63 @@
+# The radial menu (#40) opened near a screen's corner stays whole on that
+# screen, though another screen is beside it: it moves in, away from the
+# pointer. A press let go without moving leaves it open for the keys;
+# Right lights Next screen, Enter sends the window there.
+description = "The radial menu opened near the right edge of a screen stays fully on that screen; a click leaves it open, and the keys send the window to the next screen"
+outputs = ["1280x800", "1280x800"]
+
+[[step]]
+open = { app_id = "editor", size = [1260, 760], color = "#3399ff" }
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-1" }
+
+[[step]]
+pointer_move = [1250, 720]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "Next screen", inside = [0, 0, 1280, 800] }
+
+[[step]]
+expect_ui = { label = "Minimize", inside = [0, 0, 1280, 800] }
+
+[[step]]
+expect_ui = { label = "Maximize", inside = [0, 0, 1280, 800] }
+
+[[step]]
+expect_ui = { label = "Snap", inside = [0, 0, 1280, 800] }
+
+[[step]]
+expect_ui = { label = "Desktop…", inside = [0, 0, 1280, 800] }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "radial-edge.png" }
+
+[[step]]
+expect_not_received = { app_id = "editor", event = "button 273 pressed" }
+
+[[step]]
+keys = "right"
+
+[[step]]
+expect_ui = { label = "Next screen", selected = true }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "Next screen", shown = false }
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-2" }

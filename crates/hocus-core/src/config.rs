@@ -44,6 +44,8 @@ pub struct Config {
     pub gestures: Gestures,
     /// Circling something on screen to ask about it (#46).
     pub circle: Circle,
+    /// The window menu around the pointer (#40).
+    pub radial: Radial,
     pub clipboard: ClipboardConfig,
     /// Key combination → action, in file order: `"Super+Return" = "spawn foot"`.
     pub shortcuts: toml::Table,
@@ -1004,6 +1006,52 @@ impl Circle {
     }
 }
 
+/// The radial menu (#40): this button with these keys held over a window
+/// opens its actions around the pointer; a flick picks one at once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Radial {
+    pub enabled: bool,
+    /// The keys held with the button. Super with the left button draws on
+    /// the screen (#86), hence the right one by default.
+    pub modifiers: String,
+    /// `right` or `middle`.
+    pub button: String,
+}
+
+impl Default for Radial {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            modifiers: "Super".into(),
+            button: "right".into(),
+        }
+    }
+}
+
+/// The buttons the radial menu may take.
+pub const RADIAL_BUTTONS: [&str; 2] = ["right", "middle"];
+
+impl Radial {
+    /// The keys to hold and the button; `None` when off.
+    pub fn held(&self) -> Option<(crate::Modifiers, RadialButton)> {
+        let button = match self.button.as_str() {
+            "right" => RadialButton::Right,
+            "middle" => RadialButton::Middle,
+            _ => return None,
+        };
+        let keys = self.modifiers.parse().ok()?;
+        self.enabled.then_some((keys, button))
+    }
+}
+
+/// The button that opens the radial menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadialButton {
+    Right,
+    Middle,
+}
+
 /// A calendar account or subscription; its password is in the keyring.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1725,6 +1773,17 @@ impl Config {
                 return out_of_range("circle.modifiers", m, "keys such as \"Super+Shift\"");
             }
         }
+        match self.radial.modifiers.parse::<crate::Modifiers>() {
+            Ok(m) if m != crate::Modifiers::default() => {}
+            _ => {
+                let m = format!("{:?}", self.radial.modifiers);
+                return out_of_range("radial.modifiers", m, "keys such as \"Super\"");
+            }
+        }
+        if !RADIAL_BUTTONS.contains(&self.radial.button.as_str()) {
+            let b = format!("{:?}", self.radial.button);
+            return out_of_range("radial.button", b, "right, middle");
+        }
         if !(10..=60).contains(&self.recording.fps) {
             let f = self.recording.fps.to_string();
             return out_of_range("recording.fps", f, "10 to 60");
@@ -2049,6 +2108,30 @@ mod tests {
                 .expect_err("not modifiers");
             assert!(err.0.starts_with("line 2: circle.modifiers"), "{err}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn the_radial_menu_takes_super_and_the_right_button_or_as_set() -> Result<(), ConfigError> {
+        let held = Config::default().radial.held();
+        assert!(held.is_some_and(|(m, b)| m.logo
+            && !m.shift
+            && !m.ctrl
+            && !m.alt
+            && b == RadialButton::Right));
+        let config = Config::parse("[radial]\nmodifiers = \"Alt+Shift\"\nbutton = \"middle\"\n")?;
+        assert!(
+            config
+                .radial
+                .held()
+                .is_some_and(|(m, b)| m.alt && m.shift && b == RadialButton::Middle)
+        );
+        let off = Config::parse("[radial]\nenabled = false\n")?;
+        assert_eq!(off.radial.held(), None);
+        let err = Config::parse("[radial]\nmodifiers = \"\"\n").expect_err("no modifier");
+        assert!(err.0.starts_with("line 2: radial.modifiers"), "{err}");
+        let err = Config::parse("[radial]\nbutton = \"left\"\n").expect_err("drawing's");
+        assert!(err.0.starts_with("line 2: radial.button"), "{err}");
         Ok(())
     }
 

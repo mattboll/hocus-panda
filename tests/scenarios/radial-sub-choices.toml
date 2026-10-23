@@ -1,0 +1,134 @@
+# The radial menu (#40): Desktop… and Snap open a ring of their own, the
+# screen's desktops and the snap zones; Pin and Always on top toggle.
+description = "The radial menu's Desktop… sends the window to a desktop of its screen and Snap to a zone; Pin shows it on every desktop and Always on top keeps it above the others"
+outputs = ["1280x800/3"]
+
+[[step]]
+open = { app_id = "editor", size = [800, 500], color = "#3399ff" }
+
+# Snap, by a slow move left, then the left half.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+press = "right"
+
+[[step]]
+pointer_move = [560, 400]
+
+[[step]]
+expect_ui = { label = "Snap", selected = true }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "Left half" }
+
+[[step]]
+expect_ui = { label = "Top right" }
+
+[[step]]
+click_ui = "Left half"
+
+[[step]]
+expect_window = { app_id = "editor", state = "snapped" }
+
+# Pin, then Unpin.
+[[step]]
+pointer_move = [320, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+click_ui = "Pin"
+
+[[step]]
+expect_window = { app_id = "editor", pinned = true }
+
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+expect_ui = { label = "Unpin" }
+
+[[step]]
+click_ui = "Unpin"
+
+[[step]]
+expect_window = { app_id = "editor", pinned = false }
+
+# Always on top: above a window opened after it.
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+click_ui = "Always on top"
+
+[[step]]
+open = { app_id = "chat", size = [400, 300], color = "#ff6600" }
+
+[[step]]
+expect_stack = ["chat", "editor"]
+
+# Desktop…, then the third: gone from the one shown.
+[[step]]
+pointer_move = [100, 400]
+
+[[step]]
+key_down = "super"
+
+[[step]]
+click = "right"
+
+[[step]]
+key_up = "super"
+
+[[step]]
+click_ui = "Desktop…"
+
+[[step]]
+expect_ui = { label = "Desktop 2" }
+
+[[step]]
+expect_ui = { label = "Back" }
+
+[[step]]
+click_ui = "Desktop 3"
+
+[[step]]
+expect_window = { app_id = "editor", visible = false }
+
+[[step]]
+keys = "super+3"
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }

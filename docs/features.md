@@ -75,6 +75,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Super pressed and released alone opens the overview
 - Super + drag draws on the screen; the line fades when Super is released
 - Super+Shift + drag circles anything to ask about it (keys set in `[circle]`): its text is read (tesseract), then copied, searched, noted, or explained, translated or asked about when the AI is on
+- Super + right button over a window opens its radial menu at the pointer (keys and button set in `[radial]`): Maximize up, Pin, Next screen, Desktop… (the screen's desktops), Minimize down, Always on top, Snap (the snap zones) and Close at the top left; a flick picks on release, a slow move lights the action up, a click leaves it to the pointer and the keys (arrows, Enter, Escape); Close is never flicked, only rested on for 300 ms or clicked; the menu stays whole on the screen under the pointer
 - Touchpad gestures: 3 fingers for desktops and overview, 4 fingers for the launcher
 - Gestures passed to applications: pinch (browser zoom), hold
 - Use the touchpad better: pinch in or out for the overview or the radial menu, and find other useful gestures. Must coexist with two-finger pinch in applications (browser zoom): 3 or 4 fingers, a modifier, or pinch on the desktop background
