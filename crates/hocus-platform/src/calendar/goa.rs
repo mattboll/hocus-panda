@@ -35,6 +35,17 @@ const SERVICE: &str = "org.gnome.OnlineAccounts";
 const ROOT: &str = "/org/gnome/OnlineAccounts";
 const ACCOUNT: &str = "org.gnome.OnlineAccounts.Account";
 const OAUTH2: &str = "org.gnome.OnlineAccounts.OAuth2Based";
+/// How long GOA may take to answer, starting included: on GOA's own
+/// threads and connections, a GOA that hangs holds nothing else.
+const ANSWER: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A connection of GOA's own to the bus at `bus`.
+async fn connect(bus: &str) -> zbus::Result<Connection> {
+    zbus::connection::Builder::address(bus)
+        .method_timeout(ANSWER)
+        .build()
+        .await
+}
 
 /// Google's CalDAV, as GOA's Google provider names it: the principal, the
 /// calendar home and the calendars are found from there.
@@ -138,7 +149,7 @@ enum Either<A, B> {
 }
 
 async fn watch(bus: &str, sink: &Sink) -> zbus::Result<()> {
-    let conn = zbus::connection::Builder::address(bus).build().await?;
+    let conn = connect(bus).await?;
     let dbus = DBusProxy::new(&conn).await?;
     let mut owners = dbus
         .receive_name_owner_changed_with_args(&[(0, SERVICE)])
@@ -321,7 +332,7 @@ pub fn fetch(
     from: Timestamp,
     to: Timestamp,
 ) -> Result<Vec<Fetched>, FetchError> {
-    let conn = zbus::block_on(zbus::connection::Builder::address(bus).build())
+    let conn = zbus::block_on(connect(bus))
         .map_err(|e| FetchError::Failed(format!("the session bus: {e}")))?;
     let token = zbus::block_on(access_token(&conn, &account.path)).map_err(refused)?;
     match google(base, &account.identity, token, from, to) {

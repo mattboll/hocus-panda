@@ -353,14 +353,18 @@ impl State {
 
     /// GOA is followed once the configuration is read, when the
     /// compositor's children (GNOME's settings) are known.
+    /// Called after each dispatch: nothing is cloned before it is
+    /// known to be needed, since dropping a clone of the news' sender
+    /// wakes the loop, which would then never sleep.
     fn follow_goa(&mut self) {
-        let goa = &mut self.calendar.goa;
-        let (false, Some(bus), Some(news)) =
-            (goa.started, goa.bus.clone(), self.calendar.news.clone())
+        if self.calendar.goa.started {
+            return;
+        }
+        self.calendar.goa.started = true;
+        let (Some(bus), Some(news)) = (self.calendar.goa.bus.clone(), self.calendar.news.clone())
         else {
             return;
         };
-        goa.started = true;
         let path = self
             .child_env
             .as_ref()
