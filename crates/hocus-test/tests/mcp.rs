@@ -341,5 +341,24 @@ fn given_the_stop_key_pressed_when_a_connected_agent_tries_to_act_then_it_is_ref
     };
     assert_eq!(read.entries.len(), 3);
     assert!(!read.stopped);
+
+    // Another agent reads only its own entries: none.
+    let socket = compositor.api_socket().to_path_buf();
+    let other = std::thread::spawn(move || {
+        let mut client = hocus_api::Client::connect(&socket)?;
+        client.set_timeout(Some(TIMEOUT))?;
+        client.request(Request::Agent {
+            name: "reader".into(),
+        })?;
+        client.request(Request::AgentsJournal)
+    });
+    compositor.dispatch_until(TIMEOUT, |_| other.is_finished())?;
+    let Reply::AgentsJournal(own) = other
+        .join()
+        .map_err(|_| anyhow::anyhow!("the client panicked"))??
+    else {
+        anyhow::bail!("expected the journal");
+    };
+    assert!(own.entries.is_empty(), "{own:?}");
     Ok(())
 }

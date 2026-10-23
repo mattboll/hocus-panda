@@ -7,6 +7,9 @@ config = """
 name = "helper"
 access = "act"
 apps = ["notes"]
+
+[[agents.mcp]]
+name = "reader"
 """
 
 [[step]]
@@ -52,6 +55,10 @@ mcp = { agent = "helper", tool = "journal", contains = [
   '14:37:00 helper: click on window',
   'helper: type 4 characters on window',
 ] }
+
+# An agent reads its own entries alone; the user reads them all.
+[[step]]
+mcp = { agent = "reader", tool = "journal", contains = ["Nothing yet."] }
 
 # The column shows the last few, newest first, and the button that stops
 # every agent.

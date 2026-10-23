@@ -558,7 +558,7 @@ impl App {
                 Reply::Done
             }
             Request::Agent { name } => return Some(state.name_agent(connection, name)),
-            Request::AgentsJournal => Reply::AgentsJournal(state.agents_journal()),
+            Request::AgentsJournal => Reply::AgentsJournal(state.agents_journal(connection)),
             Request::Act { target, action } => {
                 return Some(state.act(connection, target, action));
             }

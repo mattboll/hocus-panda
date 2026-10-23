@@ -54,7 +54,7 @@ With Claude Code: `claude mcp add hocuspanda -- hocus mcp --agent assistant`.
 | `type` | `text` into `window`, with the keyboard layout in effect |
 | `press_keys` | a combination into `window`: `Ctrl+A`, `Return`, `Shift+Tab` |
 | `wait_for` | until a window (`app_id`, a part of its `title`) or an element (`label`) is shown, or with `gone` until none is; `timeout_ms` |
-| `journal` | what agents did this session, oldest first, one line each (see below); `limit` (the last so many, 50 by default), `agent` |
+| `journal` | what this agent did this session, oldest first, one line each (see below); `limit` (the last so many, 50 by default), `agent` |
 
 Acting on a window brings it forward first (its desktop shown, restored if
 minimized) and gives it the keyboard; a click that something else would
@@ -93,18 +93,25 @@ $ hocus msg agents-journal
 ```
 
 `--json` gives the entries as data; the control API's `agents_journal`
-request (open to any client of the session) and the `journal` tool give the
-same. Once an agent connected, the column shows the last three, newest
-first (agent · action · window · time), and a click on them opens the last
-dozen with the reasons of refusals.
+request (open to any client of the session) gives the same. An agent reads
+its own entries alone, through the `journal` tool or the request: the user
+(`hocus msg`, the column) and a server started without `--agent` read them
+all. While agents are stopped, an agent that names itself is refused and
+kept as such (`helper: connect; refused: …`). The journal lives in memory
+only, the last 500 entries: nothing is written to disk, and entries never
+reach the compositor's log above debug level.
+
+Once an agent connected, the column shows the last three, newest first
+(agent · action · window · time), and a click on them opens the last dozen
+with the reasons of refusals.
 
 ## Stop them all
 
 `stop-agents`, Super+Shift+Escape by default, or Stop in the column's
 journal, stops every agent at once: from then on every request of an agent's
 connection is refused, reading included (`refused: the user stopped every
-agent…`), a new agent cannot name itself, and the events they subscribed to
-stop reaching them. The column says so, and the same key, or Allow, lets
+agent…`), a new agent cannot name itself (the attempt is kept in the
+journal), and the events they subscribed to stop reaching them. The column says so, and the same key, or Allow, lets
 them go on. The key works even while a window holds the shortcuts back or a
 panel is open; agents cannot press it, since the keys they type never reach
 the desktop's shortcuts. It lasts until allowed again or the session ends.
