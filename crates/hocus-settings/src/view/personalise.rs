@@ -324,7 +324,13 @@ impl SettingsView {
         self.note_painted(theme, parent, words, paint);
     }
 
-    fn note_painted(&mut self, theme: &Theme, parent: NodeId, words: words::Words, paint: Paint) {
+    pub(super) fn note_painted(
+        &mut self,
+        theme: &Theme,
+        parent: NodeId,
+        words: words::Words,
+        paint: Paint,
+    ) {
         let text = words.get(self.lang);
         self.add(
             parent,

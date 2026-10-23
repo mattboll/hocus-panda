@@ -470,6 +470,11 @@ without unlocking leaves our lock screen: a crash never unlocks.
   (`hocus settings keyboard`). To record a shortcut, it holds the
   compositor's own back through keyboard-shortcuts-inhibit, so that the
   keys reach it; nothing is written until the new keys are confirmed.
+  An AI provider's key typed there goes to the compositor's keyring
+  (`ai_secret`), never to the file; `ai` says which providers have one,
+  never the keys, and the `ai` event when that changes. Its button stops
+  or allows every MCP agent (`set_agents_stopped`) as the stop key does,
+  and the `agents_stopped` event tells it.
   What is not the compositor's it asks itself, on threads of its own: the
   system's time zone (timedated), the account's name, picture and
   fingerprints (AccountsService, fprintd) on the system bus; the default

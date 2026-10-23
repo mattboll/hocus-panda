@@ -98,6 +98,8 @@ pub enum Request {
         provider: String,
         secret: String,
     },
+    /// Which AI providers have a key kept, never the keys (#67).
+    Ai,
     /// System updates waiting, and whether they are being looked for or
     /// installed (#84).
     Updates,
@@ -246,6 +248,11 @@ pub enum Request {
     /// What MCP agents did this session, oldest first, and whether they
     /// are stopped (#176).
     AgentsJournal,
+    /// Stops every MCP agent at once, or allows them again, as the stop
+    /// key and the column's button do (#67).
+    SetAgentsStopped {
+        stopped: bool,
+    },
 }
 
 impl Request {
@@ -261,6 +268,8 @@ impl Request {
             | Self::CalendarSecret { .. }
             // The user's own key, typed by the user.
             | Self::AiSecret { .. }
+            // Which providers have one, not the keys.
+            | Self::Ai
             | Self::Updates
             // The system asks for the password itself.
             | Self::InstallUpdates
@@ -285,6 +294,8 @@ impl Request {
             | Self::Screenshot { .. }
             // What agents did: the user's to read, and the agents' own.
             | Self::AgentsJournal
+            // As the stop key: an agent itself may not (`agents_may`).
+            | Self::SetAgentsStopped { .. }
             // Showing the settings window changes nothing by itself.
             | Self::OpenSettings { .. } => Permission::Observe,
             Self::Scene
@@ -582,8 +593,17 @@ pub enum Reply {
     /// The agent this connection is now.
     Agent(AgentInfo),
     AgentsJournal(AgentsJournal),
+    Ai(AiInfo),
     /// The request was carried out.
     Done,
+}
+
+/// What the session knows of the AI providers (#67): which have a key
+/// kept, by their names in `[ai] provider`; never the keys themselves.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AiInfo {
+    /// `None` until the keyring (or the sealed file) was read.
+    pub keys: Option<Vec<String>>,
 }
 
 /// An element of the shell's interface, depth first.
@@ -1090,6 +1110,13 @@ pub enum Event {
     OpenSettings {
         page: Option<String>,
     },
+    /// An AI provider's key was kept or forgotten (#67), as `Request::Ai`
+    /// says them.
+    Ai,
+    /// Every MCP agent was stopped, or allowed again (#176).
+    AgentsStopped {
+        stopped: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1353,6 +1380,9 @@ mod tests {
             Request::CopyPng {
                 png_base64: String::new(),
             },
+            // An agent never allows itself again, nor reads the keys kept.
+            Request::SetAgentsStopped { stopped: false },
+            Request::Ai,
         ] {
             assert!(!request.agents_may(), "{request:?}");
         }

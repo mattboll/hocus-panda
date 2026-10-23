@@ -1,0 +1,93 @@
+# AI and agents (#67): the AI turned on, its provider and address chosen
+# in the settings; the key typed there goes to the keyring through the
+# compositor (a sealed file in tests: never the developer's keyring), never
+# into the configuration, and the page only says whether one is kept.
+description = "AI and agents: the AI turned on, Claude chosen and its address typed; the key typed there is kept in the keyring, never in the configuration file, and the next question carries it; removed, no key is kept"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+ai_server = { delay_ms = 10, pieces = ["Forty", "-two."] }
+
+[[step]]
+open_settings = { page = "agents" }
+
+# Off by default; ollama needs no key.
+[[step]]
+expect_settings = { label = "Ask the AI", selected = false }
+
+[[step]]
+expect_settings = { label = "ollama needs no key." }
+
+[[step]]
+click_settings = "Ask the AI"
+
+[[step]]
+expect_config_file = { contains = ["[ai]", "enabled = true"] }
+
+[[step]]
+click_settings = "Provider: Claude"
+
+[[step]]
+expect_config_file = { contains = ["provider = \"claude\""] }
+
+[[step]]
+expect_settings = { label = "No key" }
+
+[[step]]
+click_settings = "AI address"
+
+[[step]]
+type = "{ai}"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["url = \"http://127.0.0.1:"] }
+
+[[step]]
+click_settings = "Provider key"
+
+[[step]]
+type = "sk-test-panda"
+
+[[step]]
+click_settings = "Keep the key"
+
+[[step]]
+expect_settings = { label = "A key is kept" }
+
+[[step]]
+expect_config_file = { lacks = ["sk-test-panda"] }
+
+[[step]]
+expect_state_file = { name = "ai-secrets", lacks = ["sk-test-panda"] }
+
+# The next question carries it.
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "what is the answer?"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Forty-two." }
+
+[[step]]
+expect_ai = { path = "/v1/messages", header = "x-api-key: sk-test-panda" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+click_settings = "Remove the key"
+
+[[step]]
+expect_settings = { label = "No key" }
+
+[[step]]
+expect_settings = { label = "Remove the key", shown = false }

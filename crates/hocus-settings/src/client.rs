@@ -312,6 +312,14 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 Ok(Reply::Notifications(notifications)) => notifications,
                 _ => Default::default(),
             };
+            let ai = match requests.request(Request::Ai) {
+                Ok(Reply::Ai(ai)) => ai,
+                _ => Default::default(),
+            };
+            let agents_stopped = match requests.request(Request::AgentsJournal) {
+                Ok(Reply::AgentsJournal(journal)) => journal.stopped,
+                _ => false,
+            };
             let config = hocus_core::Config::parse(&info.toml)
                 .map_err(|e| anyhow::anyhow!("the configuration in effect: {e}"))?;
             let ctx = Context {
@@ -328,6 +336,8 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 // The settings read these themselves.
                 apps: Default::default(),
                 account: Default::default(),
+                ai,
+                agents_stopped,
             };
             let path = info.path.map(PathBuf::from);
             let sent = to_window.send(FromApi::Context(Box::new((ctx, info.accent, path))));
@@ -341,6 +351,8 @@ fn api_thread(path: PathBuf, to_window: Sender<FromApi>) {
                 | Event::Calendars
                 | Event::Hardware
                 | Event::Notifications
+                | Event::Ai
+                | Event::AgentsStopped { .. }
                 | Event::OutputAdded { .. }
                 | Event::OutputRemoved { .. }
                 | Event::OutputChanged { .. } => {
@@ -672,6 +684,44 @@ impl App {
                             });
                     if let Err(err) = spawned {
                         tracing::warn!(%err, "could not change the setting");
+                    }
+                }
+                // The key goes straight to the compositor's keyring, never
+                // into the configuration; it says which providers have one.
+                Outcome::AiKey { provider, key } => {
+                    let api = self.api.clone();
+                    let spawned =
+                        std::thread::Builder::new()
+                            .name("ai key".into())
+                            .spawn(move || {
+                                let request = Request::AiSecret {
+                                    provider,
+                                    secret: key,
+                                };
+                                if let Err(err) = Api::connect(&api)
+                                    .and_then(|mut c| c.request(request).map(drop))
+                                {
+                                    tracing::warn!(%err, "could not keep the AI key");
+                                }
+                            });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not keep the AI key");
+                    }
+                }
+                Outcome::StopAgents(stopped) => {
+                    let api = self.api.clone();
+                    let spawned = std::thread::Builder::new()
+                        .name("stop agents".into())
+                        .spawn(move || {
+                            let request = Request::SetAgentsStopped { stopped };
+                            if let Err(err) =
+                                Api::connect(&api).and_then(|mut c| c.request(request).map(drop))
+                            {
+                                tracing::warn!(%err, "could not stop or allow the agents");
+                            }
+                        });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not stop or allow the agents");
                     }
                 }
                 Outcome::DoNotDisturb(on) => {

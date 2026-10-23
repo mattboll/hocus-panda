@@ -24,6 +24,12 @@ pub(super) struct SystemPage {
     pub(super) open: Option<&'static str>,
     /// Why AccountsService did not take the last change.
     pub(super) refused: Option<String>,
+    /// OpenAI's API on another server is chosen, its address not typed
+    /// yet.
+    pub(super) openai_like: bool,
+    /// The AI's address typed last would send questions in the clear: it
+    /// was not written.
+    pub(super) bad_address: bool,
 }
 
 impl SettingsView {

@@ -71,6 +71,19 @@ impl Secrets {
         Ok(self.sealed()?.len())
     }
 
+    /// The ids of the secrets of this kind kept (which providers have a
+    /// key). Read locked too, without asking to unlock, and without the
+    /// secrets themselves.
+    pub fn ids(&self) -> Result<Vec<String>, String> {
+        let mut ids = match self.keyring() {
+            Some(keyring) => zbus::block_on(keyring_ids(&keyring, self.attribute))?,
+            None => self.sealed()?.into_keys().collect(),
+        };
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
     /// The keyring, when the session bus has one.
     fn keyring(&self) -> Option<Connection> {
         let bus = self.bus.as_deref()?;
@@ -256,14 +269,19 @@ async fn item_attributes(
 
 /// The application's items of this kind, locked or not.
 async fn keyring_count(conn: &Connection, attribute: &str) -> Result<usize, String> {
+    Ok(keyring_ids(conn, attribute).await?.len())
+}
+
+/// The ids of the application's items of this kind, locked or not.
+async fn keyring_ids(conn: &Connection, attribute: &str) -> Result<Vec<String>, String> {
     let (unlocked, locked) = search(conn, attribute, None).await?;
-    let mut n = 0;
+    let mut ids = Vec::new();
     for item in unlocked.iter().chain(&locked) {
-        if item_attributes(conn, item).await?.contains_key(attribute) {
-            n += 1;
+        if let Some(id) = item_attributes(conn, item).await?.remove(attribute) {
+            ids.push(id);
         }
     }
-    Ok(n)
+    Ok(ids)
 }
 
 async fn keyring_keep_only(
@@ -310,5 +328,6 @@ mod tests {
         assert_eq!(s.lookup("work").expect("read"), None);
         assert_eq!(s.lookup("home").expect("read").as_deref(), Some("panda"));
         assert_eq!(s.count(), Ok(1));
+        assert_eq!(s.ids(), Ok(vec!["home".to_owned()]));
     }
 }

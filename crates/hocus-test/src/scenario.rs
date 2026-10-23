@@ -121,7 +121,7 @@ pub enum Step {
     /// (degrees), and reads on the theme's surfaces.
     ExpectAccent(ExpectAccent),
     /// Types text, as on a US keyboard; `{caldav}` is the test server's
-    /// calendar.
+    /// calendar, `{ai}` the AI provider's address.
     Type(String),
     /// A file a started program wrote in the compositor's runtime
     /// directory: `{ name, contains?, lacks? }`.
@@ -1848,10 +1848,13 @@ impl Run<'_> {
             }
             Step::ExpectConfigFile(expected) => self.expect_config_file(expected),
             Step::Type(text) => {
-                let text = match &self.caldav {
+                let mut text = match &self.caldav {
                     Some(server) => text.replace("{caldav}", server.url()),
                     None => text.clone(),
                 };
+                if let Some(ai) = &self.ai {
+                    text = text.replace("{ai}", ai.url());
+                }
                 self.type_text(&text)
             }
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
@@ -3704,6 +3707,7 @@ fn us_key(c: char) -> Option<(u32, bool)> {
         '<' => shifted(51),
         '>' => shifted(52),
         '?' => shifted(53),
+        '~' => shifted(41),
         _ => None,
     }
 }

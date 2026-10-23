@@ -153,6 +153,7 @@ impl Page {
                 | Self::Language
                 | Self::Notifications
                 | Self::Apps
+                | Self::Agents
                 | Self::About
                 | Self::Welcome
         )
@@ -333,6 +334,19 @@ impl Page {
                 "wifi", "wi-fi", "internet", "wireless", "sans fil", "airplane", "avion",
             ],
             Bluetooth => &["headphones", "casque", "pairing", "appairer"],
+            Agents => &[
+                "ai",
+                "ia",
+                "llm",
+                "assistant",
+                "ollama",
+                "claude",
+                "openai",
+                "herdr",
+                "mcp",
+                "circle",
+                "entourer",
+            ],
             Notifications => &[
                 "notification",
                 "toast",
@@ -619,6 +633,22 @@ impl Page {
                 AppsState::Unknown => words::DEFAULT_APPS.get(lang).to_owned(),
             },
             Self::Accounts => words::calendars(ctx.config.calendars.len(), lang),
+            Self::Agents => {
+                let ai = &ctx.config.ai;
+                let mut said = vec![if ai.enabled {
+                    provider_name(&ai.provider, &ai.url, lang)
+                } else {
+                    words::AI_OFF.get(lang).to_owned()
+                }];
+                let herdr = ctx.config.agents.herdr_sockets().len();
+                if herdr > 0 {
+                    said.push(words::herdr_count(herdr));
+                }
+                if ctx.agents_stopped {
+                    said.push(words::AGENTS_STOPPED_SHORT.get(lang).to_owned());
+                }
+                said.join(" · ")
+            }
             Self::Account => {
                 let name = match &ctx.account.user {
                     UserState::Known(u) if !u.real_name.is_empty() => u.real_name.clone(),
@@ -633,6 +663,36 @@ impl Page {
             _ => words::NOT_YET.get(lang).into(),
         }
     }
+}
+
+/// The AI providers offered, as the configuration names them, and as
+/// people do; OpenAI's API on another server is told apart by its address.
+pub const PROVIDERS: [(&str, &str); 4] = [
+    ("ollama", "ollama"),
+    ("llamacpp", "llama.cpp"),
+    ("openai", "OpenAI"),
+    ("claude", "Claude"),
+];
+
+/// OpenAI's own address, as the usual one is written.
+pub const OPENAI_URL: &str = "https://api.openai.com";
+
+/// Whether `[ai]` names a server speaking OpenAI's API that is not
+/// OpenAI's.
+pub fn openai_like(provider: &str, url: &str) -> bool {
+    let url = url.trim_end_matches('/');
+    provider == "openai" && !url.is_empty() && url != OPENAI_URL
+}
+
+/// A provider as people name it.
+pub fn provider_name(provider: &str, url: &str, lang: Lang) -> String {
+    if openai_like(provider, url) {
+        return words::OPENAI_LIKE.get(lang).to_owned();
+    }
+    PROVIDERS
+        .iter()
+        .find(|(id, _)| *id == provider)
+        .map_or_else(|| provider.to_owned(), |(_, name)| (*name).to_owned())
 }
 
 fn on_off(on: bool, lang: Lang) -> String {
@@ -729,6 +789,10 @@ pub struct Context {
     pub apps: AppsState,
     /// What AccountsService and fprintd say, for the Account page.
     pub account: hocus_platform::account::AccountInfo,
+    /// Which AI providers have a key kept, for AI and agents.
+    pub ai: hocus_api::AiInfo,
+    /// Every MCP agent is stopped, for AI and agents.
+    pub agents_stopped: bool,
 }
 
 /// The default applications and autostart entries, as the XDG files say.
@@ -813,6 +877,13 @@ pub enum Setting {
     AccountName,
     Fingerprint,
     Updates,
+    Ai,
+    AiProvider,
+    AiKey,
+    Herdr,
+    JournalText,
+    StopAgents,
+    Circle,
 }
 
 impl Setting {
@@ -852,6 +923,13 @@ impl Setting {
             Self::DefaultApps | Self::Autostart | Self::SessionRestore => Page::Apps,
             Self::Calendars => Page::Accounts,
             Self::AccountName | Self::Fingerprint | Self::Updates => Page::Account,
+            Self::Ai
+            | Self::AiProvider
+            | Self::AiKey
+            | Self::Herdr
+            | Self::JournalText
+            | Self::StopAgents
+            | Self::Circle => Page::Agents,
         }
     }
 }
@@ -1282,6 +1360,7 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
     ];
     out.extend(hardware_entries(ctx, lang));
     out.extend(system_entries(ctx, lang));
+    out.extend(agents_entries(ctx, lang));
     for (combo, action) in &ctx.config.shortcuts().bindings {
         let combo = combo.to_string();
         let (label, _, _) = words::action(action, lang);
@@ -1568,6 +1647,101 @@ fn system_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String
     ]
 }
 
+/// The AI and agents page's settings.
+fn agents_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, String)> {
+    let ai = &ctx.config.ai;
+    let both = |w: Words| vec![w.en.to_owned(), w.fr.to_owned()];
+    let words = |list: &[&str]| list.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+    let key = match &ctx.ai.keys {
+        Some(keys) if keys.contains(&ai.provider) => words::KEY_KEPT,
+        Some(_) => words::NO_KEY,
+        None => words::KEY_NOT_READ,
+    };
+    vec![
+        (
+            Setting::Ai,
+            words::ASK_AI.get(lang).to_owned(),
+            [
+                both(words::ASK_AI),
+                words(&["ai", "ia", "llm", "assistant", "question", "chatgpt"]),
+            ]
+            .concat(),
+            on_off(ai.enabled, lang),
+        ),
+        (
+            Setting::AiProvider,
+            words::PROVIDER.get(lang).to_owned(),
+            [
+                both(words::PROVIDER),
+                both(words::MODEL),
+                words(&[
+                    "ollama",
+                    "llama.cpp",
+                    "openai",
+                    "claude",
+                    "anthropic",
+                    "model",
+                    "modèle",
+                    "lm studio",
+                ]),
+            ]
+            .concat(),
+            provider_name(&ai.provider, &ai.url, lang),
+        ),
+        (
+            Setting::AiKey,
+            words::KEY.get(lang).to_owned(),
+            [
+                both(words::KEY),
+                words(&["api key", "clé d’api", "token", "jeton", "secret"]),
+            ]
+            .concat(),
+            key.get(lang).to_owned(),
+        ),
+        (
+            Setting::Herdr,
+            "herdr".to_owned(),
+            [
+                both(words::AGENTS),
+                words(&["herdr", "socket", "coding agents", "agents de code"]),
+            ]
+            .concat(),
+            ctx.config.agents.herdr_sockets().len().to_string(),
+        ),
+        (
+            Setting::JournalText,
+            words::JOURNAL_TEXT.get(lang).to_owned(),
+            [
+                both(words::JOURNAL_TEXT),
+                words(&["journal", "typed", "tapé", "mcp"]),
+            ]
+            .concat(),
+            on_off(ctx.config.agents.journal_text, lang),
+        ),
+        (
+            Setting::StopAgents,
+            words::STOP_ALL.get(lang).to_owned(),
+            [
+                both(words::STOP_ALL),
+                both(words::ALLOW_AGENTS),
+                words(&["stop", "arrêter", "mcp", "agents"]),
+            ]
+            .concat(),
+            keys_of(ctx, &hocus_core::Action::StopAgents, lang),
+        ),
+        (
+            Setting::Circle,
+            words::CIRCLE.get(lang).to_owned(),
+            [
+                both(words::CIRCLE),
+                words(&["circle", "entourer", "lasso", "loop", "boucle"]),
+            ]
+            .concat(),
+            on_off(ctx.config.circle.enabled, lang),
+        ),
+    ]
+}
+
 /// What `query` finds, the best first: a setting's own name beats its
 /// synonyms, which beat its value; pages are found by name too.
 pub fn search(query: &str, ctx: &Context, lang: Lang) -> Vec<Hit> {
@@ -1760,11 +1934,36 @@ mod tests {
         for page in [
             Page::Notifications,
             Page::Apps,
+            Page::Agents,
             Page::Accounts,
             Page::Account,
         ] {
             assert!(page.available(), "{page:?}");
         }
+    }
+
+    #[test]
+    fn the_ai_and_agents_are_found_and_their_tile_says_what_is_in_effect() {
+        let hits = search("entourer", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::Circle), "{hits:?}");
+        let hits = search("api key", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::AiKey), "{hits:?}");
+        let hits = search("herdr", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::Herdr), "{hits:?}");
+        let mut c = ctx();
+        assert_eq!(Page::Agents.summary(&c, Lang::En), "AI off");
+        c.config = Config::parse(
+            "[ai]\nenabled = true\nprovider = \"openai\"\nurl = \"http://127.0.0.1:1234\"\n\n[[agents.herdr]]\nsocket = \"web.sock\"\n",
+        )
+        .expect("valid");
+        c.agents_stopped = true;
+        assert_eq!(
+            Page::Agents.summary(&c, Lang::Fr),
+            "Compatible OpenAI · 1 herdr · Agents arrêtés"
+        );
+        assert!(openai_like("openai", "http://127.0.0.1:1234"));
+        assert!(!openai_like("openai", "https://api.openai.com/"));
+        assert!(!openai_like("claude", "http://127.0.0.1:1234"));
     }
 
     #[test]
