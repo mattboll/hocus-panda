@@ -616,8 +616,9 @@ struct LauncherFx {
 pub struct Moments {
     desktops: Vec<DesktopRain>,
     toasts: Vec<ToastFx>,
-    /// The column shown last time, and its moment.
-    column_shown: Option<bool>,
+    /// The screen the column showed on last time (none: hidden), once
+    /// looked at; and its moment.
+    column_on: Option<Option<String>>,
     column: Option<(Moment, Duration)>,
     launcher: Option<LauncherFx>,
 }
@@ -660,15 +661,24 @@ impl State {
     pub fn refresh_matrix_shell(&mut self) {
         let now = self.clock.now();
         let moves = self.matrix_moves();
-        // The column comes and goes with a fullscreen window over it.
-        let shown = self
+        // The column opens when it first shows, when it comes to another
+        // screen and when a fullscreen window over it goes; it closes when
+        // one comes over it.
+        let placed = self.shell.as_ref().is_some_and(|s| s.is_placed());
+        let on = self
             .column_output()
-            .is_some_and(|o| !self.fullscreen_on(&o))
-            && self.shell.as_ref().is_some_and(|s| s.is_placed());
-        let was = self.matrix_shell.column_shown.replace(shown);
-        if moves && was.is_some_and(|w| w != shown) {
-            let moment = if shown { Moment::Open } else { Moment::Close };
-            self.matrix_shell.column = Some((moment, now));
+            .filter(|o| placed && !self.fullscreen_on(o))
+            .map(|o| o.name());
+        let was = self.matrix_shell.column_on.replace(on.clone());
+        if moves && was.as_ref() != Some(&on) {
+            let moment = match (was.flatten(), &on) {
+                (_, Some(_)) => Some(Moment::Open),
+                (Some(_), None) => Some(Moment::Close),
+                (None, None) => None,
+            };
+            if let Some(moment) = moment {
+                self.matrix_shell.column = Some((moment, now));
+            }
         }
         if let Some(panel) = self.toasts.as_mut() {
             for (id, rect) in panel.toasts.take_gone() {
