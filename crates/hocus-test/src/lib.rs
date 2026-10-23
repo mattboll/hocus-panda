@@ -1,5 +1,6 @@
 //! Scenario runner, test clients and screenshot comparison.
 
+pub mod ai;
 pub mod bus;
 pub mod caldav;
 pub mod client;

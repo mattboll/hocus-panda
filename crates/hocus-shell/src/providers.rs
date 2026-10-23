@@ -5,8 +5,10 @@
 use hocus_ui::Color;
 
 use crate::{
+    answer::Source,
     calc, fuzzy,
     i18n::Lang,
+    intents,
     launcher::{App, Choice, Showcase},
     toasts::app_color,
     units,
@@ -48,6 +50,10 @@ pub struct Enabled {
     pub search_engine: String,
     pub large_type: bool,
     pub qr: bool,
+    /// Requests understood offline, confirmed before they run (#44).
+    pub intents: bool,
+    /// Who answers what is asked; `None`: nothing is offered to ask.
+    pub ask: Option<Source>,
 }
 
 impl Default for Enabled {
@@ -60,6 +66,8 @@ impl Default for Enabled {
             search_engine: "https://duckduckgo.com/?q={}".into(),
             large_type: true,
             qr: true,
+            intents: true,
+            ask: None,
         }
     }
 }
@@ -67,6 +75,15 @@ impl Default for Enabled {
 /// The providers, in the order their results come.
 pub fn providers(enabled: &Enabled) -> Vec<Box<dyn Provider>> {
     let mut out: Vec<Box<dyn Provider>> = Vec::new();
+    if enabled.intents {
+        out.push(Box::new(Intents));
+    }
+    if let Some(source) = &enabled.ask {
+        out.push(Box::new(Ask {
+            source: source.clone(),
+            questions: true,
+        }));
+    }
     if enabled.large_type {
         out.push(Box::new(LargeType));
     }
@@ -85,12 +102,113 @@ pub fn providers(enabled: &Enabled) -> Vec<Box<dyn Provider>> {
     out.push(Box::new(Settings));
     out.push(Box::new(SessionActions));
     out.push(Box::new(Apps));
+    if let Some(source) = &enabled.ask {
+        out.push(Box::new(Ask {
+            source: source.clone(),
+            questions: false,
+        }));
+    }
     if enabled.web_search {
         out.push(Box::new(WebSearch {
             engine: enabled.search_engine.clone(),
         }));
     }
     out
+}
+
+/// A request understood offline: shown for confirmation, first.
+struct Intents;
+
+impl Provider for Intents {
+    fn name(&self) -> &'static str {
+        "intents"
+    }
+
+    fn hits(&self, query: &str, cx: &Context<'_>, out: &mut Vec<Hit>) {
+        if let Some(intent) = intents::parse(query, cx.apps) {
+            out.push(Hit {
+                title: intent.title(cx.lang),
+                kind: cx.lang.intent_kind().into(),
+                color: None,
+                choice: Choice::Intent(intent),
+            });
+        }
+    }
+}
+
+/// Words that start a question, in either language.
+const QUESTION_WORDS: [&str; 34] = [
+    "why",
+    "how",
+    "what",
+    "when",
+    "where",
+    "who",
+    "which",
+    "whose",
+    "can",
+    "could",
+    "should",
+    "would",
+    "is",
+    "are",
+    "does",
+    "do",
+    "explain",
+    "summarize",
+    "translate",
+    "pourquoi",
+    "comment",
+    "quoi",
+    "que",
+    "quel",
+    "quelle",
+    "quels",
+    "quelles",
+    "quand",
+    "ou",
+    "qui",
+    "combien",
+    "explique",
+    "resume",
+    "traduis",
+];
+
+/// What reads as a question: it ends with "?", or starts as one does.
+pub fn is_question(query: &str) -> bool {
+    let first = fuzzy::fold(query)
+        .split(|c: char| !c.is_alphanumeric())
+        .find(|w| !w.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_default();
+    query.trim_end().ends_with('?')
+        || (QUESTION_WORDS.contains(&first.as_str()) && query.split_whitespace().count() >= 3)
+        || first == "est" && fuzzy::fold(query).starts_with("est-ce")
+}
+
+/// Asks the AI: first for a question, else after the applications.
+struct Ask {
+    source: Source,
+    /// This one offers questions only; the other everything else.
+    questions: bool,
+}
+
+impl Provider for Ask {
+    fn name(&self) -> &'static str {
+        "ai"
+    }
+
+    fn hits(&self, query: &str, cx: &Context<'_>, out: &mut Vec<Hit>) {
+        if is_question(query) != self.questions {
+            return;
+        }
+        out.push(Hit {
+            title: cx.lang.ask(query),
+            kind: self.source.label(cx.lang),
+            color: None,
+            choice: Choice::Ask(query.to_owned()),
+        });
+    }
 }
 
 /// `large hello`: the words over the whole screen.

@@ -2,6 +2,7 @@
 //! own threads and talks to the compositor's loop through channels.
 
 pub mod adb;
+pub mod ai;
 pub mod apps;
 pub mod auth;
 pub mod calendar;
@@ -12,6 +13,7 @@ pub mod polkit;
 pub mod power;
 pub mod quick;
 pub mod sealed;
+pub mod secrets;
 pub mod session;
 pub mod system;
 pub mod timedate;

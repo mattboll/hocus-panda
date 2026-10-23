@@ -262,6 +262,17 @@ pub enum Step {
     ExpectHerdr(String),
     /// The settings keep a calendar account's password: `{ id, password }`.
     CalendarPassword(CalendarPassword),
+    /// An AI provider on 127.0.0.1 (ollama, OpenAI's chat completions,
+    /// Claude's Messages API) answers every question with these pieces,
+    /// `delay_ms` before each (and `first_ms` more before the first); its
+    /// address is `{ai}` in later configuration.
+    AiServer(AiServerStep),
+    /// An AI provider's key is kept, as `hocus msg ai-key` does: `{
+    /// provider, key }`.
+    AiKey(AiKeyStep),
+    /// The AI provider was asked, once so: `{ path?, contains? = […],
+    /// header? }` (a header as `name: value`, the name in lower case).
+    ExpectAi(ExpectAi),
     /// The calendars as the session knows them, once so: `{ events?,
     /// secrets?, contains?, error? }`.
     ExpectCalendars(ExpectCalendars),
@@ -570,6 +581,32 @@ pub struct TrayAttention {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AiServerStep {
+    pub pieces: Vec<String>,
+    #[serde(default)]
+    pub delay_ms: u64,
+    #[serde(default)]
+    pub first_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiKeyStep {
+    pub provider: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectAi {
+    pub path: Option<String>,
+    #[serde(default)]
+    pub contains: Vec<String>,
+    pub header: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HerdrStep {
     pub agents: Vec<HerdrAgent>,
 }
@@ -857,6 +894,9 @@ impl fmt::Display for Step {
             Self::HerdrStatus(h) => write!(f, "herdr_status {} {}", h.agent, h.status),
             Self::ExpectHerdr(asked) => write!(f, "expect_herdr {asked:?}"),
             Self::CalendarPassword(p) => write!(f, "calendar_password {}", p.id),
+            Self::AiServer(a) => write!(f, "ai_server with {} pieces", a.pieces.len()),
+            Self::AiKey(k) => write!(f, "ai_key {}", k.provider),
+            Self::ExpectAi(e) => write!(f, "expect_ai {e:?}"),
             Self::ExpectCalendars(e) => write!(f, "expect_calendars {e:?}"),
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
             Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
@@ -1065,6 +1105,7 @@ impl Scenario {
             events: Vec::new(),
             caldav: None,
             herdr: None,
+            ai: None,
             blurs: 0,
         };
         run.request(Request::Subscribe)?;
@@ -1110,6 +1151,7 @@ struct Run<'a> {
     events: Vec<hocus_api::Event>,
     caldav: Option<crate::caldav::Server>,
     herdr: Option<crate::herdr::Server>,
+    ai: Option<crate::ai::Server>,
     /// Blurs computed at the last `expect_blur`.
     blurs: u64,
 }
@@ -1588,6 +1630,52 @@ impl Run<'_> {
                 Ok(())
             }
             Step::ExpectCalendars(expected) => self.expect_calendars(expected),
+            Step::AiServer(a) => {
+                self.ai = Some(crate::ai::Server::start(crate::ai::Answers {
+                    pieces: a.pieces.clone(),
+                    delay: Duration::from_millis(a.delay_ms),
+                    first: Duration::from_millis(a.first_ms),
+                })?);
+                Ok(())
+            }
+            Step::AiKey(k) => {
+                self.request(Request::AiSecret {
+                    provider: k.provider.clone(),
+                    secret: k.key.clone(),
+                })?;
+                // Kept by a worker before the next step.
+                let until = Instant::now() + Duration::from_millis(200);
+                while Instant::now() < until {
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                Ok(())
+            }
+            Step::ExpectAi(expected) => {
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let asked = self
+                        .ai
+                        .as_ref()
+                        .context("no ai_server step before")?
+                        .asked();
+                    let found = asked.iter().any(|a| {
+                        expected.path.as_ref().is_none_or(|p| *p == a.path)
+                            && expected.contains.iter().all(|c| a.body.contains(c))
+                            && expected
+                                .header
+                                .as_ref()
+                                .is_none_or(|h| a.headers.contains(h))
+                    });
+                    if found {
+                        return Ok(());
+                    }
+                    anyhow::ensure!(
+                        Instant::now() < deadline,
+                        "the AI provider was asked {asked:?}"
+                    );
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
             Step::ExpectRecording(expected) => self.expect_recording(expected),
             Step::Swipe(swipe) => {
                 use hocus_api::SwipePhase;
@@ -1856,6 +1944,9 @@ impl Run<'_> {
                 }
                 if let Some(herdr) = &self.herdr {
                     text = text.replace("{herdr}", &herdr.path().to_string_lossy());
+                }
+                if let Some(ai) = &self.ai {
+                    text = text.replace("{ai}", ai.url());
                 }
                 if let Some(client) = &self.options.test_client {
                     text = text.replace("{test_client}", &client.to_string_lossy());

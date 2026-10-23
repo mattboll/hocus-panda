@@ -166,6 +166,18 @@ web_search = true          # always last
 search_engine = "https://duckduckgo.com/?q={}"
 large_type = true          # large <words>
 qr = true                  # qr <words>
+intents = true             # "capture de slack dans 3 secondes", "open the keyboard settings": understood
+                           #   offline in English and French, shown to confirm before anything runs
+
+[ai]                       # questions typed in the command field; the answer streams into it
+enabled = true             # false: nothing is offered to ask, nothing is sent
+provider = "ollama"        # ollama, llamacpp (its server), openai (or any server speaking its chat
+                           #   completions: LM Studio, vLLM…), claude
+url = ""                   # empty: the provider's usual address (ollama http://127.0.0.1:11434, llama.cpp
+                           #   http://127.0.0.1:8080), used by the session only; https, or http to this machine
+model = ""                 # empty: ollama's first model, the llama.cpp server's own, Claude's default;
+                           #   openai needs one
+                           # keys are in the keyring, never here: hocus msg ai-key claude < key.txt
 
 [dock]                     # Super+D; shown on an empty desktop or after resting at the bottom edge
 enabled = true             # false: neither the dock nor its hint

@@ -92,6 +92,12 @@ pub enum Request {
         account: String,
         secret: String,
     },
+    /// The key of AI provider `provider` (`claude`, `openai`, `llamacpp`),
+    /// kept in the keyring (#44); an empty one forgets it.
+    AiSecret {
+        provider: String,
+        secret: String,
+    },
     /// System updates waiting, and whether they are being looked for or
     /// installed (#84).
     Updates,
@@ -246,6 +252,8 @@ impl Request {
             | Self::Calendars
             // The user's own account, typed in the settings.
             | Self::CalendarSecret { .. }
+            // The user's own key, typed by the user.
+            | Self::AiSecret { .. }
             | Self::Updates
             // The system asks for the password itself.
             | Self::InstallUpdates

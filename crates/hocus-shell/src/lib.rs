@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod agents;
+pub mod answer;
 pub mod authorize;
 pub mod boot;
 pub mod calc;
@@ -18,6 +19,7 @@ pub mod i18n;
 pub mod icons;
 pub mod identify;
 pub mod ink;
+pub mod intents;
 pub mod journal;
 pub mod launcher;
 pub mod leave;

@@ -107,6 +107,9 @@ Steps, one per `[[step]]` table:
 | `herdr = { agents = [{ name, status }] }` | a herdr of the test's own (never the user's) serves these agents (`working`, `blocked`, `done`, `idle`) on a socket in the compositor's runtime directory, `{herdr}` in later configuration |
 | `herdr_status = { agent, status, label? }` | an agent's status changes in it once the compositor follows that agent, with what its integration says (the question, while blocked) |
 | `expect_herdr = "agent.send_keys refacto enter"` | it was asked this (`agent.focus NAME`, `agent.send_keys NAME KEYS`) |
+| `ai_server = { pieces = […], delay_ms?, first_ms? }` | an AI provider on 127.0.0.1 (ollama's API, OpenAI's chat completions, Claude's Messages API, which refuses without a key) answers every question with these pieces, `delay_ms` before each and `first_ms` more before the first; its address is `{ai}` in later configuration |
+| `ai_key = { provider, key }` | an AI provider's key is kept, as `hocus msg ai-key` does (in a sealed file of the state directory: never the developer's keyring) |
+| `expect_ai = { path?, contains? = […], header? }` | the AI provider was asked, once so: on this path, its body holding these strings, with this header (`name: value`, the name in lower case) |
 | `calendar_password = { id, password }` | the settings keep this account's (`user@url`) password |
 | `expect_calendars = { events?, secrets?, contains? = […], error? }` | the calendars, once so: events from now on, passwords kept, events by title, whether an account failed its last sync |
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |

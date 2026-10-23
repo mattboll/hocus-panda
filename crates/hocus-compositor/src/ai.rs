@@ -1,0 +1,269 @@
+//! Questions asked in the command field (#44): each goes to the provider
+//! the configuration names on a worker thread of its own, which reads the
+//! key from the keyring and sends the answer back piece by piece through a
+//! channel; the loop only adds the pieces to the card. Typing again,
+//! closing the field or Stop tells the worker to stop at the next piece.
+//!
+//! Nested or in tests, a provider's usual address is never asked (the
+//! developer's own model is not ours): only the address the configuration
+//! gives, and only the session's own keyring.
+
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+
+use hocus_platform::{
+    ai::{self, AskError, Provider, Question},
+    secrets::Secrets,
+};
+use hocus_shell::{
+    Lang,
+    answer::{self, News as AnswerNews, Source},
+};
+use smithay::reexports::calloop::{LoopHandle, channel};
+
+use crate::{App, State};
+
+/// What the workers send back.
+#[derive(Debug)]
+enum News {
+    Piece(u64, String),
+    Done(u64),
+    Failed(u64, AskError),
+    /// A key was stored, or not.
+    Stored(Result<String, String>),
+}
+
+/// The question being answered.
+#[derive(Debug)]
+struct Asking {
+    id: u64,
+    stop: Arc<AtomicBool>,
+    since: Duration,
+}
+
+#[derive(Debug, Default)]
+pub struct Ai {
+    news: Option<channel::Sender<News>>,
+    asking: Option<Asking>,
+    secrets: Option<Secrets>,
+}
+
+pub fn start(
+    handle: &LoopHandle<'static, App>,
+    state: &mut State,
+    dir: Option<PathBuf>,
+    session_bus: Option<&str>,
+) {
+    let (news, received) = channel::channel::<News>();
+    let inserted = handle.insert_source(received, |event, _, app| {
+        if let channel::Event::Msg(news) = event {
+            app.timed("ai", |app| app.state.ai_news(news));
+        }
+    });
+    if let Err(err) = inserted {
+        tracing::warn!(%err.error, "questions will get no answers");
+        return;
+    }
+    state.ai.news = Some(news);
+    state.ai.secrets = dir.map(|dir| Secrets {
+        // The session's own keyring only: nested, the developer's is not ours.
+        bus: state
+            .is_session
+            .then(|| session_bus.map(str::to_owned))
+            .flatten(),
+        fallback: dir.join("ai-secrets"),
+        attribute: "ai-provider",
+    });
+}
+
+fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
+    if let Err(err) = std::thread::Builder::new().name(name.into()).spawn(work) {
+        tracing::warn!(%err, "could not start a thread");
+    }
+}
+
+/// What the user reads when no answer came.
+fn said(err: &AskError, url: &str, lang: Lang) -> String {
+    match err {
+        AskError::Unreachable(_) => lang.ai_unreachable(url),
+        AskError::Refused(why) => lang.ai_refused(why),
+        AskError::NoModel => lang.ai_no_model().into(),
+        AskError::Declined => lang.ai_declined().into(),
+        AskError::Failed(why) => lang.ai_failed(why),
+    }
+}
+
+impl State {
+    /// The provider, and its address; `None` when nothing may be asked.
+    fn ai_provider(&self) -> Option<(Provider, String)> {
+        let config = &self.config.ai;
+        if !config.enabled {
+            return None;
+        }
+        let provider = Provider::from_name(&config.provider)?;
+        let url = if !config.url.is_empty() {
+            config.url.clone()
+        } else if self.is_session {
+            provider.default_url().to_owned()
+        } else {
+            return None;
+        };
+        Some((provider, url))
+    }
+
+    /// Who answers, as the command field says it; `None` when nothing may
+    /// be asked.
+    pub fn ai_source(&self) -> Option<Source> {
+        let (provider, _) = self.ai_provider()?;
+        // Claude is Claude, wherever its address leads.
+        Some(
+            if self.config.ai.is_local() && provider != Provider::Claude {
+                Source::Local
+            } else {
+                Source::Named(
+                    match provider {
+                        Provider::Claude => "Claude",
+                        Provider::OpenAi => "OpenAI",
+                        Provider::Ollama => "ollama",
+                        Provider::LlamaCpp => "llama.cpp",
+                    }
+                    .into(),
+                )
+            },
+        )
+    }
+
+    /// Asks `question` (the command field's question `id`) on a worker.
+    pub fn ask_ai(&mut self, id: u64, question: String) {
+        self.stop_asking();
+        let lang = self.shell_lang();
+        let Some(news) = self.ai.news.clone() else {
+            return;
+        };
+        let Some((provider, url)) = self.ai_provider() else {
+            self.answer_news(id, AnswerNews::Failed(lang.ai_no_address().into()));
+            return;
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        self.ai.asking = Some(Asking {
+            id,
+            stop: stop.clone(),
+            since: self.clock.now(),
+        });
+        let secrets = self.ai.secrets.clone();
+        let mut question = Question {
+            provider,
+            url,
+            model: self.config.ai.model.clone(),
+            key: None,
+            system: answer::instructions(lang),
+            text: question,
+        };
+        tracing::info!(provider = provider.name(), "asking");
+        spawn("ai", move || {
+            // A local server may want a key too, if one was kept.
+            if provider != Provider::Ollama
+                && let Some(secrets) = &secrets
+            {
+                match secrets.lookup(provider.name()) {
+                    Ok(key) => question.key = key,
+                    Err(err) => tracing::warn!(err, "the keyring did not give the key"),
+                }
+            }
+            let sender = news.clone();
+            let asked = ai::ask(&question, &stop, |piece| {
+                let _ = sender.send(News::Piece(id, piece.to_owned()));
+            });
+            let _ = news.send(match asked {
+                Ok(()) => News::Done(id),
+                Err(err) => News::Failed(id, err),
+            });
+        });
+    }
+
+    fn stop_asking(&mut self) {
+        if let Some(asking) = self.ai.asking.take() {
+            asking.stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn answer_news(&mut self, id: u64, news: AnswerNews) {
+        if let Some(panel) = self.launcher.as_mut() {
+            panel.launcher.answer_news(id, news);
+        }
+        self.needs_redraw = true;
+    }
+
+    fn ai_news(&mut self, news: News) {
+        let lang = self.shell_lang();
+        match news {
+            News::Piece(id, text) => self.answer_news(id, AnswerNews::Text(text)),
+            News::Done(id) => {
+                let took = match self.ai.asking.take() {
+                    Some(a) if a.id == id => self.clock.now().saturating_sub(a.since),
+                    other => {
+                        self.ai.asking = other;
+                        Duration::ZERO
+                    }
+                };
+                self.answer_news(id, AnswerNews::Done(took));
+            }
+            News::Failed(id, err) => {
+                tracing::warn!(%err, "no answer");
+                if self.ai.asking.as_ref().is_some_and(|a| a.id == id) {
+                    self.ai.asking = None;
+                }
+                let url = self.ai_provider().map(|(_, u)| u).unwrap_or_default();
+                self.answer_news(id, AnswerNews::Failed(said(&err, &url, lang)));
+            }
+            News::Stored(Ok(provider)) => tracing::info!(provider, "AI key kept"),
+            News::Stored(Err(err)) => tracing::warn!(err, "the AI key was not kept"),
+        }
+    }
+
+    /// Keeps `secret` as `provider`'s key; an empty one forgets it.
+    pub fn ai_secret(&mut self, provider: &str, secret: String) -> Result<(), String> {
+        let Some(provider) = Provider::from_name(provider) else {
+            return Err(format!("unknown provider {provider:?}"));
+        };
+        let (Some(secrets), Some(news)) = (self.ai.secrets.clone(), self.ai.news.clone()) else {
+            return Err("no place to keep secrets".into());
+        };
+        spawn("ai secrets", move || {
+            let name = provider.name();
+            let done = if secret.is_empty() {
+                // Forgets this one, keeps the others.
+                let others: Vec<String> = ["openai", "llamacpp", "claude"]
+                    .iter()
+                    .filter(|p| **p != name)
+                    .map(|p| (*p).to_owned())
+                    .collect();
+                secrets.keep_only(&others)
+            } else {
+                let label = format!("Hocuspanda: {name} key");
+                secrets.store(name, &label, &secret)
+            };
+            let _ = news.send(News::Stored(done.map(|()| name.to_owned())));
+        });
+        Ok(())
+    }
+
+    /// After each dispatch: a question no longer awaited is stopped.
+    pub fn refresh_ai(&mut self) {
+        let awaited = self.launcher.as_ref().and_then(|p| p.launcher.awaited());
+        if self
+            .ai
+            .asking
+            .as_ref()
+            .is_some_and(|a| Some(a.id) != awaited)
+        {
+            self.stop_asking();
+        }
+    }
+}

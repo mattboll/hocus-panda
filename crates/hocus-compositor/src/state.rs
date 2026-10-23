@@ -132,6 +132,8 @@ pub struct State {
     /// The phone, through KDE Connect (#85).
     pub phone: crate::phone::PhoneState,
     pub calendar: crate::calendar::Calendar,
+    /// Questions to the AI (#44).
+    pub ai: crate::ai::Ai,
     /// Notes and to-dos (#79).
     pub notes: crate::notes::NotesState,
     /// Focus mode, the magnifier, night light (#78).
@@ -311,6 +313,7 @@ impl State {
             updates: Default::default(),
             phone: Default::default(),
             calendar: Default::default(),
+            ai: Default::default(),
             gamma_wanted: Vec::new(),
             share: None,
             clipboard: Default::default(),

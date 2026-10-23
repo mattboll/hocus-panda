@@ -1,0 +1,53 @@
+# Offline intents (#44), in English: the confirmation's button starts the
+# delay, Cancel runs nothing.
+description = "\"screenshot of slack in 3 seconds\" shows the screenshot of Slack with its 3 s delay; Cancel runs nothing, the confirmation's button starts the delay"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[screenshots]
+save = false
+"""
+
+[[step]]
+open = { app_id = "slack", size = [400, 240], color = "#4a154b" }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "screenshot of slack in 3 seconds"
+
+[[step]]
+expect_ui = { label = "Screenshot of Slack in 3 s" }
+
+[[step]]
+expect_ui = { label = "Delay: 3 s" }
+
+[[step]]
+click_ui = "Cancel"
+
+[[step]]
+expect_ui = { label = "Screenshot of Slack in 3\u00A0s", shown = false }
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "screenshot of slack in 3 seconds"
+
+[[step]]
+click_ui = "Start the delay"
+
+[[step]]
+advance_ms = 3100
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_event = { type = "screenshot", has = "\"width\":400,\"height\":240" }

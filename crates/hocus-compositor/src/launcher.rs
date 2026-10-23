@@ -51,6 +51,8 @@ pub struct LauncherPanel {
     pub(crate) launcher: Launcher,
     on: Option<(String, Rectangle<i32, Logical>, f64)>,
     buffer: Option<MemoryRenderBuffer>,
+    /// The buffer's size in pixels: the card grows with an answer.
+    buffer_size: (u32, u32),
     /// Where desktop entries are read from.
     dirs: Vec<PathBuf>,
     apps: Option<channel::Sender<Vec<Entry>>>,
@@ -122,6 +124,7 @@ pub fn start(
         launcher: Launcher::new(Theme::default(), lang, 1.0),
         on: None,
         buffer: None,
+        buffer_size: (0, 0),
         dirs: dirs.unwrap_or_else(apps::data_dirs),
         apps: Some(sender),
         pressed: false,
@@ -406,11 +409,52 @@ impl State {
                     self.close_launcher();
                     self.show(what);
                 }
+                LauncherEvent::Chosen(Choice::Intent(intent)) => {
+                    self.close_launcher();
+                    self.run_intent(intent);
+                }
+                // Asked and answered in the field itself.
+                LauncherEvent::Chosen(Choice::Ask(_) | Choice::Answer) => {}
+                LauncherEvent::Ask { id, question } => self.ask_ai(id, question),
+                LauncherEvent::NoteAnswer(text) => {
+                    self.close_launcher();
+                    // A line of the notes.
+                    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                    self.add_note(&line);
+                    let lang = self.shell_lang();
+                    self.shell_toast(lang.added_to_notes(), "");
+                }
             }
         }
     }
 
-    /// Puts text on the clipboard, for Wayland and X11 clients.
+    /// Runs a request the user confirmed (#44).
+    fn run_intent(&mut self, intent: hocus_shell::intents::Intent) {
+        use hocus_shell::intents::Intent;
+        tracing::info!(?intent, "confirmed");
+        match intent {
+            Intent::Run(action) => {
+                self.run_action(&action, SERIAL_COUNTER.next_serial());
+            }
+            Intent::CaptureApp {
+                matches,
+                name,
+                delay,
+            } => self.screenshot_app(matches, name, delay),
+            Intent::Launch(app) => {
+                if let Some((program, args)) = app.exec.split_first() {
+                    self.launch(program, args);
+                }
+            }
+            Intent::Settings(page) => self.open_settings(Some(page)),
+            Intent::Note(text) => {
+                self.add_note(&text);
+                let lang = self.shell_lang();
+                self.shell_toast(lang.added_to_notes(), &text);
+            }
+        }
+    }
+
     /// Puts a PNG on the clipboard, for Wayland and X11 clients.
     pub fn copy_png(&mut self, png: Arc<[u8]>) {
         let mimes = vec!["image/png".to_owned()];
@@ -430,6 +474,7 @@ impl State {
         }
     }
 
+    /// Puts text on the clipboard, for Wayland and X11 clients.
     pub fn copy_text(&mut self, text: &str) {
         self.shell_copied(text);
         let mimes: Vec<String> = TEXT.iter().map(|m| (*m).to_owned()).collect();
@@ -600,6 +645,8 @@ impl State {
             search_engine: self.config.launcher.search_engine.clone(),
             large_type: self.config.launcher.large_type,
             qr: self.config.launcher.qr,
+            intents: self.config.launcher.intents,
+            ask: self.ai_source(),
         };
         let Some(panel) = self.launcher.as_mut() else {
             return;
@@ -628,10 +675,14 @@ impl State {
         panel.drawn_parts = panel.launcher.parts();
         let view = panel.launcher.view();
         let mut changed = !damage.is_empty();
+        let size = (view.width, view.height);
         match &mut panel.buffer {
-            Some(buffer) => crate::shell::upload(buffer, &view, &damage),
-            None => {
+            Some(buffer) if panel.buffer_size == size => {
+                crate::shell::upload(buffer, &view, &damage)
+            }
+            _ => {
                 panel.buffer = Some(crate::shell::buffer_for(&view));
+                panel.buffer_size = size;
                 changed = true;
             }
         }

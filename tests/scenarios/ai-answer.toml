@@ -1,0 +1,74 @@
+# AI in the command field (#44): a question goes to the local model
+# (ollama's API, served by a stand-in on 127.0.0.1); its answer streams into
+# the field, under the panda, with Copy and Add to the notes; the other
+# results stay below, under "Also".
+description = "A question typed in the command field is asked to the local model; the answer streams into the field and Copy puts it on the clipboard"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+ai_server = { delay_ms = 30, pieces = [
+  "Le build prend 4 min 10 au lieu de 1 min 30 depuis 9 h 12 : ",
+  "le cache de compilation est désactivé depuis la mise à jour du paquet sccache.\n\n",
+  "1. Les 5 derniers builds n'ont trouvé aucune entrée en cache.\n",
+  "2. La configuration attend l'ancienne variable `RUSTC_WRAPPER`.\n",
+] }
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+
+[ai]
+provider = "ollama"
+url = "{ai}"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+pointer_move = [700, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "pourquoi le build est lent depuis ce matin ?"
+
+# A question: asking it comes first.
+[[step]]
+expect_ui = { label = "Demander « pourquoi le build est lent depuis ce matin ? »", selected = true }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_ui = { label = "Le build prend 4 min 10 au lieu de 1 min 30 depuis 9 h 12 : le cache de compilation est désactivé depuis la mise à jour du paquet sccache." }
+
+[[step]]
+expect_ui = { label = "2. La configuration attend l'ancienne variable RUSTC_WRAPPER." }
+
+[[step]]
+expect_ui = { label = "Copier" }
+
+[[step]]
+expect_ai = { path = "/api/chat", contains = ["test-model", "pourquoi le build est lent depuis ce matin ?", "French"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "ai-answer.png" }
+
+[[step]]
+expect_budget = { max_ms = 100 }
+
+[[step]]
+click_ui = "Copier"
+
+[[step]]
+expect_ui = { label = "Copier", shown = false }
+
+[[step]]
+expect_clipboard = { app_id = "editor", text = "Le build prend 4 min 10 au lieu de 1 min 30 depuis 9 h 12 : le cache de compilation est désactivé depuis la mise à jour du paquet sccache.\n1. Les 5 derniers builds n'ont trouvé aucune entrée en cache.\n2. La configuration attend l'ancienne variable RUSTC_WRAPPER." }

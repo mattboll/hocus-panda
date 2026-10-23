@@ -1,7 +1,8 @@
-//! Calendar passwords: in the keyring (the Secret Service on the session
-//! bus: GNOME Keyring, KWallet, KeePassXC…) when there is one, else in a
-//! file sealed with the session's key (`crate::sealed`). Blocking: called
-//! on worker threads.
+//! Secrets: calendar passwords, AI providers' keys. In the keyring (the
+//! Secret Service on the session bus: GNOME Keyring, KWallet, KeePassXC…)
+//! when there is one, else in a file sealed with the session's key
+//! (`crate::sealed`). Each kind has its own attribute in the keyring and
+//! its own sealed file. Blocking: called on worker threads.
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -20,6 +21,9 @@ pub struct Secrets {
     pub bus: Option<String>,
     /// The sealed file used without a keyring.
     pub fallback: PathBuf,
+    /// The keyring attribute naming what a secret is for: `calendar` (the
+    /// account), `ai-provider` (the provider).
+    pub attribute: &'static str,
 }
 
 /// What the Secret Service calls a secret: session, parameters, value,
@@ -27,10 +31,10 @@ pub struct Secrets {
 type Secret = (OwnedObjectPath, Vec<u8>, Vec<u8>, String);
 
 impl Secrets {
-    /// Stores `secret` for calendar `id`, over what was there.
+    /// Stores `secret` for `id`, over what was there.
     pub fn store(&self, id: &str, label: &str, secret: &str) -> Result<(), String> {
         if let Some(keyring) = self.keyring() {
-            return zbus::block_on(keyring_store(&keyring, id, label, secret));
+            return zbus::block_on(keyring_store(&keyring, self.attribute, id, label, secret));
         }
         let mut all = self.sealed()?;
         all.insert(id.to_owned(), secret.to_owned());
@@ -39,7 +43,7 @@ impl Secrets {
 
     pub fn lookup(&self, id: &str) -> Result<Option<String>, String> {
         if let Some(keyring) = self.keyring() {
-            return zbus::block_on(keyring_lookup(&keyring, id));
+            return zbus::block_on(keyring_lookup(&keyring, self.attribute, id));
         }
         Ok(self.sealed()?.remove(id))
     }
@@ -47,7 +51,7 @@ impl Secrets {
     /// Forgets every secret but those of `keep`.
     pub fn keep_only(&self, keep: &[String]) -> Result<(), String> {
         if let Some(keyring) = self.keyring() {
-            return zbus::block_on(keyring_keep_only(&keyring, keep));
+            return zbus::block_on(keyring_keep_only(&keyring, self.attribute, keep));
         }
         let mut all = self.sealed()?;
         let before = all.len();
@@ -58,11 +62,11 @@ impl Secrets {
         Ok(())
     }
 
-    /// How many calendar secrets are kept.
+    /// How many secrets of this kind are kept.
     pub fn count(&self) -> Result<usize, String> {
         if let Some(keyring) = self.keyring() {
             // Counted locked too: no unlocking prompt for a count.
-            return zbus::block_on(search(&keyring, None)).map(|(a, b)| a.len() + b.len());
+            return zbus::block_on(keyring_count(&keyring, self.attribute));
         }
         Ok(self.sealed()?.len())
     }
@@ -91,10 +95,10 @@ impl Secrets {
     }
 }
 
-fn attributes(id: Option<&str>) -> HashMap<&str, &str> {
+fn attributes<'a>(attribute: &'a str, id: Option<&'a str>) -> HashMap<&'a str, &'a str> {
     let mut a = HashMap::from([("application", "hocuspanda")]);
     if let Some(id) = id {
-        a.insert("calendar", id);
+        a.insert(attribute, id);
     }
     a
 }
@@ -146,6 +150,7 @@ async fn prompted(conn: &Connection, prompt: &OwnedObjectPath) -> Result<(), Str
 
 async fn keyring_store(
     conn: &Connection,
+    attribute: &str,
     id: &str,
     label: &str,
     secret: &str,
@@ -158,7 +163,7 @@ async fn keyring_store(
     properties.insert("org.freedesktop.Secret.Item.Label", Variant::from(label));
     properties.insert(
         "org.freedesktop.Secret.Item.Attributes",
-        Variant::from(attributes(Some(id))),
+        Variant::from(attributes(attribute, Some(id))),
     );
     let value: Secret = (
         session,
@@ -173,23 +178,29 @@ async fn keyring_store(
     prompted(conn, &prompt).await
 }
 
-/// The items of calendar `id` (or all): unlocked, and locked.
+/// The items of `id` (or all of the application's): unlocked, and locked.
 async fn search(
     conn: &Connection,
+    attribute: &str,
     id: Option<&str>,
 ) -> Result<(Vec<OwnedObjectPath>, Vec<OwnedObjectPath>), String> {
     let service = proxy(conn, PATH, "org.freedesktop.Secret.Service")
         .await
         .map_err(|e| e.to_string())?;
     service
-        .call("SearchItems", &(attributes(id),))
+        .call("SearchItems", &(attributes(attribute, id),))
         .await
         .map_err(|e| e.to_string())
 }
 
-/// The items of calendar `id` (or all), unlocked if they were not.
-async fn find(conn: &Connection, id: Option<&str>) -> Result<Vec<OwnedObjectPath>, String> {
-    let (mut unlocked, locked) = search(conn, id).await?;
+/// The items of `id` (or all of the application's), unlocked if they
+/// were not.
+async fn find(
+    conn: &Connection,
+    attribute: &str,
+    id: Option<&str>,
+) -> Result<Vec<OwnedObjectPath>, String> {
+    let (mut unlocked, locked) = search(conn, attribute, id).await?;
     if !locked.is_empty() {
         let service = proxy(conn, PATH, "org.freedesktop.Secret.Service")
             .await
@@ -208,8 +219,12 @@ async fn find(conn: &Connection, id: Option<&str>) -> Result<Vec<OwnedObjectPath
     Ok(unlocked)
 }
 
-async fn keyring_lookup(conn: &Connection, id: &str) -> Result<Option<String>, String> {
-    let items = find(conn, Some(id)).await?;
+async fn keyring_lookup(
+    conn: &Connection,
+    attribute: &str,
+    id: &str,
+) -> Result<Option<String>, String> {
+    let items = find(conn, attribute, Some(id)).await?;
     let Some(item) = items.first() else {
         return Ok(None);
     };
@@ -226,18 +241,45 @@ async fn keyring_lookup(conn: &Connection, id: &str) -> Result<Option<String>, S
         .map(|(_, _, value, _)| String::from_utf8_lossy(value).into_owned()))
 }
 
-async fn keyring_keep_only(conn: &Connection, keep: &[String]) -> Result<(), String> {
-    for item in find(conn, None).await? {
+/// The attributes of an item, which the keyring shows locked too.
+async fn item_attributes(
+    conn: &Connection,
+    item: &OwnedObjectPath,
+) -> Result<HashMap<String, String>, String> {
+    let p = proxy(conn, item.as_str(), "org.freedesktop.Secret.Item")
+        .await
+        .map_err(|e| e.to_string())?;
+    p.get_property("Attributes")
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The application's items of this kind, locked or not.
+async fn keyring_count(conn: &Connection, attribute: &str) -> Result<usize, String> {
+    let (unlocked, locked) = search(conn, attribute, None).await?;
+    let mut n = 0;
+    for item in unlocked.iter().chain(&locked) {
+        if item_attributes(conn, item).await?.contains_key(attribute) {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+async fn keyring_keep_only(
+    conn: &Connection,
+    attribute: &str,
+    keep: &[String],
+) -> Result<(), String> {
+    for item in find(conn, attribute, None).await? {
+        let attributes = item_attributes(conn, &item).await?;
+        // Another kind's secret is not this one's to forget.
+        let Some(id) = attributes.get(attribute) else {
+            continue;
+        };
         let p = proxy(conn, item.as_str(), "org.freedesktop.Secret.Item")
             .await
             .map_err(|e| e.to_string())?;
-        let attributes: HashMap<String, String> = p
-            .get_property("Attributes")
-            .await
-            .map_err(|e| e.to_string())?;
-        let Some(id) = attributes.get("calendar") else {
-            continue;
-        };
         if keep.contains(id) {
             continue;
         }
@@ -257,6 +299,7 @@ mod tests {
         let s = Secrets {
             bus: None,
             fallback: dir.path().join("calendar-secrets"),
+            attribute: "calendar",
         };
         s.store("work", "Work", "hunter2").expect("stored");
         s.store("home", "Home", "panda").expect("stored");

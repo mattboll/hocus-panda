@@ -17,9 +17,9 @@ use hocus_platform::{
     calendar::{
         caldav::{self, FetchError, Source},
         ics::{self, Occurrence},
-        secrets::Secrets,
     },
     sealed::Sealed,
+    secrets::Secrets,
 };
 use hocus_shell::column::{Agenda, Meeting};
 use jiff::{SignedDuration, Timestamp, ToSpan, civil::Date, tz::TimeZone};
@@ -117,6 +117,7 @@ pub fn start(
             .then(|| session_bus.map(str::to_owned))
             .flatten(),
         fallback: dir.join("calendar-secrets"),
+        attribute: "calendar",
     };
     state.calendar.secrets = Some(secrets.clone());
     spawn("calendar cache", move || {
