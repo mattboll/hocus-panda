@@ -4,15 +4,21 @@
 //! shorter than two seconds never shows, so an agent flickering between
 //! work and rest does not make the column flicker.
 //!
-//! The configuration may name herdr's socket; otherwise only the session
-//! looks for herdr's default one: nested or headless, the developer's own
-//! herdr is never reached.
+//! The configuration may name herdr's socket, or several herdr each tied
+//! to a desktop (#192); otherwise only the session looks for herdr's
+//! default one: nested or headless, the developer's own herdr is never
+//! reached. Agents of a herdr tied to a desktop show in full on it, and in
+//! a line of their own elsewhere; an agent done while its desktop is not
+//! shown badges it until it is (`activity`).
 
 use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
 
-use hocus_core::config::Agents as AgentsConfig;
+use hocus_core::{
+    DesktopId, OutputName,
+    config::{Agents as AgentsConfig, HerdrSocket},
+};
 use hocus_platform::herdr::{self, Herdr, News, Status};
-use hocus_shell::agents::{AgentAsk, AgentState, AgentsView, Board, Change};
+use hocus_shell::agents::{AgentAsk, AgentState, AgentsView, Board, Change, Elsewhere};
 use smithay::{
     reexports::{
         calloop::{
@@ -32,30 +38,57 @@ use crate::{App, State};
 const YES: &[&str] = &["enter"];
 const NO: &[&str] = &["esc"];
 
+/// A herdr to follow: its socket, and the desktop its agents work for
+/// (its screen's name, none for the primary one, and its number from 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Source {
+    socket: PathBuf,
+    desktop: Option<(Option<String>, u32)>,
+}
+
+/// News of one herdr: the clients' generation, and which herdr.
+type Tidings = (u64, usize, News);
+
 #[derive(Debug, Default)]
 pub struct Agents {
     board: Board,
-    herdr: Option<Herdr>,
-    /// Bumped with each client: news from an older one is stale.
+    /// One client per source, in the configuration's order.
+    herdr: Vec<Option<Herdr>>,
+    /// Bumped with each set of clients: news from an older one is stale.
     generation: u64,
-    news: Option<channel::Sender<(u64, News)>>,
+    news: Option<channel::Sender<Tidings>>,
     /// herdr's default socket, for the session only.
     default_socket: Option<PathBuf>,
-    /// The configuration the client follows, and the socket it gives.
-    following: Option<(AgentsConfig, Option<PathBuf>)>,
+    /// The configuration the clients follow, and the sources it gives.
+    following: Option<(AgentsConfig, Vec<Source>)>,
     /// Toasts of waiting agents: toast id → agent.
     toasts: HashMap<u32, String>,
     /// When the loop is woken for a rest to show.
     waking: Option<Duration>,
-    /// The socket the client was started for.
-    tried: Option<PathBuf>,
+    /// The sources the clients were started for.
+    tried: Option<Vec<Source>>,
+    /// Agents done while their desktop was not shown: agent → desktop.
+    pub(crate) done_unseen: HashMap<String, DesktopId>,
+}
+
+/// An agent's key on the board: its herdr and its pane.
+fn key(source: usize, pane: &str) -> String {
+    format!("{source}/{pane}")
+}
+
+/// The herdr and the pane of a key.
+fn pane_of(key: &str) -> Option<(usize, &str)> {
+    let (source, pane) = key.split_once('/')?;
+    Some((source.parse().ok()?, pane))
 }
 
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
-    let (news, received) = channel::channel::<(u64, News)>();
+    let (news, received) = channel::channel::<Tidings>();
     let inserted = handle.insert_source(received, |event, _, app| {
-        if let channel::Event::Msg((generation, news)) = event {
-            app.timed("agents", |app| app.state.agents_news(generation, news));
+        if let channel::Event::Msg((generation, source, news)) = event {
+            app.timed("agents", |app| {
+                app.state.agents_news(generation, source, news)
+            });
         }
     });
     if let Err(err) = inserted {
@@ -92,57 +125,70 @@ fn expand(path: &str) -> PathBuf {
 }
 
 impl State {
-    /// The socket the configuration asks for, worked out when it changes.
-    fn herdr_socket(&mut self) -> Option<PathBuf> {
+    /// The sockets the configuration asks for, worked out when it changes.
+    fn herdr_sources(&mut self) -> Vec<Source> {
         let config = &self.config.agents;
-        if let Some((followed, socket)) = &self.agents.following
+        if let Some((followed, sources)) = &self.agents.following
             && followed == config
         {
-            return socket.clone();
+            return sources.clone();
         }
-        let socket = if !config.enabled {
-            None
-        } else if config.herdr_socket.is_empty() {
-            self.agents.default_socket.clone()
+        let named = config.herdr_sockets();
+        let sources: Vec<Source> = if !config.enabled {
+            Vec::new()
+        } else if named.is_empty() {
+            self.agents
+                .default_socket
+                .iter()
+                .map(|socket| Source {
+                    socket: socket.clone(),
+                    desktop: None,
+                })
+                .collect()
         } else {
-            Some(expand(&config.herdr_socket))
+            named
+                .iter()
+                .map(
+                    |HerdrSocket {
+                         socket,
+                         desktop,
+                         output,
+                     }| Source {
+                        socket: expand(socket),
+                        desktop: desktop.map(|d| (output.clone(), d)),
+                    },
+                )
+                .collect()
         };
-        self.agents.following = Some((config.clone(), socket.clone()));
-        socket
+        self.agents.following = Some((config.clone(), sources.clone()));
+        sources
     }
 
-    /// After each dispatch: follows the configuration's socket, and shows
+    /// After each dispatch: follows the configuration's sockets, and shows
     /// rests that lasted.
     pub fn refresh_agents(&mut self) {
         // Without the shell, nothing shows them.
         if self.agents.news.is_none() {
             return;
         }
-        let wanted = self.herdr_socket();
-        // Tried once per socket: a client that cannot start is not retried
-        // at every dispatch.
-        if self.agents.tried != wanted {
-            self.agents.tried.clone_from(&wanted);
-            self.agents.herdr = None;
+        let wanted = self.herdr_sources();
+        // Tried once per set of sockets: a client that cannot start is not
+        // retried at every dispatch.
+        if self.agents.tried.as_ref() != Some(&wanted) {
+            self.agents.tried = Some(wanted.clone());
+            self.agents.herdr.clear();
             self.agents.generation += 1;
-            let changes = self.agents.board.clear();
+            let changes = self.agents.board.clear_all();
             self.agent_changes(changes);
+            self.agents.done_unseen.clear();
             self.needs_redraw = true;
-            if let (Some(socket), Some(news)) = (wanted, self.agents.news.clone()) {
-                let generation = self.agents.generation;
-                let news = Mutex::new(news);
-                let sink = move |n| {
-                    if let Ok(news) = news.lock() {
-                        let _ = news.send((generation, n));
-                    }
-                };
-                match Herdr::start(socket.clone(), sink) {
-                    Ok(client) => {
-                        tracing::info!(socket = %socket.display(), "following herdr's agents");
-                        self.agents.herdr = Some(client);
-                    }
-                    Err(err) => tracing::warn!(%err, "herdr's agents will not be shown"),
-                }
+            for (i, source) in wanted.iter().enumerate() {
+                let client = self
+                    .agents
+                    .news
+                    .clone()
+                    .and_then(|news| self.start_herdr(i, &source.socket, news));
+                self.agents.herdr.push(client);
             }
         }
         // The column draws what changed after this.
@@ -162,7 +208,33 @@ impl State {
         self.agents.waking = due;
     }
 
-    fn agents_news(&mut self, generation: u64, news: News) {
+    /// A client for the herdr `i` at `socket`, telling the loop.
+    fn start_herdr(
+        &self,
+        i: usize,
+        socket: &std::path::Path,
+        news: channel::Sender<Tidings>,
+    ) -> Option<Herdr> {
+        let generation = self.agents.generation;
+        let news = Mutex::new(news);
+        let sink = move |n| {
+            if let Ok(news) = news.lock() {
+                let _ = news.send((generation, i, n));
+            }
+        };
+        match Herdr::start(socket.to_path_buf(), sink) {
+            Ok(client) => {
+                tracing::info!(socket = %socket.display(), "following herdr's agents");
+                Some(client)
+            }
+            Err(err) => {
+                tracing::warn!(socket = %socket.display(), %err, "herdr's agents will not be shown");
+                None
+            }
+        }
+    }
+
+    fn agents_news(&mut self, generation: u64, source: usize, news: News) {
         if generation != self.agents.generation {
             return;
         }
@@ -170,8 +242,9 @@ impl State {
         let board = &mut self.agents.board;
         let changes = match news {
             News::Agents(list) => board.replace(
+                source,
                 list.into_iter()
-                    .map(|a| (a.pane, a.name, state_of(a.status), a.label))
+                    .map(|a| (key(source, &a.pane), a.name, state_of(a.status), a.label))
                     .collect(),
                 now,
             ),
@@ -179,8 +252,8 @@ impl State {
                 pane,
                 status,
                 label,
-            } => board.set(&pane, state_of(status), label, now),
-            News::Gone => board.clear(),
+            } => board.set(&key(source, &pane), state_of(status), label, now),
+            News::Gone => board.clear(source),
             News::Terminal(processes) => {
                 self.raise_terminal(&processes);
                 Vec::new()
@@ -214,6 +287,14 @@ impl State {
                     }
                 }
                 Change::Answered(key) => self.close_agent_toasts(&key),
+                Change::Done(key) => {
+                    // Done where Alex is not looking: its desktop says so.
+                    if let Some(desktop) = self.agent_desktop(&key)
+                        && !self.desktop_is_shown(desktop)
+                    {
+                        self.agents.done_unseen.insert(key, desktop);
+                    }
+                }
             }
         }
     }
@@ -232,14 +313,111 @@ impl State {
         }
     }
 
-    /// The column's agents, when they are on.
+    /// The desktop the herdr `source` works for, when it has one and it
+    /// is there.
+    fn source_desktop(&self, source: usize) -> Option<DesktopId> {
+        let (output, n) = self.agents.tried.as_ref()?.get(source)?.desktop.clone()?;
+        let output = match output {
+            Some(name) => OutputName(name),
+            None => self.model.primary()?.name.clone(),
+        };
+        let index = (n as usize).checked_sub(1)?;
+        self.model.own_desktops(&output)?.get(index).copied()
+    }
+
+    /// The desktop an agent works for, by its key.
+    pub(crate) fn agent_desktop(&self, key: &str) -> Option<DesktopId> {
+        self.source_desktop(pane_of(key)?.0)
+    }
+
+    /// Whether a screen shows this desktop.
+    pub(crate) fn desktop_is_shown(&self, desktop: DesktopId) -> bool {
+        self.model.outputs().iter().any(|o| o.shown == desktop)
+    }
+
+    /// Whether the agent of this key is done still.
+    pub(crate) fn agent_still_done(&self, key: &str) -> bool {
+        self.agents.board.state(key) == Some(AgentState::Done)
+    }
+
+    /// Desktops with an agent waiting for an answer.
+    pub(crate) fn desktops_waiting(&self) -> Vec<DesktopId> {
+        self.agents
+            .board
+            .states()
+            .filter(|(_, s)| *s == AgentState::Wait)
+            .filter_map(|(source, _)| self.source_desktop(source))
+            .collect()
+    }
+
+    /// The column's agents, when they are on: those of the desktop its
+    /// screen shows in full, every other desktop's in a line.
     pub fn agents_view(&self) -> Option<AgentsView> {
         if !self.config.agents.enabled {
             return None;
         }
-        self.agents
-            .board
-            .view(self.clock.now(), self.pandas_on(), self.power_saver())
+        let here = self
+            .column_output()
+            .and_then(|o| self.model.output(&OutputName(o.name())))
+            .map(|o| o.shown);
+        let count = self.agents.tried.as_ref().map_or(0, Vec::len);
+        // Every other desktop with a herdr, in the screens' order.
+        let mut elsewhere: Vec<(usize, usize, Elsewhere)> = Vec::new();
+        for source in 0..count {
+            let Some(desktop) = self.source_desktop(source) else {
+                continue;
+            };
+            if Some(desktop) == here {
+                continue;
+            }
+            if let Some((_, _, e)) = elsewhere
+                .iter_mut()
+                .find(|(_, _, e)| self.source_desktop(e.sources[0]) == Some(desktop))
+            {
+                e.sources.push(source);
+                continue;
+            }
+            let Some(home) = self.model.desktop(desktop).map(|d| d.home.clone()) else {
+                continue;
+            };
+            let host = self.model.host_of(desktop);
+            let screen = host.map_or(usize::MAX, |h| {
+                self.model
+                    .outputs()
+                    .iter()
+                    .position(|o| o.name == h.name)
+                    .unwrap_or(usize::MAX)
+            });
+            let index = host
+                .and_then(|h| h.desktops.iter().position(|d| *d == desktop))
+                .unwrap_or(usize::MAX);
+            let own = self
+                .model
+                .own_desktops(&home)
+                .and_then(|own| own.iter().position(|d| *d == desktop))
+                .unwrap_or(0);
+            let name = self
+                .desktop_name(desktop)
+                .unwrap_or_else(|| self.shell_lang().desktop(own + 1));
+            elsewhere.push((
+                screen,
+                index,
+                Elsewhere {
+                    name,
+                    output: host.map_or(home.0.clone(), |h| h.name.0.clone()),
+                    desktop: index.saturating_add(1),
+                    sources: vec![source],
+                },
+            ));
+        }
+        elsewhere.sort_by_key(|(screen, index, _)| (*screen, *index));
+        let elsewhere: Vec<Elsewhere> = elsewhere.into_iter().map(|(_, _, e)| e).collect();
+        self.agents.board.view(
+            self.clock.now(),
+            self.pandas_on(),
+            self.power_saver(),
+            &elsewhere,
+        )
     }
 
     /// A waiting agent's toast was answered: whether it was one.
@@ -260,13 +438,16 @@ impl State {
     /// From the column or a toast. An answer goes only to an agent still
     /// waiting, so that a late click never presses Enter in its work.
     pub fn agent_ask(&mut self, key: &str, ask: AgentAsk) {
-        let Some(herdr) = &self.agents.herdr else {
+        let Some((source, pane)) = pane_of(key) else {
+            return;
+        };
+        let Some(herdr) = self.agents.herdr.get(source).and_then(Option::as_ref) else {
             return;
         };
         match ask {
-            AgentAsk::Show => herdr.focus(key),
+            AgentAsk::Show => herdr.focus(pane),
             AgentAsk::Yes | AgentAsk::No if self.agents.board.waits(key) => {
-                herdr.keys(key, if ask == AgentAsk::Yes { YES } else { NO });
+                herdr.keys(pane, if ask == AgentAsk::Yes { YES } else { NO });
                 self.close_agent_toasts(key);
             }
             AgentAsk::Yes | AgentAsk::No => {}

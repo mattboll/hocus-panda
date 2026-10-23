@@ -60,7 +60,7 @@ pub struct ActiveWindow {
 }
 
 /// One screen's desktops.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScreenDesktops {
     pub output: String,
     pub count: usize,
@@ -68,6 +68,28 @@ pub struct ScreenDesktops {
     pub shown: usize,
     /// The shown desktop's name, empty when it has none but its number.
     pub name: String,
+    /// Every desktop's name, in order, empty for one that has none (#192).
+    pub names: Vec<String>,
+    /// What goes on on each desktop, in order (#192); none on the one
+    /// shown.
+    pub badges: Vec<crate::activity::Badge>,
+}
+
+impl ScreenDesktops {
+    /// Desktop `i`'s (from 0) name, or its number.
+    pub fn label(&self, lang: Lang, i: usize) -> String {
+        lang.desktop_label(self.names.get(i).map_or("", String::as_str), i + 1)
+    }
+
+    /// The badges of its desktops, said: "Website: an agent waits for an
+    /// answer", in order; empty when nothing goes on.
+    pub fn activity(&self, lang: Lang) -> Vec<String> {
+        self.badges
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| lang.desktop_badge(&self.label(lang, i), *b))
+            .collect()
+    }
 }
 
 /// What the column shows.
@@ -318,10 +340,12 @@ impl Draw for Ring {
     }
 }
 
-/// A screen's desktops as dots, the shown one in the accent.
+/// A screen's desktops as dots, the shown one in the accent; one where
+/// something goes on carries its badge (#192).
 struct Dots {
     count: usize,
     shown: usize,
+    badges: Vec<crate::activity::Badge>,
 }
 
 impl Draw for Dots {
@@ -329,13 +353,19 @@ impl Draw for Dots {
         let size = 8.0;
         let y = rect.y + (rect.h - size) / 2.0;
         for i in 0..self.count {
+            let x = rect.x + i as f32 * (size + 5.0);
+            let dot = Rect::new(x, y, size, size);
+            let badge = self.badges.get(i).copied().unwrap_or_default();
+            if i + 1 != self.shown && badge.is_some() {
+                badge.draw_dot(canvas, dot, size, theme);
+                continue;
+            }
             let color = if i + 1 == self.shown {
                 theme.colors.accent
             } else {
                 theme.colors.muted.with_alpha(0x66)
             };
-            let x = rect.x + i as f32 * (size + 5.0);
-            canvas.fill_rect(Rect::new(x, y, size, size), size / 2.0, color);
+            canvas.fill_rect(dot, size / 2.0, color);
         }
     }
 
@@ -526,9 +556,11 @@ impl Column {
         }
     }
 
-    /// Shows as many notifications and journal entries as there is room
-    /// for, the account inside the card: the notifications go first, down
-    /// to one, then the journal's entries, down to one.
+    /// Shows as many notifications, journal entries and agents as there is
+    /// room for, the account inside the card: the notifications go first,
+    /// down to one, then the journal's entries, down to one, then the
+    /// other desktops' agents' lines, then the notifications altogether,
+    /// then the agents shown in full, down to one.
     fn fit_room(&mut self) {
         let mut want = Fit::MOST;
         loop {
@@ -569,6 +601,15 @@ impl Column {
             let (button, entries) =
                 crate::journal::fill(&mut self.tree, n.journal, &theme, lang, view, want.journal);
             (self.nodes.journal_button, self.nodes.journal_entries) = (Some(button), Some(entries));
+        }
+        if want.agents != self.fit.agents
+            && let Some(view) = &self.state.agents
+        {
+            for child in self.tree.children(n.agents) {
+                self.tree.remove(child);
+            }
+            self.agent_targets =
+                crate::agents::fill(&mut self.tree, n.agents, &theme, lang, view, want.agents);
         }
         self.fit = want;
     }
@@ -687,7 +728,7 @@ impl Column {
             }
             let theme = t.theme().clone();
             self.agent_targets = shown
-                .map(|view| crate::agents::fill(t, n.agents, &theme, lang, view))
+                .map(|view| crate::agents::fill(t, n.agents, &theme, lang, view, fit.agents))
                 .unwrap_or_default();
         }
         if all || old.journal != state.journal {
@@ -790,8 +831,27 @@ impl Column {
                 lang.desktop_named(name, shown, count)
             };
             t.set_text(n.desktops_text, &line);
-            t.set_name(n.desktops, &line);
-            t.set_draw(n.dots, Box::new(Dots { count, shown }));
+            // What goes on elsewhere, said after it.
+            let activity = state
+                .screens
+                .first()
+                .map(|s| s.activity(lang))
+                .unwrap_or_default();
+            let said = std::iter::once(line).chain(activity).collect::<Vec<_>>();
+            t.set_name(n.desktops, &said.join(" · "));
+            let badges = state
+                .screens
+                .first()
+                .map(|s| s.badges.clone())
+                .unwrap_or_default();
+            t.set_draw(
+                n.dots,
+                Box::new(Dots {
+                    count,
+                    shown,
+                    badges,
+                }),
+            );
         }
         if all_status || old.layout != state.layout || old.layout_name != state.layout_name {
             t.set_text(n.layout, &state.layout);
@@ -1248,21 +1308,25 @@ impl Column {
     }
 }
 
-/// How many notifications and journal entries the column shows.
+/// How many notifications, journal entries and agents the column shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Fit {
     notifications: usize,
     journal: usize,
+    agents: crate::agents::Fit,
 }
 
 impl Fit {
     const MOST: Self = Self {
         notifications: NOTIFICATIONS,
         journal: crate::journal::ROWS,
+        agents: crate::agents::Fit::MOST,
     };
 
     /// One less: a notification while more than one shows, else a journal
-    /// entry while more than one shows; `None` when nothing gives more.
+    /// entry while more than one shows, else an other desktop's agents'
+    /// line, else the notifications altogether, else an agent shown in
+    /// full; `None` when nothing gives more.
     fn less(self, state: &ColumnState) -> Option<Self> {
         // "Nothing new" takes a line too.
         let notifications = self.notifications.min(state.notifications.len().max(1));
@@ -1280,12 +1344,34 @@ impl Fit {
             return Some(Self {
                 notifications,
                 journal: journal - 1,
+                ..self
             });
         }
-        // Last, the notifications' section goes altogether.
-        (notifications > 0).then_some(Self {
-            notifications: 0,
+        // Then the other desktops' agents share a line; then the
+        // notifications' section goes altogether; last, the agents shown in
+        // full go down to one.
+        let agents = state.agents.as_ref();
+        if let Some(agents) = agents
+            .filter(|a| self.agents.lines.min(a.others.len()) > 0)
+            .and_then(|a| self.agents.less(a))
+        {
+            return Some(Self {
+                notifications,
+                journal,
+                agents,
+            });
+        }
+        if notifications > 0 {
+            return Some(Self {
+                notifications: 0,
+                journal,
+                ..self
+            });
+        }
+        agents.and_then(|a| self.agents.less(a)).map(|agents| Self {
+            notifications,
             journal,
+            agents,
         })
     }
 }
@@ -1555,7 +1641,11 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         desktops,
         Style::default(),
         Kind::Custom {
-            draw: Box::new(Dots { count: 1, shown: 1 }),
+            draw: Box::new(Dots {
+                count: 1,
+                shown: 1,
+                badges: Vec::new(),
+            }),
             label: None,
         },
     );
@@ -2953,20 +3043,47 @@ fn desktops_popover(
             )
             .unwrap_or_else(missing);
         for d in 1..=screen.count {
-            let mut button = Button::new(d.to_string(), ButtonKind::Chip, theme)
-                .with_name(format!("{} · {}", screen.output, lang.desktop(d)));
+            let badge = screen.badges.get(d - 1).copied().unwrap_or_default();
+            let named = screen.names.get(d - 1).is_some_and(|n| !n.is_empty());
+            let mut name = format!(
+                "{} · {}",
+                screen.output,
+                if named {
+                    screen.label(lang, d - 1)
+                } else {
+                    lang.desktop(d)
+                }
+            );
+            if let Some(what) = lang.badge(badge) {
+                name = format!("{name} · {what}");
+            }
+            let mut button = Button::new(d.to_string(), ButtonKind::Chip, theme).with_name(name);
             button.selected = d == screen.shown;
+            let chip = Style {
+                width: Length::Px(58.0),
+                height: Length::Px(40.0),
+                ..Style::default()
+            };
             let id = tree
-                .add(
-                    chips,
+                .add(chips, chip, Kind::Button(button))
+                .unwrap_or_else(missing);
+            // Its badge, over its corner.
+            if badge.is_some() {
+                tree.add(
+                    id,
                     Style {
-                        width: Length::Px(58.0),
-                        height: Length::Px(40.0),
+                        at: Some(Point::new(46.0, 4.0)),
+                        width: Length::Px(8.0),
+                        height: Length::Px(8.0),
                         ..Style::default()
                     },
-                    Kind::Button(button),
+                    Kind::Custom {
+                        draw: Box::new(crate::activity::BadgeDot(badge)),
+                        label: None,
+                    },
                 )
                 .unwrap_or_else(missing);
+            }
             targets.push((
                 id,
                 Action::ShowDesktop {

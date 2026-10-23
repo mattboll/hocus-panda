@@ -233,6 +233,10 @@ pub enum Step {
     /// The client of this app id asks for its window to come forward,
     /// with an activation token of its own.
     Activate(String),
+    /// The same with a token it took more than ten seconds before (the
+    /// virtual clock moves on meanwhile): too old to bring it forward, it
+    /// asks for attention.
+    AskAttention(String),
     /// Starts the settings app on a page (or its home), and waits for its
     /// window: `{ page? }`.
     OpenSettings(OpenSettings),
@@ -627,6 +631,8 @@ pub struct ExpectAi {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HerdrStep {
+    /// Several herdr have names: `{herdr:NAME}` is the socket of one.
+    pub name: Option<String>,
     pub agents: Vec<HerdrAgent>,
 }
 
@@ -838,6 +844,8 @@ impl ButtonName {
 #[serde(deny_unknown_fields)]
 pub struct ExpectWindow {
     pub app_id: String,
+    /// Among windows of one application, the one with this title.
+    pub title: Option<String>,
     pub output: Option<String>,
     /// `[x, y, width, height]`, logical.
     pub geometry: Option<[i32; 4]>,
@@ -884,6 +892,7 @@ impl fmt::Display for Step {
             Self::ExpectJournal(_) => write!(f, "expect_journal"),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
+            Self::AskAttention(app_id) => write!(f, "ask_attention {app_id}"),
             Self::Share(_) => write!(f, "share"),
             Self::LockClient(_) => write!(f, "lock_client"),
             Self::SessionFile(_) => write!(f, "session_file"),
@@ -1131,7 +1140,7 @@ impl Scenario {
             asking: None,
             events: Vec::new(),
             caldav: None,
-            herdr: None,
+            herdrs: Vec::new(),
             ai: None,
             blurs: 0,
         };
@@ -1179,7 +1188,8 @@ struct Run<'a> {
     /// Every event since the start.
     events: Vec<hocus_api::Event>,
     caldav: Option<crate::caldav::Server>,
-    herdr: Option<crate::herdr::Server>,
+    /// The herdr of the test, by name (`None` for `{herdr}`).
+    herdrs: Vec<(Option<String>, crate::herdr::Server)>,
     ai: Option<crate::ai::Server>,
     /// Blurs computed at the last `expect_blur`.
     blurs: u64,
@@ -1599,6 +1609,7 @@ impl Run<'_> {
                 .find(|c| c.spec.app_id == *app_id)
                 .with_context(|| format!("no client {app_id}"))?
                 .activate(),
+            Step::AskAttention(app_id) => self.ask_attention(app_id),
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
             Step::DragSettings(drag) => self.drag_settings(drag),
@@ -1642,11 +1653,22 @@ impl Run<'_> {
                     .map(|a| (a.name.clone(), a.status.clone()))
                     .collect();
                 let dir = self.compositor.runtime_dir().to_path_buf();
-                self.herdr = Some(crate::herdr::Server::start(&dir, &agents)?);
+                let file = match &h.name {
+                    Some(name) => format!("herdr-{name}.sock"),
+                    None => "herdr.sock".to_owned(),
+                };
+                self.herdrs.retain(|(n, _)| *n != h.name);
+                let server = crate::herdr::Server::start(&dir.join(file), &agents)?;
+                self.herdrs.push((h.name.clone(), server));
                 Ok(())
             }
             Step::HerdrStatus(h) => {
-                let herdr = self.herdr.as_ref().context("no herdr step before")?;
+                let herdr = self
+                    .herdrs
+                    .iter()
+                    .map(|(_, s)| s)
+                    .find(|s| s.has(&h.agent))
+                    .with_context(|| format!("no herdr step with {:?} before", h.agent))?;
                 let deadline = Instant::now() + CLIENT_TIMEOUT;
                 while !herdr.followed(&h.agent) {
                     anyhow::ensure!(
@@ -1668,7 +1690,9 @@ impl Run<'_> {
             Step::ExpectHerdr(wanted) => {
                 let deadline = Instant::now() + SETTLE_TIMEOUT;
                 loop {
-                    let asked = self.herdr.as_ref().context("no herdr step before")?.asked();
+                    anyhow::ensure!(!self.herdrs.is_empty(), "no herdr step before");
+                    let asked: Vec<String> =
+                        self.herdrs.iter().flat_map(|(_, s)| s.asked()).collect();
                     if asked.contains(wanted) {
                         return Ok(());
                     }
@@ -2009,8 +2033,12 @@ impl Run<'_> {
                 if let Some(server) = &self.caldav {
                     text = text.replace("{caldav}", server.url());
                 }
-                if let Some(herdr) = &self.herdr {
-                    text = text.replace("{herdr}", &herdr.path().to_string_lossy());
+                for (name, herdr) in &self.herdrs {
+                    let key = match name {
+                        Some(name) => format!("{{herdr:{name}}}"),
+                        None => "{herdr}".to_owned(),
+                    };
+                    text = text.replace(&key, &herdr.path().to_string_lossy());
                 }
                 if let Some(ai) = &self.ai {
                     text = text.replace("{ai}", ai.url());
@@ -3303,6 +3331,42 @@ impl Run<'_> {
             .context("the window did not go away")
     }
 
+    /// The client takes a token, the virtual clock moves past the time a
+    /// token brings a window forward, and only then it asks with it.
+    fn ask_attention(&mut self, app_id: &str) -> anyhow::Result<()> {
+        let client = self
+            .clients
+            .iter()
+            .find(|c| c.spec.app_id == app_id)
+            .with_context(|| format!("no client {app_id}"))?;
+        client.take_token()?;
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let has = self
+                .clients
+                .iter()
+                .find(|c| c.spec.app_id == app_id)
+                .is_some_and(|c| c.events().contains(&crate::client::ClientEvent::Token));
+            if has {
+                break;
+            }
+            anyhow::ensure!(Instant::now() < deadline, "{app_id} got no token");
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+        self.compositor.advance(Duration::from_secs(11))?;
+        self.clients
+            .iter()
+            .find(|c| c.spec.app_id == app_id)
+            .with_context(|| format!("no client {app_id}"))?
+            .use_token()?;
+        // It reaches the loop before the next step.
+        let until = Instant::now() + Duration::from_millis(200);
+        while Instant::now() < until {
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        Ok(())
+    }
+
     /// Clients resize in their own threads: the window gets a moment to
     /// match before the step fails.
     fn expect_window(&mut self, expected: &ExpectWindow) -> anyhow::Result<()> {
@@ -3326,8 +3390,19 @@ impl Run<'_> {
 
     fn window_differences(&mut self, expected: &ExpectWindow) -> anyhow::Result<Vec<String>> {
         let window = self
-            .find(&expected.app_id)?
-            .with_context(|| format!("no window {}", expected.app_id))?;
+            .windows()?
+            .into_iter()
+            .find(|w| {
+                w.app_id.as_deref() == Some(expected.app_id.as_str())
+                    && expected
+                        .title
+                        .as_ref()
+                        .is_none_or(|t| w.title.as_ref() == Some(t))
+            })
+            .with_context(|| match &expected.title {
+                Some(title) => format!("no window {} titled {title:?}", expected.app_id),
+                None => format!("no window {}", expected.app_id),
+            })?;
         let mut wrong = Vec::new();
         if let Some(output) = &expected.output
             && window.output.as_ref() != Some(output)

@@ -596,8 +596,11 @@ pub struct Agents {
     pub enabled: bool,
     /// herdr's API socket; empty: its default one
     /// (`$XDG_CONFIG_HOME/herdr/herdr.sock`), which only the session
-    /// looks for.
+    /// looks for, and only when `[[agents.herdr]]` names none. Its agents
+    /// belong to no desktop: the column shows them wherever Alex is.
     pub herdr_socket: String,
+    /// More herdr, each tied to a desktop (#192): `[[agents.herdr]]`.
+    pub herdr: Vec<HerdrSocket>,
     /// The agents' journal (#176) keeps the text MCP agents type; without
     /// it, only how many characters, since what is typed may be a secret.
     pub journal_text: bool,
@@ -612,13 +615,46 @@ impl Default for Agents {
         Self {
             enabled: true,
             herdr_socket: String::new(),
+            herdr: Vec::new(),
             journal_text: false,
             mcp: Vec::new(),
         }
     }
 }
 
+/// A herdr whose agents work for one desktop, a project's (#192).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HerdrSocket {
+    /// Its API socket; `~/` is the home directory.
+    pub socket: String,
+    /// The desktop its agents belong to, from 1; none: wherever Alex is,
+    /// as `herdr_socket`'s.
+    pub desktop: Option<u32>,
+    /// That desktop's screen; the primary one when not set.
+    pub output: Option<String>,
+}
+
 impl Agents {
+    /// The herdr to follow, in order: `[[agents.herdr]]`, then
+    /// `herdr_socket` when set. Empty, the session looks for herdr's
+    /// default socket.
+    pub fn herdr_sockets(&self) -> Vec<HerdrSocket> {
+        let mut out: Vec<HerdrSocket> = self
+            .herdr
+            .iter()
+            .filter(|h| !h.socket.trim().is_empty())
+            .cloned()
+            .collect();
+        if !self.herdr_socket.trim().is_empty() {
+            out.push(HerdrSocket {
+                socket: self.herdr_socket.clone(),
+                ..HerdrSocket::default()
+            });
+        }
+        out
+    }
+
     /// The MCP agent of this name; the first wins.
     pub fn mcp_agent(&self, name: &str) -> Option<&McpAgent> {
         self.mcp.iter().find(|a| a.name == name)
@@ -1481,6 +1517,14 @@ impl Config {
                 return out_of_range(&format!("rules[{i}].desktop"), d.to_string(), "1 to 8");
             }
         }
+        for (i, herdr) in self.agents.herdr.iter().enumerate() {
+            if let Some(d) = herdr.desktop
+                && !(1..=8).contains(&d)
+            {
+                let key = format!("agents.herdr[{i}].desktop");
+                return out_of_range(&key, d.to_string(), "1 to 8");
+            }
+        }
         for (i, output) in self.outputs.iter().enumerate() {
             if let Err(err) = output.check() {
                 let line = text
@@ -1878,6 +1922,34 @@ mod tests {
             ["\"a\""; 9].join(", ")
         );
         assert!(Config::parse(&nine).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn several_herdr_each_for_a_desktop_and_the_old_key_still_reads() -> Result<(), ConfigError> {
+        let c = Config::parse(
+            "[agents]\nherdr_socket = \"~/herdr.sock\"\n\n\
+             [[agents.herdr]]\nsocket = \"/run/chapito.sock\"\ndesktop = 2\n\n\
+             [[agents.herdr]]\nsocket = \"/run/website.sock\"\ndesktop = 3\noutput = \"DP-1\"\n\n\
+             [[agents.herdr]]\nsocket = \"\"\n",
+        )?;
+        let sockets = c.agents.herdr_sockets();
+        let got: Vec<(&str, Option<u32>, Option<&str>)> = sockets
+            .iter()
+            .map(|h| (h.socket.as_str(), h.desktop, h.output.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("/run/chapito.sock", Some(2), None),
+                ("/run/website.sock", Some(3), Some("DP-1")),
+                ("~/herdr.sock", None, None),
+            ]
+        );
+        assert!(Config::default().agents.herdr_sockets().is_empty());
+        let err = Config::parse("[[agents.herdr]]\nsocket = \"a\"\ndesktop = 9\n")
+            .expect_err("desktop 9 is refused");
+        assert!(err.0.contains("agents.herdr[0].desktop = 9"), "{err}");
         Ok(())
     }
 

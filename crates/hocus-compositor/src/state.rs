@@ -166,6 +166,8 @@ pub struct State {
     pub pandas: crate::pandas::Pandas,
     /// Coding agents (#41).
     pub agents: crate::agents::Agents,
+    /// What goes on on the desktops not shown (#192).
+    pub activity: crate::activity::Activity,
     /// What MCP agents did (#176).
     pub journal: crate::journal::Journal,
     /// The first session's welcome (#82).
@@ -300,6 +302,7 @@ impl State {
             wobbles: Default::default(),
             pandas: Default::default(),
             agents: Default::default(),
+            activity: Default::default(),
             journal: Default::default(),
             first_run: Default::default(),
             slides: Default::default(),

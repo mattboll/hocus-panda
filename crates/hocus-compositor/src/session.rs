@@ -429,19 +429,25 @@ impl State {
         }
     }
 
-    /// A window just managed: put back where it was, if it was saved.
-    pub fn place_restored(&mut self, id: hocus_core::WindowId, app_id: Option<&str>) {
+    /// A window just managed: put back where it was, if it was saved;
+    /// among several of its application, the one saved with its title,
+    /// else the first saved.
+    pub fn place_restored(
+        &mut self,
+        id: hocus_core::WindowId,
+        app_id: Option<&str>,
+        title: Option<&str>,
+    ) {
         let Some(app_id) = app_id else { return };
-        self.sessions.started.retain(|(a, _)| a != app_id);
-        let Some(i) = self
-            .sessions
-            .pending
-            .iter()
-            .position(|w| w.app_id == app_id)
-        else {
-            return;
-        };
-        let Some(saved) = self.sessions.pending.remove(i) else {
+        // One start of the application came: others it had may still.
+        if let Some(i) = self.sessions.started.iter().position(|(a, _)| a == app_id) {
+            self.sessions.started.remove(i);
+        }
+        let Some(saved) = hocus_core::session::take_match(
+            &mut self.sessions.pending,
+            app_id,
+            title.unwrap_or_default(),
+        ) else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();

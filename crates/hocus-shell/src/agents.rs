@@ -1,8 +1,12 @@
 //! Coding agents (#41) in the column: the active ones with their state and
 //! a panda each, the others summed up; the ones waiting for an answer offer
-//! it. [`Board`] follows what an agent manager (herdr) says, holding back
-//! rests shorter than [`SETTLE`] so that an agent flickering between work
-//! and rest does not make the column flicker.
+//! it. [`Board`] follows what agent managers (herdr, one or several) say,
+//! holding back rests shorter than [`SETTLE`] so that an agent flickering
+//! between work and rest does not make the column flicker.
+//!
+//! With a herdr per project desktop (#192) the agents are grouped by
+//! desktop: those of the desktop shown (and of no desktop) in full, every
+//! other desktop's in a line with its counts, which goes there.
 
 use std::time::Duration;
 
@@ -80,7 +84,7 @@ pub enum AgentAsk {
     No,
 }
 
-/// An agent waits for an answer, or no longer does.
+/// An agent waits for an answer, or no longer does; or it is done.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     Waits {
@@ -89,11 +93,15 @@ pub enum Change {
         question: Option<String>,
     },
     Answered(String),
+    /// It came to be done while followed.
+    Done(String),
 }
 
 #[derive(Debug, Clone)]
 struct Tracked {
     key: String,
+    /// The manager it comes from.
+    source: usize,
     name: String,
     /// Its place among the agents seen: its panda's character.
     nth: usize,
@@ -121,14 +129,81 @@ impl Tracked {
         self.shown = state;
         self.since = now;
         self.moved_at = Some(now);
-        if state == AgentState::Wait {
-            changes.push(Change::Waits {
+        match state {
+            AgentState::Wait => changes.push(Change::Waits {
                 key: self.key.clone(),
                 name: self.name.clone(),
                 question: self.question.clone(),
-            });
+            }),
+            AgentState::Done => changes.push(Change::Done(self.key.clone())),
+            _ => {}
         }
     }
+}
+
+/// How many agents do what.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Counts {
+    pub resting: usize,
+    pub waiting: usize,
+    pub working: usize,
+    pub done: usize,
+    pub stuck: usize,
+}
+
+impl Counts {
+    fn of<'a>(agents: impl Iterator<Item = &'a Tracked>) -> Self {
+        let mut c = Self::default();
+        for t in agents {
+            match t.shown {
+                AgentState::Rest => c.resting += 1,
+                AgentState::Wait => c.waiting += 1,
+                AgentState::Work => c.working += 1,
+                AgentState::Done => c.done += 1,
+                AgentState::Stuck => c.stuck += 1,
+            }
+        }
+        c
+    }
+
+    pub fn total(&self) -> usize {
+        self.resting + self.waiting + self.working + self.done + self.stuck
+    }
+
+    fn plus(self, o: Self) -> Self {
+        Self {
+            resting: self.resting + o.resting,
+            waiting: self.waiting + o.waiting,
+            working: self.working + o.working,
+            done: self.done + o.done,
+            stuck: self.stuck + o.stuck,
+        }
+    }
+
+    /// The colour of the most pressing: what a line's dot shows.
+    fn paint(&self) -> Paint {
+        if self.waiting > 0 {
+            AgentState::Wait.paint()
+        } else if self.stuck > 0 {
+            AgentState::Stuck.paint()
+        } else if self.working + self.done > 0 {
+            AgentState::Work.paint()
+        } else {
+            AgentState::Rest.paint()
+        }
+    }
+}
+
+/// A desktop the column does not show in full, and the managers whose
+/// agents work for it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Elsewhere {
+    /// Its name, or "Desktop N".
+    pub name: String,
+    pub output: String,
+    /// From 1.
+    pub desktop: usize,
+    pub sources: Vec<usize>,
 }
 
 /// The agents an agent manager runs, as the column shows them.
@@ -143,16 +218,21 @@ impl Board {
         self.agents.is_empty()
     }
 
-    /// Every agent, in the manager's order, with its state and its
-    /// question: new ones show as they are, the others change as
-    /// [`Board::set`] does; those missing are gone.
+    /// Every agent of manager `source`, in its order, with its state and
+    /// its question (keys unique among every manager's): new ones show as
+    /// they are, the others change as [`Board::set`] does; those missing
+    /// are gone.
     pub fn replace(
         &mut self,
+        source: usize,
         list: Vec<(String, String, AgentState, Option<String>)>,
         now: Duration,
     ) -> Vec<Change> {
         let mut changes = Vec::new();
-        let mut old = std::mem::take(&mut self.agents);
+        let (mut old, others): (Vec<Tracked>, Vec<Tracked>) = std::mem::take(&mut self.agents)
+            .into_iter()
+            .partition(|t| t.source == source);
+        self.agents = others;
         for (key, name, state, question) in list {
             if let Some(i) = old.iter().position(|t| t.key == key) {
                 let mut t = old.swap_remove(i);
@@ -169,6 +249,7 @@ impl Board {
                 }
                 self.agents.push(Tracked {
                     key,
+                    source,
                     name,
                     nth: self.next_nth,
                     shown: state,
@@ -188,9 +269,16 @@ impl Board {
         changes
     }
 
-    /// The manager went away: no agents.
-    pub fn clear(&mut self) -> Vec<Change> {
-        self.replace(Vec::new(), Duration::ZERO)
+    /// Manager `source` went away: none of its agents.
+    pub fn clear(&mut self, source: usize) -> Vec<Change> {
+        self.replace(source, Vec::new(), Duration::ZERO)
+    }
+
+    /// Every manager went away.
+    pub fn clear_all(&mut self) -> Vec<Change> {
+        let sources: std::collections::BTreeSet<usize> =
+            self.agents.iter().map(|t| t.source).collect();
+        sources.into_iter().flat_map(|s| self.clear(s)).collect()
     }
 
     /// An agent's state changed; a rest shows only once it lasted
@@ -247,20 +335,47 @@ impl Board {
 
     /// Whether it waits for an answer.
     pub fn waits(&self, key: &str) -> bool {
-        self.agents
-            .iter()
-            .any(|t| t.key == key && t.shown == AgentState::Wait)
+        self.state(key) == Some(AgentState::Wait)
     }
 
-    /// What the column shows at `now`; nothing without agents.
-    pub fn view(&self, now: Duration, pandas: bool, still: bool) -> Option<AgentsView> {
-        if self.agents.is_empty() {
+    /// What it is doing, as shown.
+    pub fn state(&self, key: &str) -> Option<AgentState> {
+        self.agents.iter().find(|t| t.key == key).map(|t| t.shown)
+    }
+
+    /// Each manager's agents' states, as shown: source and state.
+    pub fn states(&self) -> impl Iterator<Item = (usize, AgentState)> + '_ {
+        self.agents.iter().map(|t| (t.source, t.shown))
+    }
+
+    /// What the column shows at `now`: the agents of no desktop in
+    /// `elsewhere` in full, those of each desktop there in a line; nothing
+    /// without agents.
+    pub fn view(
+        &self,
+        now: Duration,
+        pandas: bool,
+        still: bool,
+        elsewhere: &[Elsewhere],
+    ) -> Option<AgentsView> {
+        let away = |t: &Tracked| elsewhere.iter().any(|e| e.sources.contains(&t.source));
+        let here: Vec<&Tracked> = self.agents.iter().filter(|t| !away(t)).collect();
+        let others: Vec<DesktopAgents> = elsewhere
+            .iter()
+            .map(|e| DesktopAgents {
+                name: e.name.clone(),
+                output: e.output.clone(),
+                desktop: e.desktop,
+                counts: Counts::of(self.agents.iter().filter(|t| e.sources.contains(&t.source))),
+            })
+            .filter(|d| d.counts.total() > 0)
+            .collect();
+        if here.is_empty() && others.is_empty() {
             return None;
         }
-        let count = |s: AgentState| self.agents.iter().filter(|t| t.shown == s).count();
-        let mut active: Vec<&Tracked> = self
-            .agents
+        let mut active: Vec<&Tracked> = here
             .iter()
+            .copied()
             .filter(|t| t.shown != AgentState::Rest)
             .collect();
         active.sort_by_key(|t| (t.shown.rank(), t.nth));
@@ -280,20 +395,27 @@ impl Board {
         Some(AgentsView {
             rows,
             more: active.len().saturating_sub(ROWS),
-            resting: count(AgentState::Rest),
-            waiting: count(AgentState::Wait),
-            working: count(AgentState::Work),
-            done: count(AgentState::Done),
-            stuck: count(AgentState::Stuck),
+            counts: Counts::of(here.iter().copied()),
+            others,
             pandas,
             still,
             // All at rest: the juggler moves from the last one's rest.
             rested_at: active
                 .is_empty()
-                .then(|| self.agents.iter().filter_map(|t| t.moved_at).max())
+                .then(|| here.iter().filter_map(|t| t.moved_at).max())
                 .flatten(),
         })
     }
+}
+
+/// Another desktop's agents, in a line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopAgents {
+    pub name: String,
+    pub output: String,
+    /// From 1.
+    pub desktop: usize,
+    pub counts: Counts,
 }
 
 /// An agent shown in full.
@@ -314,14 +436,14 @@ pub struct AgentRow {
 /// The column's agents section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentsView {
+    /// The agents shown in full: those of the desktop shown, and of none.
     pub rows: Vec<AgentRow>,
     /// Active agents left out for room.
     pub more: usize,
-    pub resting: usize,
-    pub waiting: usize,
-    pub working: usize,
-    pub done: usize,
-    pub stuck: usize,
+    /// What the agents shown in full do.
+    pub counts: Counts,
+    /// Every other desktop with agents, in a line each (#192).
+    pub others: Vec<DesktopAgents>,
     /// Pandas shown; otherwise a dot of each agent's colour.
     pub pandas: bool,
     /// They hold still (battery saver).
@@ -330,8 +452,58 @@ pub struct AgentsView {
 }
 
 impl AgentsView {
-    fn total(&self) -> usize {
-        self.resting + self.waiting + self.working + self.done + self.stuck
+    /// Every agent's counts, here and elsewhere.
+    pub fn totals(&self) -> Counts {
+        self.others
+            .iter()
+            .fold(self.counts, |sum, d| sum.plus(d.counts))
+    }
+}
+
+/// How much of the section shows: fewer rows and lines when the column has
+/// no room for all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fit {
+    /// Agents shown in full, at most [`ROWS`].
+    pub rows: usize,
+    /// Other desktops in a line each; the rest share one.
+    pub lines: usize,
+    /// The line the rest share shows; without it, the header's summary
+    /// and the desktops' badges still say what goes on there.
+    pub shared: bool,
+}
+
+impl Fit {
+    pub const MOST: Self = Self {
+        rows: ROWS,
+        lines: 8,
+        shared: true,
+    };
+
+    /// One less: a desktop's line while some show (they merge into one),
+    /// else the line they share, else a row while more than one shows;
+    /// `None` when nothing gives more.
+    pub fn less(self, view: &AgentsView) -> Option<Self> {
+        let lines = self.lines.min(view.others.len());
+        if lines > 0 {
+            return Some(Self {
+                lines: lines - 1,
+                ..self
+            });
+        }
+        if self.shared && !view.others.is_empty() {
+            return Some(Self {
+                lines,
+                shared: false,
+                ..self
+            });
+        }
+        let rows = self.rows.min(view.rows.len());
+        (rows > 1).then(|| Self {
+            rows: rows - 1,
+            lines,
+            ..self
+        })
     }
 }
 
@@ -340,8 +512,14 @@ impl Lang {
         self.pick("HERDR AGENTS", "AGENTS HERDR")
     }
 
-    /// The header's summary: who waits, else what the others do.
+    /// The header's summary, over every desktop: who waits, else what the
+    /// others do.
     pub fn agents_summary(self, v: &AgentsView) -> String {
+        self.agents_counts(&v.totals())
+    }
+
+    /// Who waits, else what the others do.
+    pub fn agents_counts(self, v: &Counts) -> String {
         let fr = self == Self::Fr;
         if v.waiting > 0 {
             return match (fr, v.waiting) {
@@ -453,6 +631,41 @@ impl Lang {
         })
     }
 
+    /// A desktop's agents in its line: how many wait, work, are done or
+    /// stuck; at rest only when all are.
+    pub fn agents_line(self, c: &Counts) -> String {
+        let fr = self == Self::Fr;
+        let plural = |n: usize| if fr && n > 1 { "s" } else { "" };
+        let parts: Vec<String> = [
+            (c.waiting, self.pick("waiting", "attend"), ""),
+            (c.working, self.pick("at work", "au travail"), ""),
+            (c.done, self.pick("done", "fini"), plural(c.done)),
+            (c.stuck, self.pick("stuck", "bloqué"), plural(c.stuck)),
+        ]
+        .into_iter()
+        .filter(|(n, _, _)| *n > 0)
+        .map(|(n, what, s)| match (fr, n, what) {
+            (true, n, "attend") if n > 1 => format!("{n} attendent"),
+            _ => format!("{n} {what}{s}"),
+        })
+        .collect();
+        if parts.is_empty() {
+            format!("{} {}", c.resting, self.pick("at rest", "au repos"))
+        } else {
+            parts.join(" · ")
+        }
+    }
+
+    /// Desktops whose agents share one line, for room.
+    pub fn agents_other_desktops(self, count: usize) -> String {
+        match (self, count) {
+            (Self::En, 1) => "1 other desktop".into(),
+            (Self::En, n) => format!("{n} other desktops"),
+            (Self::Fr, 1) => "1 autre bureau".into(),
+            (Self::Fr, n) => format!("{n} autres bureaux"),
+        }
+    }
+
     /// Every agent at rest.
     pub fn agents_all_resting(self, count: usize, pandas: bool) -> String {
         let first = match (self, count) {
@@ -507,14 +720,16 @@ fn panda(
 }
 
 /// Fills the section as the design draws it: a header with the summary,
-/// the agents shown in full, then the others in a line. The rows' and the
-/// buttons' actions come back.
+/// the agents shown in full, then the others in a line, then the other
+/// desktops' in a line each, as many as `fit` leaves room for. The rows',
+/// the lines' and the buttons' actions come back.
 pub(crate) fn fill(
     tree: &mut Tree,
     room: NodeId,
     theme: &Theme,
     lang: Lang,
     view: &AgentsView,
+    fit: Fit,
 ) -> Vec<(NodeId, Action)> {
     let missing = || unreachable!("adding to a node of this tree");
     let add = |tree: &mut Tree, parent, style, kind| {
@@ -564,7 +779,9 @@ pub(crate) fn fill(
         Kind::text(lang.agents_summary(view), small.with_color(Paint::Muted)),
     );
 
-    if view.rows.is_empty() {
+    let shown = view.rows.len().min(fit.rows.max(1));
+    let more = view.more + view.rows.len() - shown;
+    if view.rows.is_empty() && view.counts.total() > 0 {
         let line = add(
             tree,
             room,
@@ -600,14 +817,13 @@ pub(crate) fn fill(
                 ..Style::default()
             },
             Kind::text(
-                lang.agents_all_resting(view.total(), view.pandas),
+                lang.agents_all_resting(view.counts.total(), view.pandas),
                 theme.text.body.with_color(Paint::Muted),
             ),
         );
-        return targets;
     }
 
-    for agent in &view.rows {
+    for agent in view.rows.iter().take(shown) {
         let waits = agent.state == AgentState::Wait;
         let colour = agent.state.paint();
         let look = if waits {
@@ -720,7 +936,10 @@ pub(crate) fn fill(
             }
         }
     }
-    if let Some(line) = lang.agents_rest(view.more, view.resting) {
+    if let Some(line) = lang
+        .agents_rest(more, view.counts.resting)
+        .filter(|_| !view.rows.is_empty())
+    {
         add(
             tree,
             room,
@@ -734,7 +953,118 @@ pub(crate) fn fill(
             Kind::text(line, small.with_color(Paint::Muted)),
         );
     }
+
+    // The other desktops: a line each, as many as there is room for; the
+    // rest share one.
+    let lines = view.others.len().min(fit.lines);
+    for desktop in &view.others[..lines] {
+        let line = desktop_line(tree, room, theme, lang, &desktop.name, &desktop.counts);
+        tree.set_clickable(
+            line,
+            &format!("{} · {}", desktop.name, lang.agents_line(&desktop.counts)),
+        );
+        targets.push((
+            line,
+            Action::ShowDesktop {
+                output: desktop.output.clone(),
+                desktop: desktop.desktop,
+            },
+        ));
+    }
+    let rest = &view.others[lines..];
+    if !rest.is_empty() && fit.shared {
+        let counts = rest
+            .iter()
+            .fold(Counts::default(), |sum, d| sum.plus(d.counts));
+        let name = lang.agents_other_desktops(rest.len());
+        desktop_line(tree, room, theme, lang, &name, &counts);
+    }
     targets
+}
+
+/// A line for another desktop's agents: a dot of the most pressing one's
+/// colour, the desktop's name, and under it what they do.
+fn desktop_line(
+    tree: &mut Tree,
+    room: NodeId,
+    theme: &Theme,
+    lang: Lang,
+    name: &str,
+    counts: &Counts,
+) -> NodeId {
+    let missing = || unreachable!("adding to a node of this tree");
+    let line = tree
+        .add(
+            room,
+            Style {
+                direction: Direction::Row,
+                gap: 10.0,
+                align: Align::Center,
+                padding: Insets::symmetric(10.0, 12.0),
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 14.0,
+                ..Look::default()
+            }),
+        )
+        .unwrap_or_else(missing);
+    tree.add(
+        line,
+        square(10.0),
+        Kind::Box(Look {
+            background: Some(counts.paint()),
+            radius: 5.0,
+            ..Look::default()
+        }),
+    )
+    .unwrap_or_else(missing);
+    let words = tree
+        .add(
+            line,
+            Style {
+                width: Length::Fill,
+                gap: 2.0,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    tree.add(
+        words,
+        Style::default(),
+        Kind::text_line(
+            name.to_owned(),
+            TextStyle {
+                size: 15.0,
+                weight: 700,
+                ..theme.text.title
+            },
+        ),
+    )
+    .unwrap_or_else(missing);
+    let paint = if counts.waiting > 0 {
+        Paint::Waiting
+    } else {
+        Paint::Muted
+    };
+    tree.add(
+        words,
+        Style::default(),
+        Kind::text_line(
+            lang.agents_line(counts),
+            TextStyle {
+                size: 13.0,
+                weight: 500,
+                line_height: 1.35,
+                ..theme.text.label
+            }
+            .with_color(paint),
+        ),
+    )
+    .unwrap_or_else(missing);
+    line
 }
 
 fn square(side: f32) -> Style {
@@ -761,6 +1091,7 @@ mod tests {
     fn board(states: &[(&str, AgentState)]) -> Board {
         let mut board = Board::default();
         board.replace(
+            0,
             states
                 .iter()
                 .map(|(k, s)| ((*k).to_owned(), (*k).to_owned(), *s, None))
@@ -773,15 +1104,15 @@ mod tests {
     #[test]
     fn a_rest_shorter_than_two_seconds_never_shows() {
         let mut b = board(&[("refacto", AgentState::Work)]);
-        let before = b.view(10 * S, true, false);
+        let before = b.view(10 * S, true, false, &[]);
         assert!(b.set("refacto", AgentState::Rest, None, 10 * S).is_empty());
         assert_eq!(b.deadline(), Some(12 * S));
-        assert_eq!(b.view(11 * S, true, false), before);
+        assert_eq!(b.view(11 * S, true, false, &[]), before);
         b.set("refacto", AgentState::Work, None, 11 * S);
         assert!(b.settle(13 * S).is_empty());
         assert_eq!(b.deadline(), None);
         // It never stopped working: nothing moved, nothing changed.
-        assert_eq!(b.view(11 * S, true, false), before);
+        assert_eq!(b.view(11 * S, true, false, &[]), before);
     }
 
     #[test]
@@ -789,11 +1120,14 @@ mod tests {
         let mut b = board(&[("refacto", AgentState::Work)]);
         b.set("refacto", AgentState::Rest, None, 10 * S);
         b.settle(11 * S);
-        assert_eq!(b.view(11 * S, true, false).expect("agents").rows.len(), 1);
+        assert_eq!(
+            b.view(11 * S, true, false, &[]).expect("agents").rows.len(),
+            1
+        );
         b.settle(12 * S);
-        let view = b.view(12 * S, true, false).expect("agents");
+        let view = b.view(12 * S, true, false, &[]).expect("agents");
         assert!(view.rows.is_empty());
-        assert_eq!(view.resting, 1);
+        assert_eq!(view.counts.resting, 1);
         assert_eq!(view.rested_at, Some(12 * S));
     }
 
@@ -813,7 +1147,7 @@ mod tests {
             b.set("refacto", AgentState::Wait, Some("Push?".into()), 6 * S)
                 .is_empty()
         );
-        let view = b.view(6 * S, true, false).expect("agents");
+        let view = b.view(6 * S, true, false, &[]).expect("agents");
         assert_eq!(view.rows[0].key, "refacto");
         assert_eq!(view.rows[0].state, AgentState::Wait);
         assert_eq!(view.rows[0].moved_at, Some(5 * S));
@@ -826,12 +1160,12 @@ mod tests {
     #[test]
     fn agents_keep_their_character_and_the_gone_are_answered() {
         let mut b = board(&[("a", AgentState::Wait), ("b", AgentState::Work)]);
-        let changes = b.replace(vec![("b".into(), "b".into(), AgentState::Work, None)], S);
+        let changes = b.replace(0, vec![("b".into(), "b".into(), AgentState::Work, None)], S);
         assert_eq!(changes, vec![Change::Answered("a".into())]);
-        let view = b.view(S, true, false).expect("agents");
+        let view = b.view(S, true, false, &[]).expect("agents");
         assert_eq!(view.rows[0].character, Character::nth(1));
-        assert_eq!(b.clear(), Vec::new());
-        assert_eq!(b.view(S, true, false), None);
+        assert_eq!(b.clear(0), Vec::new());
+        assert_eq!(b.view(S, true, false, &[]), None);
     }
 
     #[test]
@@ -844,15 +1178,17 @@ mod tests {
             ("e", AgentState::Rest),
         ]);
         let view = b
-            .view(Duration::from_secs(400), true, false)
+            .view(Duration::from_secs(400), true, false, &[])
             .expect("agents");
         let keys: Vec<_> = view.rows.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(keys, ["c", "b", "a"]);
-        assert_eq!((view.more, view.resting), (1, 1));
+        assert_eq!((view.more, view.counts.resting), (1, 1));
         assert_eq!(view.rows[2].minutes, 6);
         assert_eq!(Lang::En.agents_summary(&view), "1 waits for an answer");
         assert_eq!(
-            Lang::En.agents_rest(view.more, view.resting).as_deref(),
+            Lang::En
+                .agents_rest(view.more, view.counts.resting)
+                .as_deref(),
             Some("1 more, 1 at rest in herdr")
         );
     }
@@ -860,16 +1196,86 @@ mod tests {
     #[test]
     fn the_summary_says_what_they_do() {
         let b = board(&[("a", AgentState::Done), ("b", AgentState::Stuck)]);
-        let view = b.view(S, true, false).expect("agents");
+        let view = b.view(S, true, false, &[]).expect("agents");
         assert_eq!(Lang::En.agents_summary(&view), "1 done, 1 stuck");
         assert_eq!(Lang::Fr.agents_summary(&view), "1 fini, 1 bloqué");
         let b = board(&[("a", AgentState::Rest), ("b", AgentState::Rest)]);
-        let view = b.view(S, true, false).expect("agents");
+        let view = b.view(S, true, false, &[]).expect("agents");
         assert_eq!(Lang::Fr.agents_summary(&view), "2 au repos");
         assert_eq!(
             Lang::Fr.agents_all_resting(2, true),
             "Les 2 agents sont au repos. Les pandas en profitent."
         );
+    }
+
+    #[test]
+    fn agents_of_other_desktops_are_counted_in_a_line_each() {
+        let mut b = Board::default();
+        let agent = |key: &str, state| (key.to_owned(), key.to_owned(), state, None);
+        b.replace(0, vec![agent("0/a", AgentState::Work)], Duration::ZERO);
+        b.replace(
+            1,
+            vec![
+                agent("1/b", AgentState::Work),
+                agent("1/c", AgentState::Rest),
+            ],
+            Duration::ZERO,
+        );
+        b.replace(2, vec![agent("2/d", AgentState::Work)], Duration::ZERO);
+        let elsewhere = |sources: Vec<usize>, desktop: usize| Elsewhere {
+            name: format!("D{desktop}"),
+            output: "DP-1".into(),
+            desktop,
+            sources,
+        };
+        let changes = b.set("2/d", AgentState::Wait, None, S);
+        assert!(matches!(&changes[..], [Change::Waits { key, .. }] if key == "2/d"));
+        let view = b
+            .view(
+                S,
+                true,
+                false,
+                &[elsewhere(vec![1], 2), elsewhere(vec![2], 3)],
+            )
+            .expect("agents");
+        let keys: Vec<_> = view.rows.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(keys, ["0/a"]);
+        let lines: Vec<_> = view
+            .others
+            .iter()
+            .map(|d| format!("{} · {}", d.name, Lang::En.agents_line(&d.counts)))
+            .collect();
+        assert_eq!(lines, ["D2 · 1 at work", "D3 · 1 waiting"]);
+        let counts = Counts {
+            waiting: 2,
+            working: 1,
+            done: 2,
+            ..Counts::default()
+        };
+        assert_eq!(
+            Lang::Fr.agents_line(&counts),
+            "2 attendent · 1 au travail · 2 finis"
+        );
+        assert_eq!(Lang::En.agents_summary(&view), "1 waits for an answer");
+        // Done comes once, when it comes; the other manager's agents stay.
+        assert_eq!(
+            b.set("1/b", AgentState::Done, None, 2 * S),
+            vec![Change::Done("1/b".into())]
+        );
+        assert_eq!(b.clear(1), Vec::new());
+        assert_eq!(b.state("0/a"), Some(AgentState::Work));
+        // Only other desktops' agents: no rows, their lines.
+        let view = b
+            .view(S, true, false, &[elsewhere(vec![0, 2], 2)])
+            .expect("agents");
+        assert!(view.rows.is_empty() && view.counts.total() == 0);
+        assert_eq!(view.others.len(), 1);
+        // Room is given back by the lines first, then the rows.
+        let fit = Fit::MOST.less(&view).expect("a line less");
+        assert_eq!((fit.lines, fit.shared), (0, true));
+        let fit = fit.less(&view).expect("the shared line less");
+        assert_eq!((fit.lines, fit.shared), (0, false));
+        assert_eq!(fit.less(&view), None);
     }
 
     #[test]

@@ -1,0 +1,97 @@
+description = "Activity on the other desktops: an agent done on desktop 2 while Alex is on desktop 1 badges desktop 2 until Alex visits it; a window on desktop 3 that asks for attention badges desktop 3 until it has the keyboard; the switcher strip and the desktops popover show the badges too"
+outputs = ["1600x1000/3"]
+shell = true
+
+[[step]]
+herdr = { name = "chapito", agents = [
+  { name = "refacto", status = "working" },
+] }
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+desktop_names = ["Me", "Chapitô", "Website"]
+
+[[agents.herdr]]
+socket = "{herdr:chapito}"
+desktop = 2
+"""
+
+[[step]]
+expect_ui = { label = "Chapitô · 1 at work" }
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3" }
+
+# Done while Alex is elsewhere.
+[[step]]
+herdr_status = { agent = "refacto", status = "done" }
+
+[[step]]
+expect_ui = { label = "Chapitô · 1 done" }
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3 · Chapitô: an agent is done" }
+
+# A window on Website asks to come forward with a token too old to: it
+# stays where it is and asks for attention instead.
+[[step]]
+open = { app_id = "chat", size = [500, 400], color = "#3399ff", title = "Chat" }
+
+[[step]]
+send = { app_id = "chat", output = "HEADLESS-1", desktop = 3 }
+
+[[step]]
+ask_attention = "chat"
+
+[[step]]
+expect_shown = { output = "HEADLESS-1", desktop = 1 }
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3 · Chapitô: an agent is done · Website: a window asks for attention" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "desktops-activity.png" }
+
+# The desktops popover names them.
+[[step]]
+click_ui = "Me · desktop 1 of 3 · Chapitô: an agent is done · Website: a window asks for attention"
+
+[[step]]
+expect_ui = { label = "HEADLESS-1 · Chapitô · an agent is done" }
+
+[[step]]
+expect_ui = { label = "HEADLESS-1 · Website · a window asks for attention" }
+
+[[step]]
+keys = "escape"
+
+# Visiting Chapitô clears its "done"; the agent is still done.
+[[step]]
+keys = "super+2"
+
+[[step]]
+expect_ui = { label = "Chapitô · desktop 2 of 3 · Website: a window asks for attention" }
+
+[[step]]
+keys = "super+1"
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3 · Website: a window asks for attention" }
+
+[[step]]
+expect_ui = { label = "Chapitô · 1 done" }
+
+# Visiting Website gives chat the keyboard: no more attention.
+[[step]]
+keys = "super+3"
+
+[[step]]
+expect_focus = "chat"
+
+[[step]]
+keys = "super+1"
+
+[[step]]
+expect_ui = { label = "Me · desktop 1 of 3" }

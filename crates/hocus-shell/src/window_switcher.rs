@@ -1,7 +1,10 @@
 //! The window switcher (#39): a grid of cards, one per window, with room
 //! for its live preview (the compositor draws the window there), its app's
 //! colour and its title; a ring glides to the card chosen. Alt+Tab shows
-//! the windows of one screen, Super+Tab each screen's own.
+//! the windows of one screen, Super+Tab each screen's own. Over the cards,
+//! a screen whose desktops have names, or where something goes on
+//! elsewhere, has its desktops in a line, the shown one in the accent, the
+//! others with their badges (#192).
 
 use std::time::Duration;
 
@@ -11,7 +14,7 @@ use hocus_ui::{
     motion::{Curve, Easing, SMALL},
 };
 
-use crate::{column::View, matrix::Variant};
+use crate::{activity::Badge, column::View, matrix::Variant};
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
 
@@ -23,9 +26,23 @@ const GAP: f32 = 14.0;
 const PAD: f32 = 18.0;
 /// Room for the shadow.
 const ROOM: f32 = 18.0;
+/// The desktops' line over the cards.
+const HEADER: f32 = 20.0;
 /// A title is typed in at this pace in the Matrix theme
 /// (docs/design/matrix-theme.md, §11).
 const TYPED: Duration = Duration::from_millis(3);
+
+/// A screen's desktops, as the line over the cards shows them.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Desks {
+    /// Each one's name, or its number's.
+    pub names: Vec<String>,
+    /// What screen readers say of each: its name and badge.
+    pub said: Vec<String>,
+    pub badges: Vec<Badge>,
+    /// From 0.
+    pub shown: usize,
+}
 
 /// A window as the switcher shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,20 +88,22 @@ impl WindowSwitcher {
         (fit.max(1.0) as usize).min(count.max(1))
     }
 
-    /// The size it takes for `count` cards across at most `width`.
-    pub fn size(count: usize, width: f32) -> Size {
+    /// The size it takes for `count` cards across at most `width`, with
+    /// the desktops' line or not.
+    pub fn size(count: usize, width: f32, desks: bool) -> Size {
         let columns = Self::columns(count, width);
         let rows = count.max(1).div_ceil(columns);
         let card = card_size();
+        let header = if desks { HEADER + GAP } else { 0.0 };
         Size::new(
             columns as f32 * card.w + (columns as f32 - 1.0) * GAP + 2.0 * (PAD + ROOM),
-            rows as f32 * card.h + (rows as f32 - 1.0) * GAP + 2.0 * (PAD + ROOM),
+            rows as f32 * card.h + (rows as f32 - 1.0) * GAP + 2.0 * (PAD + ROOM) + header,
         )
     }
 
     /// The cards across at most `width`, `selected` ringed (none: none on
-    /// this screen); in the Matrix theme each card has the theme's thin
-    /// border.
+    /// this screen), under the screen's desktops when given; in the Matrix
+    /// theme each card has the theme's thin border.
     pub fn new(
         theme: Theme,
         scale: f32,
@@ -92,8 +111,9 @@ impl WindowSwitcher {
         selected: Option<usize>,
         width: f32,
         variant: Variant,
+        desks: Option<&Desks>,
     ) -> Self {
-        let size = Self::size(cards.len(), width);
+        let size = Self::size(cards.len(), width, desks.is_some());
         let columns = Self::columns(cards.len(), width);
         let mut tree = Tree::new(theme.clone(), size, scale);
         let root = tree.root();
@@ -123,6 +143,10 @@ impl WindowSwitcher {
                 }),
             )
             .unwrap_or_else(MISSING);
+        if let Some(desks) = desks {
+            desks_line(&mut tree, panel, &theme, desks);
+        }
+        let below = if desks.is_some() { HEADER + GAP } else { 0.0 };
         let card = card_size();
         let mut nodes = Vec::new();
         let mut previews = Vec::new();
@@ -222,7 +246,7 @@ impl WindowSwitcher {
                 root,
                 Style {
                     // From inside the root's padding.
-                    at: Some(Point::new(PAD - 4.0, PAD - 4.0)),
+                    at: Some(Point::new(PAD - 4.0, PAD - 4.0 + below)),
                     width: Length::Px(card.w + 8.0),
                     height: Length::Px(card.h + 8.0),
                     ..Style::default()
@@ -365,6 +389,83 @@ impl WindowSwitcher {
     }
 }
 
+/// The screen's desktops in a line: each one's name, the shown one in the
+/// accent, the others with their badge before it.
+fn desks_line(tree: &mut Tree, panel: NodeId, theme: &Theme, desks: &Desks) {
+    let line = tree
+        .add(
+            panel,
+            Style {
+                direction: Direction::Row,
+                gap: 18.0,
+                align: Align::Center,
+                height: Length::Px(HEADER),
+                padding: Insets {
+                    left: 4.0,
+                    ..Insets::default()
+                },
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(MISSING);
+    for (i, name) in desks.names.iter().enumerate() {
+        let here = i == desks.shown;
+        let badge = desks
+            .badges
+            .get(i)
+            .copied()
+            .filter(|_| !here)
+            .unwrap_or_default();
+        let desk = tree
+            .add(
+                line,
+                Style {
+                    direction: Direction::Row,
+                    gap: 6.0,
+                    align: Align::Center,
+                    grow: 0.0,
+                    ..Style::default()
+                },
+                Kind::Box(Look::default()),
+            )
+            .unwrap_or_else(MISSING);
+        // The badge says what goes on, to screen readers too.
+        if badge.is_some() {
+            tree.add(
+                desk,
+                Style {
+                    width: Length::Px(8.0),
+                    height: Length::Px(8.0),
+                    grow: 0.0,
+                    ..Style::default()
+                },
+                Kind::Custom {
+                    draw: Box::new(crate::activity::BadgeDot(badge)),
+                    label: desks.said.get(i).cloned(),
+                },
+            )
+            .unwrap_or_else(MISSING);
+        }
+        let style = theme.text.label.with_weight(700).with_color(if here {
+            Paint::Accent
+        } else {
+            Paint::Muted
+        });
+        let text = tree
+            .add(
+                desk,
+                Style {
+                    grow: 0.0,
+                    ..Style::default()
+                },
+                Kind::text_line(name.clone(), style),
+            )
+            .unwrap_or_else(MISSING);
+        tree.set_selected_box(text, here);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,6 +488,7 @@ mod tests {
             Some(1),
             900.0,
             Variant::Plain,
+            None,
         );
         assert_eq!(s.columns_shown(), 3);
         let first = s.preview(0).expect("a preview");
@@ -406,6 +508,7 @@ mod tests {
             Some(0),
             900.0,
             Variant::Matrix,
+            None,
         );
         let since = Duration::from_secs(1);
         s.type_titles(since);

@@ -65,7 +65,7 @@ Steps, one per `[[step]]` table:
 | `open = { app_id, size = [w, h], color = "#rrggbb", title?, inhibit_shortcuts?, inhibit_idle? }` | starts a test client with a solid window (titled `title`, untitled by default), waits until it is shown; `inhibit_shortcuts` holds the compositor's shortcuts back while it has the keyboard; `inhibit_idle` keeps the session awake while it is shown, as a video player does |
 | `open_layer = { namespace, layer, anchor?, size = [w, h], exclusive_zone?, keyboard?, color }` | starts a layer-shell client (`background`, `bottom`, `top`, `overlay`; anchors among `top`, `bottom`, `left`, `right`; 0 for a length anchored at both ends; keyboard `none`, `exclusive`, `on_demand`), waits until it is shown; `expect_received` reads it by its namespace |
 | `close_layer = "namespace"` | closes that layer client |
-| `session_file = """…"""` | writes the saved session file (TOML, `[[window]]` with `app_id`, `title`, `command`, `output`, `desktop`, `geometry`, `state`, `pinned`); `{test_client}` is the test client program |
+| `session_file = """…"""` | writes the saved session file (TOML, `[[window]]` with `app_id`, `title`, `command`, `output`, `desktop`, `geometry`, `state`, `pinned`); `{test_client}` is the test client program (`--app-id`, `--size`, `--color`, `--title`) |
 | `save_session = true`, `offer_session = true` | saves the session now; offers to put the saved one back, as at start |
 | `expect_session_file = { contains?, lacks? }` | the saved session file holds these strings, or lacks them |
 | `lock_client = "#rrggbb"` | a lock client locks the session (ext-session-lock) with a surface of that colour on every output, waits until it is locked |
@@ -75,6 +75,7 @@ Steps, one per `[[step]]` table:
 | `ask_share = true` | a screen-cast portal's chooser asks what to share (as `hocus share-pick`), and waits |
 | `expect_shared = "Monitor: HEADLESS-1"` | it was answered this; `""` for nothing |
 | `activate = "app_id"` | the client of that app id asks for its window to come forward, with an activation token of its own (xdg-activation) |
+| `ask_attention = "app_id"` | the same with a token it took eleven seconds of virtual time before: too old to bring its window forward, the window asks for attention instead |
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
@@ -112,9 +113,9 @@ Steps, one per `[[step]]` table:
 | `expect_recording = { audio?, keys_at_ms? }` | the last recording saved, read by ffprobe and ffmpeg once done: with a sound track as long as the picture (or none); keys drawn near the bottom from this time in the video, the top unchanged |
 | `caldav = { dir, user, password }` | a CalDAV server on 127.0.0.1 serves the `.ics` files of `dir` (relative to the scenario); its calendar's address is `{caldav}` in later configuration, `type` and `calendar_password` steps |
 | `caldav_stop = true` | the CalDAV server goes, as the network would |
-| `herdr = { agents = [{ name, status }] }` | a herdr of the test's own (never the user's) serves these agents (`working`, `blocked`, `done`, `idle`) on a socket in the compositor's runtime directory, `{herdr}` in later configuration |
-| `herdr_status = { agent, status, label? }` | an agent's status changes in it once the compositor follows that agent, with what its integration says (the question, while blocked) |
-| `expect_herdr = "agent.send_keys refacto enter"` | it was asked this (`agent.focus NAME`, `agent.send_keys NAME KEYS`) |
+| `herdr = { name?, agents = [{ name, status }] }` | a herdr of the test's own (never the user's) serves these agents (`working`, `blocked`, `done`, `idle`) on a socket in the compositor's runtime directory, `{herdr}` in later configuration; several have names, `{herdr:NAME}` |
+| `herdr_status = { agent, status, label? }` | an agent's status changes in the herdr serving it (agents' names are unique in a scenario) once the compositor follows that agent, with what its integration says (the question, while blocked) |
+| `expect_herdr = "agent.send_keys refacto enter"` | a herdr was asked this (`agent.focus NAME`, `agent.send_keys NAME KEYS`) |
 | `ai_server = { pieces = […], delay_ms?, first_ms? }` | an AI provider on 127.0.0.1 (ollama's API, OpenAI's chat completions, Claude's Messages API, which refuses without a key; `/v1/models` lists `claude-sonnet-9`, `claude-opus-9-1`, `claude-opus-9`, `claude-haiku-9`, newest first) answers every question with these pieces, `delay_ms` before each and `first_ms` more before the first; its address is `{ai}` in later configuration |
 | `ai_key = { provider, key }` | an AI provider's key is kept, as `hocus msg ai-key` does (in a sealed file of the state directory: never the developer's keyring) |
 | `expect_ai = { path?, contains? = […], header? }` | the AI provider was asked, once so: on this path, its body holding these strings, with this header (`name: value`, the name in lower case) |
@@ -155,7 +156,7 @@ Steps, one per `[[step]]` table:
 | `expect_event = { type = "keyboard_layout", has? = "French" }` | checks the compositor said it in its event stream since the start |
 | `advance_ms = 500` | moves the virtual clock forward |
 | `frames = 1` | moves the virtual clock forward by whole frames |
-| `expect_window = { app_id, output?, geometry? = [x, y, w, h], focused?, visible?, state?, opacity?, pinned? }` | checks a window, waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized |
+| `expect_window = { app_id, title?, output?, geometry? = [x, y, w, h], focused?, visible?, state?, opacity?, pinned? }` | checks a window (among several of one app id, the one with this title), waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized |
 | `expect_no_window = "app_id"` | checks a window is gone |
 | `expect_focus = "app_id"` | checks which window has keyboard focus |
 | `expect_stack = ["below", "above"]` | checks the shown windows, bottom to top |

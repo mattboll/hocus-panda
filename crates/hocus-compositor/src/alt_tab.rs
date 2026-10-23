@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use hocus_shell::{
     matrix::Variant,
-    window_switcher::{Card, WindowSwitcher},
+    window_switcher::{Card, Desks, WindowSwitcher},
 };
 use smithay::{
     backend::renderer::{
@@ -129,6 +129,38 @@ impl State {
         ids
     }
 
+    /// The line of `output`'s desktops over its cards (#192): when one of
+    /// them has a name, or something goes on on one.
+    fn desks_line(&self, output: &Output) -> Option<Desks> {
+        let name = hocus_core::OutputName(output.name());
+        let out = self.model.output(&name)?;
+        let names = self.desktop_names(&name);
+        let badges = self.desktop_badges(&name);
+        if names.iter().all(String::is_empty) && badges.iter().all(|b| !b.is_some()) {
+            return None;
+        }
+        let lang = self.shell_lang();
+        let names: Vec<String> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| lang.desktop_label(n, i + 1))
+            .collect();
+        let said = names
+            .iter()
+            .zip(&badges)
+            .map(|(n, b)| match lang.badge(*b) {
+                Some(what) => format!("{n} · {what}"),
+                None => n.clone(),
+            })
+            .collect();
+        Some(Desks {
+            names,
+            said,
+            badges,
+            shown: out.desktops.iter().position(|d| *d == out.shown)?,
+        })
+    }
+
     /// The switcher's action: opens it, or picks the next window when it
     /// is open.
     pub fn switch_windows(&mut self, scope: Scope) {
@@ -204,6 +236,7 @@ impl State {
             let mine = (first..first + count)
                 .contains(&selected)
                 .then(|| selected - first);
+            let desks = self.desks_line(&output);
             let mut switcher = WindowSwitcher::new(
                 theme.clone(),
                 output.current_scale().fractional_scale() as f32,
@@ -211,12 +244,13 @@ impl State {
                 mine,
                 width,
                 variant,
+                desks.as_ref(),
             );
             // The Matrix theme types the titles in.
             if typed {
                 switcher.type_titles(now);
             }
-            let size = WindowSwitcher::size(cards.len(), width);
+            let size = WindowSwitcher::size(cards.len(), width, desks.is_some());
             let place = Point::from((
                 ((area.size.w as f32 - size.w) / 2.0).round() as i32,
                 ((area.size.h as f32 - size.h) / 2.0).round() as i32,
