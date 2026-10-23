@@ -167,7 +167,7 @@ command = "foot --app-id=hocus-dropdown"
 app_id = "hocus-dropdown"  # how its window is recognised
 height = 0.45              # share of the screen's height (0.2 to 0.9)
 
-[launcher]                 # what the launcher offers besides applications
+[launcher]                 # what the launcher offers besides applications (Settings → Search)
 calculator = true          # 2*21
 units = true               # 12 km in miles
 urls = true                # example.org
@@ -190,7 +190,7 @@ model = ""                 # empty: asked of the provider at the first question 
                            # keys are in the keyring, never here: Settings → AI and agents, or
                            #   hocus msg ai-key claude < key.txt
 
-[search]                   # documents found from the command field, under "Documents" (#45)
+[search]                   # documents found from the command field, under "Documents" (#45; Settings → Search)
 documents = true           # false: nothing is read, and the index kept is deleted
 folders = []               # e.g. ["~/Documents", "/srv/notes"]; empty: the documents, desktop and download
                            #   folders (XDG user dirs), in the session only: nested or in tests, only the
@@ -322,9 +322,10 @@ at the lowest priority (nice 19, which the I/O scheduler follows), in small
 batches with pauses between them, waits a minute after the session starts,
 waits while the laptop is on battery and goes on once on the charger, and
 looks at the folders again every half hour, reading only what changed (by
-date and size). Hidden files and folders are not searched; what is never
-read (see above) is not even opened, and symbolic links are never
-followed. The index (words, the start of each text for the line shown
+date and size); `hocus msg search-again` (or Search again now in the
+settings) looks at once. Hidden files and folders are not searched; what
+is never read (see above) is not even opened, and symbolic links are
+never followed. The index (words, the start of each text for the line shown
 under a result, vectors) is kept in `$XDG_STATE_HOME/hocuspanda/search/`,
 readable by the user only; `documents = false` deletes it. `hocus msg
 search` says what the indexer does.
@@ -335,7 +336,15 @@ what is typed in the command field once typing stops. With `meaning =
 "local"` (the default) that happens only when the provider is on this
 machine; `meaning = "on"` lets a provider elsewhere (OpenAI…) read them.
 Claude makes no vectors: with it, documents are searched by their words.
-The settings' Search page is a later part of #67.
+
+The settings' Search page edits `[search]` and `[launcher]`: documents on
+or off, the folders (typed, from `/` or `~/`; one inside a place never read
+is refused and the page says which place), the screenshots' text, the
+names left out, search by meaning (saying plainly, when it may go
+anywhere, that the start of every document and what is typed leave the
+machine) and its model, and the command field's other results with the
+web search's address. It shows what the indexer does: documents counted,
+paused on battery, when it last looked, with Search again now.
 
 ## Window rules
 

@@ -186,6 +186,35 @@ fn on_battery_the_indexer_waits_and_on_the_charger_it_runs() {
 }
 
 #[test]
+fn asked_again_the_folders_are_looked_at_before_the_half_hour() {
+    let dir = tempfile::tempdir().expect("a folder");
+    write(&dir.path().join("plan.txt"), b"Plant bamboo in spring.");
+    let run = start();
+    run.search.configure(settings(dir.path(), None));
+    run.wait("indexed", |s| s.phase == Phase::Ready && s.documents == 1);
+    write(
+        &dir.path().join("harvest.txt"),
+        b"Harvest the shoots in May.",
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(run.status().map(|s| s.documents), Some(1), "not before");
+    run.search.look_again();
+    run.wait("looked again", |s| {
+        s.phase == Phase::Ready && s.documents == 2
+    });
+    assert_eq!(run.find(1, "shoots"), ["harvest.txt"]);
+    // On battery, it waits for the charger even when asked.
+    write(&dir.path().join("rain.txt"), b"Rain in June.");
+    run.search.set_battery(true);
+    run.search.look_again();
+    run.wait("paused", |s| s.phase == Phase::Paused);
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(run.status().map(|s| s.documents), Some(2));
+    run.search.set_battery(false);
+    run.wait("on the charger", |s| s.documents == 3);
+}
+
+#[test]
 fn pdf_and_office_documents_are_found_by_their_words() {
     let dir = tempfile::tempdir().expect("a folder");
     write(

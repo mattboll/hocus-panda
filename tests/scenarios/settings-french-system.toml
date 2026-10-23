@@ -1,4 +1,4 @@
-description = "French chosen on Language and region: the System pages, AI and agents among them, speak it at once, without restart"
+description = "French chosen on Language and region: the System pages, AI and agents and Search among them, speak it at once, without restart"
 outputs = ["1280x800"]
 shell = true
 dbus = true
@@ -57,6 +57,21 @@ expect_settings = { label = "Fournisseur : ollama", selected = true }
 
 [[step]]
 expect_settings = { label = "ollama n’a pas besoin de clé." }
+
+[[step]]
+click_settings = "Recherche"
+
+[[step]]
+expect_settings = { label = "Chercher les documents", selected = true }
+
+[[step]]
+expect_settings = { label = "Aucun nommé : les dossiers Documents, Bureau et Téléchargements." }
+
+[[step]]
+expect_settings = { label = "Chercher par le sens : Sur cette machine", selected = true }
+
+[[step]]
+expect_settings = { label = "Calculatrice", selected = true }
 
 [[step]]
 click_settings = "Applications"

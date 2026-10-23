@@ -1,0 +1,206 @@
+# Search (#67): the documents found from the command field (#45) and what the
+# indexer does, its folders (one inside a place never read refused, and said
+# why; one of the private home added, then searched), the names it leaves
+# out, search by meaning (saying plainly what leaves the machine when it may
+# go anywhere), Search again now, and the command field's other results.
+description = "Search: the indexer's documents and last look; a folder never read refused and said why, one of the home added and its documents found; a name left out; meaning anywhere says what is sent; the calculator off; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+home = "../fixtures/search-home"
+
+[[step]]
+config = """
+[search]
+folders = ["{home}/Documents"]
+exclude = ["*.log"]
+"""
+
+[[step]]
+expect_search = { state = "ready", documents = 7 }
+
+[[step]]
+open_settings = { page = "search" }
+
+[[step]]
+expect_settings = { label = "Search documents", selected = true }
+
+[[step]]
+expect_settings = { label = "7 documents" }
+
+[[step]]
+expect_settings = { label = "Up to date · Last look just now" }
+
+[[step]]
+expect_settings = { label = "~/Documents" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-search-page.png" }
+
+# A folder inside a place never read: not added, and said why.
+[[step]]
+click_settings = "New folder to search"
+
+[[step]]
+type = "~/.ssh/notes"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_settings = { label = "Not added: ~/.ssh is never read; keys, passwords and browser profiles never are." }
+
+[[step]]
+expect_config_file = { lacks = [".ssh"] }
+
+# Escape forgets what was typed; one of the home is written, and its
+# document found once read.
+[[step]]
+keys = "escape"
+
+[[step]]
+click_settings = "New folder to search"
+
+[[step]]
+type = "{home}/Notes"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["/Documents\", \"", "/Notes\"]"] }
+
+[[step]]
+expect_settings = { label = "~/Notes" }
+
+[[step]]
+expect_settings = { label = "Not added: ~/.ssh is never read; keys, passwords and browser profiles never are.", shown = false }
+
+[[step]]
+expect_search = { state = "ready", documents = 8 }
+
+[[step]]
+expect_settings = { label = "8 documents" }
+
+[[step]]
+click_settings = "Search again now"
+
+[[step]]
+expect_search = { state = "ready", documents = 8 }
+
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "overnight"
+
+[[step]]
+expect_ui = { label = "Bamboo diary.md, in Notes: Bamboo diary The young shoots grew ten centimetres overnight after the rain." }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+click_settings = "Remove ~/Notes"
+
+[[step]]
+expect_config_file = { lacks = ["/Notes\""] }
+
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+scroll = 650
+
+[[step]]
+click_settings = "Name to leave out"
+
+[[step]]
+type = "drafts"
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_config_file = { contains = ["exclude = [\"*.log\", \"drafts\"]"] }
+
+[[step]]
+click_settings = "Search by meaning: Wherever the AI is"
+
+[[step]]
+expect_config_file = { contains = ["meaning = \"on\""] }
+
+[[step]]
+expect_settings = { label = "Wherever the AI is: the start of every document (a few thousand characters each), and what is typed in the command field, are sent to its provider, even when it is another company’s server." }
+
+[[step]]
+expect_settings = { label = "The AI is off: documents are found by their words." }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-search-page-meaning.png" }
+
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+scroll = 2000
+
+# The end, then back up to the command field's results.
+[[step]]
+scroll = -300
+
+[[step]]
+click_settings = "Calculator"
+
+[[step]]
+expect_config_file = { contains = ["[launcher]", "calculator = false"] }
+
+[[step]]
+expect_settings = { label = "Calculator", selected = false }
+
+[[step]]
+scroll = -3000
+
+# The same search, so that the indexer has nothing new to look at.
+[[step]]
+config = """
+[appearance]
+theme = "light"
+
+[search]
+folders = ["{home}/Documents"]
+exclude = ["*.log", "drafts"]
+meaning = "on"
+
+[launcher]
+calculator = false
+"""
+
+[[step]]
+expect_search = { state = "ready", documents = 7 }
+
+[[step]]
+expect_settings = { label = "Up to date · Last look just now" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-search-page-light.png" }

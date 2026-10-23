@@ -25,12 +25,14 @@ mod agents;
 mod hardware;
 mod map;
 mod personalise;
+mod search;
 mod system;
 mod work;
 
 use hardware::HardwarePage;
 pub use hardware::{BluetoothAction, Listed, Pairing, Secret, WifiAction};
 use personalise::WallpaperPage;
+use search::SearchPage;
 use system::SystemPage;
 use work::{Field, Fields};
 
@@ -96,6 +98,9 @@ pub enum Outcome {
     Bluetooth(BluetoothAction),
     /// The passkey the pairing asked about is the device's, or not.
     PairingAnswer(bool),
+    /// The document search's folders looked at again now, through the
+    /// compositor.
+    SearchAgain,
 }
 
 /// What a node does when clicked.
@@ -168,6 +173,7 @@ enum Target {
     PairingAnswer(bool),
     /// The world map: the city nearest the pointer gives the zone.
     Map,
+    SearchAgain,
 }
 
 /// Which of a screen's choices are open.
@@ -401,6 +407,7 @@ pub struct SettingsView {
     fields: Fields,
     hardware: HardwarePage,
     system: SystemPage,
+    search: SearchPage,
     /// Why the system did not take the time zone chosen last.
     zone_refused: Option<String>,
     /// The time zones' places, for the map; none without the database.
@@ -487,6 +494,7 @@ impl SettingsView {
             fields: Fields::default(),
             hardware: HardwarePage::default(),
             system: SystemPage::default(),
+            search: SearchPage::default(),
             zone_refused: None,
             places: Default::default(),
             map: None,
@@ -519,6 +527,7 @@ impl SettingsView {
         if ctx.config != self.ctx.config {
             self.fields.leave();
             self.system.bad_address = false;
+            self.search.leave();
         }
         // The settings read these themselves, not the compositor.
         ctx.apps = std::mem::take(&mut self.ctx.apps);
@@ -608,6 +617,7 @@ impl SettingsView {
             self.system.openai_like = false;
             self.system.bad_address = false;
             self.hardware.leave();
+            self.search.leave();
         }
         self.screen = screen;
         self.typing = screen == Screen::Home;
@@ -1052,6 +1062,7 @@ impl SettingsView {
                         out.push(Outcome::PairingAnswer(yes));
                     }
                     Some(Target::Map) => out.extend(self.map_clicked()),
+                    Some(Target::SearchAgain) => out.push(Outcome::SearchAgain),
                     Some(Target::SetZone(zone)) => {
                         self.zone_refused = None;
                         self.dirty = true;
@@ -1759,7 +1770,7 @@ impl SettingsView {
             Page::Notifications => self.notifications(theme, body),
             Page::Apps => self.apps(theme, body),
             Page::Agents => self.agents(theme, body),
-            Page::Search => {}
+            Page::Search => self.search_page(theme, body),
         }
     }
 
@@ -5091,5 +5102,161 @@ mod tests {
         );
         let out = click(&mut v, "Circle to ask");
         assert_eq!(changes(&out), [("enabled".into(), Some("false".into()))]);
+    }
+
+    fn search_view(toml: &str) -> SettingsView {
+        let mut v = page_view(toml, Page::Search, &[]);
+        let mut ctx = v.context().clone();
+        ctx.home = Some("/home/alex".into());
+        ctx.search = hocus_api::SearchInfo {
+            state: "ready".into(),
+            documents: 8,
+            never_read: 3,
+            last_look_seconds: Some(300),
+            ..Default::default()
+        };
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        v
+    }
+
+    fn type_in(v: &mut SettingsView, field: &str, text: &str) -> Vec<Outcome> {
+        click(v, field);
+        let node = v
+            .tree
+            .focused()
+            .unwrap_or_else(|| panic!("{field} has no keyboard:\n{}", v.access().dump()));
+        for _ in 0..v.tree.field_value(node).map_or(0, |t| t.chars().count()) {
+            v.key(Key::Backspace);
+        }
+        v.text(text);
+        let out = v.key(Key::Enter);
+        v.draw(Duration::ZERO);
+        out
+    }
+
+    #[test]
+    fn search_s_folders_are_added_unless_never_read_and_its_state_shows() {
+        use crate::edit::Place;
+        let mut v = search_view("[search]\nfolders = [\"~/Notes\"]\n");
+        assert!(find(&v.access(), "8 documents").is_some());
+        assert!(find(&v.access(), "Up to date · Last look 5 min ago").is_some());
+        assert!(find(&v.access(), "3 never read").is_some());
+        let out = click(&mut v, "Search again now");
+        assert!(matches!(out.as_slice(), [Outcome::SearchAgain]), "{out:?}");
+        let out = click(&mut v, "Search documents");
+        assert_eq!(changes(&out), [("documents".into(), Some("false".into()))]);
+        // Inside a place never read: not added, and said why.
+        let out = type_in(&mut v, "New folder to search", "~/.config/gcloud/work");
+        assert!(out.is_empty(), "{out:?}");
+        let why = "Not added: ~/.config/gcloud is never read; keys, passwords and browser profiles never are.";
+        assert!(find(&v.access(), why).is_some(), "{}", v.access().dump());
+        let field = v.fields.node(&Field::NewSearchFolder).expect("the field");
+        assert_eq!(v.tree.field_value(field), Some("~/.config/gcloud/work"));
+        let out = type_in(&mut v, "New folder to search", "/srv/docs/");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Section("search"),
+                "folders".into(),
+                Some("[\"~/Notes\", \"/srv/docs\"]".into())
+            )]
+        );
+        let out = type_in(&mut v, "New folder to search", "~/Notes/");
+        assert!(out.is_empty());
+        assert!(find(&v.access(), "Not added: it is searched already.").is_some());
+        // The last one removed: the key goes, the usual folders come back.
+        let out = click(&mut v, "Remove ~/Notes");
+        assert_eq!(changes(&out), [("folders".into(), None)]);
+        let out = click(&mut v, "Screenshots’ text");
+        assert_eq!(
+            changes(&out),
+            [("screenshots".into(), Some("false".into()))]
+        );
+        let mut ctx = v.context().clone();
+        ctx.search.state = "paused".into();
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Search again now").expect("it").disabled);
+        assert!(
+            find(
+                &v.access(),
+                "Paused on battery: it goes on once on the charger · Last look 5 min ago"
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn names_left_out_meaning_and_the_command_field_s_results_are_set() {
+        let mut v = search_view("");
+        v.scroll(500.0);
+        v.draw(Duration::ZERO);
+        let out = type_in(&mut v, "Name to leave out", "drafts/old");
+        assert!(out.is_empty());
+        assert!(find(&v.access(), "Not added: a name, without /.").is_some());
+        let out = type_in(&mut v, "Name to leave out", "*.log");
+        assert_eq!(
+            changes(&out),
+            [("exclude".into(), Some("[\"*.log\"]".into()))]
+        );
+        // Words only for now, and why.
+        assert!(
+            find(
+                &v.access(),
+                "The AI is off: documents are found by their words."
+            )
+            .is_some()
+        );
+        assert!(
+            find(&v.access(), "Search by meaning: On this machine")
+                .expect("it")
+                .selected
+        );
+        let out = click(&mut v, "Search by meaning: Wherever the AI is");
+        assert_eq!(changes(&out), [("meaning".into(), Some("\"on\"".into()))]);
+        with_config(
+            &mut v,
+            "[search]\nmeaning = \"on\"\n\n[ai]\nenabled = true\nprovider = \"openai\"\n",
+            None,
+        );
+        let sent = "Wherever the AI is: the start of every document (a few thousand characters each), and what is typed in the command field, are sent to its provider, even when it is another company’s server.";
+        assert!(find(&v.access(), sent).is_some());
+        let out = type_in(&mut v, "Embedding model", "nomic-embed-text");
+        assert_eq!(
+            changes(&out),
+            [(
+                "embedding_model".into(),
+                Some("\"nomic-embed-text\"".into())
+            )]
+        );
+        with_config(&mut v, "[search]\nmeaning = \"off\"\n", None);
+        assert!(find(&v.access(), sent).is_none());
+        assert!(find(&v.access(), "Embedding model").is_none());
+        v.scroll(2000.0);
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Calculator");
+        assert_eq!(changes(&out), [("calculator".into(), Some("false".into()))]);
+        let out = type_in(&mut v, "Search engine address", "https://example.org/?q=");
+        assert!(out.is_empty());
+        assert!(
+            find(
+                &v.access(),
+                "Not written: an http(s) address with {} where the words go."
+            )
+            .is_some()
+        );
+        let out = type_in(&mut v, "Search engine address", "https://example.org/?q={}");
+        assert!(
+            matches!(&out[..], [Outcome::Change(c)] if c.place == crate::edit::Place::Section("launcher")),
+            "{out:?}"
+        );
+        assert_eq!(
+            changes(&out),
+            [(
+                "search_engine".into(),
+                Some("\"https://example.org/?q={}\"".into())
+            )]
+        );
     }
 }

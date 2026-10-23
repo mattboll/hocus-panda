@@ -98,8 +98,8 @@ pub struct Scenario {
     pub child_env: Option<std::collections::BTreeMap<String, String>>,
     /// A home of the scenario's own: this folder (relative to the
     /// scenario) copied into a fresh temporary directory, `{home}` in
-    /// configuration and `unreadable` steps. Documents are searched there,
-    /// never in the developer's.
+    /// configuration, `type` and `unreadable` steps. Documents are searched
+    /// there, never in the developer's; it is the settings app's home.
     pub home: Option<PathBuf>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
@@ -2024,6 +2024,9 @@ impl Run<'_> {
                 if let Some(ai) = &self.ai {
                     text = text.replace("{ai}", ai.url());
                 }
+                if let Some(home) = &self.home {
+                    text = text.replace("{home}", &home.path().to_string_lossy());
+                }
                 self.type_text(&text)
             }
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
@@ -2993,6 +2996,8 @@ impl Run<'_> {
             // The scenarios' own copy of the zones' places: the map draws
             // the same wherever the tests run.
             zoneinfo: self.scenario.dir.join("zoneinfo"),
+            // The scenario's own home, never the developer's.
+            home: self.home.as_ref().map(|h| h.path().to_owned()),
         })?;
         self.settings = Some(running);
         let deadline = Instant::now() + CLIENT_TIMEOUT;

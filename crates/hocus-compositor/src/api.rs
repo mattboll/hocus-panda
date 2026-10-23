@@ -273,6 +273,10 @@ impl App {
             },
             Request::Ai => Reply::Ai(state.ai_info()),
             Request::Search => Reply::Search(state.search_info()),
+            Request::SearchAgain => {
+                state.search_again();
+                Reply::Done
+            }
             Request::Updates => Reply::Updates(state.updates_info()),
             Request::InstallUpdates => {
                 state.install_updates();

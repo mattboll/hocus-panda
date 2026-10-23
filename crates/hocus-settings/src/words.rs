@@ -1796,13 +1796,247 @@ pub fn of_herdr(what: Words, socket: &str, lang: Lang) -> String {
 
 /// "Remove web.sock".
 pub fn remove_herdr(socket: &str, lang: Lang) -> String {
-    match lang {
-        Lang::En => format!("Remove {socket}"),
-        Lang::Fr => format!("Retirer {socket}"),
-    }
+    remove_named(socket, lang)
 }
 
 /// "2 herdr".
 pub fn herdr_count(n: usize) -> String {
     format!("{n} herdr")
+}
+
+// Search.
+pub const DOCUMENTS: Words = Words::new("Documents", "Documents");
+pub const SEARCH_DOCUMENTS: Words = Words::new("Search documents", "Chercher les documents");
+pub const SEARCH_DOCUMENTS_SUB: Words = Words::new(
+    "Found from the command field, under “Documents”",
+    "Trouvés depuis le champ de commande, sous « Documents »",
+);
+pub const DOCUMENTS_OFF: Words = Words::new("Documents off", "Documents désactivés");
+pub const SECRETS_NEVER_READ: Words = Words::new(
+    "Documents · secrets never read",
+    "Documents · secrets jamais lus",
+);
+pub const ON_BATTERY_SHORT: Words = Words::new("On battery", "Sur batterie");
+pub const INDEX_OFF: Words = Words::new(
+    "Off: nothing is read, and no index is kept",
+    "Désactivée : rien n’est lu, aucun index n’est gardé",
+);
+pub const INDEX_WAITING: Words = Words::new("Waiting to look", "En attente");
+pub const INDEX_PAUSED: Words = Words::new(
+    "Paused on battery: it goes on once on the charger",
+    "En pause sur batterie : reprend une fois sur le chargeur",
+);
+pub const INDEX_LOOKING: Words = Words::new("Looking at the folders…", "Parcours des dossiers…");
+pub const INDEX_READY: Words = Words::new("Up to date", "À jour");
+pub const NOT_LOOKED_YET: Words = Words::new("Not looked at yet", "Pas encore parcourus");
+pub const SEARCH_AGAIN: Words = Words::new("Search again now", "Parcourir maintenant");
+pub const DOCUMENTS_NOTE: Words = Words::new(
+    "Text, Markdown, HTML, PDF and office files. Read at the lowest priority, paused on battery, looked at again every half hour: only what changed is read.",
+    "Texte, Markdown, HTML, PDF et fichiers bureautiques. Lus à la priorité la plus basse, en pause sur batterie, parcourus de nouveau toutes les demi-heures : seul ce qui a changé est lu.",
+);
+pub const FOLDERS_SEARCHED: Words = Words::new("Folders searched", "Dossiers parcourus");
+pub const USUAL_FOLDERS: Words = Words::new(
+    "None named: the Documents, Desktop and Downloads folders.",
+    "Aucun nommé : les dossiers Documents, Bureau et Téléchargements.",
+);
+pub const NEW_FOLDER: Words = Words::new("New folder to search", "Nouveau dossier à parcourir");
+pub const NEW_FOLDER_HINT: Words = Words::new(
+    "~/Notes or /srv/docs, then Enter",
+    "~/Notes ou /srv/docs, puis Entrée",
+);
+pub const ADD_FOLDER: Words = Words::new("Add the folder", "Ajouter le dossier");
+pub const NOT_A_FULL_PATH: Words = Words::new(
+    "Not added: a full path, from / or ~/.",
+    "Non ajouté : un chemin complet, depuis / ou ~/.",
+);
+pub const ALREADY_SEARCHED: Words = Words::new(
+    "Not added: it is searched already.",
+    "Non ajouté : il est déjà parcouru.",
+);
+pub const SCREENSHOTS_TEXT: Words = Words::new("Screenshots’ text", "Texte des captures");
+pub const SCREENSHOTS_TEXT_SUB: Words = Words::new(
+    "The screenshots folder’s pictures, read by OCR",
+    "Les images du dossier des captures, lues par OCR",
+);
+pub const NEVER_READ_NOTE: Words = Words::new(
+    "Never read, whatever is named here: ~/.ssh, ~/.gnupg, keyrings, password stores, browser and mail profiles, cloud credentials, .env files, keys and certificates. Hidden folders are skipped and links are not followed.",
+    "Jamais lus, quoi qu’on nomme ici : ~/.ssh, ~/.gnupg, les trousseaux, les gestionnaires de mots de passe, les profils de navigateur et de courriel, les identifiants de cloud, les fichiers .env, les clés et les certificats. Les dossiers cachés sont ignorés, les liens ne sont pas suivis.",
+);
+pub const LEFT_OUT: Words = Words::new("Left out", "Laissés de côté");
+pub const NOTHING_LEFT_OUT: Words = Words::new(
+    "Nothing besides what is never read.",
+    "Rien d’autre que ce qui n’est jamais lu.",
+);
+pub const NEW_EXCLUDE: Words = Words::new("Name to leave out", "Nom à laisser de côté");
+pub const NEW_EXCLUDE_HINT: Words = Words::new(
+    "*.log or drafts, then Enter",
+    "*.log ou brouillons, puis Entrée",
+);
+pub const ADD_EXCLUDE: Words = Words::new("Leave the name out", "Laisser le nom de côté");
+pub const EXCLUDE_NOTE: Words = Words::new(
+    "A file’s or a folder’s name; * stands for any letters, ? for one.",
+    "Le nom d’un fichier ou d’un dossier ; * remplace des lettres, ? une seule.",
+);
+pub const NOT_A_NAME: Words = Words::new(
+    "Not added: a name, without /.",
+    "Non ajouté : un nom, sans /.",
+);
+pub const MEANING: Words = Words::new("Search by meaning", "Chercher par le sens");
+pub const MEANING_OFF: Words = Words::new("Words only", "Les mots seulement");
+pub const MEANING_LOCAL: Words = Words::new("On this machine", "Sur cette machine");
+pub const MEANING_ON: Words = Words::new("Wherever the AI is", "Où que soit l’IA");
+pub const MEANING_NOTE: Words = Words::new(
+    "Documents are found by what they mean too, through vectors from the AI of “AI and agents”. On this machine, nothing leaves it.",
+    "Les documents sont trouvés aussi par ce qu’ils veulent dire, grâce aux vecteurs de l’IA d’« IA et agents ». Sur cette machine, rien n’en sort.",
+);
+pub const MEANING_SENT: Words = Words::new(
+    "Wherever the AI is: the start of every document (a few thousand characters each), and what is typed in the command field, are sent to its provider, even when it is another company’s server.",
+    "Où que soit l’IA : le début de chaque document (quelques milliers de caractères chacun) et ce qui est tapé dans le champ de commande sont envoyés à son fournisseur, même quand c’est le serveur d’une autre entreprise.",
+);
+pub const MEANING_AI_OFF: Words = Words::new(
+    "The AI is off: documents are found by their words.",
+    "L’IA est désactivée : les documents sont trouvés par leurs mots.",
+);
+pub const MEANING_CLAUDE: Words = Words::new(
+    "Claude makes no vectors: documents are found by their words.",
+    "Claude ne fait pas de vecteurs : les documents sont trouvés par leurs mots.",
+);
+pub const MEANING_NOT_HERE: Words = Words::new(
+    "The AI is not on this machine: documents are found by their words.",
+    "L’IA n’est pas sur cette machine : les documents sont trouvés par leurs mots.",
+);
+pub const EMBEDDING_MODEL: Words = Words::new("Embedding model", "Modèle de vecteurs");
+pub const EMBEDDING_HINT: Words = Words::new(
+    "Empty: the first with “embed” in its name",
+    "Vide : le premier avec « embed » dans son nom",
+);
+pub const EMBEDDING_NOTE: Words = Words::new(
+    "nomic-embed-text, mxbai-embed-large…; with none, words only. Enter writes it.",
+    "nomic-embed-text, mxbai-embed-large… ; sans, les mots seulement. Entrée l’enregistre.",
+);
+pub const ALSO_OFFERED: Words = Words::new(
+    "Also in the command field",
+    "Aussi dans le champ de commande",
+);
+pub const CALCULATOR: Words = Words::new("Calculator", "Calculatrice");
+pub const CALCULATOR_SUB: Words = Words::new("2*21 as you type", "2*21 pendant la frappe");
+pub const UNITS: Words = Words::new("Units", "Unités");
+pub const UNITS_SUB: Words = Words::new("12 km in miles", "12 km en miles");
+pub const URLS: Words = Words::new("Addresses", "Adresses");
+pub const URLS_SUB: Words = Words::new(
+    "example.org, in the browser",
+    "example.org, dans le navigateur",
+);
+pub const WEB_SEARCH: Words = Words::new("Web search", "Recherche sur le web");
+pub const WEB_SEARCH_SUB: Words = Words::new("Always last", "Toujours en dernier");
+pub const LARGE_TYPE: Words = Words::new("Large type", "Grand texte");
+pub const LARGE_TYPE_SUB: Words = Words::new("large <words>", "grand <mots>");
+pub const QR_CODE: Words = Words::new("QR code", "Code QR");
+pub const QR_CODE_SUB: Words = Words::new("qr <words>", "qr <mots>");
+pub const REQUESTS: Words = Words::new("Requests", "Demandes");
+pub const REQUESTS_SUB: Words = Words::new(
+    "Understood offline, confirmed first",
+    "Comprises hors ligne, confirmées d’abord",
+);
+pub const SEARCH_ENGINE: Words = Words::new("Search engine", "Moteur de recherche");
+pub const ENGINE_ADDRESS: Words =
+    Words::new("Search engine address", "Adresse du moteur de recherche");
+pub const SEARCH_ENGINE_HINT: Words =
+    Words::new("https://…?q={}, then Enter", "https://…?q={}, puis Entrée");
+pub const SEARCH_ENGINE_NOTE: Words = Words::new(
+    "{} is where the words go. Enter writes it.",
+    "{} marque la place des mots. Entrée l’enregistre.",
+);
+pub const BAD_ENGINE: Words = Words::new(
+    "Not written: an http(s) address with {} where the words go.",
+    "Non enregistrée : une adresse http(s) avec {} à la place des mots.",
+);
+pub const ALWAYS_OFFERED: Words = Words::new(
+    "Applications and actions are always offered.",
+    "Les applications et les actions sont toujours proposées.",
+);
+
+/// "1 document", "1204 documents".
+pub fn documents(n: u64, lang: Lang) -> String {
+    match (lang, n) {
+        (Lang::En, 0) => "No document".into(),
+        (Lang::En, 1) => "1 document".into(),
+        (Lang::En, n) => format!("{n} documents"),
+        (Lang::Fr, 0) => "Aucun document".into(),
+        (Lang::Fr, 1) => "1 document".into(),
+        (Lang::Fr, n) => format!("{n} documents"),
+    }
+}
+
+/// When the folders were last looked at: "Last look 5 min ago".
+pub fn last_look(seconds: Option<u64>, lang: Lang) -> String {
+    let Some(s) = seconds else {
+        return NOT_LOOKED_YET.get(lang).to_owned();
+    };
+    let nb = match lang {
+        Lang::En => " ",
+        Lang::Fr => "\u{a0}",
+    };
+    let ago = match (s / 60, s / 3600, s / 86_400) {
+        (0, _, _) => None,
+        (m, 0, _) => Some(format!("{m}{nb}min")),
+        (_, h, 0..=1) => Some(format!("{h}{nb}h")),
+        (_, _, d) => Some(match lang {
+            Lang::En => format!("{d} days"),
+            Lang::Fr => format!("{d}{nb}jours"),
+        }),
+    };
+    match (lang, ago) {
+        (Lang::En, None) => "Last look just now".into(),
+        (Lang::En, Some(ago)) => format!("Last look {ago} ago"),
+        (Lang::Fr, None) => "Dernier parcours à l’instant".into(),
+        (Lang::Fr, Some(ago)) => format!("Dernier parcours il y a {ago}"),
+    }
+}
+
+/// "12 with their meaning".
+pub fn with_meaning(n: u64, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("{n} with their meaning"),
+        Lang::Fr => format!("{n} avec leur sens"),
+    }
+}
+
+/// "3 never read".
+pub fn never_read(n: u64, lang: Lang) -> String {
+    match (lang, n) {
+        (Lang::En, n) => format!("{n} never read"),
+        (Lang::Fr, 1) => "1 jamais lu".into(),
+        (Lang::Fr, n) => format!("{n} jamais lus"),
+    }
+}
+
+/// "1 unreadable".
+pub fn unreadable(n: u64, lang: Lang) -> String {
+    match (lang, n) {
+        (Lang::En, n) => format!("{n} unreadable"),
+        (Lang::Fr, 1) => "1 illisible".into(),
+        (Lang::Fr, n) => format!("{n} illisibles"),
+    }
+}
+
+/// "Not added: ~/.ssh is never read; keys, passwords and browser profiles
+/// never are."
+pub fn never_read_place(place: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!(
+            "Not added: {place} is never read; keys, passwords and browser profiles never are."
+        ),
+        Lang::Fr => format!(
+            "Non ajouté : {place} n’est jamais lu ; clés, mots de passe et profils de navigateur ne le sont jamais."
+        ),
+    }
+}
+
+/// "Remove ~/Notes".
+pub fn remove_named(name: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Remove {name}"),
+        Lang::Fr => format!("Retirer {name}"),
+    }
 }

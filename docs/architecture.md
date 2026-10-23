@@ -538,7 +538,13 @@ without unlocking leaves our lock screen: a crash never unlocks.
   (`ai_secret`), never to the file; `ai` says which providers have one,
   never the keys, and the `ai` event when that changes. Its button stops
   or allows every MCP agent (`set_agents_stopped`) as the stop key does,
-  and the `agents_stopped` event tells it.
+  and the `agents_stopped` event tells it. Its Search page reads what the
+  document indexer does (`search`: counts and when it last looked, never a
+  document) when the `search` event says its state changed, and every two
+  seconds on a thread of its own while the page shows; Search again now
+  is `search_again`. A folder typed there is checked against
+  `search::deny` by its words alone (the settings never open it), and
+  refused with the place never read named.
   What is not the compositor's it asks itself, on threads of its own: the
   system's time zone (timedated), the account's name, picture and
   fingerprints (AccountsService, fprintd) on the system bus; the default

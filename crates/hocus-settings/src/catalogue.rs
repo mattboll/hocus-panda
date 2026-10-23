@@ -154,6 +154,7 @@ impl Page {
                 | Self::Notifications
                 | Self::Apps
                 | Self::Agents
+                | Self::Search
                 | Self::About
                 | Self::Welcome
         )
@@ -382,6 +383,20 @@ impl Page {
                 "autostart",
                 "démarrage",
                 "mimeapps",
+            ],
+            Search => &[
+                "documents",
+                "files",
+                "fichiers",
+                "index",
+                "indexer",
+                "pdf",
+                "ocr",
+                "semantic",
+                "sémantique",
+                "embeddings",
+                "launcher",
+                "lanceur",
             ],
             Accounts => &[
                 "calendar",
@@ -652,6 +667,22 @@ impl Page {
                 AppsState::Unknown => words::DEFAULT_APPS.get(lang).to_owned(),
             },
             Self::Accounts => words::calendars(ctx.config.calendars.len(), lang),
+            Self::Search => {
+                let info = &ctx.search;
+                if !ctx.config.search.documents {
+                    words::DOCUMENTS_OFF.get(lang).to_owned()
+                } else if info.state.is_empty() || info.state == "off" {
+                    words::SECRETS_NEVER_READ.get(lang).to_owned()
+                } else if info.state == "paused" {
+                    format!(
+                        "{} · {}",
+                        words::documents(info.documents, lang),
+                        words::ON_BATTERY_SHORT.get(lang)
+                    )
+                } else {
+                    words::documents(info.documents, lang)
+                }
+            }
             Self::Agents => {
                 let ai = &ctx.config.ai;
                 let mut said = vec![if ai.enabled {
@@ -812,6 +843,11 @@ pub struct Context {
     pub ai: hocus_api::AiInfo,
     /// Every MCP agent is stopped, for AI and agents.
     pub agents_stopped: bool,
+    /// What the document search's indexer does, for Search.
+    pub search: hocus_api::SearchInfo,
+    /// The user's home, for the folders typed on Search: `~/` and the
+    /// places never read under it.
+    pub home: Option<std::path::PathBuf>,
 }
 
 /// The default applications and autostart entries, as the XDG files say.
@@ -903,6 +939,13 @@ pub enum Setting {
     JournalText,
     StopAgents,
     Circle,
+    Documents,
+    SearchFolders,
+    SearchScreenshots,
+    SearchExclude,
+    SearchMeaning,
+    Calculator,
+    WebSearch,
 }
 
 impl Setting {
@@ -949,6 +992,13 @@ impl Setting {
             | Self::JournalText
             | Self::StopAgents
             | Self::Circle => Page::Agents,
+            Self::Documents
+            | Self::SearchFolders
+            | Self::SearchScreenshots
+            | Self::SearchExclude
+            | Self::SearchMeaning
+            | Self::Calculator
+            | Self::WebSearch => Page::Search,
         }
     }
 }
@@ -1380,6 +1430,7 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
     out.extend(hardware_entries(ctx, lang));
     out.extend(system_entries(ctx, lang));
     out.extend(agents_entries(ctx, lang));
+    out.extend(search_entries(ctx, lang));
     for (combo, action) in &ctx.config.shortcuts().bindings {
         let combo = combo.to_string();
         let (label, _, _) = words::action(action, lang);
@@ -1761,6 +1812,103 @@ fn agents_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String
     ]
 }
 
+/// The Search page's settings.
+fn search_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, String)> {
+    let s = &ctx.config.search;
+    let l = &ctx.config.launcher;
+    let both = |w: Words| vec![w.en.to_owned(), w.fr.to_owned()];
+    let words = |list: &[&str]| list.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+    let meaning = match s.meaning {
+        hocus_core::config::Meaning::Off => words::MEANING_OFF,
+        hocus_core::config::Meaning::Local => words::MEANING_LOCAL,
+        hocus_core::config::Meaning::On => words::MEANING_ON,
+    };
+    vec![
+        (
+            Setting::Documents,
+            words::SEARCH_DOCUMENTS.get(lang).to_owned(),
+            [
+                both(words::SEARCH_DOCUMENTS),
+                both(words::DOCUMENTS),
+                words(&["index", "indexer", "files", "fichiers", "pdf"]),
+            ]
+            .concat(),
+            Page::Search.summary(ctx, lang),
+        ),
+        (
+            Setting::SearchFolders,
+            words::FOLDERS_SEARCHED.get(lang).to_owned(),
+            [
+                both(words::FOLDERS_SEARCHED),
+                words(&["folders", "dossiers", "directories", "répertoires"]),
+            ]
+            .concat(),
+            s.folders.join(", "),
+        ),
+        (
+            Setting::SearchScreenshots,
+            words::SCREENSHOTS_TEXT.get(lang).to_owned(),
+            [
+                both(words::SCREENSHOTS_TEXT),
+                words(&["ocr", "tesseract", "text in pictures", "texte des images"]),
+            ]
+            .concat(),
+            on_off(s.screenshots, lang),
+        ),
+        (
+            Setting::SearchExclude,
+            words::LEFT_OUT.get(lang).to_owned(),
+            [
+                both(words::LEFT_OUT),
+                words(&["exclude", "exclure", "ignore", "ignorer", "glob"]),
+            ]
+            .concat(),
+            s.exclude.join(", "),
+        ),
+        (
+            Setting::SearchMeaning,
+            words::MEANING.get(lang).to_owned(),
+            [
+                both(words::MEANING),
+                both(words::EMBEDDING_MODEL),
+                words(&[
+                    "semantic",
+                    "sémantique",
+                    "embeddings",
+                    "vectors",
+                    "vecteurs",
+                    "meaning",
+                    "sens",
+                ]),
+            ]
+            .concat(),
+            meaning.get(lang).to_owned(),
+        ),
+        (
+            Setting::Calculator,
+            words::CALCULATOR.get(lang).to_owned(),
+            [
+                both(words::CALCULATOR),
+                both(words::UNITS),
+                words(&["calc", "math", "maths", "conversion"]),
+            ]
+            .concat(),
+            on_off(l.calculator, lang),
+        ),
+        (
+            Setting::WebSearch,
+            words::WEB_SEARCH.get(lang).to_owned(),
+            [
+                both(words::WEB_SEARCH),
+                both(words::SEARCH_ENGINE),
+                words(&["duckduckgo", "google", "qwant", "moteur"]),
+            ]
+            .concat(),
+            on_off(l.web_search, lang),
+        ),
+    ]
+}
+
 /// What `query` finds, the best first: a setting's own name beats its
 /// synonyms, which beat its value; pages are found by name too.
 pub fn search(query: &str, ctx: &Context, lang: Lang) -> Vec<Hit> {
@@ -2014,6 +2162,34 @@ mod tests {
             }],
         });
         assert_eq!(Page::Apps.summary(&c, Lang::En), "Firefox · 1 at start");
+    }
+
+    #[test]
+    fn the_search_page_is_found_and_its_tile_says_what_is_in_effect() {
+        let hits = search("calculatrice", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::Calculator), "{hits:?}");
+        let hits = search("semantic", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::SearchMeaning), "{hits:?}");
+        let hits = search("dossiers parcourus", &ctx(), Lang::Fr);
+        assert_eq!(hits[0].setting, Some(Setting::SearchFolders), "{hits:?}");
+        let hits = search("duckduckgo", &ctx(), Lang::En);
+        assert_eq!(hits[0].setting, Some(Setting::WebSearch), "{hits:?}");
+        let hits = search("recherche", &ctx(), Lang::Fr);
+        assert!(hits.iter().any(|h| h.page == Page::Search), "{hits:?}");
+        assert!(Page::Search.available());
+        let mut c = ctx();
+        assert_eq!(
+            Page::Search.summary(&c, Lang::Fr),
+            "Documents · secrets jamais lus"
+        );
+        c.search.state = "paused".into();
+        c.search.documents = 12;
+        assert_eq!(
+            Page::Search.summary(&c, Lang::En),
+            "12 documents · On battery"
+        );
+        c.config.search.documents = false;
+        assert_eq!(Page::Search.summary(&c, Lang::En), "Documents off");
     }
 
     #[test]

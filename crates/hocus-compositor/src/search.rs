@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use hocus_core::config::{Meaning, PowerSource};
 use hocus_platform::{
     ai::Embedder,
-    search::{Folder, News, Root, Search, Settings, Status},
+    search::{Folder, News, Phase, Root, Search, Settings, Status},
 };
 use smithay::reexports::calloop::{LoopHandle, channel};
 
@@ -33,6 +33,8 @@ pub struct SearchState {
     /// The configuration generation the settings follow.
     from: u64,
     pub status: Status,
+    /// When the last look at the folders ended, on the compositor's clock.
+    last_look: Option<std::time::Duration>,
 }
 
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<&Path>) {
@@ -213,7 +215,11 @@ impl State {
     fn search_news(&mut self, news: News) {
         match news {
             News::Status(status) => {
-                if status.phase != self.search.status.phase {
+                if status.phase == Phase::Ready && self.search.status.phase != Phase::Ready {
+                    self.search.last_look = Some(self.clock.now());
+                }
+                let moved = status.phase != self.search.status.phase;
+                if moved {
                     tracing::info!(
                         phase = status.phase.as_str(),
                         documents = status.documents,
@@ -221,6 +227,10 @@ impl State {
                     );
                 }
                 self.search.status = status;
+                if moved {
+                    let state = self.search.status.phase.as_str().to_owned();
+                    self.emit(|_| hocus_api::Event::Search { state });
+                }
             }
             News::Found { id, hits } => {
                 let documents = hits
@@ -244,6 +254,14 @@ impl State {
         }
     }
 
+    /// The folders looked at again now (`search_again`), as the settings'
+    /// button asks.
+    pub fn search_again(&self) {
+        if let Some(service) = &self.search.service {
+            service.look_again();
+        }
+    }
+
     /// Documents can be searched.
     pub fn search_running(&self) -> bool {
         self.search.service.is_some()
@@ -259,6 +277,10 @@ impl State {
             never_read: s.denied as u64,
             unreadable: s.unreadable as u64,
             meaning: s.meaning,
+            last_look_seconds: self
+                .search
+                .last_look
+                .map(|at| self.clock.now().saturating_sub(at).as_secs()),
         }
     }
 }

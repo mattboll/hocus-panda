@@ -55,8 +55,9 @@ config_dirs = ["../fixtures/system/config"]
 # (PATH is added when missing; {scenario_dir} for stand-in programs)
 child_env = { LD_PRELOAD = "/tmp/not-a-library.so" }
 # A home of its own: this folder (relative to the scenario) copied into a
-# fresh temporary directory, {home} in configuration and `unreadable` steps;
-# documents are searched there, never in the developer's
+# fresh temporary directory, {home} in configuration, `type` and `unreadable`
+# steps; documents are searched there, never in the developer's, and it is
+# the settings app's home
 home = "../fixtures/search-home"
 
 [[step]]

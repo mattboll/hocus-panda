@@ -103,6 +103,9 @@ pub enum Request {
     /// What the document search's indexer does (#45): never the
     /// documents themselves.
     Search,
+    /// Its folders looked at again now, not at the next half hour (#67):
+    /// what changed is read, nothing while on battery.
+    SearchAgain,
     /// System updates waiting, and whether they are being looked for or
     /// installed (#84).
     Updates,
@@ -281,6 +284,8 @@ impl Request {
             | Self::Ai
             // Counts only, never a document.
             | Self::Search
+            // The user's own folders, read as they are every half hour.
+            | Self::SearchAgain
             | Self::Updates
             // The system asks for the password itself.
             | Self::InstallUpdates
@@ -645,6 +650,10 @@ pub struct SearchInfo {
     pub unreadable: u64,
     /// Search by meaning works.
     pub meaning: bool,
+    /// Seconds since the last look at the folders ended; `None` before
+    /// the first.
+    #[serde(default)]
+    pub last_look_seconds: Option<u64>,
 }
 
 /// What the session knows of the AI providers (#67): which have a key
@@ -1166,6 +1175,12 @@ pub enum Event {
     AgentsStopped {
         stopped: bool,
     },
+    /// The document search's indexer went from one state to another
+    /// (#67), as `Request::Search` says it: `off`, `waiting`, `paused`,
+    /// `indexing` or `ready`.
+    Search {
+        state: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1457,6 +1472,7 @@ mod tests {
             Request::SetAgentsStopped { stopped: false },
             Request::Ai,
             Request::Search,
+            Request::SearchAgain,
         ] {
             assert!(!request.agents_may(), "{request:?}");
         }
