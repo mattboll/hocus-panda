@@ -158,6 +158,7 @@ fn summary_shown_at(late_frames: u32) -> anyhow::Result<Duration> {
         polkit_helper: None,
         motion: false,
         first_run: false,
+        google_caldav: None,
     })?;
     let stop = Arc::new(AtomicBool::new(false));
     let (pace, paced) = std::sync::mpsc::channel();

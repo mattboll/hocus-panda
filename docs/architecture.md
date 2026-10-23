@@ -249,6 +249,30 @@ configuration; an account taken out of the configuration takes its cache
 and its password with it. Accounts count only once the configuration is
 read, so a session starting never forgets one.
 
+Google calendars (#137) come from GNOME Online Accounts (GOA), never from
+an OAuth client of Hocuspanda's own: a worker thread follows
+`org.gnome.OnlineAccounts` on the session bus through its public D-Bus API
+(the object manager at `/org/gnome/OnlineAccounts`, `InterfacesAdded`,
+`InterfacesRemoved` and `PropertiesChanged`), and keeps the accounts whose
+`org.gnome.OnlineAccounts.Account` says `ProviderType` `google` with
+`CalendarDisabled` false. Each sync asks GOA for a token
+(`org.gnome.OnlineAccounts.OAuth2Based.GetAccessToken`) and reads the
+account's calendars through Google's CalDAV endpoint
+(`https://apidata.googleusercontent.com/caldav/v2/`: principal, calendar
+home, then each `<calendar id>/events/`) with the same CalDAV client, the
+token as a bearer; a token Google refuses is renewed once
+(`Account.EnsureCredentials`, then `GetAccessToken` again). Tokens stay
+GOA's: asked for each sync, never stored, never logged, and sent to
+Google's own server only. An account removed in GOA, or its calendar
+switched off there, takes its events and its cache with it; until GOA
+first answers, the cache of its accounts stays. Without GOA nothing shows
+and nothing is logged above debug; the settings' Accounts and calendar
+page lists GOA's Google accounts read-only and opens GNOME's own settings
+for them (`gnome-control-center online-accounts`) when installed. Tests
+run GOA's and Google's stand-ins on a private bus and 127.0.0.1; the
+harness alone points the client at the stand-in, and on the virtual clock
+without one Google accounts never sync.
+
 The command field (#44) understands short requests in English and French
 without a model (`hocus-shell::intents`: screenshots with a target and a
 delay, opening an application or a settings page, desktops, recording,
@@ -727,7 +751,10 @@ guarded by these rules (#134):
   never sent in clear.
 - **Calendar passwords (#75)** live in the keyring, never in the
   configuration, and travel only over https (plain http is refused but to
-  this machine); the cache of events is sealed.
+  this machine); the cache of events is sealed. Google's access tokens
+  (#137) are GNOME Online Accounts': asked for each sync, never stored
+  nor logged, and sent only to the origin of Google's CalDAV endpoint,
+  whatever its answers point at.
 - **Search never reads secrets (#45).** The document indexer never opens
   `~/.ssh`, `~/.gnupg`, keyrings, password stores, cloud credentials,
   browser profiles, hidden folders named for secrets, `.env*`, `id_*` or

@@ -92,6 +92,9 @@ pub enum Request {
         account: String,
         secret: String,
     },
+    /// Opens GNOME's own settings for online accounts, where Google
+    /// accounts are added and removed (#137), when they are installed.
+    OpenOnlineAccounts,
     /// The key of AI provider `provider` (`claude`, `openai`, `llamacpp`),
     /// kept in the keyring (#44); an empty one forgets it.
     AiSecret {
@@ -322,7 +325,9 @@ impl Request {
             // As the stop key: an agent itself may not (`agents_may`).
             | Self::SetAgentsStopped { .. }
             // Showing the settings window changes nothing by itself.
-            | Self::OpenSettings { .. } => Permission::Observe,
+            | Self::OpenSettings { .. }
+            // Nor GNOME's, where the user signs in and out.
+            | Self::OpenOnlineAccounts => Permission::Observe,
             Self::Scene
             | Self::PointerMove { .. }
             | Self::PointerButton { .. }
@@ -908,6 +913,22 @@ pub struct CalendarsInfo {
     pub secrets: usize,
     /// Events from now on, cached ones included.
     pub events: Vec<EventInfo>,
+    /// Google accounts through GNOME Online Accounts (#137).
+    #[serde(default)]
+    pub online: OnlineAccountsInfo,
+}
+
+/// GNOME Online Accounts as the session follows it, for the settings.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct OnlineAccountsInfo {
+    /// `unknown` until looked at (or without a session bus), `absent`
+    /// (not installed), or `installed`.
+    pub state: String,
+    /// Its Google accounts with their calendar on, read-only here: GOA
+    /// adds and removes them.
+    pub accounts: Vec<CalendarStatus>,
+    /// GNOME's settings for them can be opened (`OpenOnlineAccounts`).
+    pub settings: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

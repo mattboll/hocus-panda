@@ -377,6 +377,10 @@ impl App {
                 state.open_settings(page);
                 Reply::Done
             }
+            Request::OpenOnlineAccounts => {
+                state.open_online_accounts();
+                Reply::Done
+            }
             Request::PlugOutput { spec, name } => {
                 let spec: OutputSpec = match spec.parse() {
                     Ok(spec) => spec,

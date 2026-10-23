@@ -405,6 +405,9 @@ impl Page {
                 "ics",
                 "subscription",
                 "abonnement",
+                "google",
+                "gnome online accounts",
+                "comptes en ligne",
             ],
             Account => &[
                 "user",
@@ -666,7 +669,10 @@ impl Page {
                 }
                 AppsState::Unknown => words::DEFAULT_APPS.get(lang).to_owned(),
             },
-            Self::Accounts => words::calendars(ctx.config.calendars.len(), lang),
+            Self::Accounts => words::calendars(
+                ctx.config.calendars.len() + ctx.calendars.online.accounts.len(),
+                lang,
+            ),
             Self::Search => {
                 let info = &ctx.search;
                 if !ctx.config.search.documents {
@@ -1681,7 +1687,7 @@ fn system_entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String
             words::CALENDARS.get(lang).to_owned(),
             [
                 both(words::CALENDARS),
-                words(&["calendar", "agenda", "caldav", "ics"]),
+                words(&["calendar", "agenda", "caldav", "ics", "google"]),
             ]
             .concat(),
             Page::Accounts.summary(ctx, lang),

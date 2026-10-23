@@ -68,6 +68,7 @@ fn compositor(bus: &PrivateBus) -> anyhow::Result<Headless> {
         polkit_helper: None,
         motion: false,
         first_run: false,
+        google_caldav: None,
     })
 }
 

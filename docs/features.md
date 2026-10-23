@@ -275,7 +275,7 @@ The column on the right of the screen is the chosen form (see
 ## 18. Calendar
 
 - Multiple accounts, sync, local cache (CalDAV and ICS subscriptions)
-- Google (GNOME online accounts `[linux]` or OAuth)
+- Google, through GNOME Online Accounts when installed `[linux]` (its accounts listed read-only in the settings); an OAuth client of our own later
 - Reminders with "Join"
 - Month view with week numbers from the clock, today's agenda
 - Inline commands

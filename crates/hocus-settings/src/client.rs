@@ -1037,6 +1037,23 @@ impl App {
                         tracing::warn!(%err, "could not keep the calendar password");
                     }
                 }
+                // GNOME's settings start from the compositor, with the
+                // session's environment.
+                Outcome::OpenOnlineAccounts => {
+                    let api = self.api.clone();
+                    let spawned = std::thread::Builder::new()
+                        .name("online accounts".into())
+                        .spawn(move || {
+                            if let Err(err) = Api::connect(&api)
+                                .and_then(|mut c| c.request(Request::OpenOnlineAccounts).map(drop))
+                            {
+                                tracing::warn!(%err, "could not open GNOME Online Accounts");
+                            }
+                        });
+                    if let Err(err) = spawned {
+                        tracing::warn!(%err, "could not open GNOME Online Accounts");
+                    }
+                }
                 // Off the window's thread: polkit may ask for a password.
                 Outcome::SetTimeZone(zone) => {
                     let tx = self.zone_news.clone();

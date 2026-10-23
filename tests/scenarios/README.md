@@ -37,6 +37,13 @@ accounts = false
 # after zoneinfo/zone1970.tab here (tzdata's, public domain), never the
 # machine's: it draws the same everywhere
 timedated = "UTC"
+# A stand-in for GNOME Online Accounts on the scenario's private session
+# bus (dbus implied; never the session's) with a Google account signed in,
+# its calendar on, and one for Google's CalDAV on 127.0.0.1, at Google's
+# paths, serving the .ics files of dir as its calendar; it takes only the
+# token GOA handed out last. With running = false, GOA's name is taken only
+# at a `goa = "run"` step: until then, it is not installed
+goa = { identity = "alex.panda@gmail.com", dir = "calendar/google", running = true }
 # Windows move as in a session, to sample motion at a virtual time;
 # otherwise they appear and go at once
 motion = false
@@ -138,7 +145,10 @@ Steps, one per `[[step]]` table:
 | `unreadable = "{home}/Documents/.ssh"` | makes a file or folder of the scenario's home unreadable (mode 000) until the end: reading it would fail, and count as `unreadable` |
 | `expect_ai = { path?, contains? = […], header? }` | the AI provider was asked, once so: on this path, its body holding these strings, with this header (`name: value`, the name in lower case) |
 | `calendar_password = { id, password }` | the settings keep this account's (`user@url`) password |
-| `expect_calendars = { events?, secrets?, contains? = […], error? }` | the calendars, once so: events from now on, passwords kept, events by title, whether an account failed its last sync |
+| `expect_calendars = { events?, secrets?, contains? = […], error?, online?, online_accounts? }` | the calendars, once so: events from now on, passwords kept, events by title, whether an account failed its last sync, GNOME Online Accounts (`unknown`, `absent` or `installed`) and its Google accounts with their calendar on |
+| `expect_calendar_cache = { contains? = […], lacks? = […] }` | the sealed calendar cache of the state directory, opened, holds these strings and not those (accounts' ids, events' texts) |
+| `goa = "remove"` | something changes in GNOME Online Accounts' stand-in: `run` (its name taken), `sign_in`, `remove` (the account), `calendar_off`, `calendar_on`, `revoke` (Google refuses the token GOA holds until GOA renews it), `break_tokens` (Google refuses every token) |
+| `expect_goa = ["GetAccessToken", "REPORT /caldav/v2/"]` | GOA's and Google's stand-ins were asked these, in this order, each the start of a line of their log: `GetAccessToken`, `EnsureCredentials`, and Google's `METHOD PATH ok` or `METHOD PATH refused` |
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |
 | `open_annotate = "{last_screenshot}"` | opens the annotation window on a capture (`{last_screenshot}` is the last one saved, `{runtime_dir}` the compositor's temporary directory), and waits for it |
 | `expect_annotate`, `click_annotate`, `drag_annotate` | as the settings steps, in the annotation window (its capture is labelled `Capture`) |

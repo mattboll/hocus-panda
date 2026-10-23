@@ -57,6 +57,8 @@ pub enum Outcome {
         account: String,
         password: String,
     },
+    /// GNOME's settings for online accounts open, through the compositor.
+    OpenOnlineAccounts,
     /// The compositor holds its own shortcuts back while keys are
     /// recorded (keyboard-shortcuts-inhibit), or no longer.
     Inhibit(bool),
@@ -113,6 +115,8 @@ enum Target {
     Set(Change),
     /// The calendar form's account is added.
     AddCalendar,
+    /// GNOME's settings for online accounts open.
+    OpenOnlineAccounts,
     /// Several keys at once (the primary screen: on for one, off for the
     /// others).
     SetAll(Vec<Change>),
@@ -998,6 +1002,7 @@ impl SettingsView {
                     Some(Target::ListenNew) => out.extend(self.listen_new()),
                     Some(Target::InstallUpdates) => out.push(Outcome::InstallUpdates),
                     Some(Target::AddCalendar) => out.extend(self.add_calendar()),
+                    Some(Target::OpenOnlineAccounts) => out.push(Outcome::OpenOnlineAccounts),
                     Some(Target::Reset) => {
                         self.keys.resetting = !self.keys.resetting;
                         self.dirty = true;
@@ -1835,39 +1840,14 @@ impl SettingsView {
         }
         for account in &accounts {
             let id = account.id();
-            let status = self.ctx.calendars.accounts.iter().find(|s| s.id == id);
-            let (said, paint) = match status {
-                Some(s) if s.refused => {
-                    (words::WRONG_PASSWORD.get(lang).to_owned(), Paint::Waiting)
-                }
-                Some(s) if s.error.is_some() => {
-                    (words::UNREACHABLE.get(lang).to_owned(), Paint::Waiting)
-                }
-                Some(s) if s.synced => (words::synced(s.events, lang), Paint::Muted),
-                _ => (words::SYNCING.get(lang).to_owned(), Paint::Muted),
-            };
-            let line = self.add(
-                section,
-                Style {
-                    padding: Insets::symmetric(12.0, 18.0),
-                    ..fill_width(row(12.0))
-                },
-                Kind::Box(Look {
-                    background: Some(Paint::SurfaceHover),
-                    radius: 16.0,
-                    ..Look::default()
-                }),
-            );
-            let text = self.add(
-                line,
-                Style {
-                    width: Length::Fill,
-                    ..column(2.0)
-                },
-                Kind::Box(Look::default()),
-            );
-            self.line(text, &account.name, theme.text.body.with_weight(600));
-            self.line(text, &said, theme.text.body.with_color(paint));
+            let status = self
+                .ctx
+                .calendars
+                .accounts
+                .iter()
+                .find(|s| s.id == id)
+                .cloned();
+            let line = self.calendar_line(theme, section, &account.name, status.as_ref(), false);
             let remove = self.add(
                 line,
                 Style {
@@ -1886,6 +1866,8 @@ impl SettingsView {
                 Target::Set(Change::forget_calendar(&account.url, &account.user)),
             );
         }
+
+        self.online_accounts(theme, body);
 
         let section = self.section(theme, body, words::ADD_CALENDAR);
         let form = self.add(
@@ -1957,6 +1939,107 @@ impl SettingsView {
             )),
         );
         self.targets.insert(add, Target::AddCalendar);
+    }
+
+    /// A calendar account's line: its name, how it synced; what goes at
+    /// its end is the caller's.
+    fn calendar_line(
+        &mut self,
+        theme: &Theme,
+        section: NodeId,
+        name: &str,
+        status: Option<&hocus_api::CalendarStatus>,
+        google: bool,
+    ) -> NodeId {
+        let lang = self.lang;
+        let (said, paint) = match status {
+            Some(s) if s.refused && google => (
+                words::GOOGLE_SIGN_IN_AGAIN.get(lang).to_owned(),
+                Paint::Waiting,
+            ),
+            Some(s) if s.refused => (words::WRONG_PASSWORD.get(lang).to_owned(), Paint::Waiting),
+            Some(s) if s.error.is_some() => {
+                (words::UNREACHABLE.get(lang).to_owned(), Paint::Waiting)
+            }
+            Some(s) if s.synced => (words::synced(s.events, lang), Paint::Muted),
+            _ => (words::SYNCING.get(lang).to_owned(), Paint::Muted),
+        };
+        let line = self.add(
+            section,
+            Style {
+                padding: Insets::symmetric(12.0, 18.0),
+                ..fill_width(row(12.0))
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 16.0,
+                ..Look::default()
+            }),
+        );
+        let text = self.add(
+            line,
+            Style {
+                width: Length::Fill,
+                ..column(2.0)
+            },
+            Kind::Box(Look::default()),
+        );
+        self.line(text, name, theme.text.body.with_weight(600));
+        self.line(text, &said, theme.text.body.with_color(paint));
+        line
+    }
+
+    /// Google accounts from GNOME Online Accounts (#137), read-only: GOA
+    /// adds and removes them. Without GOA, a sentence says it is needed;
+    /// before it is known (no session bus), nothing.
+    fn online_accounts(&mut self, theme: &Theme, body: NodeId) {
+        let lang = self.lang;
+        let online = self.ctx.calendars.online.clone();
+        let muted = theme.text.body.with_color(Paint::Muted);
+        match online.state.as_str() {
+            "installed" => {}
+            "absent" => {
+                let section = self.section(theme, body, words::FROM_GOA);
+                self.add(
+                    section,
+                    fill_width(Style::default()),
+                    Kind::text(words::GOA_NEEDED.get(lang), muted),
+                );
+                return;
+            }
+            _ => return,
+        }
+        let section = self.section(theme, body, words::FROM_GOA);
+        if online.accounts.is_empty() {
+            self.line(section, words::NO_GOOGLE_ACCOUNT.get(lang), muted);
+        }
+        for account in &online.accounts {
+            self.calendar_line(theme, section, &account.name, Some(account), true);
+        }
+        if online.settings {
+            // Its own width, as the form's Add.
+            let buttons = self.add(section, row(10.0), Kind::Box(Look::default()));
+            let open = self.add(
+                buttons,
+                Style {
+                    height: Length::Px(40.0),
+                    padding: Insets::symmetric(0.0, 18.0),
+                    ..Style::default()
+                },
+                Kind::Button(Button::new(
+                    words::OPEN_GOA.get(lang),
+                    ButtonKind::Plain,
+                    theme,
+                )),
+            );
+            self.targets.insert(open, Target::OpenOnlineAccounts);
+        } else {
+            self.add(
+                section,
+                fill_width(Style::default()),
+                Kind::text(words::GOA_ELSEWHERE.get(lang), muted),
+            );
+        }
     }
 
     fn section(&mut self, theme: &Theme, parent: NodeId, title: words::Words) -> NodeId {

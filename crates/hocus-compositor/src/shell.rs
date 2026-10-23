@@ -314,7 +314,7 @@ impl State {
             updates: self.updates_line(),
             phone: self.phone_line(),
             meeting: self.meeting_card(),
-            calendar_set: !self.config.calendars.is_empty(),
+            calendar_set: self.calendar_set(),
             agenda: self.agenda(),
             agents: self.agents_view(),
             journal: self.journal_view(),

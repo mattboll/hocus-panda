@@ -139,6 +139,7 @@ fn a_sandboxed_client_does_not_see_the_sensitive_protocols() -> anyhow::Result<(
         polkit_helper: None,
         motion: false,
         first_run: false,
+        google_caldav: None,
     })?;
     let socket = compositor.socket_path().to_path_buf();
     let dir = tempfile::tempdir()?;
@@ -268,6 +269,7 @@ fn idle_notifications_say_idled_then_resumed() -> anyhow::Result<()> {
         polkit_helper: None,
         motion: false,
         first_run: false,
+        google_caldav: None,
     })?;
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let socket = compositor.socket_path().to_path_buf();

@@ -1,0 +1,70 @@
+description = "A Google account signed in to GNOME Online Accounts: its calendar, read with GOA's token at Google's CalDAV, shows in the column and the agenda; its calendar switched off there, then the account removed, its events and its cache go"
+outputs = ["1280x800"]
+shell = true
+# GNOME Online Accounts' stand-in on the scenario's private bus, and
+# Google's on 127.0.0.1: never the session's, never Google.
+goa = { identity = "alex.panda@gmail.com", dir = "calendar/google" }
+
+[[step]]
+expect_calendars = { online = "installed", online_accounts = 1, contains = ["Family dinner", "Dentist"], error = false }
+
+# Discovered from Google's base, with the token GOA handed out.
+[[step]]
+expect_goa = ["GetAccessToken", "PROPFIND /caldav/v2/ ok", "PROPFIND /caldav/v2/alex.panda%40gmail.com/user ok", "REPORT /caldav/v2/alex.panda%40gmail.com/events/ ok"]
+
+[[step]]
+expect_calendar_cache = { contains = ["goa:account_1761055200_0", "Family dinner"] }
+
+# 14:37: dinner tonight.
+[[step]]
+expect_ui = { label = "Family dinner" }
+
+[[step]]
+click_ui = "Details"
+
+[[step]]
+expect_ui = { label = "October 2026" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "calendar-google.png" }
+
+[[step]]
+click_ui = "Details"
+
+# Its calendar switched off in GOA: PropertiesChanged.
+[[step]]
+goa = "calendar_off"
+
+[[step]]
+expect_calendars = { online = "installed", online_accounts = 0, events = 0 }
+
+[[step]]
+expect_calendar_cache = { lacks = ["goa:", "Family dinner"] }
+
+[[step]]
+goa = "calendar_on"
+
+[[step]]
+expect_calendars = { online_accounts = 1, contains = ["Family dinner"] }
+
+# The account removed in GOA: InterfacesRemoved.
+[[step]]
+goa = "remove"
+
+[[step]]
+expect_calendars = { online = "installed", online_accounts = 0, events = 0 }
+
+[[step]]
+expect_calendar_cache = { lacks = ["goa:", "Family dinner"] }
+
+[[step]]
+expect_ui = { label = "Calendar not set up" }
+
+[[step]]
+restart = true
+
+[[step]]
+expect_calendars = { online = "installed", online_accounts = 0, events = 0 }
