@@ -287,7 +287,7 @@ The column on the right of the screen is the chosen form (see
 - Dock, desktops, keyboard and shortcut editor, screenshots, window rules, modules, AI
 - Account: avatar, password, fingerprint `[linux]`
 - Screens: resolution, scale, position, primary, mirroring, enabled, VRR
-- Network `[linux]`, date and time with world map `[linux]`
+- Network (the Wi-Fi networks in reach: join with a password, leave, forget) `[linux]`, Bluetooth (devices paired and in reach: pair, with a passkey to confirm, connect, forget) `[linux]`, date and time with world map `[linux]`
 - Power: delays, suspend action, fullscreen keeps the screen awake
 - Calendar, advanced, updates
 - Different delays on battery and on AC

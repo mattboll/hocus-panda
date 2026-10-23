@@ -6,7 +6,12 @@
 //!
 //! Everything here blocks or runs on threads of its own: never on a loop.
 
-use std::{future::poll_fn, path::Path, pin::Pin, time::Duration};
+use std::{
+    future::poll_fn,
+    path::{Path, PathBuf},
+    pin::Pin,
+    time::Duration,
+};
 
 use futures_core::Stream;
 use zbus::{Connection, Proxy};
@@ -146,9 +151,91 @@ async fn changes(bus: Option<String>, sink: &(dyn Fn(String) + Send + Sync)) -> 
     }
 }
 
+/// Where the time zone database is: `TZDIR`, else `/usr/share/zoneinfo`.
+pub fn zoneinfo() -> PathBuf {
+    std::env::var_os("TZDIR")
+        .filter(|d| !d.is_empty())
+        .map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from)
+}
+
+/// A zone where its principal city is: degrees, north and east positive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Place {
+    pub zone: String,
+    pub latitude: f32,
+    pub longitude: f32,
+}
+
+/// The zones of the database in `zoneinfo`, with their places, from its
+/// `zone1970.tab` (public domain); none when it is missing. It reads a
+/// file: for a worker thread.
+pub fn places(zoneinfo: &Path) -> Vec<Place> {
+    let Ok(table) = std::fs::read_to_string(zoneinfo.join("zone1970.tab")) else {
+        return Vec::new();
+    };
+    table
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|line| {
+            let mut columns = line.split('\t');
+            let (_, at, zone) = (columns.next()?, columns.next()?, columns.next()?);
+            let (latitude, longitude) = coordinates(at)?;
+            Some(Place {
+                zone: zone.to_owned(),
+                latitude,
+                longitude,
+            })
+        })
+        .collect()
+}
+
+/// ISO 6709 as the table writes it: `±DDMM±DDDMM` or `±DDMMSS±DDDMMSS`.
+fn coordinates(at: &str) -> Option<(f32, f32)> {
+    let split = at
+        .char_indices()
+        .skip(1)
+        .find(|(_, c)| matches!(c, '+' | '-'))?
+        .0;
+    let (lat, lon) = at.split_at(split);
+    let degrees = |part: &str, width: usize| -> Option<f32> {
+        let (sign, digits) = part.split_at(1);
+        let sign = if sign == "-" { -1.0 } else { 1.0 };
+        let number = |range: std::ops::Range<usize>| -> Option<f32> {
+            digits.get(range)?.parse::<u16>().ok().map(f32::from)
+        };
+        let d = number(0..width)?;
+        let m = number(width..width + 2)?;
+        let s = if digits.len() > width + 2 {
+            number(width + 2..width + 4)?
+        } else {
+            0.0
+        };
+        Some(sign * (d + m / 60.0 + s / 3600.0))
+    };
+    Some((degrees(lat, 2)?, degrees(lon, 3)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn places_are_read_from_the_table() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(
+            dir.path().join("zone1970.tab"),
+            "# comment\nFR,MC\t+4852+00220\tEurope/Paris\nUS\t+404251-0740023\tAmerica/New_York\tEastern (most areas)\nbad line\n",
+        )?;
+        let places = places(dir.path());
+        assert_eq!(places.len(), 2);
+        assert_eq!(places[0].zone, "Europe/Paris");
+        assert!((places[0].latitude - 48.8667).abs() < 0.01);
+        assert!((places[0].longitude - 2.3333).abs() < 0.01);
+        assert!((places[1].latitude - 40.7142).abs() < 0.01);
+        assert!((places[1].longitude + 74.0064).abs() < 0.01);
+        assert!(super::places(&dir.path().join("none")).is_empty());
+        Ok(())
+    }
 
     #[test]
     fn a_link_names_its_zone() -> std::io::Result<()> {

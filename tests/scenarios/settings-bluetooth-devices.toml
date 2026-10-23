@@ -1,0 +1,130 @@
+# The Bluetooth page's lists (#67): the devices BlueZ knows (a stand-in on
+# a private system bus, never the machine's), looked for only while the
+# page shows; a keyboard paired once its passkey is confirmed, through an
+# agent registered for that pairing only; a speaker that just pairs; one
+# disconnected, one forgotten.
+description = "The Bluetooth page lists the paired devices and those in reach, pairs a keyboard after its passkey is confirmed and a speaker at once, disconnects and forgets, and stops looking once left; in the dark and light themes"
+outputs = ["1280x800"]
+shell = true
+devices = true
+
+[[step]]
+open_settings = { page = "bluetooth" }
+
+[[step]]
+expect_devices = "StartDiscovery"
+
+[[step]]
+expect_settings = { label = "Connected: Bamboo headphones" }
+
+[[step]]
+expect_settings = { label = "Headphones · Connected · Battery 80%" }
+
+[[step]]
+expect_settings = { label = "Pair Panda keyboard" }
+
+# One that says no name is not offered.
+[[step]]
+expect_settings = { label = "Pair 5C-12-00-AA-BB-CC", shown = false }
+
+# Refused: not paired, and said so.
+[[step]]
+click_settings = "Pair Panda keyboard"
+
+[[step]]
+expect_devices = "RegisterAgent DisplayYesNo"
+
+[[step]]
+expect_settings = { label = "Does Panda keyboard show 123456? Pair only if it is the same." }
+
+[[step]]
+click_settings = "Cancel Panda keyboard"
+
+[[step]]
+expect_devices = "Pair Panda keyboard rejected"
+
+[[step]]
+expect_settings = { label = "Did not work: Authentication Rejected" }
+
+[[step]]
+click_settings = "Pair Panda keyboard"
+
+[[step]]
+expect_settings = { label = "Same code: pair Panda keyboard" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-bluetooth-pairing.png" }
+
+[[step]]
+click_settings = "Same code: pair Panda keyboard"
+
+[[step]]
+expect_devices = "Trusted Panda keyboard true"
+
+[[step]]
+expect_devices = "Connect Panda keyboard"
+
+[[step]]
+expect_devices = "UnregisterAgent"
+
+[[step]]
+expect_settings = { label = "Disconnect Panda keyboard" }
+
+# "Just works": nothing asked.
+[[step]]
+click_settings = "Pair Speaker by the window"
+
+[[step]]
+expect_devices = "Connect Speaker by the window"
+
+[[step]]
+expect_settings = { label = "Forget Speaker by the window" }
+
+[[step]]
+click_settings = "Disconnect Bamboo headphones"
+
+[[step]]
+expect_devices = "Disconnect Bamboo headphones"
+
+[[step]]
+expect_settings = { label = "Connect Bamboo headphones" }
+
+[[step]]
+click_settings = "Forget Panda mouse"
+
+[[step]]
+expect_devices = "RemoveDevice Panda mouse"
+
+[[step]]
+expect_settings = { label = "Forget Panda mouse", shown = false }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+expect_settings = { label = "Connect Bamboo headphones" }
+
+[[step]]
+pointer_move = [330, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-bluetooth-devices-light.png" }
+
+# Left, the page stops looking.
+[[step]]
+click_settings = "Network"
+
+[[step]]
+expect_devices = "StopDiscovery"

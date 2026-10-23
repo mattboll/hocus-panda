@@ -18,9 +18,14 @@ shell = false
 # A private D-Bus bus for the compositor (notifications); never the session's
 dbus = false
 # Stand-ins for UPower (a battery at 80 % on its charger), NetworkManager
-# (Wi-Fi on, joined to "Bamboo grove"), BlueZ (on) and power profiles
-# (balanced), on a private system bus the compositor follows; never the
-# machine's. The sound is kept in memory then, never the machine's
+# (Wi-Fi on, joined to its saved "Bamboo grove"; "Panda den" and "Tea house"
+# in reach with the password "bamboo shoots", "Café du Parc" open, "Office"
+# an account's, one hidden), BlueZ (on; "Bamboo headphones" paired and
+# connected, "Panda mouse" paired; while discovering, "Panda keyboard",
+# which shows the passkey 123456 to confirm, and "Speaker by the window",
+# which just pairs) and power profiles (balanced), on a private system bus
+# the compositor and the settings follow; never the machine's. The sound is
+# kept in memory then, never the machine's
 devices = false
 # Stand-ins for AccountsService ("Alex Panda", no picture) and fprintd (a
 # reader, one finger enrolled), on a private system bus the settings ask;
@@ -28,7 +33,9 @@ devices = false
 accounts = false
 # A stand-in for timedated in this time zone, on a private system bus the
 # compositor and the settings follow; never the machine's. Without it the
-# settings cannot change the time zone
+# settings cannot change the time zone. Their world map places the cities
+# after zoneinfo/zone1970.tab here (tzdata's, public domain), never the
+# machine's: it draws the same everywhere
 timedated = "UTC"
 # Windows move as in a session, to sample motion at a virtual time;
 # otherwise they appear and go at once
@@ -104,6 +111,7 @@ Steps, one per `[[step]]` table:
 | `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `desktops`, `windows`, `keyboard`, `mouse`, `captures`, `clipboard`, `screens`, `sound`, `network`, `bluetooth`, `power`, `lock`, `notifications`, `apps`, `accounts`, `account`…) or its home, and waits for its window |
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
+| `click_settings_at = { label = "World map of the time zones", at = [0.89, 0.34] }` | clicks it elsewhere than its middle: `at` in fractions of its width and height from its corner |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
 | `expect_budget = { max_ms = 50 }` | every frame drawn so far took at most that long, and no loop handler went over its budget |
 | `expect_state_file = { name, contains? = […], lacks? = […] }` | a file of the compositor's state directory (notes, the saved session) holds these strings, once written |
@@ -134,7 +142,7 @@ Steps, one per `[[step]]` table:
 | `timedated_zone = "America/New_York"` | the system's zone changes in the stand-in, as if set elsewhere |
 | `timedated_refuses = true` | the stand-in refuses to set the zone from now on, as polkit would (`false`: no longer) |
 | `charger = false` | the charger is pulled out (`true`: plugged in), as the UPower stand-in says |
-| `expect_devices = "WirelessEnabled false"` | the devices' stand-ins were asked this: `WirelessEnabled BOOL`, `Powered BOOL` (Bluetooth), `ActiveProfile NAME` |
+| `expect_devices = "WirelessEnabled false"` | the devices' stand-ins were asked this: `WirelessEnabled BOOL`, `Powered BOOL` (Bluetooth), `ActiveProfile NAME`; NetworkManager's `RequestScan`, `ActivateConnection SSID`, `AddAndActivateConnection SSID KEY-MGMT` (`open`; never the password), `Disconnect`, `Delete SSID`; BlueZ's `StartDiscovery`, `StopDiscovery`, `RegisterAgent CAPABILITY`, `UnregisterAgent`, `Pair NAME` (`Pair NAME rejected`), `Trusted NAME BOOL`, `Connect NAME`, `Disconnect NAME`, `RemoveDevice NAME` |
 | `expect_accounts = "SetRealName Alex P."` | the account's stand-ins were asked this: `SetRealName NAME`, `SetIconFile PATH` |
 | `expect_xdg_file = { name, contains?, lacks? }` | a file of the user's private configuration directory the settings write (`mimeapps.list`, `autostart/NAME.desktop`) holds these strings, or lacks them |
 | `expect_config_file = { contains?, lacks? }` | the configuration file holds these strings, or lacks them (the settings app writes it) |

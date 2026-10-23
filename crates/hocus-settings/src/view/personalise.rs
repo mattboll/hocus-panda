@@ -993,8 +993,9 @@ impl SettingsView {
         }
         self.highlighted(section, &Setting::Clock, Look::default());
 
-        // The system's, through timedated: a list of cities, by region;
-        // the map comes later.
+        // The system's, through timedated: a map of the cities, and a
+        // list of the main ones by region, the way readers and keyboards
+        // take.
         let section = self.section(theme, body, words::TIME_ZONE);
         let system = self.ctx.zone.clone();
         let zone = system.name();
@@ -1003,6 +1004,10 @@ impl SettingsView {
         if let SystemZone::Absent(why) = &system {
             tracing::debug!(why, "no timedated");
             self.note(theme, section, words::NO_TIMEDATED);
+        }
+        // Without timedated, nothing to click: the list says why.
+        if works && !self.places.is_empty() {
+            self.zone_map(theme, section, zone);
         }
         let line = self.add(section, row(8.0), Kind::Box(Look::default()));
         self.zone_chip(theme, line, "UTC", "UTC", (zone == "UTC", works));
@@ -1046,6 +1051,92 @@ impl SettingsView {
             );
         }
         self.highlighted(section, &Setting::TimeZone, Look::default());
+    }
+
+    /// The world map, as board R4's arrangement: its cities to click, the
+    /// zone in effect ringed and named.
+    fn zone_map(&mut self, theme: &Theme, parent: NodeId, zone: &str) {
+        let lang = self.lang;
+        let area = self.add(
+            parent,
+            Style {
+                width: Length::Fill,
+                height: Length::Px(240.0),
+                padding: Insets::symmetric(14.0, 14.0),
+                clip: true,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Background),
+                radius: 18.0,
+                border: Some(Paint::Border),
+                ..Look::default()
+            }),
+        );
+        self.tree.layout();
+        let width = self.tree.rect(area).map_or(560.0, |r| r.w) - 28.0;
+        let height = (width / map::RATIO).round();
+        self.tree.set_style(
+            area,
+            Style {
+                width: Length::Fill,
+                height: Length::Px(height + 28.0),
+                padding: Insets::symmetric(14.0, 14.0),
+                clip: true,
+                ..Style::default()
+            },
+        );
+        let drawn = self.add(
+            area,
+            Style {
+                width: Length::Px(width),
+                height: Length::Px(height),
+                ..Style::default()
+            },
+            Kind::Custom {
+                draw: Box::new(map::WorldMap {
+                    places: self.places.clone(),
+                    current: zone.to_owned(),
+                }),
+                label: Some(words::MAP_NAME.get(lang).to_owned()),
+            },
+        );
+        self.tree.set_clickable(drawn, words::MAP_NAME.get(lang));
+        self.targets.insert(drawn, Target::Map);
+        self.map = Some(drawn);
+        // The zone in effect, said in a corner, as board R4 says how to
+        // place the screens: its dot is ringed.
+        if self.places.iter().any(|p| p.zone == zone) {
+            let said = words::zone_in_effect(&words::zone_name(zone, lang), lang);
+            self.add(
+                area,
+                Style {
+                    at: Some(Point::new(18.0, height - 26.0)),
+                    ..Style::default()
+                },
+                Kind::text_line(
+                    said,
+                    theme.text.label.with_weight(600).with_color(Paint::Muted),
+                ),
+            );
+        }
+        self.note(theme, parent, words::MAP_NOTE);
+    }
+
+    /// A click on the map: the city nearest the pointer, when near enough,
+    /// gives the zone.
+    pub(super) fn map_clicked(&mut self) -> Option<Outcome> {
+        let at = self.pointer?;
+        // Laid out unscrolled: where it shows is that, scrolled.
+        let mut rect = self.tree.rect(self.map?)?;
+        if self.scroller.is_some() {
+            rect.y -= self.scroll;
+        }
+        let place = map::nearest(&self.places, rect, at)?;
+        let zone = place.zone.clone();
+        self.zone_refused = None;
+        self.dirty = true;
+        Some(Outcome::SetTimeZone(zone))
     }
 
     /// A zone to choose; greyed where the system's cannot be set.

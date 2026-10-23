@@ -250,6 +250,10 @@ pub enum Step {
     ExpectSettings(ExpectSettings),
     /// Clicks the element of the settings window with this label.
     ClickSettings(String),
+    /// Clicks it at a place other than its middle: `{ label, at = [x, y]
+    /// }`, fractions of its width and height from its corner (a city on
+    /// the world map).
+    ClickSettingsAt(ClickAt),
     /// The compositor goes as a crash would, and a new one starts on the
     /// same configuration and state; clients go with the old one.
     Restart(bool),
@@ -811,6 +815,13 @@ pub struct SendWindow {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ClickAt {
+    pub label: String,
+    pub at: [f32; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DragSettings {
     pub label: String,
     /// Logical pixels.
@@ -931,6 +942,7 @@ impl fmt::Display for Step {
             Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
             Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
+            Self::ClickSettingsAt(c) => write!(f, "click_settings_at {:?} {:?}", c.label, c.at),
             Self::OpenAnnotate(file) => write!(f, "open_annotate {file:?}"),
             Self::WaitWallpapers(_) => write!(f, "wait_wallpapers"),
             Self::Restart(_) => write!(f, "restart"),
@@ -1691,6 +1703,7 @@ impl Run<'_> {
             Step::AskAttention(app_id) => self.ask_attention(app_id),
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
+            Step::ClickSettingsAt(c) => self.click_settings_at(&c.label, c.at),
             Step::DragSettings(drag) => self.drag_settings(drag),
             Step::OpenAnnotate(file) => {
                 self.open_editor(file, hocus_annotate::client::Editing::Annotate)
@@ -2797,6 +2810,9 @@ impl Run<'_> {
                     .map(|d| self.scenario.dir.join(d))
                     .collect(),
             }),
+            // The scenarios' own copy of the zones' places: the map draws
+            // the same wherever the tests run.
+            zoneinfo: self.scenario.dir.join("zoneinfo"),
         })?;
         self.settings = Some(running);
         let deadline = Instant::now() + CLIENT_TIMEOUT;
@@ -3093,6 +3109,10 @@ impl Run<'_> {
     }
 
     fn click_settings(&mut self, label: &str) -> anyhow::Result<()> {
+        self.click_settings_at(label, [0.5, 0.5])
+    }
+
+    fn click_settings_at(&mut self, label: &str, at: [f32; 2]) -> anyhow::Result<()> {
         self.settings_caught_up()?;
         self.settle_window()?;
         let (node, all) = self.settings_node(label)?;
@@ -3103,8 +3123,8 @@ impl Run<'_> {
             .context("no such window")?;
         let g = window.geometry;
         let (x, y) = (
-            f64::from(g.x) + f64::from(node.rect.x + node.rect.w / 2.0),
-            f64::from(g.y) + f64::from(node.rect.y + node.rect.h / 2.0),
+            f64::from(g.x) + f64::from(node.rect.x + node.rect.w * at[0]),
+            f64::from(g.y) + f64::from(node.rect.y + node.rect.h * at[1]),
         );
         self.request(Request::PointerMove { x, y })?;
         for pressed in [true, false] {
