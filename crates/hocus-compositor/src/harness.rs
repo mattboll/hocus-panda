@@ -323,6 +323,7 @@ impl Headless {
         self.event_loop.dispatch(Some(timeout), &mut self.app)?;
         self.app.state.refresh_shell();
         self.app.serve_captures();
+        self.app.serve_agent_captures();
         self.app.serve_screenshots();
         self.app.serve_circle();
         self.app.serve_recording();
@@ -370,6 +371,12 @@ impl Headless {
     /// and whether one waits for the user's confirmation instead (#43).
     pub fn agent_deadline(&self) -> (Option<Duration>, bool) {
         self.app.state.seat_deadline()
+    }
+
+    /// When an agent's capture waiting for its window to draw is taken
+    /// anyway (#229).
+    pub fn agent_capture_deadline(&self) -> Option<Duration> {
+        self.app.state.capture_deadline()
     }
 
     /// Moves the virtual clock forward by `by`, drawing a frame at each frame

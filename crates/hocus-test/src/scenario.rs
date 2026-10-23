@@ -2734,6 +2734,10 @@ impl Run<'_> {
         use std::sync::mpsc::TryRecvError;
         // As long as the longest wait a scenario asks for, and some.
         let deadline = Instant::now() + Duration::from_secs(30);
+        // A capture waiting for its window to draw: the application gets a
+        // moment of real time to, before the clock moves to the end of the
+        // wait.
+        let mut drawing: Option<Instant> = None;
         loop {
             match answer.try_recv() {
                 Ok(answer) => return answer.context("no answer"),
@@ -2741,6 +2745,18 @@ impl Run<'_> {
                 Err(TryRecvError::Empty) => {}
             }
             anyhow::ensure!(Instant::now() < deadline, "the MCP server never answered");
+            if let Some(until) = self.compositor.agent_capture_deadline() {
+                let since = *drawing.get_or_insert_with(Instant::now);
+                if since.elapsed() < Duration::from_millis(500) {
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                } else if until > self.compositor.now() {
+                    let by = until - self.compositor.now();
+                    self.compositor.advance(by)?;
+                } else {
+                    self.compositor.dispatch(Duration::from_millis(5))?;
+                }
+                continue;
+            }
             let (due, asking) = self.compositor.agent_deadline();
             anyhow::ensure!(
                 !asking || !self.mcp_waiting.is_empty(),

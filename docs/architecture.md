@@ -542,6 +542,10 @@ without unlocking leaves our lock screen: a crash never unlocks.
   woken by the seats' timer, nothing queued per frame, and nothing once no
   agent drives one. Nothing is rendered for it; a capture of the window
   (`screenshot` of a window) renders its surfaces on demand, mapped or not.
+  An agent connection's capture of such a window drives it too: it sends
+  a frame callback at once when the application waits for one, and the
+  reply is deferred until the window's next commit or 200 ms on the
+  compositor's clock (`captures_due`, served after each dispatch).
   The seat remembers the window under its pointer: its pointer and ring
   are drawn only where a screen shows that window; a card waiting for the
   user shows alone, on the screen at its place. A minimized window an

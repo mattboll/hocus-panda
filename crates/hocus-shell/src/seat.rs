@@ -115,6 +115,12 @@ impl Lang {
         }
     }
 
+    /// The keys that answer the card once clicked, as board D04 says
+    /// them.
+    pub fn card_keys(self) -> &'static str {
+        self.pick("Enter · Esc", "Entrée · Échap")
+    }
+
     pub fn allow(self) -> &'static str {
         self.pick("Allow", "Valider")
     }
@@ -357,12 +363,37 @@ impl SeatView {
                 }),
             )
             .unwrap_or_else(MISSING);
+        // The title, and the keys that answer once the card is clicked.
+        let head = t
+            .add(
+                card,
+                Style {
+                    direction: Direction::Row,
+                    gap: 12.0,
+                    width: Length::Fill,
+                    ..Style::default()
+                },
+                Kind::Box(Look::default()),
+            )
+            .unwrap_or_else(MISSING);
         t.add(
-            card,
-            Style::default(),
+            head,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
             Kind::text(
                 confirm.title.to_uppercase(),
                 theme.text.caption.with_color(Paint::Accent),
+            ),
+        )
+        .unwrap_or_else(MISSING);
+        t.add(
+            head,
+            Style::default(),
+            Kind::text_line(
+                lang.card_keys(),
+                theme.text.caption.with_color(Paint::Muted),
             ),
         )
         .unwrap_or_else(MISSING);
@@ -655,6 +686,7 @@ mod tests {
         let dump = view.access().dump();
         assert!(!dump.contains("helper · Clicks in Notes"), "{dump}");
         assert!(view.card_rect().is_some());
+        assert!(dump.contains("Enter · Esc"), "{dump}");
         assert_eq!(
             Lang::Fr.sensitive_unseen("Dans un champ de mot de passe", "Bureau 2"),
             "Dans un champ de mot de passe · Bureau 2, non affiché"
