@@ -46,9 +46,9 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle, WEnum,
     globals::registry_queue_init,
     protocol::{
-        wl_data_device::WlDataDevice, wl_data_device_manager::DndAction,
-        wl_data_source::WlDataSource, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm,
-        wl_surface,
+        wl_callback, wl_data_device::WlDataDevice, wl_data_device_manager::DndAction,
+        wl_data_source::WlDataSource, wl_display, wl_keyboard, wl_output, wl_pointer, wl_seat,
+        wl_shm, wl_surface,
     },
 };
 use wayland_protocols::{
@@ -160,6 +160,9 @@ pub enum ClientEvent {
     OnSeat(String, Box<ClientEvent>),
     /// A button pressed over an element it draws, by its label (#175).
     Hit(String),
+    /// It drew this many marks, and the compositor has that picture: a
+    /// test waits for it rather than for a moment of real time (#235).
+    Drew(u32),
 }
 
 impl fmt::Display for ClientEvent {
@@ -179,6 +182,8 @@ impl fmt::Display for ClientEvent {
             Self::PasswordField => write!(f, "password_field"),
             Self::OnSeat(seat, event) => write!(f, "{event} on {seat}"),
             Self::Hit(label) => write!(f, "hit {label}"),
+            Self::Drew(1) => write!(f, "drew 1 mark"),
+            Self::Drew(marks) => write!(f, "drew {marks} marks"),
         }
     }
 }
@@ -367,6 +372,7 @@ impl SolidWindow {
             shm,
             pool,
             window,
+            display: conn.display(),
             events: shared.events,
             clipboard: shared.clipboard,
             data_devices,
@@ -458,6 +464,8 @@ struct Client {
     shm: Shm,
     pool: SlotPool,
     window: Window,
+    /// To learn that the compositor has what was sent before.
+    display: wl_display::WlDisplay,
     events: Arc<Mutex<Vec<ClientEvent>>>,
     clipboard: Arc<Mutex<Option<String>>>,
     data_devices: DataDeviceManagerState,
@@ -574,6 +582,10 @@ impl Client {
         surface.damage_buffer(0, 0, width as i32, height as i32);
         buffer.attach_to(surface)?;
         self.window.commit();
+        // Said once the compositor answers what follows the commit.
+        if let Some(marks) = &self.marks {
+            self.display.sync(qh, MarksDrawn(marks.count));
+        }
         Ok(())
     }
 
@@ -659,6 +671,24 @@ impl Client {
                 let name = self.seat_names.get(i).cloned().unwrap_or_default();
                 self.record(ClientEvent::OnSeat(name, Box::new(event)));
             }
+        }
+    }
+}
+
+/// A picture of this many marks committed, before a sync.
+struct MarksDrawn(u32);
+
+impl Dispatch<wl_callback::WlCallback, MarksDrawn> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        drawn: &MarksDrawn,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            client.record(ClientEvent::Drew(drawn.0));
         }
     }
 }

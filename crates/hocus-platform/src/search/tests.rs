@@ -97,6 +97,17 @@ fn settings(root: &Path, store: Option<PathBuf>) -> Settings {
     }
 }
 
+/// A fresh folder to search. Not the temporary directory's default name,
+/// which is hidden (`.tmpXXXXXX`): one in about 700 holds a word of a
+/// secret's place (`.tmpKIg5LX`: "pki", `.tmp0PgpgY`: "gpg"), is never
+/// read, and its documents were never found (#235).
+fn folder() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix("search-")
+        .tempdir()
+        .expect("a folder")
+}
+
 fn write(path: &Path, contents: &[u8]) {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).expect("a folder");
@@ -105,8 +116,16 @@ fn write(path: &Path, contents: &[u8]) {
 }
 
 #[test]
+fn the_tests_folders_are_never_denied_by_their_name() {
+    for _ in 0..2000 {
+        let dir = folder();
+        assert!(!deny::denied(dir.path(), None), "{}", dir.path().display());
+    }
+}
+
+#[test]
 fn nothing_under_ssh_or_named_as_a_secret_is_ever_opened() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     let docs = dir.path().join("Documents");
     write(&docs.join("report.md"), b"The bamboo report.");
     write(&docs.join(".ssh/id_ed25519"), b"bamboo: not a key");
@@ -155,7 +174,7 @@ fn nothing_under_ssh_or_named_as_a_secret_is_ever_opened() {
 
 #[test]
 fn a_folder_inside_one_never_read_is_not_searched() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     let keys = dir.path().join(".gnupg");
     write(&keys.join("notes.txt"), b"bamboo");
     let run = start();
@@ -167,7 +186,7 @@ fn a_folder_inside_one_never_read_is_not_searched() {
 
 #[test]
 fn on_battery_the_indexer_waits_and_on_the_charger_it_runs() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     write(&dir.path().join("plan.txt"), b"Plant bamboo in spring.");
     let run = start();
     run.search.set_battery(true);
@@ -187,7 +206,7 @@ fn on_battery_the_indexer_waits_and_on_the_charger_it_runs() {
 
 #[test]
 fn asked_again_the_folders_are_looked_at_before_the_half_hour() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     write(&dir.path().join("plan.txt"), b"Plant bamboo in spring.");
     let run = start();
     run.search.configure(settings(dir.path(), None));
@@ -216,7 +235,7 @@ fn asked_again_the_folders_are_looked_at_before_the_half_hour() {
 
 #[test]
 fn pdf_and_office_documents_are_found_by_their_words() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     write(
         &dir.path().join("report.pdf"),
         &pdf::write(&["Quarterly report", "Bamboo harvest up"], true, true),
@@ -262,7 +281,7 @@ fn pdf_and_office_documents_are_found_by_their_words() {
 
 #[test]
 fn screenshots_are_read_by_the_ocr_program() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     let shots = dir.path().join("Screenshots");
     write(&shots.join("Screenshot 1.png"), b"\x89PNG");
     write(&shots.join("notes.txt"), b"not a picture");
@@ -284,7 +303,7 @@ fn screenshots_are_read_by_the_ocr_program() {
 
 #[test]
 fn the_index_is_kept_and_read_again_only_for_what_changed() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     let docs = dir.path().join("docs");
     let store = dir.path().join("state/search/index");
     write(&docs.join("a.txt"), b"alpha bamboo");
@@ -326,7 +345,7 @@ fn the_index_is_kept_and_read_again_only_for_what_changed() {
 
 #[test]
 fn the_user_s_folders_come_from_user_dirs() {
-    let dir = tempfile::tempdir().expect("a folder");
+    let dir = folder();
     let home = dir.path();
     let documents = Folder::User {
         key: "DOCUMENTS",

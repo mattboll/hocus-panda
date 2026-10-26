@@ -49,9 +49,13 @@ expect_received = { app_id = "editor", event = "button 272 pressed on agent-help
 expect_received = { app_id = "editor", event = "key 46 pressed on agent-helper" }
 
 # The application draws on the frame callbacks the compositor sends it
-# meanwhile: the agent's capture shows the four marks.
+# meanwhile, in its own time: the agent's capture shows the four marks
+# once it drew them.
 [[step]]
 advance_ms = 500
+
+[[step]]
+expect_received = { app_id = "editor", event = "drew 4 marks" }
 
 [[step]]
 mcp = { agent = "helper", tool = "capture", window = "editor", image = "agent-desktop-capture.png" }

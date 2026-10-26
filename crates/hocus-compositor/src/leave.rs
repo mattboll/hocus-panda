@@ -54,6 +54,8 @@ pub struct Card {
 pub struct Leaver {
     pub card: Option<Card>,
     pub caps: Capabilities,
+    /// logind told them, for the test harness (#235).
+    pub(crate) caps_known: bool,
     news: Option<channel::Sender<News>>,
 }
 
@@ -86,7 +88,10 @@ impl State {
     fn leave_news(&mut self, news: News) {
         match news {
             // The column shows hibernating only where it works.
-            News::Caps(caps) => self.leaver.caps = caps,
+            News::Caps(caps) => {
+                self.leaver.caps = caps;
+                self.leaver.caps_known = true;
+            }
             News::Blockers(all) => {
                 let held: Vec<(String, String)> = all
                     .into_iter()

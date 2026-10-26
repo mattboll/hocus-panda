@@ -19,6 +19,7 @@ The workspace is being set up (milestone M0). Until then:
 ```sh
 cargo build                                   # build everything
 cargo nextest run                             # tests (or: cargo test)
+cargo nextest run -p hocus-compositor --run-ignored only the_refinements_cost  # GPU timings, alone
 cargo clippy --all-targets -- -D warnings     # lints
 cargo fmt --check                             # formatting
 cargo deny check                              # licenses and advisories

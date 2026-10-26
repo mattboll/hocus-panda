@@ -85,6 +85,9 @@ pub struct Protocols {
     pub inhibiting: HashSet<WlSurface>,
     /// When each activation token was made, on the compositor's clock.
     pub token_times: std::collections::HashMap<String, Duration>,
+    /// Activations asked with a token, for the test harness: a client asks
+    /// in its own time (#235).
+    pub activations: u64,
     pub shortcuts_inhibit: KeyboardShortcutsInhibitState,
     /// The surface with the keyboard, as last told: the keyboard cannot
     /// be asked from within its own key filter.
@@ -124,6 +127,7 @@ impl Protocols {
             ExtDataControlState::new::<State, _>(dh, Some(&primary_selection), trusted);
         Self {
             activation: XdgActivationState::new::<State>(dh),
+            activations: 0,
             idle_inhibit: IdleInhibitManagerState::new::<State>(dh),
             inhibiting: HashSet::new(),
             token_times: Default::default(),
@@ -183,6 +187,7 @@ impl XdgActivationHandler for State {
         token_data: XdgActivationTokenData,
         surface: WlSurface,
     ) {
+        self.protocols.activations += 1;
         let age = self
             .protocols
             .token_times

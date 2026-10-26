@@ -100,6 +100,10 @@ pub struct Seats {
     unseen_frame: Option<Duration>,
     /// Agents' captures of such windows, waiting for them to draw.
     captures: Vec<CaptureWait>,
+    /// Windows whose applications were asked to answer once they handled
+    /// what an agent's wait expects of them (see [`State::ask_answer`]),
+    /// and whether to ask again: one was already asked then.
+    asked: Vec<(WindowId, bool)>,
 }
 
 /// An agent's capture of a window no screen shows, woken to draw first.
@@ -514,6 +518,9 @@ impl State {
         if let Aimed::Keys { window } = &aim.target
             && self.agent_focus(connection, window)
         {
+            if let Some(id) = model_id(window) {
+                self.ask_answer(id);
+            }
             return Some(Phase::Settling {
                 until: now + SETTLE,
             });
@@ -1123,7 +1130,70 @@ impl State {
             until: self.clock.now() + CAPTURE_WAIT,
             drawn: false,
         });
+        self.ask_answer(window);
         self.wake_for_seats();
+    }
+
+    /// Asks window `id`'s application to answer (`xdg_wm_base.ping`) once
+    /// it handled what it was just sent: a frame callback for a capture,
+    /// the agent's keyboard before typing. Its answer comes after what it
+    /// did about them on its connection, a commit or a field's purpose.
+    /// A session still waits its time, since an application may draw from
+    /// another thread after it answered; on a virtual clock, the test
+    /// harness moves the clock past such a wait once the application
+    /// answered, however long its thread took (#235).
+    fn ask_answer(&mut self, id: WindowId) {
+        use smithay::wayland::shell::PingError;
+        let windows = &self.windows;
+        self.seats.asked.retain(|(id, _)| windows.contains_key(id));
+        let Some(toplevel) = self.windows.get(&id).and_then(|m| m.window.toplevel()) else {
+            return;
+        };
+        let again = match toplevel.client().send_ping(SERIAL_COUNTER.next_serial()) {
+            Ok(()) => false,
+            // Its answer to the one before does not say it handled this.
+            Err(PingError::PingAlreadyPending(_)) => true,
+            Err(PingError::DeadSurface) => return,
+        };
+        self.seats.asked.push((id, again));
+    }
+
+    /// An application answered: what it was asked about before is
+    /// handled, and it is asked again for what came after.
+    pub(crate) fn app_answered(&mut self, client: &smithay::wayland::shell::xdg::ShellClient) {
+        if self.seats.asked.is_empty() {
+            return;
+        }
+        let windows = &self.windows;
+        let of_client = |id: &WindowId| {
+            windows
+                .get(id)
+                .and_then(|m| m.window.toplevel())
+                .is_some_and(|t| t.client() == *client)
+        };
+        let (answered, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.seats.asked)
+            .into_iter()
+            .partition(|(id, _)| of_client(id));
+        self.seats.asked = kept;
+        let again: Vec<WindowId> = answered
+            .into_iter()
+            .filter_map(|(id, again)| again.then_some(id))
+            .collect();
+        if let Some(&first) = again.first() {
+            self.ask_answer(first);
+            // One answer for all of its windows.
+            self.seats
+                .asked
+                .extend(again.iter().skip(1).map(|id| (*id, false)));
+        }
+    }
+
+    /// Whether every application asked to answer did, or went.
+    pub fn apps_answered(&self) -> bool {
+        self.seats
+            .asked
+            .iter()
+            .all(|(id, _)| !self.windows.contains_key(id))
     }
 
     /// A surface committed: a capture waiting on its window goes on.

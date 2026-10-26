@@ -39,6 +39,11 @@ impl XdgShellHandler for State {
         &mut self.xdg_shell_state
     }
 
+    /// Applications answer what an agent's wait asked of them (#235).
+    fn client_pong(&mut self, client: smithay::wayland::shell::xdg::ShellClient) {
+        self.app_answered(&client);
+    }
+
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // What a window may take, so that one that chooses its size fits
         // the screen it opens on.

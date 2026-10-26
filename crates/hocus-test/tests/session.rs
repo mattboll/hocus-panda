@@ -207,11 +207,9 @@ fn logind_locks_on_request_and_before_sleep() -> anyhow::Result<()> {
     let bus = PrivateBus::start()?;
     let service = logind(&bus)?;
     let mut compositor = compositor(None, Some(&bus))?;
-    // Its threads subscribe.
-    let until = Instant::now() + Duration::from_millis(300);
-    while Instant::now() < until {
-        compositor.dispatch(Duration::from_millis(10))?;
-    }
+    // Its threads follow logind's lock, unlock and sleep signals, in their
+    // own time: one sent before would be missed (#235).
+    compositor.dispatch_until(Duration::from_secs(10), |c| c.logind_following() == 3)?;
     zbus::block_on(async {
         let iface = service
             .object_server()
@@ -273,8 +271,15 @@ fn click(compositor: &mut Headless, label: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Lets the compositor's threads reach the bus.
-fn settle(compositor: &mut Headless) -> anyhow::Result<()> {
+/// Waits until logind said what the machine can do, however long the
+/// compositor's thread takes to ask (#235).
+fn ready(compositor: &mut Headless) -> anyhow::Result<()> {
+    compositor.dispatch_until(Duration::from_secs(10), Headless::power_caps_known)
+}
+
+/// Gives the compositor's threads a moment on the bus, to see that
+/// nothing happens.
+fn moment(compositor: &mut Headless) -> anyhow::Result<()> {
     let until = Instant::now() + Duration::from_millis(300);
     while Instant::now() < until {
         compositor.dispatch(Duration::from_millis(10))?;
@@ -317,13 +322,13 @@ fn an_application_holding_shutdown_back_is_said_and_waited_for() -> anyhow::Resu
         },
     )?;
     let mut compositor = compositor(None, Some(&bus))?;
-    settle(&mut compositor)?;
+    ready(&mut compositor)?;
     click(&mut compositor, "Account: Alex")?;
     click(&mut compositor, "Shut down")?;
     wait_for(&mut compositor, "Editor — Unsaved document in notes.txt")?;
     // No countdown: it waits for a decision.
     compositor.advance(Duration::from_secs(15))?;
-    settle(&mut compositor)?;
+    moment(&mut compositor)?;
     assert!(shows(
         &mut compositor,
         "Editor — Unsaved document in notes.txt"
@@ -359,7 +364,7 @@ fn hibernating_is_offered_only_where_it_works() -> anyhow::Result<()> {
             },
         )?;
         let mut compositor = compositor(None, Some(&bus))?;
-        settle(&mut compositor)?;
+        ready(&mut compositor)?;
         compositor.advance(FRAME)?;
         click(&mut compositor, "Account: Alex")?;
         assert!(shows(&mut compositor, "Suspend")?);

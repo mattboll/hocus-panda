@@ -80,6 +80,8 @@ pub struct Ai {
     model: Option<(Provider, String, String)>,
     /// The providers with a key kept, for the settings; `None` until read.
     keys: Option<Vec<String>>,
+    /// Keys kept or forgotten by the worker, for the test harness (#235).
+    pub(crate) stored: u64,
 }
 
 pub fn start(
@@ -305,10 +307,14 @@ impl State {
                 self.ai.model = Some((provider, url, model));
             }
             News::Stored(Ok(provider)) => {
+                self.ai.stored += 1;
                 tracing::info!(provider, "AI key kept or forgotten");
                 self.read_ai_keys();
             }
-            News::Stored(Err(err)) => tracing::warn!(err, "the AI key was not kept"),
+            News::Stored(Err(err)) => {
+                self.ai.stored += 1;
+                tracing::warn!(err, "the AI key was not kept");
+            }
             News::Keys(Ok(keys)) => {
                 if self.ai.keys.as_ref() != Some(&keys) {
                     self.ai.keys = Some(keys);
