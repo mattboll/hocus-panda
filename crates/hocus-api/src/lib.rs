@@ -1118,6 +1118,10 @@ pub struct WindowInfo {
     pub opacity: f64,
     /// Shown on every desktop of its output.
     pub pinned: bool,
+    /// It asks for attention (an activation not let take the focus, an
+    /// X11 urgency hint), until it has the keyboard.
+    #[serde(default)]
+    pub attention: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

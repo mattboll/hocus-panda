@@ -1,0 +1,46 @@
+description = "An X11 window's urgency hint asks for attention; taken back, it asks no more; given the keyboard, neither"
+outputs = ["1280x800"]
+xwayland = true
+
+[[step]]
+open_x11 = { app_id = "xterm", size = [400, 300], color = "#f2a65a" }
+
+[[step]]
+open = { app_id = "foot", size = [200, 100], color = "#3399ff" }
+
+[[step]]
+expect_focus = "foot"
+
+[[step]]
+x11_urgent = { app_id = "xterm", urgent = true }
+
+[[step]]
+expect_window = { app_id = "xterm", attention = true }
+
+[[step]]
+expect_focus = "foot"
+
+[[step]]
+x11_urgent = { app_id = "xterm", urgent = false }
+
+[[step]]
+expect_window = { app_id = "xterm", attention = false }
+
+[[step]]
+x11_urgent = { app_id = "xterm", urgent = true }
+
+[[step]]
+expect_window = { app_id = "xterm", attention = true }
+
+# Inside the X11 window, outside the other one.
+[[step]]
+pointer_move = [450, 260]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_focus = "xterm"
+
+[[step]]
+expect_window = { app_id = "xterm", attention = false }

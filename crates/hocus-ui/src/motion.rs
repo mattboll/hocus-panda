@@ -61,6 +61,14 @@ impl Spring {
         damping_ratio: 0.72,
     };
 
+    /// Lightly damped, quick: kicked, a shake of three visible swings
+    /// within 400 ms, for what asks to be looked at (a dock icon's
+    /// attention wiggle).
+    pub const WIGGLE: Spring = Spring {
+        stiffness: 1000.0,
+        damping_ratio: 0.25,
+    };
+
     /// Position and velocity at `t` seconds, starting at `x0` with velocity
     /// `v0` towards rest at 0.
     pub fn state(self, x0: f32, v0: f32, t: f32) -> (f32, f32) {
@@ -161,6 +169,20 @@ impl Animated {
         };
     }
 
+    /// Pushed with `velocity` (units per second) from where it is, on
+    /// `spring` back to its target: it swings around it, and settles.
+    pub fn kick(&mut self, velocity: f32, spring: Spring, now: Duration) {
+        let (from, v0) = (self.value(now), self.velocity(now) + velocity);
+        *self = Self {
+            from,
+            to: self.to,
+            v0,
+            start: now,
+            curve: Curve::Spring(spring),
+            end: now + spring.settles_after(from - self.to, v0),
+        };
+    }
+
     /// Jumps to `to` without animating (reduced motion).
     pub fn jump(&mut self, to: f32) {
         *self = Self::new(to);
@@ -225,6 +247,20 @@ mod tests {
         }
         assert!(Easing::OutCubic.apply(0.5) > 0.5);
         assert!(Easing::InCubic.apply(0.5) < 0.5);
+    }
+
+    #[test]
+    fn a_kick_swings_both_ways_and_settles_where_it_was() {
+        let mut a = Animated::new(0.0);
+        a.kick(300.0, Spring::WIGGLE, MS(0));
+        let samples: Vec<f32> = (0..40).map(|i| a.value(MS(i * 10))).collect();
+        let high = samples.iter().copied().fold(f32::MIN, f32::max);
+        let low = samples.iter().copied().fold(f32::MAX, f32::min);
+        assert!(high > 4.0 && high < 8.0, "{high}");
+        assert!(low < -1.5, "{low}");
+        assert!(a.is_running(MS(400)));
+        assert!(!a.is_running(MS(1500)));
+        assert_eq!(a.value(MS(1500)), 0.0);
     }
 
     #[test]

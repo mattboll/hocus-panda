@@ -247,7 +247,7 @@ impl State {
             let Some((program, args)) = command.split_first() else {
                 continue;
             };
-            match self.try_launch(program, args) {
+            match self.start_program(program, args, crate::actions::Asked::BySession) {
                 Ok(()) => self.sessions.started.push((app_id, now)),
                 Err(err) => {
                     tracing::warn!(app_id, %err, "could not restore");
@@ -543,7 +543,14 @@ impl State {
                     for entry in entries {
                         tracing::info!(id = entry.id, "autostart");
                         if let Some((program, args)) = entry.exec.split_first() {
-                            app.state.launch(program, args);
+                            let started = app.state.start_program(
+                                program,
+                                args,
+                                crate::actions::Asked::BySession,
+                            );
+                            if let Err(err) = started {
+                                tracing::warn!(%err, program, "could not start");
+                            }
                         }
                     }
                 });

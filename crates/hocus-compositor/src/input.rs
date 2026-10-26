@@ -107,6 +107,9 @@ impl State {
         };
         let serial = SERIAL_COUNTER.next_serial();
         let pressed = state == KeyState::Pressed;
+        if pressed {
+            self.note_press(serial);
+        }
         self.activity();
         let handled = keyboard.input::<Handled, _>(
             self,
@@ -432,6 +435,9 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let at = pointer.current_location();
         let pressed = state == ButtonState::Pressed;
+        if pressed {
+            self.note_press(serial);
+        }
         self.activity();
         // Locked: a lock client's surface gets the button, nothing else.
         if self.locked() {

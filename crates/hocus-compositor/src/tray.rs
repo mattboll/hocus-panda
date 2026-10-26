@@ -121,8 +121,12 @@ impl State {
 
     pub fn tray_activate(&mut self, key: String) {
         let (x, y) = self.tray_at();
+        if self.tray.tray.is_none() {
+            return;
+        }
+        let token = self.shell_token();
         if let Some(tray) = &self.tray.tray {
-            tray.send(TrayCommand::Activate { key, x, y });
+            tray.send(TrayCommand::Activate { key, x, y, token });
         }
     }
 

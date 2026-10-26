@@ -28,7 +28,8 @@ struct Shown {
     delay: Duration,
 }
 
-/// What it was asked, in order: `activate`, `clicked N`.
+/// What it was asked, in order: `token` (an activation token given),
+/// `activate`, `clicked N`.
 pub type Log = Arc<Mutex<Vec<String>>>;
 
 struct Item {
@@ -118,6 +119,16 @@ impl Item {
     fn activate(&self, _x: i32, _y: i32) {
         if let Ok(mut log) = self.log.lock() {
             log.push("activate".into());
+        }
+    }
+
+    fn provide_xdg_activation_token(&self, token: String) {
+        if let Ok(mut log) = self.log.lock() {
+            log.push(if token.is_empty() {
+                "empty token".into()
+            } else {
+                "token".into()
+            });
         }
     }
 

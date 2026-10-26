@@ -78,6 +78,7 @@ impl State {
                 .and_then(|id| self.windows.get(&id))
                 .map_or(1.0, |m| f64::from(m.opacity)),
             pinned: model_id(window).is_some_and(|id| self.model.is_pinned(id)),
+            attention: model_id(window).is_some_and(|id| self.asks_attention(id)),
         }
     }
 

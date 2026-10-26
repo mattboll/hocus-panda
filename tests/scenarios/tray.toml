@@ -30,6 +30,10 @@ click_ui = "Sync"
 [[step]]
 expect_tray = { title = "Sync", asked = "activate" }
 
+# With a token of the shell's first, for the window it brings forward.
+[[step]]
+expect_tray = { title = "Sync", asked = "token" }
+
 # The menu, by a right click.
 [[step]]
 click_ui = "Tray: 2 applications"
