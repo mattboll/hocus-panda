@@ -179,6 +179,7 @@ Steps, one per `[[step]]` table:
 | `send = { app_id, output, desktop? }` | sends a window to an output: its desktop `desktop` (from 1), or the shown one |
 | `plug = { spec = "1920x1080+1280+0", name? }` | plugs an output; `name` brings back one unplugged before |
 | `unplug = "HEADLESS-2"` | unplugs an output |
+| `prefer_mode = { output, mode = "1920x1200" }` | the output's connector, still connected, now prefers that mode (`WIDTHxHEIGHT`), as a monitor whose EDID changed or a VM's resized window would; the output follows unless a mode chosen for it is still offered |
 | `randr = { output, enabled?, mode?, scale?, position? }` | sets a screen through wlr-output-management, as wlr-randr would (`mode` is `WIDTHxHEIGHT`), and checks it succeeded |
 | `expect_output = { name, geometry? = [x, y, w, h], pixels? = [w, h], scale?, temperature? = [low, high], shown? }` | checks an output's logical geometry, pixel size, scale and night light (kelvin); `shown = false` checks it is off or gone |
 | `stall_output = "HEADLESS-1"` | the output stops presenting its frames, as a stuck screen would, until the compositor recovers it |

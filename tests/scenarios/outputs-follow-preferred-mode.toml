@@ -1,0 +1,47 @@
+# A connector still connected comes to prefer another mode (#248): a
+# monitor whose EDID changed behind a dock or a switch, a VM's window
+# resized. With no mode chosen for it, the screen takes the new one, as any
+# change of mode: each window keeps its place on it, a maximized one fills
+# it again.
+description = "A screen follows its connector's new preferred mode"
+outputs = ["1920x1080", "1280x800"]
+
+[[step]]
+pointer_move = [2560, 400]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+open = { app_id = "big", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+set_state = { app_id = "big", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-2", geometry = [2360, 250, 400, 300] }
+
+[[step]]
+prefer_mode = { output = "HEADLESS-2", mode = "1920x1200" }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", geometry = [1920, 0, 1920, 1200], pixels = [1920, 1200] }
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 1920, 1080], pixels = [1920, 1080] }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-2", geometry = [2360, 250, 400, 300], visible = true }
+
+[[step]]
+expect_window = { app_id = "big", output = "HEADLESS-2", state = "maximized", geometry = [1920, 0, 1920, 1200] }
+
+# And back.
+[[step]]
+prefer_mode = { output = "HEADLESS-2", mode = "1280x800" }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", geometry = [1920, 0, 1280, 800], pixels = [1280, 800] }
+
+[[step]]
+expect_window = { app_id = "big", output = "HEADLESS-2", state = "maximized", geometry = [1920, 0, 1280, 800] }

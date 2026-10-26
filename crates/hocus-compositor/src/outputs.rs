@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use hocus_api::Event;
-use hocus_core::outputs::{Mode, ModeSpec, Transform, round_scale};
+use hocus_core::outputs::{Mode, ModeSpec, Offer, Transform, follow, round_scale};
 use smithay::{
     desktop::layer_map_for_output,
     output::{Mode as WlMode, Output, Scale},
@@ -126,6 +126,37 @@ impl State {
             .entry(output.name())
             .or_insert_with(|| Setting::of(output, at, true, false));
         self.output_settings.changed = true;
+    }
+
+    /// The connector of `name`, still connected, offered `before` and now
+    /// offers `after` (#248). What the screen goes back to with no mode
+    /// chosen follows the connector; a mode a tool set for the session
+    /// stays while offered, as the file's does (see [`State::wanted`]); the
+    /// screens are settled after this turn of the loop, through the same
+    /// path as any change of mode.
+    pub fn modes_changed(&mut self, name: &str, before: Offer<'_>, after: Offer<'_>) {
+        let settings = &mut self.output_settings;
+        if let Some(base) = settings.base.get_mut(name) {
+            base.mode = follow(before, after, base.mode, None);
+        }
+        if let Some(set) = settings.overrides.get_mut(name) {
+            set.mode = follow(before, after, set.mode, Some(&set.mode.into()));
+        }
+        settings.changed = true;
+        let preferred = after.lit_with().map(|m| {
+            format!(
+                "{}x{}@{:.2}",
+                m.width,
+                m.height,
+                f64::from(m.refresh) / 1000.0
+            )
+        });
+        tracing::info!(
+            output = name,
+            modes = after.modes.len(),
+            preferred = preferred.as_deref().unwrap_or("none"),
+            "the screen's modes changed"
+        );
     }
 
     /// The file changed: what it says wins over what tools set.

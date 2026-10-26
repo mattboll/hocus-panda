@@ -423,6 +423,22 @@ impl App {
                         .map_err(|err| ApiError::new(ErrorCode::NotFound, format!("{err:#}"))),
                 );
             }
+            Request::PreferMode { output, mode } => {
+                let mode: hocus_core::outputs::ModeSpec = match mode.parse() {
+                    Ok(mode) => mode,
+                    Err(err) => return Some(Err(ApiError::new(ErrorCode::BadRequest, err))),
+                };
+                let App { state, backend } = self;
+                let BackendState::Headless(headless) = backend else {
+                    return Some(Err(not_headless()));
+                };
+                return Some(
+                    headless
+                        .prefer(&output, (mode.width, mode.height), state)
+                        .map(|()| Reply::Done)
+                        .map_err(|err| ApiError::new(ErrorCode::NotFound, format!("{err:#}"))),
+                );
+            }
             Request::SetPrimaryOutput { output } => {
                 return Some(
                     state

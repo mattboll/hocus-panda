@@ -408,6 +408,9 @@ pub enum Step {
     Unplug(String),
     /// The output stops presenting its frames, as a stuck screen would.
     StallOutput(String),
+    /// An output's connector, still connected, now prefers another mode:
+    /// `{ output, mode = "WIDTHxHEIGHT" }`.
+    PreferMode(PreferMode),
     /// Maximizes, makes fullscreen, minimizes or restores (`normal`) a
     /// window: `{ app_id, state }`.
     SetState(SetState),
@@ -1004,6 +1007,14 @@ pub struct PlugOutput {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PreferMode {
+    pub output: String,
+    /// `WIDTHxHEIGHT`.
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SendWindow {
     pub app_id: String,
     pub output: String,
@@ -1225,6 +1236,7 @@ impl fmt::Display for Step {
             Self::Plug(plug) => write!(f, "plug {}", plug.spec),
             Self::Unplug(name) => write!(f, "unplug {name}"),
             Self::StallOutput(name) => write!(f, "stall output {name}"),
+            Self::PreferMode(p) => write!(f, "prefer mode {} {}", p.output, p.mode),
             Self::Config(_) => write!(f, "config"),
             Self::ExpectConfigError(e) => write!(f, "expect_config_error {e:?}"),
             Self::ExpectConfigWarning(e) => write!(f, "expect_config_warning {e:?}"),
@@ -2608,6 +2620,13 @@ impl Run<'_> {
             Step::StallOutput(name) => {
                 self.request(Request::StallOutput {
                     output: name.clone(),
+                })?;
+                Ok(())
+            }
+            Step::PreferMode(p) => {
+                self.request(Request::PreferMode {
+                    output: p.output.clone(),
+                    mode: p.mode.clone(),
                 })?;
                 Ok(())
             }

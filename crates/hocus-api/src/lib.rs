@@ -228,6 +228,13 @@ pub enum Request {
     StallOutput {
         output: String,
     },
+    /// A headless output's connector, still connected, now prefers another
+    /// mode, `WIDTHxHEIGHT`: as a monitor whose EDID changed behind a dock,
+    /// or a VM's window resized.
+    PreferMode {
+        output: String,
+        mode: String,
+    },
     /// The output that takes what an unplugged one showed.
     SetPrimaryOutput {
         output: String,
@@ -342,6 +349,7 @@ impl Request {
             | Self::PlugOutput { .. }
             | Self::UnplugOutput { .. }
             | Self::StallOutput { .. }
+            | Self::PreferMode { .. }
             | Self::SetPrimaryOutput { .. }
             | Self::SaveSession
             | Self::OfferSession => Permission::Test,

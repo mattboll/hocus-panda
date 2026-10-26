@@ -122,6 +122,9 @@ struct CanvasOutput<T> {
     /// Dark through output-power: in the layout, nothing drawn.
     dark: bool,
     spec: OutputSpec,
+    /// The size its connector prefers: the spec's, until a test says the
+    /// connector prefers another (#248).
+    preferred: (i32, i32),
     position: (i32, i32),
     target: T,
     damage_tracker: OutputDamageTracker,
@@ -258,6 +261,7 @@ where
             global: Some(global),
             dark: false,
             spec: *spec,
+            preferred: (spec.width, spec.height),
             position,
             target,
             frames: 0,
@@ -421,7 +425,7 @@ where
         self.outputs
             .iter()
             .map(|o| {
-                let own = (o.spec.width, o.spec.height);
+                let own = o.preferred;
                 let modes = std::iter::once(own)
                     .chain(MODES.into_iter().filter(|m| *m != own))
                     .map(|(width, height)| hocus_core::outputs::Mode {
@@ -520,6 +524,46 @@ impl HeadlessBackend {
         };
         anyhow::ensure!(found, "no output named {name}");
         state.needs_redraw = true;
+        Ok(())
+    }
+
+    /// The connector of output `name` now prefers `size`: the output's
+    /// modes change while it stays connected, and it follows as a screen
+    /// does (#248).
+    pub fn prefer(
+        &mut self,
+        name: &str,
+        size: (i32, i32),
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        fn prefer<R, T>(canvas: &mut Canvas<R, T>, name: &str, size: (i32, i32)) -> bool {
+            let out = canvas.outputs.iter_mut().find(|o| o.output.name() == name);
+            out.map(|o| {
+                o.preferred = size;
+                o.output.set_preferred(Mode {
+                    size: size.into(),
+                    refresh: REFRESH_MHZ,
+                });
+            })
+            .is_some()
+        }
+        let head = |heads: Vec<Head>| heads.into_iter().find(|h| h.name == name);
+        let before = head(self.heads(state)).with_context(|| format!("no output named {name}"))?;
+        let found = match &mut self.renderers {
+            Renderers::Gles(canvas) => prefer(canvas, name, size),
+            Renderers::Pixman(canvas) => prefer(canvas, name, size),
+        };
+        anyhow::ensure!(found, "no output named {name}");
+        let after = head(self.heads(state)).with_context(|| format!("no output named {name}"))?;
+        fn offer(h: &Head) -> hocus_core::outputs::Offer<'_> {
+            hocus_core::outputs::Offer {
+                modes: &h.modes,
+                preferred: h.preferred,
+            }
+        }
+        if offer(&before) != offer(&after) {
+            state.modes_changed(name, offer(&before), offer(&after));
+        }
         Ok(())
     }
 

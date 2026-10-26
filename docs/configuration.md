@@ -370,7 +370,10 @@ Each `[[outputs]]` sets one screen; what it does not set goes back to how the
 screen was lit (its preferred mode, scale 1, no rotation, to the right of the
 others). Changes apply at once and move nothing else: each window keeps its
 place on its screen, maximized and fullscreen ones fill it again, and a
-layout seen before puts every window back where it was. Screen tools
+layout seen before puts every window back where it was. When a connected
+screen comes to offer other modes (a monitor behind a dock or a switch, a
+virtual machine's window resized), it takes the one it now prefers, unless
+the mode chosen for it is still offered. Screen tools
 (wlr-randr, kanshi, wdisplays) can change the same for the running session
 through wlr-output-management; the file wins again once it changes. Turning
 a screen's light off and on (output-power, as swayidle does) keeps it in the

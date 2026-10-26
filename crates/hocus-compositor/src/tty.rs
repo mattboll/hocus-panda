@@ -613,6 +613,13 @@ fn on_vblank(
     }
 }
 
+/// The mode a connector prefers, by its place in its modes.
+fn preferred(info: &connector::Info) -> Option<usize> {
+    info.modes()
+        .iter()
+        .position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
+}
+
 fn core_mode(m: control::Mode) -> hocus_core::outputs::Mode {
     let wl = Mode::from(m);
     hocus_core::outputs::Mode {
@@ -800,7 +807,56 @@ impl TtyBackend {
         for change in gpus::scan(&found, &known) {
             self.carry_out(node, change, &connected, state);
         }
+        self.follow_modes(node, &connected, state);
         state.needs_redraw = true;
+    }
+
+    /// The screens, lit or off, whose connector offers other modes now
+    /// while it stays connected (#248): their heads say so, and the
+    /// desktop settles them after this turn of the loop.
+    fn follow_modes(&mut self, node: DrmNode, connected: &[connector::Info], state: &mut State) {
+        let Some(device) = self.devices.get_mut(&node) else {
+            return;
+        };
+        for info in connected {
+            let modes: Vec<hocus_core::outputs::Mode> =
+                info.modes().iter().map(|m| core_mode(*m)).collect();
+            let preferred = preferred(info);
+            let head = if let Some(screen) = device
+                .screens
+                .values_mut()
+                .find(|s| s.connector == info.handle())
+            {
+                // The same sizes may come with other timings.
+                screen.modes = info.modes().to_vec();
+                if let Some(i) = preferred
+                    && screen.head.preferred != preferred
+                {
+                    screen.output.set_preferred(Mode::from(info.modes()[i]));
+                }
+                &mut screen.head
+            } else if let Some(off) = device.off.iter_mut().find(|o| o.connector == info.handle()) {
+                &mut off.head
+            } else {
+                continue;
+            };
+            if head.modes == modes && head.preferred == preferred {
+                continue;
+            }
+            let before = std::mem::replace(&mut head.modes, modes);
+            let before_preferred = std::mem::replace(&mut head.preferred, preferred);
+            state.modes_changed(
+                &head.name,
+                hocus_core::outputs::Offer {
+                    modes: &before,
+                    preferred: before_preferred,
+                },
+                hocus_core::outputs::Offer {
+                    modes: &head.modes,
+                    preferred: head.preferred,
+                },
+            );
+        }
     }
 
     fn carry_out(
@@ -977,10 +1033,7 @@ impl TtyBackend {
         let (make, model) = edid(drm, info.handle())
             .map(|e| identity(&e))
             .unwrap_or_default();
-        let preferred = info
-            .modes()
-            .iter()
-            .position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED));
+        let preferred = preferred(info);
         let drm_mode = mode
             .or_else(|| preferred.map(|i| info.modes()[i]))
             .or_else(|| info.modes().first().copied())

@@ -220,8 +220,9 @@ fn tell(dh: &DisplayHandle, told: &mut Told, heads: &[Head], serial: u32) {
         match known {
             Some(i) => {
                 let (last, handle, modes) = &mut told.heads[i];
-                if last.modes != head.modes {
-                    // New modes: the old ones go, the new ones come.
+                if last.modes != head.modes || last.preferred != head.preferred {
+                    // New modes, or another preferred (#248): the old ones
+                    // go, the new ones come.
                     for mode in modes.drain(..) {
                         mode.finished();
                     }

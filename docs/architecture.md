@@ -96,6 +96,10 @@ fast to compile and test, and lets the UI be developed in a plain window.
   element the screen's `DrmOutput` shows, the copy turned as the screen
   is. GPUs plugged and unplugged, and their screens, are followed through
   udev; a GPU that goes takes its screens with it, as an unplug of each.
+  A change event re-reads every connector's modes too: a screen still
+  connected whose connector offers others (a monitor's EDID changed behind
+  a dock, a VM's window resized) has its head updated, and is settled as
+  below (#248).
   When two GPUs number a connector alike, the second's screen is named
   after its card too (`card1-HDMI-A-1`). linux-dmabuf is offered for
   clients that draw on the GPU (the primary). libinput reads keyboards and
@@ -112,7 +116,11 @@ geometry, windows kept in place, relayout, events. Wanted settings come from
 `[[outputs]]` and, for where screens are, the `[[layouts]]` entry for the set
 connected, or, for the session, from wlr-output-management; they are
 settled after the turn of the loop where something changed, and
-configurations are answered then. Output globals are retired in two steps
+configurations are answered then. When a connector's modes change while it
+stays connected, a mode chosen in the file or by a tool stays while the
+connector offers it; otherwise the screen takes the mode the connector now
+prefers (`hocus_core::outputs::follow`), through the same path as any change
+of mode. The headless backend models it for the scenarios (`prefer_mode`). Output globals are retired in two steps
 (hidden, destroyed seconds later) so that a client binding one meanwhile is
 not cut off.
 
