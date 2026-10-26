@@ -217,6 +217,8 @@ impl State {
             return;
         };
         let ticking = handle.insert_source(Timer::from_duration(Duration::ZERO), |_, _, app| {
+            // Counted, not timed: the time passing is no activity.
+            app.state.measures.ran("night light");
             let state = &mut app.state;
             state.needs_redraw = true;
             if state.comfort.night.ramp.is_some() {

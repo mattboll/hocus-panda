@@ -146,7 +146,7 @@ impl State {
         let tick = self.waker().and_then(|handle| {
             handle
                 .insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, app| {
-                    app.state.needs_redraw = true;
+                    app.timed("leave countdown", |app| app.state.needs_redraw = true);
                     TimeoutAction::ToDuration(Duration::from_secs(1))
                 })
                 .ok()
@@ -279,6 +279,10 @@ impl State {
 
     /// After each dispatch: the countdown, and windows closing.
     pub fn refresh_leaving(&mut self) {
+        // Nothing to do, nor to read, without the card (#88).
+        if self.leaver.card.is_none() {
+            return;
+        }
         let now = self.clock.now();
         let open: Vec<String> = self
             .windows

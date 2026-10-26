@@ -1,0 +1,175 @@
+description = "Twenty windows open on two screens and their desktops switch, within budgets counted rather than timed: frames, scenes built, allocations on the loop and memory held (#88)"
+# The scenarios' two screens: a laptop panel at scale 2, a wide screen.
+outputs = ["2560x1600@2", "3440x1440"]
+shell = true
+motion = true
+
+[[step]]
+wait_wallpapers = true
+[[step]]
+advance_ms = 1000
+[[step]]
+measure = true
+
+[[step]]
+open = { app_id = "budget.w01", size = [480, 320], color = "#3399ff" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w02", size = [540, 360], color = "#ff6633" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w03", size = [600, 400], color = "#33cc66" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w04", size = [660, 440], color = "#cc33aa" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w05", size = [720, 320], color = "#ffcc00" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w06", size = [480, 360], color = "#00cccc" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w07", size = [540, 400], color = "#9966ff" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w08", size = [600, 440], color = "#ff3366" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w09", size = [660, 320], color = "#66cc33" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w10", size = [720, 360], color = "#3366cc" }
+[[step]]
+advance_ms = 300
+
+# The next ten on the wide screen.
+[[step]]
+pointer_move = [2900, 700]
+
+[[step]]
+open = { app_id = "budget.w11", size = [480, 400], color = "#3399ff" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w12", size = [540, 440], color = "#ff6633" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w13", size = [600, 320], color = "#33cc66" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w14", size = [660, 360], color = "#cc33aa" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w15", size = [720, 400], color = "#ffcc00" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w16", size = [480, 440], color = "#00cccc" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w17", size = [540, 320], color = "#9966ff" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w18", size = [600, 360], color = "#ff3366" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w19", size = [660, 400], color = "#66cc33" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+open = { app_id = "budget.w20", size = [720, 440], color = "#3366cc" }
+[[step]]
+advance_ms = 300
+
+[[step]]
+# Measured: frames [160, 150], scenes [320, 320], 180,600 allocations,
+# 376 MB asked for (the dock's picture made again for each new app), 9.1 MB
+# held; budgets 10 % above, held 15 %.
+expect_cost = { frames = [176, 165], renders = [352, 352], allocations = 199_000, allocated_mb = 414, held_mb = 10.5 }
+
+# Each screen to its second desktop and back, the pointer on it.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+keys = "super+2"
+[[step]]
+advance_ms = 1000
+
+[[step]]
+keys = "super+3"
+[[step]]
+advance_ms = 1000
+
+[[step]]
+keys = "super+1"
+[[step]]
+advance_ms = 1000
+
+[[step]]
+pointer_move = [2900, 700]
+
+[[step]]
+keys = "super+2"
+[[step]]
+advance_ms = 1000
+
+[[step]]
+keys = "super+3"
+[[step]]
+advance_ms = 1000
+
+[[step]]
+keys = "super+1"
+[[step]]
+advance_ms = 1000
+
+[[step]]
+# Measured: frames [23, 21], scenes [102, 102], 59,950 allocations,
+# 91 MB, 0.9 MB held.
+expect_cost = { frames = [26, 24], renders = [113, 113], allocations = 66_000, allocated_mb = 101, held_mb = 1.0 }
+[[step]]
+expect_shown = { output = "HEADLESS-2", desktop = 1 }
+[[step]]
+expect_window = { app_id = "budget.w20", output = "HEADLESS-2", visible = true }
+# At rest with twenty windows, a minute: nothing drawn but the column's
+# clock turning, nothing held.
+[[step]]
+advance_ms = 60000
+[[step]]
+# Measured: 274,700 allocations (38 a turn of the loop, two a frame), 8.5 MB.
+expect_cost = { frames = [1, 0], renders = [1, 1], allocations = 302_000, allocated_mb = 10, held_mb = 0.25 }

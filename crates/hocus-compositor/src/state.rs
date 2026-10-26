@@ -212,6 +212,10 @@ pub struct State {
     pub dropdown: crate::dropdown::Dropdown,
     /// The theme the shell was last given.
     pub applied_theme: Option<hocus_ui::Theme>,
+    /// The theme in effect as last worked out, and what from: asked for
+    /// after every turn of the loop, worked out again only when that
+    /// changes (#88).
+    pub theme_memo: std::cell::RefCell<Option<(u64, hocus_ui::Theme)>>,
     /// What started applications inherit, if not the compositor's own
     /// environment (tests).
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
@@ -309,6 +313,7 @@ impl State {
             quick: None,
             wallpapers: None,
             applied_theme: None,
+            theme_memo: Default::default(),
             dropdown: Default::default(),
             bars: Default::default(),
             config_path: None,

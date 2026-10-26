@@ -6,7 +6,7 @@
 //! docs/design/identity.md: dark, light, matrix, hud and paper, each with
 //! its own variants of the accents.
 
-use std::{fmt, str::FromStr};
+use std::{fmt, str::FromStr, sync::OnceLock};
 
 use serde::Deserialize;
 
@@ -532,11 +532,17 @@ pub struct Theme {
 impl Theme {
     /// A built-in theme with its default accent.
     pub fn builtin(name: ThemeName) -> Self {
-        match Self::from_toml(name.file()) {
-            Ok(theme) => theme,
-            // The files are part of the build and tested.
-            Err(err) => unreachable!("built-in theme {}: {err}", name.name()),
-        }
+        // Each file is read once: the compositor asks for its theme after
+        // every turn of its loop (#88).
+        static READ: [OnceLock<Theme>; ThemeName::ALL.len()] =
+            [const { OnceLock::new() }; ThemeName::ALL.len()];
+        READ[name as usize]
+            .get_or_init(|| match Self::from_toml(name.file()) {
+                Ok(theme) => theme,
+                // The files are part of the build and tested.
+                Err(err) => unreachable!("built-in theme {}: {err}", name.name()),
+            })
+            .clone()
     }
 
     /// A theme from a file in the format of `themes/*.toml`.

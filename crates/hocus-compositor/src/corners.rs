@@ -86,7 +86,7 @@ impl State {
                 let delay = Duration::from_millis(u64::from(self.config.hot_corners.delay_ms));
                 if let Some(handle) = self.waker() {
                     let woken = handle.insert_source(Timer::from_duration(delay), |_, _, app| {
-                        app.state.needs_redraw = true;
+                        app.timed("hot corner", |app| app.state.needs_redraw = true);
                         TimeoutAction::Drop
                     });
                     if let Err(err) = woken {

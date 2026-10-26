@@ -61,6 +61,9 @@ pub struct Wallpapers {
     papers: BTreeMap<String, Paper>,
     jobs: mpsc::Sender<(String, u64, Request)>,
     generation: u64,
+    /// What the wallpapers and the theme were last worked out from,
+    /// summed up: nothing is worked out again until it changes (#88).
+    inputs: Option<u64>,
 }
 
 struct Done {
@@ -114,6 +117,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
         papers: BTreeMap::new(),
         jobs,
         generation: 0,
+        inputs: None,
     });
 }
 
@@ -164,6 +168,14 @@ impl State {
     /// After each dispatch: asks for the wallpapers that changed, and gives
     /// the shell the theme in effect.
     pub fn refresh_appearance(&mut self) {
+        // Nothing it reads changed since the last turn: neither the
+        // wallpapers nor the theme do.
+        let inputs = self.appearance_inputs();
+        match self.wallpapers.as_mut() {
+            None => return,
+            Some(papers) if papers.inputs == Some(inputs) => return,
+            Some(papers) => papers.inputs = Some(inputs),
+        }
         let slot = self.wall_minutes() / 10;
         let outputs: Vec<Output> = self.space.outputs().cloned().collect();
         // Each output's look: its shown desktop's own, or the general one.
@@ -256,6 +268,34 @@ impl State {
         self.apply_theme();
     }
 
+    /// What [`State::refresh_appearance`] reads, summed up without
+    /// allocating: the configuration, the time of day, the screens and the
+    /// desktops they show, glass.
+    fn appearance_inputs(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        self.config_generation.hash(&mut hasher);
+        let time = self.wall_time();
+        (time.hour, time.minute / 10).hash(&mut hasher);
+        self.glass_on().hash(&mut hasher);
+        for output in self.space.outputs() {
+            output
+                .current_mode()
+                .map(|m| (m.size.w, m.size.h))
+                .hash(&mut hasher);
+            output
+                .current_scale()
+                .fractional_scale()
+                .to_bits()
+                .hash(&mut hasher);
+        }
+        for output in self.model.outputs() {
+            (&output.name.0, output.shown).hash(&mut hasher);
+        }
+        self.model.primary().map(|o| &o.name.0).hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// Minutes since midnight, as the user reads the time.
     pub(crate) fn wall_minutes(&self) -> u32 {
         let t = self.wall_time();
@@ -300,6 +340,27 @@ impl State {
     /// otherwise): the configured one or that desktop's own, its accent
     /// from that screen's wallpaper when asked.
     pub fn theme(&self) -> Theme {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        self.appearance_inputs().hash(&mut hasher);
+        self.shell.is_some().hash(&mut hasher);
+        if let Some(papers) = &self.wallpapers {
+            for (name, paper) in &papers.papers {
+                (name, paper.dominant.map(|c| (c.r, c.g, c.b, c.a))).hash(&mut hasher);
+            }
+        }
+        let inputs = hasher.finish();
+        if let Some((seen, theme)) = &*self.theme_memo.borrow()
+            && *seen == inputs
+        {
+            return theme.clone();
+        }
+        let theme = self.work_out_theme();
+        *self.theme_memo.borrow_mut() = Some((inputs, theme.clone()));
+        theme
+    }
+
+    fn work_out_theme(&self) -> Theme {
         let column = self
             .column_output()
             .map(|o| o.name())

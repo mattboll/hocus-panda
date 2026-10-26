@@ -47,6 +47,7 @@ pub fn insert(
         .insert_source(
             Generic::new(socket.listener, Interest::READ, Mode::Level),
             |_, listener, app| {
+                app.state.measures.ran("wayland connection");
                 while let Some(stream) = listener.accept()? {
                     if let Err(err) = app
                         .state

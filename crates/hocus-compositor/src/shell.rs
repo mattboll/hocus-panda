@@ -172,7 +172,9 @@ pub fn start(
             std::time::Duration::from_secs(60 - now.as_secs() % 60)
         };
         let timer = Timer::from_duration(until_next_minute());
-        if let Err(err) = handle.insert_source(timer, move |_, _, _| {
+        if let Err(err) = handle.insert_source(timer, move |_, _, app| {
+            // Counted, not timed: the time passing is no activity.
+            app.state.measures.ran("column clock");
             TimeoutAction::ToDuration(until_next_minute())
         }) {
             tracing::warn!(%err.error, "the column's clock will not tick");

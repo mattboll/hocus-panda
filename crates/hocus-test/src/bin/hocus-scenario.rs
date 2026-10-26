@@ -5,6 +5,11 @@ use std::{path::PathBuf, process::ExitCode};
 use clap::{Parser, Subcommand};
 use hocus_test::scenario::{RunOptions, Scenario};
 
+// Counts what the compositor allocates on its loop, for the scenarios'
+// budgets (#88).
+#[global_allocator]
+static ALLOCATOR: hocus_compositor::allocations::Counting = hocus_compositor::allocations::Counting;
+
 /// Run Hocuspanda scenarios on headless compositors.
 #[derive(Debug, Parser)]
 #[command(version)]

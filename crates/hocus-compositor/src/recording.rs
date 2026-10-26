@@ -294,12 +294,14 @@ impl State {
         };
         let ticking =
             handle.insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, app| {
-                if app.state.recording() {
-                    app.state.needs_redraw = true;
-                    TimeoutAction::ToDuration(Duration::from_secs(1))
-                } else {
-                    TimeoutAction::Drop
-                }
+                app.timed("recording second", |app| {
+                    if app.state.recording() {
+                        app.state.needs_redraw = true;
+                        TimeoutAction::ToDuration(Duration::from_secs(1))
+                    } else {
+                        TimeoutAction::Drop
+                    }
+                })
             });
         if let Err(err) = ticking {
             tracing::warn!(%err.error, "the recording's time will not move");

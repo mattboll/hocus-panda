@@ -31,10 +31,7 @@ use hocus_platform::{
 };
 use hocus_shell::column::{Agenda, Meeting};
 use jiff::{SignedDuration, Timestamp, ToSpan, civil::Date, tz::TimeZone};
-use smithay::reexports::calloop::{
-    LoopHandle, channel,
-    timer::{TimeoutAction, Timer},
-};
+use smithay::reexports::calloop::{LoopHandle, channel};
 
 use crate::{App, State};
 
@@ -42,6 +39,8 @@ use crate::{App, State};
 const SYNC_EVERY: Duration = Duration::from_secs(600);
 /// The first one, once the session has settled.
 const FIRST_SYNC: Duration = Duration::from_secs(2);
+/// How often reminders are looked at, while there is a calendar.
+const TICK: Duration = Duration::from_secs(30);
 /// Reminders, in minutes before.
 const REMIND: [i64; 2] = [10, 1];
 /// Join shows this long before.
@@ -114,6 +113,8 @@ pub struct Calendar {
     secrets_kept: usize,
     /// The day the events were expanded on.
     expanded_on: Option<Date>,
+    /// Wakes the loop for syncs and reminders while there is a calendar.
+    alarm: crate::alarm::Alarm,
 }
 
 pub fn start(
@@ -135,16 +136,6 @@ pub fn start(
     state.calendar.news = Some(news.clone());
     state.calendar.goa.bus = session_bus.map(str::to_owned);
     state.calendar.next_sync = Some(state.clock.now() + FIRST_SYNC);
-    // Wakes the loop: syncs and reminders fall due on the clock.
-    if !state.clock.is_virtual() {
-        let ticking = handle.insert_source(Timer::from_duration(FIRST_SYNC), |_, _, app| {
-            app.state.needs_redraw = true;
-            TimeoutAction::ToDuration(Duration::from_secs(30))
-        });
-        if let Err(err) = ticking {
-            tracing::warn!(%err.error, "reminders will come only when something happens");
-        }
-    }
     let Some(dir) = dir else {
         return;
     };
@@ -322,6 +313,24 @@ impl State {
             self.expand_calendar();
         }
         self.remind();
+        // Syncs and reminders fall due on the clock: the loop is woken
+        // every half minute (a reminder is shown within the minute before
+        // its time), but only while there is a calendar (#88).
+        let wanted = !ids.is_empty() || !self.calendar.events.is_empty();
+        let at = wanted.then(|| {
+            let tick = match self.calendar.alarm.at() {
+                Some(at) if at > now => at,
+                _ => now + TICK,
+            };
+            match self.calendar.next_sync {
+                Some(sync) if !ids.is_empty() && sync > now => tick.min(sync),
+                _ => tick,
+            }
+        });
+        let handle = self.waker().cloned();
+        self.calendar
+            .alarm
+            .set(handle.as_ref(), "calendar", at, now);
     }
 
     /// The configuration's accounts, then GOA's.

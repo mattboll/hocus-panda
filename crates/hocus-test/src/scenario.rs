@@ -455,6 +455,54 @@ pub enum Step {
     /// on the GPU (#169), so many since the last such step, or the start:
     /// `{ at_least?, at_most? }`.
     ExpectGlitch(ExpectBlur),
+    /// Starts counting what the compositor does (#88): frames, scenes
+    /// built, allocations on its loop.
+    Measure(bool),
+    /// What the compositor did since `measure` or the last such step is
+    /// within these budgets; counting starts again (#88).
+    ExpectCost(ExpectCost),
+}
+
+/// Budgets of what the compositor does, counted rather than timed (#88):
+/// the same on every machine, however loaded.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectCost {
+    /// Frames drawn, at most, per output in order.
+    pub frames: Option<Vec<u64>>,
+    /// Scenes built and compared, drawn or not, at most, per output.
+    pub renders: Option<Vec<u64>>,
+    /// Allocations on the compositor's loop, at most.
+    pub allocations: Option<u64>,
+    /// Megabytes asked for on its loop, at most.
+    pub allocated_mb: Option<f64>,
+    /// Megabytes it holds more than when counting started, at most.
+    pub held_mb: Option<f64>,
+}
+
+/// What a scenario's compositor did, for reports (#88).
+#[derive(Debug, Clone)]
+pub struct Measured {
+    /// Its stats at the end.
+    pub stats: hocus_api::Stats,
+    /// What each `expect_cost` step counted, in order.
+    pub costs: Vec<Cost>,
+}
+
+/// What the compositor did between two steps.
+#[derive(Debug, Clone)]
+pub struct Cost {
+    pub frames: Vec<u64>,
+    pub renders: Vec<u64>,
+    pub allocations: hocus_compositor::allocations::Allocations,
+}
+
+/// Where counting started.
+#[derive(Debug, Clone)]
+struct CostFrom {
+    frames: Vec<u64>,
+    renders: Vec<u64>,
+    allocations: hocus_compositor::allocations::Allocations,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1195,6 +1243,8 @@ impl fmt::Display for Step {
             Self::ExpectReceived(e) => write!(f, "expect_received {} `{}`", e.app_id, e.event),
             Self::ExpectBudget(e) => write!(f, "expect_budget {} ms", e.max_ms),
             Self::ExpectBlur(e) => write!(f, "expect_blur {:?} to {:?}", e.at_least, e.at_most),
+            Self::Measure(_) => write!(f, "measure"),
+            Self::ExpectCost(e) => write!(f, "expect_cost {e:?}"),
             Self::ExpectGlitch(e) => {
                 write!(f, "expect_glitch {:?} to {:?}", e.at_least, e.at_most)
             }
@@ -1264,6 +1314,21 @@ impl Scenario {
     /// Runs every step on a fresh compositor; the first step that fails ends
     /// the run, and the error names it.
     pub fn run(&self, options: &RunOptions) -> anyhow::Result<()> {
+        self.run_measured(options).map(|_| ())
+    }
+
+    /// Runs it, and says what its compositor did.
+    pub fn run_measured(&self, options: &RunOptions) -> anyhow::Result<Measured> {
+        self.run_counting(options, true)
+    }
+
+    /// Runs it, and says what its compositor did, its `expect_cost`
+    /// budgets left unchecked: for reports, before and after a change.
+    pub fn run_reporting(&self, options: &RunOptions) -> anyhow::Result<Measured> {
+        self.run_counting(options, false)
+    }
+
+    fn run_counting(&self, options: &RunOptions, check_costs: bool) -> anyhow::Result<Measured> {
         let outputs = if self.outputs.is_empty() {
             vec![OutputSpec::new(1280, 800)]
         } else {
@@ -1378,6 +1443,9 @@ impl Scenario {
             glitches: 0,
             a11y_apps: Vec::new(),
             a11y: None,
+            cost_from: None,
+            costs: Vec::new(),
+            check_costs,
             home,
         };
         run.request(Request::Subscribe)?;
@@ -1391,7 +1459,10 @@ impl Scenario {
             run.step(step)
                 .with_context(|| format!("step {} ({step})", n + 1))?;
         }
-        Ok(())
+        Ok(Measured {
+            stats: run.compositor.stats(),
+            costs: std::mem::take(&mut run.costs),
+        })
     }
 }
 
@@ -1449,6 +1520,12 @@ struct Run<'a> {
     /// bus with its registry, made at the first.
     a11y_apps: Vec<crate::atspi::FakeApp>,
     a11y: Option<(crate::bus::PrivateBus, crate::atspi::FakeRegistry)>,
+    /// Where counting what the compositor does started (#88).
+    cost_from: Option<CostFrom>,
+    /// What each `expect_cost` counted.
+    costs: Vec<Cost>,
+    /// Whether `expect_cost` budgets fail the scenario.
+    check_costs: bool,
     /// The scenario's own home, last: the compositor is gone before it.
     home: Option<PrivateHome>,
 }
@@ -1973,6 +2050,11 @@ impl Run<'_> {
             }
             Step::ExpectExport(expected) => self.expect_export(expected),
             Step::WaitWallpapers(_) => self.wallpapers(),
+            Step::Measure(_) => {
+                self.cost_from = Some(self.cost_now());
+                Ok(())
+            }
+            Step::ExpectCost(expected) => self.expect_cost(expected),
             Step::Caldav(c) => {
                 let dir = self.scenario.dir.join(&c.dir);
                 self.caldav = Some(crate::caldav::Server::start(dir, &c.user, &c.password)?);
@@ -4267,6 +4349,90 @@ impl Run<'_> {
             }
             self.compositor.dispatch(Duration::from_millis(10))?;
         }
+    }
+
+    /// What the compositor did so far, read without a request.
+    fn cost_now(&self) -> CostFrom {
+        let stats = self.compositor.stats();
+        CostFrom {
+            frames: stats.outputs.iter().map(|o| o.frames).collect(),
+            renders: stats.outputs.iter().map(|o| o.renders).collect(),
+            allocations: hocus_compositor::allocations::counted(),
+        }
+    }
+
+    fn expect_cost(&mut self, expected: &ExpectCost) -> anyhow::Result<()> {
+        let now = self.cost_now();
+        let from = self
+            .cost_from
+            .replace(now.clone())
+            .context("expect_cost needs a measure step before it")?;
+        let per_output = |what: &str, budget: &Option<Vec<u64>>, now: &[u64], from: &[u64]| {
+            let Some(budget) = budget else {
+                return Ok(());
+            };
+            anyhow::ensure!(
+                now.len() == from.len() && now.len() == budget.len(),
+                "{} outputs, {} budgets of {what}",
+                now.len(),
+                budget.len()
+            );
+            for (i, ((n, f), max)) in now.iter().zip(from).zip(budget).enumerate() {
+                let done = n - f;
+                anyhow::ensure!(
+                    done <= *max,
+                    "output {}: {done} {what}, budget {max}",
+                    i + 1
+                );
+            }
+            Ok(())
+        };
+        let done = now.allocations.since(&from.allocations);
+        let sub = |a: &[u64], b: &[u64]| a.iter().zip(b).map(|(a, b)| a - b).collect::<Vec<_>>();
+        let cost = Cost {
+            frames: sub(&now.frames, &from.frames),
+            renders: sub(&now.renders, &from.renders),
+            allocations: done,
+        };
+        // Said whether within budget or not: what budgets are set from.
+        eprintln!("cost: {cost:?}");
+        self.costs.push(cost);
+        if !self.check_costs {
+            return Ok(());
+        }
+        per_output("frames", &expected.frames, &now.frames, &from.frames)?;
+        per_output(
+            "scenes built",
+            &expected.renders,
+            &now.renders,
+            &from.renders,
+        )?;
+        let wanted = expected.allocations.is_some()
+            || expected.allocated_mb.is_some()
+            || expected.held_mb.is_some();
+        if wanted && !hocus_compositor::allocations::installed() {
+            // A program without the counting allocator (`hocus scenario`
+            // built elsewhere) cannot tell.
+            eprintln!("allocations not counted here: their budgets are not checked");
+            return Ok(());
+        }
+        let mb = |bytes: i64| bytes as f64 / (1024.0 * 1024.0);
+        if let Some(max) = expected.allocations {
+            anyhow::ensure!(
+                done.count <= max,
+                "{} allocations, budget {max}",
+                done.count
+            );
+        }
+        if let Some(max) = expected.allocated_mb {
+            let asked = mb(done.bytes as i64);
+            anyhow::ensure!(asked <= max, "{asked:.1} MB allocated, budget {max} MB");
+        }
+        if let Some(max) = expected.held_mb {
+            let held = mb(done.held);
+            anyhow::ensure!(held <= max, "{held:.1} MB more held, budget {max} MB");
+        }
+        Ok(())
     }
 
     /// Wallpapers are made off the loop: pictures wait for them.

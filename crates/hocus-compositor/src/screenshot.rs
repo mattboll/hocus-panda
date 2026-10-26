@@ -188,7 +188,7 @@ impl State {
             let woken = handle.insert_source(
                 Timer::from_duration(Duration::from_secs(delay.into())),
                 |_, _, app| {
-                    app.state.needs_redraw = true;
+                    app.timed("screenshot delay", |app| app.state.needs_redraw = true);
                     TimeoutAction::Drop
                 },
             );

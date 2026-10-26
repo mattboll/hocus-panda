@@ -1295,7 +1295,7 @@ impl Tree {
             }
             out.push(visual);
         }
-        let children = node.children.clone();
+        let count = node.children.len();
         if let Some(node) = self.node_mut(id) {
             node.painted = Some(visual);
             node.changed = false;
@@ -1303,7 +1303,13 @@ impl Tree {
         }
         // A moving subtree moves its children with it.
         let carries = animating && dirty;
-        for child in children {
+        // By index, not a copy of the list: this runs for every node after
+        // every turn of the compositor's loop (#88), and damage never
+        // changes a tree's shape.
+        for i in 0..count {
+            let Some(child) = self.node(id).and_then(|n| n.children.get(i).copied()) else {
+                break;
+            };
             self.collect_damage(child, offset, carries, out);
         }
     }

@@ -58,7 +58,7 @@ pub struct HarnessOptions {
 
 /// Starts a compositor for `harness`, its configuration file at `config`
 /// and its state beside it.
-fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
+fn launch(harness: &HarnessOptions, config: &Path, clock: Clock) -> anyhow::Result<Started> {
     let state_dir = config.with_file_name("state");
     if !harness.first_run {
         // As after the first session: the welcome was offered.
@@ -86,12 +86,7 @@ fn launch(harness: &HarnessOptions, config: &Path) -> anyhow::Result<Started> {
         child_env: harness.child_env.clone(),
         polkit_helper: harness.polkit_helper.clone(),
     };
-    let mut started = crate::start(
-        &options,
-        Clock::Virtual {
-            now: Duration::ZERO,
-        },
-    )?;
+    let mut started = crate::start(&options, clock)?;
     started.app.state.instant_motion = !harness.motion;
     // Before the first dispatch: no sync has started yet.
     started
@@ -121,6 +116,8 @@ pub struct Headless {
     _config_dir: tempfile::TempDir,
     /// What it was started with, to start again.
     harness: HarnessOptions,
+    /// The clock it started on, as it was then.
+    clock: Clock,
 }
 
 /// A control connection read without blocking, so that the harness can run
@@ -198,7 +195,10 @@ impl Headless {
         // exists once the compositor started: watched from the start, read
         // when a test writes it.
         let config_dir = tempfile::Builder::new().prefix("hocus-config-").tempdir()?;
-        Self::start_in(harness, config_dir)
+        let clock = Clock::Virtual {
+            now: Duration::ZERO,
+        };
+        Self::start_in(harness, config_dir, clock)
     }
 
     /// The compositor goes as a crash would (nothing saved, nothing
@@ -209,23 +209,36 @@ impl Headless {
             event_loop,
             app,
             runtime_dir,
-        } = launch(&self.harness, &self.config)?;
+        } = crate::allocations::counting(|| launch(&self.harness, &self.config, self.clock))?;
         let old = (
             std::mem::replace(&mut self.app, app),
             std::mem::replace(&mut self.event_loop, event_loop),
             std::mem::replace(&mut self.runtime_dir, runtime_dir),
         );
-        drop(old);
+        crate::allocations::counting(|| drop(old));
         self.ready()
     }
 
-    fn start_in(harness: HarnessOptions, config_dir: tempfile::TempDir) -> anyhow::Result<Self> {
+    /// Starts on the system's monotonic clock, as a session runs: timers
+    /// wake the loop on real time and frames are drawn when they fall
+    /// due, so the test must keep dispatching. For measuring what wakes
+    /// the loop (#88); [`Headless::advance`] refuses.
+    pub fn start_real_time(harness: HarnessOptions) -> anyhow::Result<Self> {
+        let config_dir = tempfile::Builder::new().prefix("hocus-config-").tempdir()?;
+        Self::start_in(harness, config_dir, Clock::monotonic())
+    }
+
+    fn start_in(
+        harness: HarnessOptions,
+        config_dir: tempfile::TempDir,
+        clock: Clock,
+    ) -> anyhow::Result<Self> {
         let config = config_dir.path().join("config.toml");
         let Started {
             event_loop,
             app,
             runtime_dir,
-        } = launch(&harness, &config)?;
+        } = crate::allocations::counting(|| launch(&harness, &config, clock))?;
         let mut headless = Self {
             event_loop,
             app,
@@ -234,6 +247,7 @@ impl Headless {
             config,
             _config_dir: config_dir,
             harness,
+            clock,
         };
         headless.ready()?;
         Ok(headless)
@@ -337,17 +351,37 @@ impl Headless {
     /// Handles what clients sent, waiting up to `timeout` of real time for
     /// something to arrive. The virtual clock does not move.
     pub fn dispatch(&mut self, timeout: Duration) -> anyhow::Result<()> {
-        self.event_loop.dispatch(Some(timeout), &mut self.app)?;
-        self.app.state.refresh_shell();
-        self.app.serve_captures();
-        self.app.serve_agent_captures();
-        self.app.serve_screenshots();
-        self.app.serve_circle();
-        self.app.serve_recording();
-        self.app.apply_gamma();
-        self.app.settle_outputs();
-        self.app.state.display_handle.flush_clients()?;
-        Ok(())
+        crate::allocations::counting(|| {
+            self.event_loop.dispatch(Some(timeout), &mut self.app)?;
+            self.app.state.refresh_shell();
+            self.app.serve_captures();
+            self.app.serve_agent_captures();
+            self.app.serve_screenshots();
+            self.app.serve_circle();
+            self.app.serve_recording();
+            self.app.apply_gamma();
+            self.app.settle_outputs();
+            if !self.app.state.clock.is_virtual() {
+                // On real time, frames fall due as in a session.
+                let handle = self.event_loop.handle();
+                let App { state, backend } = &mut self.app;
+                if let BackendState::Headless(headless) = backend {
+                    headless.after_dispatch(&handle, state);
+                }
+            }
+            self.app.state.display_handle.flush_clients()?;
+            Ok(())
+        })
+    }
+
+    /// The stats, as the control API gives them, read without a request
+    /// (which would count as one).
+    pub fn stats(&self) -> hocus_api::Stats {
+        let names: Vec<String> = self.app.state.space.outputs().map(|o| o.name()).collect();
+        self.app
+            .state
+            .measures
+            .report(names.iter().map(String::as_str))
     }
 
     /// Dispatches until `done` holds, for at most `timeout` of real time:
@@ -468,6 +502,10 @@ impl Headless {
     /// Moves the virtual clock forward by `by`, drawing a frame at each frame
     /// boundary it crosses if something changed.
     pub fn advance(&mut self, by: Duration) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.app.state.clock.is_virtual(),
+            "the clock is real time: it moves by itself"
+        );
         // Applications asked to answer before an agent's wait ends do
         // first, or the wait would end at a moment of their threads (#235).
         self.dispatch_until(REQUEST_TIMEOUT, Self::apps_answered)
@@ -480,13 +518,15 @@ impl Headless {
             }
             self.dispatch(Duration::ZERO)?;
             self.app.state.clock.advance_to(next);
-            // The column's clock follows the virtual time.
-            self.app.state.refresh_shell();
-            let App { state, backend } = &mut self.app;
-            if let BackendState::Headless(headless) = backend {
-                headless.frame(state);
-            }
-            self.app.state.display_handle.flush_clients()?;
+            crate::allocations::counting(|| {
+                // The column's clock follows the virtual time.
+                self.app.state.refresh_shell();
+                let App { state, backend } = &mut self.app;
+                if let BackendState::Headless(headless) = backend {
+                    headless.frame(state);
+                }
+                self.app.state.display_handle.flush_clients()
+            })?;
         }
         self.app.state.clock.advance_to(end);
         Ok(())

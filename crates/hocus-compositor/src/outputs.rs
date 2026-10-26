@@ -306,9 +306,11 @@ impl State {
         let removed = handle.insert_source(
             Timer::from_duration(std::time::Duration::from_secs(5)),
             move |_, _, app| {
-                app.state
-                    .display_handle
-                    .remove_global::<State>(global.clone());
+                app.timed("output global", |app| {
+                    app.state
+                        .display_handle
+                        .remove_global::<State>(global.clone());
+                });
                 TimeoutAction::Drop
             },
         );
@@ -520,7 +522,8 @@ impl State {
         // would take them away whenever it fired, in a test too (#212).
         self.identifying_until = Some(self.clock.now() + IDENTIFY);
         if let Some(handle) = self.waker() {
-            let woken = handle.insert_source(Timer::from_duration(IDENTIFY), |_, _, _| {
+            let woken = handle.insert_source(Timer::from_duration(IDENTIFY), |_, _, app| {
+                app.timed("screen names", |_| {});
                 TimeoutAction::Drop
             });
             if let Err(err) = woken {

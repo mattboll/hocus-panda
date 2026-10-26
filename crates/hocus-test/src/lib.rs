@@ -50,6 +50,8 @@ mod tests {
             outputs: Vec::new(),
             slow_handlers: vec![slow(53.0, 0), slow(53.0, 120), slow(20.0, 300)],
             stalls: Vec::new(),
+            wakeups: 0,
+            handlers: Vec::new(),
         };
         let held = held_the_loop(&stats);
         assert_eq!(held.len(), 1);

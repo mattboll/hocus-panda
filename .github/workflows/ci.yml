@@ -70,6 +70,40 @@ jobs:
           path: target/test-artifacts/
           if-no-files-found: ignore
 
+  timings:
+    # Wall-clock timings (#88): startup, a turn of the loop at rest, input
+    # to photon, the launcher and the settings opening, frame times. They
+    # measure the shared runner as much as the code, so they are published
+    # in the run's summary, with a warning past a frame's budget, and never
+    # fail a build. The budgets that gate are counts, in the linux job.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: ~/apt-cache
+          key: apt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ runner.os }}-${{ runner.arch }}-
+      - name: Build dependencies
+        run: |
+          mkdir -p ~/apt-cache/partial
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::Archives="$HOME/apt-cache" -o Acquire::Retries=3 \
+            clang mold pkg-config \
+            libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
+            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev libpam0g-dev
+          sudo chown -R "$USER" ~/apt-cache
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Timings
+        # A release build: the numbers a session would see. The table goes
+        # to the run's summary ($GITHUB_STEP_SUMMARY).
+        run: cargo nextest run --release -p hocus-test --test timings --run-ignored only --no-capture
+
   freebsd:
     # Pull requests wait for Linux only (#141): FreeBSD builds everything in
     # a VM, and runs on main after each merge, every night, and on demand.

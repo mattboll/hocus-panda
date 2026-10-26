@@ -293,6 +293,7 @@ where
                 continue;
             }
             let start = Instant::now();
+            state.measures.render(&out.output.name());
             let Some((states, drawn)) = render_one(renderer, out, state) else {
                 continue;
             };
@@ -728,7 +729,7 @@ impl HeadlessBackend {
             return;
         }
         let timer = handle.insert_source(Timer::from_duration(FRAME), |_, _, app| {
-            app.timed("headless frame", |app| {
+            app.timed_quietly("headless frame", |app| {
                 if let crate::BackendState::Headless(headless) = &mut app.backend {
                     headless.frame_timer = None;
                     headless.frame(&mut app.state);

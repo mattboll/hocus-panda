@@ -54,6 +54,16 @@ HOCUS_BLESS=1 cargo nextest run -p hocus-test --test scenarios  # record referen
 target/debug/hocus scenario run tests/scenarios/click-to-focus.toml
 ```
 
+Performance ([docs/performance.md](docs/performance.md)): budgets are
+counts (frames, scenes built, wakeups, allocations, memory) and gate CI;
+wall-clock timings are only reported:
+
+```sh
+cargo nextest run -p hocus-test --test budgets           # counted budgets at rest
+cargo nextest run --release -p hocus-test --test timings --run-ignored only --no-capture
+target/debug/hocus msg --socket <control socket> stats   # frames, wakeups, handlers
+```
+
 The shell's toolkit runs alone, in a window of any Wayland session (or of a
 nested or headless hocuspanda); its reference images are recorded the same
 way:

@@ -10,6 +10,8 @@ mod activity;
 mod agents;
 mod ai;
 mod ai_actions;
+mod alarm;
+pub mod allocations;
 mod alt_tab;
 mod api;
 mod authorize;
@@ -395,6 +397,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
 
     let handle = event_loop.handle();
     event_loop.run(None, &mut app, |app| {
+        app.state.measures.woke();
         app.state.refresh_shell();
         app.serve_captures();
         app.serve_agent_captures();
