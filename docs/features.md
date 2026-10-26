@@ -37,7 +37,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Window rules (by app or pattern): floating, desktop, size, maximized, opacity, pinned
 - Remembered places per screen layout, re-applied when screens are plugged
 - Per-window opacity (Super+wheel)
-- Click to focus, recent order, focus-stealing prevention
+- Click to focus, recent order, focus-stealing prevention: a window takes the focus with an activation token made from your last key or click, or one the shell made for what you started from it (launcher, dock, notification, tray); otherwise it asks for attention
 - Attention halo on windows that request attention
 - Drop-down terminal
 - Drop-down terminal that slides and has an adjustable size
@@ -141,7 +141,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Window-less clipboard managers
 - Fractional scale, presentation-time
 - External screen lockers (swaylock, waylock, gtklock)
-- Activation and attention requests (xdg-activation)
+- Activation and attention requests (xdg-activation, X11 urgency hints)
 - Idle inhibit (idle-inhibit, D-Bus ScreenSaver); a fullscreen window keeps the screen awake
 - Virtual keyboards and input tools (wtype)
 - Sandboxed applications: sensitive protocols hidden (security-context)
@@ -161,7 +161,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Pinned icons, reordered by drag and drop
 - Open applications, windows grouped by app (optional)
 - Hover zoom with spring and bounce
-- Icon animations: hover, launch bounce, "open" dot, shake and breathe when a window waits
+- Icon animations: hover, launch bounce, "open" dot, shake and breathe when a window waits (its dot, and the hidden dock's hint, in the accent)
 - Window previews on hover
 - Icon menu: the app's windows, pin, unpin
 - Updated when applications are installed (XDG, Flatpak, Snap)

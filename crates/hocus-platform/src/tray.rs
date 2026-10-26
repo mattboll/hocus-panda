@@ -66,8 +66,14 @@ pub enum TrayEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrayCommand {
-    /// Left click.
-    Activate { key: String, x: i32, y: i32 },
+    /// Left click, with the activation token the application's window
+    /// may come forward with.
+    Activate {
+        key: String,
+        x: i32,
+        y: i32,
+        token: String,
+    },
     /// Right click: its menu, or the item's own.
     Menu { key: String, x: i32, y: i32 },
     /// A menu entry chosen.
@@ -415,11 +421,12 @@ async fn follow(
 
 async fn run(conn: Connection, command: TrayCommand, sink: Sink) -> zbus::Result<()> {
     match command {
-        TrayCommand::Activate { key, x, y } => {
-            item_proxy(&conn, &key)
-                .await?
-                .call::<_, _, ()>("Activate", &(x, y))
-                .await
+        TrayCommand::Activate { key, x, y, token } => {
+            let item = item_proxy(&conn, &key).await?;
+            // KDE's addition, which items without it refuse: their window
+            // may then still come forward, asking for attention.
+            let _: zbus::Result<()> = item.call("ProvideXdgActivationToken", &(token,)).await;
+            item.call::<_, _, ()>("Activate", &(x, y)).await
         }
         TrayCommand::Menu { key, x, y } => {
             let item = item_proxy(&conn, &key).await?;

@@ -1093,6 +1093,7 @@ mod tests {
             desktop: 1,
             opacity: 1.0,
             pinned: false,
+            attention: false,
         };
         let tree = AppTree {
             window: 2,

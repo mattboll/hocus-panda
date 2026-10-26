@@ -51,6 +51,10 @@ expect_shown = { output = "HEADLESS-1", desktop = 1 }
 [[step]]
 expect_ui = { label = "Me · desktop 1 of 3 · Chapitô: an agent is done · Website: a window asks for attention" }
 
+# Once the dock's icon for it has wiggled (#145).
+[[step]]
+advance_ms = 1000
+
 [[step]]
 expect_screenshot = { output = "HEADLESS-1", reference = "desktops-activity.png" }
 

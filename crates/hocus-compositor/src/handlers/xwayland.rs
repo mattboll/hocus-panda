@@ -22,7 +22,7 @@ use smithay::{
     },
     xwayland::{
         X11Surface, X11Wm, XwmHandler,
-        xwm::{Reorder, ResizeEdge as X11ResizeEdge, XwmId},
+        xwm::{Reorder, ResizeEdge as X11ResizeEdge, WmWindowProperty, XwmId},
     },
 };
 
@@ -81,11 +81,18 @@ impl XwmHandler for State {
             tracing::warn!(%err, "could not map an X11 window");
             return;
         }
-        let window = Window::new_x11_window(surface);
+        let window = Window::new_x11_window(surface.clone());
         let Some(output) = self.output_under_pointer() else {
             return;
         };
         self.manage(window, &output, SERIAL_COUNTER.next_serial());
+        // Urgent from the start: it asks once it is there, unless it has
+        // the keyboard.
+        if surface.hints().is_some_and(|h| h.urgent)
+            && let Some(id) = self.x11_id(&surface)
+        {
+            self.ask_attention(id);
+        }
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, surface: X11Surface) {
@@ -152,6 +159,22 @@ impl XwmHandler for State {
         if let Some(overlay) = overlay {
             self.space.map_element(overlay, geometry.loc, true);
             self.needs_redraw = true;
+        }
+    }
+
+    /// An urgency hint asks for attention, as an activation does; taken
+    /// back, it asks no more (#145).
+    fn property_notify(&mut self, _xwm: XwmId, surface: X11Surface, property: WmWindowProperty) {
+        if property != WmWindowProperty::Hints {
+            return;
+        }
+        let Some(id) = self.x11_id(&surface) else {
+            return;
+        };
+        if surface.hints().is_some_and(|h| h.urgent) {
+            self.ask_attention(id);
+        } else {
+            self.drop_attention(id);
         }
     }
 
@@ -345,6 +368,9 @@ impl XwmHandler for crate::App {
         above: Option<smithay::xwayland::xwm::X11Window>,
     ) {
         self.state.configure_notify(xwm, window, geometry, above);
+    }
+    fn property_notify(&mut self, xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
+        self.state.property_notify(xwm, window, property);
     }
     fn maximize_request(&mut self, xwm: XwmId, window: X11Surface) {
         self.state.maximize_request(xwm, window);

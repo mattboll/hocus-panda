@@ -1,0 +1,70 @@
+description = "A window takes the focus with a token made from the user's last key or click; without a serial, or from an older input, it asks for attention instead, until it has the keyboard"
+outputs = ["1280x800"]
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "notes", size = [200, 100], color = "#e8e4da" }
+
+[[step]]
+expect_focus = "notes"
+
+# A token made from no input: a command done in the background.
+[[step]]
+activate_without_serial = "editor"
+
+[[step]]
+expect_window = { app_id = "editor", attention = true, focused = false }
+
+[[step]]
+expect_focus = "notes"
+
+# Given the keyboard, it asks no more.
+[[step]]
+pointer_move = [450, 260]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+expect_window = { app_id = "editor", attention = false }
+
+# A window opens over it; the editor's token, from that click, still is
+# from the user's last input: it comes back.
+[[step]]
+open = { app_id = "chat", size = [600, 500], color = "#f2a65a" }
+
+[[step]]
+expect_focus = "chat"
+
+[[step]]
+activate = "editor"
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+expect_window = { app_id = "editor", attention = false }
+
+# A click on the chat since: the editor's click is older, it only asks.
+[[step]]
+pointer_move = [360, 170]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_focus = "chat"
+
+[[step]]
+activate = "editor"
+
+[[step]]
+expect_window = { app_id = "editor", attention = true }
+
+[[step]]
+expect_focus = "chat"

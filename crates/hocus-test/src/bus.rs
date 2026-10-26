@@ -123,3 +123,78 @@ pub fn notify_on(connection: &zbus::Connection, note: &Note<'_>) -> anyhow::Resu
     ))?;
     Ok(reply.body().deserialize::<u32>()?)
 }
+
+/// The notification server's signals, as they come: `ActivationToken ID`
+/// (`ActivationToken ID empty` for an empty token), `ActionInvoked ID
+/// KEY`, `NotificationClosed ID REASON`.
+pub type Signals = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+/// Listens to the notification server's signals on the bus at `address`,
+/// from a thread of its own until the bus goes; returns once listening.
+pub fn listen_notifications(address: &str) -> anyhow::Result<Signals> {
+    use futures_core::Stream;
+    let signals: Signals = Default::default();
+    let (ready, listening) = std::sync::mpsc::channel();
+    let address = address.to_owned();
+    let log = signals.clone();
+    std::thread::Builder::new()
+        .name("notification signals".into())
+        .spawn(move || {
+            zbus::block_on(async move {
+                let stream = async {
+                    let connection = zbus::connection::Builder::address(address.as_str())
+                        .build()
+                        .await?;
+                    let rule = zbus::MatchRule::builder()
+                        .msg_type(zbus::message::Type::Signal)
+                        .interface("org.freedesktop.Notifications")
+                        .build()?;
+                    zbus::MessageStream::for_match_rule(rule, &connection, None).await
+                };
+                let mut stream = match stream.await {
+                    Ok(s) => {
+                        let _ = ready.send(Ok(()));
+                        s
+                    }
+                    Err(err) => {
+                        let _ = ready.send(Err(err.to_string()));
+                        return;
+                    }
+                };
+                while let Some(Ok(message)) =
+                    std::future::poll_fn(|cx| std::pin::Pin::new(&mut stream).poll_next(cx)).await
+                {
+                    let header = message.header();
+                    let body = message.body();
+                    let line = match header.member().map(|m| m.as_str()) {
+                        Some("ActivationToken") => {
+                            body.deserialize::<(u32, String)>().ok().map(|(id, token)| {
+                                if token.is_empty() {
+                                    format!("ActivationToken {id} empty")
+                                } else {
+                                    format!("ActivationToken {id}")
+                                }
+                            })
+                        }
+                        Some("ActionInvoked") => body
+                            .deserialize::<(u32, String)>()
+                            .ok()
+                            .map(|(id, key)| format!("ActionInvoked {id} {key}")),
+                        Some("NotificationClosed") => body
+                            .deserialize::<(u32, u32)>()
+                            .ok()
+                            .map(|(id, reason)| format!("NotificationClosed {id} {reason}")),
+                        _ => None,
+                    };
+                    if let (Some(line), Ok(mut log)) = (line, log.lock()) {
+                        log.push(line);
+                    }
+                }
+            });
+        })?;
+    match listening.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(Ok(())) => Ok(signals),
+        Ok(Err(err)) => anyhow::bail!("could not listen to the notifications: {err}"),
+        Err(_) => anyhow::bail!("the bus did not answer"),
+    }
+}

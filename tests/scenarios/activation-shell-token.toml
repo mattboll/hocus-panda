@@ -1,0 +1,38 @@
+description = "A program started from the launcher gets an activation token of the shell's: the running window it hands it to takes the focus, though the token has no serial"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+open = { app_id = "editor", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+open = { app_id = "notes", size = [300, 200], color = "#e8e4da" }
+
+[[step]]
+expect_focus = "notes"
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+type = "environment"
+
+[[step]]
+expect_ui = { label = "Environment Probe", selected = true }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_runtime_file = { name = "launched-env", contains = ["XDG_ACTIVATION_TOKEN=", "DESKTOP_STARTUP_ID="] }
+
+# As a new instance hands its token to the one running.
+[[step]]
+activate_with = { app_id = "editor", token_from = "launched-env" }
+
+[[step]]
+expect_focus = "editor"
+
+[[step]]
+expect_window = { app_id = "editor", attention = false }

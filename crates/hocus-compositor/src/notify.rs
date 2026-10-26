@@ -460,18 +460,35 @@ impl State {
                 _ => {}
             }
         }
+        if self
+            .toasts
+            .as_ref()
+            .and_then(|p| p.server.as_ref())
+            .is_none()
+        {
+            return;
+        }
+        // An application's action chosen: what it brings forward may take
+        // the focus, with a token of the shell's (#145).
+        let tokens: Vec<Option<String>> = events
+            .iter()
+            .map(|e| match e {
+                ToastEvent::Action(id, _) if *id < SHELL_IDS_END => Some(self.shell_token()),
+                _ => None,
+            })
+            .collect();
         let Some(server) = self.toasts.as_ref().and_then(|p| p.server.as_ref()) else {
             return;
         };
         // The shell's own toasts are not the server's to report.
-        for event in events.into_iter().filter(|e| {
+        for (event, token) in events.into_iter().zip(tokens).filter(|(e, _)| {
             !matches!(e, ToastEvent::Expired(id) | ToastEvent::Dismissed(id) | ToastEvent::Action(id, _) | ToastEvent::Replied(id, _) if *id >= SHELL_IDS_END)
         }) {
             match event {
                 ToastEvent::Expired(id) => server.closed(id, CloseReason::Expired),
                 ToastEvent::Dismissed(id) => server.closed(id, CloseReason::Dismissed),
                 ToastEvent::Action(id, key) => {
-                    server.action_invoked(id, &key);
+                    server.action_invoked(id, &key, token);
                     server.closed(id, CloseReason::Dismissed);
                 }
                 // The server offers no reply to its clients.

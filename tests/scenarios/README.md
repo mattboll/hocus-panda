@@ -95,13 +95,17 @@ Steps, one per `[[step]]` table:
 | `expect_shared = "Monitor: HEADLESS-1"` | it was answered this; `""` for nothing |
 | `activate = "app_id"` | the client of that app id asks for its window to come forward, with an activation token of its own (xdg-activation) |
 | `ask_attention = "app_id"` | the same with a token it took eleven seconds of virtual time before: too old to bring its window forward, the window asks for attention instead |
+| `activate_without_serial = "app_id"` | the same with a token made without a serial, from no input of the user's: the window asks for attention instead |
+| `activate_with = { app_id, token_from = "launched-env" }` | the same with the token a program the compositor started was given (an `XDG_ACTIVATION_TOKEN=` line of that runtime file), as a new instance hands it to the one running |
 | `open_x11 = { app_id, size = [w, h], color = "#rrggbb" }` | the same with an X11 client through XWayland (WM_CLASS is the app id) |
+| `x11_urgent = { app_id, urgent = true }` | that X11 client sets its urgency hint (WM_HINTS), or takes it back |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
 | `type = "fir"` | types text as on a US keyboard |
 | `expect_runtime_file = { name, lines?, contains?, lacks? }` | a file a started program wrote in the compositor's runtime directory: so many lines, with or without these strings (the test client adds a line to `<app id>.starts` each time it starts) |
 | `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
 | `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces?, hints? = { "x-kde-appname" = "…" } }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires; `hints` of text) |
+| `expect_notification_signals = ["ActivationToken 1", "ActionInvoked 1 default"]` | the notification server sent these signals, in this order (others may come between), since the first `notify`: `ActivationToken ID` (`… empty` for an empty token), `ActionInvoked ID KEY`, `NotificationClosed ID REASON` |
 | `phone = { name, battery, charging? }` | KDE Connect, a stand-in on the private bus, with one phone paired and within reach (its files at `{runtime_dir}/phone-files`); again, its battery changes |
 | `phone_notification = { app, title, text, reply? = true }` | the phone posts a notification; `reply` when its application takes replies (the reply ids are `r1`, `r2`… in order) |
 | `phone_remove = 1` | the notification it posted first (from 1) goes on the phone |
@@ -117,7 +121,7 @@ Steps, one per `[[step]]` table:
 | `right_click_ui = "Chat"` | the same with the secondary button |
 | `tray_app = { title, color = "#rrggbb", menu? = ["Open", "-", "Quit"], delay_ms? }` | an application registers in the tray on the private bus, with a disc of that colour as its icon and that menu (`"-"` a separator); it takes `delay_ms` to answer anything |
 | `tray_attention = { title, attention }` | it asks for attention, or stops |
-| `expect_tray = { title, asked = "clicked 2" }` | it was asked this: `activate`, `clicked N` (menu entry N, from 1) |
+| `expect_tray = { title, asked = "clicked 2" }` | it was asked this: `token` (an activation token given), `activate`, `clicked N` (menu entry N, from 1) |
 | `open_settings = { page? }` | starts the settings app in the test, on a page (`appearance`, `wallpaper`, `column`, `pandas`, `accessibility`, `language`, `desktops`, `windows`, `keyboard`, `mouse`, `captures`, `clipboard`, `screens`, `sound`, `network`, `bluetooth`, `power`, `lock`, `notifications`, `apps`, `accounts`, `account`…) or its home, and waits for its window |
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
@@ -184,7 +188,7 @@ Steps, one per `[[step]]` table:
 | `expect_event = { type = "keyboard_layout", has? = "French" }` | checks the compositor said it in its event stream since the start |
 | `advance_ms = 500` | moves the virtual clock forward |
 | `frames = 1` | moves the virtual clock forward by whole frames |
-| `expect_window = { app_id, title?, output?, geometry? = [x, y, w, h], focused?, visible?, state?, opacity?, pinned? }` | checks a window (among several of one app id, the one with this title), waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized |
+| `expect_window = { app_id, title?, output?, geometry? = [x, y, w, h], focused?, visible?, state?, opacity?, pinned?, attention? }` | checks a window (among several of one app id, the one with this title), waiting a moment for its client to resize; `visible` is whether its desktop is shown and it is not minimized; `attention` whether it asks for attention |
 | `expect_no_window = "app_id"` | checks a window is gone |
 | `expect_focus = "app_id"` | checks which window has keyboard focus |
 | `expect_stack = ["below", "above"]` | checks the shown windows, bottom to top |

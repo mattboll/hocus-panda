@@ -13,7 +13,7 @@ use crate::{
     access::{AccessNode, Role},
     canvas::Canvas,
     geom::{Insets, PixelRect, Point, Rect, Size},
-    motion::{Animated, Curve},
+    motion::{Animated, Curve, Spring},
     text::{Fonts, TextBox},
     theme::{Color, Paint, TextStyle, Theme},
 };
@@ -896,6 +896,24 @@ impl Tree {
             }
             self.arrange(root, Rect::new(0.0, 0.0, size.w, size.h));
             self.relayout = false;
+        }
+    }
+
+    /// Pushes a property with `velocity` from where it is: it swings
+    /// around its target on `spring` and settles there. Nothing moves with
+    /// reduced motion.
+    pub fn kick(&mut self, id: NodeId, property: Property, velocity: f32, spring: Spring) {
+        if self.theme.reduced_motion {
+            return;
+        }
+        let now = self.now;
+        if let Some(node) = self.node_mut(id) {
+            let value = match property {
+                Property::Opacity => &mut node.opacity,
+                Property::OffsetX => &mut node.offset_x,
+                Property::OffsetY => &mut node.offset_y,
+            };
+            value.kick(velocity, spring, now);
         }
     }
 

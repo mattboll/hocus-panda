@@ -1204,6 +1204,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "futures-core",
  "hocus-annotate",
  "hocus-api",
  "hocus-compositor",

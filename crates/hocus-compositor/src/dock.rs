@@ -3,9 +3,11 @@
 //! for 300 ms (going once the pointer leaves it), or with its shortcut;
 //! hidden, a thin hint marks where it is. It holds the pinned apps, then
 //! the open ones: a click focuses an open app's window, or launches it,
-//! its square bouncing.
+//! its square bouncing. An app with a window asking for attention wiggles
+//! once when the dock shows, its dot in the accent, and the hint takes
+//! the accent meanwhile (#145).
 
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 use hocus_core::WindowId;
 use hocus_platform::apps::Entry;
@@ -48,7 +50,10 @@ pub struct Dock {
     pub entries: Vec<Entry>,
     items: Vec<Item>,
     panel: Option<(String, Point<i32, Logical>, Panel<DockView>)>,
-    hint: Option<Panel<DockHint>>,
+    /// The hint, and whether it says a window asks for attention.
+    hint: Option<(bool, Panel<DockHint>)>,
+    /// Windows asking for attention whose icon wiggled already: once.
+    wiggled: BTreeSet<WindowId>,
     /// The theme it was drawn in: glass, the accent and the hour's shadow
     /// come with it.
     theme: Option<hocus_ui::Theme>,
@@ -106,6 +111,7 @@ impl State {
                         glyph,
                         color,
                         open: false,
+                        attention: false,
                     },
                     exec: e.exec.clone(),
                     windows: Vec::new(),
@@ -116,9 +122,11 @@ impl State {
             let (title, app_id) = title_and_app_id(&managed.window);
             let app_id = app_id.unwrap_or_default();
             let key = entry_of(&app_id).map_or_else(|| app_id.clone(), |e| e.id.clone());
+            let attention = self.asks_attention(*id);
             if let Some(item) = items.iter_mut().find(|i| i.app.key == key) {
                 item.windows.push(*id);
                 item.app.open = true;
+                item.app.attention |= attention;
                 continue;
             }
             let entry = entry_of(&app_id);
@@ -134,6 +142,7 @@ impl State {
                     color,
                     name,
                     open: true,
+                    attention,
                 },
                 exec: entry.map(|e| e.exec.clone()).unwrap_or_default(),
                 windows: vec![*id],
@@ -223,13 +232,38 @@ impl State {
             self.dock.panel = Some((output.name(), place, panel));
             self.needs_redraw = true;
         }
-        if self.dock.hint.is_none() {
-            let mut hint = Panel::new(DockHint::new(theme, scale));
+        let attention = self.dock.items.iter().any(|i| i.app.attention);
+        if self.dock.hint.as_ref().is_none_or(|(a, _)| *a != attention) {
+            let mut hint = Panel::new(DockHint::new(theme, scale, attention));
             hint.upload(&[]);
-            self.dock.hint = Some(hint);
+            self.dock.hint = Some((attention, hint));
+            self.needs_redraw = true;
+        }
+        // Shown, an app with a window newly asking for attention wiggles,
+        // once; hidden, it waits for the dock to show.
+        let activity = &self.activity;
+        let dock = &mut self.dock;
+        dock.wiggled.retain(|w| activity.asks(*w));
+        let mut wiggles = Vec::new();
+        if dock.shown.is_some() {
+            for (i, item) in dock.items.iter().enumerate() {
+                let asking = item.windows.iter().filter(|w| activity.asks(**w));
+                let mut new = false;
+                for w in asking {
+                    new |= dock.wiggled.insert(*w);
+                }
+                if new {
+                    wiggles.push(i);
+                }
+            }
         }
         if let Some((_, _, panel)) = &mut self.dock.panel {
             let drawn = panel.view.draw(now);
+            // After drawing, so that it starts now, not when the dock was
+            // last drawn.
+            for i in wiggles {
+                panel.view.wiggle(i);
+            }
             if panel.upload(&drawn) || panel.view.is_animating(now) {
                 self.needs_redraw = true;
             }
@@ -370,7 +404,7 @@ impl State {
         if self.fullscreen_on(output) {
             return Vec::new();
         }
-        let Some(hint) = &self.dock.hint else {
+        let Some((_, hint)) = &self.dock.hint else {
             return Vec::new();
         };
         let area = self.work_area(output);

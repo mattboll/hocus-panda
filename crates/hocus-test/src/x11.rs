@@ -1,5 +1,5 @@
 //! An X11 test client, for XWayland: one window filled with a solid colour,
-//! which can own the clipboard and read it.
+//! which can own the clipboard and read it, and mark itself urgent.
 
 use std::{
     sync::{
@@ -13,6 +13,7 @@ use std::{
 use anyhow::Context;
 use x11rb::{
     connection::Connection,
+    properties::WmHints,
     protocol::{
         Event,
         xproto::{
@@ -38,6 +39,8 @@ pub struct X11Window {
 enum Command {
     Copy(String),
     Paste,
+    /// Its urgency hint (WM_HINTS), set or taken back.
+    Urgent(bool),
 }
 
 /// A running X11 test client.
@@ -54,6 +57,13 @@ impl X11Client {
     pub fn copy(&self, text: &str) -> anyhow::Result<()> {
         self.commands
             .send(Command::Copy(text.to_owned()))
+            .context("the X11 client is gone")
+    }
+
+    /// Sets its urgency hint, or takes it back.
+    pub fn urgent(&self, urgent: bool) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::Urgent(urgent))
             .context("the X11 client is gone")
     }
 
@@ -157,6 +167,11 @@ impl X11Window {
                     Command::Copy(text) => {
                         conn.set_selection_owner(window, atoms.clipboard, x11rb::CURRENT_TIME)?;
                         copied = Some(text);
+                    }
+                    Command::Urgent(urgent) => {
+                        let mut hints = WmHints::new();
+                        hints.urgent = urgent;
+                        hints.set(&conn, window)?;
                     }
                     Command::Paste => {
                         conn.convert_selection(

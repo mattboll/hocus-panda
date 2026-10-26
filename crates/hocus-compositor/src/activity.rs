@@ -18,6 +18,13 @@ pub struct Activity {
     attention: BTreeSet<WindowId>,
 }
 
+impl Activity {
+    /// Whether a window asks for attention.
+    pub fn asks(&self, id: WindowId) -> bool {
+        self.attention.contains(&id)
+    }
+}
+
 impl State {
     /// A window asks for attention: its desktop says so until it has the
     /// keyboard. The one with the keyboard needs none.
@@ -29,6 +36,18 @@ impl State {
             tracing::debug!(window = id.0, "asks for attention");
             self.needs_redraw = true;
         }
+    }
+
+    /// It asks no more: an X11 window took its urgency back.
+    pub fn drop_attention(&mut self, id: WindowId) {
+        if self.activity.attention.remove(&id) {
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Whether a window asks for attention.
+    pub fn asks_attention(&self, id: WindowId) -> bool {
+        self.activity.asks(id)
     }
 
     /// After each dispatch: what was seen is forgotten. A window with the
