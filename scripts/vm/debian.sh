@@ -27,7 +27,8 @@
 # taken for the first's too.
 # HOCUS_VM_DISPLAY=gtk shows its screens in a window of the current
 # session, its keyboard and mouse for a person to try it by hand (any QEMU
-# display backend; `none` by default).
+# display backend; `none` by default). Ctrl+Alt+G lets the keyboard go,
+# Ctrl+Alt+F goes full screen.
 set -eu
 
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/hocuspanda-vm"
@@ -40,6 +41,9 @@ MEMORY="${HOCUS_VM_MEMORY:-4G}"
 CPUS="${HOCUS_VM_CPUS:-4}"
 GPUS="${HOCUS_VM_GPUS:-1}"
 DISPLAY_BACKEND="${HOCUS_VM_DISPLAY:-none}"
+# A window's keyboard is the VM's while the pointer is over it, so that the
+# host session's shortcuts reach the session tried there.
+[ "$DISPLAY_BACKEND" = gtk ] && DISPLAY_BACKEND="gtk,grab-on-hover=on"
 
 # Input events to the VM's devices, as a person would make them (QMP: the
 # monitor's mouse_move reaches no device without a display).
