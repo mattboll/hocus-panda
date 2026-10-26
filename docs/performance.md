@@ -53,7 +53,9 @@ there is a calendar or something to ask.
 Wall-clock times measure the machine as much as the code: in a shared CI
 runner they flaked (#235). CI's `timings` job runs them alone, in a release
 build, publishes the table in the run's summary and warns, without failing,
-where a frame's budget (16 ms, the one the architecture sets) is passed.
+where a target is passed: a frame's budget (16 ms, the one the
+architecture sets), 1 s for startup, 100 ms for opening the launcher or
+the settings.
 Headless outputs are drawn by pixman, on the CPU: frame times there are an
 upper bound of what a GPU draws.
 
@@ -70,9 +72,6 @@ machine, three runs:
 | Input to photon (pointer motion to the frame drawn), median / 95th percentile / worst | 0.4–0.5 / 0.6–0.7 / 1.9–2.4 ms |
 | The twenty windows' scenario: frames over 16 ms, laptop panel at scale 2 | 82–91 of 185, slowest 32–35 ms |
 | The same, wide screen | 0 of 172, slowest 9–10 ms |
-
-Only a frame's budget warns today; targets for startup and for opening
-the launcher and the settings are yet to be set.
 
 ## The pass of #88, before and after
 
