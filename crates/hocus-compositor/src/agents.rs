@@ -69,6 +69,9 @@ pub struct Agents {
     tried: Option<Vec<Source>>,
     /// Agents done while their desktop was not shown: agent → desktop.
     pub(crate) done_unseen: HashMap<String, DesktopId>,
+    /// Status changes the loop took in, for the test harness: one comes
+    /// off a worker thread in its own time (#235).
+    pub(crate) statuses_seen: u64,
 }
 
 /// An agent's key on the board: its herdr and its pane.
@@ -239,9 +242,8 @@ impl State {
             return;
         }
         let now = self.clock.now();
-        let board = &mut self.agents.board;
         let changes = match news {
-            News::Agents(list) => board.replace(
+            News::Agents(list) => self.agents.board.replace(
                 source,
                 list.into_iter()
                     .map(|a| (key(source, &a.pane), a.name, state_of(a.status), a.label))
@@ -252,8 +254,13 @@ impl State {
                 pane,
                 status,
                 label,
-            } => board.set(&key(source, &pane), state_of(status), label, now),
-            News::Gone => board.clear(source),
+            } => {
+                self.agents.statuses_seen += 1;
+                self.agents
+                    .board
+                    .set(&key(source, &pane), state_of(status), label, now)
+            }
+            News::Gone => self.agents.board.clear(source),
             News::Terminal(processes) => {
                 self.raise_terminal(&processes);
                 Vec::new()

@@ -101,6 +101,8 @@ pub struct Locking {
     screensaver: Option<hocus_platform::session::ScreenSaverService>,
     /// Applications keeping the screen awake through D-Bus.
     dbus_inhibitors: u32,
+    /// logind's signals followed, for the test harness (#235).
+    pub(crate) logind_following: usize,
     /// logind was told the lock shows.
     told_locked: bool,
     /// The timer that wakes the loop at the next deadline, and when.
@@ -160,6 +162,7 @@ impl Locking {
             logind: None,
             screensaver: None,
             dbus_inhibitors: 0,
+            logind_following: 0,
             told_locked: false,
             timer: None,
             marker: None,
@@ -994,6 +997,7 @@ impl State {
             Request::Unlock => {}
             Request::Activity => self.activity(),
             Request::Inhibitors(n) => self.locking.dbus_inhibitors = n,
+            Request::Following => self.locking.logind_following += 1,
         }
     }
 

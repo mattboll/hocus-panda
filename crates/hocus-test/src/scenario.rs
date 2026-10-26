@@ -1343,6 +1343,12 @@ impl Scenario {
             home,
         };
         run.request(Request::Subscribe)?;
+        // The wallpapers asked for at the start are made off the loop: in
+        // before the first step, the clock still, so that the frame that
+        // shows them is the same every run (#235).
+        run.compositor
+            .dispatch_until(CLIENT_TIMEOUT, Headless::wallpapers_ready)
+            .context("the wallpapers never came")?;
         for (n, step) in self.steps.iter().enumerate() {
             run.step(step)
                 .with_context(|| format!("step {} ({step})", n + 1))?;
@@ -1869,12 +1875,19 @@ impl Run<'_> {
                 self.layers.retain(|l| l.spec.namespace != *namespace);
                 self.compositor.advance(FRAME)
             }
-            Step::Activate(app_id) => self
-                .clients
-                .iter()
-                .find(|c| c.spec.app_id == *app_id)
-                .with_context(|| format!("no client {app_id}"))?
-                .activate(),
+            Step::Activate(app_id) => {
+                let before = self.compositor.activations_asked();
+                self.clients
+                    .iter()
+                    .find(|c| c.spec.app_id == *app_id)
+                    .with_context(|| format!("no client {app_id}"))?
+                    .activate()?;
+                // It asks in its own time: handled before the next step,
+                // at this moment of the clock (#235).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, |c| c.activations_asked() > before)
+                    .with_context(|| format!("{app_id} never asked to come forward"))
+            }
             Step::AskAttention(app_id) => self.ask_attention(app_id),
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
@@ -1945,14 +1958,13 @@ impl Run<'_> {
                     );
                     self.compositor.dispatch(Duration::from_millis(10))?;
                 }
+                let before = self.compositor.agent_statuses_seen();
                 herdr.set_status(&h.agent, &h.status, h.label.as_deref())?;
-                // It reaches the loop before the next step, even on a
-                // loaded machine.
-                let until = Instant::now() + Duration::from_millis(200);
-                while Instant::now() < until {
-                    self.compositor.dispatch(Duration::from_millis(5))?;
-                }
-                Ok(())
+                // It reaches the loop before the next step, at this moment
+                // of the clock however long the worker takes (#235).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, |c| c.agent_statuses_seen() > before)
+                    .with_context(|| format!("the status of {:?} never came in", h.agent))
             }
             Step::ExpectHerdr(wanted) => {
                 let deadline = Instant::now() + SETTLE_TIMEOUT;
@@ -2014,16 +2026,16 @@ impl Run<'_> {
                 Ok(())
             }
             Step::AiKey(k) => {
+                let before = self.compositor.ai_keys_stored();
                 self.request(Request::AiSecret {
                     provider: k.provider.clone(),
                     secret: k.key.clone(),
                 })?;
-                // Kept by a worker before the next step.
-                let until = Instant::now() + Duration::from_millis(200);
-                while Instant::now() < until {
-                    self.compositor.dispatch(Duration::from_millis(5))?;
-                }
-                Ok(())
+                // Kept by a worker before the next step, however long it
+                // takes (#235).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, |c| c.ai_keys_stored() > before)
+                    .context("the AI key was never kept")
             }
             Step::ExpectAi(expected) => {
                 let deadline = Instant::now() + SETTLE_TIMEOUT;
@@ -2323,7 +2335,12 @@ impl Run<'_> {
                     window: window.id,
                     state: set.state,
                 })?;
-                Ok(())
+                // Its application draws the new size in its own time: the
+                // clock moves on once it did, so that a morph's frames show
+                // the same buffer every run (#235).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, |c| c.window_caught_up(window.id))
+                    .with_context(|| format!("{} never drew its new size", set.app_id))
             }
             Step::Config(text) => {
                 // Fixtures are found from the scenario's own directory.
@@ -2871,10 +2888,6 @@ impl Run<'_> {
         use std::sync::mpsc::TryRecvError;
         // As long as the longest wait a scenario asks for, and some.
         let deadline = Instant::now() + Duration::from_secs(30);
-        // A capture waiting for its window to draw: the application gets a
-        // moment of real time to, before the clock moves to the end of the
-        // wait.
-        let mut drawing: Option<Instant> = None;
         loop {
             match answer.try_recv() {
                 Ok(answer) => return answer.context("no answer"),
@@ -2882,9 +2895,11 @@ impl Run<'_> {
                 Err(TryRecvError::Empty) => {}
             }
             anyhow::ensure!(Instant::now() < deadline, "the MCP server never answered");
+            // A capture waiting for its window to draw: the clock moves to
+            // the end of the wait once the application answered, having
+            // drawn or not, however long its thread took (#235).
             if let Some(until) = self.compositor.agent_capture_deadline() {
-                let since = *drawing.get_or_insert_with(Instant::now);
-                if since.elapsed() < Duration::from_millis(500) {
+                if !self.compositor.apps_answered() {
                     self.compositor.dispatch(Duration::from_millis(5))?;
                 } else if until > self.compositor.now() {
                     let by = until - self.compositor.now();
@@ -3963,12 +3978,12 @@ impl Run<'_> {
             .find(|c| c.spec.app_id == app_id)
             .with_context(|| format!("no client {app_id}"))?
             .use_token()?;
-        // It reaches the loop before the next step.
-        let until = Instant::now() + Duration::from_millis(200);
-        while Instant::now() < until {
-            self.compositor.dispatch(Duration::from_millis(5))?;
-        }
-        Ok(())
+        // It reaches the loop before the next step, however long the
+        // client takes (#235).
+        let before = self.compositor.activations_asked();
+        self.compositor
+            .dispatch_until(CLIENT_TIMEOUT, |c| c.activations_asked() > before)
+            .with_context(|| format!("{app_id} never asked with its token"))
     }
 
     /// Clients resize in their own threads: the window gets a moment to

@@ -280,11 +280,9 @@ fn idle_notifications_say_idled_then_resumed() -> anyhow::Result<()> {
     let seen_now = |s: &std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>| {
         s.lock().map(|v| v.clone()).unwrap_or_default()
     };
-    // Its request arrives.
-    let until = std::time::Instant::now() + Duration::from_millis(100);
-    while std::time::Instant::now() < until {
-        compositor.dispatch(Duration::from_millis(5))?;
-    }
+    // Its request arrives, however long its thread takes: its second
+    // counts from there on the virtual clock (#235).
+    compositor.dispatch_until(Duration::from_secs(5), |c| c.idle_watchers() == 1)?;
     compositor.advance(Duration::from_millis(500))?;
     assert!(seen_now(&seen).is_empty(), "too early");
     compositor.advance(Duration::from_millis(700))?;

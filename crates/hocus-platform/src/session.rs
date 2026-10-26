@@ -26,6 +26,10 @@ pub enum Request {
     Activity,
     /// How many applications hold the screen awake.
     Inhibitors(u32),
+    /// One of logind's signals is followed from now on (one per thread
+    /// of [`Logind`]): a signal sent before would be missed, which a test
+    /// waits for (#235).
+    Following,
 }
 
 /// logind: lock and unlock requests, and the lock before sleep.
@@ -123,6 +127,7 @@ async fn session_signal(
     )
     .await?;
     let mut signals = session.receive_signal(name).await?;
+    sink(Request::Following);
     while poll_fn(|cx| Pin::new(&mut signals).poll_next(cx))
         .await
         .is_some()
@@ -158,6 +163,7 @@ async fn sleep(
     };
     let mut delay = inhibit().await;
     let mut signals = manager.receive_signal("PrepareForSleep").await?;
+    sink(Request::Following);
     while let Some(signal) = poll_fn(|cx| Pin::new(&mut signals).poll_next(cx)).await {
         let going: bool = signal.body().deserialize()?;
         if going {

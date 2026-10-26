@@ -396,9 +396,82 @@ impl Headless {
         self.app.state.capture_deadline()
     }
 
+    /// logind's signals the compositor follows (lock, unlock, sleep: 3
+    /// once all are), on a system bus given: a signal before is missed.
+    pub fn logind_following(&self) -> usize {
+        self.app.state.locking.logind_following
+    }
+
+    /// Whether logind said what the machine can do (suspend, hibernate).
+    pub fn power_caps_known(&self) -> bool {
+        self.app.state.leaver.caps_known
+    }
+
+    /// Idle notifications clients asked for (ext-idle-notify).
+    pub fn idle_watchers(&self) -> usize {
+        self.app.state.idle_notifications.len()
+    }
+
+    /// Activations clients asked with a token (xdg-activation), as the
+    /// compositor handled them (#235).
+    pub fn activations_asked(&self) -> u64 {
+        self.app.state.protocols.activations
+    }
+
+    /// AI keys a worker kept or forgot, as the compositor heard (#235).
+    pub fn ai_keys_stored(&self) -> u64 {
+        self.app.state.ai.stored
+    }
+
+    /// herdr's status changes the compositor took in (#41): each comes
+    /// off a worker thread in its own time (#235).
+    pub fn agent_statuses_seen(&self) -> u64 {
+        self.app.state.agents.statuses_seen
+    }
+
+    /// Whether every application an agent's wait asked to answer (a
+    /// capture's frame callback, the agent's keyboard before typing) did:
+    /// it handled what it was sent, in its own time (#235).
+    pub fn apps_answered(&self) -> bool {
+        self.app.state.apps_answered()
+    }
+
+    /// Whether window `id`'s application drew the size it was last asked
+    /// for, in its own time: the clock moves on once it did, or what a
+    /// frame shows would depend on how fast its thread ran (#235). Windows
+    /// gone and X11 ones count as done.
+    pub fn window_caught_up(&self, id: u64) -> bool {
+        use smithay::wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData};
+        let Some(managed) = self.app.state.windows.get(&hocus_core::WindowId(id)) else {
+            return true;
+        };
+        let Some(toplevel) = managed.window.toplevel() else {
+            return true;
+        };
+        // Whether it acknowledged the last configure, and the size it asked.
+        let asked = with_states(toplevel.wl_surface(), |states| {
+            let data = states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()?
+                .lock()
+                .ok()?;
+            let acked = data.pending_configures().is_empty();
+            Some((acked, data.last_acked.as_ref().and_then(|s| s.size)))
+        });
+        match asked {
+            Some((false, _)) => false,
+            Some((true, Some(size))) => managed.window.geometry().size == size,
+            Some((true, None)) | None => true,
+        }
+    }
+
     /// Moves the virtual clock forward by `by`, drawing a frame at each frame
     /// boundary it crosses if something changed.
     pub fn advance(&mut self, by: Duration) -> anyhow::Result<()> {
+        // Applications asked to answer before an agent's wait ends do
+        // first, or the wait would end at a moment of their threads (#235).
+        self.dispatch_until(REQUEST_TIMEOUT, Self::apps_answered)
+            .context("an application never answered before the clock moved")?;
         let end = self.now() + by;
         loop {
             let next = next_frame_after(self.now());

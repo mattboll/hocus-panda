@@ -28,7 +28,8 @@
   a faint wider line. Measured at 1920×1080 (a debug build, waiting for
   the GPU): the glitch of a window as large as the screen 0.13 ms, the
   scanlines and vignette over it 0.12 ms, the blooms of eight traces
-  1.1 ms. Sounds are not played yet.
+  1.1 ms. The test that measures them runs alone, on request (see
+  docs/architecture.md, Testing). Sounds are not played yet.
 - **Window border**: every decorated window has a 1 px hairline inside its
   edge, `rgba(0,240,96,0.22)` here (the boards' window border).
 

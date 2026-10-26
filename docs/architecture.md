@@ -785,7 +785,14 @@ suspends and wakes.
   something falls due are not set (what is due is seen as the clock
   advances), and a moment starts from the compositor's own events (a frame
   served, a key handled), not from when a client's thread got its request
-  in (#212).
+  in (#212). Nor does a step wait a fixed amount of real time for a client
+  or a worker: it waits for the event that says it is done (a client drew
+  the size its new state asks, a test client's picture with its marks is
+  in, an activation or a worker's answer reached the loop, logind's signals
+  are followed), and the clock never moves past a wait that depends on an
+  application before it answered: an agent's capture or typing pings the
+  application (`xdg_wm_base.ping`), and the harness advances only once it
+  answered, having drawn or said what its field is for (#235).
   Each runs on its own compositor in-process, through the control API;
   the format is described in `tests/scenarios/README.md`.
 - **Test clients**: a small in-repo client that draws known colours and
@@ -793,7 +800,11 @@ suspends and wakes.
 - **Reference screenshots** reviewed in pull requests.
 - **Performance**: frame-time histograms per output and slow handlers,
   exposed as `stats` over the API (`hocus msg stats`); scenarios can assert
-  budgets.
+  budgets. Timings in wall-clock milliseconds (the Matrix theme's GPU
+  passes) measure the machine's load as much as the code alongside the
+  rest of the suite: they are ignored there and run alone,
+  `cargo nextest run -p hocus-compositor --run-ignored only the_refinements_cost`
+  (`--release` for the release budget).
 - **VMs**: QEMU scripts for the DRM session, suspend/resume, several outputs,
   and FreeBSD.
 

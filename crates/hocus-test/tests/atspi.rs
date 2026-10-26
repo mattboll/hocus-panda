@@ -359,9 +359,12 @@ fn the_ring_surrounds_the_element_before_the_click_lands() -> anyhow::Result<()>
             "params": { "name": "click", "arguments": { "window": id, "label": "Send" } },
         }))
     });
-    // Once the element is found, the click waits under its ring.
+    // Once the element is found and the application took the agent's new
+    // seat, the click waits under its ring. The seat is taken in the
+    // client's own time: the clock moves only once it was, or the wait for
+    // it would be over in a few of its steps (#235).
     desk.compositor
-        .dispatch_until(TIMEOUT, |c| c.agent_pending().0 == 1)?;
+        .dispatch_until(TIMEOUT, |c| c.agent_pending() == (1, false))?;
     let Reply::Ui(nodes) = desk.compositor.request(Request::Ui)? else {
         anyhow::bail!("expected the interface");
     };
@@ -376,11 +379,9 @@ fn the_ring_surrounds_the_element_before_the_click_lands() -> anyhow::Result<()>
     }
     let answer = thread
         .join()
-        .map_err(|_| anyhow::anyhow!("the MCP server panicked"))?;
-    assert_eq!(
-        answer.map(|a| a["result"]["isError"].clone()),
-        Some(json!(false))
-    );
+        .map_err(|_| anyhow::anyhow!("the MCP server panicked"))?
+        .ok_or_else(|| anyhow::anyhow!("no answer"))?;
+    assert_eq!(answer["result"]["isError"], false, "{answer}");
     Ok(())
 }
 
