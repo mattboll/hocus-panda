@@ -77,12 +77,26 @@ fast to compile and test, and lets the UI be developed in a plain window.
   default when started outside a graphical session). libseat (logind or
   seatd) gives the seat, its devices and the switches to other terminals
   (Ctrl+Alt+F1…F12, which pause the session and draw everything again on
-  return). The primary GPU's display engine is driven through DRM/KMS
-  (smithay's `DrmOutputManager`), drawn with GLES on GBM (Mesa's software GL
-  in a VM without 3D); screens plugged and unplugged are followed through
-  udev; linux-dmabuf is offered for clients that draw on the GPU. libinput
-  reads keyboards and mice. Screens of other GPUs stay dark for now (#123).
-  Tried in a QEMU VM on virtio-gpu, then on hardware.
+  return). Every GPU's display engine is driven through DRM/KMS (smithay's
+  `DrmOutputManager`); the primary GPU draws every screen with GLES on GBM
+  (Mesa's software GL in a VM without 3D), so that windows, effects and
+  the shell are drawn by one renderer whatever screen they are on (#123).
+  Another GPU gets its frames one of two ways (`gpus::Path`): a display
+  engine that takes the primary's buffers as framebuffers (a DisplayLink
+  dock) scans them out, nothing copied; a GPU with a renderer of its own
+  (a laptop's second GPU, whose HDMI port it drives), or one that does not
+  take them, has each frame copied across by smithay's multi-GPU renderer:
+  the primary draws the scene into a buffer of its own, which is the one
+  element the screen's `DrmOutput` shows, the copy turned as the screen
+  is. GPUs plugged and unplugged, and their screens, are followed through
+  udev; a GPU that goes takes its screens with it, as an unplug of each.
+  When two GPUs number a connector alike, the second's screen is named
+  after its card too (`card1-HDMI-A-1`). linux-dmabuf is offered for
+  clients that draw on the GPU (the primary). libinput reads keyboards and
+  mice. A connector that says it is no desktop (`non-desktop`: a VR
+  headset) is never lit; it is offered through drm-lease, with a CRTC and
+  planes kept for it (`leases`). Tried in a QEMU VM on virtio-gpu, one GPU
+  or two, then on hardware.
 
 Screens are set the same way on every backend (`outputs.rs`): the backend
 lists its screens, lit or off, with their modes, and carries a setting out
@@ -489,8 +503,8 @@ surfaces under the windows, top above them (under a fullscreen window),
 overlay above everything but the cursor; exclusive zones come off the work
 area, and a surface may take the keyboard always or when clicked. Clients
 started through a security context (Flatpak and other sandboxes) do not see
-layer-shell, the virtual keyboard, data control, the window list nor
-security contexts.
+layer-shell, the virtual keyboard, data control, the window list, drm-lease
+nor security contexts.
 
 Screenshot tools and screen sharing read the screen through
 ext-image-copy-capture (output and window sources) and wlr-screencopy
@@ -505,8 +519,14 @@ the screens and the windows as pictures and answers `Monitor: NAME` or
 `Window: IDENTIFIER`. The configuration files are in `data/portal/`.
 While the screen is shared, the column says so with a stop that ends
 every capture, toasts are held, and one summarises them afterwards (a
-tool that goes while it waits for the screen to change no longer counts). Idle notification (#29) is served;
-drm-lease, for VR headsets, waits for an issue of its own.
+tool that goes while it waits for the screen to change no longer counts). Idle notification (#29) is served,
+and drm-lease (wp-drm-lease-v1, #123) for VR runtimes: each GPU has a
+lease global offering its connectors that say they are no desktop; a
+lease takes the connector, the CRTC kept for it and its primary and cursor
+planes, and ends when the client lets go or the headset or its GPU goes.
+While another terminal is shown nothing new is lent, but a lease given
+stays: logind has taken the GPUs from the session by then, so it could
+not be revoked, and the headset is no part of what that terminal shows.
 
 ## Session
 
@@ -817,7 +837,8 @@ suspends and wakes.
   `cargo nextest run -p hocus-compositor --run-ignored only the_refinements_cost`
   (`--release` for the release budget).
 - **VMs**: QEMU scripts for the DRM session, suspend/resume, several outputs,
-  and FreeBSD.
+  two GPUs (`HOCUS_VM_GPUS=2`; the second's screen can be made a VR
+  headset, by its EDID, to lease it), and FreeBSD.
 
 ## Licenses
 

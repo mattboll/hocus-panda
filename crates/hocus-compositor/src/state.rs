@@ -127,6 +127,8 @@ pub struct State {
     /// Running as the session itself (the DRM backend, #27), not nested
     /// nor headless: the machine's services are ours to use.
     pub is_session: bool,
+    /// drm-lease: VR headsets lent to clients (#123), on a TTY.
+    pub leases: crate::leases::Leases,
     /// Switches virtual terminals, on a TTY.
     pub vt_switch: Option<smithay::backend::session::libseat::LibSeatSession>,
     /// The clipboard history and the emoji picker (#71).
@@ -312,6 +314,7 @@ impl State {
             config_path: None,
             system_bus: None,
             is_session: false,
+            leases: Default::default(),
             vt_switch: None,
             output_settings: Default::default(),
             mirrors: Vec::new(),
