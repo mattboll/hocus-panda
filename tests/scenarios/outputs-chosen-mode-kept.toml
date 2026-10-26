@@ -1,0 +1,37 @@
+# A mode chosen for a screen stays while its connector offers it, when the
+# connector comes to prefer another (#248); with the choice gone, the
+# screen takes what the connector prefers now, not what it was lit with.
+description = "A screen's chosen mode stays when its connector prefers another"
+outputs = ["1920x1080"]
+
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+mode = "1280x720"
+"""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 1280, 720], pixels = [1280, 720] }
+
+[[step]]
+prefer_mode = { output = "HEADLESS-1", mode = "2560x1600" }
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 1280, 720], pixels = [1280, 720] }
+
+[[step]]
+config = ""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 2560, 1600], pixels = [2560, 1600] }
+
+# A mode a tool set for the session stays too.
+[[step]]
+randr = { output = "HEADLESS-1", mode = "1920x1080" }
+
+[[step]]
+prefer_mode = { output = "HEADLESS-1", mode = "1920x1200" }
+
+[[step]]
+expect_output = { name = "HEADLESS-1", geometry = [0, 0, 1920, 1080], pixels = [1920, 1080] }

@@ -180,6 +180,53 @@ impl ModeSpec {
     }
 }
 
+impl From<Mode> for ModeSpec {
+    fn from(mode: Mode) -> Self {
+        Self {
+            width: mode.width,
+            height: mode.height,
+            refresh: Some(mode.refresh),
+        }
+    }
+}
+
+/// The modes a connector offers, and the one it prefers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Offer<'a> {
+    pub modes: &'a [Mode],
+    /// An index in `modes`.
+    pub preferred: Option<usize>,
+}
+
+impl Offer<'_> {
+    /// What a screen is lit with: the preferred mode, else the first.
+    pub fn lit_with(&self) -> Option<Mode> {
+        self.preferred
+            .and_then(|i| self.modes.get(i))
+            .or_else(|| self.modes.first())
+            .copied()
+    }
+}
+
+/// The mode a screen at `now` takes when its connector, still connected,
+/// offered `before` and now offers `after` (#248: a monitor whose EDID
+/// changed behind a dock or a switch, a VM's window resized). A mode
+/// `chosen` in the settings stays while the connector offers it; otherwise
+/// the screen keeps its mode unless the connector now prefers another or no
+/// longer offers it, and then takes the one it now prefers.
+pub fn follow(before: Offer<'_>, after: Offer<'_>, now: Mode, chosen: Option<&ModeSpec>) -> Mode {
+    if let Some(i) = chosen.and_then(|spec| spec.pick(after.modes)) {
+        return after.modes[i];
+    }
+    let prefers_another = before.lit_with() != after.lit_with();
+    if prefers_another || !after.modes.contains(&now) {
+        // A connector with no mode at all lights nothing: what is lit stays.
+        after.lit_with().unwrap_or(now)
+    } else {
+        now
+    }
+}
+
 /// Scales go to clients in 120ths (fractional-scale-v1): a scale is set to
 /// the nearest one, so that what clients draw lands on whole pixels.
 pub fn round_scale(scale: f64) -> f64 {
@@ -270,6 +317,100 @@ mod tests {
         assert_eq!(spec("2560x1440").pick(&modes), Some(1));
         assert_eq!(spec("1920x1080@75").pick(&modes), Some(2));
         assert_eq!(spec("1280x720").pick(&modes), None);
+    }
+
+    fn offer(modes: &[Mode], preferred: usize) -> Offer<'_> {
+        Offer {
+            modes,
+            preferred: Some(preferred),
+        }
+    }
+
+    #[test]
+    fn a_screen_takes_its_connectors_new_preferred_mode() {
+        // A VM's window resized: the old size is still offered, another
+        // is preferred.
+        let before = [mode(640, 480, 60), mode(1024, 768, 60)];
+        let after = [
+            mode(1539, 1200, 60),
+            mode(640, 480, 60),
+            mode(1024, 768, 60),
+        ];
+        let now = mode(640, 480, 60);
+        assert_eq!(
+            follow(offer(&before, 0), offer(&after, 0), now, None),
+            mode(1539, 1200, 60)
+        );
+        // Nothing preferred: the first mode, as a screen is lit with.
+        let unpreferred = Offer {
+            modes: &after,
+            preferred: None,
+        };
+        assert_eq!(
+            follow(offer(&before, 0), unpreferred, now, None),
+            mode(1539, 1200, 60)
+        );
+    }
+
+    #[test]
+    fn a_mode_chosen_stays_while_the_connector_offers_it() {
+        let before = [mode(2560, 1440, 60), mode(1920, 1080, 60)];
+        let after = [
+            mode(3840, 2160, 60),
+            mode(2560, 1440, 60),
+            mode(1920, 1080, 60),
+        ];
+        let chosen: ModeSpec = "1920x1080".parse().unwrap_or_else(|e| panic!("{e}"));
+        let now = mode(1920, 1080, 60);
+        assert_eq!(
+            follow(offer(&before, 0), offer(&after, 0), now, Some(&chosen)),
+            now
+        );
+        // No longer offered: the new preferred one.
+        let gone = [mode(3840, 2160, 60), mode(2560, 1440, 60)];
+        assert_eq!(
+            follow(offer(&before, 0), offer(&gone, 0), now, Some(&chosen)),
+            mode(3840, 2160, 60)
+        );
+        // Offered again: chosen again.
+        assert_eq!(
+            follow(
+                offer(&gone, 0),
+                offer(&after, 0),
+                mode(3840, 2160, 60),
+                Some(&chosen)
+            ),
+            now
+        );
+    }
+
+    #[test]
+    fn a_mode_set_for_the_session_stays_unless_it_goes() {
+        // Not the preferred one: the same preferred one with more modes
+        // leaves it be.
+        let before = [mode(2560, 1440, 60), mode(1920, 1080, 60)];
+        let more = [
+            mode(2560, 1440, 60),
+            mode(1920, 1080, 60),
+            mode(1280, 720, 60),
+        ];
+        let now = mode(1920, 1080, 60);
+        assert_eq!(follow(offer(&before, 0), offer(&more, 0), now, None), now);
+        // The same preferred mode at another place in the list is no change.
+        let moved = [mode(1920, 1080, 60), mode(2560, 1440, 60)];
+        assert_eq!(follow(offer(&before, 0), offer(&moved, 1), now, None), now);
+        // Gone: the preferred one.
+        let fewer = [mode(2560, 1440, 60)];
+        assert_eq!(
+            follow(offer(&before, 0), offer(&fewer, 0), now, None),
+            mode(2560, 1440, 60)
+        );
+        // No mode at all: what is lit stays.
+        let none = Offer {
+            modes: &[],
+            preferred: None,
+        };
+        assert_eq!(follow(offer(&before, 0), none, now, None), now);
     }
 
     #[test]
