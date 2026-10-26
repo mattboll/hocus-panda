@@ -25,6 +25,9 @@
 # its own screen): the first has no EDID then, so that the EDID of a VR
 # headset given to the second's connector (`~/hocus-vm headset`) is not
 # taken for the first's too.
+# HOCUS_VM_DISPLAY=gtk shows its screens in a window of the current
+# session, its keyboard and mouse for a person to try it by hand (any QEMU
+# display backend; `none` by default).
 set -eu
 
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/hocuspanda-vm"
@@ -36,6 +39,7 @@ HTTP_PORT="${HOCUS_VM_HTTP_PORT:-2580}"
 MEMORY="${HOCUS_VM_MEMORY:-4G}"
 CPUS="${HOCUS_VM_CPUS:-4}"
 GPUS="${HOCUS_VM_GPUS:-1}"
+DISPLAY_BACKEND="${HOCUS_VM_DISPLAY:-none}"
 
 # Input events to the VM's devices, as a person would make them (QMP: the
 # monitor's mouse_move reaches no device without a display).
@@ -142,7 +146,7 @@ up() {
         -drive file="$WORK/disk.qcow2",if=virtio \
         -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:"$SSH_PORT"-:22 \
         -smbios type=1,serial="ds=nocloud;s=http://10.0.2.2:$HTTP_PORT/" \
-        $gpus -display none \
+        $gpus -display "$DISPLAY_BACKEND" \
         -global PIIX4_PM.disable_s3=0 \
         -monitor unix:"$WORK/monitor",server,nowait \
         -qmp unix:"$WORK/qmp",server,nowait \
