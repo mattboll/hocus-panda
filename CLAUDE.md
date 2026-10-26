@@ -79,6 +79,11 @@ scripts/vm/debian.sh ssh '~/hocus-vm msg ui'     # its control socket
 scripts/vm/debian.sh ssh '~/hocus-vm start'      # or headless, with --session-services
 scripts/vm/debian.sh monitor system_wakeup       # after `systemctl suspend` in it
 scripts/vm/debian.sh down
+# two GPUs, each with its screen; the second's can turn into a VR headset
+HOCUS_VM_GPUS=2 scripts/vm/debian.sh up
+scripts/vm/debian.sh screen shot.png 1           # the second GPU's screen
+scripts/vm/debian.sh ssh '~/hocus-vm headset'    # back: '~/hocus-vm desktop'
+scripts/vm/debian.sh ssh '~/hocus-vm lease take' # a client leases it (also: globals [--sandboxed])
 ```
 
 `--session-services` makes a headless hocuspanda use the machine's services

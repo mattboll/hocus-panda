@@ -1,0 +1,47 @@
+description = "A GPU that goes takes both its screens: their windows come to the laptop's, and go back to their own screens with the GPU"
+# The laptop's screen, then the two screens of a second GPU (a dock).
+outputs = ["1280x800", "1920x1080", "1920x1080"]
+
+[[step]]
+pointer_move = [2240, 540]
+
+[[step]]
+open = { app_id = "mail", size = [400, 300], color = "#3399ff" }
+
+[[step]]
+pointer_move = [4160, 540]
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+expect_window = { app_id = "mail", output = "HEADLESS-2", visible = true }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-3", visible = true, focused = true }
+
+# The GPU goes: both its screens at once, as udev tells of it.
+[[step]]
+unplug = "HEADLESS-2"
+
+[[step]]
+unplug = "HEADLESS-3"
+
+[[step]]
+expect_window = { app_id = "mail", output = "HEADLESS-1", visible = true }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-1", visible = true, focused = true }
+
+# It comes back.
+[[step]]
+plug = { spec = "1920x1080+1280+0", name = "HEADLESS-2" }
+
+[[step]]
+plug = { spec = "1920x1080+3200+0", name = "HEADLESS-3" }
+
+[[step]]
+expect_window = { app_id = "mail", output = "HEADLESS-2", visible = true }
+
+[[step]]
+expect_window = { app_id = "doc", output = "HEADLESS-3", visible = true }

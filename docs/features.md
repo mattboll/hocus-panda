@@ -116,6 +116,8 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Resolution, fractional scale, cursor at the right scale per screen
 - Adaptive sync (VRR)
 - Per-screen panel margins
+- Screens of every GPU (a laptop's second GPU, a DisplayLink dock), drawn by the primary GPU and plugged and unplugged with their GPU
+- VR headsets never lit as screens: lent to VR runtimes (drm-lease), not to sandboxed applications
 
 ## 7. Input
 
