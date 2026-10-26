@@ -822,13 +822,34 @@ pub struct Stats {
     pub slow_handlers: Vec<SlowHandler>,
     /// Times the loop did not answer the watchdog in time, oldest first.
     pub stalls: Vec<Stall>,
+    /// Times the loop woke up and handled something, since the start.
+    /// Only a compositor running its own loop counts them: one a test
+    /// harness turns counts none (`handlers` tells what ran).
+    #[serde(default)]
+    pub wakeups: u64,
+    /// How many times each loop handler ran since the start, by name: what
+    /// woke the loop (the watchdog, a client, a worker's result, a timer).
+    #[serde(default)]
+    pub handlers: Vec<HandlerRuns>,
+}
+
+/// A loop handler and how many times it ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandlerRuns {
+    pub name: String,
+    pub runs: u64,
 }
 
 /// Time spent drawing the frames an output presented.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutputStats {
     pub name: String,
+    /// Frames that drew something and were presented.
     pub frames: u64,
+    /// Times the scene was built and compared with the last frame, drawn
+    /// or not: a pass that finds nothing changed still costs.
+    #[serde(default)]
+    pub renders: u64,
     pub histogram: Vec<Bucket>,
     pub max_ms: f64,
     /// Times the blur behind something on it was computed (#37): only when

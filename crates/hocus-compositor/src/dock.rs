@@ -18,7 +18,12 @@ use smithay::{
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
-use crate::{State, scene::SceneElement, shell::Panel, surface::title_and_app_id};
+use crate::{
+    State,
+    scene::SceneElement,
+    shell::Panel,
+    surface::{hash_title_and_app_id, title_and_app_id},
+};
 
 /// How long the pointer rests at the bottom edge before it shows.
 const REST: Duration = Duration::from_millis(300);
@@ -48,7 +53,12 @@ struct Item {
 pub struct Dock {
     /// The applications known, read off the loop.
     pub entries: Vec<Entry>,
+    /// Bumped when the entries are read again.
+    pub entries_generation: u64,
     items: Vec<Item>,
+    /// What the items were built from, summed up: they are built again
+    /// only when it changes, not after every turn of the loop (#88).
+    inputs: Option<u64>,
     panel: Option<(String, Point<i32, Logical>, Panel<DockView>)>,
     /// The hint, and whether it says a window asks for attention.
     hint: Option<(bool, Panel<DockHint>)>,
@@ -82,6 +92,21 @@ impl State {
         self.shell.as_ref()?;
         let name = self.model.primary()?.name.0.clone();
         self.find_output(&name)
+    }
+
+    /// What [`State::dock_items`] reads, summed up without allocating.
+    fn dock_inputs(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        // The pinned apps are the configuration's.
+        self.config_generation.hash(&mut hasher);
+        self.dock.entries_generation.hash(&mut hasher);
+        for (id, managed) in &self.windows {
+            id.hash(&mut hasher);
+            hash_title_and_app_id(&managed.window, &mut hasher);
+            self.asks_attention(*id).hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// The pinned apps found, then the open ones.
@@ -165,9 +190,15 @@ impl State {
             self.dock.panel = None;
             return;
         };
-        let items = self.dock_items();
+        // Built again only when what they are made of changed.
+        let inputs = self.dock_inputs();
+        let items = (self.dock.inputs != Some(inputs)).then(|| self.dock_items());
+        self.dock.inputs = Some(inputs);
         // Nothing to hold: neither it nor its hint.
-        if items.is_empty() {
+        if items
+            .as_ref()
+            .map_or(self.dock.items.is_empty(), Vec::is_empty)
+        {
             self.dock.items.clear();
             self.dock.panel = None;
             self.dock.shown = None;
@@ -192,11 +223,13 @@ impl State {
         };
         self.dock.shown = shown;
         // What it holds, built again when it changes.
-        let changed = items.len() != self.dock.items.len()
-            || items
-                .iter()
-                .zip(&self.dock.items)
-                .any(|(a, b)| a.app != b.app);
+        let changed = items.as_ref().is_some_and(|items| {
+            items.len() != self.dock.items.len()
+                || items
+                    .iter()
+                    .zip(&self.dock.items)
+                    .any(|(a, b)| a.app != b.app)
+        });
         let theme = self.theme();
         let scale = output.current_scale().fractional_scale() as f32;
         let restyled = self.dock.theme.as_ref() != Some(&theme);
@@ -212,7 +245,9 @@ impl State {
                 .as_ref()
                 .is_none_or(|(o, _, _)| *o != output.name())
         {
-            self.dock.items = items;
+            if let Some(items) = items {
+                self.dock.items = items;
+            }
             let apps: Vec<DockApp> = self.dock.items.iter().map(|i| i.app.clone()).collect();
             let view = DockView::new(theme.clone(), scale, &apps);
             let size = DockView::size(apps.len());
@@ -290,7 +325,7 @@ impl State {
             // Woken when the rest is long enough.
             if let Some(handle) = self.waker() {
                 let woken = handle.insert_source(Timer::from_duration(REST), |_, _, app| {
-                    app.state.needs_redraw = true;
+                    app.timed("dock rest", |app| app.state.needs_redraw = true);
                     TimeoutAction::Drop
                 });
                 if let Err(err) = woken {

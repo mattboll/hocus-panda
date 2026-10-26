@@ -539,6 +539,10 @@ impl State {
 
     /// Follows the state and draws what changed; after each dispatch.
     pub fn refresh_quick(&mut self) {
+        // Closed, its state is not even read (#88).
+        if !self.quick.as_ref().is_some_and(|p| p.sheet.is_open()) {
+            return;
+        }
         let now = self.clock.now();
         let state = self.quick_state();
         let Some(panel) = self.quick.as_mut() else {

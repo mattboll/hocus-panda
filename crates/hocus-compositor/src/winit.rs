@@ -186,6 +186,7 @@ impl WinitBackend {
 
     fn render(&mut self, state: &mut State) {
         let start = Instant::now();
+        state.measures.render(&self.output.name());
         // A wallpaper that moves, the blur behind panels and the Matrix
         // theme's GPU effects, before the scene shows them.
         state.paint_backdrop(self.backend.renderer(), &self.output);

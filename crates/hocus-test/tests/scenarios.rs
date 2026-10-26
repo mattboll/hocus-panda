@@ -12,6 +12,11 @@ use hocus_test::{
 };
 use libtest_mimic::{Arguments, Failed, Trial};
 
+// Counts what the compositor allocates on its loop, for the scenarios'
+// budgets (#88).
+#[global_allocator]
+static ALLOCATOR: hocus_compositor::allocations::Counting = hocus_compositor::allocations::Counting;
+
 fn main() -> std::process::ExitCode {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = manifest.ancestors().nth(2).unwrap_or(manifest);

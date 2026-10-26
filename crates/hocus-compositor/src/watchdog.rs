@@ -122,7 +122,8 @@ pub fn start(
     let loop_asked = asked.clone();
     let loop_answered = answered.clone();
     handle
-        .insert_source(wakeups, move |_, _, _| {
+        .insert_source(wakeups, move |_, _, app| {
+            app.state.measures.ran("watchdog");
             loop_answered.store(loop_asked.load(Ordering::Acquire), Ordering::Release);
         })
         .map_err(|err| err.error)
@@ -133,6 +134,7 @@ pub fn start(
     handle
         .insert_source(stalls, |event, _, app| {
             if let channel::Event::Msg(stall) = event {
+                app.state.measures.ran("stall report");
                 app.state.measures.stall(stall);
             }
         })

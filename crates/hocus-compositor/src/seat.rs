@@ -1642,7 +1642,11 @@ impl State {
         self.seats.waking = next;
         if let (Some(at), Some(handle)) = (next, self.waker()) {
             let timer = Timer::from_duration(at.saturating_sub(now));
-            if let Err(err) = handle.insert_source(timer, |_, _, _| TimeoutAction::Drop) {
+            let woken = handle.insert_source(timer, |_, _, app| {
+                app.timed("agent seats", |_| {});
+                TimeoutAction::Drop
+            });
+            if let Err(err) = woken {
                 tracing::warn!(%err.error, "an agent's pointer changes on the next event");
             }
         }

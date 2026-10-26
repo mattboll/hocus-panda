@@ -27,6 +27,8 @@ use crate::{State, desktops::title_and_app_id, window_mode::WindowMode};
 
 /// How long a restored application has to show its window.
 const PATIENCE: Duration = Duration::from_secs(15);
+/// How long after something happened the session is saved.
+const SAVE_AFTER: Duration = Duration::from_secs(30);
 /// The boot screen shows at most this long: an application slow to come
 /// back is reported, and the desktop is there meanwhile.
 const BOOT_AT_MOST: Duration = Duration::from_secs(5);
@@ -53,6 +55,12 @@ pub struct Sessions {
     card: Option<Card>,
     /// The boot screen while windows come back (#48).
     boot: Option<Booting>,
+    /// Saved now and then on a real clock; tests save when they ask.
+    periodic: bool,
+    /// The loop's activity last seen: nothing changes at rest.
+    seen_activity: u64,
+    /// When the session is saved next, once something happened.
+    alarm: crate::alarm::Alarm,
 }
 
 #[derive(Debug)]
@@ -135,17 +143,32 @@ impl State {
             Err(err) => tracing::warn!(%err, "the session will not be saved"),
         }
         // Saved now and then; tests save when they ask.
-        if matches!(self.clock, crate::clock::Clock::Monotonic { .. })
-            && let Some(handle) = &self.loop_handle
-        {
-            use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-            let every = Duration::from_secs(30);
-            let inserted = handle.insert_source(Timer::from_duration(every), move |_, _, app| {
-                app.timed("session", |app| app.state.save_session());
-                TimeoutAction::ToDuration(every)
-            });
-            if let Err(err) = inserted {
-                tracing::warn!(%err, "the session will only be saved when quitting");
+        self.sessions.periodic = self.waker().is_some();
+    }
+
+    /// Saves the session thirty seconds after something happened (a
+    /// client, an input, a worker's result), at most so often: at rest,
+    /// nothing changes and the loop is not woken to look (#88).
+    fn save_after_activity(&mut self) {
+        if !self.sessions.periodic {
+            return;
+        }
+        let now = self.clock.now();
+        let handle = self.waker().cloned();
+        if self.sessions.alarm.due(now) {
+            self.sessions
+                .alarm
+                .set(handle.as_ref(), "session save", None, now);
+            self.save_session();
+        }
+        let activity = self.measures.activity();
+        if activity != self.sessions.seen_activity {
+            self.sessions.seen_activity = activity;
+            if self.sessions.alarm.at().is_none() {
+                let at = Some(now + SAVE_AFTER);
+                self.sessions
+                    .alarm
+                    .set(handle.as_ref(), "session save", at, now);
             }
         }
     }
@@ -479,6 +502,7 @@ impl State {
     /// After each dispatch: restored applications whose window never came
     /// are reported.
     pub fn refresh_sessions(&mut self) {
+        self.save_after_activity();
         self.offer_when_ready();
         self.refresh_card();
         self.refresh_boot();

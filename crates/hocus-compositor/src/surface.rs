@@ -37,6 +37,24 @@ pub fn title_and_app_id(window: &Window) -> (Option<String>, Option<String>) {
     }
 }
 
+/// Feeds a window's title and app id to `hasher`, as
+/// [`title_and_app_id`] reads them, without copying them.
+pub fn hash_title_and_app_id(window: &Window, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    match window.underlying_surface() {
+        WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
+            if let Some(data) = states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .and_then(|data| data.lock().ok())
+            {
+                (&data.title, &data.app_id).hash(hasher);
+            }
+        }),
+        WindowSurface::X11(_) => title_and_app_id(window).hash(hasher),
+    }
+}
+
 /// Asks the client to show its window at `rect`'s size, in `shown` mode;
 /// `resizing` while an interactive resize is under way.
 pub fn request_size(window: &Window, rect: Rectangle<i32, Logical>, shown: Shown, resizing: bool) {

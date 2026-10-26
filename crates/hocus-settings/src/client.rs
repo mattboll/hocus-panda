@@ -779,6 +779,7 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
         configured: false,
         frame_pending: false,
         needs_draw: true,
+        committed: None,
         keyboard: None,
         pointer: None,
         seat_handle: None,
@@ -852,6 +853,9 @@ struct App {
     configured: bool,
     frame_pending: bool,
     needs_draw: bool,
+    /// The size in pixels of the last buffer given: one of the same size
+    /// differs from it only where the view was drawn again.
+    committed: Option<(u32, u32)>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
     seat_handle: Option<wl_seat::WlSeat>,
@@ -1290,9 +1294,17 @@ impl App {
         }
         let surface = self.window.wl_surface();
         surface.set_buffer_scale(scale);
-        // A new buffer each time: all of it is new to the compositor.
-        let _ = damage;
-        surface.damage_buffer(0, 0, pw as i32, ph as i32);
+        // The compositor is told only what was drawn again: a pointer
+        // moving over the window no longer has it draw the whole window
+        // again (#88). A new size is new everywhere.
+        if self.committed == Some((pw, ph)) {
+            for r in &damage {
+                surface.damage_buffer(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
+            }
+        } else {
+            surface.damage_buffer(0, 0, pw as i32, ph as i32);
+            self.committed = Some((pw, ph));
+        }
         buffer.attach_to(surface)?;
         self.needs_draw = self.view.is_animating();
         if self.needs_draw {

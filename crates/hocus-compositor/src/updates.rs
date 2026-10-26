@@ -8,10 +8,7 @@ use std::time::Duration;
 
 use hocus_api::{Event, UpdateInfo, UpdatesInfo};
 use hocus_platform::updates::{self as platform, Manager, Update};
-use smithay::reexports::calloop::{
-    LoopHandle, channel,
-    timer::{TimeoutAction, Timer},
-};
+use smithay::reexports::calloop::{LoopHandle, channel};
 
 use crate::{App, State};
 
@@ -42,6 +39,8 @@ pub struct Updates {
     manager: Option<Manager>,
     next_look: Option<Duration>,
     news: Option<channel::Sender<News>>,
+    /// Wakes the loop for the next look.
+    alarm: crate::alarm::Alarm,
 }
 
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
@@ -57,17 +56,6 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
     }
     state.updates.news = Some(news);
     state.updates.next_look = Some(state.clock.now() + FIRST_LOOK);
-    // Wakes the loop now and then: looks fall due on the clock.
-    if state.clock.is_virtual() {
-        return;
-    }
-    let ticking = handle.insert_source(Timer::from_duration(FIRST_LOOK), |_, _, app| {
-        app.state.needs_redraw = true;
-        TimeoutAction::ToDuration(Duration::from_secs(600))
-    });
-    if let Err(err) = ticking {
-        tracing::warn!(%err.error, "updates will be looked for only when something happens");
-    }
 }
 
 impl State {
@@ -83,6 +71,18 @@ impl State {
 
     /// After each dispatch: a look falls due.
     pub fn refresh_updates(&mut self) {
+        self.look_for_updates();
+        // Woken for the next look only, when there is something to ask
+        // (#88): a timer every ten minutes would wake a resting desktop.
+        let now = self.clock.now();
+        let u = &self.config.updates;
+        let asks = u.enabled && (self.is_session || !u.check.is_empty());
+        let at = self.updates.next_look.filter(|at| asks && *at > now);
+        let handle = self.waker().cloned();
+        self.updates.alarm.set(handle.as_ref(), "updates", at, now);
+    }
+
+    fn look_for_updates(&mut self) {
         let now = self.clock.now();
         let due = self.updates.next_look.is_some_and(|t| now >= t);
         if !due || self.updates.phase != Phase::Idle || !self.config.updates.enabled {

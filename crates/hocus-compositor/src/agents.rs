@@ -204,7 +204,11 @@ impl State {
             && due != self.agents.waking
         {
             let timer = Timer::from_duration(at.saturating_sub(now));
-            if let Err(err) = handle.insert_source(timer, |_, _, _| TimeoutAction::Drop) {
+            let woken = handle.insert_source(timer, |_, _, app| {
+                app.timed("agents rest", |_| {});
+                TimeoutAction::Drop
+            });
+            if let Err(err) = woken {
                 tracing::warn!(%err.error, "a resting agent shows only when something happens");
             }
         }

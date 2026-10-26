@@ -36,6 +36,9 @@ struct Slide {
     switcher: Option<(Point<i32, Logical>, Panel<Switcher>)>,
     /// When the switcher goes.
     until: Duration,
+    /// The strip moved at the last look: one more frame shows where it
+    /// stopped.
+    moved: bool,
 }
 
 #[derive(Debug, Default)]
@@ -43,6 +46,8 @@ pub struct Slides {
     by_output: BTreeMap<String, Slide>,
     /// The screen a swipe moves.
     swiping: Option<String>,
+    /// Wakes the loop when a lingering switcher goes.
+    alarm: crate::alarm::Alarm,
 }
 
 impl crate::shell::Pixels for Switcher {
@@ -92,6 +97,7 @@ impl State {
                     swipe: None,
                     switcher: None,
                     until: now,
+                    moved: false,
                 },
             );
             self.show_switcher(output);
@@ -106,6 +112,7 @@ impl State {
                 swipe: None,
                 switcher: None,
                 until: now,
+                moved: false,
             });
         slide.swipe = None;
         slide
@@ -314,12 +321,26 @@ impl State {
     /// shows; a strip at rest is forgotten.
     pub fn refresh_slides(&mut self) {
         let now = self.clock.now();
+        let before = self.slides.by_output.len();
         self.slides
             .by_output
             .retain(|_, s| s.swipe.is_some() || s.position.is_running(now) || now < s.until);
-        if !self.slides.by_output.is_empty() {
+        // Frames while a strip moves (and one where it stopped), and when
+        // a switcher goes; none while it lingers, still (#88).
+        let mut redraw = self.slides.by_output.len() != before;
+        for slide in self.slides.by_output.values_mut() {
+            let moving = slide.swipe.is_some() || slide.position.is_running(now);
+            redraw |= moving || slide.moved;
+            slide.moved = moving;
+        }
+        if redraw {
             self.needs_redraw = true;
         }
+        let goes = self.slides.by_output.values().map(|s| s.until).min();
+        let handle = self.waker().cloned();
+        self.slides
+            .alarm
+            .set(handle.as_ref(), "switcher", goes.filter(|t| *t > now), now);
     }
 
     // Swipes.
@@ -349,6 +370,7 @@ impl State {
                 swipe: None,
                 switcher: None,
                 until: now,
+                moved: false,
             });
         // A strip still moving is caught where it is.
         let at = slide.position.value(now);

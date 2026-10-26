@@ -297,6 +297,7 @@ impl State {
     fn apps_found(&mut self, entries: Vec<Entry>) {
         // The dock names and launches the same apps.
         self.dock.entries = entries.clone();
+        self.dock.entries_generation += 1;
         if let Some(panel) = self.launcher.as_mut() {
             panel
                 .launcher

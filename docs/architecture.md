@@ -30,6 +30,12 @@ Rules:
   spawning that waits. Every loop handler is timed against a frame (16 ms);
   one over budget is logged with its name and duration, and kept in the
   `stats` of the control API with the frame-time histogram of each output.
+- **Nothing on a timer at rest.** The loop wakes for the watchdog, and
+  otherwise when something happens or falls due: a moment on the clock is
+  an alarm set for it (`alarm.rs`), never a timer ticking in case. The
+  `stats` count each handler's runs, the loop's wakeups and each output's
+  scenes built and frames drawn; tests count what the loop allocates
+  ([performance](performance.md), #88).
 - **A watchdog that does not bite a quiet screen.** A thread wakes the loop
   every second and checks it answered; after 10 s without an answer it
   writes every thread's state and backtrace (gdb when installed) to
@@ -531,7 +537,8 @@ not be revoked, and the headset is no part of what that terminal shows.
 ## Session
 
 What is open (each window's application, output, desktop, place and
-state) is saved every thirty seconds when it changed and when quitting, in
+state) is saved thirty seconds after something happened (a client, an
+input, a worker's result) when it changed, and when quitting, in
 `$XDG_STATE_HOME/hocuspanda/session.toml`, written on a worker thread. At
 the next start a card offers to put everything back, to choose which
 applications, or to start fresh (`[session] restore`); the applications
@@ -829,13 +836,18 @@ suspends and wakes.
 - **Test clients**: a small in-repo client that draws known colours and
   reports what it receives, plus real ones (foot, Firefox) for smoke tests.
 - **Reference screenshots** reviewed in pull requests.
-- **Performance**: frame-time histograms per output and slow handlers,
-  exposed as `stats` over the API (`hocus msg stats`); scenarios can assert
-  budgets. Timings in wall-clock milliseconds (the Matrix theme's GPU
-  passes) measure the machine's load as much as the code alongside the
-  rest of the suite: they are ignored there and run alone,
-  `cargo nextest run -p hocus-compositor --run-ignored only the_refinements_cost`
-  (`--release` for the release budget).
+- **Performance** ([performance](performance.md), #88): frame-time
+  histograms per output, slow handlers, what woke the loop and scenes
+  built, exposed as `stats` over the API (`hocus msg stats`). Budgets that
+  gate CI are counts, the same on every machine however loaded: frames
+  drawn, scenes built, wakeups, allocations on the loop and memory held
+  (`hocus-test`'s `budgets`, the `budget-twenty-windows` scenario; a
+  counting allocator in the test programs). Timings in wall-clock
+  milliseconds measure the machine's load as much as the code: they are
+  ignored in the suite and run alone, by a CI job that publishes them and
+  never fails (`timings`; the Matrix theme's GPU passes,
+  `cargo nextest run -p hocus-compositor --run-ignored only the_refinements_cost`,
+  `--release` for the release budget). perf runs in the Debian VM only.
 - **VMs**: QEMU scripts for the DRM session, suspend/resume, several outputs,
   two GPUs (`HOCUS_VM_GPUS=2`; the second's screen can be made a VR
   headset, by its EDID, to lease it), and FreeBSD.

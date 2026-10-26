@@ -545,8 +545,10 @@ impl State {
         };
         let wait = at.saturating_sub(self.clock.now());
         match handle.insert_source(Timer::from_duration(wait), |_, _, app| {
-            app.state.locking.timer = None;
-            app.state.needs_redraw = true;
+            app.timed("idle deadline", |app| {
+                app.state.locking.timer = None;
+                app.state.needs_redraw = true;
+            });
             TimeoutAction::Drop
         }) {
             Ok(token) => self.locking.timer = Some((token, at)),
@@ -557,6 +559,15 @@ impl State {
     /// The curtain's and the lock screens' contents, per output.
     fn refresh_lock_panels(&mut self) {
         self.refresh_lock_moments();
+        // Unlocked and no curtain: nothing to draw, nor to work out (#88).
+        let falling = matches!(self.locking.phase, Phase::Curtain { .. });
+        if !falling && !(self.locked() && !self.client_lock()) {
+            if !self.locking.curtains.is_empty() {
+                self.locking.curtains.clear();
+                self.needs_redraw = true;
+            }
+            return;
+        }
         let now = self.clock.now();
         let theme = self.theme();
         let lang = self.shell_lang();

@@ -466,7 +466,7 @@ fn watch(
     handle
         .insert_source(notifier, move |event, metadata, app| match event {
             DrmEvent::VBlank(crtc) => {
-                app.timed("vblank", |app| on_vblank(app, node, crtc, metadata));
+                app.timed_quietly("vblank", |app| on_vblank(app, node, crtc, metadata));
             }
             DrmEvent::Error(err) => tracing::warn!(%err, %node, "GPU error"),
         })
@@ -1402,6 +1402,7 @@ impl TtyBackend {
             return;
         };
         let start = Instant::now();
+        state.measures.render(&screen.output.name());
         screen.dirty = false;
         let drawn = match (how, target) {
             (Path::Copied, Some(target)) => {
@@ -1627,6 +1628,7 @@ fn pace(screen: &mut Screen, node: DrmNode, crtc: crtc::Handle, state: &State) {
     }
     let timer = Timer::from_duration(refresh(&screen.output));
     match handle.insert_source(timer, move |_, _, app| {
+        app.state.measures.ran("pace");
         let App { state, backend } = app;
         if let BackendState::Tty(tty) = backend {
             let active = tty.active;
@@ -1659,6 +1661,7 @@ fn watch_flip(screen: &mut Screen, node: DrmNode, crtc: crtc::Handle, state: &St
     }
     let timer = Timer::from_duration(flip::CHECK);
     match handle.insert_source(timer, move |_, _, app| {
+        app.state.measures.ran("flip check");
         let App { state, backend } = app;
         let BackendState::Tty(tty) = backend else {
             return TimeoutAction::Drop;
