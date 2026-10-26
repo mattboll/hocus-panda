@@ -32,6 +32,10 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 /// A frame at 60 Hz: the one budget of time the architecture sets (every
 /// loop handler is timed against it).
 const FRAME_BUDGET_MS: f64 = 16.0;
+/// What Alex waits for without noticing a wait, as the maintainer set them
+/// (#88): warnings past them, never failures.
+const STARTUP_TARGET_MS: f64 = 1000.0;
+const OPENING_TARGET_MS: f64 = 100.0;
 /// evdev codes.
 const KEY_LEFTMETA: u32 = 125;
 const KEY_SPACE: u32 = 57;
@@ -84,9 +88,13 @@ impl Report {
 
     /// `ms` against the frame's budget.
     fn add_frame_ms(&mut self, what: impl Into<String>, ms: f64) {
+        self.add_target_ms(what, ms, FRAME_BUDGET_MS, "a frame");
+    }
+
+    /// `ms` against `target`, named `name` in the warning.
+    fn add_target_ms(&mut self, what: impl Into<String>, ms: f64, target: f64, name: &str) {
         let what = what.into();
-        let over = (ms > FRAME_BUDGET_MS)
-            .then(|| format!("{what}: {ms:.1} ms, over a frame ({FRAME_BUDGET_MS} ms)"));
+        let over = (ms > target).then(|| format!("{what}: {ms:.1} ms, over {name} ({target} ms)"));
         self.rows.push(Row {
             what,
             value: format!("{ms:.1} ms"),
@@ -189,9 +197,11 @@ fn timings() -> anyhow::Result<()> {
     let mut desktop = Headless::start_options(options())?;
     desktop.dispatch_until(TIMEOUT, Headless::wallpapers_ready)?;
     desktop.advance(FRAME)?;
-    report.add(
+    report.add_target_ms(
         "Startup: two screens and the shell drawn",
-        format!("{:.0} ms", ms(start.elapsed())),
+        ms(start.elapsed()),
+        STARTUP_TARGET_MS,
+        "its target",
     );
     desktop.advance(Duration::from_secs(2))?;
     report.add(
@@ -215,9 +225,11 @@ fn timings() -> anyhow::Result<()> {
         desktop.advance(FRAME)?;
         anyhow::ensure!(start.elapsed() < TIMEOUT, "the launcher never drew");
     }
-    report.add_frame_ms(
+    report.add_target_ms(
         "Opening the launcher, to its first frame",
         ms(start.elapsed()),
+        OPENING_TARGET_MS,
+        "its target",
     );
     desktop.request(Request::Key {
         code: 1,
@@ -251,9 +263,11 @@ fn timings() -> anyhow::Result<()> {
     desktop.dispatch_until(TIMEOUT, |d| {
         d.window_count() > windows && settings.access().is_some()
     })?;
-    report.add(
+    report.add_target_ms(
         "Opening the settings, to their first frame",
-        format!("{:.0} ms", ms(start.elapsed())),
+        ms(start.elapsed()),
+        OPENING_TARGET_MS,
+        "its target",
     );
     drop(settings);
 
