@@ -95,6 +95,8 @@ scripts/vm/debian.sh screen shot.png 1           # the second GPU's screen
 scripts/vm/debian.sh ssh '~/hocus-vm headset'    # back: '~/hocus-vm desktop'
 scripts/vm/debian.sh ssh '~/hocus-vm lease take' # a client leases it (also: globals [--sandboxed])
 # to try it by hand: its screens in a window, with its keyboard and mouse
+# (the keyboard is the VM's under the pointer; Ctrl+Alt+G lets it go,
+# Ctrl+Alt+F goes full screen)
 HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 ```
 
