@@ -139,6 +139,10 @@ pub enum Step {
     /// A file of the compositor's state directory (notes, the session):
     /// `{ name, contains?, lacks? }`, once written.
     ExpectStateFile(ExpectFile),
+    /// The notification server sent these signals, in this order (others
+    /// between them), since the first `notify` step: `["ActivationToken
+    /// 1", "ActionInvoked 1 reply"]`.
+    ExpectNotificationSignals(Vec<String>),
     /// Runs `notify-send` with these arguments on the private bus.
     NotifySend(Vec<String>),
     /// Sends a notification on the private bus.
@@ -256,6 +260,17 @@ pub enum Step {
     /// The client of this app id asks for its window to come forward,
     /// with an activation token of its own.
     Activate(String),
+    /// The same with a token made without a serial, from no input of the
+    /// user's: it asks for attention.
+    ActivateWithoutSerial(String),
+    /// The same with the activation token a program the compositor
+    /// started was given, read off a runtime file (`env` written there),
+    /// as a running instance is handed it by a new one: `{ app_id,
+    /// token_from }`.
+    ActivateWith(ActivateWith),
+    /// An X11 client sets its urgency hint or takes it back: `{ app_id,
+    /// urgent }`.
+    X11Urgent(X11Urgent),
     /// The same with a token it took more than ten seconds before (the
     /// virtual clock moves on meanwhile): too old to bring it forward, it
     /// asks for attention.
@@ -888,6 +903,22 @@ pub struct ExpectConfigFile {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ActivateWith {
+    pub app_id: String,
+    /// A file of the runtime directory with an `XDG_ACTIVATION_TOKEN=`
+    /// line.
+    pub token_from: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct X11Urgent {
+    pub app_id: String,
+    pub urgent: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Clipboard {
     pub app_id: String,
     pub text: String,
@@ -1007,6 +1038,8 @@ pub struct ExpectWindow {
     pub state: Option<WindowState>,
     pub opacity: Option<f64>,
     pub pinned: Option<bool>,
+    /// Whether it asks for attention.
+    pub attention: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1046,6 +1079,9 @@ impl fmt::Display for Step {
             Self::ExpectJournal(_) => write!(f, "expect_journal"),
             Self::OpenSettings(o) => write!(f, "open_settings {:?}", o.page),
             Self::Activate(app_id) => write!(f, "activate {app_id}"),
+            Self::ActivateWithoutSerial(app_id) => write!(f, "activate_without_serial {app_id}"),
+            Self::ActivateWith(a) => write!(f, "activate_with {} {}", a.app_id, a.token_from),
+            Self::X11Urgent(u) => write!(f, "x11_urgent {} {}", u.app_id, u.urgent),
             Self::AskAttention(app_id) => write!(f, "ask_attention {app_id}"),
             Self::Share(_) => write!(f, "share"),
             Self::LockClient(_) => write!(f, "lock_client"),
@@ -1102,6 +1138,7 @@ impl fmt::Display for Step {
             Self::ExpectStateFile(e) => write!(f, "expect_state_file {}", e.name),
             Self::NotifySend(args) => write!(f, "notify_send {args:?}"),
             Self::Notify(n) => write!(f, "notify {} {:?}", n.app, n.summary),
+            Self::ExpectNotificationSignals(s) => write!(f, "expect_notification_signals {s:?}"),
             Self::RightClickUi(label) => write!(f, "right_click_ui {label:?}"),
             Self::TrayApp(t) => write!(f, "tray_app {:?}", t.title),
             Self::TrayAttention(t) => write!(f, "tray_attention {:?} {}", t.title, t.attention),
@@ -1314,6 +1351,7 @@ impl Scenario {
             compositor,
             clients: Vec::new(),
             x11_clients: Vec::new(),
+            notification_signals: None,
             settings: None,
             editor: None,
             driving: Driving::Settings,
@@ -1363,6 +1401,8 @@ struct Run<'a> {
     compositor: Headless,
     clients: Vec<TestClient>,
     x11_clients: Vec<X11Client>,
+    /// The notification server's signals, heard from the first `notify`.
+    notification_signals: Option<crate::bus::Signals>,
     settings: Option<hocus_settings::client::Running>,
     /// The annotation window or the recording editor.
     editor: Option<hocus_annotate::client::Running>,
@@ -1882,12 +1922,28 @@ impl Run<'_> {
                     .find(|c| c.spec.app_id == *app_id)
                     .with_context(|| format!("no client {app_id}"))?
                     .activate()?;
-                // It asks in its own time: handled before the next step,
-                // at this moment of the clock (#235).
-                self.compositor
-                    .dispatch_until(CLIENT_TIMEOUT, |c| c.activations_asked() > before)
-                    .with_context(|| format!("{app_id} never asked to come forward"))
+                self.asked_activation(app_id, before)
             }
+            Step::ActivateWithoutSerial(app_id) => {
+                let before = self.compositor.activations_asked();
+                self.clients
+                    .iter()
+                    .find(|c| c.spec.app_id == *app_id)
+                    .with_context(|| format!("no client {app_id}"))?
+                    .activate_without_serial()?;
+                self.asked_activation(app_id, before)
+            }
+            Step::ActivateWith(a) => {
+                let before = self.compositor.activations_asked();
+                self.activate_with(a)?;
+                self.asked_activation(&a.app_id, before)
+            }
+            Step::X11Urgent(u) => self
+                .x11_clients
+                .iter()
+                .find(|c| c.spec.app_id == u.app_id)
+                .with_context(|| format!("no X11 client {}", u.app_id))?
+                .urgent(u.urgent),
             Step::AskAttention(app_id) => self.ask_attention(app_id),
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
@@ -2177,6 +2233,27 @@ impl Run<'_> {
             Step::ExpectStateFile(expected) => self.expect_state_file(expected),
             Step::NotifySend(args) => self.notify_send(args),
             Step::Notify(n) => self.notify(n),
+            Step::ExpectNotificationSignals(expected) => {
+                let deadline = Instant::now() + CLIENT_TIMEOUT;
+                loop {
+                    let got: Vec<String> = self
+                        .notification_signals
+                        .as_ref()
+                        .context("no notification sent yet")?
+                        .lock()
+                        .map(|s| s.clone())
+                        .unwrap_or_default();
+                    let mut rest = got.iter();
+                    if expected.iter().all(|e| rest.any(|g| g == e)) {
+                        return Ok(());
+                    }
+                    anyhow::ensure!(
+                        Instant::now() < deadline,
+                        "notification signals: expected {expected:?} in order, got {got:?}"
+                    );
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
             Step::ExpectUi(expected) => self.expect_ui(expected),
             Step::Close(app_id) => self.close(app_id),
             Step::PointerMove([x, y]) => {
@@ -3203,6 +3280,9 @@ impl Run<'_> {
     }
 
     fn notify(&mut self, n: &NotifyStep) -> anyhow::Result<()> {
+        if self.notification_signals.is_none() {
+            self.notification_signals = Some(crate::bus::listen_notifications(self.bus()?)?);
+        }
         let urgency = match n.urgency.as_deref() {
             Some("low") => 0_u8,
             Some("critical") => 2,
@@ -3950,6 +4030,40 @@ impl Run<'_> {
             .context("the window did not go away")
     }
 
+    /// The token a started program was given, read off what it wrote,
+    /// used by a client for its own window.
+    fn activate_with(&mut self, a: &ActivateWith) -> anyhow::Result<()> {
+        let path = self.compositor.runtime_dir().join(&a.token_from);
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        let token = loop {
+            let found = std::fs::read_to_string(&path).ok().and_then(|text| {
+                text.lines()
+                    .find_map(|l| l.strip_prefix("XDG_ACTIVATION_TOKEN="))
+                    .map(str::to_owned)
+            });
+            match found {
+                Some(token) => break token,
+                None if Instant::now() > deadline => {
+                    anyhow::bail!("no activation token in {}", a.token_from)
+                }
+                None => self.compositor.dispatch(Duration::from_millis(10))?,
+            }
+        };
+        self.clients
+            .iter()
+            .find(|c| c.spec.app_id == a.app_id)
+            .with_context(|| format!("no client {}", a.app_id))?
+            .activate_with(&token)
+    }
+
+    /// A client asks to come forward in its own time: the request is
+    /// handled before the next step, at this moment of the clock (#235).
+    fn asked_activation(&mut self, app_id: &str, before: u64) -> anyhow::Result<()> {
+        self.compositor
+            .dispatch_until(CLIENT_TIMEOUT, |c| c.activations_asked() > before)
+            .with_context(|| format!("{app_id} never asked to come forward"))
+    }
+
     /// The client takes a token, the virtual clock moves past the time a
     /// token brings a window forward, and only then it asks with it.
     fn ask_attention(&mut self, app_id: &str) -> anyhow::Result<()> {
@@ -4066,6 +4180,14 @@ impl Run<'_> {
             && window.pinned != pinned
         {
             wrong.push(format!("pinned: expected {pinned}, got {}", window.pinned));
+        }
+        if let Some(attention) = expected.attention
+            && window.attention != attention
+        {
+            wrong.push(format!(
+                "attention: expected {attention}, got {}",
+                window.attention
+            ));
         }
         if let Some(state) = expected.state
             && window.state != state

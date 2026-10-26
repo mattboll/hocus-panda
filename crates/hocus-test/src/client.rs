@@ -76,6 +76,11 @@ enum Command {
     CopyThenSecret(String, String),
     /// Asks the compositor to bring its window forward (xdg-activation).
     Activate,
+    /// The same with a token made without a serial: from no input.
+    ActivateWithoutSerial,
+    /// The same with a token it was handed, as a running instance is by
+    /// a new one started for it.
+    ActivateWith(String),
     /// Takes an activation token and keeps it, to use it late.
     TakeToken,
     /// Asks to come forward with the token kept.
@@ -226,6 +231,20 @@ impl TestClient {
     pub fn activate(&self) -> anyhow::Result<()> {
         self.commands
             .send(Command::Activate)
+            .context("the test client is gone")
+    }
+
+    /// The same with a token made without a serial.
+    pub fn activate_without_serial(&self) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::ActivateWithoutSerial)
+            .context("the test client is gone")
+    }
+
+    /// The same with a token it was handed.
+    pub fn activate_with(&self, token: &str) -> anyhow::Result<()> {
+        self.commands
+            .send(Command::ActivateWith(token.to_owned()))
             .context("the test client is gone")
     }
 
@@ -405,10 +424,16 @@ impl SolidWindow {
                         client.copy(text, false, &qh);
                         client.copy(secret, true, &qh);
                     }
-                    Command::Activate => client.ask_activation(&qh),
+                    Command::Activate => client.ask_activation(true, &qh),
+                    Command::ActivateWithoutSerial => client.ask_activation(false, &qh),
+                    Command::ActivateWith(token) => {
+                        if let Some(activation) = &client.activation {
+                            activation.activate(token, client.window.wl_surface());
+                        }
+                    }
                     Command::TakeToken => {
                         client.keep_token = true;
-                        client.ask_activation(&qh);
+                        client.ask_activation(true, &qh);
                     }
                     Command::UseToken => {
                         if let (Some(token), Some(activation)) =
@@ -512,14 +537,16 @@ impl Client {
         }
     }
 
-    /// A token for its own window, with its last input serial; used as
-    /// soon as it comes.
-    fn ask_activation(&mut self, qh: &QueueHandle<Self>) {
+    /// A token for its own window, with its last input serial or none;
+    /// used as soon as it comes.
+    fn ask_activation(&mut self, with_serial: bool, qh: &QueueHandle<Self>) {
         let Some(activation) = &self.activation else {
             return;
         };
         let token = activation.get_activation_token(qh, ());
-        token.set_serial(self.serial, &self.seat);
+        if with_serial {
+            token.set_serial(self.serial, &self.seat);
+        }
         token.set_surface(self.window.wl_surface());
         token.commit();
     }

@@ -1,7 +1,9 @@
 //! The discreet dock (#38), as board Bureau draws it: a pill at the bottom
 //! of the screen with an app per square, its glyph on its colour, a dot
 //! under those open. The one under the pointer rises on a spring; one
-//! launched bounces. Hidden, only a thin hint shows where it is.
+//! launched bounces; one with a window asking for attention wiggles, its
+//! dot in the accent (#145). Hidden, only a thin hint shows where it is,
+//! in the accent while a window asks for attention.
 
 use std::time::Duration;
 
@@ -23,6 +25,9 @@ const PAD_Y: f32 = 12.0;
 /// Room above for an icon that rises, and around for the shadow.
 const ROOM: f32 = 24.0;
 const RISE: f32 = 10.0;
+/// How fast an icon asking for attention is pushed sideways, logical
+/// pixels per second: its first swing goes some 6 px.
+const WIGGLE: f32 = 300.0;
 
 /// An app in the dock.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +38,8 @@ pub struct DockApp {
     pub glyph: Glyph,
     pub color: Color,
     pub open: bool,
+    /// One of its windows asks for attention.
+    pub attention: bool,
 }
 
 /// What an app's square shows, as board Bureau draws them: a few
@@ -195,8 +202,14 @@ impl Dock {
             };
             tree.add(icon, Style::default(), glyph)
                 .unwrap_or_else(MISSING);
-            // Open: a dot at the square's foot.
+            // Open: a dot at the square's foot, in the accent while a
+            // window asks for attention.
             if app.open {
+                let dot = if app.attention {
+                    Paint::Accent
+                } else {
+                    Paint::Rgba(Color::rgb(0xFF, 0xFF, 0xFF))
+                };
                 tree.add(
                     icon,
                     Style {
@@ -206,7 +219,7 @@ impl Dock {
                         ..Style::default()
                     },
                     Kind::Box(Look {
-                        background: Some(Paint::Rgba(Color::rgb(0xFF, 0xFF, 0xFF))),
+                        background: Some(dot),
                         radius: 3.0,
                         ..Look::default()
                     }),
@@ -268,6 +281,16 @@ impl Dock {
         }
     }
 
+    /// A window of app `app` asks for attention: its square is pushed
+    /// sideways and shakes back on a lightly damped spring, once. With
+    /// reduced motion it stays put.
+    pub fn wiggle(&mut self, app: usize) {
+        if let Some(icon) = self.icons.get(app) {
+            self.tree
+                .kick(*icon, Property::OffsetX, WIGGLE, Spring::WIGGLE);
+        }
+    }
+
     pub fn is_animating(&self, now: Duration) -> bool {
         self.tree.is_animating(now)
     }
@@ -297,7 +320,8 @@ impl Dock {
     }
 }
 
-/// The hint where the dock hides: a short bar.
+/// The hint where the dock hides: a short bar, in the accent while a
+/// window asks for attention.
 pub struct DockHint {
     surface: Surface,
 }
@@ -311,13 +335,18 @@ impl std::fmt::Debug for DockHint {
 impl DockHint {
     pub const SIZE: Size = Size::new(140.0, 5.0);
 
-    pub fn new(theme: Theme, scale: f32) -> Self {
+    pub fn new(theme: Theme, scale: f32, attention: bool) -> Self {
         let mut tree = Tree::new(theme, Self::SIZE, scale);
         let root = tree.root();
+        let paint = if attention {
+            Paint::Accent
+        } else {
+            Paint::Rgba(Color::rgba(0xA6, 0xA9, 0xB1, 115))
+        };
         tree.set_look(
             root,
             Look {
-                background: Some(Paint::Rgba(Color::rgba(0xA6, 0xA9, 0xB1, 115))),
+                background: Some(paint),
                 radius: 2.5,
                 ..Look::default()
             },
@@ -379,6 +408,7 @@ mod tests {
                 glyph: Glyph::Text(glyph_of(n)),
                 color: Color::rgb(80, 80, 200),
                 open: *n == "Mail",
+                attention: false,
             })
             .collect();
         let mut dock = Dock::new(Theme::default(), 1.0, &apps);
@@ -389,5 +419,27 @@ mod tests {
         );
         dock.hover(Some(1));
         assert!(dock.is_animating(Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn a_wiggle_shakes_once_and_settles() {
+        let apps = vec![DockApp {
+            key: "mail".into(),
+            name: "Mail".into(),
+            glyph: Glyph::Text("Ma".into()),
+            color: Color::rgb(80, 80, 200),
+            open: true,
+            attention: true,
+        }];
+        let mut dock = Dock::new(Theme::default(), 1.0, &apps);
+        dock.draw(Duration::from_secs(1));
+        dock.wiggle(0);
+        assert!(dock.is_animating(Duration::from_millis(1100)));
+        assert!(!dock.is_animating(Duration::from_millis(2500)));
+        // Reduced motion: nothing moves.
+        let mut still = Dock::new(Theme::default().with_reduced_motion(true), 1.0, &apps);
+        still.draw(Duration::from_secs(1));
+        still.wiggle(0);
+        assert!(!still.is_animating(Duration::from_millis(1010)));
     }
 }

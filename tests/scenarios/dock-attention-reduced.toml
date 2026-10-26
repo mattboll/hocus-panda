@@ -1,0 +1,37 @@
+description = "With reduced motion, a window asking for attention does not wiggle its dock icon: its dot is the accent, and nothing moves"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[appearance]
+reduced_motion = true
+
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+"""
+
+[[step]]
+open = { app_id = "firefox", size = [900, 600], color = "#e8642c" }
+
+[[step]]
+open = { app_id = "foot", size = [500, 300], color = "#2b2d33" }
+
+[[step]]
+activate_without_serial = "firefox"
+
+[[step]]
+expect_window = { app_id = "firefox", attention = true }
+
+[[step]]
+keys = "super+d"
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_idle = { for_ms = 500 }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-attention-reduced.png" }

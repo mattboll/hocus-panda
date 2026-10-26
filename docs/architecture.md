@@ -429,11 +429,22 @@ waiting agent, the meeting and the account card. The desktops not shown carry a 
 desktops are drawn (the column's dots and its desktops popover, the
 switcher's strip, Alt+Tab and the overview): an agent waiting, a window
 asking for attention, an agent done since a screen last showed its
-desktop. A window asks for attention when it asks to come forward with an
-activation token too old to let it (tokens are timed on the compositor's
-clock), or with any token while no screen shows its desktop: Alex goes
-there by choice, from a badge, never pulled away (#218); it asks until it
-has the keyboard. A waiting agent's toast names its desktop when no screen
+desktop. A window asks for attention when it asks to come forward without
+Alex having asked for it (#145): with an activation token made from no
+input, or from an input older than their last key or click (the serial
+of the last press is kept), or too old (tokens are timed on the
+compositor's clock), or with any token while no screen shows its
+desktop: Alex goes there by choice, from a badge, never pulled away
+(#218). Tokens the shell makes for what Alex starts from it always may
+take the focus: programs it launches get one (`XDG_ACTIVATION_TOKEN`,
+`DESKTOP_STARTUP_ID`), a notification's action comes after its
+`ActivationToken` signal, a tray item is handed one
+(`ProvideXdgActivationToken`) before `Activate`; what the session starts
+by itself (autostart, a restored session) gets none. An X11 window's
+urgency hint asks the same way, and taken back asks no more. A window
+asks until it has the keyboard; meanwhile its dock icon wiggles once when
+the dock shows, and its dot, and the hidden dock's hint, take the
+accent. A waiting agent's toast names its desktop when no screen
 shows it.
 
 Notes (#79) are one Markdown file, read and written whole on worker

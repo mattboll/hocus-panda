@@ -36,7 +36,7 @@ Motion is a first-class part of Hocuspanda, not decoration added at the end.
 | Snap | Preview zone fades in under the pointer; the window is in place at once (it springs into place in the Matrix theme) |
 | Resize | Live, no stretching of stale content |
 | Focus change | Dim and depth-of-field fade on the windows behind; accent fade on the focused one |
-| Attention | Breathing amber halo; dock icon wiggle; edge glow in the app colour |
+| Attention | Breathing amber halo; dock icon wiggle (pushed sideways, it swings back on a lightly damped spring, three visible swings within 400 ms, once, when the dock shows; with reduced motion it stays put, its dot in the accent all the same); edge glow in the app colour |
 | Dialogs | Appear from their parent with a short scale; the parent dims behind modal ones |
 | Send to desktop | The window flies towards the desktop indicator of its screen |
 

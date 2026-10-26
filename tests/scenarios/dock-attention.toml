@@ -1,0 +1,73 @@
+description = "A window asking for attention: the dock's hint takes the accent; when the dock shows, the app's icon wiggles once and its dot is the accent; focused, the window asks no more"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+"""
+
+[[step]]
+open = { app_id = "firefox", size = [900, 600], color = "#e8642c" }
+
+[[step]]
+open = { app_id = "foot", size = [500, 300], color = "#2b2d33" }
+
+[[step]]
+expect_focus = "foot"
+
+[[step]]
+activate_without_serial = "firefox"
+
+[[step]]
+expect_window = { app_id = "firefox", attention = true }
+
+[[step]]
+frames = 2
+
+# Hidden, its hint says a window waits.
+[[step]]
+expect_ui = { label = "Firefox", shown = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-attention-hint.png" }
+
+# Shown, Firefox's icon is thrown sideways and shakes back.
+[[step]]
+keys = "super+d"
+
+[[step]]
+advance_ms = 40
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-attention-wiggle.png" }
+
+[[step]]
+expect_frames = { for_ms = 300, at_least = 10 }
+
+# Once: then at rest, its dot in the accent.
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_idle = { for_ms = 500 }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-attention.png" }
+
+[[step]]
+click_ui = "Firefox"
+
+[[step]]
+expect_focus = "firefox"
+
+[[step]]
+expect_window = { app_id = "firefox", attention = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-attention-focused.png" }

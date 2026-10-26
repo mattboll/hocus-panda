@@ -20,6 +20,17 @@ const XKB_OFFSET: u32 = 8;
 /// The key left of 1: a physical key, like the digits.
 const KEY_GRAVE: u32 = 41;
 
+/// Who a program is started for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    /// Alex, from the shell (a click, a key): its window may take the
+    /// focus.
+    ByUser,
+    /// The session, putting itself back or starting what it always does:
+    /// nobody waits for those.
+    BySession,
+}
+
 /// The combination a key press makes, as shortcuts name them: digits by
 /// position, other keys by their unshifted symbol in the active layout.
 pub fn combo_of(modifiers: &ModifiersState, key: &KeysymHandle<'_>) -> Option<Combo> {
@@ -276,6 +287,20 @@ impl State {
 
     /// As [`Self::launch`], saying whether it started.
     pub fn try_launch(&mut self, program: &str, args: &[String]) -> std::io::Result<()> {
+        self.start_program(program, args, Asked::ByUser)
+    }
+
+    /// Starts a program, for Alex or for the session: one Alex asked for
+    /// gets an activation token of the shell's (`XDG_ACTIVATION_TOKEN`,
+    /// and `DESKTOP_STARTUP_ID` for X11 ones), so that its window, or an
+    /// instance already running that it hands the token to, takes the
+    /// focus (#145).
+    pub fn start_program(
+        &mut self,
+        program: &str,
+        args: &[String],
+        asked: Asked,
+    ) -> std::io::Result<()> {
         let mut cmd = Command::new(program);
         cmd.args(args);
         if let Some(env) = &self.child_env {
@@ -293,6 +318,15 @@ impl State {
         }
         if let Some(n) = self.xdisplay {
             cmd.env("DISPLAY", format!(":{n}"));
+        }
+        // The session's environment may carry a token of its own, used
+        // already.
+        cmd.env_remove("XDG_ACTIVATION_TOKEN")
+            .env_remove("DESKTOP_STARTUP_ID");
+        if asked == Asked::ByUser {
+            let token = self.shell_token();
+            cmd.env("XDG_ACTIVATION_TOKEN", &token)
+                .env("DESKTOP_STARTUP_ID", &token);
         }
         let mut child = cmd.spawn()?;
         let spawned = std::thread::Builder::new()

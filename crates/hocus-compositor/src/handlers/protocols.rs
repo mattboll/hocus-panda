@@ -22,7 +22,7 @@ use smithay::{
     delegate_virtual_keyboard_manager, delegate_xdg_activation, delegate_xdg_foreign,
     input::pointer::PointerHandle,
     reexports::wayland_server::{Client, DisplayHandle, protocol::wl_surface::WlSurface},
-    utils::{Logical, Point, SERIAL_COUNTER},
+    utils::{Logical, Point, SERIAL_COUNTER, Serial},
     wayland::{
         alpha_modifier::AlphaModifierState,
         compositor::with_states,
@@ -69,6 +69,16 @@ use crate::{State, state::ClientState};
 /// How old an activation token may be and still bring a window forward.
 const ACTIVATION_PATIENCE: Duration = Duration::from_secs(10);
 
+/// An activation token handed out: when, on the compositor's clock, and
+/// by whom.
+#[derive(Debug, Clone, Copy)]
+pub struct Issued {
+    pub at: Duration,
+    /// Made by the shell for what Alex started from it (the launcher, the
+    /// dock, a notification, a shortcut): it always may take the focus.
+    pub by_shell: bool,
+}
+
 /// Whether `client` runs outside any sandbox.
 pub fn trusted(client: &Client) -> bool {
     client
@@ -83,8 +93,11 @@ pub struct Protocols {
     pub idle_inhibit: IdleInhibitManagerState,
     /// Surfaces that keep the session awake while shown.
     pub inhibiting: HashSet<WlSurface>,
-    /// When each activation token was made, on the compositor's clock.
-    pub token_times: std::collections::HashMap<String, Duration>,
+    /// The activation tokens handed out, by name.
+    pub tokens: std::collections::HashMap<String, Issued>,
+    /// The serial of the user's last key or button press: a token made
+    /// from an older event was not asked by what Alex did last (#145).
+    pub last_press: Option<Serial>,
     /// Activations asked with a token, for the test harness: a client asks
     /// in its own time (#235).
     pub activations: u64,
@@ -130,7 +143,8 @@ impl Protocols {
             activations: 0,
             idle_inhibit: IdleInhibitManagerState::new::<State>(dh),
             inhibiting: HashSet::new(),
-            token_times: Default::default(),
+            tokens: Default::default(),
+            last_press: None,
             shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<State>(dh),
             keyboard_focus: None,
             foreign: XdgForeignState::new::<State>(dh),
@@ -167,20 +181,18 @@ impl XdgActivationHandler for State {
     }
 
     /// Notes when a token was made, on the compositor's clock (tests move
-    /// it); tokens never used are forgotten after a minute.
+    /// it).
     fn token_created(&mut self, token: XdgActivationToken, _data: XdgActivationTokenData) -> bool {
-        let now = self.clock.now();
-        self.protocols
-            .token_times
-            .retain(|_, at| now.saturating_sub(*at) < 6 * ACTIVATION_PATIENCE);
-        self.protocols.token_times.insert(token.to_string(), now);
+        self.issue_token(token.to_string(), false);
         true
     }
 
-    /// A recent token brings its window forward when a screen shows its
-    /// desktop; on another desktop, or with an old token, the window asks
-    /// for attention instead, and Alex goes there when they choose
-    /// (#192, #218).
+    /// A window may take the focus when Alex asked for it: with a token
+    /// the shell made, or one made from their last key or click (or
+    /// later), recent, while a screen shows its desktop. Otherwise it asks
+    /// for attention, and Alex goes there when they choose: a command
+    /// done in the background, a token without a serial, an old one, one
+    /// for a desktop no screen shows (#145, #192, #218).
     fn request_activation(
         &mut self,
         token: XdgActivationToken,
@@ -188,29 +200,74 @@ impl XdgActivationHandler for State {
         surface: WlSurface,
     ) {
         self.protocols.activations += 1;
-        let age = self
-            .protocols
-            .token_times
-            .remove(&token.to_string())
-            .map_or_else(
-                || token_data.timestamp.elapsed(),
-                |at| self.clock.now().saturating_sub(at),
-            );
+        let issued = self.protocols.tokens.remove(&token.to_string());
+        let age = issued.map_or_else(
+            || token_data.timestamp.elapsed(),
+            |i| self.clock.now().saturating_sub(i.at),
+        );
+        let by_shell = issued.is_some_and(|i| i.by_shell);
         // A token from an agent's click never takes the user's keyboard
         // (#43): the window asks for attention.
         let by_agent = token_data
             .serial
             .as_ref()
             .is_some_and(|(_, seat)| self.is_agent_wl_seat(seat));
+        let last_press = self.protocols.last_press;
+        let from_last_input = !by_agent
+            && token_data.serial.as_ref().is_some_and(|(serial, _)| {
+                last_press.is_none_or(|last| serial.is_no_older_than(&last))
+            });
         if let Some(id) = self.managed_id(&surface) {
             let shown = self.model.output_showing(id).is_some();
-            if age < ACTIVATION_PATIENCE && shown && !by_agent {
+            let asked = by_shell || from_last_input;
+            if age < ACTIVATION_PATIENCE && shown && asked {
                 self.restore(id, SERIAL_COUNTER.next_serial());
             } else {
+                tracing::debug!(
+                    window = id.0,
+                    ?age,
+                    shown,
+                    by_shell,
+                    from_last_input,
+                    "activation refused"
+                );
                 self.ask_attention(id);
             }
         }
         self.protocols.activation.remove_token(&token);
+    }
+}
+
+impl State {
+    /// Notes a token handed out; those never used are forgotten after a
+    /// minute.
+    fn issue_token(&mut self, name: String, by_shell: bool) {
+        let now = self.clock.now();
+        let tokens = &mut self.protocols.tokens;
+        tokens.retain(|_, i| now.saturating_sub(i.at) < 6 * ACTIVATION_PATIENCE);
+        tokens.insert(name, Issued { at: now, by_shell });
+        // Smithay keeps every token until it is used: those forgotten go.
+        self.protocols
+            .activation
+            .retain_tokens(|t, _| tokens.contains_key(t.as_str()));
+    }
+
+    /// A token of the shell's, for a program or an application it starts
+    /// or wakes on Alex's behalf (`XDG_ACTIVATION_TOKEN`): its window may
+    /// take the focus.
+    pub fn shell_token(&mut self) -> String {
+        let (token, _) = self
+            .protocols
+            .activation
+            .create_external_token(XdgActivationTokenData::default());
+        let name = token.to_string();
+        self.issue_token(name.clone(), true);
+        name
+    }
+
+    /// A key or button pressed by the user: what tokens are measured by.
+    pub fn note_press(&mut self, serial: Serial) {
+        self.protocols.last_press = Some(serial);
     }
 }
 delegate_xdg_activation!(State);

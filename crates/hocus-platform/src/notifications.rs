@@ -80,7 +80,8 @@ pub enum CloseReason {
 
 enum Signal {
     Closed(u32, CloseReason),
-    Action(u32, String),
+    /// An action, with the activation token what it opens may use.
+    Action(u32, String, Option<String>),
 }
 
 /// A token bucket per application.
@@ -207,6 +208,15 @@ impl Server {
         reason: u32,
     ) -> zbus::Result<()>;
 
+    /// Sent before an action, as specification 1.2 says: the token the
+    /// application brings its window forward with.
+    #[zbus(signal)]
+    async fn activation_token(
+        emitter: &SignalEmitter<'_>,
+        id: u32,
+        activation_token: &str,
+    ) -> zbus::Result<()>;
+
     #[zbus(signal)]
     async fn action_invoked(
         emitter: &SignalEmitter<'_>,
@@ -279,7 +289,10 @@ impl Notifications {
                             Signal::Closed(id, reason) => {
                                 Server::notification_closed(emitter, id, reason as u32).await
                             }
-                            Signal::Action(id, key) => {
+                            Signal::Action(id, key, token) => {
+                                if let Some(token) = token {
+                                    Server::activation_token(emitter, id, &token).await?;
+                                }
                                 Server::action_invoked(emitter, id, &key).await
                             }
                         }
@@ -302,9 +315,10 @@ impl Notifications {
         let _ = self.signals.send(Signal::Closed(id, reason));
     }
 
-    /// Tells the client its action was chosen.
-    pub fn action_invoked(&self, id: u32, key: &str) {
-        let _ = self.signals.send(Signal::Action(id, key.to_owned()));
+    /// Tells the client its action was chosen, with the activation token
+    /// its window may come forward with.
+    pub fn action_invoked(&self, id: u32, key: &str, token: Option<String>) {
+        let _ = self.signals.send(Signal::Action(id, key.to_owned(), token));
     }
 }
 

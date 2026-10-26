@@ -1,0 +1,19 @@
+description = "Choosing a notification's action gives its application an activation token of the shell's first, so that the window it brings forward takes the focus"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+notify = { app = "Mail", summary = "New mail from Sam", timeout_ms = 0, actions = [["default", "Open"], ["archive", "Archive"]] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+click_ui = "Mail: New mail from Sam"
+
+[[step]]
+expect_notification_signals = ["ActivationToken 1", "ActionInvoked 1 default"]
