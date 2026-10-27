@@ -1714,11 +1714,18 @@ impl Run<'_> {
                     .refuse(*refuse);
                 Ok(())
             }
-            Step::Charger(plugged) => self
-                .devices
-                .as_ref()
-                .context("no devices: the scenario needs `devices = true`")?
-                .set_charger(*plugged),
+            Step::Charger(plugged) => {
+                self.devices
+                    .as_ref()
+                    .context("no devices: the scenario needs `devices = true`")?
+                    .set_charger(*plugged)?;
+                // UPower's news comes off the loop in its own time: taken in
+                // at this moment of the clock, or the battery's delays would
+                // start at a moment of the worker's thread (#265).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, |c| c.on_battery() != *plugged)
+                    .context("the compositor never heard of the charger")
+            }
             Step::ExpectAccounts(expected) => {
                 let deadline = Instant::now() + SETTLE_TIMEOUT;
                 loop {
