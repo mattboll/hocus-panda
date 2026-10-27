@@ -1,0 +1,38 @@
+# A window's shadow on a dark wallpaper at scales 2, 1.5 and 1 (#261),
+# the window opened at 2 and kept in its place, all of it on the screen:
+# drawn at the screen's pixels each time, the same soft falloff, no bands,
+# no gap under the window; the profiles are checked in
+# crates/hocus-test/tests/shadows.rs.
+description = "A window's shadow on a dark wallpaper keeps its shape and falls off smoothly at scales 1, 1.5 and 2"
+outputs = ["2400x1500@2"]
+
+[[step]]
+config = """
+[wallpaper]
+kind = "colour"
+colour = "#0e0f12"
+"""
+
+[[step]]
+open = { app_id = "lit", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "shadow-scales.2.png" }
+
+[[step]]
+randr = { output = "HEADLESS-1", scale = 1.5 }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "shadow-scales.1-5.png" }
+
+[[step]]
+randr = { output = "HEADLESS-1", scale = 1.0 }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "shadow-scales.1.png" }

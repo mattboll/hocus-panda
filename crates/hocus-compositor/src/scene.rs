@@ -25,7 +25,9 @@ use crate::{
     State,
     blur::{Pane, Spot},
     cursor::CursorElement,
-    decoration::{Rounded, hairline_elements, ring_elements, ring_elements_in, shadow_elements},
+    decoration::{
+        Rounded, ShadowPiece, hairline_elements, ring_elements, ring_elements_in, shadow_elements,
+    },
     desktops::{model_id, rect},
     handlers::layer_shell::LayerKind as Layer,
     matrix_layers::LayerElement,
@@ -44,6 +46,8 @@ render_elements! {
     /// blur behind a pane of glass (#37).
     Snapshot=Rounded<TextureRenderElement<<R as RendererSuper>::TextureId>>,
     Frame=MemoryRenderBufferRenderElement<R>,
+    /// A piece of a window's shadow, outside the window (#261).
+    Shadow=ShadowPiece<R>,
     Solid=SolidColorRenderElement,
     /// A plain colour over a window's picture, its corners cut (#154).
     Tint=Rounded<SolidColorRenderElement>,
@@ -685,7 +689,7 @@ impl State {
                     scale,
                     alpha,
                 );
-                elements.extend(shadow.into_iter().map(SceneElement::Frame));
+                elements.extend(shadow.into_iter().map(SceneElement::Shadow));
             }
             // Dragged in the Matrix theme: its phosphor trail, behind it.
             if let Some(id) = id {

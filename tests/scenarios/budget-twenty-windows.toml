@@ -118,7 +118,9 @@ advance_ms = 300
 [[step]]
 # Measured: frames [160, 150], scenes [320, 320], 180,600 allocations,
 # 376 MB asked for (the dock's picture made again for each new app), 9.1 MB
-# held; budgets 10 % above, held 15 %.
+# held; budgets 10 % above, held 15 %. Since windows' shadows are drawn at
+# the screen's pixels and left out of the window (#261): 189,900
+# allocations, 362 MB, 9.5 MB held.
 expect_cost = { frames = [176, 165], renders = [352, 352], allocations = 199_000, allocated_mb = 414, held_mb = 10.5 }
 
 # Each screen to its second desktop and back, the pointer on it.
@@ -160,7 +162,7 @@ advance_ms = 1000
 
 [[step]]
 # Measured: frames [23, 21], scenes [102, 102], 59,950 allocations,
-# 91 MB, 0.9 MB held.
+# 91 MB, 0.9 MB held (since #261: 61,400 allocations, 96 MB).
 expect_cost = { frames = [26, 24], renders = [113, 113], allocations = 66_000, allocated_mb = 101, held_mb = 1.0 }
 [[step]]
 expect_shown = { output = "HEADLESS-2", desktop = 1 }
