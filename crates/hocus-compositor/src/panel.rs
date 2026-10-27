@@ -457,8 +457,9 @@ impl State {
     }
 
     /// After each dispatch, the column drawn: follows the form, shows the
-    /// strip or the bar on each screen that has one. Whether something to
-    /// draw changed.
+    /// strip or the bar on each screen that has one. A strip or a bar that
+    /// changed redraws its own screen (#244); whether the column's screen
+    /// has more to draw (the column sliding).
     pub(crate) fn refresh_panel(&mut self, state: &ColumnState) -> bool {
         let form = self.panel_form();
         let screens = self.config.panel.screens;
@@ -471,7 +472,13 @@ impl State {
         } else {
             Vec::new()
         };
-        let Some(shell) = self.shell.as_mut() else {
+        let Self {
+            shell,
+            space,
+            redraw,
+            ..
+        } = self;
+        let Some(shell) = shell.as_mut() else {
             return false;
         };
         let Shell {
@@ -480,6 +487,7 @@ impl State {
         let forms = panel;
         let mut changed = false;
         if forms.form != Some((form, screens)) {
+            redraw.all();
             // Another form: the column is in, and what stays made anew.
             forms.form = Some((form, screens));
             forms.screens.clear();
@@ -553,7 +561,7 @@ impl State {
                         let mut hint = Panel::new(EdgeHint::new(forms.theme.clone(), scale as f32));
                         hint.upload(&[]);
                         screen.bar = Some(Bar::Hint(hint, scale));
-                        changed = true;
+                        redraw.named(space, name);
                     }
                 }
                 PanelForm::Column => screen.bar = None,
@@ -575,18 +583,21 @@ impl State {
             } else {
                 Here::of(state)
             };
-            match &mut screen.bar {
+            let shows = match &mut screen.bar {
                 Some(Bar::Strip(p)) => {
                     p.view.set_state_here(state, here);
                     let drawn = p.view.draw(now);
-                    changed |= p.upload(&drawn) || p.view.is_animating(now);
+                    p.upload(&drawn) || p.view.is_animating(now)
                 }
                 Some(Bar::Top(p)) => {
                     p.view.set_state_here(state, here);
                     let drawn = p.view.draw(now);
-                    changed |= p.upload(&drawn) || p.view.is_animating(now);
+                    p.upload(&drawn) || p.view.is_animating(now)
                 }
-                Some(Bar::Hint(..)) | None => {}
+                Some(Bar::Hint(..)) | None => false,
+            };
+            if shows {
+                redraw.named(space, &screen.output);
             }
         }
         // While it slides, and once more where it ends.
@@ -677,18 +688,20 @@ impl State {
                     );
                     screen.inside = true;
                     panel.view.input(at, Input::PointerMove(at));
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 } else if screen.inside {
                     screen.inside = false;
                     panel.view.pointer_left();
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
             }
             if taker.is_some() {
                 return true;
             }
         }
-        self.needs_redraw |= forms.slide.is_running(now);
+        if forms.slide.is_running(now) {
+            self.redraw.all();
+        }
         on_strip
     }
 
@@ -738,7 +751,7 @@ impl State {
             let actions = panel.view.input(at, Input::PointerButton { pressed });
             let window = screen.window;
             let output = everywhere.then(|| screen.output.clone());
-            self.needs_redraw = true;
+            self.redraw.all();
             for action in actions {
                 match action {
                     ShellAction::OpenPanel => self.toggle_panel_from(Out::Asked, output.clone()),
@@ -761,7 +774,7 @@ impl State {
             forms.close(now, moves);
             forms.rest = Rest::Away;
             shell.column.close_popover();
-            self.needs_redraw = true;
+            self.redraw.all();
             return false;
         }
         if form == PanelForm::Strip
@@ -773,7 +786,7 @@ impl State {
             }
             forms.open(Out::Hovered, now, moves);
             forms.rest = Rest::Spent;
-            self.needs_redraw = true;
+            self.redraw.all();
             return true;
         }
         false
@@ -833,7 +846,7 @@ impl State {
             shell.column.close_popover();
             shell.column.pointer_left();
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Escape: the column out goes back. Whether it was out.

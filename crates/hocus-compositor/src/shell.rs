@@ -371,7 +371,7 @@ impl State {
             if !fade.is_running(now) {
                 shell.fading = None;
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         self.refresh_lock();
         self.refresh_sessions();
@@ -480,8 +480,14 @@ impl State {
             // The work area of the column's output changed.
             self.relayout();
         }
-        if changed || moved {
-            self.needs_redraw = true;
+        // The column shows on its screen alone (#244).
+        match &place {
+            Some((name, ..)) if changed && !moved => {
+                let Self { space, redraw, .. } = self;
+                redraw.named(space, name);
+            }
+            _ if changed || moved => self.redraw.all(),
+            _ => {}
         }
     }
 

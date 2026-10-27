@@ -102,7 +102,7 @@ impl State {
             .slide
             .set(1.0, Curve::Ease(Easing::OutCubic, motion::STANDARD), now);
         self.dropdown.shown = true;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn hide_dropdown(&mut self, now: Duration) {
@@ -110,7 +110,7 @@ impl State {
         self.dropdown
             .slide
             .set(0.0, Curve::Ease(Easing::InCubic, motion::SMALL), now);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// After each dispatch: minimizes it once it slid away, keeps frames
@@ -125,7 +125,7 @@ impl State {
             return;
         }
         if self.dropdown.slide.is_running(now) {
-            self.needs_redraw = true;
+            self.redraw.all();
         } else if !self.dropdown.shown && !self.model.is_minimized(id) {
             self.minimize(id, SERIAL_COUNTER.next_serial());
         }

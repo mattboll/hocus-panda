@@ -125,12 +125,18 @@ impl State {
     fn layers_changed(&mut self, output: &Output) {
         let zone = layer_map_for_output(output).non_exclusive_zone();
         let previous = self.protocols.zones.insert(output.name(), zone);
-        if previous != Some(zone) {
+        // Its work area changed: windows move, the shell follows.
+        let moved = previous != Some(zone);
+        if moved {
             self.relayout();
             self.layout_tiles();
         }
         self.layer_keyboard();
-        self.needs_redraw = true;
+        if moved {
+            self.redraw.all();
+        } else {
+            self.redraw.output(output);
+        }
     }
 
     /// What layer surfaces leave of `output`, global coordinates.

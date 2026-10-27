@@ -175,7 +175,7 @@ impl State {
             count,
             state: state.into(),
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn updates_state(&self) -> &'static str {

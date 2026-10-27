@@ -106,7 +106,7 @@ impl State {
                 {
                     card.until = None;
                     card.panel.view.set_stage(Stage::HeldBack(held));
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
             }
             News::Done(power, Err(err)) => {
@@ -146,7 +146,7 @@ impl State {
         let tick = self.waker().and_then(|handle| {
             handle
                 .insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, app| {
-                    app.timed("leave countdown", |app| app.state.needs_redraw = true);
+                    app.timed("leave countdown", |app| app.state.redraw.all());
                     TimeoutAction::ToDuration(Duration::from_secs(1))
                 })
                 .ok()
@@ -171,7 +171,7 @@ impl State {
             action: name(what).into(),
             stage: "countdown".into(),
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Sleep now (locked first through logind's PrepareForSleep).
@@ -204,7 +204,7 @@ impl State {
         if let (Some(token), Some(handle)) = (card.tick, &self.loop_handle) {
             handle.remove(token);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn leave_chose(&mut self, choice: Option<LeaveChoice>) {
@@ -243,7 +243,7 @@ impl State {
                 action: name(what).into(),
                 stage: "closing".into(),
             });
-            self.needs_redraw = true;
+            self.redraw.all();
             if !self.windows.is_empty() {
                 return;
             }
@@ -324,7 +324,7 @@ impl State {
         }
         let drawn = card.panel.view.draw(now);
         if card.panel.upload(&drawn) {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if go {
             self.leave_go();
@@ -354,7 +354,7 @@ impl State {
         card.panel.view.pointer_move(local);
         let choice = pressed.and_then(|p| card.panel.view.pointer_button(p));
         self.leave_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -365,7 +365,7 @@ impl State {
         };
         let choice = crate::launcher::key_of(sym).and_then(|k| card.panel.view.key(k));
         self.leave_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 

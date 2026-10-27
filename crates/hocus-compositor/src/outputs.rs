@@ -274,7 +274,7 @@ impl State {
         );
         // Showing another's picture: only its mode and scale change.
         if self.is_mirroring(&name) {
-            self.needs_redraw = true;
+            self.redraw.all();
             return;
         }
         self.space.map_output(output, setting.position);
@@ -300,7 +300,7 @@ impl State {
         self.emit(|s| Event::OutputChanged {
             output: s.output_info(output),
         });
-        self.needs_redraw = true;
+        self.redraw.all();
         tracing::info!(
             output = name,
             mode = %format!("{}x{}@{:.2}", setting.mode.width, setting.mode.height, f64::from(setting.mode.refresh) / 1000.0),
@@ -560,7 +560,7 @@ impl State {
                 (o.name(), panel)
             })
             .collect();
-        self.needs_redraw = true;
+        self.redraw.all();
         // On the compositor's clock, as every moment: a timer on real time
         // would take them away whenever it fired, in a test too (#212).
         self.identifying_until = Some(self.clock.now() + IDENTIFY);
@@ -583,7 +583,7 @@ impl State {
         {
             self.identifying_until = None;
             self.identifying.clear();
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

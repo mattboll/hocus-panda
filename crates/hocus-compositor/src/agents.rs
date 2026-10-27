@@ -184,7 +184,7 @@ impl State {
             let changes = self.agents.board.clear_all();
             self.agent_changes(changes);
             self.agents.done_unseen.clear();
-            self.needs_redraw = true;
+            self.redraw.all();
             for (i, source) in wanted.iter().enumerate() {
                 let client = self
                     .agents

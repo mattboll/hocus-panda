@@ -143,7 +143,7 @@ impl State {
         if was.is_some_and(|was| was != now) {
             self.power_source_changed(now);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The charger, unless UPower says the battery is discharging.
@@ -265,7 +265,7 @@ impl State {
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial());
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn close_quick(&mut self) {
@@ -273,7 +273,7 @@ impl State {
             panel.sheet.close();
         }
         self.apply_focus(SERIAL_COUNTER.next_serial());
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The power saver is on: background work waits.
@@ -426,7 +426,7 @@ impl State {
                 service.change(change);
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Uses the `index`th layout of the configuration.
@@ -568,7 +568,7 @@ impl State {
             }
         }
         if changed {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

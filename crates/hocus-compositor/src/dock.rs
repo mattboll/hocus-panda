@@ -201,7 +201,7 @@ impl State {
     /// The shortcut: shows it, or hides it.
     pub fn toggle_dock(&mut self) {
         self.dock.toggled = !self.dock.toggled;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// After each dispatch: what it holds, whether it shows, and its
@@ -209,7 +209,7 @@ impl State {
     pub fn refresh_dock(&mut self) {
         let now = self.clock.now();
         let Some(output) = self.dock_output().filter(|_| self.config.dock.enabled) else {
-            self.dock.panel = None;
+            self.drop_dock();
             return;
         };
         // Built again only when what they are made of changed.
@@ -222,7 +222,7 @@ impl State {
             .map_or(self.dock.items.is_empty(), Vec::is_empty)
         {
             self.dock.items.clear();
-            self.dock.panel = None;
+            self.drop_dock();
             self.dock.shown = None;
             return;
         }
@@ -243,6 +243,10 @@ impl State {
         } else {
             None
         };
+        // The dock shows on its screen alone (#244).
+        if self.dock.shown != shown {
+            self.redraw.output(&output);
+        }
         self.dock.shown = shown;
         // What it holds, built again when it changes.
         let changed = items.as_ref().is_some_and(|items| {
@@ -265,15 +269,12 @@ impl State {
         }
         let relabelled = self.dock.lang.is_none_or(|(_, l)| l != lang);
         self.dock.lang = Some((self.config_generation, lang));
-        if changed
-            || restyled
-            || relabelled
-            || self
-                .dock
-                .panel
-                .as_ref()
-                .is_none_or(|(o, _, _)| *o != output.name())
-        {
+        let here = self
+            .dock
+            .panel
+            .as_ref()
+            .map(|(o, _, _)| *o == output.name());
+        if changed || restyled || relabelled || here != Some(true) {
             if let Some(items) = items {
                 self.dock.items = items;
             }
@@ -283,7 +284,12 @@ impl State {
             let mut panel = Panel::new(view);
             panel.upload(&[]);
             self.dock.panel = Some((output.name(), place, panel));
-            self.needs_redraw = true;
+            // Gone from another screen too.
+            if here == Some(false) {
+                self.redraw.all();
+            } else {
+                self.redraw.output(&output);
+            }
         } else {
             // The work area changes on its own: the panel takes another
             // form, or is placed after the dock was (#287).
@@ -292,7 +298,7 @@ impl State {
                 && *at != place
             {
                 *at = place;
-                self.needs_redraw = true;
+                self.redraw.output(&output);
             }
         }
         let attention = self.dock.items.iter().any(|i| i.app.attention);
@@ -300,7 +306,7 @@ impl State {
             let mut hint = Panel::new(DockHint::new(theme, scale, attention));
             hint.upload(&[]);
             self.dock.hint = Some((attention, hint));
-            self.needs_redraw = true;
+            self.redraw.output(&output);
         }
         // Shown, an app with a window newly asking for attention wiggles,
         // once; hidden, it waits for the dock to show.
@@ -328,8 +334,15 @@ impl State {
                 panel.view.wiggle(i);
             }
             if panel.upload(&drawn) || panel.view.is_animating(now) {
-                self.needs_redraw = true;
+                self.redraw.output(&output);
             }
+        }
+    }
+
+    /// The dock goes: its screen redraws without it (#244).
+    fn drop_dock(&mut self) {
+        if let Some((name, _, _)) = self.dock.panel.take() {
+            self.redraw.named(&self.space, &name);
         }
     }
 
@@ -353,7 +366,7 @@ impl State {
             // Woken when the rest is long enough.
             if let Some(handle) = self.waker() {
                 let woken = handle.insert_source(Timer::from_duration(REST), |_, _, app| {
-                    app.timed("dock rest", |app| app.state.needs_redraw = true);
+                    app.timed("dock rest", |app| app.state.redraw.all());
                     TimeoutAction::Drop
                 });
                 if let Err(err) = woken {
@@ -380,13 +393,13 @@ impl State {
             // edge.
             if shown == Shown::Edge && !at_edge {
                 self.dock.shown = None;
-                self.needs_redraw = true;
+                self.redraw.output(&output);
             }
             return false;
         }
         let spot = panel.view.spot_at(p);
         panel.view.hover(spot);
-        self.needs_redraw = true;
+        self.redraw.output(&output);
         match (pressed, spot) {
             (Some(true), Some(Spot::App(i))) => self.dock_pick(i),
             // Every application, in the launcher on the dock's screen.
@@ -429,7 +442,7 @@ impl State {
                 }
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// On its screen: the dock, or the hint where it hides.

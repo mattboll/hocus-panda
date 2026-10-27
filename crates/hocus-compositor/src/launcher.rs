@@ -327,7 +327,7 @@ impl State {
         if let Some(panel) = self.launcher.as_mut() {
             panel.launcher.press_keys(combo);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn toggle_launcher(&mut self) {
@@ -391,7 +391,7 @@ impl State {
         if !was_open {
             self.matrix_launcher(crate::matrix_shell::Moment::Open, None);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn close_launcher(&mut self) {
@@ -407,7 +407,7 @@ impl State {
             self.matrix_launcher(crate::matrix_shell::Moment::Close, Some(parts));
         }
         self.apply_focus(SERIAL_COUNTER.next_serial());
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn apps_found(&mut self, found: Found) {
@@ -440,7 +440,7 @@ impl State {
                 panel.launcher.set_icons(found);
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// A key pressed while open; whether the launcher took it (always).
@@ -458,7 +458,7 @@ impl State {
         ) {
             let down = matches!(sym, Keysym::Page_Down | Keysym::KP_Page_Down);
             panel.launcher.page(down);
-            self.needs_redraw = true;
+            self.redraw.all();
             return true;
         }
         let events = match key_of(sym) {
@@ -475,7 +475,7 @@ impl State {
             }
         };
         self.launcher_events(events);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -714,7 +714,7 @@ impl State {
             .as_mut()
             .is_some_and(|panel| panel.launcher.wheel(at, dy as f32));
         if scrolled {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         scrolled
     }
@@ -780,7 +780,7 @@ impl State {
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial());
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn showcase_open(&self) -> bool {
@@ -792,7 +792,7 @@ impl State {
             && panel.showcase.take().is_some()
         {
             self.apply_focus(SERIAL_COUNTER.next_serial());
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -855,7 +855,7 @@ impl State {
                 None => shown.buffer = Some(crate::shell::buffer_for(&view)),
             }
             if !damage.is_empty() {
-                self.needs_redraw = true;
+                self.redraw.all();
             }
             return;
         }
@@ -874,8 +874,12 @@ impl State {
         if changed || panel.drawn_parts.is_none() {
             panel.drawn_parts = panel.launcher.parts();
         }
+        // On its screen alone (#244).
         if changed {
-            self.needs_redraw = true;
+            match &panel.on {
+                Some((name, ..)) => self.redraw.named(&self.space, name),
+                None => self.redraw.all(),
+            }
         }
     }
 

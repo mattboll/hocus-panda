@@ -38,7 +38,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<P
         return;
     }
     let woken = handle.insert_source(Timer::from_duration(AFTER), |_, _, app| {
-        app.timed("welcome", |app| app.state.needs_redraw = true);
+        app.timed("welcome", |app| app.state.redraw.all());
         TimeoutAction::Drop
     });
     if let Err(err) = woken {

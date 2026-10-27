@@ -34,14 +34,14 @@ impl State {
         }
         if self.activity.attention.insert(id) {
             tracing::debug!(window = id.0, "asks for attention");
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
     /// It asks no more: an X11 window took its urgency back.
     pub fn drop_attention(&mut self, id: WindowId) {
         if self.activity.attention.remove(&id) {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -74,7 +74,7 @@ impl State {
         }
         if self.activity.attention.len() != before || self.agents.done_unseen.len() != board_before
         {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

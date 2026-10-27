@@ -293,8 +293,12 @@ where
         } = self;
         for out in outputs {
             // Off, dark, or a frame still out (as on a screen): nothing is
-            // drawn there.
-            if out.global.is_none() || out.dark || out.flip.is_queued() {
+            // drawn there. Nor where nothing changed (#244).
+            if out.global.is_none()
+                || out.dark
+                || out.flip.is_queued()
+                || !state.redraws(&out.output)
+            {
                 continue;
             }
             let start = Instant::now();
@@ -524,7 +528,7 @@ impl HeadlessBackend {
             Renderers::Pixman(canvas) => power(canvas, name, on),
         };
         anyhow::ensure!(found, "no output named {name}");
-        state.needs_redraw = true;
+        state.redraw.all();
         Ok(())
     }
 
@@ -745,7 +749,7 @@ impl HeadlessBackend {
     /// Draws a frame if something changed since the last one.
     pub fn frame(&mut self, state: &mut State) {
         self.check_flips(state);
-        if !state.needs_redraw {
+        if !state.redraw.is_pending() {
             return;
         }
         match &mut self.renderers {
@@ -754,6 +758,9 @@ impl HeadlessBackend {
                 // and the Matrix theme's GPU effects, before the outputs
                 // show them.
                 for out in &canvas.outputs {
+                    if !state.redraws(&out.output) {
+                        continue;
+                    }
                     state.paint_backdrop(&mut canvas.renderer, &out.output);
                     state.paint_glass(&mut canvas.renderer, &out.output);
                     state.paint_crt(&mut canvas.renderer, &out.output);
@@ -764,13 +771,13 @@ impl HeadlessBackend {
         }
         state.space.refresh();
         state.popups.cleanup();
-        state.needs_redraw = false;
+        state.redraw.done();
     }
 
     /// On a monotonic clock, schedules the next frame when something changed:
     /// nothing wakes up at rest.
     pub fn after_dispatch(&mut self, handle: &LoopHandle<'static, App>, state: &State) {
-        if !state.needs_redraw || self.frame_timer.is_some() {
+        if !state.redraw.is_pending() || self.frame_timer.is_some() {
             return;
         }
         let timer = handle.insert_source(Timer::from_duration(FRAME), |_, _, app| {

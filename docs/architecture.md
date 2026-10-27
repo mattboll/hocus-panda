@@ -635,6 +635,15 @@ sunset to sunrise (NOAA's approximation) where the user says they are.
   ([decision 0009](decisions/0009-ui-rendering-stack.md)).
 - Frame pacing per output, driven by presentation feedback. Animations
   advance on that clock and never schedule work per tick.
+- A redraw names the outputs it concerns (`redraw.rs`, #244): a window
+  asks for the outputs it overlaps, its shadow included, and those the
+  last frame showed it on; a panel, the dock, the toasts or the launcher
+  their own screen; the pointer the screens around it. What every screen
+  shows (the theme, the accent, the lock, the configuration, a screen
+  plugged) asks for all of them, and so does whatever is not known to
+  concern fewer. Only the outputs asked for build a scene on the next
+  frame, a screen mirroring another with its source; the others send no
+  frame callbacks, as nothing of theirs was drawn.
 - The cursor (`cursor.rs`) is what the client under the pointer sets, its
   own surface or a cursor-shape name, except over a window's frame band
   (the 8 px around it, `grabs.rs`) and while a move or resize lasts: then

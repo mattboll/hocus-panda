@@ -790,7 +790,7 @@ impl State {
 
     fn tasks_changed(&mut self) {
         self.tasks.generation += 1;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn tasks_send(&mut self, command: Command) {

@@ -148,7 +148,7 @@ impl State {
         if let Some(panel) = self.launcher.as_mut() {
             panel.launcher.set_notes(items);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Super+N: the notes in the launcher's card, read again first.

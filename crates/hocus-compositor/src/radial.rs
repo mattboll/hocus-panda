@@ -108,7 +108,7 @@ impl State {
                 }
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -174,7 +174,7 @@ impl State {
             },
             held: Some((button, Gesture::new(point(at), now))),
         });
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -277,7 +277,7 @@ impl State {
                 }
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -295,7 +295,7 @@ impl State {
         if let Some(event) = event {
             self.radial_event(event);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn radial_event(&mut self, event: RadialEvent) {
@@ -353,7 +353,7 @@ impl State {
                 }
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The screen after the one showing window `id`, left to right then
@@ -381,7 +381,7 @@ impl State {
             }
             open.shown.panel.view.close();
             self.radials.closing = Some(open.shown);
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -398,17 +398,17 @@ impl State {
         if let Some(open) = self.radials.open.as_mut() {
             let drawn = open.shown.panel.view.draw(now);
             if open.shown.panel.upload(&drawn) {
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
         if let Some(shown) = self.radials.closing.as_mut() {
             if shown.panel.view.is_animating(now) {
                 let drawn = shown.panel.view.draw(now);
                 shown.panel.upload(&drawn);
-                self.needs_redraw = true;
+                self.redraw.all();
             } else {
                 self.radials.closing = None;
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
     }

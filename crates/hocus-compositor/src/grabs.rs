@@ -278,7 +278,7 @@ impl PointerGrab<State> for MoveGrab {
             state.wobble_moved(id, location - before);
             state.matrix_moved(id, location);
         }
-        state.needs_redraw = true;
+        state.redraw.all();
     }
 
     fn button(
@@ -315,7 +315,7 @@ impl PointerGrab<State> for MoveGrab {
             state.matrix_let_go(id);
         }
         if let (Some((_, zone)), Some(id)) = (state.snap_preview.take(), model_id(&self.window)) {
-            state.needs_redraw = true;
+            state.redraw.all();
             if let Some(id) = model_id(&self.window) {
                 state.wobble_let_go(id, &self.window, None);
             }
@@ -546,7 +546,7 @@ impl State {
         managed.location = rect.loc;
         let window = managed.window.clone();
         self.space.map_element(window, rect.loc, true);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The window whose frame band is under `pos`, and what that band does:
@@ -588,7 +588,7 @@ impl State {
     pub fn set_frame_cursor(&mut self, cursor: Option<CursorIcon>) {
         if self.frame_cursor != cursor {
             self.frame_cursor = cursor;
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

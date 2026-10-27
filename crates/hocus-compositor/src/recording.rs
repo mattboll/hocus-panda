@@ -242,7 +242,7 @@ impl State {
             Phase::Counting { .. } => {
                 self.recorder.phase = Phase::Idle;
                 self.recorder.bar = None;
-                self.needs_redraw = true;
+                self.redraw.all();
             }
             Phase::Recording(_) => self.stop_recording(),
         }
@@ -331,7 +331,7 @@ impl State {
         };
         self.place_bar(&target);
         self.tick_each_second();
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Wakes the loop each second while recording: the countdown and the
@@ -344,7 +344,7 @@ impl State {
             handle.insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, app| {
                 app.timed("recording second", |app| {
                     if app.state.recording() {
-                        app.state.needs_redraw = true;
+                        app.state.redraw.all();
                         TimeoutAction::ToDuration(Duration::from_secs(1))
                     } else {
                         TimeoutAction::Drop
@@ -559,7 +559,7 @@ impl State {
         }
         self.recorder.bar = None;
         self.recorder.bubble = None;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn recording_finished(&mut self, finished: Finished) {
@@ -633,7 +633,7 @@ impl State {
         let now = self.clock.now();
         if let Phase::Recording(running) = &mut self.recorder.phase {
             running.clicks.push((at, now));
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -684,7 +684,7 @@ impl State {
                     if let Phase::Recording(running) = &self.recorder.phase {
                         let _ = running.feed.send(Feed::Bubble { x, y });
                     }
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
                 true
             }
@@ -742,7 +742,7 @@ impl State {
                 BarEvent::Resume => self.pause_recording(false),
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -790,7 +790,7 @@ impl State {
                     .clicks
                     .retain(|(_, t)| now.saturating_sub(*t) < RING);
                 if !running.clicks.is_empty() {
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
                 Some(BarState::Recording {
                     elapsed: running.elapsed(now),
@@ -803,7 +803,7 @@ impl State {
             panel.view.set(state);
             let drawn = panel.view.draw(now);
             if panel.upload(&drawn) {
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
     }

@@ -238,7 +238,7 @@ impl State {
             }
         }
         capture.last_damage_copy = None;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn has_pending_captures(&self) -> bool {

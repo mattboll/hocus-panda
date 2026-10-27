@@ -232,7 +232,7 @@ impl State {
         if let Some(panel) = self.launcher.as_mut() {
             panel.launcher.set_history(shown);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn history_pin(&mut self, text: &str) {

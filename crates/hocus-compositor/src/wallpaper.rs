@@ -341,7 +341,7 @@ impl State {
                 self.config_warnings.push(format!("wallpaper: {err}"));
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         self.apply_theme();
     }
 
@@ -422,21 +422,21 @@ impl State {
                 style.shadow_alpha,
             ) = shape;
             self.textures.clear();
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         // The focus ring in the accent, unless it has a colour of its own.
         let a = theme.colors.accent;
         if self.config.decorations.accent == "theme" && self.style.accent != [a.r, a.g, a.b] {
             self.style.accent = [a.r, a.g, a.b];
             self.textures.clear();
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         // Windows' hairline in the theme's tint.
         let b = theme.colors.window_border;
         if self.style.border != [b.r, b.g, b.b, b.a] {
             self.style.border = [b.r, b.g, b.b, b.a];
             self.textures.clear();
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if self.applied_theme.as_ref() == Some(&theme) {
             return;
@@ -468,7 +468,7 @@ impl State {
             quick.set_theme(theme.clone());
         }
         self.applied_theme = Some(theme);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The wallpaper of `output`, at the very back.

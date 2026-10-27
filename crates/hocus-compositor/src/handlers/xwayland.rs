@@ -59,7 +59,7 @@ impl State {
             .cloned();
         if let Some(overlay) = overlay {
             self.space.unmap_elem(&overlay);
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 }
@@ -100,7 +100,7 @@ impl XwmHandler for State {
         let location = surface.geometry().loc;
         self.space
             .map_element(Window::new_x11_window(surface), location, true);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, surface: X11Surface) {
@@ -158,7 +158,7 @@ impl XwmHandler for State {
             .cloned();
         if let Some(overlay) = overlay {
             self.space.map_element(overlay, geometry.loc, true);
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

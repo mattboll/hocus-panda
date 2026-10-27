@@ -138,7 +138,7 @@ impl State {
             ScreenshotMode::Region => self.start_picking(PickMode::Region),
             ScreenshotMode::Window => self.start_picking(PickMode::Window),
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// A screenshot of `app`'s window (as an intent says it: "slack"), now
@@ -155,7 +155,7 @@ impl State {
                 self.shell_toast(&lang.no_window_of(&name), "");
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The window of the application `app` names, the one on top first:
@@ -188,7 +188,7 @@ impl State {
             let woken = handle.insert_source(
                 Timer::from_duration(Duration::from_secs(delay.into())),
                 |_, _, app| {
-                    app.timed("screenshot delay", |app| app.state.needs_redraw = true);
+                    app.timed("screenshot delay", |app| app.state.redraw.all());
                     TimeoutAction::Drop
                 },
             );
@@ -234,7 +234,7 @@ impl State {
             from: None,
             on_option: false,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The record picker, when it shows, shows the options as they are.
@@ -246,7 +246,7 @@ impl State {
             for (_, panel) in &mut picking.panels {
                 panel.view.set_options(options);
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -366,7 +366,7 @@ impl State {
                 }
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -430,7 +430,7 @@ impl State {
         }
         if sym == smithay::input::keyboard::Keysym::Escape {
             self.shots.picking = None;
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         // Recording: Enter takes the screen under the pointer.
         let recording = self
@@ -467,7 +467,7 @@ impl State {
             for (_, panel) in &mut picking.panels {
                 let drawn = panel.view.draw(now);
                 if panel.upload(&drawn) {
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
             }
         }
@@ -477,7 +477,7 @@ impl State {
             .retain(|(_, _, start)| now.saturating_sub(*start) < FLASH);
         // A flash fades frame by frame, then once more to take it away.
         if !self.shots.flashes.is_empty() || before > 0 {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

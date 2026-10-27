@@ -98,7 +98,7 @@ impl State {
             }
         }
         self.show_next_request();
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The next request, once nothing else is asked and the session is
@@ -138,7 +138,7 @@ impl State {
             output: output.name(),
             panel: Panel::new(view),
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn auth_open(&self) -> bool {
@@ -164,7 +164,7 @@ impl State {
             }
             None => {}
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The dialog takes every key while it shows.
@@ -187,7 +187,7 @@ impl State {
             None => None,
         };
         self.auth_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -215,7 +215,7 @@ impl State {
         dialog.panel.view.pointer_move(local);
         let choice = pressed.and_then(|p| dialog.panel.view.pointer_button(p));
         self.auth_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -229,7 +229,7 @@ impl State {
         };
         let drawn = dialog.panel.view.draw(now);
         if dialog.panel.upload(&drawn) {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

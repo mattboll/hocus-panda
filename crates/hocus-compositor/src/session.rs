@@ -445,7 +445,7 @@ impl State {
                     .map(|w| w.app_id.clone())
                     .collect(),
             });
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -484,7 +484,7 @@ impl State {
         if done && boot.leaving.is_none() {
             if !moves {
                 self.sessions.boot = None;
-                self.needs_redraw = true;
+                self.redraw.all();
                 return;
             }
             boot.leaving = Some(if matrix {
@@ -501,7 +501,7 @@ impl State {
             .is_some_and(|f| !f.is_running(now, crate::matrix_screens::BOOT_OUT))
         {
             self.sessions.boot = None;
-            self.needs_redraw = true;
+            self.redraw.all();
             return;
         }
         let theme = self.theme();
@@ -546,7 +546,7 @@ impl State {
             redraw |= panel.upload(&drawn) || panel.view.is_moving(now);
         }
         if redraw {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -686,7 +686,7 @@ impl State {
         if let Some(boot) = self.sessions.boot.as_mut() {
             boot.total = boot.total.saturating_sub(gone);
             boot.apps.retain(|a| a != app_id);
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         self.report_restore(app_id, why);
     }
@@ -815,7 +815,7 @@ impl State {
             panel: crate::shell::Panel::new(welcome),
             session,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn card_open(&self) -> bool {
@@ -841,7 +841,7 @@ impl State {
             WelcomeChoice::Only(apps) => self.restore_session(&card.session, Some(&apps)),
             WelcomeChoice::StartFresh => {}
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The card takes the pointer while it shows.
@@ -869,7 +869,7 @@ impl State {
         card.panel.view.pointer_move(local);
         let choice = pressed.and_then(|p| card.panel.view.pointer_button(p));
         self.card_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -880,7 +880,7 @@ impl State {
         };
         let choice = crate::launcher::key_of(sym).and_then(|k| card.panel.view.key(k));
         self.card_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -891,7 +891,7 @@ impl State {
         };
         let drawn = card.panel.view.draw(now);
         if card.panel.upload(&drawn) {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

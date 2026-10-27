@@ -652,7 +652,7 @@ impl State {
             opacity,
             fade,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Where a window minimizes to: its dock icon when the dock shows, the
@@ -726,7 +726,7 @@ impl State {
             away,
             decorated,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// After the desktops change: minimized windows that came back play
@@ -779,7 +779,7 @@ impl State {
                 away,
                 decorated,
             });
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -839,7 +839,7 @@ impl State {
             change,
             seed: hash(&[now.as_nanos() as u64, id.0]),
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Where a morphing window was asked to go, global.

@@ -249,7 +249,7 @@ impl State {
         self.idle_resumed();
         if matches!(self.locking.phase, Phase::Curtain { .. }) {
             self.locking.phase = Phase::Unlocked;
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -261,7 +261,7 @@ impl State {
         if matches!(self.locking.phase, Phase::Curtain { .. }) {
             self.locking.phase = Phase::Unlocked;
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The last activity (holds included) and the last input.
@@ -306,7 +306,7 @@ impl State {
             screen.view.set_check(Check::Typing);
         }
         self.lock_keyboard();
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn unlock(&mut self) {
@@ -336,7 +336,7 @@ impl State {
             self.locking.parting = Some((Moment::Plain(open), screens));
         }
         self.apply_focus(SERIAL_COUNTER.next_serial());
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn password_checked(&mut self, ok: bool) {
@@ -352,7 +352,7 @@ impl State {
             if self.matrix_moves() {
                 self.locking.refused = Some(self.clock.now());
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -394,7 +394,7 @@ impl State {
             }
             auth.check(&user, password);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -439,13 +439,13 @@ impl State {
             self.locking.by = By::Us;
             self.locking.lock_surfaces.clear();
             self.lock_keyboard();
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if self.idle_held() {
             self.locking.last_activity = now;
             if matches!(self.locking.phase, Phase::Curtain { .. }) {
                 self.locking.phase = Phase::Unlocked;
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
         let idle = self.config.idle;
@@ -458,7 +458,7 @@ impl State {
             {
                 tracing::info!("idle: the curtain falls");
                 self.locking.phase = Phase::Curtain { since: now };
-                self.needs_redraw = true;
+                self.redraw.all();
             }
             Phase::Curtain { since }
                 if idle.lock
@@ -551,7 +551,7 @@ impl State {
         match handle.insert_source(Timer::from_duration(wait), |_, _, app| {
             app.timed("idle deadline", |app| {
                 app.state.locking.timer = None;
-                app.state.needs_redraw = true;
+                app.state.redraw.all();
             });
             TimeoutAction::Drop
         }) {
@@ -568,7 +568,7 @@ impl State {
         if !falling && !(self.locked() && !self.client_lock()) {
             if !self.locking.curtains.is_empty() {
                 self.locking.curtains.clear();
-                self.needs_redraw = true;
+                self.redraw.all();
             }
             return;
         }
@@ -617,13 +617,13 @@ impl State {
                     panel.view.set_seconds(seconds);
                     let drawn = panel.view.draw(now);
                     if panel.upload(&drawn) {
-                        self.needs_redraw = true;
+                        self.redraw.all();
                     }
                 }
             }
             None if !self.locking.curtains.is_empty() => {
                 self.locking.curtains.clear();
-                self.needs_redraw = true;
+                self.redraw.all();
             }
             None => {}
         }
@@ -658,7 +658,7 @@ impl State {
                 panel.view.set_caps_lock(caps);
                 let drawn = panel.view.draw(now);
                 if panel.upload(&drawn) {
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
             }
         }
@@ -822,19 +822,19 @@ impl State {
             if !moment.is_running(now, LOCK_IN) {
                 self.locking.entering = None;
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if let Some((moment, _)) = &self.locking.parting {
             if !moment.is_running(now, UNLOCK) {
                 self.locking.parting = None;
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if let Some(since) = self.locking.refused {
             if now.saturating_sub(since) >= REFUSED {
                 self.locking.refused = None;
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -936,7 +936,7 @@ impl SessionLockHandler for State {
         surface.send_configure();
         self.locking.lock_surfaces.insert(output.name(), surface);
         self.lock_keyboard();
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 }
 delegate_session_lock!(State);

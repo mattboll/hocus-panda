@@ -110,7 +110,7 @@ impl State {
         if n.names != names {
             n.names = names;
             self.keep_layouts();
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

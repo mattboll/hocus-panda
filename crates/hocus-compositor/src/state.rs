@@ -259,8 +259,8 @@ pub struct State {
     pub popups: PopupManager,
     /// Windows whose size is not known yet: they are placed on their first buffer.
     pub unplaced: Vec<Window>,
-    /// Something changed since the last frame.
-    pub needs_redraw: bool,
+    /// The outputs that changed since the last frame (#244).
+    pub redraw: crate::redraw::Redraw,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -414,7 +414,7 @@ impl State {
             space: Space::default(),
             popups: PopupManager::default(),
             unplaced: Vec::new(),
-            needs_redraw: true,
+            redraw: crate::redraw::Redraw::default(),
             compositor_state: CompositorState::new::<Self>(dh),
             xdg_shell_state: XdgShellState::new::<Self>(dh),
             shm_state: ShmState::new::<Self>(dh, vec![]),

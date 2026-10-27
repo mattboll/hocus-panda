@@ -275,14 +275,14 @@ impl State {
             since: now,
             moved: None,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// It closes, `picked` the card chosen: in the Matrix theme it goes in
     /// its own way.
     fn alt_tab_close(&mut self, picked: Option<usize>) -> Option<WindowId> {
         let open = self.alt_tab.open.take()?;
-        self.needs_redraw = true;
+        self.redraw.all();
         let id = picked.and_then(|i| open.entries.get(i)).map(|(id, _)| *id);
         if self.matrix_moves() {
             self.alt_tab.closing = Some(Closing {
@@ -320,7 +320,7 @@ impl State {
                 .then(|| open.selected - view.first);
             view.panel.view.select(mine);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// A key while it is open: Tab and the arrows move, Enter picks,
@@ -453,7 +453,7 @@ impl State {
             if gone || !crate::matrix_screens::closing_runs(closing, now) {
                 self.alt_tab.closing = None;
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         let gone = self.alt_tab.open.as_ref().is_some_and(|o| {
             o.entries
@@ -463,7 +463,7 @@ impl State {
         if gone {
             // Opened again as the windows are now.
             self.alt_tab.open = None;
-            self.needs_redraw = true;
+            self.redraw.all();
             return;
         }
         let Some(open) = &mut self.alt_tab.open else {
@@ -472,11 +472,11 @@ impl State {
         for view in &mut open.views {
             let drawn = view.panel.view.draw(now);
             if view.panel.upload(&drawn) || view.panel.view.is_animating(now) {
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
         // The previews are live.
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// On `output`: its grid, and each card's window drawn in it, front

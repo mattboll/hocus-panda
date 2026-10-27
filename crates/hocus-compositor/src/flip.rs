@@ -87,7 +87,7 @@ impl State {
             "output stopped presenting frames; recovered"
         );
         self.emit(|_| Event::OutputRecovered { name, missed });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 }
 

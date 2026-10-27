@@ -111,7 +111,7 @@ impl App {
             output: output.name(),
             panel,
         });
-        state.needs_redraw = true;
+        state.redraw.all();
     }
 
     fn picture_of_output(&mut self, output: &Output) -> Option<Pixels> {
@@ -161,7 +161,7 @@ impl State {
             tracing::info!(?answer, "chosen to share");
             let reply: Result<Reply, ApiError> = Ok(Reply::Shared(answer));
             self.api.reply(picking.connection, picking.id, reply);
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -193,7 +193,7 @@ impl State {
         picking.panel.view.pointer_move(local);
         let choice = pressed.and_then(|p| picking.panel.view.pointer_button(p));
         self.share_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -203,7 +203,7 @@ impl State {
         };
         let choice = crate::launcher::key_of(sym).and_then(|k| picking.panel.view.key(k));
         self.share_chose(choice);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -213,7 +213,7 @@ impl State {
         if let Some(picking) = &mut self.share {
             let drawn = picking.panel.view.draw(now);
             if picking.panel.upload(&drawn) {
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
     }

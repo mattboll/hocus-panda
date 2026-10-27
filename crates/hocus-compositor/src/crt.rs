@@ -425,7 +425,7 @@ impl State {
                 }
             };
             // The lines bloom from now on.
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if !matches!(self.crt.shaders, Shaders::Ready(_)) {
             return;

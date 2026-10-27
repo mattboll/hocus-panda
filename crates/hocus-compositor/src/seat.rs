@@ -106,6 +106,13 @@ pub struct Seats {
     asked: Vec<(WindowId, bool)>,
 }
 
+impl Seats {
+    /// Whether no agent has a seat.
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+}
+
 /// An agent's capture of a window no screen shows, woken to draw first.
 #[derive(Debug, Clone)]
 pub(crate) struct CaptureWait {
@@ -326,7 +333,7 @@ impl State {
         if self.seats.list.is_empty() {
             self.a11y_agents(false);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Whether this `wl_seat` is an agent's.
@@ -429,7 +436,7 @@ impl State {
                 seat.window = model_id(window);
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         match phase {
             Some(phase) => {
                 if let Phase::Confirming { why, .. } = &phase {
@@ -1017,7 +1024,7 @@ impl State {
                     ));
                     self.journal_keep(pending.entry, Some(&err));
                     self.api.reply(connection, pending.id, Err(err));
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
             }
         }
@@ -1256,7 +1263,7 @@ impl State {
             }
             None => self.land_pending(connection, pending, false),
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Actions waiting for their window's application to take the seat go
@@ -1304,7 +1311,7 @@ impl State {
             } else if let Some(seat) = self.agent_seat(connection) {
                 seat.pending = Some(pending);
             }
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -1325,7 +1332,7 @@ impl State {
             seat.last = now;
         }
         self.api.reply(connection, pending.id, result);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The user answered a card.
@@ -1349,7 +1356,7 @@ impl State {
                 self.take_over(&name);
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Every agent stopped: what they wait on is refused with `why`.
@@ -1364,7 +1371,7 @@ impl State {
             self.journal_keep(pending.entry, Some(why));
             self.api.reply(connection, pending.id, Err(why.clone()));
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The user takes over from agent `name`: its window gets their
@@ -1404,7 +1411,7 @@ impl State {
             self.restore(id, SERIAL_COUNTER.next_serial());
         }
         tracing::info!(agent = name, "the user took over");
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// And hands back.
@@ -1414,7 +1421,7 @@ impl State {
             seat.last = self.clock.now();
         }
         tracing::info!(agent = name, "the user handed back");
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The agents connected now, for the column's journal.
@@ -1611,7 +1618,7 @@ impl State {
             }
         }
         if changed {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -1807,7 +1814,7 @@ impl State {
                     && *keys != (Some(seat.connection) == clicked)
                 {
                     *keys = !*keys;
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
             }
         }
@@ -1817,7 +1824,7 @@ impl State {
         if let Some(answer) = answer {
             self.seat_answer(connection, answer);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -1870,7 +1877,7 @@ impl State {
         if let Some(answer) = answer {
             self.seat_answer(connection, answer);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 }
 

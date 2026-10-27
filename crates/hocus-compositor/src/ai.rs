@@ -266,7 +266,7 @@ impl State {
             }
             Asker::Circle => self.circle_answer_news(id, news),
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn ai_news(&mut self, news: News) {

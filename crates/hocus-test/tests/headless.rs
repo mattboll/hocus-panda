@@ -215,7 +215,7 @@ fn lock(compositor: &mut Headless) -> anyhow::Result<()> {
 
 /// Something asks for a frame although nothing changed.
 fn ask_for_a_frame(compositor: &mut Headless) -> anyhow::Result<()> {
-    compositor.on_loop("redraw", |state| state.needs_redraw = true);
+    compositor.on_loop("redraw", |state| state.redraw.all());
     compositor.dispatch(Duration::ZERO)?;
     compositor.advance(FRAME)
 }

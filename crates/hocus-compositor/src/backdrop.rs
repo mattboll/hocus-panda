@@ -193,7 +193,7 @@ impl State {
                 }
             };
             // Frames start.
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if let Err(err) = self.paint(renderer, output, moving) {
             tracing::warn!(output = name, %err, "could not paint the wallpaper");

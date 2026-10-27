@@ -53,6 +53,6 @@ impl State {
         }
         tracing::info!(name, "time zone");
         self.wall.set_zone(zone);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 }

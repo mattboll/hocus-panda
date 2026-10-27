@@ -43,7 +43,7 @@ impl State {
     /// From quick settings: off or back on for the session.
     pub fn toggle_pandas(&mut self) {
         self.pandas.hidden = !self.pandas.hidden;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The screen a video plays on: a fullscreen window that keeps the
@@ -96,7 +96,7 @@ impl State {
             .watching
             .retain(|name, _| wanted.iter().any(|o| o.name() == *name));
         if self.pandas.watching.len() != before {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         let now = self.clock.now();
         for output in wanted {
@@ -121,7 +121,7 @@ impl State {
             if let Some(panel) = self.pandas.watching.get_mut(&name) {
                 let drawn = panel.view.draw(now);
                 if panel.upload(&drawn) || panel.view.is_moving(now) {
-                    self.needs_redraw = true;
+                    self.redraw.all();
                 }
             }
         }

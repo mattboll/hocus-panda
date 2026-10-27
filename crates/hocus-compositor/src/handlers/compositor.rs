@@ -52,7 +52,8 @@ impl CompositorHandler for State {
             xdg_shell::handle_commit(self, surface);
         }
         self.place_new_windows(SERIAL_COUNTER.next_serial());
-        self.needs_redraw = true;
+        // Only the outputs it shows on (#244).
+        self.redraw_committed(surface);
     }
 }
 

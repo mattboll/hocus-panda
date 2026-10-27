@@ -126,8 +126,11 @@ advance_ms = 300
 # 376 MB asked for (the dock's picture made again for each new app), 9.1 MB
 # held; budgets 10 % above, held 15 %. Since windows' shadows are drawn at
 # the screen's pixels and left out of the window (#261): 189,900
-# allocations, 362 MB, 9.5 MB held.
-expect_cost = { frames = [176, 165], renders = [352, 352], allocations = 199_000, allocated_mb = 414, held_mb = 10.5 }
+# allocations, 362 MB, 9.5 MB held. Since a redraw names the screens it
+# concerns (#244), each screen builds its scenes for its own windows alone:
+# scenes [170, 160] (from [320, 320]), 176,400 allocations (from 193,600),
+# 289 MB (from 374).
+expect_cost = { frames = [176, 165], renders = [187, 176], allocations = 194_000, allocated_mb = 318, held_mb = 10.5 }
 
 # Each screen to its second desktop and back, the pointer on it.
 [[step]]
@@ -171,8 +174,11 @@ advance_ms = 1000
 # 91 MB, 0.9 MB held (since #261: 61,400 allocations, 96 MB). Since the
 # compositor draws panels' shadows (#281), the shadows of the panels the
 # switches show are kept, as windows' are, for the next switch: three
-# textures, 0.85 MB more held, once (1.8 MB).
-expect_cost = { frames = [26, 24], renders = [113, 113], allocations = 66_000, allocated_mb = 101, held_mb = 2.1 }
+# textures, 0.85 MB more held, once (1.8 MB). Since #244, a switch builds
+# the scenes of its own screen, and of the other where the focus goes:
+# scenes [53, 52] (from [102, 102]), 53,700 allocations (from 62,700),
+# 49 MB (from 101), 1.9 MB.
+expect_cost = { frames = [26, 24], renders = [58, 57], allocations = 59_000, allocated_mb = 54, held_mb = 2.1 }
 [[step]]
 expect_shown = { output = "HEADLESS-2", desktop = 1 }
 [[step]]
@@ -183,4 +189,6 @@ expect_window = { app_id = "budget.w20", output = "HEADLESS-2", visible = true }
 advance_ms = 60000
 [[step]]
 # Measured: 274,700 allocations (38 a turn of the loop, two a frame), 8.5 MB.
-expect_cost = { frames = [1, 0], renders = [1, 1], allocations = 302_000, allocated_mb = 10, held_mb = 0.25 }
+# Since #244 the minute builds the column's screen alone: scenes [1, 0]
+# (from [1, 1]), 267,500 allocations (267,600 before).
+expect_cost = { frames = [1, 0], renders = [1, 0], allocations = 294_000, allocated_mb = 10, held_mb = 0.25 }
