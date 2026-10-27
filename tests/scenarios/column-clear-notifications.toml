@@ -1,0 +1,79 @@
+description = "Given three notifications, Alex clicks Clear all in the column's Notifications header: the list says Nothing new, their toasts go, and each application gets NotificationClosed with reason 2, dismissed by the user (#253)"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+pointer_move = [400, 400]
+
+# They stay until dismissed: still open for their applications.
+[[step]]
+notify = { app = "Mail", summary = "Review of MR 42", timeout_ms = 0 }
+
+[[step]]
+notify = { app = "Chat", summary = "Lunch at noon?", timeout_ms = 0 }
+
+[[step]]
+notify = { app = "Build", summary = "Pipeline green", timeout_ms = 0 }
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_ui = { label = "Build · Pipeline green" }
+
+[[step]]
+expect_ui = { label = "Chat · Lunch at noon?" }
+
+[[step]]
+expect_ui = { label = "Mail · Review of MR 42" }
+
+[[step]]
+expect_ui = { label = "Clear all", inside = [944, 0, 320, 800] }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "column-clear-notifications.png" }
+
+[[step]]
+click_ui = "Clear all"
+
+[[step]]
+expect_ui = { label = "Nothing new" }
+
+[[step]]
+expect_ui = { label = "Clear all", shown = false }
+
+[[step]]
+expect_ui = { label = "Mail · Review of MR 42", shown = false }
+
+# Their toasts went with them.
+[[step]]
+expect_ui = { label = "Review of MR 42", shown = false }
+
+[[step]]
+expect_ui = { label = "Pipeline green", shown = false }
+
+[[step]]
+expect_notification_signals = ["NotificationClosed 3 2", "NotificationClosed 2 2", "NotificationClosed 1 2"]
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "column-clear-notifications-cleared.png" }
+
+# The strip counts none.
+[[step]]
+config = """
+[panel]
+form = "strip"
+"""
+
+[[step]]
+expect_ui = { label = "Notifications: 0" }

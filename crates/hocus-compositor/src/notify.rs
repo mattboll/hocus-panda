@@ -9,7 +9,7 @@ use hocus_api::{NotificationsInfo, UiNode};
 use hocus_core::config::AppNotifications;
 use hocus_platform::notifications::{CloseReason, Expiry, Incoming, Notifications, Urgency};
 use hocus_shell::{
-    Lang, Toast, ToastEvent, Toasts,
+    Lang, NotificationLine, Toast, ToastEvent, Toasts,
     toasts::{ROOM, WIDTH},
 };
 use hocus_ui::{Input, Point as UiPoint, Theme};
@@ -94,7 +94,8 @@ pub fn start(
         pressed: false,
         seen_apps: Vec::new(),
     };
-    panel
+    // Nothing is kept yet: nothing to let go.
+    let _ = panel
         .toasts
         .set_history_limit(state.config.notifications.history as usize);
     if let Some(address) = address {
@@ -212,11 +213,11 @@ impl State {
                 // Do not disturb holds all but critical ones: the column's
                 // history keeps them.
                 } else if (dnd || sharing || mode == AppNotifications::History) && !toast.critical {
-                    panel.toasts.remember(&toast);
+                    let events = panel.toasts.remember(&toast);
                     if sharing && !dnd && mode == AppNotifications::Show {
                         self.screen_capture.held += 1;
                     }
-                    Vec::new()
+                    events
                 } else {
                     let id = toast.id;
                     let new = !panel.toasts.shown().contains(&id);
@@ -229,6 +230,8 @@ impl State {
                     events
                 }
             }
+            // Shown, or open in the history: closed as its client asked;
+            // the history keeps its line.
             Incoming::Close(id) => {
                 if panel.toasts.close(id)
                     && let Some(server) = &panel.server
@@ -526,7 +529,8 @@ impl State {
     pub fn apply_notifications_config(&mut self) {
         let limit = self.config.notifications.history as usize;
         if let Some(panel) = self.toasts.as_mut() {
-            panel.toasts.set_history_limit(limit);
+            let events = panel.toasts.set_history_limit(limit);
+            self.toast_events(events);
         }
         self.needs_redraw = true;
     }
@@ -538,22 +542,38 @@ impl State {
             .map_or(0, |p| p.toasts.history().count())
     }
 
+    /// Clear all, from the column or quick settings: each notification
+    /// still open is dismissed for its client (#253).
     pub fn clear_notifications(&mut self) {
         if let Some(panel) = self.toasts.as_mut() {
-            panel.toasts.clear_history();
+            let events = panel.toasts.clear_history();
+            self.toast_events(events);
+        }
+        self.needs_redraw = true;
+    }
+
+    /// One notification dismissed from the column.
+    pub fn dismiss_notification(&mut self, id: u32) {
+        if let Some(panel) = self.toasts.as_mut() {
+            let events = panel.toasts.dismiss(id);
+            self.toast_events(events);
         }
         self.needs_redraw = true;
     }
 
     /// The newest notifications, for the column.
-    pub fn notification_history(&self) -> Vec<(String, String)> {
+    pub fn notification_history(&self) -> Vec<NotificationLine> {
         self.toasts
             .as_ref()
             .map(|p| {
                 p.toasts
                     .history()
                     .take(3)
-                    .map(|n| (n.app.clone(), n.summary.clone()))
+                    .map(|n| NotificationLine {
+                        id: n.id,
+                        app: n.app.clone(),
+                        summary: n.summary.clone(),
+                    })
                     .collect()
             })
             .unwrap_or_default()

@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use hocus_shell::{
-    Action, ActiveWindow, Column, ColumnState, KeyboardLayout, Lang, ScreenDesktops, TrayApp,
-    TrayMenuEntry, WallTime,
+    Action, ActiveWindow, Column, ColumnState, KeyboardLayout, Lang, NotificationLine,
+    ScreenDesktops, TrayApp, TrayMenuEntry, WallTime,
     activity::Badge,
     agents::{AgentAsk, AgentState, AgentsView, Board, Elsewhere},
     column::{AdbLine, Agenda, Meeting, PairStage, Pairing, PhoneLine},
@@ -65,9 +65,18 @@ fn state() -> ColumnState {
         switch_layout_keys: Some("Super+Ctrl+Space".into()),
         user: "Camille".into(),
         notifications: vec![
-            ("Mail".into(), "Revue de la MR #42".into()),
-            ("Chat".into(), "Les maquettes du dock sont prêtes".into()),
+            line(1, "Mail", "Revue de la MR #42"),
+            line(2, "Chat", "Les maquettes du dock sont prêtes"),
         ],
+        notification_count: 2,
+    }
+}
+
+fn line(id: u32, app: &str, summary: &str) -> NotificationLine {
+    NotificationLine {
+        id,
+        app: app.into(),
+        summary: summary.into(),
     }
 }
 
@@ -330,7 +339,7 @@ fn on_a_laptop_screen_the_account_stays_in_the_column_and_the_lists_give_room_ba
     let mut s = state();
     s.journal = Some(journal(true));
     s.notifications = (1..=5)
-        .map(|i| ("Mail".to_owned(), format!("Message {i}")))
+        .map(|i| line(i, "Mail", &format!("Message {i}")))
         .collect();
     s.meeting = Some(Meeting {
         title: "Design review".into(),
@@ -478,7 +487,7 @@ fn other_desktops_agents_show_in_a_line_each_and_give_room_back_first() -> anyho
     let height = 900.0;
     let mut column = Column::new(Theme::default(), Lang::En, height, 1.0);
     s.notifications = (1..=5)
-        .map(|i| ("Mail".to_owned(), format!("Message {i}")))
+        .map(|i| line(i, "Mail", &format!("Message {i}")))
         .collect();
     column.set_state(&s);
     column.draw(Duration::from_secs(600));
@@ -582,6 +591,34 @@ fn the_window_buttons_ask_for_their_actions() -> anyhow::Result<()> {
         let at = button(&column, name)?;
         assert_eq!(click(&mut column, at), vec![action]);
     }
+    Ok(())
+}
+
+#[test]
+fn the_notifications_are_cleared_all_at_once_or_one_by_one() -> anyhow::Result<()> {
+    let mut column = column(Lang::En);
+    // A row's dismiss button shows while the pointer is over the row.
+    let row = rect_of(&column, "Mail · Revue de la MR #42")?;
+    let over = Point::new(row.x + 20.0, row.y + row.h / 2.0);
+    column.input(over, Input::PointerMove(over));
+    column.draw(Duration::from_secs(1));
+    common::expect_reference(&column.view(), "column-notification-hovered.png")?;
+    let at = button(&column, "Dismiss: Chat · Les maquettes du dock sont prêtes")?;
+    assert_eq!(click(&mut column, at), vec![Action::DismissNotification(2)]);
+    let at = button(&column, "Clear all")?;
+    assert_eq!(click(&mut column, at), vec![Action::ClearNotifications]);
+    // None left: neither Clear all nor rows, but that there is none.
+    let mut s = state();
+    s.notifications.clear();
+    s.notification_count = 0;
+    column.set_state(&s);
+    column.draw(Duration::from_secs(2));
+    assert!(button(&column, "Clear all").is_err());
+    rect_of(&column, "Nothing new")?;
+    // In French.
+    let column = self::column(Lang::Fr);
+    button(&column, "Tout effacer")?;
+    button(&column, "Ignorer\u{a0}: Mail · Revue de la MR #42")?;
     Ok(())
 }
 

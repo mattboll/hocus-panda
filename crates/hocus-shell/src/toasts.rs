@@ -59,8 +59,13 @@ pub enum ToastEvent {
 /// An entry of the history the column shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Past {
+    pub id: u32,
     pub app: String,
     pub summary: String,
+    /// Not closed for its client yet: its toast shows, or it never showed
+    /// (do not disturb, the history only). Taken from the history, it is
+    /// closed then, once.
+    pub open: bool,
 }
 
 /// The thin line at the bottom of a toast: the time it has left.
@@ -304,11 +309,7 @@ impl Toasts {
         let before = self.places();
         let card = self.build(toast.clone(), 0, now);
         self.cards.insert(0, card);
-        self.history.push_front(Past {
-            app: toast.app.clone(),
-            summary: toast.summary.clone(),
-        });
-        self.history.truncate(self.history_limit);
+        events.extend(self.keep(&toast));
         // It slides in from the edge while the others make room.
         if self.entrance == Entrance::Slide {
             let id = self.cards[0].card;
@@ -328,39 +329,98 @@ impl Toasts {
     }
 
     /// Keeps a notification in the history without showing it (do not
-    /// disturb).
-    pub fn remember(&mut self, toast: &Toast) {
+    /// disturb); those it pushes out of the history expire.
+    pub fn remember(&mut self, toast: &Toast) -> Vec<ToastEvent> {
+        self.keep(toast)
+    }
+
+    /// The newest of the history, in place of an older one of its id;
+    /// those pushed out of it expire if nothing else holds them.
+    fn keep(&mut self, toast: &Toast) -> Vec<ToastEvent> {
+        self.history.retain(|p| p.id != toast.id);
         self.history.push_front(Past {
+            id: toast.id,
             app: toast.app.clone(),
             summary: toast.summary.clone(),
+            open: true,
         });
-        self.history.truncate(self.history_limit);
+        self.trim()
     }
 
-    /// The history keeps `limit` at most from now on.
-    pub fn set_history_limit(&mut self, limit: usize) {
+    /// The history keeps `limit` at most from now on; those it lets go
+    /// expire.
+    pub fn set_history_limit(&mut self, limit: usize) -> Vec<ToastEvent> {
         self.history_limit = limit;
-        self.history.truncate(limit);
+        self.trim()
     }
 
-    pub fn clear_history(&mut self) {
-        self.history.clear();
+    /// Down to the limit: what was open there, and shows no more, expires.
+    fn trim(&mut self) -> Vec<ToastEvent> {
+        let mut events = Vec::new();
+        while self.history.len() > self.history_limit {
+            let Some(past) = self.history.pop_back() else {
+                break;
+            };
+            if past.open && !self.cards.iter().any(|c| c.toast.id == past.id) {
+                events.push(ToastEvent::Expired(past.id));
+            }
+        }
+        events
     }
 
-    /// Closes a toast, as its client asked: no event.
+    /// The user cleared the history: each notification goes, its toast
+    /// too, and those still open are dismissed.
+    pub fn clear_history(&mut self) -> Vec<ToastEvent> {
+        let ids: Vec<u32> = self.history.iter().map(|p| p.id).collect();
+        ids.into_iter().flat_map(|id| self.dismiss(id)).collect()
+    }
+
+    /// The user dismissed notification `id` from the history: it goes, its
+    /// toast too; dismissed if it was still open.
+    pub fn dismiss(&mut self, id: u32) -> Vec<ToastEvent> {
+        let shown = self.cards.iter().position(|c| c.toast.id == id);
+        let open = shown.is_some() || self.history.iter().any(|p| p.id == id && p.open);
+        self.history.retain(|p| p.id != id);
+        if let Some(i) = shown {
+            self.take(i);
+        }
+        if open {
+            vec![ToastEvent::Dismissed(id)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Closes a notification, as its client asked: no event. Whether it
+    /// was open, shown or in the history.
     pub fn close(&mut self, id: u32) -> bool {
+        let kept = self.history.iter().any(|p| p.id == id && p.open);
         match self.cards.iter().position(|c| c.toast.id == id) {
             Some(i) => {
                 self.take(i);
                 true
             }
-            None => false,
+            None => {
+                self.closed(id);
+                kept
+            }
         }
     }
 
-    /// Removes the card at `i`; the others close the gap.
+    /// Notification `id` is closed for its client: the history keeps it,
+    /// closed.
+    fn closed(&mut self, id: u32) {
+        for past in self.history.iter_mut().filter(|p| p.id == id) {
+            past.open = false;
+        }
+    }
+
+    /// Removes the card at `i`; the others close the gap. Every toast that
+    /// goes is closed for its client (expired, dismissed, acted on, or as
+    /// it asked).
     fn take(&mut self, i: usize) {
         let card = self.cards.remove(i);
+        self.closed(card.toast.id);
         if let Some(rect) = self.tree.rect(card.card) {
             // Kept for the compositor, which takes them after each change.
             self.gone.truncate(MAX * 2);

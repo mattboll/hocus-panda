@@ -105,6 +105,70 @@ fn an_action_is_reported_and_closes_the_toast() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn still(id: u32, summary: &str) -> Toast {
+    Toast {
+        timeout: None,
+        ..toast(id, summary)
+    }
+}
+
+fn history(toasts: &Toasts) -> Vec<(u32, bool)> {
+    toasts.history().map(|p| (p.id, p.open)).collect()
+}
+
+#[test]
+fn clearing_the_history_dismisses_what_is_still_open_once() {
+    let mut toasts = Toasts::new(Theme::default(), Lang::En, 700.0, 1.0);
+    toasts.show(still(1, "shown"), MS(0));
+    toasts.show(toast(2, "expires"), MS(0));
+    assert_eq!(toasts.update(MS(7000)), vec![ToastEvent::Expired(2)]);
+    // Do not disturb: kept without a toast, still open.
+    assert_eq!(toasts.remember(&toast(3, "held")), vec![]);
+    assert_eq!(history(&toasts), vec![(3, true), (2, false), (1, true)]);
+    // The one that expired was closed then: it is not closed again.
+    assert_eq!(
+        toasts.clear_history(),
+        vec![ToastEvent::Dismissed(3), ToastEvent::Dismissed(1)]
+    );
+    assert!(toasts.is_empty(), "its toast went with it");
+    assert_eq!(history(&toasts), vec![]);
+    assert_eq!(toasts.clear_history(), vec![]);
+}
+
+#[test]
+fn one_dismissed_from_the_history_leaves_the_others() {
+    let mut toasts = Toasts::new(Theme::default(), Lang::En, 700.0, 1.0);
+    toasts.show(still(1, "first"), MS(0));
+    toasts.show(still(2, "second"), MS(0));
+    assert_eq!(toasts.dismiss(1), vec![ToastEvent::Dismissed(1)]);
+    assert_eq!(toasts.shown(), vec![2]);
+    assert_eq!(history(&toasts), vec![(2, true)]);
+    assert_eq!(toasts.dismiss(1), vec![], "gone already");
+}
+
+#[test]
+fn what_the_history_lets_go_expires_unless_its_toast_shows() {
+    let mut toasts = Toasts::new(Theme::default(), Lang::En, 700.0, 1.0);
+    toasts.show(still(1, "shown"), MS(0));
+    toasts.remember(&toast(2, "held"));
+    toasts.remember(&toast(3, "held too"));
+    assert_eq!(
+        toasts.set_history_limit(1),
+        vec![ToastEvent::Expired(2)],
+        "the one shown is still open there"
+    );
+    assert_eq!(history(&toasts), vec![(3, true)]);
+    // The client closes the one held: closed, its line kept.
+    assert!(toasts.close(3));
+    assert_eq!(history(&toasts), vec![(3, false)]);
+    assert_eq!(toasts.dismiss(3), vec![]);
+    // An id given again takes the place of its older line.
+    toasts.set_history_limit(20);
+    toasts.remember(&toast(4, "a"));
+    toasts.remember(&toast(4, "a, again"));
+    assert_eq!(history(&toasts), vec![(4, true)]);
+}
+
 #[test]
 fn a_replacement_keeps_its_place() {
     let mut toasts = Toasts::new(Theme::default(), Lang::En, 700.0, 1.0);

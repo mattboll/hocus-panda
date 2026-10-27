@@ -179,11 +179,11 @@ nothing at all are options (see
 
 - Four forms, `[panel] form`, on the settings' Appearance page and live:
   the strip (72 px: the time stacked, the next meeting's ring, a panda per
-  active agent, the to-dos and notifications counted, the desktops, the
-  battery, the account), the column (320 px), a top bar (one line: the
-  active window and its buttons, the time and the date, the agents, the
-  tasks) and hidden (a faint hint at the right edge); windows leave room
-  for the strip, the column or the bar only
+  active agent, the to-dos and notifications counted beside a tick and a
+  bell, the desktops, the battery, the account), the column (320 px), a
+  top bar (one line: the active window and its buttons, the time and the
+  date, the agents, the tasks) and hidden (a faint hint at the right
+  edge); windows leave room for the strip, the column or the bar only
 - The whole column slides over the windows from the right edge: the pointer
   resting on the strip or at the right edge, a click on the strip or the
   bar, or Super+C; it slides back when the pointer leaves it, on Escape,
@@ -191,7 +191,10 @@ nothing at all are options (see
 
 - Clock 12/24 h, seconds, follows the time zone
 - Date; calendar on touch (month, events, today's agenda)
-- Notifications with Clear all; animated bell with badge
+- Notifications with Clear all in their header, and a close button on the
+  row under the pointer for one; each one cleared and still open is closed
+  for its application as dismissed by the user (`NotificationClosed`,
+  reason 2); animated bell with badge
 - "Waiting for you": windows that request attention
 - Command field ("Search, act, ask…")
 - Status modules
@@ -232,7 +235,9 @@ nothing at all are options (see
 
 - Bubbles top right, newest first, slide in, countdown paused on hover
 - Icon, click opens the app, action buttons, urgency, replacement
-- History; transient notifications not kept
+- History; transient notifications not kept; one held there and never
+  shown (do not disturb) stays open for its application until cleared, or
+  expires when the history lets it go
 - Held during screen sharing, then summarised
 - Matrix style
 
