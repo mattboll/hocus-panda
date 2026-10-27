@@ -1,4 +1,4 @@
-description = "A ten-second recording's toast offers Trim; cut to 2–6 s it exports as a four-second MP4, and as a GIF under 5 MB, while the compositor keeps its frame budget"
+description = "A ten-second recording's toast offers Trim; cut to 2–6 s it exports as a four-second MP4, and as a GIF under 5 MB, the compositor's frame times reported"
 outputs = ["1280x800"]
 shell = true
 needs = ["ffmpeg", "ffprobe"]

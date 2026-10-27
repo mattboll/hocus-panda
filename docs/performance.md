@@ -58,7 +58,10 @@ where a target is passed: a frame's budget (16 ms, the one the
 architecture sets, opening the launcher from the keyboard included,
 #242), 1 s for startup, 100 ms for opening the settings.
 Headless outputs are drawn by pixman, on the CPU: frame times there are an
-upper bound of what a GPU draws.
+upper bound of what a GPU draws. The same goes for the scenarios'
+`expect_budget` steps (#295): a frame slower than their limit, or a
+handler that held the loop, is printed as a warning with its time and
+never fails the scenario.
 
 Reference numbers, a debug build (the test profile) on a development
 machine, three runs:
