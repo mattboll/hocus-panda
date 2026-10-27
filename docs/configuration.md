@@ -221,7 +221,7 @@ pinned = [                 # desktop entries, in order; those not installed are 
 
 [panel]                    # the widget panel's form (Settings → Appearance), applied at once
 form = "strip"             # "strip": 72 px on the right (the time, the next meeting, a panda per active
-                           #   agent, the to-dos and notifications counted, the account); resting the
+                           #   agent, the tasks and notifications counted, the account); resting the
                            #   pointer on it (150 ms), a click or Super+C slides the whole column over
                            #   the windows, leaving it or Escape slides it back
                            # "column": the whole column on the right, always there (320 px)
@@ -458,7 +458,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `clipboard-history` | the clipboard history in the launcher's card: newest first, Enter pastes into the focused application, Tab pins, Delete forgets |
 | `palette` | the action palette: every action with its keys and what it acts on, recent ones first; searched by name (English or French) or by keys, typed (`Maj+S`) or pressed; Enter runs it on the window that had the focus, Tab opens the settings to give it keys |
 | `emoji` | the emoji picker: searched in English and French, recent ones first, Tab changes the skin tone, Enter types it into the focused application |
-| `notes` | notes and to-dos in the launcher's card: what is typed is added, a to-do when it starts `- [ ]`; on an empty line Enter ticks, Delete removes. Kept in `~/.local/share/hocuspanda/notes.md`, plain Markdown; the column shows the to-dos left, the command field finds notes |
+| `notes` | notes in the launcher's card: what is typed is added; a line typed as a to-do (`- [ ] …`) goes to the tasks instead; Delete removes the line chosen. Kept in `~/.local/share/hocuspanda/notes.md`, plain Markdown, whose to-dos move to the tasks; the command field finds notes |
 | `focus-mode` | everything but the focused window dims; again, it lifts |
 | `night-light` | night light on or off, until the schedule changes |
 | `zoom-in`, `zoom-out` | the magnifier, around the pointer, up to 8×; back to 1 it is off (also Super+Alt+wheel) |

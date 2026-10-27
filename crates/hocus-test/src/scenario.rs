@@ -138,8 +138,13 @@ pub enum Step {
     /// directory: `{ name, contains?, lacks? }`.
     ExpectRuntimeFile(ExpectFile),
     /// A file of the compositor's state directory (notes, the session):
-    /// `{ name, contains?, lacks? }`, once written.
+    /// `{ name, contains?, lacks? }`, once written; for a folder (the
+    /// tasks), one of its files holds `contains` and none `lacks`.
     ExpectStateFile(ExpectFile),
+    /// Writes a file of the compositor's state directory, its folders
+    /// made: `{ name, text }`. The compositor reads it when it reads that
+    /// file again, or after a `restart`.
+    StateFile(StateFile),
     /// The notification server sent these signals, in this order (others
     /// between them), since the first `notify` step: `["ActivationToken
     /// 1", "ActionInvoked 1 reply"]`.
@@ -764,6 +769,13 @@ pub struct ExpectCalendars {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct StateFile {
+    pub name: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectFile {
     pub name: String,
     /// How many lines it has.
@@ -1217,6 +1229,7 @@ impl fmt::Display for Step {
             Self::ExpectAccent(e) => write!(f, "expect_accent {:?}", e.hue),
             Self::ExpectRuntimeFile(e) => write!(f, "expect_runtime_file {}", e.name),
             Self::ExpectStateFile(e) => write!(f, "expect_state_file {}", e.name),
+            Self::StateFile(file) => write!(f, "state_file {}", file.name),
             Self::NotifySend(args) => write!(f, "notify_send {args:?}"),
             Self::Notify(n) => write!(f, "notify {} {:?}", n.app, n.summary),
             Self::ExpectNotificationSignals(s) => write!(f, "expect_notification_signals {s:?}"),
@@ -2362,6 +2375,18 @@ impl Run<'_> {
             }
             Step::ExpectRuntimeFile(expected) => self.expect_runtime_file(expected),
             Step::ExpectStateFile(expected) => self.expect_state_file(expected),
+            Step::StateFile(file) => {
+                anyhow::ensure!(
+                    !file.name.split('/').any(|p| p == ".." || p.is_empty()),
+                    "a state file is named from the state directory"
+                );
+                let path = self.compositor.state_dir().join(&file.name);
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(path, &file.text)?;
+                Ok(())
+            }
             Step::NotifySend(args) => self.notify_send(args),
             Step::Notify(n) => self.notify(n),
             Step::ExpectNotificationSignals(expected) => {
@@ -3378,12 +3403,35 @@ impl Run<'_> {
         let path = self.compositor.state_dir().join(&expected.name);
         let deadline = Instant::now() + CLIENT_TIMEOUT;
         loop {
-            let text = std::fs::read_to_string(&path).unwrap_or_default();
-            let ok = expected.contains.iter().all(|c| text.contains(c.as_str()))
-                && !expected.lacks.iter().any(|l| text.contains(l.as_str()));
+            // A folder: each of its files, and those of its folders.
+            let texts: Vec<String> = if path.is_dir() {
+                let mut files = Vec::new();
+                let mut folders = vec![path.clone()];
+                while let Some(folder) = folders.pop() {
+                    for entry in std::fs::read_dir(&folder)?.flatten() {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            folders.push(p);
+                        } else {
+                            files.push(std::fs::read_to_string(&p).unwrap_or_default());
+                        }
+                    }
+                }
+                files
+            } else {
+                vec![std::fs::read_to_string(&path).unwrap_or_default()]
+            };
+            let ok = (expected.contains.is_empty()
+                || texts
+                    .iter()
+                    .any(|text| expected.contains.iter().all(|c| text.contains(c.as_str()))))
+                && !texts
+                    .iter()
+                    .any(|text| expected.lacks.iter().any(|l| text.contains(l.as_str())));
             if ok {
                 return Ok(());
             }
+            let text = texts.join("\n----\n");
             anyhow::ensure!(Instant::now() < deadline, "{} is:\n{text}", expected.name);
             self.compositor.dispatch(Duration::from_millis(10))?;
         }

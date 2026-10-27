@@ -84,6 +84,7 @@ mod socket;
 mod state;
 mod stats;
 mod surface;
+mod tasks;
 mod timezone;
 mod tray;
 mod tty;
@@ -317,6 +318,9 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         .clone()
         .or_else(|| state.is_session.then(session::default_dir).flatten());
     lock::persist(&mut state, state_dir.clone());
+    // Before the notes: their to-dos move to the tasks.
+    let tasks_dir = tasks::dir(state.is_session, state_dir.as_deref());
+    tasks::start(&event_loop.handle(), &mut state, tasks_dir);
     let notes_file = notes::file(state.is_session, state_dir.as_deref());
     notes::start(&event_loop.handle(), &mut state, notes_file);
     clipboard::start(&event_loop.handle(), &mut state, state_dir.clone());

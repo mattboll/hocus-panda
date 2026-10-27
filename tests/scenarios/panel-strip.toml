@@ -26,18 +26,15 @@ herdr_status = { agent = "refacto", status = "blocked", label = "Push the branch
 [[step]]
 notify = { app = "Chat", summary = "Lea", body = "The dock mockups are in the thread.", timeout_ms = 1000 }
 
-# A to-do, from the notes.
+# A task, from the command field.
 [[step]]
-keys = "super+49"
+keys = "super+57"
 
 [[step]]
-type = "- [ ] review the merge request"
+type = "todo review the merge request"
 
 [[step]]
 key = 28
-
-[[step]]
-key = 1
 
 [[step]]
 open = { app_id = "editor", size = [600, 400], color = "#3399ff" }

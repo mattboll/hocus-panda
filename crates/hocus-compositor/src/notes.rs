@@ -1,6 +1,7 @@
-//! Notes and to-dos (#79): one Markdown file, read and written on worker
-//! threads. Super+N shows them in the launcher's card; the column shows
-//! the to-dos not done; the command field finds them.
+//! Notes (#79): one Markdown file, read and written on worker threads.
+//! Super+N shows them in the launcher's card; the command field finds
+//! them. Its to-dos (`- [ ] …`, `- [x] …`) are tasks now (#255): those
+//! found in the file, or typed so in the card, move to the task list.
 
 use std::path::PathBuf;
 
@@ -91,7 +92,33 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, path: Option<
 impl State {
     fn notes_loaded(&mut self, text: &str) {
         self.notes.notes = Notes::parse(text);
-        self.show_notes();
+        if self.notes_todos_to_tasks() {
+            self.save_notes();
+        } else {
+            self.show_notes();
+        }
+    }
+
+    /// The notes' to-dos go to the tasks; whether some went.
+    fn notes_todos_to_tasks(&mut self) -> bool {
+        let todos: Vec<(bool, String)> = self
+            .notes
+            .notes
+            .lines
+            .iter()
+            .filter_map(|l| match l {
+                Line::Todo { done, text } => Some((*done, text.clone())),
+                _ => None,
+            })
+            .collect();
+        if !self.tasks_from_notes(todos) {
+            return false;
+        }
+        self.notes
+            .notes
+            .lines
+            .retain(|l| !matches!(l, Line::Todo { .. }));
+        true
     }
 
     fn save_notes(&mut self) {
@@ -110,15 +137,10 @@ impl State {
             .iter()
             .enumerate()
             .filter_map(|(index, line)| match line {
-                Line::Todo { done, text } => Some(NoteItem {
+                // Left only without a task list to move them to.
+                Line::Todo { text, .. } | Line::Note(text) => Some(NoteItem {
                     index,
                     text: text.clone(),
-                    todo: Some(*done),
-                }),
-                Line::Note(text) => Some(NoteItem {
-                    index,
-                    text: text.clone(),
-                    todo: None,
                 }),
                 Line::Other(_) => None,
             })
@@ -127,16 +149,6 @@ impl State {
             panel.launcher.set_notes(items);
         }
         self.needs_redraw = true;
-    }
-
-    /// The column's to-dos.
-    pub fn open_todos(&self) -> Vec<(usize, String)> {
-        self.notes
-            .notes
-            .open_todos()
-            .into_iter()
-            .map(|(i, t)| (i, t.to_owned()))
-            .collect()
     }
 
     /// Super+N: the notes in the launcher's card, read again first.
@@ -148,14 +160,10 @@ impl State {
         self.toggle_launcher_mode(Mode::Notes);
     }
 
+    /// A line typed in the notes; one typed as a to-do is a task.
     pub fn add_note(&mut self, typed: &str) {
         if self.notes.notes.add(typed) {
-            self.save_notes();
-        }
-    }
-
-    pub fn tick_note(&mut self, index: usize) {
-        if self.notes.notes.toggle(index) {
+            self.notes_todos_to_tasks();
             self.save_notes();
         }
     }

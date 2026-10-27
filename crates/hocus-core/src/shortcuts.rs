@@ -74,7 +74,7 @@ pub enum Action {
     Palette,
     /// Starts a screen recording (#70), or stops it.
     Record,
-    /// Notes and to-dos (#79), or no longer.
+    /// Notes (#79), or no longer.
     Notes,
     /// Everything but the focused window dims (#78), or no longer.
     FocusMode,

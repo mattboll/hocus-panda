@@ -80,6 +80,8 @@ impl Default for Enabled {
 /// The providers, in the order their results come.
 pub fn providers(enabled: &Enabled) -> Vec<Box<dyn Provider>> {
     let mut out: Vec<Box<dyn Provider>> = Vec::new();
+    // Said for what it is ("todo …"): first.
+    out.push(Box::new(Tasks));
     if enabled.intents {
         out.push(Box::new(Intents));
     }
@@ -122,6 +124,26 @@ pub fn providers(enabled: &Enabled) -> Vec<Box<dyn Provider>> {
         }));
     }
     out
+}
+
+/// "todo …", "task: …": a task to add (#255).
+struct Tasks;
+
+impl Provider for Tasks {
+    fn name(&self) -> &'static str {
+        "tasks"
+    }
+
+    fn hits(&self, query: &str, cx: &Context<'_>, out: &mut Vec<Hit>) {
+        if let Some(text) = crate::tasks::typed_task(query) {
+            out.push(Hit {
+                title: cx.lang.add_the_task(text),
+                kind: cx.lang.task_kind().into(),
+                color: Some(Color::rgb(0x2E, 0x7D, 0x4F)),
+                choice: Choice::AddTask(text.to_owned()),
+            });
+        }
+    }
 }
 
 /// A request understood offline: shown for confirmation, first.

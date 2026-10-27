@@ -1,0 +1,133 @@
+description = "Adding tasks (#255): given no tasks, the column says All done for today; todo Buy milk in the command field adds a task Buy milk to the local list, the column's field adds another, and with both ticked it is all done again, 2 of 2; MCP lists and adds tasks, an agent that may only read is refused"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+
+[[agents.mcp]]
+name = "reader"
+
+[[agents.mcp]]
+name = "helper"
+access = "act"
+"""
+
+# Never used, there is no list: the column says nothing of tasks.
+[[step]]
+expect_ui = { label = "TASKS", shown = false }
+
+# The list's folder, empty.
+[[step]]
+state_file = { name = "tasks/.keep", text = "" }
+
+[[step]]
+restart = true
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_ui = { label = "TASKS" }
+
+[[step]]
+expect_ui = { label = "All done for today." }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-empty.png" }
+
+# The command field.
+[[step]]
+keys = "super+57"
+
+[[step]]
+type = "todo Buy milk"
+
+[[step]]
+expect_ui = { label = "Add the task “Buy milk”" }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_state_file = { name = "tasks", contains = ["SUMMARY:Buy milk\r\n", "STATUS:NEEDS-ACTION\r\n", "BEGIN:VTODO\r\n"] }
+
+[[step]]
+expect_ui = { label = "Buy milk" }
+
+[[step]]
+expect_ui = { label = "1 to do" }
+
+# The column's field.
+[[step]]
+click_ui = "Add a task"
+
+[[step]]
+expect_ui = { label = "Enter adds it to the tasks · Escape closes" }
+
+[[step]]
+type = "Call the vet"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_state_file = { name = "tasks", contains = ["SUMMARY:Call the vet\r\n"] }
+
+[[step]]
+expect_ui = { label = "2 to do" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-added.png" }
+
+[[step]]
+click_ui = "Buy milk"
+
+[[step]]
+click_ui = "Call the vet"
+
+[[step]]
+expect_ui = { label = "All done for today." }
+
+[[step]]
+expect_ui = { label = "2 of 2" }
+
+[[step]]
+expect_state_file = { name = "tasks", lacks = ["NEEDS-ACTION"] }
+
+# MCP: an agent that may act adds one, kept in the journal; one that
+# may only read lists them, and is refused adding.
+[[step]]
+mcp = { agent = "helper", tool = "add_task", arguments = { text = "Water the bamboo", due = "tomorrow" }, contains = ["added: [ ] Water the bamboo (due 2026-10-22)"] }
+
+[[step]]
+expect_ui = { label = "Water the bamboo" }
+
+[[step]]
+expect_ui = { label = "tomorrow" }
+
+[[step]]
+expect_state_file = { name = "tasks", contains = ["SUMMARY:Water the bamboo\r\n", "DUE;VALUE=DATE:20261022\r\n"] }
+
+[[step]]
+mcp = { agent = "reader", tool = "list_tasks", contains = ["[ ] Water the bamboo (due 2026-10-22)"] }
+
+[[step]]
+mcp = { agent = "reader", tool = "list_tasks", arguments = { done = true }, contains = ["[x] Buy milk", "[x] Call the vet"] }
+
+[[step]]
+mcp = { agent = "reader", tool = "add_task", arguments = { text = "Delete everything" }, error = "refused: agent \"reader\" may only read" }
+
+[[step]]
+expect_journal = { has = ["helper: added a task of 16 characters", "reader: added a task of 17 characters; refused"] }
+
+[[step]]
+expect_state_file = { name = "tasks", lacks = ["Delete everything"] }

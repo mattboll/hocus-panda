@@ -1,4 +1,4 @@
-description = "Super+N: a line typed as - [ ] becomes a to-do, saved in the notes' Markdown file; the column shows it, and ticking it there writes - [x]"
+description = "Super+N: a line typed is saved in the notes' Markdown file; one typed as - [ ] is a task (#255), in the task list rather than the notes, and the column shows it; to-dos found in a notes file move to the tasks"
 outputs = ["1280x800"]
 shell = true
 
@@ -24,10 +24,13 @@ type = "the wifi code is on the fridge"
 key = 28
 
 [[step]]
-expect_ui = { label = "buy bamboo" }
+expect_ui = { label = "the wifi code is on the fridge" }
 
 [[step]]
-expect_state_file = { name = "notes.md", contains = ["- [ ] buy bamboo\n", "- the wifi code is on the fridge\n"] }
+expect_state_file = { name = "notes.md", contains = ["- the wifi code is on the fridge\n"], lacks = ["buy bamboo"] }
+
+[[step]]
+expect_state_file = { name = "tasks", contains = ["SUMMARY:buy bamboo\r\n", "STATUS:NEEDS-ACTION\r\n"] }
 
 [[step]]
 advance_ms = 300
@@ -35,12 +38,12 @@ advance_ms = 300
 [[step]]
 expect_screenshot = { output = "HEADLESS-1", reference = "notes.png" }
 
-# The column's preview.
+# The column shows the task.
 [[step]]
 key = 1
 
 [[step]]
-expect_ui = { label = "TASKS · 1 TO DO" }
+expect_ui = { label = "1 to do" }
 
 [[step]]
 advance_ms = 300
@@ -52,10 +55,10 @@ expect_screenshot = { output = "HEADLESS-1", reference = "notes-column.png" }
 click_ui = "buy bamboo"
 
 [[step]]
-expect_state_file = { name = "notes.md", contains = ["- [x] buy bamboo\n"] }
+expect_state_file = { name = "tasks", contains = ["SUMMARY:buy bamboo\r\n", "STATUS:COMPLETED\r\n"] }
 
 [[step]]
-expect_ui = { label = "TASKS · 1 TO DO", shown = false }
+expect_ui = { label = "All done for today." }
 
 # The command field finds notes.
 [[step]]
@@ -66,3 +69,35 @@ type = "fridge"
 
 [[step]]
 expect_ui = { label = "the wifi code is on the fridge" }
+
+[[step]]
+key = 1
+
+# A notes file with to-dos, as written before tasks were: they move to
+# the task list, done or not, and the notes keep the rest.
+[[step]]
+state_file = { name = "notes.md", text = """
+# Notes
+
+- [ ] call Léa
+- [x] water the plant
+- the wifi code is on the fridge
+""" }
+
+[[step]]
+restart = true
+
+[[step]]
+expect_state_file = { name = "notes.md", contains = ["# Notes\n", "- the wifi code is on the fridge\n"], lacks = ["call Léa", "water the plant"] }
+
+[[step]]
+expect_state_file = { name = "tasks", contains = ["SUMMARY:call Léa\r\n", "STATUS:NEEDS-ACTION\r\n"] }
+
+[[step]]
+expect_state_file = { name = "tasks", contains = ["SUMMARY:water the plant\r\n", "STATUS:COMPLETED\r\n"] }
+
+[[step]]
+expect_ui = { label = "call Léa" }
+
+[[step]]
+expect_ui = { label = "water the plant", shown = false }

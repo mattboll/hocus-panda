@@ -96,7 +96,7 @@ pub struct Occurrence {
 
 /// Lines unfolded (a line that starts with a space or a tab goes on the
 /// one before).
-fn unfold(text: &str) -> Vec<String> {
+pub(crate) fn unfold(text: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in text.split('\n') {
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
@@ -113,10 +113,10 @@ fn unfold(text: &str) -> Vec<String> {
 }
 
 /// A property's parameters (`TZID=…`, `VALUE=DATE`), names in capitals.
-type Params = Vec<(String, String)>;
+pub(crate) type Params = Vec<(String, String)>;
 
 /// `NAME;PARAM=V;…:VALUE` into its name, its parameters and its value.
-fn property(line: &str) -> Option<(String, Params, String)> {
+pub(crate) fn property(line: &str) -> Option<(String, Params, String)> {
     // The value starts at the first colon outside quotes.
     let mut quoted = false;
     let at = line.char_indices().find_map(|(i, c)| match c {
@@ -139,7 +139,7 @@ fn property(line: &str) -> Option<(String, Params, String)> {
     Some((name, params, value.to_owned()))
 }
 
-fn unescape(value: &str) -> String {
+pub(crate) fn unescape(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut chars = value.chars();
     while let Some(c) = chars.next() {
@@ -156,7 +156,7 @@ fn unescape(value: &str) -> String {
     out
 }
 
-fn parse_when(value: &str, params: &[(String, String)]) -> Option<When> {
+pub(crate) fn parse_when(value: &str, params: &[(String, String)]) -> Option<When> {
     let param = |k: &str| params.iter().find(|(p, _)| p == k).map(|(_, v)| v.as_str());
     let value = value.trim();
     if param("VALUE") == Some("DATE") || value.len() == 8 {

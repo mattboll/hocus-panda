@@ -223,11 +223,7 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             EVERYWHERE,
         ),
         A::Emoji => (w("Emoji", "Emoji"), G::System, EVERYWHERE),
-        A::Notes => (
-            w("Notes and to-dos", "Notes et tâches"),
-            G::Launcher,
-            EVERYWHERE,
-        ),
+        A::Notes => (w("Notes", "Notes"), G::Launcher, EVERYWHERE),
         A::FocusMode => (
             w(
                 "Focus: dim everything else",

@@ -507,28 +507,18 @@ impl Lang {
     }
 
     pub fn notes_placeholder(self) -> &'static str {
-        self.pick("A note, or - [ ] a to-do", "Une note, ou - [ ] une tâche")
+        self.pick("A note, or - [ ] a task", "Une note, ou - [ ] une tâche")
     }
 
     pub fn notes_hint(self) -> &'static str {
         self.pick(
-            "Enter adds the line, a to-do when it starts with - [ ] · on an empty line, Enter ticks · Delete removes",
-            "Entrée ajoute la ligne, une tâche si elle commence par - [ ] · sur une ligne vide, Entrée coche · Suppr retire",
+            "Enter adds the line, to the tasks when it starts with - [ ] · Delete removes the line chosen",
+            "Entrée ajoute la ligne, aux tâches si elle commence par - [ ] · Suppr retire la ligne choisie",
         )
     }
 
-    pub fn note_kind(self, todo: bool) -> &'static str {
-        match todo {
-            true => self.pick("To-do", "Tâche"),
-            false => self.pick("Note", "Note"),
-        }
-    }
-
-    pub fn tasks_caption(self, open: usize) -> String {
-        match self {
-            Self::En => format!("Tasks · {open} to do"),
-            Self::Fr => format!("Tâches · {open} à faire"),
-        }
+    pub fn note_kind(self) -> &'static str {
+        self.pick("Note", "Note")
     }
 
     pub fn coming(self) -> &'static str {

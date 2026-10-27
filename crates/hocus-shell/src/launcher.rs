@@ -7,9 +7,13 @@
 //! pins, Delete forgets) and the emoji picker (Super+Period: in English and
 //! French, recent ones first, Tab changes the skin tone).
 //!
-//! And notes (Super+N, #79): what is typed is added as a line, a to-do
-//! when it starts `- [ ]`; Enter on an empty field ticks the to-do chosen,
-//! Delete removes the line.
+//! And notes (Super+N, #79): what is typed is added as a line (one typed
+//! as a to-do, `- [ ] …`, becomes a task, #255); Delete removes the line
+//! chosen.
+//!
+//! And a task (#255), from the column's field or a task's menu: what is
+//! typed is added to the tasks, or replaces the text of the one edited.
+//! The command field adds one too: "todo …", "task: …".
 //!
 //! And the action palette (Super+P, #68): every action, with its keys as
 //! caps and what it acts on, recent ones first; searched by name in either
@@ -200,8 +204,13 @@ pub enum Choice {
     SetShortcut,
     /// A line typed in the notes: added.
     AddNote(String),
-    /// The to-do at this place in the file: ticked, or not.
-    ToggleNote(usize),
+    /// A task to add, from the command field (#255).
+    AddTask(String),
+    /// A task typed in the card: added, or the text of the one of this id.
+    SaveTask {
+        id: Option<String>,
+        text: String,
+    },
     /// The notes, opened from the command field.
     OpenNotes,
     /// A request understood offline, confirmed (#44).
@@ -218,8 +227,6 @@ pub struct NoteItem {
     /// Its place in the file.
     pub index: usize,
     pub text: String,
-    /// A to-do, and whether it is done.
-    pub todo: Option<bool>,
 }
 
 /// What the card shows.
@@ -231,6 +238,8 @@ pub enum Mode {
     Emoji,
     Actions,
     Notes,
+    /// A task to add or edit (#255).
+    Tasks,
 }
 
 /// What the command field can do to the session.
@@ -332,6 +341,8 @@ pub struct Launcher {
     action_recents: Vec<Action>,
     /// The notes, in the file's order.
     notes: Vec<NoteItem>,
+    /// The task being edited, by id; `None` adds one.
+    editing: Option<String>,
     /// The keys that open what the card shows, in the field's corner.
     chip_text: NodeId,
     /// The hint under the list in the history and the picker, and its box.
@@ -539,6 +550,7 @@ impl Launcher {
             shortcuts: Vec::new(),
             action_recents: Vec::new(),
             notes: Vec::new(),
+            editing: None,
             chip_text,
             hint,
             hint_box,
@@ -713,6 +725,7 @@ impl Launcher {
     pub fn open_mode(&mut self, mode: Mode) {
         self.open = true;
         self.mode = mode;
+        self.editing = None;
         self.answer = None;
         self.offers.clear();
         self.confirming = None;
@@ -724,11 +737,13 @@ impl Launcher {
             Mode::Emoji => "Super+.",
             Mode::Actions => "Super+P",
             Mode::Notes => "Super+N",
+            Mode::Tasks => self.lang.task_kind(),
         };
         self.tree.set_text(self.chip_text, keys);
         let placeholder = match mode {
             Mode::Actions => self.lang.palette_placeholder(),
             Mode::Notes => self.lang.notes_placeholder(),
+            Mode::Tasks => self.lang.task_placeholder(),
             _ => self.lang.command_placeholder(),
         };
         self.tree.set_placeholder(self.field, placeholder);
@@ -738,6 +753,17 @@ impl Launcher {
 
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// Opens on a task to add, or on the text of the one of this id, to
+    /// edit (#255).
+    pub fn open_task(&mut self, editing: Option<(String, String)>) {
+        self.open_mode(Mode::Tasks);
+        if let Some((id, text)) = editing {
+            self.tree.set_field_value(self.field, &text);
+            self.editing = Some(id);
+            self.show_hint();
+        }
     }
 
     /// The clipboard history, as it is shown: text and pinned.
@@ -872,6 +898,7 @@ impl Launcher {
             Mode::Actions => self.lang.palette_hint().to_owned(),
             Mode::Clipboard => self.lang.history_hint().to_owned(),
             Mode::Notes => self.lang.notes_hint().to_owned(),
+            Mode::Tasks => self.lang.task_hint(self.editing.is_some()).to_owned(),
             Mode::Emoji => self.lang.emoji_hint(&self.tone_sample()),
         };
         self.tree
@@ -923,7 +950,7 @@ impl Launcher {
                                 .take(3)
                                 .map(|n| Hit {
                                     title: n.text.clone(),
-                                    kind: self.lang.note_kind(n.todo.is_some()).into(),
+                                    kind: self.lang.note_kind().into(),
                                     color: Some(hocus_ui::Color::rgb(0x2E, 0x7D, 0x4F)),
                                     choice: Choice::OpenNotes,
                                 }),
@@ -980,12 +1007,11 @@ impl Launcher {
                     title: n.text.clone(),
                     kind: String::new(),
                     color: None,
-                    choice: match n.todo {
-                        Some(_) => Choice::ToggleNote(n.index),
-                        None => Choice::Copy(n.text.clone()),
-                    },
+                    choice: Choice::Copy(n.text.clone()),
                 })
                 .collect(),
+            // What is typed is the task, not a search.
+            Mode::Tasks => Vec::new(),
             Mode::Emoji => {
                 let emoji: Vec<&crate::emoji::Emoji> = if query.is_empty() {
                     self.recents
@@ -1035,7 +1061,7 @@ impl Launcher {
         // Only the palette scrolls: it lists everything.
         if self.has_card() {
             self.hits.truncate(1 + MAX_ALSO);
-        } else if !matches!(self.mode, Mode::Actions | Mode::Notes) {
+        } else if !matches!(self.mode, Mode::Actions | Mode::Notes | Mode::Tasks) {
             fit(&mut self.hits, MAX_RESULTS);
         }
         self.selected = 0;
@@ -1314,27 +1340,6 @@ impl Launcher {
             self.tree.set_clickable(row, &said);
             // Applications and results have their colour; copies and emoji
             // speak for themselves.
-            // A to-do's box, ticked when done.
-            if let Choice::ToggleNote(index) = &hit.choice {
-                let done = self
-                    .notes
-                    .iter()
-                    .find(|n| n.index == *index)
-                    .and_then(|n| n.todo)
-                    .unwrap_or(false);
-                let _ = self.tree.add(
-                    row,
-                    Style {
-                        width: Length::Px(20.0),
-                        height: Length::Px(20.0),
-                        ..Style::default()
-                    },
-                    Kind::Custom {
-                        draw: Box::new(crate::checkbox::Checkbox(done)),
-                        label: None,
-                    },
-                );
-            }
             if self.mode == Mode::Commands {
                 let _ = self.tree.add(
                     row,
@@ -1866,26 +1871,33 @@ impl Launcher {
                 .map(LauncherEvent::Pin)
                 .into_iter()
                 .collect(),
-            // Notes: Enter adds what is typed; on an empty field, it ticks.
+            // Notes: Enter adds what is typed; on an empty field, it copies
+            // the line chosen.
             Key::Enter if self.mode == Mode::Notes && !self.query().trim().is_empty() => {
                 let typed = self.query().to_owned();
                 self.tree.set_field_value(self.field, "");
                 vec![LauncherEvent::Chosen(Choice::AddNote(typed))]
             }
-            Key::Enter if self.mode == Mode::Notes => {
-                self.choose(self.selected).into_iter().collect()
-            }
-            Key::Delete if self.mode == Mode::Notes && self.query().is_empty() => {
-                match self.hits.get(self.selected).map(|h| &h.choice) {
-                    Some(Choice::ToggleNote(i)) => vec![LauncherEvent::RemoveNote(*i)],
-                    _ => self
-                        .notes
-                        .iter()
-                        .rev()
-                        .nth(self.selected)
-                        .map(|n| LauncherEvent::RemoveNote(n.index))
-                        .into_iter()
-                        .collect(),
+            Key::Delete if self.mode == Mode::Notes && self.query().is_empty() => self
+                .notes
+                .iter()
+                .rev()
+                .nth(self.selected)
+                .map(|n| LauncherEvent::RemoveNote(n.index))
+                .into_iter()
+                .collect(),
+            // A task: Enter keeps it and closes; nothing typed, nothing kept.
+            Key::Enter if self.mode == Mode::Tasks => {
+                let text = self.query().trim().to_owned();
+                let id = self.editing.take();
+                self.close();
+                if text.is_empty() {
+                    vec![LauncherEvent::Closed]
+                } else {
+                    vec![
+                        LauncherEvent::Closed,
+                        LauncherEvent::Chosen(Choice::SaveTask { id, text }),
+                    ]
                 }
             }
             Key::Delete if self.mode == Mode::Clipboard => self
@@ -1989,10 +2001,7 @@ impl Launcher {
             if let Some(i) = self.rows.iter().position(|r| *r == node)
                 && let Some(chosen) = self.choose(self.first + i)
             {
-                // Ticking a to-do keeps the notes open.
-                if self.mode != Mode::Notes {
-                    self.close();
-                }
+                self.close();
                 events.push(chosen);
             }
         }

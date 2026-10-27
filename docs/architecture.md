@@ -509,7 +509,24 @@ shows it.
 Notes (#79) are one Markdown file, read and written whole on worker
 threads (written to a new file, then renamed over the old one); lines the
 notes do not understand are kept as they were. The file is read again each
-time the notes open, so edits made elsewhere show.
+time the notes open, so edits made elsewhere show. Its to-dos are tasks
+now: those found in it (as files written before #255 have them) or typed so
+move to the task list, done or not, and leave the notes.
+
+Tasks (#255) share one model, iCalendar's VTODO (`hocus_platform::tasks`),
+whatever their source: the local list now, CalDAV task lists (#256) and
+Google Tasks (#257) next, each a `Source` that knows where its tasks are
+written back. The local list is a folder of `.ics` files, one task each,
+as vdir has it (vdirsyncer's `filesystem` storage, so it can be synced
+too): its files are the default list, its folders named lists. A thread of
+its own reads the folder at start and writes each change sent to it, then
+reads the folder again and sends it back; the loop changes its own copy
+at once, so that a tick shows at once, and takes a folder read only once
+every change sent before it is written. A task written back keeps every
+line it was read with but those the desktop manages (summary, status,
+completion, due date, stamps). What the column shows is made again only
+when the tasks, the minute or the pandas change; without a list, the
+column shows no section and nothing is made.
 
 Comfort over the whole screen (#78): focus mode puts a veil just under the
 focused window; the magnifier wraps every element of an output's scene in a

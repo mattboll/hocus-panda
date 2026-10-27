@@ -21,6 +21,7 @@ pub mod search;
 pub mod secrets;
 pub mod session;
 pub mod system;
+pub mod tasks;
 pub mod timedate;
 pub mod tray;
 pub mod updates;

@@ -156,6 +156,24 @@ impl State {
         self.journal_keep((civil.hour() as u8, civil.minute() as u8, entry), None);
     }
 
+    /// A task `agent` added (#255), or tried to: its text only when
+    /// `[agents] journal_text` says so.
+    pub(crate) fn journal_task(&mut self, agent: &str, text: &str, refusal: Option<&ApiError>) {
+        let civil = self.wall_civil();
+        let entry = JournalEntry {
+            at: wall(&civil),
+            agent: agent.to_owned(),
+            action: JournalAction::AddTask {
+                characters: text.chars().count(),
+                text: self.config.agents.journal_text.then(|| text.to_owned()),
+            },
+            target: None,
+            refused: None,
+            confirmed: false,
+        };
+        self.journal_keep((civil.hour() as u8, civil.minute() as u8, entry), refusal);
+    }
+
     /// What `agent` asks for, as the journal keeps it: the window as it
     /// is now, before the action changes it. Text and keys are not kept
     /// while the session is locked or a password is asked for.
@@ -300,6 +318,10 @@ fn did(action: &JournalAction) -> Did {
         JournalAction::Keys { keys } => Did::Keys(keys.clone()),
         JournalAction::Connect => Did::Connect,
         JournalAction::Prompt { characters, text } => Did::Prompt {
+            characters: *characters,
+            text: text.clone(),
+        },
+        JournalAction::AddTask { characters, text } => Did::AddTask {
             characters: *characters,
             text: text.clone(),
         },

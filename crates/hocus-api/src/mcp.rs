@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     ActTarget, Action, ApiError, AppTree, Button, Client, ClientError, ErrorCode, Point, Reply,
-    Request, Target, UiNode, WindowInfo,
+    Request, Target, TaskInfo, UiNode, WindowInfo,
 };
 
 /// Protocol revisions spoken, newest first; the newest is offered to a
@@ -252,6 +252,8 @@ impl Bridge {
             "press_keys" => self.press_keys(&args),
             "wait_for" => self.wait_for(&args),
             "journal" => self.journal(&args),
+            "list_tasks" => self.list_tasks(&args),
+            "add_task" => self.add_task(&args),
             other => return Err((INVALID_PARAMS, format!("unknown tool {other:?}"))),
         };
         Ok(match outcome {
@@ -600,6 +602,65 @@ impl Bridge {
     }
 }
 
+impl Bridge {
+    /// The user's tasks (#255), one line each for the agent to read, and
+    /// as data.
+    fn list_tasks(&mut self, args: &Args) -> Result<Done, Failure> {
+        let with_done = args.bool("done")?.unwrap_or(false);
+        let tasks: Vec<TaskInfo> = match self.request(Request::Tasks)? {
+            Reply::Tasks(tasks) => tasks.into_iter().filter(|t| with_done || !t.done).collect(),
+            other => return Err(unexpected(&other)),
+        };
+        let mut lines: Vec<String> = tasks.iter().map(task_line).collect();
+        if lines.is_empty() {
+            lines.push("No tasks.".into());
+        }
+        Ok(Done {
+            content: vec![text(&lines.join("\n"))],
+            structured: Some(json!({ "tasks": tasks })),
+        })
+    }
+
+    fn add_task(&mut self, args: &Args) -> Result<Done, Failure> {
+        let what = args
+            .str("text")?
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .ok_or("text: what is to be done")?;
+        let request = Request::AddTask {
+            text: what.to_owned(),
+            due: args.str("due")?.map(str::to_owned),
+            list: args.str("list")?.map(str::to_owned),
+        };
+        match self.request(request)? {
+            Reply::Task(task) => Ok(Done {
+                content: vec![text(&format!("added: {}", task_line(&task)))],
+                structured: Some(json!({ "task": task })),
+            }),
+            other => Err(unexpected(&other)),
+        }
+    }
+}
+
+/// A task in one line: `[ ] Buy milk (due 2026-10-21, late)`.
+fn task_line(task: &TaskInfo) -> String {
+    let mut line = format!("[{}] {}", if task.done { "x" } else { " " }, task.text);
+    let mut about = Vec::new();
+    if let Some(due) = &task.due {
+        about.push(format!("due {due}"));
+    }
+    if task.late {
+        about.push("late".into());
+    }
+    if let Some(list) = &task.list {
+        about.push(format!("in {list}"));
+    }
+    if !about.is_empty() {
+        line.push_str(&format!(" ({})", about.join(", ")));
+    }
+    line
+}
+
 fn describe(app_id: Option<&str>, title: Option<&str>, label: Option<&str>) -> String {
     let mut parts = Vec::new();
     if let Some(a) = app_id {
@@ -902,6 +963,39 @@ fn tools() -> Vec<Value> {
             },
             "annotations": read,
         }),
+        json!({
+            "name": "list_tasks",
+            "title": "List tasks",
+            "description": "The user's tasks (the column's Tasks): those not done, late ones and \
+                today's first, as the column orders them, each with its id, text, due date \
+                (`2026-10-21`, or `2026-10-21T15:00` in the user's time), whether it is late, its \
+                list and its source; with `done`, those done too.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "done": { "type": "boolean", "default": false, "description": "Those done too." },
+                },
+                "additionalProperties": false,
+            },
+            "annotations": read,
+        }),
+        json!({
+            "name": "add_task",
+            "title": "Add a task",
+            "description": "Adds a task to the user's local task list; the column shows it. Only \
+                for an agent whose access is to act; kept in the agents' journal.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "What is to be done, one line." },
+                    "due": { "type": "string", "description": "When: `today`, `tomorrow`, `2026-10-21`, or `2026-10-21T15:00` in the user's time." },
+                    "list": { "type": "string", "description": "A list of the local one, by name; its default list otherwise." },
+                },
+                "required": ["text"],
+                "additionalProperties": false,
+            },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false },
+        }),
     ]
 }
 
@@ -1014,7 +1108,9 @@ mod tests {
                 "type",
                 "press_keys",
                 "wait_for",
-                "journal"
+                "journal",
+                "list_tasks",
+                "add_task"
             ]
         );
         for tool in tools {

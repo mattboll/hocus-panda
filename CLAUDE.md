@@ -39,7 +39,8 @@ target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 3440x14
 # talk to it: the socket is logged at start ("control=…")
 target/debug/hocus msg --socket <control socket> windows   # also: outputs, scene,
     # events, pointer-move X Y, click, key CODE, screenshot --output NAME -o FILE,
-    # ui (the shell's buttons and texts with their places), search (the indexer), agents-journal
+    # ui (the shell's buttons and texts with their places), search (the indexer), agents-journal,
+    # tasks, task-add TEXT --due tomorrow
 # an MCP server on stdio for AI agents, as an agent of [[agents.mcp]] (docs/mcp.md)
 target/debug/hocus mcp --socket <control socket> --agent NAME
 ```

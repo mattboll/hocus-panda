@@ -122,8 +122,9 @@ pub struct ColumnState {
     pub tray: Vec<TrayApp>,
     /// The screen is being shared.
     pub sharing: bool,
-    /// To-dos not done, with their place in the notes, and how many.
-    pub todos: Vec<(usize, String)>,
+    /// The tasks (#255), once there is a list of them (shared: the state
+    /// is made after every turn of the loop).
+    pub tasks: Option<Arc<crate::tasks::TasksView>>,
     /// System updates waiting, and whether they are being installed.
     pub updates: Option<(usize, bool)>,
     /// The phone within reach (#85).
@@ -284,8 +285,18 @@ pub enum Action {
     OpenPanel,
     /// Every screen capture ends.
     StopSharing,
-    /// The to-do at this place in the notes is ticked.
-    TickTodo(usize),
+    /// The task of this id is ticked, or unticked (#255).
+    ToggleTask(String),
+    /// The tasks' field: the launcher opens to add one.
+    AddTask,
+    /// The task's menu: the launcher opens on its text.
+    EditTask(String),
+    /// The task's menu: when it is due.
+    TaskDue {
+        id: String,
+        due: crate::tasks::DueChoice,
+    },
+    DeleteTask(String),
     /// The next meeting's call.
     JoinMeeting,
     InstallUpdates,
@@ -454,7 +465,7 @@ struct Nodes {
     /// The sharing line's room, and its stop while the screen is shared.
     sharing: NodeId,
     stop_sharing: Option<NodeId>,
-    /// The to-dos' room.
+    /// The tasks' room.
     tasks: NodeId,
     /// The updates' room, and its Install.
     updates: NodeId,
@@ -518,6 +529,8 @@ enum PopoverKind {
     Agenda,
     Phone,
     Journal,
+    /// A task's menu.
+    Task,
 }
 
 /// A popover: its own tree and pixels, placed by the column.
@@ -571,8 +584,10 @@ pub struct Column {
     closed_by_press: Option<PopoverKind>,
     /// The menu last received, and whose.
     tray_menu: Option<(String, Vec<TrayMenuEntry>)>,
-    /// The to-dos shown, and their places in the notes.
-    todo_rows: Vec<(NodeId, usize)>,
+    /// The tasks shown and the field, and what a click on each does.
+    task_targets: Vec<(NodeId, crate::tasks::Target)>,
+    /// The task whose menu is open.
+    task_menu: Option<String>,
     /// The notifications shown, and the one the pointer is over.
     note_rows: Vec<NoteRow>,
     hovered_note: Option<u32>,
@@ -605,7 +620,8 @@ impl Column {
             popover_changed: false,
             closed_by_press: None,
             tray_menu: None,
-            todo_rows: Vec::new(),
+            task_targets: Vec::new(),
+            task_menu: None,
             note_rows: Vec::new(),
             hovered_note: None,
             pointer: None,
@@ -880,15 +896,16 @@ impl Column {
                 .sharing
                 .then(|| fill_sharing(t, n.sharing, &theme, lang));
         }
-        if all || old.todos != state.todos {
-            t.set_style(n.tasks, tasks_room(!state.todos.is_empty()));
+        if all || old.tasks != state.tasks || old.time.format != state.time.format {
+            t.set_style(n.tasks, crate::tasks::room(state.tasks.is_some()));
             for child in t.children(n.tasks) {
                 t.remove(child);
             }
-            self.todo_rows.clear();
-            if !state.todos.is_empty() {
+            self.task_targets.clear();
+            if let Some(view) = &state.tasks {
                 let theme = t.theme().clone();
-                self.todo_rows = fill_tasks(t, n.tasks, &theme, lang, &state.todos);
+                self.task_targets =
+                    crate::tasks::fill(t, n.tasks, &theme, lang, view, state.time.format);
             }
         }
         if all || old.agents != state.agents {
@@ -920,7 +937,7 @@ impl Column {
             };
         }
         if all || old.updates != state.updates {
-            t.set_style(n.updates, tasks_room(state.updates.is_some()));
+            t.set_style(n.updates, line_room(state.updates.is_some()));
             for child in t.children(n.updates) {
                 t.remove(child);
             }
@@ -930,7 +947,7 @@ impl Column {
             });
         }
         if all || old.phone != state.phone {
-            t.set_style(n.phone, tasks_room(state.phone.is_some()));
+            t.set_style(n.phone, line_room(state.phone.is_some()));
             for child in t.children(n.phone) {
                 t.remove(child);
             }
@@ -1116,6 +1133,17 @@ impl Column {
                 self.open(PopoverKind::Journal);
             }
         }
+        // A task's menu is about the task as it was: it closes once the
+        // tasks change.
+        if !all
+            && old.tasks != state.tasks
+            && self
+                .popover
+                .as_ref()
+                .is_some_and(|p| p.kind == PopoverKind::Task)
+        {
+            self.close_popover();
+        }
         // An open tray follows its applications; it closes with the last.
         if !all
             && old.tray != state.tray
@@ -1142,8 +1170,27 @@ impl Column {
     }
 
     /// The secondary button at `at`: over an application in the tray, its
-    /// menu.
+    /// menu; over a task, its own.
     pub fn secondary_click(&mut self, at: Point) -> Vec<Action> {
+        if !self.in_popover(at) {
+            self.tree.layout();
+            let task = self
+                .task_targets
+                .iter()
+                .find_map(|(node, target)| match target {
+                    crate::tasks::Target::Toggle(id)
+                        if self.tree.rect(*node).is_some_and(|r| r.contains(at)) =>
+                    {
+                        Some(id.clone())
+                    }
+                    _ => None,
+                });
+            if let Some(id) = task {
+                self.task_menu = Some(id);
+                self.open(PopoverKind::Task);
+                return Vec::new();
+            }
+        }
         let Some(p) = &self.popover else {
             return Vec::new();
         };
@@ -1187,6 +1234,10 @@ impl Column {
                 Some(entries) => entries,
                 None => return,
             },
+            PopoverKind::Task => match self.task_row(self.task_menu.as_deref()) {
+                Some((node, _)) => node,
+                None => return,
+            },
         };
         let anchor = self.tree.rect(anchor).unwrap_or_default();
         let (mut tree, targets) = match kind {
@@ -1215,6 +1266,10 @@ impl Column {
                 Some(view) => journal_popover(&theme, self.lang, view, scale),
                 None => return,
             },
+            PopoverKind::Task => match self.task_row(self.task_menu.as_deref()) {
+                Some((_, task)) => task_popover(&theme, self.lang, &task, scale),
+                None => return,
+            },
         };
         let first = tree.update(self.now);
         let size = tree.size();
@@ -1226,7 +1281,8 @@ impl Column {
             | PopoverKind::TrayMenu
             | PopoverKind::Agenda
             | PopoverKind::Phone
-            | PopoverKind::Journal => anchor.y - SHADOW_ROOM,
+            | PopoverKind::Journal
+            | PopoverKind::Task => anchor.y - SHADOW_ROOM,
             PopoverKind::Account => anchor.bottom() + SHADOW_ROOM - size.h,
         };
         let y = y.clamp(-MARGIN, (self.tree.size().h + MARGIN - size.h).max(-MARGIN));
@@ -1241,6 +1297,26 @@ impl Column {
             targets,
         });
         self.popover_changed = true;
+    }
+
+    /// The row of the task of this id, and the task.
+    fn task_row(&self, id: Option<&str>) -> Option<(NodeId, crate::tasks::TaskRow)> {
+        let id = id?;
+        let node = self
+            .task_targets
+            .iter()
+            .find_map(|(node, target)| match target {
+                crate::tasks::Target::Toggle(t) if t == id => Some(*node),
+                _ => None,
+            })?;
+        let task = self
+            .state
+            .tasks
+            .as_ref()?
+            .rows
+            .iter()
+            .find(|r| r.id == id)?;
+        Some((node, task.clone()))
     }
 
     /// Whether the phone's popover is open: a pairing shown in it stops
@@ -1375,8 +1451,11 @@ impl Column {
                 self.toggle(PopoverKind::Desktops);
             } else if id == n.account {
                 self.toggle(PopoverKind::Account);
-            } else if let Some((_, index)) = self.todo_rows.iter().find(|(row, _)| *row == id) {
-                actions.push(Action::TickTodo(*index));
+            } else if let Some((_, target)) = self.task_targets.iter().find(|(t, _)| *t == id) {
+                actions.push(match target {
+                    crate::tasks::Target::Toggle(task) => Action::ToggleTask(task.clone()),
+                    crate::tasks::Target::Add => Action::AddTask,
+                });
             } else if Some(id) == n.clear_notifications {
                 actions.push(Action::ClearNotifications);
             } else if let Some(row) = self.note_rows.iter().find(|r| r.dismiss == id) {
@@ -1597,7 +1676,7 @@ fn takes_other_room(old: &ColumnState, new: &ColumnState) -> bool {
     old.notifications != new.notifications
         || old.journal != new.journal
         || old.agents != new.agents
-        || old.todos != new.todos
+        || old.tasks != new.tasks
         || old.updates != new.updates
         || old.phone != new.phone
         || old.sharing != new.sharing
@@ -1966,7 +2045,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         ),
     );
 
-    // The coding agents and the to-dos when there are some (they take no
+    // The coding agents and the tasks when there are some (they take no
     // room otherwise), then the latest notifications.
     let feed = add(tree, card, Style::default(), Kind::Box(Look::default()));
     let agents = add(
@@ -1981,10 +2060,15 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         crate::journal::room(false),
         Kind::Box(Look::default()),
     );
-    let tasks = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
+    let tasks = add(
+        tree,
+        feed,
+        crate::tasks::room(false),
+        Kind::Box(Look::default()),
+    );
     // Board D13: the phone, the updates, then the notifications.
-    let phone = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
-    let updates = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
+    let phone = add(tree, feed, line_room(false), Kind::Box(Look::default()));
+    let updates = add(tree, feed, line_room(false), Kind::Box(Look::default()));
     let notes = add(tree, feed, notes_room(true), Kind::Box(Look::default()));
     // As tall as its caption, with or without Clear all: the button
     // reaches over the gaps around it, and nothing moves when it comes.
@@ -2250,8 +2334,8 @@ fn meeting_button(
     .unwrap_or_else(|| unreachable!("adding to a node of this tree"))
 }
 
-/// The to-dos' room above the notifications: some, or none.
-fn tasks_room(shown: bool) -> Style {
+/// A line's room above the notifications: some, or none.
+fn line_room(shown: bool) -> Style {
     Style {
         gap: 8.0,
         padding: Insets {
@@ -2262,68 +2346,6 @@ fn tasks_room(shown: bool) -> Style {
         clip: true,
         ..Style::default()
     }
-}
-
-/// The to-dos not done, three at most, as board D13 shows them: each a
-/// box to tick.
-fn fill_tasks(
-    tree: &mut Tree,
-    room: NodeId,
-    theme: &Theme,
-    lang: Lang,
-    todos: &[(usize, String)],
-) -> Vec<(NodeId, usize)> {
-    let missing = || unreachable!("adding to a node of this tree");
-    tree.add(
-        room,
-        Style::default(),
-        Kind::text(
-            lang.tasks_caption(todos.len()).to_uppercase(),
-            caption(theme),
-        ),
-    )
-    .unwrap_or_else(missing);
-    let mut rows = Vec::new();
-    for (index, text) in todos.iter().take(3) {
-        let row = tree
-            .add(
-                room,
-                Style {
-                    direction: hocus_ui::Direction::Row,
-                    gap: 10.0,
-                    align: Align::Center,
-                    height: Length::Px(28.0),
-                    ..Style::default()
-                },
-                Kind::Box(Look::default()),
-            )
-            .unwrap_or_else(missing);
-        tree.set_clickable(row, text);
-        tree.add(
-            row,
-            Style {
-                width: Length::Px(18.0),
-                height: Length::Px(18.0),
-                ..Style::default()
-            },
-            Kind::Custom {
-                draw: Box::new(crate::checkbox::Checkbox(false)),
-                label: None,
-            },
-        )
-        .unwrap_or_else(missing);
-        tree.add(
-            row,
-            Style {
-                width: Length::Fill,
-                ..Style::default()
-            },
-            Kind::text_line(text.clone(), theme.text.body),
-        )
-        .unwrap_or_else(missing);
-        rows.push((row, *index));
-    }
-    rows
 }
 
 /// The updates' line, as board D13 draws it: how many, and Install;
@@ -3103,6 +3125,83 @@ fn tray_menu_popover(
                 id: entry.id,
             },
         ));
+    }
+    (tree, targets)
+}
+
+/// A task's menu: edit it, when it is due, delete it.
+fn task_popover(
+    theme: &Theme,
+    lang: Lang,
+    task: &crate::tasks::TaskRow,
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    use crate::tasks::{Due, DueChoice};
+    let id = || task.id.clone();
+    let mut entries = vec![(lang.edit_task(), Action::EditTask(id()))];
+    if !task.done {
+        if task.due != Some(Due::Today) {
+            entries.push((
+                lang.due_today(),
+                Action::TaskDue {
+                    id: id(),
+                    due: DueChoice::Today,
+                },
+            ));
+        }
+        if task.due != Some(Due::Tomorrow) {
+            entries.push((
+                lang.due_tomorrow(),
+                Action::TaskDue {
+                    id: id(),
+                    due: DueChoice::Tomorrow,
+                },
+            ));
+        }
+        if task.due.is_some() {
+            entries.push((
+                lang.no_due_date(),
+                Action::TaskDue {
+                    id: id(),
+                    due: DueChoice::None,
+                },
+            ));
+        }
+    }
+    entries.push((lang.delete_task(), Action::DeleteTask(id())));
+    let height = 16.0 * 2.0 + entries.len() as f32 * 40.0;
+    let (mut tree, card) = popover_tree(theme, 240.0, height, scale);
+    tree.set_style(
+        card,
+        Style {
+            height: Length::Fill,
+            padding: Insets::all(16.0),
+            gap: 1.0,
+            ..Style::default()
+        },
+    );
+    let mut targets = Vec::new();
+    for (label, action) in entries {
+        let style = if matches!(action, Action::DeleteTask(_)) {
+            theme.text.body.with_color(Paint::Error)
+        } else {
+            theme.text.body
+        };
+        let Some(button) = tree.add(
+            card,
+            Style {
+                height: Length::Px(39.0),
+                ..Style::default()
+            },
+            Kind::Button(
+                Button::new(label, ButtonKind::Ghost, theme)
+                    .with_style(style)
+                    .at_start(),
+            ),
+        ) else {
+            continue;
+        };
+        targets.push((button, action));
     }
     (tree, targets)
 }
