@@ -525,8 +525,10 @@ at once, so that a tick shows at once, and takes a folder read only once
 every change sent before it is written. A task written back keeps every
 line it was read with but those the desktop manages (summary, status,
 completion, due date, stamps). What the column shows is made again only
-when the tasks, the minute or the pandas change; without a list, the
-column shows no section and nothing is made.
+when the tasks, the minute or the pandas change. The section always shows,
+"All done for today." and the field to add one before any task exists;
+only without a data directory (a nested session with no state directory)
+is there none.
 
 Comfort over the whole screen (#78): focus mode puts a veil just under the
 focused window; the magnifier wraps every element of an output's scene in a

@@ -1,9 +1,9 @@
 //! Tasks (#255): the local list, a folder of iCalendar VTODO files
 //! (`$XDG_DATA_HOME/hocuspanda/tasks`), read and written by a thread of its
 //! own, which reads the folder again after each change it writes. The
-//! column shows them once the folder is there; the command field, the
-//! column's field and a task's menu change them; the control API and MCP
-//! list and add them. CalDAV task lists (#256) and Google Tasks (#257) are
+//! column always shows them ("All done for today." without any, and the
+//! field to add the first); the command field, the column's field and a
+//! task's menu change them; the control API and MCP list and add them. CalDAV task lists (#256) and Google Tasks (#257) are
 //! sources to come, of the same [`Task`].
 //!
 //! The loop changes its own copy at once, so that a tick shows at once,
@@ -52,8 +52,6 @@ struct ViewKey {
 #[derive(Debug, Default)]
 pub struct TasksState {
     pub tasks: Vec<Task>,
-    /// The list's folder is there: the column shows the section.
-    pub exists: bool,
     /// The local list's folder; `None` without one (a nested session).
     dir: Option<PathBuf>,
     worker: Option<mpsc::Sender<Command>>,
@@ -297,14 +295,9 @@ impl State {
             return;
         }
         match read.tasks {
-            Ok(Some(tasks)) => {
-                self.tasks.tasks = tasks;
-                self.tasks.exists = true;
-            }
-            Ok(None) => {
-                self.tasks.tasks.clear();
-                self.tasks.exists = false;
-            }
+            Ok(Some(tasks)) => self.tasks.tasks = tasks,
+            // No folder yet: none, until the first is added.
+            Ok(None) => self.tasks.tasks.clear(),
             Err(err) => {
                 tracing::warn!(%err, "the tasks do not read; those known stay");
                 return;
@@ -357,26 +350,30 @@ impl State {
         if self.tasks.view.as_ref().is_some_and(|(k, _)| *k == key) {
             return;
         }
-        let shown = self.tasks.exists.then(|| {
+        // Shown wherever tasks can be kept, none yet included: "All done
+        // for today." and the field to add the first.
+        let shown = self.tasks.dir.is_some().then(|| {
             let now = self.tasks_now();
-            Arc::new(view(&self.tasks.tasks, &now, key.pandas))
+            view(&self.tasks.tasks, &now, key.pandas)
         });
         // The minute turning changes nothing most of the time: the same
-        // view stays, and nothing is drawn again.
-        let same = matches!(
-            (&self.tasks.view, &shown),
-            (Some((_, Some(old))), Some(new)) if old == new
-        ) || matches!((&self.tasks.view, &shown), (Some((_, None)), None));
+        // view stays, nothing is drawn again, nothing more is held.
+        let same = match (&self.tasks.view, &shown) {
+            (Some((_, Some(old))), Some(new)) => **old == *new,
+            (Some((_, None)), None) => true,
+            _ => false,
+        };
         if same {
             if let Some((k, _)) = &mut self.tasks.view {
                 *k = key;
             }
             return;
         }
-        self.tasks.view = Some((key, shown));
+        self.tasks.view = Some((key, shown.map(Arc::new)));
     }
 
-    /// What the column shows of the tasks; `None` without a list.
+    /// What the column shows of the tasks; `None` where none can be kept
+    /// (no data directory).
     pub(crate) fn tasks_view(&self) -> Option<Arc<TasksView>> {
         self.tasks.view.as_ref().and_then(|(_, v)| v.clone())
     }
@@ -399,7 +396,6 @@ impl State {
         tracing::info!("a task added");
         self.tasks_write(&task);
         self.tasks.tasks.push(task.clone());
-        self.tasks.exists = true;
         self.tasks_changed();
         Ok(task)
     }
