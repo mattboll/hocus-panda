@@ -47,7 +47,9 @@ impl SeatHandler for State {
             return;
         }
         self.cursor = image;
-        self.needs_redraw = true;
+        // Where it shows (#244); the pointer may be the one calling, and
+        // cannot be read here.
+        self.redraw.around_pointer();
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {

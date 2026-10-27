@@ -118,7 +118,7 @@ fn on_event(app: &mut App, event: WinitEvent) {
                 let output = winit.output.clone();
                 app.state.output_moved(&output);
             }
-            app.state.needs_redraw = true;
+            app.state.redraw.all();
         }
         WinitEvent::Input(event) => app.state.process_input_event(event),
         WinitEvent::Redraw => {
@@ -159,7 +159,7 @@ impl WinitBackend {
 
     /// Asks for a frame only when something changed: nothing is drawn at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
-        if state.needs_redraw {
+        if state.redraw.is_pending() {
             self.backend.window().request_redraw();
         }
     }
@@ -261,6 +261,6 @@ impl WinitBackend {
         state.send_frames(&self.output, elapsed, None);
         state.space.refresh();
         state.popups.cleanup();
-        state.needs_redraw = false;
+        state.redraw.done();
     }
 }

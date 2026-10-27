@@ -412,7 +412,7 @@ impl State {
                 if let Some(result) = reply {
                     self.api.reply(connection, id, result);
                 }
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
     }

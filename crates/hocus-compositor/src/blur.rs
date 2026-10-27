@@ -355,7 +355,7 @@ impl State {
                 }
             };
             // The theme turns glass on.
-            self.needs_redraw = true;
+            self.redraw.all();
         }
         if !matches!(self.blurs.shaders, Shaders::Ready(_)) {
             return;

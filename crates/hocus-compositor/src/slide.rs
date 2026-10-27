@@ -198,7 +198,7 @@ impl State {
             slide.switcher = Some((place, panel));
             slide.until = slide.until.max(now + STANDARD + LINGER);
         }
-        self.needs_redraw = true;
+        self.redraw.output(output);
     }
 
     /// Where `output`'s strip is, while it moves or a swipe holds it.
@@ -323,20 +323,28 @@ impl State {
     /// shows; a strip at rest is forgotten.
     pub fn refresh_slides(&mut self) {
         let now = self.clock.now();
-        let before = self.slides.by_output.len();
-        self.slides
-            .by_output
-            .retain(|_, s| s.swipe.is_some() || s.position.is_running(now) || now < s.until);
         // Frames while a strip moves (and one where it stopped), and when
-        // a switcher goes; none while it lingers, still (#88).
-        let mut redraw = self.slides.by_output.len() != before;
-        for slide in self.slides.by_output.values_mut() {
+        // a switcher goes; none while it lingers, still (#88). Each on its
+        // own screen (#244).
+        let Self {
+            slides,
+            space,
+            redraw,
+            ..
+        } = self;
+        slides.by_output.retain(|name, s| {
+            let keep = s.swipe.is_some() || s.position.is_running(now) || now < s.until;
+            if !keep {
+                redraw.named(space, name);
+            }
+            keep
+        });
+        for (name, slide) in &mut slides.by_output {
             let moving = slide.swipe.is_some() || slide.position.is_running(now);
-            redraw |= moving || slide.moved;
+            if moving || slide.moved {
+                redraw.named(space, name);
+            }
             slide.moved = moving;
-        }
-        if redraw {
-            self.needs_redraw = true;
         }
         let goes = self.slides.by_output.values().map(|s| s.until).min();
         let handle = self.waker().cloned();
@@ -410,7 +418,7 @@ impl State {
                 .clamp(0.0, (count - 1) as f64);
             slide.position.jump(at as f32);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -445,7 +453,7 @@ impl State {
                     .set(target, Curve::Spring(Spring::SMOOTH), now);
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 }

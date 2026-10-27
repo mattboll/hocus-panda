@@ -212,7 +212,7 @@ impl State {
         if let Some(jelly) = self.wobbles.jellies.get_mut(&id) {
             jelly.advance(now);
             jelly.moved((f64::from(delta.x), f64::from(delta.y)));
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -268,7 +268,7 @@ impl State {
         } else {
             self.land(id, window, to);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -336,7 +336,7 @@ impl State {
                 self.matrix_moved(id, now_at);
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Whether a window bends now: it is drawn by [`Self::wobbly_elements`].

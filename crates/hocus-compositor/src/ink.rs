@@ -96,7 +96,7 @@ impl State {
             sheet.view.line(p(from), p(to));
         }
         self.ink.drawing = Some((name, to));
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Super let go: the drawing fades.
@@ -107,7 +107,7 @@ impl State {
         let mut fade = Animated::new(1.0);
         fade.set(0.0, Curve::Ease(Easing::InCubic, LARGE), self.clock.now());
         self.ink.fade = Some(fade);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// After each dispatch: new pieces uploaded, frames while it fades,
@@ -116,17 +116,17 @@ impl State {
         let now = self.clock.now();
         if let Some(fade) = &self.ink.fade {
             if fade.is_running(now) {
-                self.needs_redraw = true;
+                self.redraw.all();
             } else {
                 self.ink = Inking::default();
-                self.needs_redraw = true;
+                self.redraw.all();
                 return;
             }
         }
         for sheet in self.ink.sheets.values_mut() {
             let drawn = sheet.view.draw(now);
             if sheet.upload(&drawn) {
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
     }

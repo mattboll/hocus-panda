@@ -73,7 +73,7 @@ impl Default for Night {
 impl State {
     pub fn toggle_focus_mode(&mut self) {
         self.comfort.focus_mode = !self.comfort.focus_mode;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The magnifier a step closer (`in`) or further; at 1, it is off.
@@ -92,7 +92,7 @@ impl State {
         let z = if z < 1.05 { 1.0 } else { z };
         if (z - self.comfort.zoom).abs() > f64::EPSILON {
             self.comfort.zoom = z;
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -152,7 +152,7 @@ impl State {
         let scheduled = self.night_scheduled();
         let on = !self.night_on();
         self.comfort.night.forced = (on != scheduled).then_some((on, scheduled));
-        self.needs_redraw = true;
+        self.redraw.all();
         self.tick_night();
     }
 
@@ -220,7 +220,7 @@ impl State {
             // Counted, not timed: the time passing is no activity.
             app.state.measures.ran("night light");
             let state = &mut app.state;
-            state.needs_redraw = true;
+            state.redraw.all();
             if state.comfort.night.ramp.is_some() {
                 TimeoutAction::ToDuration(Duration::from_millis(100))
             } else if state.config.night_light.enabled {

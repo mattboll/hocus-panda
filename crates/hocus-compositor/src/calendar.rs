@@ -318,7 +318,7 @@ impl State {
         events.dedup_by(|(_, a), (_, b)| a.uid == b.uid && a.start == b.start);
         self.calendar.events = events;
         self.calendar.expanded_on = Some(today);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// After each dispatch: accounts that came or went, syncs and

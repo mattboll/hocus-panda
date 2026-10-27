@@ -167,6 +167,6 @@ impl State {
         // The layouts' names follow the language too.
         self.name_layouts();
         self.relayout();
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 }

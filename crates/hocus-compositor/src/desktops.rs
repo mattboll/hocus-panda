@@ -286,7 +286,7 @@ impl State {
             );
             self.resize_to(id, frame, false);
         }
-        self.sync_desktops();
+        self.sync_windows();
         self.emit(|s| Event::WindowOpened {
             window: s.window_info(&window),
         });
@@ -366,7 +366,7 @@ impl State {
             }
             None => self.model.clear_focus(),
         }
-        self.sync_desktops();
+        self.sync_windows();
         self.apply_focus(serial);
     }
 
@@ -390,7 +390,9 @@ impl State {
             if let (Some(from), Some(to)) = (before, after) {
                 self.slide_desktops(output, from, to);
             }
-            self.sync_desktops();
+            // Its desktop changed: its wallpaper, what the panel shows.
+            self.sync_windows();
+            self.redraw.output(output);
             let shown = self.model.output(&name).map(|o| o.shown.0);
             self.emit(|_| Event::DesktopShown {
                 output: name.0.clone(),
@@ -449,8 +451,24 @@ impl State {
     }
 
     /// Maps the windows the model shows, bottom to top, where they were;
-    /// unmaps the others and remembers where they were.
+    /// unmaps the others and remembers where they were. Every output
+    /// redraws.
     pub fn sync_desktops(&mut self) {
+        self.sync_windows();
+        self.redraw.all();
+    }
+
+    /// As [`State::sync_desktops`], but only the outputs where a window came,
+    /// went, moved or changed places with another redraw (#244): for a
+    /// change of the windows alone.
+    pub fn sync_windows(&mut self) {
+        let before = self.window_places();
+        self.sync_space();
+        self.redraw_places(&before);
+    }
+
+    /// The windows the model shows mapped, the others not.
+    fn sync_space(&mut self) {
         self.layout_tiles();
         for managed in self.windows.values_mut() {
             if let Some(location) = self.space.element_location(&managed.window) {
@@ -493,7 +511,6 @@ impl State {
         }
         self.refresh_workspaces();
         self.track_minimized();
-        self.needs_redraw = true;
     }
 
     /// Gives keyboard focus to the model's focused window, activates it, and
@@ -532,7 +549,15 @@ impl State {
                 id: focused.as_ref().map(api::window_id),
             });
         }
-        self.needs_redraw = true;
+        // The focus ring goes from one to the other (#244); in focus mode
+        // the veil moves on every screen.
+        if self.comfort.focus_mode {
+            self.redraw.all();
+        } else {
+            for window in before.iter().chain(focused.iter()) {
+                self.redraw_window(window);
+            }
+        }
     }
 
     /// Tells taskbars that a window's title or app id changed.

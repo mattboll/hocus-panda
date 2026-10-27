@@ -716,7 +716,7 @@ impl State {
             .take()
             .filter(|l| millis(l.since, now) < launcher_ms(l.moment));
         if self.matrix_shell_moving(now) {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -760,7 +760,7 @@ impl State {
             windows,
             seed: hash(&[now.as_nanos() as u64, from as u64, to as u64]),
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The desktop left behind on `output`, over the windows, front first.
@@ -926,7 +926,7 @@ impl State {
             since: now,
             rect: None,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The parts of the toasts' picture not yet typed in, from its corner.
@@ -1094,7 +1094,7 @@ impl State {
             since: self.clock.now(),
             parts,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Whether the launcher's own picture is left out: it is typed in or

@@ -135,15 +135,6 @@ impl WindowMotion {
 }
 
 impl crate::State {
-    /// Whether any window is moving at `now`.
-    pub fn animating(&self, now: Duration) -> bool {
-        self.windows.values().any(|m| m.motion.is_running(now))
-            || self.snapshots_moving(now)
-            || self.wobbles_moving()
-            || self.matrix_motions_moving(now)
-            || self.matrix_shell_moving(now)
-    }
-
     /// How windows come and go in the theme configured.
     pub fn look(&self) -> Look {
         match self.config.appearance.theme.parse() {
@@ -173,8 +164,25 @@ impl crate::State {
         self.settle_snapshots();
         self.refresh_matrix_motions();
         self.refresh_matrix_shell();
-        if self.animating(self.clock.now()) || self.backdrops_moving() {
-            self.needs_redraw = true;
+        let now = self.clock.now();
+        if self.snapshots_moving(now)
+            || self.wobbles_moving()
+            || self.matrix_motions_moving(now)
+            || self.matrix_shell_moving(now)
+            || self.backdrops_moving()
+        {
+            self.redraw.all();
+            return;
+        }
+        // A window opening or going redraws where it is (#244).
+        let moving: Vec<smithay::desktop::Window> = self
+            .windows
+            .values()
+            .filter(|m| m.motion.is_running(now))
+            .map(|m| m.window.clone())
+            .collect();
+        for window in &moving {
+            self.redraw_window(window);
         }
     }
 }

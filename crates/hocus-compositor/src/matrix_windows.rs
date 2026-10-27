@@ -633,7 +633,7 @@ impl State {
             since: self.clock.now(),
             kind,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// A drag begins: the window's trail starts where it is.
@@ -668,7 +668,7 @@ impl State {
             trail.samples.drain(..i);
         }
         trail.samples.push((now, at.to_f64()));
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The ghosts of a dragged window at its last places, behind it, front
@@ -747,7 +747,7 @@ impl State {
                 });
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The resize ends: the glow flashes once.
@@ -765,7 +765,7 @@ impl State {
             self.matrix_motions.resized.retain(|(w, _)| *w != id);
             self.matrix_motions.resized.push((id, now));
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The ring a window has while resized and just after, in place of its
@@ -840,7 +840,7 @@ impl State {
         if panel.view.set(&text) {
             let drawn = panel.view.draw(now);
             panel.upload(&drawn);
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

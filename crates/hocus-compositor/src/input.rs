@@ -374,7 +374,7 @@ impl State {
                 },
             );
             pointer.frame(self);
-            self.needs_redraw = true;
+            self.redraw.all();
             return;
         }
         // Games and 3D tools read the motion itself (relative-pointer),
@@ -443,8 +443,9 @@ impl State {
             },
         );
         pointer.frame(self);
-        // The cursor moved.
-        self.needs_redraw = true;
+        // The cursor moved: from where it was to where it is (#244).
+        self.redraw_around(from);
+        self.redraw_around(location);
     }
 
     fn on_pointer_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
@@ -484,16 +485,16 @@ impl State {
         self.super_spoiled();
         // With the right one, the window's menu (#40).
         if !pointer.is_grabbed() && self.radial_button(at, button, pressed) {
-            self.needs_redraw = true;
+            self.redraw.all();
             return;
         }
         // With Shift too, it circles something to ask about it (#46).
         if !pointer.is_grabbed() && self.circle_button(at, button, pressed) {
-            self.needs_redraw = true;
+            self.redraw.all();
             return;
         }
         if !pointer.is_grabbed() && self.ink_button(at, button, pressed) {
-            self.needs_redraw = true;
+            self.redraw.all();
             return;
         }
         self.recording_click(at, pressed);
@@ -683,7 +684,7 @@ impl State {
         if let Some(app_id) = crate::desktops::title_and_app_id(&window).1 {
             self.app_opacity.insert(app_id, opacity);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 }

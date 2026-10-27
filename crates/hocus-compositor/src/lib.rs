@@ -70,6 +70,7 @@ mod programs;
 mod quick;
 mod radial;
 mod recording;
+mod redraw;
 mod scene;
 mod screen_capture;
 mod screenshot;

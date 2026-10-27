@@ -538,7 +538,7 @@ fn on_session(app: &mut App, event: SessionEvent) {
             for node in tty.nodes() {
                 tty.scan(node, &mut app.state);
             }
-            app.state.needs_redraw = true;
+            app.state.redraw.all();
         }
     }
 }
@@ -761,7 +761,7 @@ impl TtyBackend {
                 self.gpus.as_mut().remove_node(&target);
             }
         }
-        state.needs_redraw = true;
+        state.redraw.all();
     }
 
     /// What the session does with each of a GPU's connectors now.
@@ -808,7 +808,7 @@ impl TtyBackend {
             self.carry_out(node, change, &connected, state);
         }
         self.follow_modes(node, &connected, state);
-        state.needs_redraw = true;
+        state.redraw.all();
     }
 
     /// The screens, lit or off, whose connector offers other modes now
@@ -1179,17 +1179,19 @@ impl TtyBackend {
         for (node, device) in &self.devices {
             state.leases.refill(*node, device.outputs.device());
         }
-        if !state.needs_redraw {
+        if !state.redraw.is_pending() {
             return;
         }
-        state.needs_redraw = false;
+        // Only the screens asked for (#244); each stays dirty until it
+        // draws, after a frame still out.
         for screen in self
             .devices
             .values_mut()
             .flat_map(|d| d.screens.values_mut())
         {
-            screen.dirty = true;
+            screen.dirty |= state.redraws(&screen.output);
         }
+        state.redraw.done();
         if !self.active {
             return;
         }
@@ -1199,7 +1201,7 @@ impl TtyBackend {
             .flat_map(|(node, d)| {
                 d.screens
                     .iter()
-                    .filter(|(_, s)| !s.dark && !s.flip.is_queued() && s.pace.is_none())
+                    .filter(|(_, s)| s.dirty && !s.dark && !s.flip.is_queued() && s.pace.is_none())
                     .map(|(crtc, _)| (*node, *crtc))
             })
             .collect();

@@ -112,7 +112,7 @@ impl State {
                 desktops,
             });
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The mirrored screen's picture: the source's scene, scaled to fit

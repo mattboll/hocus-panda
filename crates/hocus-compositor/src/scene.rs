@@ -122,7 +122,7 @@ impl State {
                 .update((target.width, target.height), [c(r), c(g), c(b), a]);
         }
         self.snap_preview = preview;
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Everything `output` shows, front first; magnified around the

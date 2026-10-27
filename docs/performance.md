@@ -39,11 +39,12 @@ updates the budget in the same pull request, with the numbers.
 
 | Budget | Where | Measured | Budget |
 |---|---|---|---|
-| At rest, two screens and the shell, 60 s on a virtual clock | `budgets` | 1 frame (the column's clock turning a minute) and 1 scene per screen, no handler run, 209,500 allocations (29 a turn of the loop), 4.1 MB fewer held, or 316 kB more when a buffer of the start went before the minute | frames `[1, 0]`, scenes `[1, 1]`, no handler, ≤ 230,000 allocations, ≤ 512 kB more held |
+| At rest, two screens and the shell, 60 s on a virtual clock | `budgets` | 1 frame (the column's clock turning a minute) and 1 scene, on the column's screen (#244), no handler run, 209,500 allocations (29 a turn of the loop), 4.1 MB fewer held, or 316 kB more when a buffer of the start went before the minute | frames `[1, 0]`, scenes `[1, 0]`, no handler, ≤ 230,000 allocations, ≤ 512 kB more held |
 | At rest, the same, 60 s of real time | `budgets` | the watchdog 60 times, the column's clock once, its frame, the session saved once after the start | anything for the watchdog; at most 2 for the column's clock, 2 for the wallpaper's light (every ten minutes), 4 frames, 2 session saves; nothing else |
-| Twenty windows open on two screens | `budget-twenty-windows` | frames `[160, 150]`, scenes `[320, 320]`, 180,600 allocations, 376 MB asked for, 9.1 MB held | `[176, 165]`, `[352, 352]`, 199,000, 414 MB, 10.5 MB |
-| Their desktops switch, three times on each screen | `budget-twenty-windows` | frames `[23, 21]`, scenes `[102, 102]`, 59,950 allocations, 91 MB, 1.8 MB (the switches' panels' shadows kept, #281) | `[26, 24]`, `[113, 113]`, 66,000, 101 MB, 2.1 MB |
-| A minute at rest with the twenty windows | `budget-twenty-windows` | frames `[1, 0]`, scenes `[1, 1]`, 274,700 allocations (38 a turn), 8.5 MB, 0.1 MB | `[1, 0]`, `[1, 1]`, 302,000, 10 MB, 0.25 MB |
+| Twenty windows open on two screens | `budget-twenty-windows` | frames `[160, 150]`, scenes `[170, 160]`, 176,400 allocations, 289 MB asked for, 10 MB held | `[176, 165]`, `[187, 176]`, 194,000, 318 MB, 10.5 MB |
+| Their desktops switch, three times on each screen | `budget-twenty-windows` | frames `[23, 21]`, scenes `[53, 52]`, 53,700 allocations, 49 MB, 1.9 MB (the switches' panels' shadows kept, #281) | `[26, 24]`, `[58, 57]`, 59,000, 54 MB, 2.1 MB |
+| A minute at rest with the twenty windows | `budget-twenty-windows` | frames `[1, 0]`, scenes `[1, 0]`, 267,500 allocations (37 a turn), 8.4 MB, 0.2 MB | `[1, 0]`, `[1, 0]`, 294,000, 10 MB, 0.25 MB |
+| Twenty windows open on the first screen, then another theme (#244) | `redraw-per-output` | scenes `[320, 0]`; the theme: one frame and one scene on each screen | `[352, 0]`; frames `[1, 1]` at least and at most, scenes `[1, 1]` |
 | The launcher on 40 applications opened, searched in, closed, and opened again (#242) | `budgets` | the second opening 288 allocations, the first 5,091 | the second at most a tenth of the first |
 
 At rest the loop wakes for the watchdog (once a second) and for what the
@@ -264,6 +265,32 @@ unchanged: at rest 209,200 allocations; the launcher's second opening
 318 of the first's 5,012; the twenty windows opening 195,548 instead of
 195,544 (within a handful from run to run), holding the same 10.02 MB.
 
+## Redraw per output, #244
+
+A redraw was one flag for every screen: a change on one screen built the
+scene of every screen. A redraw now names the outputs it concerns
+(`redraw.rs`): a window's commit and motion the outputs it overlaps (its
+shadow included) and those the last frame showed it on; the focus ring
+the window losing it and the one taking it; windows mapped, unmapped or
+restacked the screens where what shows of them changed; the column, a
+strip or a top bar, the dock, the toasts, the launcher and a desktop's
+slide their own screen; the pointer and its image the screens around it.
+The theme, the accent, the lock, the configuration and a screen plugged
+still redraw every screen, and so does whatever is not known to concern
+fewer. An output not asked for builds no scene and sends no frame
+callbacks; one mirroring another redraws with its source. The same
+machine, counted:
+
+| Measure | Before | After |
+|---|---|---|
+| Twenty windows opening, ten on each screen: scenes built per screen | `[320, 320]` | `[170, 160]` |
+| The same: allocations, asked for | 193,600, 374 MB | 176,400, 289 MB |
+| Twenty windows opening on the first screen: scenes on the second | 320 | 0 |
+| Six desktop switches: scenes per screen, allocations, asked for | `[102, 102]`, 62,700, 101 MB | `[53, 52]`, 53,700, 49 MB |
+| A minute at rest, two screens: scenes per screen, allocations | `[1, 1]`, 194,800 | `[1, 0]`, 194,800 |
+| A minute at rest with twenty windows: scenes, allocations | `[1, 1]`, 267,600 | `[1, 0]`, 267,500 |
+| Another theme: scenes per screen | 1 each | 1 each |
+
 ## Reproducing
 
 ```sh
@@ -306,10 +333,10 @@ tenth Mesa's software rasterizer.
 
 ## Not yet
 
-- **A redraw is asked for every screen.** `needs_redraw` is one flag:
-  a change on one screen builds the scene of every screen (when twenty
-  windows open, 320 scenes on each screen for 160 and 150 frames; the
-  column's minute builds the second screen's too).
+- **Much still redraws every screen** (#244): what is not known to
+  concern fewer, and is not frequent, asks for all of them (a window
+  closing, maximized or made fullscreen, a window moved by the pointer,
+  the switcher, the lock, the quick settings, an agent's seat).
 - **The column's state is worked out after every turn** (15 of the 29
   allocations at rest), then compared: an event-driven dirtiness would
   make a turn at rest allocate nothing.

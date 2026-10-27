@@ -256,7 +256,7 @@ impl State {
                 if let Some(panel) = self.launcher.as_mut() {
                     panel.launcher.set_documents(id, documents);
                 }
-                self.needs_redraw = true;
+                self.redraw.all();
             }
         }
     }

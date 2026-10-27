@@ -361,7 +361,7 @@ impl State {
             state: state.into(),
             phones,
         });
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn phone_info(&self) -> PhoneInfo {

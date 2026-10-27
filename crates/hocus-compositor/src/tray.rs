@@ -105,7 +105,7 @@ impl State {
                 }
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Where the pointer is, for an item placing its own window or menu.

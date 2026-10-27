@@ -168,7 +168,7 @@ impl State {
         };
         circled.panel.view.line_to(local(at, area.loc));
         self.circles.circle = Some(circled);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -187,7 +187,7 @@ impl State {
         };
         if let Some(c) = self.circles.circle.as_mut() {
             c.panel.view.line_to(local(at, origin));
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -209,13 +209,13 @@ impl State {
         );
         tracing::info!(?area, output = c.output, "circled");
         self.circles.wanted = Some((c.output.clone(), area, c.serial));
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     pub fn close_circle(&mut self) {
         if self.circles.circle.take().is_some() {
             self.circles.wanted = None;
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -251,7 +251,7 @@ impl State {
         if let Some(event) = event {
             self.circle_event(event);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 
@@ -277,7 +277,9 @@ impl State {
             return false;
         };
         let scrolled = c.panel.view.wheel(local(at, origin), dy as f32);
-        self.needs_redraw |= scrolled;
+        if scrolled {
+            self.redraw.all();
+        }
         // Over the menu or the card, the wheel is theirs.
         scrolled || c.panel.view.hit(local(at, origin))
     }
@@ -301,7 +303,7 @@ impl State {
         if let Some(event) = event {
             self.circle_event(event);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn circle_event(&mut self, event: CircleEvent) {
@@ -337,7 +339,7 @@ impl State {
                 }
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Done now when the text is there, once it is otherwise.
@@ -474,7 +476,7 @@ impl State {
             }
             Text::Reading => {}
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// After each dispatch: locked, it goes; otherwise it draws what
@@ -494,7 +496,7 @@ impl State {
         };
         let drawn = c.panel.view.draw(now);
         if c.panel.upload(&drawn) {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 

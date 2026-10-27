@@ -20,7 +20,7 @@ pub fn start(handle: &LoopHandle<'static, App>) {
                 if let Some(launcher) = app.state.launcher.as_mut() {
                     launcher.fonts_changed();
                 }
-                app.state.needs_redraw = true;
+                app.state.redraw.all();
             });
         }
     });

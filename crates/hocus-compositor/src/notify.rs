@@ -248,7 +248,7 @@ impl State {
             self.matrix_toast_shown(id);
         }
         self.toast_events(events);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// Sharing stopped: what was held is summed up in one toast.
@@ -384,7 +384,7 @@ impl State {
         if let Some(panel) = self.toasts.as_mut()
             && panel.toasts.close(id)
         {
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -416,7 +416,7 @@ impl State {
             }
         };
         self.toast_events(events);
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     fn shell_notification(&mut self, id: u32, summary: String, body: String) {
@@ -521,7 +521,7 @@ impl State {
         if panel.dnd != on {
             panel.dnd = on;
             self.emit(|_| hocus_api::Event::Notifications);
-            self.needs_redraw = true;
+            self.redraw.all();
         }
     }
 
@@ -532,7 +532,7 @@ impl State {
             let events = panel.toasts.set_history_limit(limit);
             self.toast_events(events);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// How many notifications the history holds.
@@ -549,7 +549,7 @@ impl State {
             let events = panel.toasts.clear_history();
             self.toast_events(events);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// One notification dismissed from the column.
@@ -558,7 +558,7 @@ impl State {
             let events = panel.toasts.dismiss(id);
             self.toast_events(events);
         }
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The newest notifications, for the column.
@@ -594,6 +594,7 @@ impl State {
             return;
         };
         let events = panel.toasts.update(now);
+        let moved = place.is_some() && panel.on != place;
         if let Some(place) = place
             && panel.on.as_ref() != Some(&place)
         {
@@ -614,9 +615,13 @@ impl State {
                 changed = true;
             }
         }
-        // The countdowns move: frames keep coming while they do.
+        // The countdowns move: frames keep coming while they do, on the
+        // toasts' screen (#244).
         if changed || panel.toasts.is_animating(now) {
-            self.needs_redraw = true;
+            match panel.on.as_ref() {
+                Some((name, ..)) if !moved => self.redraw.named(&self.space, name),
+                _ => self.redraw.all(),
+            }
         }
         self.toast_events(events);
     }
@@ -708,7 +713,7 @@ impl State {
         }
         let events = panel.toasts.input(at, Input::PointerButton { pressed });
         self.toast_events(events);
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 

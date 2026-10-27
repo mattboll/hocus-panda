@@ -154,6 +154,8 @@ impl State {
         let before = self.bars.bars.len();
         self.bars.bars.retain(|id, _| ids.contains(id));
         let mut changed = before != self.bars.bars.len();
+        // A bar drawn again redraws where its window is (#244).
+        let mut drawn_again = Vec::new();
         for id in ids {
             if self.bar_height(id) == 0 {
                 changed |= self.bars.bars.remove(&id).is_some();
@@ -220,17 +222,23 @@ impl State {
                 Some(buffer) => {
                     if !drawn.is_empty() {
                         crate::shell::upload(buffer, &bar.bar.view(), &drawn);
-                        changed = true;
+                        drawn_again.push(id);
                     }
                 }
                 None => {
                     bar.buffer = Some(crate::shell::buffer_for(&bar.bar.view()));
-                    changed = true;
+                    drawn_again.push(id);
                 }
             }
         }
         if changed {
-            self.needs_redraw = true;
+            self.redraw.all();
+            return;
+        }
+        for id in drawn_again {
+            if let Some(window) = self.windows.get(&id).map(|m| m.window.clone()) {
+                self.redraw_window(&window);
+            }
         }
     }
 
@@ -255,7 +263,7 @@ impl State {
         // Maximized, snapped and tiled windows are laid out again.
         self.relayout();
         self.layout_tiles();
-        self.needs_redraw = true;
+        self.redraw.all();
     }
 
     /// The bar under `p`, if a window's bar is the topmost thing there, and
@@ -332,7 +340,7 @@ impl State {
                 (Some(BarAction::Close), Some(window)) => crate::surface::close(&window),
                 _ => {}
             }
-            self.needs_redraw = true;
+            self.redraw.all();
             return true;
         }
         let Some((id, at)) = self.bar_at(location) else {
@@ -370,7 +378,7 @@ impl State {
                 self.start_move(&window, button, None, serial);
             }
         }
-        self.needs_redraw = true;
+        self.redraw.all();
         true
     }
 

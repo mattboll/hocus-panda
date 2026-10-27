@@ -119,9 +119,9 @@ fn at_rest_two_screens_draw_only_the_minute_turning() -> anyhow::Result<()> {
     let renders = per_output(&before, &after, |o| o.renders);
     eprintln!("frames {frames:?}, scenes built {renders:?}, {allocated:?}");
     assert_eq!(frames, [1, 0], "frames drawn at rest");
-    // One turn of the minute asks both screens again (follow-up: only the
-    // column's).
-    assert_eq!(renders, [1, 1], "scenes built at rest");
+    // The minute turning asks for the column's screen alone (#244; both
+    // built their scene before).
+    assert_eq!(renders, [1, 0], "scenes built at rest");
     assert_eq!(ran(&before, &after), [], "handlers ran at rest");
     assert!(
         allocated.count <= REST_ALLOCATIONS,
