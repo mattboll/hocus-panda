@@ -168,8 +168,11 @@ advance_ms = 1000
 
 [[step]]
 # Measured: frames [23, 21], scenes [102, 102], 59,950 allocations,
-# 91 MB, 0.9 MB held (since #261: 61,400 allocations, 96 MB).
-expect_cost = { frames = [26, 24], renders = [113, 113], allocations = 66_000, allocated_mb = 101, held_mb = 1.0 }
+# 91 MB, 0.9 MB held (since #261: 61,400 allocations, 96 MB). Since the
+# compositor draws panels' shadows (#281), the shadows of the panels the
+# switches show are kept, as windows' are, for the next switch: three
+# textures, 0.85 MB more held, once (1.8 MB).
+expect_cost = { frames = [26, 24], renders = [113, 113], allocations = 66_000, allocated_mb = 101, held_mb = 2.1 }
 [[step]]
 expect_shown = { output = "HEADLESS-2", desktop = 1 }
 [[step]]
