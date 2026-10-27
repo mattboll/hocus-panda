@@ -233,6 +233,13 @@ form = "strip"             # "strip": 72 px on the right (the time, the next mee
                            #   the agents, the tasks); a click on it brings the column out
                            # "hidden": the whole screen to the windows; resting at the right edge
                            #   (300 ms) or Super+C brings the column out; toasts still show
+screens = "primary"        # "primary": on the primary screen only
+                           # "all": each screen its own strip, bar or hint, its windows leaving
+                           #   room for it; the column comes out on the screen it is asked on (the
+                           #   strip or edge rested on or clicked, the bar clicked, the screen under
+                           #   the pointer for Super+C); each top bar shows its screen's active
+                           #   window, and its buttons act on it. The "column" form stays on the
+                           #   primary screen. Offered on the Appearance page with two screens or more
 
 [pandas]                   # they show what happens; they move a moment when it changes, then hold still
 enabled = true             # false: no panda anywhere (also from quick settings, for the session)
@@ -472,7 +479,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `dock` | shows the dock, or hides it again |
-| `panel` | slides the whole column out over the windows, or back, when the panel is a strip, a top bar or hidden (`[panel] form`); nothing when it is the column |
+| `panel` | slides the whole column out over the windows, or back, when the panel is a strip, a top bar or hidden (`[panel] form`), on the screen under the pointer with `[panel] screens = "all"`; nothing when it is the column |
 | `overview` | every screen's windows in a grid, or closes it |
 | `show-desktop` | the desktop of the screen under the pointer, its windows out of the way, or back |
 | `welcome` | the first session's welcome again: language, keyboard, theme, and where to go next |

@@ -186,7 +186,7 @@ Steps, one per `[[step]]` table:
 | `expect_accounts = "SetRealName Alex P."` | the account's stand-ins were asked this: `SetRealName NAME`, `SetIconFile PATH` |
 | `expect_xdg_file = { name, contains?, lacks? }` | a file of the user's private configuration directory the settings write (`mimeapps.list`, `autostart/NAME.desktop`) holds these strings, or lacks them |
 | `expect_config_file = { contains?, lacks? }` | the configuration file holds these strings, or lacks them (the settings app writes it) |
-| `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`); `shown = false` checks it does not |
+| `expect_ui = { label, disabled?, selected?, shown?, inside? }` | the shell shows an element with this label (disabled or not, the current choice of a list or not, within `inside = [x, y, w, h]`; of several so labelled, as each screen's strip, one that is); `shown = false` checks none is |
 | `close = "app_id"` | asks the window to close, waits until it is gone |
 | `pointer_move = [x, y]` | moves the pointer, global logical coordinates |
 | `pointer_path = [[x, y], …]` | moves the pointer through these points in turn, as a hand drawing a line |

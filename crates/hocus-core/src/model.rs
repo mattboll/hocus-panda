@@ -154,6 +154,16 @@ impl Model {
         self.focused
     }
 
+    /// An output's active window (#282): the most recently focused of
+    /// those it shows, the focused one when it is there; none when it
+    /// shows none ever focused.
+    pub fn active_on(&self, output: &OutputName) -> Option<WindowId> {
+        self.recent.iter().rev().copied().find(|w| {
+            !self.minimized.contains(w)
+                && self.output_showing(*w).is_some_and(|o| &o.name == output)
+        })
+    }
+
     /// The desktop a window is on.
     pub fn desktop_of(&self, window: WindowId) -> Option<DesktopId> {
         self.windows.get(&window).copied()
@@ -809,6 +819,27 @@ mod tests {
             .output(output)
             .map(|o| o.desktops.clone())
             .expect("plugged")
+    }
+
+    #[test]
+    fn each_output_has_its_active_window() -> Result<(), ModelError> {
+        let mut model = two_outputs();
+        let chat = model.open_window(&laptop())?;
+        let editor = model.open_window(&external())?;
+        let terminal = model.open_window(&external())?;
+        model.focus(chat)?;
+        assert_eq!(model.active_on(&laptop()), Some(chat));
+        assert_eq!(model.active_on(&external()), Some(terminal));
+        model.focus(editor)?;
+        assert_eq!(model.active_on(&external()), Some(editor));
+        assert_eq!(model.active_on(&laptop()), Some(chat));
+        // Minimized, or on a desktop not shown, it is not.
+        model.minimize(editor)?;
+        assert_eq!(model.active_on(&external()), Some(terminal));
+        model.show_nth(&external(), 1)?;
+        assert_eq!(model.active_on(&external()), None);
+        assert_eq!(model.active_on(&laptop()), Some(chat));
+        Ok(())
     }
 
     #[test]

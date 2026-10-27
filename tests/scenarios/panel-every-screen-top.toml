@@ -1,0 +1,98 @@
+description = "With [panel] form = \"top\" and screens = \"all\" (#282), each screen has its own top bar with that screen's active window: its buttons act on that window, not on the one focused on the other screen, and a click elsewhere on it brings the column out on its screen"
+outputs = ["1600x1000", "1600x1000"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "top"
+screens = "all"
+"""
+
+[[step]]
+pointer_move = [800, 500]
+
+[[step]]
+open = { app_id = "chat", size = [600, 400], color = "#3399ff", title = "standup — Chat" }
+
+[[step]]
+set_state = { app_id = "chat", state = "maximized" }
+
+[[step]]
+pointer_move = [2400, 500]
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#ff6600", title = "notes.md — Editor" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+# Each bar takes y 12 to 64 of its screen; the editor, opened last, has the
+# focus.
+[[step]]
+expect_window = { app_id = "chat", output = "HEADLESS-1", geometry = [0, 64, 1600, 936], state = "maximized", focused = false }
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-2", geometry = [1600, 64, 1600, 936], state = "maximized", focused = true }
+
+[[step]]
+expect_ui = { label = "standup — Chat", inside = [16, 12, 1568, 52] }
+
+[[step]]
+expect_ui = { label = "notes.md — Editor", inside = [1616, 12, 1568, 52] }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-every-screen-top.first.png" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "panel-every-screen-top.second.png" }
+
+# The first bar's Restore restores the chat, though the editor has the focus.
+[[step]]
+click_ui = "Restore"
+
+[[step]]
+expect_window = { app_id = "chat", state = "normal" }
+
+[[step]]
+expect_window = { app_id = "editor", state = "maximized", focused = true }
+
+# The second bar's, the only one left, the editor.
+[[step]]
+click_ui = "Restore"
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal" }
+
+# Minimize on the first bar: the chat, still not focused.
+[[step]]
+click_ui = "Minimize"
+
+[[step]]
+expect_window = { app_id = "chat", visible = false }
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+# The middle of the second bar brings the column out on the second screen.
+[[step]]
+pointer_move = [2400, 38]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_ui = { label = "Command field", inside = [1600, 0, 1600, 1000] }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# Close on the second bar, the only window left with buttons: the editor.
+[[step]]
+click_ui = "Close"
+
+[[step]]
+expect_no_window = "editor"

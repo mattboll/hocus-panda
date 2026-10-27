@@ -7,6 +7,13 @@
 //! back when the pointer leaves it, on Escape, on the shortcut again or a
 //! click elsewhere. Windows leave room for what stays only.
 //!
+//! With `[panel] screens = "all"` (#282) every screen keeps its own strip,
+//! bar or hint, and the one column comes out on the screen it was asked
+//! on: the strip or the edge rested on or clicked, the bar clicked, the
+//! screen under the pointer for the shortcut. Each top bar shows its
+//! screen's active window, and its buttons act on it. The column form
+//! stays on the primary screen.
+//!
 //! The slide is one value, evaluated in closed form at the clock's time
 //! when the scene is drawn: frames are asked for while it moves, none at
 //! rest. With reduced motion (or in tests that do not ask for motion) the
@@ -15,11 +22,14 @@
 use std::time::Duration;
 
 use hocus_api::UiNode;
-use hocus_core::config::PanelForm;
+use hocus_core::{
+    WindowId,
+    config::{PanelForm, PanelScreens},
+};
 use hocus_shell::{
-    Action as ShellAction, ColumnState, Lang,
+    Action as ShellAction, ActiveWindow, ColumnState, Lang,
     column::{MARGIN, View, WIDTH},
-    strip::{self, EdgeHint, Strip},
+    strip::{self, EdgeHint, Here, Strip},
     topbar::{self, TopBar},
 };
 use hocus_ui::{
@@ -29,14 +39,14 @@ use hocus_ui::{
 use smithay::{
     backend::renderer::{ImportAll, ImportMem, Renderer, Texture},
     output::Output,
-    utils::{Logical, Point, Rectangle},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
 use crate::{
     State,
     alarm::Alarm,
     scene::SceneElement,
-    shell::{Panel, Pixels, column_rect, flatten},
+    shell::{Panel, Pixels, Shell, column_rect, flatten},
 };
 
 /// How long the pointer rests on the strip before the column comes out:
@@ -75,6 +85,34 @@ enum Bar {
     Hint(Panel<EdgeHint>, f64),
 }
 
+/// What stays of the panel on one screen.
+#[derive(Debug)]
+struct OnScreen {
+    output: String,
+    /// That output's logical rectangle and its scale.
+    area: Rectangle<i32, Logical>,
+    scale: f64,
+    bar: Option<Bar>,
+    /// The window the top bar shows and its buttons act on, on every
+    /// screen (#282): that screen's active one.
+    window: Option<WindowId>,
+    /// The pointer over the top bar.
+    inside: bool,
+}
+
+impl OnScreen {
+    fn new(output: &str, area: Rectangle<i32, Logical>, scale: f64) -> Self {
+        Self {
+            output: output.to_owned(),
+            area,
+            scale,
+            bar: None,
+            window: None,
+            inside: false,
+        }
+    }
+}
+
 /// Whether the whole column is out over the windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Out {
@@ -90,12 +128,12 @@ pub enum Out {
 }
 
 /// The pointer where the column comes out from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum Rest {
     #[default]
     Away,
-    /// Resting there since then.
-    Since(Duration),
+    /// Resting there since then, on that screen's strip or edge.
+    Since(Duration, String),
     /// It brought the column out, or the column was sent back while it
     /// stayed: it must leave before resting there counts again.
     Spent,
@@ -104,9 +142,11 @@ enum Rest {
 /// The panel's form and what it shows besides the column.
 #[derive(Debug)]
 pub struct Forms {
-    /// The form drawn, to see the configuration change it.
-    form: Option<PanelForm>,
-    bar: Option<Bar>,
+    /// The form and the screens drawn, to see the configuration change
+    /// them.
+    form: Option<(PanelForm, PanelScreens)>,
+    /// What stays on each screen that has it, the primary first.
+    screens: Vec<OnScreen>,
     theme: Theme,
     lang: Lang,
     pub(crate) out: Out,
@@ -116,16 +156,17 @@ pub struct Forms {
     sliding: bool,
     rest: Rest,
     alarm: Alarm,
-    /// The pointer over the top bar, and a press begun on it.
-    bar_inside: bool,
-    bar_pressed: bool,
+    /// The screen whose top bar a press began on.
+    pressed: Option<String>,
+    /// The screen the column was last asked on, on every screen (#282).
+    asked_on: Option<String>,
 }
 
 impl Forms {
     pub fn new(theme: Theme, lang: Lang) -> Self {
         Self {
             form: None,
-            bar: None,
+            screens: Vec::new(),
             theme,
             lang,
             out: Out::In,
@@ -133,8 +174,8 @@ impl Forms {
             sliding: false,
             rest: Rest::Away,
             alarm: Alarm::default(),
-            bar_inside: false,
-            bar_pressed: false,
+            pressed: None,
+            asked_on: None,
         }
     }
 
@@ -143,21 +184,25 @@ impl Forms {
             return;
         }
         self.theme = theme.clone();
-        match &mut self.bar {
-            Some(Bar::Strip(p)) => p.view.set_theme(theme),
-            Some(Bar::Top(p)) => p.view.set_theme(theme),
-            // Made again with the new accent.
-            Some(Bar::Hint(..)) => self.bar = None,
-            None => {}
+        for screen in &mut self.screens {
+            match &mut screen.bar {
+                Some(Bar::Strip(p)) => p.view.set_theme(theme.clone()),
+                Some(Bar::Top(p)) => p.view.set_theme(theme.clone()),
+                // Made again with the new accent.
+                Some(Bar::Hint(..)) => screen.bar = None,
+                None => {}
+            }
         }
     }
 
     pub fn set_lang(&mut self, lang: Lang) {
         self.lang = lang;
-        match &mut self.bar {
-            Some(Bar::Strip(p)) => p.view.set_lang(lang),
-            Some(Bar::Top(p)) => p.view.set_lang(lang),
-            _ => {}
+        for screen in &mut self.screens {
+            match &mut screen.bar {
+                Some(Bar::Strip(p)) => p.view.set_lang(lang),
+                Some(Bar::Top(p)) => p.view.set_lang(lang),
+                _ => {}
+            }
         }
     }
 
@@ -181,6 +226,22 @@ impl Forms {
         } else {
             self.slide.jump(0.0);
         }
+    }
+
+    /// The screen whose strip, or right edge when hidden, is at `at`.
+    fn trigger_at(&self, form: PanelForm, at: Point<f64, Logical>) -> Option<usize> {
+        self.screens.iter().position(|s| match form {
+            PanelForm::Strip => strip_rect(s.area).to_f64().contains(at),
+            PanelForm::Hidden => at_edge(s.area, at),
+            PanelForm::Top | PanelForm::Column => false,
+        })
+    }
+
+    /// The screen whose top bar is at `at`.
+    fn bar_at(&self, at: Point<f64, Logical>) -> Option<usize> {
+        self.screens.iter().position(|s| {
+            matches!(s.bar, Some(Bar::Top(_))) && top_rect(s.area).to_f64().contains(at)
+        })
     }
 }
 
@@ -222,10 +283,44 @@ fn in_band(area: Rectangle<i32, Logical>, at: Point<f64, Logical>) -> bool {
         && at.y <= a.loc.y + a.size.h
 }
 
+/// Whether `at` is at the right edge of the output of rectangle `area`.
+fn at_edge(area: Rectangle<i32, Logical>, at: Point<f64, Logical>) -> bool {
+    let a = area.to_f64();
+    at.x >= a.loc.x + a.size.w - EDGE
+        && at.x <= a.loc.x + a.size.w
+        && at.y >= a.loc.y
+        && at.y <= a.loc.y + a.size.h
+}
+
+/// How long the pointer rests before the column comes out in `form`.
+fn rest_for(form: PanelForm) -> Duration {
+    if form == PanelForm::Hidden {
+        EDGE_REST
+    } else {
+        STRIP_REST
+    }
+}
+
+/// A screen with its place, its scale and its active window, for the
+/// panel on every screen.
+type Place = (
+    String,
+    Rectangle<i32, Logical>,
+    f64,
+    Option<(WindowId, ActiveWindow)>,
+);
+
 impl State {
     /// The panel's form in effect.
     pub(crate) fn panel_form(&self) -> PanelForm {
         self.config.panel.form
+    }
+
+    /// Whether every screen keeps its own strip, bar or hint, and the
+    /// column comes out where it is asked (#282). The column form stays
+    /// on the primary screen.
+    pub(crate) fn panel_everywhere(&self) -> bool {
+        self.config.panel.screens == PanelScreens::All && self.panel_form() != PanelForm::Column
     }
 
     /// Whether panels move as they come and go now.
@@ -233,10 +328,34 @@ impl State {
         !self.instant_motion && !self.config.appearance.reduced_motion
     }
 
+    /// The screen the column is on: the one it was last asked on when the
+    /// panel is on every screen, the primary one otherwise.
+    pub(crate) fn column_screen(&self) -> Option<Output> {
+        if self.panel_everywhere()
+            && let Some(output) = self
+                .shell
+                .as_ref()
+                .and_then(|s| s.panel.asked_on.as_deref())
+                .and_then(|name| self.find_output(name))
+        {
+            return Some(output);
+        }
+        self.column_output()
+    }
+
     /// What the panel keeps on `output` at rest, which windows leave room
     /// for: the column, the strip or the top bar; nothing when hidden.
     pub fn panel_rect(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
         let (name, area, _) = self.shell.as_ref()?.on.as_ref()?;
+        if self.panel_everywhere() {
+            // Each screen its own, wherever the column is.
+            let area = self.space.output_geometry(output)?;
+            return match self.panel_form() {
+                PanelForm::Strip => Some(strip_rect(area)),
+                PanelForm::Top => Some(top_rect(area)),
+                PanelForm::Column | PanelForm::Hidden => None,
+            };
+        }
         if *name != output.name() {
             return None;
         }
@@ -278,93 +397,196 @@ impl State {
             && self.shell.as_ref().is_some_and(|s| s.panel.out != Out::In)
     }
 
-    /// After each dispatch, the column drawn: follows the form, shows the
-    /// strip or the bar, brings the column out once the pointer rested
-    /// long enough. Whether something to draw changed.
-    pub(crate) fn refresh_panel(&mut self, state: &ColumnState) -> bool {
+    /// Every screen, the primary first, with its place and its active
+    /// window: where the panel is on every screen.
+    fn panel_places(&self) -> Vec<Place> {
+        let primary = self.model.primary().map(|o| o.name.clone());
+        let mut places: Vec<Place> = self
+            .model
+            .outputs()
+            .iter()
+            .filter_map(|o| {
+                let output = self.find_output(&o.name.0)?;
+                let area = self.space.output_geometry(&output)?;
+                let active = self
+                    .model
+                    .active_on(&o.name)
+                    .and_then(|id| Some((id, self.active_window(id)?)));
+                Some((
+                    o.name.0.clone(),
+                    area,
+                    output.current_scale().fractional_scale(),
+                    active,
+                ))
+            })
+            .collect();
+        places.sort_by_key(|p| primary.as_ref().map(|n| &n.0) != Some(&p.0));
+        places
+    }
+
+    /// Before the column is placed, after each dispatch: the pointer
+    /// rested long enough where the column comes out from, which brings
+    /// it out on that screen. Whether something to draw changed.
+    pub(crate) fn panel_rested(&mut self) -> bool {
         let form = self.panel_form();
         let now = self.clock.now();
+        let Some(Rest::Since(since, on)) = self.shell.as_ref().map(|s| &s.panel.rest) else {
+            return false;
+        };
+        if now < *since + rest_for(form) {
+            return false;
+        }
+        let fullscreen = self.find_output(on).is_some_and(|o| self.fullscreen_on(&o));
+        let on = self.panel_everywhere().then(|| on.clone());
         let moves = self.panel_moves();
         let handle = self.waker().cloned();
-        let fullscreen = self.column_output().is_some_and(|o| self.fullscreen_on(&o));
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
-        let mut changed = false;
         let forms = &mut shell.panel;
-        if forms.form != Some(form) {
+        forms.rest = Rest::Spent;
+        forms.alarm.set(handle.as_ref(), "panel rest", None, now);
+        if forms.out != Out::In || fullscreen {
+            return false;
+        }
+        if on.is_some() {
+            forms.asked_on = on;
+        }
+        forms.open(Out::Hovered, now, moves);
+        true
+    }
+
+    /// After each dispatch, the column drawn: follows the form, shows the
+    /// strip or the bar on each screen that has one. Whether something to
+    /// draw changed.
+    pub(crate) fn refresh_panel(&mut self, state: &ColumnState) -> bool {
+        let form = self.panel_form();
+        let screens = self.config.panel.screens;
+        let everywhere = self.panel_everywhere();
+        let now = self.clock.now();
+        let handle = self.waker().cloned();
+        // Nothing is looked up or copied for the primary screen alone.
+        let all = if everywhere {
+            self.panel_places()
+        } else {
+            Vec::new()
+        };
+        let Some(shell) = self.shell.as_mut() else {
+            return false;
+        };
+        let Shell {
+            on, column, panel, ..
+        } = shell;
+        let forms = panel;
+        let mut changed = false;
+        if forms.form != Some((form, screens)) {
             // Another form: the column is in, and what stays made anew.
-            forms.form = Some(form);
-            forms.bar = None;
+            forms.form = Some((form, screens));
+            forms.screens.clear();
             forms.out = Out::In;
             forms.slide.jump(0.0);
             forms.rest = Rest::Away;
+            forms.pressed = None;
             forms.alarm.set(handle.as_ref(), "panel rest", None, now);
-            shell.column.close_popover();
-            shell.column.pointer_left();
+            column.close_popover();
+            column.pointer_left();
             changed = true;
         }
-        // Nothing is made or copied while the form and the screen stay.
-        let place = shell.on.as_ref().map(|(_, area, scale)| (*area, *scale));
-        match (form, place) {
-            (PanelForm::Strip, Some((area, scale))) => {
-                let height = strip_rect(area).size.h as f32;
-                match &mut forms.bar {
-                    Some(Bar::Strip(p)) => p.view.resize(height, scale as f32),
-                    _ => {
-                        let strip =
-                            Strip::new(forms.theme.clone(), forms.lang, height, scale as f32);
-                        forms.bar = Some(Bar::Strip(Panel::new(strip)));
-                    }
+        // The screens that keep something: the column's alone, or every
+        // one once the column has a screen.
+        let one = on
+            .as_ref()
+            .map(|(name, area, scale)| (name.as_str(), *area, *scale));
+        let every: Vec<(&str, Rectangle<i32, Logical>, f64)> = all
+            .iter()
+            .filter(|_| on.is_some())
+            .map(|(name, area, scale, _)| (name.as_str(), *area, *scale))
+            .collect();
+        let places = match form {
+            PanelForm::Column => &[][..],
+            _ if everywhere => &every[..],
+            _ => one.as_slice(),
+        };
+        // Nothing is made or copied while the form and the screens stay.
+        forms
+            .screens
+            .retain(|s| places.iter().any(|(name, ..)| *name == s.output));
+        for (i, &(name, area, scale)) in places.iter().enumerate() {
+            match forms.screens.iter().position(|s| s.output == name) {
+                Some(j) if j == i => {}
+                Some(j) => {
+                    let screen = forms.screens.remove(j);
+                    forms.screens.insert(i, screen);
                 }
+                None => forms.screens.insert(i, OnScreen::new(name, area, scale)),
             }
-            (PanelForm::Top, Some((area, scale))) => {
-                let width = top_rect(area).size.w as f32;
-                match &mut forms.bar {
-                    Some(Bar::Top(p)) => p.view.resize(width, scale as f32),
-                    _ => {
-                        let bar = TopBar::new(forms.theme.clone(), forms.lang, width, scale as f32);
-                        forms.bar = Some(Bar::Top(Panel::new(bar)));
-                    }
-                }
-            }
-            (PanelForm::Hidden, Some((_, scale))) => {
-                if !matches!(forms.bar, Some(Bar::Hint(_, s)) if s == scale) {
-                    let mut hint = Panel::new(EdgeHint::new(forms.theme.clone(), scale as f32));
-                    hint.upload(&[]);
-                    forms.bar = Some(Bar::Hint(hint, scale));
-                    changed = true;
-                }
-            }
-            _ => forms.bar = None,
-        }
-        match &mut forms.bar {
-            Some(Bar::Strip(p)) => {
-                p.view.set_state(state);
-                let drawn = p.view.draw(now);
-                changed |= p.upload(&drawn) || p.view.is_animating(now);
-            }
-            Some(Bar::Top(p)) => {
-                p.view.set_state(state);
-                let drawn = p.view.draw(now);
-                changed |= p.upload(&drawn) || p.view.is_animating(now);
-            }
-            Some(Bar::Hint(..)) | None => {}
-        }
-        // Rested long enough where the column comes out from.
-        if let Rest::Since(since) = forms.rest {
-            let rest = if form == PanelForm::Hidden {
-                EDGE_REST
-            } else {
-                STRIP_REST
+            let Some(screen) = forms.screens.get_mut(i) else {
+                continue;
             };
-            if now >= since + rest {
-                forms.rest = Rest::Spent;
-                forms.alarm.set(handle.as_ref(), "panel rest", None, now);
-                if forms.out == Out::In && !fullscreen {
-                    forms.open(Out::Hovered, now, moves);
-                    changed = true;
+            screen.area = area;
+            screen.scale = scale;
+            match form {
+                PanelForm::Strip => {
+                    let height = strip_rect(area).size.h as f32;
+                    match &mut screen.bar {
+                        Some(Bar::Strip(p)) => p.view.resize(height, scale as f32),
+                        _ => {
+                            let strip =
+                                Strip::new(forms.theme.clone(), forms.lang, height, scale as f32);
+                            screen.bar = Some(Bar::Strip(Panel::new(strip)));
+                        }
+                    }
                 }
+                PanelForm::Top => {
+                    let width = top_rect(area).size.w as f32;
+                    match &mut screen.bar {
+                        Some(Bar::Top(p)) => p.view.resize(width, scale as f32),
+                        _ => {
+                            let bar =
+                                TopBar::new(forms.theme.clone(), forms.lang, width, scale as f32);
+                            screen.bar = Some(Bar::Top(Panel::new(bar)));
+                        }
+                    }
+                }
+                PanelForm::Hidden => {
+                    if !matches!(screen.bar, Some(Bar::Hint(_, s)) if s == scale) {
+                        let mut hint = Panel::new(EdgeHint::new(forms.theme.clone(), scale as f32));
+                        hint.upload(&[]);
+                        screen.bar = Some(Bar::Hint(hint, scale));
+                        changed = true;
+                    }
+                }
+                PanelForm::Column => screen.bar = None,
+            }
+        }
+        for screen in &mut forms.screens {
+            // Its own screen's desktops and active window on every screen;
+            // the column's and the focused one otherwise.
+            let here = if everywhere {
+                let active = all
+                    .iter()
+                    .find(|(name, ..)| *name == screen.output)
+                    .and_then(|(.., active)| active.as_ref());
+                screen.window = active.map(|(id, _)| *id);
+                Here {
+                    screen: state.screens.iter().find(|s| s.output == screen.output),
+                    active: active.map(|(_, window)| window),
+                }
+            } else {
+                Here::of(state)
+            };
+            match &mut screen.bar {
+                Some(Bar::Strip(p)) => {
+                    p.view.set_state_here(state, here);
+                    let drawn = p.view.draw(now);
+                    changed |= p.upload(&drawn) || p.view.is_animating(now);
+                }
+                Some(Bar::Top(p)) => {
+                    p.view.set_state_here(state, here);
+                    let drawn = p.view.draw(now);
+                    changed |= p.upload(&drawn) || p.view.is_animating(now);
+                }
+                Some(Bar::Hint(..)) | None => {}
             }
         }
         // While it slides, and once more where it ends.
@@ -375,9 +597,9 @@ impl State {
     }
 
     /// The pointer moved to `location`, the column not taking it: the
-    /// column out goes back when the pointer left its band; resting on the
-    /// strip or at the edge counts; the top bar's buttons follow it.
-    /// Whether the strip or the bar took it.
+    /// column out goes back when the pointer left its band; resting on a
+    /// strip or at an edge counts; the top bars' buttons follow it.
+    /// Whether a strip or a bar took it.
     pub(crate) fn panel_pointer_motion(&mut self, location: Point<f64, Logical>) -> bool {
         let form = self.panel_form();
         if form == PanelForm::Column {
@@ -386,7 +608,14 @@ impl State {
         let now = self.clock.now();
         let moves = self.panel_moves();
         let handle = self.waker().cloned();
-        let fullscreen = self.column_output().is_some_and(|o| self.fullscreen_on(&o));
+        let Some(shell) = self.shell.as_ref() else {
+            return false;
+        };
+        let hit = shell.panel.trigger_at(form, location);
+        let fullscreen = hit
+            .and_then(|i| shell.panel.screens.get(i))
+            .and_then(|s| self.find_output(&s.output))
+            .is_some_and(|o| self.fullscreen_on(&o));
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
@@ -407,59 +636,65 @@ impl State {
             Out::Asked => {}
         }
         let forms = &mut shell.panel;
-        let a = area.to_f64();
-        let on_strip = form == PanelForm::Strip && strip_rect(area).to_f64().contains(location);
-        let trigger = !fullscreen
-            && match form {
-                PanelForm::Strip => on_strip,
-                PanelForm::Hidden => {
-                    location.x >= a.loc.x + a.size.w - EDGE
-                        && location.x <= a.loc.x + a.size.w
-                        && location.y >= a.loc.y
-                        && location.y <= a.loc.y + a.size.h
-                }
-                PanelForm::Top | PanelForm::Column => false,
-            };
-        if !trigger {
-            forms.rest = Rest::Away;
-            forms.alarm.set(handle.as_ref(), "panel rest", None, now);
-        } else if forms.rest == Rest::Away && forms.out == Out::In {
-            forms.rest = Rest::Since(now);
-            let rest = if form == PanelForm::Hidden {
-                EDGE_REST
-            } else {
-                STRIP_REST
-            };
-            forms
-                .alarm
-                .set(handle.as_ref(), "panel rest", Some(now + rest), now);
-        }
-        // The top bar's buttons show the pointer over them.
-        if let Some(Bar::Top(panel)) = &mut forms.bar {
-            let bar = top_rect(area);
-            let at = UiPoint::new(
-                (location.x - f64::from(bar.loc.x)) as f32,
-                (location.y - f64::from(bar.loc.y)) as f32,
-            );
-            if bar.to_f64().contains(location) || forms.bar_pressed {
-                forms.bar_inside = true;
-                panel.view.input(at, Input::PointerMove(at));
-                self.needs_redraw = true;
-                return true;
+        let on_strip = form == PanelForm::Strip && hit.is_some();
+        match hit
+            .filter(|_| !fullscreen)
+            .and_then(|i| forms.screens.get(i))
+        {
+            None => {
+                forms.rest = Rest::Away;
+                forms.alarm.set(handle.as_ref(), "panel rest", None, now);
             }
-            if forms.bar_inside {
-                forms.bar_inside = false;
-                panel.view.pointer_left();
-                self.needs_redraw = true;
+            Some(screen) => {
+                let elsewhere = matches!(&forms.rest, Rest::Since(_, on) if *on != screen.output);
+                if (forms.rest == Rest::Away || elsewhere) && forms.out == Out::In {
+                    forms.rest = Rest::Since(now, screen.output.clone());
+                    forms.alarm.set(
+                        handle.as_ref(),
+                        "panel rest",
+                        Some(now + rest_for(form)),
+                        now,
+                    );
+                }
+            }
+        }
+        // The top bars' buttons show the pointer over them; a press begun
+        // on one keeps the pointer there.
+        if form == PanelForm::Top {
+            let taker = match &forms.pressed {
+                Some(output) => forms.screens.iter().position(|s| s.output == *output),
+                None => forms.bar_at(location),
+            };
+            for (i, screen) in forms.screens.iter_mut().enumerate() {
+                let Some(Bar::Top(panel)) = &mut screen.bar else {
+                    continue;
+                };
+                if Some(i) == taker {
+                    let bar = top_rect(screen.area);
+                    let at = UiPoint::new(
+                        (location.x - f64::from(bar.loc.x)) as f32,
+                        (location.y - f64::from(bar.loc.y)) as f32,
+                    );
+                    screen.inside = true;
+                    panel.view.input(at, Input::PointerMove(at));
+                    self.needs_redraw = true;
+                } else if screen.inside {
+                    screen.inside = false;
+                    panel.view.pointer_left();
+                    self.needs_redraw = true;
+                }
+            }
+            if taker.is_some() {
+                return true;
             }
         }
         self.needs_redraw |= forms.slide.is_running(now);
         on_strip
     }
 
-    /// The primary button, the column not taking it: a press on the strip
-    /// brings the column out, the top bar's buttons act, a press elsewhere
-    /// sends the column back. Whether the strip or the bar took it.
+    /// The primary button, the column not taking it: a press on a strip
+    /// brings the column out there, the top bars' buttons act, a press
+    /// elsewhere sends the column back. Whether a strip or a bar took it.
     pub(crate) fn panel_pointer_button(
         &mut self,
         location: Point<f64, Logical>,
@@ -471,6 +706,7 @@ impl State {
         }
         let now = self.clock.now();
         let moves = self.panel_moves();
+        let everywhere = self.panel_everywhere();
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
@@ -478,30 +714,45 @@ impl State {
             return false;
         };
         let forms = &mut shell.panel;
-        // The top bar: its buttons act; elsewhere on it, the column comes
-        // out or goes back.
-        if let Some(Bar::Top(panel)) = &mut forms.bar {
-            let bar = top_rect(area);
-            let on_bar = bar.to_f64().contains(location);
-            if (pressed && on_bar) || (!pressed && forms.bar_pressed) {
-                forms.bar_pressed = pressed;
-                let at = UiPoint::new(
-                    (location.x - f64::from(bar.loc.x)) as f32,
-                    (location.y - f64::from(bar.loc.y)) as f32,
-                );
-                let actions = panel.view.input(at, Input::PointerButton { pressed });
-                self.needs_redraw = true;
-                for action in actions {
-                    if action == ShellAction::OpenPanel {
-                        self.toggle_panel_from(Out::Asked);
-                    } else {
-                        self.shell_action(action);
-                    }
-                }
-                return true;
+        // A top bar: its buttons act; elsewhere on it, the column comes
+        // out on its screen or goes back.
+        let taker = if pressed {
+            forms.bar_at(location)
+        } else {
+            forms
+                .pressed
+                .take()
+                .and_then(|output| forms.screens.iter().position(|s| s.output == output))
+        };
+        if let Some(screen) = taker.and_then(|i| forms.screens.get_mut(i))
+            && let Some(Bar::Top(panel)) = &mut screen.bar
+        {
+            if pressed {
+                forms.pressed = Some(screen.output.clone());
             }
+            let bar = top_rect(screen.area);
+            let at = UiPoint::new(
+                (location.x - f64::from(bar.loc.x)) as f32,
+                (location.y - f64::from(bar.loc.y)) as f32,
+            );
+            let actions = panel.view.input(at, Input::PointerButton { pressed });
+            let window = screen.window;
+            let output = everywhere.then(|| screen.output.clone());
+            self.needs_redraw = true;
+            for action in actions {
+                match action {
+                    ShellAction::OpenPanel => self.toggle_panel_from(Out::Asked, output.clone()),
+                    // On every screen, on that screen's active window.
+                    ShellAction::Minimize | ShellAction::ToggleMaximize | ShellAction::Close
+                        if everywhere =>
+                    {
+                        self.act_on_window(&action, window);
+                    }
+                    action => self.shell_action(action),
+                }
+            }
+            return true;
         }
-        let forms = &mut shell.panel;
         if !pressed {
             return false;
         }
@@ -515,8 +766,11 @@ impl State {
         }
         if form == PanelForm::Strip
             && forms.out == Out::In
-            && strip_rect(area).to_f64().contains(location)
+            && let Some(i) = forms.trigger_at(form, location)
         {
+            if everywhere {
+                forms.asked_on = forms.screens.get(i).map(|s| s.output.clone());
+            }
             forms.open(Out::Hovered, now, moves);
             forms.rest = Rest::Spent;
             self.needs_redraw = true;
@@ -525,12 +779,37 @@ impl State {
         false
     }
 
-    /// The column out, or back (Super+C): nothing in form `column`.
-    pub fn toggle_panel(&mut self) {
-        self.toggle_panel_from(Out::Asked);
+    /// A top bar's button on the window it shows (#282).
+    fn act_on_window(&mut self, action: &ShellAction, window: Option<WindowId>) {
+        let Some(id) = window else {
+            return;
+        };
+        let serial = SERIAL_COUNTER.next_serial();
+        match action {
+            ShellAction::Minimize => self.minimize(id, serial),
+            ShellAction::ToggleMaximize => self.toggle_maximized(id, serial),
+            ShellAction::Close => {
+                if let Some(managed) = self.windows.get(&id) {
+                    crate::surface::close(&managed.window);
+                }
+            }
+            _ => {}
+        }
     }
 
-    fn toggle_panel_from(&mut self, how: Out) {
+    /// The column out, or back (Super+C): nothing in form `column`. On
+    /// every screen, it comes out on the screen under the pointer.
+    pub fn toggle_panel(&mut self) {
+        let on = if self.panel_everywhere() {
+            self.output_under_pointer().map(|o| o.name())
+        } else {
+            None
+        };
+        self.toggle_panel_from(Out::Asked, on);
+    }
+
+    /// The column out, on screen `on` when given, or back.
+    fn toggle_panel_from(&mut self, how: Out, on: Option<String>) {
         if self.panel_form() == PanelForm::Column {
             return;
         }
@@ -544,6 +823,9 @@ impl State {
         }
         let forms = &mut shell.panel;
         if forms.out == Out::In {
+            if on.is_some() {
+                forms.asked_on = on;
+            }
             forms.open(how, now, moves);
         } else {
             forms.close(now, moves);
@@ -559,7 +841,7 @@ impl State {
         if !self.panel_out() {
             return false;
         }
-        self.toggle_panel_from(Out::Asked);
+        self.toggle_panel_from(Out::Asked, None);
         true
     }
 
@@ -573,57 +855,65 @@ impl State {
         let Some(shell) = &self.shell else {
             return Vec::new();
         };
-        let Some((name, area, _)) = &shell.on else {
+        let name = output.name();
+        let Some(screen) = shell.panel.screens.iter().find(|s| s.output == name) else {
             return Vec::new();
         };
-        if *name != output.name() || self.fullscreen_on(output) {
+        if self.fullscreen_on(output) {
             return Vec::new();
         }
+        let area = screen.area;
         let local = |r: Rectangle<i32, Logical>| r.loc - area.loc;
-        let element = match &shell.panel.bar {
-            Some(Bar::Strip(p)) => p.element(renderer, output, local(strip_rect(*area))),
-            Some(Bar::Top(p)) => p.element(renderer, output, local(top_rect(*area))),
+        // The column shows on this screen.
+        let column_here = || {
+            shell.on.as_ref().is_some_and(|(on, ..)| *on == name) && self.column_shift().is_some()
+        };
+        let element = match &screen.bar {
+            Some(Bar::Strip(p)) => p.element(renderer, output, local(strip_rect(area))),
+            Some(Bar::Top(p)) => p.element(renderer, output, local(top_rect(area))),
             // Only while the column is all in.
-            Some(Bar::Hint(p, _)) if self.column_shift().is_none() => {
-                p.element(renderer, output, hint_place(*area))
+            Some(Bar::Hint(p, _)) if !column_here() => {
+                p.element(renderer, output, hint_place(area))
             }
             _ => None,
         };
         element.map(SceneElement::Frame).into_iter().collect()
     }
 
-    /// The strip's or the bar's panel on glass and its shadows, output-local.
+    /// The strip's or the bar's panel on glass and its shadows on
+    /// `output`, output-local.
     pub(crate) fn panel_panes(&self, output: &Output) -> crate::scene::Panes {
         let Some(shell) = &self.shell else {
             return crate::scene::Panes::default();
         };
-        let Some((name, area, _)) = &shell.on else {
+        let name = output.name();
+        let Some(screen) = shell.panel.screens.iter().find(|s| s.output == name) else {
             return crate::scene::Panes::default();
         };
-        if *name != output.name() {
-            return crate::scene::Panes::default();
-        }
-        let (rect, glass, shadows) = match &shell.panel.bar {
-            Some(Bar::Strip(p)) => (strip_rect(*area), p.view.glass(), p.view.shadows()),
-            Some(Bar::Top(p)) => (top_rect(*area), p.view.glass(), p.view.shadows()),
+        let area = screen.area;
+        let (rect, glass, shadows) = match &screen.bar {
+            Some(Bar::Strip(p)) => (strip_rect(area), p.view.glass(), p.view.shadows()),
+            Some(Bar::Top(p)) => (top_rect(area), p.view.glass(), p.view.shadows()),
             _ => return crate::scene::Panes::default(),
         };
         let origin = (rect.loc - area.loc).to_f64();
         crate::scene::Panes::of(crate::blur::Surface::Bar, origin, &glass, &shadows)
     }
 
-    /// The strip's or the bar's interface for the control API.
+    /// The strips' or the bars' interface for the control API, the primary
+    /// screen's first.
     pub(crate) fn panel_ui(&self, out: &mut Vec<UiNode>) {
         let Some(shell) = &self.shell else {
             return;
         };
-        let Some((_, area, _)) = &shell.on else {
-            return;
-        };
-        match &shell.panel.bar {
-            Some(Bar::Strip(p)) => flatten(&p.view.access(), strip_rect(*area).loc, 0, out),
-            Some(Bar::Top(p)) => flatten(&p.view.access(), top_rect(*area).loc, 0, out),
-            _ => {}
+        for screen in &shell.panel.screens {
+            match &screen.bar {
+                Some(Bar::Strip(p)) => {
+                    flatten(&p.view.access(), strip_rect(screen.area).loc, 0, out);
+                }
+                Some(Bar::Top(p)) => flatten(&p.view.access(), top_rect(screen.area).loc, 0, out),
+                _ => {}
+            }
         }
     }
 }
@@ -646,5 +936,13 @@ mod tests {
         assert_eq!(hint_place(area), Point::from((3432, 560)));
         assert!(in_band(area, Point::from((3439.0, 700.0))));
         assert!(!in_band(area, Point::from((3000.0, 700.0))));
+        // A second screen's own, from its corner.
+        let second = Rectangle::new((3440, 0).into(), (1600, 1000).into());
+        assert_eq!(
+            strip_rect(second),
+            Rectangle::new((4952, 16).into(), (72, 968).into())
+        );
+        assert!(at_edge(second, Point::from((5039.0, 500.0))));
+        assert!(!at_edge(area, Point::from((5039.0, 500.0))));
     }
 }

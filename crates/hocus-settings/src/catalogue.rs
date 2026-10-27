@@ -894,6 +894,8 @@ pub enum Setting {
     ThemePerDesktop,
     /// The panel's form (#263).
     PanelForm,
+    /// The panel on the primary screen or on every one (#282).
+    PanelScreens,
     Layouts,
     /// A shortcut, by its combination.
     Shortcut(String),
@@ -968,7 +970,8 @@ impl Setting {
             | Self::HighContrast
             | Self::Transparency
             | Self::ThemePerDesktop
-            | Self::PanelForm => Page::Appearance,
+            | Self::PanelForm
+            | Self::PanelScreens => Page::Appearance,
             Self::Layouts | Self::Shortcut(_) => Page::Keyboard,
             Self::Screen(_) => Page::Screens,
             Self::DesktopCount | Self::DesktopNames => Page::Desktops,
@@ -1126,6 +1129,23 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
                 .iter()
                 .find(|(id, _, _)| *id == ctx.config.panel.form.name())
                 .map_or_else(String::new, |(_, name, _)| name.get(lang).to_owned()),
+        ),
+        (
+            Setting::PanelScreens,
+            words::PANEL_SCREENS.get(lang).to_owned(),
+            [
+                both(words::PANEL_SCREENS),
+                words::PANEL_SCREENS_CHOICES
+                    .iter()
+                    .flat_map(|(_, name)| both(*name))
+                    .collect(),
+                vec!["multi-screen".into(), "multi-écran".into()],
+            ]
+            .concat(),
+            words::PANEL_SCREENS_CHOICES
+                .iter()
+                .find(|(id, _)| *id == ctx.config.panel.screens.name())
+                .map_or_else(String::new, |(_, name)| name.get(lang).to_owned()),
         ),
         (
             Setting::InterfaceLanguage,
