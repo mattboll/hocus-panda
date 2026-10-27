@@ -46,6 +46,7 @@ mod ink;
 mod input;
 mod journal;
 mod launcher;
+mod layout_names;
 mod leases;
 mod leave;
 mod lock;
@@ -109,6 +110,7 @@ use smithay::reexports::{
 pub use clock::Clock;
 pub use harness::{HarnessOptions, Headless, write_whole};
 pub use headless::{FRAME, HeadlessConfig, OutputInfo, RendererChoice, RendererKind};
+pub use hocus_platform::xkb::Registry as XkbRegistry;
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use state::State;
 pub use watchdog::WatchdogConfig;
@@ -174,6 +176,9 @@ pub struct Options {
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
     /// Runs this instead of polkit's helper to check passwords (tests).
     pub polkit_helper: Option<PathBuf>,
+    /// Where XKB's registry names the keyboard layouts the shell does not
+    /// name itself.
+    pub xkb_registry: hocus_platform::xkb::Registry,
 }
 
 /// How often the configuration file is looked at by default.
@@ -327,6 +332,11 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         options.session_bus.as_deref(),
     );
     state.start_sessions(state_dir.clone());
+    layout_names::start(
+        &event_loop.handle(),
+        &mut state,
+        options.xkb_registry.clone(),
+    );
     if options.shell {
         state.child_env = options.child_env.clone();
         shell::start(

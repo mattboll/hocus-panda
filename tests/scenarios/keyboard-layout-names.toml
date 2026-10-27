@@ -1,0 +1,21 @@
+# A layout the shell does not name itself takes the name XKB's registry
+# gives it, translated by its catalogue (#251): read off the loop, from
+# the scenarios' own copy of both (xkb/ here), never the machine's.
+description = "A kept layout the shell does not know, de(neo), is named after XKB's registry in the column's keyboard menu, in French"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+
+[keyboard]
+layouts = ["fr", "de(neo)"]
+"""
+
+[[step]]
+click_ui = "Disposition du clavier : Français (AZERTY)"
+
+[[step]]
+expect_ui = { label = "Allemand (Neo 2)", selected = false }

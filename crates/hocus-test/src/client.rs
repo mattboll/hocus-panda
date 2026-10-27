@@ -154,6 +154,11 @@ pub enum ClientEvent {
         code: u32,
         pressed: bool,
     },
+    /// The keymap the compositor gave: its layouts' names, in order.
+    Keymap(Vec<String>),
+    /// What a key pressed types in that keymap, with the modifiers and
+    /// layout in effect: `b` for the key of US Q on BÉPO.
+    Typed(String),
     /// The compositor asked the window to close; the client then exits.
     Close,
     /// Text typed into it through text-input (the history, emoji).
@@ -184,6 +189,8 @@ impl fmt::Display for ClientEvent {
             Self::KeyboardEnter => write!(f, "keyboard_enter"),
             Self::KeyboardLeave => write!(f, "keyboard_leave"),
             Self::Key { code, pressed: p } => write!(f, "key {code} {}", pressed(*p)),
+            Self::Keymap(layouts) => write!(f, "keymap {}", layouts.join(", ")),
+            Self::Typed(text) => write!(f, "typed {text}"),
             Self::Close => write!(f, "close"),
             Self::Text(text) => write!(f, "text {text}"),
             Self::Token => write!(f, "token"),
@@ -413,6 +420,7 @@ impl SolidWindow {
             elements: options.elements,
             pointers: vec![None; bound.len()],
             seat_names: vec![String::new(); bound.len()],
+            keymaps: std::collections::HashMap::new(),
             typed: None,
             serial: 0,
             drawn: None,
@@ -524,6 +532,8 @@ struct Client {
     pointers: Vec<Option<(f64, f64)>>,
     /// Each seat's name, by the order it was bound in.
     seat_names: Vec<String>,
+    /// Each seat's keymap and its state, as the compositor says them.
+    keymaps: std::collections::HashMap<usize, xkbcommon::xkb::State>,
     /// Text committed, recorded at the next `done`.
     typed: Option<String>,
     /// The last input serial, which taking the clipboard needs.
@@ -818,9 +828,32 @@ impl Dispatch<wl_keyboard::WlKeyboard, usize> for Client {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        // The keymap's file descriptor is dropped with the event: codes are
-        // enough for tests.
         match event {
+            wl_keyboard::Event::Keymap { format, fd, size } => {
+                if format != WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) {
+                    return;
+                }
+                let Some(state) = keymap(fd, size) else {
+                    return;
+                };
+                let keymap = state.get_keymap();
+                let names = (0..keymap.num_layouts())
+                    .map(|l| keymap.layout_get_name(l).to_owned())
+                    .collect();
+                client.keymaps.insert(*i, state);
+                client.record_on(*i, ClientEvent::Keymap(names));
+            }
+            wl_keyboard::Event::Modifiers {
+                mods_depressed,
+                mods_latched,
+                mods_locked,
+                group,
+                ..
+            } => {
+                if let Some(state) = client.keymaps.get_mut(i) {
+                    state.update_mask(mods_depressed, mods_latched, mods_locked, 0, 0, group);
+                }
+            }
             wl_keyboard::Event::Enter { serial, .. } => {
                 if *i == 0 {
                     client.serial = serial;
@@ -831,6 +864,16 @@ impl Dispatch<wl_keyboard::WlKeyboard, usize> for Client {
             wl_keyboard::Event::Key { key, state, .. } => {
                 let pressed = state == WEnum::Value(wl_keyboard::KeyState::Pressed);
                 client.record_on(*i, ClientEvent::Key { code: key, pressed });
+                // XKB's codes are evdev's plus 8.
+                let typed = client
+                    .keymaps
+                    .get(i)
+                    .filter(|_| pressed)
+                    .map(|s| s.key_get_utf8(xkbcommon::xkb::Keycode::new(key + 8)))
+                    .filter(|t| !t.is_empty() && !t.chars().any(char::is_control));
+                if let Some(text) = typed {
+                    client.record_on(*i, ClientEvent::Typed(text));
+                }
                 if pressed {
                     if let Some(label) = client.hit(*i) {
                         client.record_on(*i, ClientEvent::Hit(label));
@@ -841,6 +884,28 @@ impl Dispatch<wl_keyboard::WlKeyboard, usize> for Client {
             _ => {}
         }
     }
+}
+
+/// The keymap a compositor sends, compiled: XKB's text format in a file
+/// it shares, read as a file is.
+fn keymap(fd: std::os::fd::OwnedFd, size: u32) -> Option<xkbcommon::xkb::State> {
+    use xkbcommon::xkb;
+    let mut text = Vec::with_capacity(size as usize);
+    std::fs::File::from(fd).read_to_end(&mut text).ok()?;
+    text.truncate(size as usize);
+    // It ends with a NUL.
+    while text.last() == Some(&0) {
+        text.pop();
+    }
+    let text = String::from_utf8(text).ok()?;
+    let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    let keymap = xkb::Keymap::new_from_string(
+        &context,
+        text,
+        xkb::KEYMAP_FORMAT_TEXT_V1,
+        xkb::KEYMAP_COMPILE_NO_FLAGS,
+    )?;
+    Some(xkb::State::new(&keymap))
 }
 
 impl CompositorHandler for Client {

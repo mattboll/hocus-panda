@@ -237,8 +237,13 @@ impl AccountsPage {
 struct KeyboardPage {
     /// A shortcut being changed or made.
     editing: Option<Editing>,
-    /// The layouts offered to add show.
+    /// The layouts offered to add show, with their search.
     adding_layout: bool,
+    /// What the layouts' search holds, and its field.
+    layout_query: String,
+    layout_field: Option<NodeId>,
+    /// What Enter in the search chooses: the first layout offered.
+    layout_first: Option<Change>,
     /// Going back to the original shortcuts is asked.
     resetting: bool,
     /// The new shortcut's form shows, with what it runs.
@@ -416,6 +421,8 @@ pub struct SettingsView {
     zone_refused: Option<String>,
     /// The time zones' places, for the map; none without the database.
     places: std::sync::Arc<Vec<hocus_platform::timedate::Place>>,
+    /// The keyboard layouts XKB knows; none without its registry.
+    layouts: Vec<hocus_platform::xkb::Layout>,
     /// The map, where it is.
     map: Option<NodeId>,
     dirty: bool,
@@ -501,6 +508,7 @@ impl SettingsView {
             search: SearchPage::default(),
             zone_refused: None,
             places: Default::default(),
+            layouts: Vec::new(),
             map: None,
             dirty: true,
             now: Duration::ZERO,
@@ -582,6 +590,48 @@ impl SettingsView {
         }
     }
 
+    /// The keyboard layouts XKB knows, named in English and French.
+    pub fn set_layouts(&mut self, layouts: Vec<hocus_platform::xkb::Layout>) {
+        if layouts != self.layouts {
+            self.layouts = layouts;
+            self.dirty = true;
+        }
+    }
+
+    /// A layout's name in the language spoken: a common one's, XKB's, or
+    /// its code.
+    fn layout_name(&self, code: &str) -> String {
+        if let Some(name) = hocus_shell::layouts::known(code, self.lang) {
+            return name.to_owned();
+        }
+        self.layouts.iter().find(|l| l.code == code).map_or_else(
+            || code.to_owned(),
+            |l| match self.lang {
+                Lang::En => l.description.clone(),
+                Lang::Fr => l.name().to_owned(),
+            },
+        )
+    }
+
+    /// Every layout that can be chosen, named in the language spoken: XKB's,
+    /// or the common ones without its registry.
+    fn layouts_offered(&self) -> Vec<hocus_shell::layouts::Offered> {
+        use hocus_shell::layouts::{KNOWN, Offered};
+        if self.layouts.is_empty() {
+            return KNOWN
+                .iter()
+                .filter_map(|(code, _, _)| Offered::known(code, self.lang))
+                .collect();
+        }
+        self.layouts
+            .iter()
+            .map(|l| {
+                let translated = (self.lang == Lang::Fr).then(|| l.name());
+                Offered::new(&l.code, self.lang, translated, &l.description)
+            })
+            .collect()
+    }
+
     pub fn context(&self) -> &Context {
         &self.ctx
     }
@@ -622,6 +672,8 @@ impl SettingsView {
             self.system.bad_address = false;
             self.hardware.leave();
             self.search.leave();
+            self.keys.adding_layout = false;
+            self.keys.layout_query.clear();
         }
         self.screen = screen;
         self.typing = screen == Screen::Home;
@@ -764,7 +816,7 @@ impl SettingsView {
         if key == Key::Escape
             && (self.keys.adding_layout || self.keys.resetting || self.keys.new_open)
         {
-            self.keys.adding_layout = false;
+            self.close_layouts();
             self.keys.resetting = false;
             self.keys.new_open = false;
             self.dirty = true;
@@ -775,6 +827,16 @@ impl SettingsView {
             && self.tree.focused() == self.keys.new_field
         {
             return self.listen_new();
+        }
+        if key == Key::Enter
+            && self.keys.layout_field.is_some()
+            && self.tree.focused() == self.keys.layout_field
+        {
+            let Some(change) = self.keys.layout_first.take() else {
+                return Vec::new();
+            };
+            self.close_layouts();
+            return vec![Outcome::Change(Box::new(change))];
         }
         let results = self.screen == Screen::Home && !self.hits.is_empty();
         if let Some((outputs, Some(field))) = self.screens.renaming.clone() {
@@ -862,6 +924,13 @@ impl SettingsView {
             return self.handle(events);
         }
         let renaming = self.screens.renaming.as_ref().and_then(|(_, f)| *f);
+        if let Some(field) = self.keys.layout_field {
+            if self.tree.focused() != Some(field) {
+                self.tree.set_focus(Some(field));
+            }
+            let events = self.tree.text_input(text);
+            return self.handle(events);
+        }
         if let Some(field) = self.keys.new_field
             && self.keys.editing.is_none()
         {
@@ -929,6 +998,13 @@ impl SettingsView {
                         self.dirty = true;
                     }
                 }
+                Event::Changed(id) if Some(id) == self.keys.layout_field => {
+                    let typed = self.tree.field_value(id).unwrap_or_default().to_owned();
+                    if typed != self.keys.layout_query {
+                        self.keys.layout_query = typed;
+                        self.dirty = true;
+                    }
+                }
                 Event::Changed(id) if self.accounts.index(Some(id)).is_some() => {
                     if let Some(i) = self.accounts.index(Some(id)) {
                         self.accounts.values[i] =
@@ -965,7 +1041,7 @@ impl SettingsView {
                     Some(Target::Hit(i)) => self.open_hit(i),
                     Some(Target::Close) => out.push(Outcome::Close),
                     Some(Target::Set(change)) => {
-                        self.keys.adding_layout = false;
+                        self.close_layouts();
                         self.keys.resetting = false;
                         out.push(Outcome::Change(Box::new(change)));
                     }
@@ -983,7 +1059,11 @@ impl SettingsView {
                     Some(Target::ConfirmEdit) => out.extend(self.confirm_edit()),
                     Some(Target::CancelEdit) => out.extend(self.cancel_edit()),
                     Some(Target::AddLayout) => {
-                        self.keys.adding_layout = !self.keys.adding_layout;
+                        if self.keys.adding_layout {
+                            self.close_layouts();
+                        } else {
+                            self.keys.adding_layout = true;
+                        }
                         self.dirty = true;
                     }
                     Some(Target::NewShortcut) => {
@@ -1180,6 +1260,141 @@ impl SettingsView {
         out
     }
 
+    /// The layouts offered close, their search forgotten.
+    fn close_layouts(&mut self) {
+        self.keys.adding_layout = false;
+        self.keys.layout_query.clear();
+        self.keys.layout_field = None;
+        self.keys.layout_first = None;
+        self.dirty = true;
+    }
+
+    /// The layouts' search and what it finds, under `parent`: chosen, a
+    /// layout is kept after the others, or put first (`first`, the
+    /// welcome's), the others kept after it.
+    fn layout_search(&mut self, theme: &Theme, parent: NodeId, first: bool) {
+        let lang = self.lang;
+        // Without any kept, XKB's own, US, is in use: added to, it stays.
+        let mut kept: Vec<String> = self.ctx.config.keyboard.layouts.clone();
+        if kept.is_empty() && !first {
+            kept.push("us".into());
+        }
+        let box_ = self.add(
+            parent,
+            Style {
+                height: Length::Px(44.0),
+                padding: Insets::symmetric(0.0, 14.0),
+                ..fill_width(row(10.0))
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 12.0,
+                border: Some(Paint::Accent),
+                ..Look::default()
+            }),
+        );
+        self.add(
+            box_,
+            Style::default(),
+            Kind::Icon {
+                icon: stroked(icons::SEARCH, 17.0),
+                color: Paint::Muted,
+                label: None,
+            },
+        );
+        let field = self.add(
+            box_,
+            Style {
+                width: Length::Fill,
+                height: Length::Px(28.0),
+                ..Style::default()
+            },
+            Kind::TextField(Box::new(TextField::new(
+                words::LAYOUT_SEARCH_NAME.get(lang),
+                words::LAYOUT_SEARCH_HINT.get(lang),
+                theme.text.body,
+            ))),
+        );
+        self.tree.set_field_value(field, &self.keys.layout_query);
+        self.keys.layout_field = Some(field);
+        // Without a query, the common ones; else the best matches. Those
+        // kept are not offered again, but the first may be put first.
+        let offered = self.layouts_offered();
+        let query = self.keys.layout_query.trim().to_owned();
+        let found: Vec<hocus_shell::layouts::Offered> = if query.is_empty() {
+            hocus_shell::layouts::common(lang)
+                .iter()
+                .filter_map(|code| {
+                    offered
+                        .iter()
+                        .find(|o| o.code == *code)
+                        .cloned()
+                        .or_else(|| hocus_shell::layouts::Offered::known(code, lang))
+                })
+                .collect()
+        } else {
+            hocus_shell::layouts::search(&query, &offered, 40)
+        };
+        let found: Vec<_> = found
+            .into_iter()
+            .filter(|o| {
+                if first {
+                    kept.first() != Some(&o.code)
+                } else {
+                    !kept.contains(&o.code)
+                }
+            })
+            .take(8)
+            .collect();
+        if found.is_empty() {
+            self.line(
+                parent,
+                words::NO_LAYOUT.get(lang),
+                theme.text.body.with_color(Paint::Muted),
+            );
+            return;
+        }
+        let list = self.add(parent, fill_width(column(2.0)), Kind::Box(Look::default()));
+        let mono = hocus_ui::TextStyle {
+            typeface: hocus_ui::Typeface::Mono,
+            ..theme.text.label
+        }
+        .with_color(Paint::Muted);
+        for o in found {
+            let line = self.add(
+                list,
+                Style {
+                    height: Length::Px(40.0),
+                    padding: Insets::symmetric(0.0, 12.0),
+                    justify: Justify::SpaceBetween,
+                    ..fill_width(row(12.0))
+                },
+                Kind::Box(Look {
+                    radius: 10.0,
+                    ..Look::default()
+                }),
+            );
+            self.tree.set_clickable(line, &o.name);
+            self.line(line, &o.name, theme.text.body);
+            self.line(line, &o.code, mono);
+            let list = if first {
+                std::iter::once(o.code.clone())
+                    .chain(kept.iter().filter(|k| **k != o.code).cloned())
+                    .collect()
+            } else {
+                kept.iter()
+                    .cloned()
+                    .chain([o.code.clone()])
+                    .collect::<Vec<_>>()
+            };
+            let change = layouts_change(&list);
+            if self.keys.layout_first.is_none() {
+                self.keys.layout_first = Some(change.clone());
+            }
+            self.targets.insert(line, Target::Set(change));
+        }
+    }
+
     /// The new shortcut runs what its field says: an action by its name,
     /// or else a command.
     fn listen_new(&mut self) -> Vec<Outcome> {
@@ -1247,6 +1462,8 @@ impl SettingsView {
         }
         self.targets.clear();
         self.field = None;
+        self.keys.layout_field = None;
+        self.keys.layout_first = None;
         self.scroller = None;
         self.text_size = None;
         self.hardware.volume = None;
@@ -1297,6 +1514,8 @@ impl SettingsView {
             self.tree.set_focus(Some(field));
         } else if let Some(node) = typing_field.and_then(|f| self.fields.node(&f)) {
             self.tree.set_focus(Some(node));
+        } else if let Some(field) = self.keys.layout_field {
+            self.tree.set_focus(Some(field));
         } else if self.typing {
             self.tree.set_focus(self.field);
         }
@@ -2228,14 +2447,25 @@ impl SettingsView {
         let section = self.section(theme, body, words::INTERFACE_LANGUAGE);
         self.language_choices(theme, section);
         // The keyboard: the layout chosen first, the others kept after it.
+        // The common ones for the language (for French, AZERTY and BÉPO),
+        // the one in use among them, in its place or the last's; below,
+        // More… searches the others: the line does not wrap.
         let section = self.section(theme, body, words::KEYBOARD_LAYOUT);
         let line = self.add(section, row(8.0), Kind::Box(Look::default()));
         let layouts = self.ctx.config.keyboard.layouts.clone();
         let first = layouts.first().cloned().unwrap_or_else(|| "us".into());
-        for code in ["us", "fr", "gb", "de", "es", "it"] {
-            let mut list = vec![code.to_owned()];
-            list.extend(layouts.iter().filter(|l| *l != code).cloned());
-            let label = code.to_uppercase();
+        let mut offered: Vec<String> = hocus_shell::layouts::common(lang)
+            .iter()
+            .map(|c| (*c).to_owned())
+            .collect();
+        if !offered.contains(&first) {
+            offered.pop();
+            offered.insert(0, first.clone());
+        }
+        for code in offered {
+            let mut list = vec![code.clone()];
+            list.extend(layouts.iter().filter(|l| **l != code).cloned());
+            let label = self.layout_name(&code);
             self.choice(
                 theme,
                 line,
@@ -2243,6 +2473,22 @@ impl SettingsView {
                 first == code,
                 Target::Set(layouts_change(&list)),
             );
+        }
+        let mut more = Button::new(words::MORE_LAYOUTS.get(lang), ButtonKind::Chip, theme);
+        more.selected = self.keys.adding_layout;
+        let below = self.add(section, row(8.0), Kind::Box(Look::default()));
+        let more = self.add(
+            below,
+            Style {
+                height: Length::Px(40.0),
+                padding: Insets::symmetric(0.0, 14.0),
+                ..Style::default()
+            },
+            Kind::Button(more),
+        );
+        self.targets.insert(more, Target::AddLayout);
+        if self.keys.adding_layout {
+            self.layout_search(theme, section, true);
         }
         // The look.
         let a = self.ctx.config.appearance.clone();
@@ -2590,7 +2836,7 @@ impl SettingsView {
             config.keyboard.layouts.clone()
         };
         for (i, code) in names.iter().enumerate() {
-            let name = words::layout_name(code, lang);
+            let name = self.layout_name(code);
             let first = i == 0;
             let chip = self.add(
                 layouts,
@@ -2693,28 +2939,8 @@ impl SettingsView {
         }
         self.highlighted(layouts, &Setting::Layouts, Look::default());
         if self.keys.adding_layout {
-            let offered: Vec<_> = words::LAYOUT_NAMES
-                .iter()
-                .filter(|(code, _)| !names.iter().any(|n| n == code))
-                .collect();
-            // Six to a line: the page does not wrap.
-            for line in offered.chunks(6) {
-                let chips = self.add(body, fill_width(row(6.0)), Kind::Box(Look::default()));
-                for (code, name) in line {
-                    let b = self.add(
-                        chips,
-                        Style {
-                            height: Length::Px(36.0),
-                            padding: Insets::symmetric(0.0, 12.0),
-                            ..Style::default()
-                        },
-                        Kind::Button(Button::new(name.get(lang), ButtonKind::Chip, theme)),
-                    );
-                    let mut more = names.clone();
-                    more.push((*code).to_owned());
-                    self.targets.insert(b, Target::Set(layouts_change(&more)));
-                }
-            }
+            let search = self.add(body, fill_width(column(8.0)), Kind::Box(Look::default()));
+            self.layout_search(theme, search, false);
         }
         if editing
             .as_ref()
@@ -4018,18 +4244,134 @@ mod tests {
     #[test]
     fn layouts_are_added_removed_and_put_first() {
         let mut v = keyboard_view("[keyboard]\nlayouts = [\"us\", \"fr\"]\n");
-        let out = click(&mut v, "Put French · AZERTY before");
+        let out = click(&mut v, "Put French (AZERTY) before");
         assert_eq!(
             changes(&out),
             [("layouts".into(), Some("[\"fr\", \"us\"]".into()))]
         );
-        let out = click(&mut v, "Remove English · US");
+        let out = click(&mut v, "Remove English (US)");
         assert_eq!(changes(&out), [("layouts".into(), Some("[\"fr\"]".into()))]);
         click(&mut v, "Add a layout");
-        let out = click(&mut v, "German");
+        // Without a query, the common ones not kept.
+        assert!(find(&v.access(), "English (UK)").is_some());
+        assert!(
+            find(&v.access(), "French (AZERTY)").is_some(),
+            "the kept chip"
+        );
+        let out = click(&mut v, "English (UK)");
         assert_eq!(
             changes(&out),
-            [("layouts".into(), Some("[\"us\", \"fr\", \"de\"]".into()))]
+            [("layouts".into(), Some("[\"us\", \"fr\", \"gb\"]".into()))]
+        );
+    }
+
+    /// XKB's registry as the scenarios' copy has it, in part.
+    fn registry() -> Vec<hocus_platform::xkb::Layout> {
+        let l =
+            |code: &str, description: &str, translated: Option<&str>| hocus_platform::xkb::Layout {
+                code: code.into(),
+                description: description.into(),
+                translated: translated.map(str::to_owned),
+            };
+        vec![
+            l("fr", "French", Some("Français")),
+            l("fr(oss)", "French (alt.)", Some("Français (variante)")),
+            l("fr(bepo)", "French (BEPO)", Some("Français (BÉPO)")),
+            l(
+                "fr(bepo_afnor)",
+                "French (BEPO, AFNOR)",
+                Some("Français (BÉPO, AFNOR)"),
+            ),
+            l("de", "German", Some("Allemand")),
+            l("de(neo)", "German (Neo 2)", Some("Allemand (Neo 2)")),
+            l("us", "English (US)", Some("Anglais (US)")),
+        ]
+    }
+
+    #[test]
+    fn bepo_is_searched_for_and_kept_after_the_others() {
+        let mut v = keyboard_view(
+            "[language]\ninterface = \"fr\"\n[keyboard]\nlayouts = [\"fr\", \"us\"]\n",
+        );
+        v.set_layouts(registry());
+        v.draw(Duration::ZERO);
+        click(&mut v, "Ajouter une disposition");
+        v.text("bépo");
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Français (BÉPO, AFNOR)").is_some());
+        assert!(
+            find(&v.access(), "Allemand (Neo 2)").is_none(),
+            "not a match"
+        );
+        let out = click(&mut v, "Français (BÉPO)");
+        assert_eq!(
+            changes(&out),
+            [(
+                "layouts".into(),
+                Some("[\"fr\", \"us\", \"fr(bepo)\"]".into())
+            )]
+        );
+        // The list closes; a kept layout is named after the registry.
+        assert!(find(&v.access(), "Français (BÉPO, AFNOR)").is_none());
+        let mut v = keyboard_view("[keyboard]\nlayouts = [\"de(neo)\"]\n");
+        assert!(
+            find(&v.access(), "de(neo)").is_some(),
+            "its code, until the registry"
+        );
+        v.set_layouts(registry());
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "German (Neo 2)").is_some());
+    }
+
+    #[test]
+    fn enter_keeps_the_first_layout_found_and_escape_closes_the_search() {
+        let mut v = keyboard_view("[keyboard]\nlayouts = [\"us\"]\n");
+        v.set_layouts(registry());
+        v.draw(Duration::ZERO);
+        click(&mut v, "Add a layout");
+        v.text("neo");
+        v.draw(Duration::ZERO);
+        let out = v.key(Key::Enter);
+        assert_eq!(
+            changes(&out),
+            [("layouts".into(), Some("[\"us\", \"de(neo)\"]".into()))]
+        );
+        click(&mut v, "Add a layout");
+        v.text("nothing like it");
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "No layout goes by that name.").is_some());
+        assert!(v.key(Key::Enter).is_empty());
+        v.key(Key::Escape);
+        v.draw(Duration::ZERO);
+        assert!(find(&v.access(), "Search the layouts").is_none());
+    }
+
+    #[test]
+    fn the_welcome_offers_azerty_and_bepo_first_and_more() {
+        let mut v = view(Lang::Fr);
+        v.set_context(Context {
+            config: hocus_core::Config::parse("[language]\ninterface = \"fr\"\n")
+                .expect("a configuration"),
+            ..Context::default()
+        });
+        v.set_layouts(registry());
+        v.open(Some(Page::Welcome));
+        v.draw(Duration::ZERO);
+        // US is XKB's own until one is chosen.
+        let us = find(&v.access(), "Anglais (US)").expect("US offered");
+        assert!(us.selected);
+        let out = click(&mut v, "Français (BÉPO)");
+        assert_eq!(
+            changes(&out),
+            [("layouts".into(), Some("[\"fr(bepo)\"]".into()))]
+        );
+        click(&mut v, "Plus…");
+        v.text("neo");
+        v.draw(Duration::ZERO);
+        let out = click(&mut v, "Allemand (Neo 2)");
+        assert_eq!(
+            changes(&out),
+            [("layouts".into(), Some("[\"de(neo)\"]".into()))]
         );
     }
 

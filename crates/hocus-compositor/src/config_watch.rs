@@ -164,6 +164,8 @@ impl State {
         if keyboard_changed {
             self.apply_keyboard_config(first);
         }
+        // The layouts' names follow the language too.
+        self.name_layouts();
         self.relayout();
         self.needs_redraw = true;
     }

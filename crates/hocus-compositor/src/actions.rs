@@ -347,9 +347,10 @@ impl State {
             return;
         };
         let k = self.config.keyboard.clone();
-        let layout = k.layouts.join(",");
+        let (layout, variant) = hocus_core::keyboard::xkb_lists(&k.layouts);
         let xkb_config = XkbConfig {
             layout: &layout,
+            variant: &variant,
             options: (!k.options.is_empty()).then(|| k.options.clone()),
             ..Default::default()
         };

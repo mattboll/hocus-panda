@@ -187,6 +187,7 @@ fn main() -> anyhow::Result<()> {
         data_dirs: None,
         child_env: None,
         polkit_helper: None,
+        xkb_registry: hocus_compositor::XkbRegistry::Machine,
         backend: match backend {
             BackendArg::Tty => Backend::Tty,
             BackendArg::Winit => Backend::Winit,

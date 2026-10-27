@@ -1,0 +1,900 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- An excerpt of xkeyboard-config's rules/evdev.xml (MIT/Expat licence),
+     made by scripts/xkb-excerpt.py for the scenarios. -->
+<xkbConfigRegistry version="1.1">
+  <layoutList>
+    <layout>
+      <configItem>
+        <name>be</name>
+        <shortDescription>be</shortDescription>
+        <description>Belgian</description>
+        <countryList>
+          <iso3166Id>BE</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>deu</iso639Id>
+          <iso639Id>nld</iso639Id>
+          <iso639Id>fra</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>oss</name>
+            <description>Belgian (alt.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>oss_latin9</name>
+            <description>Belgian (Latin-9 only, alt.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>iso-alternate</name>
+            <description>Belgian (ISO, alt.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>nodeadkeys</name>
+            <description>Belgian (no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>wang</name>
+            <description>Belgian (Wang 724 AZERTY)</description>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>gb</name>
+        <shortDescription>en</shortDescription>
+        <description>English (UK)</description>
+        <countryList>
+          <iso3166Id>GB</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>eng</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>extd</name>
+            <description>English (UK, extended, Windows)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>intl</name>
+            <description>English (UK, intl., with dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak</name>
+            <description>English (UK, Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorakukp</name>
+            <description>English (UK, Dvorak, with UK punctuation)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac</name>
+            <description>English (UK, Macintosh)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac_intl</name>
+            <description>English (UK, Macintosh, intl.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak</name>
+            <description>English (UK, Colemak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak_dh</name>
+            <description>English (UK, Colemak-DH)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>gla</name>
+            <shortDescription>gd</shortDescription>
+            <description>Scottish Gaelic</description>
+            <countryList>
+              <iso3166Id>GB</iso3166Id>
+              <iso3166Id>CA</iso3166Id>
+            </countryList>
+            <languageList>
+              <iso639Id>eng</iso639Id>
+              <iso639Id>gla</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>pl</name>
+            <shortDescription>pl</shortDescription>
+            <description>Polish (British keyboard)</description>
+            <languageList>
+              <iso639Id>pol</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>us</name>
+        <shortDescription>en</shortDescription>
+        <description>English (US)</description>
+        <countryList>
+          <iso3166Id>US</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>eng</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>euro</name>
+            <description>English (US, euro on 5)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>intl</name>
+            <description>English (US, intl., with dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>alt-intl</name>
+            <description>English (US, alt. intl.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>altgr-intl</name>
+            <description>English (intl., with AltGr dead keys)</description>
+            <languageList>
+              <iso639Id>eng</iso639Id>
+              <iso639Id>fra</iso639Id>
+              <iso639Id>deu</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac</name>
+            <description>English (Macintosh, ABC, ANSI)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac-iso</name>
+            <description>English (Macintosh, ABC, ISO)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak</name>
+            <description>English (Colemak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak_dh</name>
+            <description>English (Colemak-DH)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak_dh_wide</name>
+            <description>English (Colemak-DH Wide)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak_dh_ortho</name>
+            <description>English (Colemak-DH Ortholinear)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak_dh_iso</name>
+            <description>English (Colemak-DH ISO)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>colemak_dh_wide_iso</name>
+            <description>English (Colemak-DH Wide ISO)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak</name>
+            <description>English (Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak-intl</name>
+            <description>English (Dvorak, intl., with dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak-alt-intl</name>
+            <description>English (Dvorak, alt. intl.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak-l</name>
+            <description>English (Dvorak, one-handed, left)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak-r</name>
+            <description>English (Dvorak, one-handed, right)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak-classic</name>
+            <description>English (classic Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvp</name>
+            <description>English (programmer Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak-mac</name>
+            <description>English (Dvorak, Macintosh, ANSI)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak-mac-iso</name>
+            <description>English (Dvorak, Macintosh, ISO)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>norman</name>
+            <description>English (Norman)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>symbolic</name>
+            <description>English (US, Symbolic)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>workman</name>
+            <description>English (Workman)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>workman-intl</name>
+            <description>English (Workman, intl., with dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>olpc2</name>
+            <description>English (the divide/multiply toggle the layout)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>chr</name>
+            <shortDescription>chr</shortDescription>
+            <description>Cherokee</description>
+            <languageList>
+              <iso639Id>chr</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>haw</name>
+            <shortDescription>haw</shortDescription>
+            <description>Hawaiian</description>
+            <languageList>
+              <iso639Id>haw</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>rus</name>
+            <shortDescription>ru</shortDescription>
+            <description>Russian (US, phonetic)</description>
+            <languageList>
+              <iso639Id>rus</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>hbs</name>
+            <description>Serbo-Croatian (US)</description>
+            <languageList>
+              <iso639Id>eng</iso639Id>
+              <iso639Id>bos</iso639Id>
+              <iso639Id>hbs</iso639Id>
+              <iso639Id>hrv</iso639Id>
+              <iso639Id>srp</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>fr</name>
+        <shortDescription>fr</shortDescription>
+        <description>French</description>
+        <countryList>
+          <iso3166Id>FR</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>fra</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>nodeadkeys</name>
+            <description>French (no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>oss</name>
+            <description>French (alt.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>oss_nodeadkeys</name>
+            <description>French (alt., no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>oss_latin9</name>
+            <description>French (alt., Latin-9 only)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>latin9</name>
+            <description>French (legacy, alt.)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>latin9_nodeadkeys</name>
+            <description>French (legacy, alt., no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>azerty</name>
+            <description>French (AZERTY)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>afnor</name>
+            <description>French (AZERTY, AFNOR)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>bepo</name>
+            <description>French (BEPO)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>bepo_latin9</name>
+            <description>French (BEPO, Latin-9 only)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>bepo_afnor</name>
+            <description>French (BEPO, AFNOR)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak</name>
+            <description>French (Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ergol</name>
+            <description>French (Ergo‑L)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ergol_iso</name>
+            <description>French (Ergo‑L, ISO variant)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac</name>
+            <description>French (Macintosh)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>us</name>
+            <description>French (US)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>bre</name>
+            <description>Breton (France)</description>
+            <languageList>
+              <iso639Id>bre</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>oci</name>
+            <description>Occitan</description>
+            <languageList>
+              <iso639Id>oci</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>geo</name>
+            <description>Georgian (France, AZERTY Tskapo)</description>
+            <languageList>
+              <iso639Id>kat</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>ca</name>
+        <shortDescription>fr</shortDescription>
+        <description>French (Canada)</description>
+        <countryList>
+          <iso3166Id>CA</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>fra</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>fr-dvorak</name>
+            <shortDescription>fr</shortDescription>
+            <description>French (Canada, Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>fr-legacy</name>
+            <shortDescription>fr</shortDescription>
+            <description>French (Canada, legacy)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>multix</name>
+            <description>Canadian (CSA)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>eng</name>
+            <shortDescription>en</shortDescription>
+            <description>English (Canada)</description>
+            <languageList>
+              <iso639Id>eng</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ike</name>
+            <shortDescription>ike</shortDescription>
+            <description>Inuktitut</description>
+            <languageList>
+              <iso639Id>iku</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>de</name>
+        <shortDescription>de</shortDescription>
+        <description>German</description>
+        <countryList>
+          <iso3166Id>DE</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>deu</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>deadacute</name>
+            <description>German (dead acute)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>deadgraveacute</name>
+            <description>German (dead grave acute)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>deadtilde</name>
+            <description>German (dead tilde)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>nodeadkeys</name>
+            <description>German (no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>e1</name>
+            <description>German (E1)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>e2</name>
+            <description>German (E2)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>T3</name>
+            <description>German (T3)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>us</name>
+            <description>German (US)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak</name>
+            <description>German (Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac</name>
+            <description>German (Macintosh)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac_nodeadkeys</name>
+            <description>German (Macintosh, no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>neo</name>
+            <description>German (Neo 2)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>qwerty</name>
+            <description>German (QWERTY)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dsb</name>
+            <description>Lower Sorbian</description>
+            <languageList>
+              <iso639Id>dsb</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dsb_qwertz</name>
+            <description>Lower Sorbian (QWERTZ)</description>
+            <languageList>
+              <iso639Id>dsb</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ro</name>
+            <description>Romanian (Germany)</description>
+            <languageList>
+              <iso639Id>ron</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ro_nodeadkeys</name>
+            <description>Romanian (Germany, no dead keys)</description>
+            <languageList>
+              <iso639Id>ron</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ru</name>
+            <shortDescription>ru</shortDescription>
+            <description>Russian (Germany, phonetic)</description>
+            <languageList>
+              <iso639Id>rus</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>tr</name>
+            <description>Turkish (Germany)</description>
+            <languageList>
+              <iso639Id>tur</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>ch</name>
+        <shortDescription>de</shortDescription>
+        <description>German (Switzerland)</description>
+        <countryList>
+          <iso3166Id>CH</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>deu</iso639Id>
+          <iso639Id>gsw</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>de_nodeadkeys</name>
+            <shortDescription>de</shortDescription>
+            <description>German (Switzerland, no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>de_mac</name>
+            <shortDescription>de</shortDescription>
+            <description>German (Switzerland, Macintosh)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>legacy</name>
+            <description>German (Switzerland, legacy)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>fr</name>
+            <shortDescription>fr</shortDescription>
+            <description>French (Switzerland)</description>
+            <languageList>
+              <iso639Id>fra</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>fr_nodeadkeys</name>
+            <shortDescription>fr</shortDescription>
+            <description>French (Switzerland, no dead keys)</description>
+            <languageList>
+              <iso639Id>fra</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>fr_mac</name>
+            <shortDescription>fr</shortDescription>
+            <description>French (Switzerland, Macintosh)</description>
+            <languageList>
+              <iso639Id>fra</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>it</name>
+        <shortDescription>it</shortDescription>
+        <description>Italian</description>
+        <countryList>
+          <iso3166Id>IT</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>ita</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>nodeadkeys</name>
+            <description>Italian (no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>winkeys</name>
+            <description>Italian (Windows)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>mac</name>
+            <description>Italian (Macintosh)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>us</name>
+            <description>Italian (US)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ibm</name>
+            <description>Italian (IBM 142)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>fur</name>
+            <description>Friulian (Italy)</description>
+            <languageList>
+              <iso639Id>fur</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>scn</name>
+            <description>Sicilian</description>
+            <languageList>
+              <iso639Id>ita</iso639Id>
+              <iso639Id>scn</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>geo</name>
+            <description>Georgian (Italy)</description>
+            <languageList>
+              <iso639Id>kat</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+    <layout>
+      <configItem>
+        <name>es</name>
+        <shortDescription>es</shortDescription>
+        <description>Spanish</description>
+        <countryList>
+          <iso3166Id>ES</iso3166Id>
+        </countryList>
+        <languageList>
+          <iso639Id>spa</iso639Id>
+        </languageList>
+      </configItem>
+      <variantList>
+        <variant>
+          <configItem>
+            <name>nodeadkeys</name>
+            <description>Spanish (no dead keys)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>deadtilde</name>
+            <description>Spanish (dead tilde)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>winkeys</name>
+            <description>Spanish (Windows)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>dvorak</name>
+            <description>Spanish (Dvorak)</description>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>ast</name>
+            <shortDescription>ast</shortDescription>
+            <description>Asturian (Spain, with bottom-dot H and L)</description>
+            <languageList>
+              <iso639Id>ast</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+        <variant>
+          <configItem>
+            <name>cat</name>
+            <shortDescription>ca</shortDescription>
+            <description>Catalan (Spain, with middle-dot L)</description>
+            <languageList>
+              <iso639Id>cat</iso639Id>
+            </languageList>
+          </configItem>
+        </variant>
+      </variantList>
+    </layout>
+  </layoutList>
+</xkbConfigRegistry>

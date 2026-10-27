@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use hocus_shell::{
-    Action, ActiveWindow, Column, ColumnState, Lang, ScreenDesktops, TrayApp, TrayMenuEntry,
-    WallTime,
+    Action, ActiveWindow, Column, ColumnState, KeyboardLayout, Lang, ScreenDesktops, TrayApp,
+    TrayMenuEntry, WallTime,
     activity::Badge,
     agents::{AgentAsk, AgentState, AgentsView, Board, Elsewhere},
     column::{AdbLine, Agenda, Meeting, PairStage, Pairing, PhoneLine},
@@ -56,8 +56,13 @@ fn state() -> ColumnState {
                 ..ScreenDesktops::default()
             },
         ],
-        layout: "FR".into(),
-        layout_name: "fr".into(),
+        layouts: vec![KeyboardLayout {
+            name: "French (AZERTY)".into(),
+            short: "FR".into(),
+        }]
+        .into(),
+        layout: 0,
+        switch_layout_keys: Some("Super+Ctrl+Space".into()),
         user: "Camille".into(),
         notifications: vec![
             ("Mail".into(), "Revue de la MR #42".into()),
@@ -690,6 +695,67 @@ fn the_account_menu_logs_out() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Board D13's keyboard menu: AZERTY, US and BÉPO kept.
+fn three_layouts() -> ColumnState {
+    let layout = |name: &str, short: &str| KeyboardLayout {
+        name: name.into(),
+        short: short.into(),
+    };
+    ColumnState {
+        layouts: vec![
+            layout("Français (AZERTY)", "FR"),
+            layout("Anglais (US)", "US"),
+            layout("Français (BÉPO)", "BÉPO"),
+        ]
+        .into(),
+        layout: 0,
+        switch_layout_keys: Some("Super+Ctrl+Espace".into()),
+        ..state()
+    }
+}
+
+#[test]
+fn the_keyboard_menu_shows_the_layouts_kept_and_picks_one() -> anyhow::Result<()> {
+    let mut column = column(Lang::Fr);
+    column.set_state(&three_layouts());
+    column.draw(Duration::ZERO);
+    let at = button(&column, "Disposition du clavier\u{a0}: Français (AZERTY)")?;
+    // The chip opens the menu; it no longer switches by itself.
+    assert!(click(&mut column, at).is_empty());
+    column.draw(Duration::from_millis(16));
+    let popover = column
+        .popover_view()
+        .ok_or_else(|| anyhow::anyhow!("no menu"))?;
+    common::expect_reference(&popover, "column-keyboard-menu.png")?;
+    let access = column.access();
+    let chosen: Vec<_> = access
+        .walk()
+        .into_iter()
+        .filter(|n| n.role == Role::Button && n.selected)
+        .filter_map(|n| n.label.clone())
+        .collect();
+    assert!(
+        chosen.contains(&"Français (AZERTY)".to_owned()),
+        "{chosen:?}"
+    );
+    assert!(
+        access.dump().contains("Super+Ctrl+Espace"),
+        "{}",
+        access.dump()
+    );
+    let at = button(&column, "Français (BÉPO)")?;
+    assert_eq!(click(&mut column, at), vec![Action::SetLayout(2)]);
+    assert!(column.popover_view().is_none(), "closed once chosen");
+    // The chip says the one in use.
+    column.set_state(&ColumnState {
+        layout: 2,
+        ..three_layouts()
+    });
+    column.draw(Duration::from_millis(32));
+    assert!(button(&column, "Disposition du clavier\u{a0}: Français (BÉPO)").is_ok());
+    Ok(())
+}
+
 #[test]
 fn the_tray_shows_its_applications_and_their_menus() -> anyhow::Result<()> {
     let mut column = column(Lang::En);
@@ -752,7 +818,7 @@ fn the_tray_shows_its_applications_and_their_menus() -> anyhow::Result<()> {
     column.set_state(&state());
     column.draw(Duration::ZERO);
     assert!(button(&column, "Tray: 2 applications").is_err());
-    assert!(button(&column, "Keyboard layout: fr").is_ok());
+    assert!(button(&column, "Keyboard layout: French (AZERTY)").is_ok());
     Ok(())
 }
 

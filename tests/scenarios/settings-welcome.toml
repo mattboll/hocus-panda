@@ -12,7 +12,7 @@ expect_settings = { label = "Panda waving" }
 expect_screenshot = { output = "HEADLESS-1", reference = "settings-welcome.png" }
 
 [[step]]
-click_settings = "FR"
+click_settings = "French (AZERTY)"
 
 [[step]]
 expect_config_file = { contains = ["layouts = [\"fr\"]"] }

@@ -217,7 +217,8 @@ impl Desktops {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Keyboard {
-    /// XKB layouts, the first active at start, e.g. `["fr", "us"]`.
+    /// XKB layouts, each with its variant in brackets, the first active
+    /// at start, e.g. `["fr", "fr(bepo)", "us"]`.
     pub layouts: Vec<String>,
     /// XKB options, e.g. `"caps:escape"`.
     pub options: String,
@@ -1721,6 +1722,15 @@ impl Config {
                 return Err(ConfigError(format!("{line}outputs[{i}].{err}")));
             }
         }
+        for code in &self.keyboard.layouts {
+            if crate::keyboard::split(code).is_none() {
+                return out_of_range(
+                    "keyboard.layouts",
+                    format!("{code:?}"),
+                    "an XKB layout, with its variant in brackets: \"fr\", \"fr(bepo)\"",
+                );
+            }
+        }
         for (i, layout) in self.layouts.iter().enumerate() {
             if let Err(err) = layout.check() {
                 return Err(ConfigError(format!("layouts[{i}].{err}")));
@@ -2247,6 +2257,16 @@ mod tests {
         let err = Config::parse("[ai]\nprovider = \"openai\"\nurl = \"http://example.org\"\n")
             .expect_err("plain http elsewhere");
         assert!(err.0.contains("ai.url"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn layouts_take_their_variant_in_brackets() -> Result<(), ConfigError> {
+        let c = Config::parse("[keyboard]\nlayouts = [\"fr\", \"fr(bepo)\", \"us(intl)\"]\n")?;
+        assert_eq!(c.keyboard.layouts, ["fr", "fr(bepo)", "us(intl)"]);
+        let err = Config::parse("[keyboard]\nlayouts = [\"fr bepo\"]\n").expect_err("no brackets");
+        assert!(err.0.starts_with("line 2: keyboard.layouts"), "{err}");
+        assert!(err.0.contains("fr(bepo)"), "{err}");
         Ok(())
     }
 

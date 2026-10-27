@@ -6,6 +6,7 @@
 pub mod clipboard;
 pub mod config;
 pub mod config_edit;
+pub mod keyboard;
 pub mod model;
 pub mod night;
 pub mod notes;

@@ -299,13 +299,13 @@ impl State {
             })
             .collect();
         screens.sort_by_key(|s| Some(&s.output) != first.as_ref());
-        let (layout, layout_name) = self.active_layout();
         ColumnState {
             time: self.wall_time(),
             active,
             screens,
-            layout,
-            layout_name,
+            layouts: self.layout_names.kept.clone(),
+            layout: self.layout_index,
+            switch_layout_keys: self.layout_names.switch_keys.clone(),
             user: self.user.clone(),
             can_hibernate: self.leaver.caps.hibernate,
             notifications: self.notification_history(),
@@ -321,19 +321,6 @@ impl State {
             agents: self.agents_view(),
             journal: self.journal_view(),
         }
-    }
-
-    /// The active keyboard layout: its code in short (`FR`), and long.
-    fn active_layout(&self) -> (String, String) {
-        let index = self.layout_index;
-        let layouts = &self.config.keyboard.layouts;
-        let code = layouts
-            .get(index)
-            .or(layouts.first())
-            .cloned()
-            .unwrap_or_else(|| "us".into());
-        let short: String = code.chars().take(4).flat_map(char::to_uppercase).collect();
-        (short, code)
     }
 
     /// After each dispatch: follows the primary output, shows the current
@@ -527,7 +514,7 @@ impl State {
             ShellAction::Minimize => self.run_action(&A::Minimize, serial),
             ShellAction::ToggleMaximize => self.run_action(&A::ToggleMaximized, serial),
             ShellAction::Close => self.run_action(&A::Close, serial),
-            ShellAction::SwitchLayout => self.run_action(&A::SwitchLayout, serial),
+            ShellAction::SetLayout(index) => self.set_layout(index),
             ShellAction::Lock => self.run_action(&A::Lock, serial),
             ShellAction::Settings => self.run_action(&A::Settings, serial),
             ShellAction::Suspend => self.run_action(&A::Suspend, serial),

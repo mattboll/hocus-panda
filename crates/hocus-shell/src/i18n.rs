@@ -251,6 +251,16 @@ impl Lang {
         }
     }
 
+    /// The column's keyboard menu's title.
+    pub fn keyboard_title(self) -> &'static str {
+        self.pick("Keyboard layout", "Disposition du clavier")
+    }
+
+    /// Beside the keys that switch layouts, in the keyboard menu.
+    pub fn switch_layout(self) -> &'static str {
+        self.pick("Switch layout", "Changer de disposition")
+    }
+
     pub fn desktops_title(self) -> &'static str {
         self.pick("Desktops of each screen", "Bureaux de chaque écran")
     }

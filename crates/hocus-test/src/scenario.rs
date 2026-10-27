@@ -1405,7 +1405,7 @@ impl Scenario {
             Some(fixture) => Some(PrivateHome::copy(&self.dir.join(fixture))?),
             None => None,
         };
-        let compositor = Headless::start_options(HarnessOptions {
+        let mut compositor = Headless::start_options(HarnessOptions {
             headless: HeadlessConfig {
                 outputs,
                 // The same pixels on every machine, for reference
@@ -1440,6 +1440,9 @@ impl Scenario {
             first_run: self.first_run,
             google_caldav: goa.as_ref().map(|g| g.google().to_owned()),
         })?;
+        // The scenarios' own copy of XKB's registry names the layouts: the
+        // same names wherever the tests run.
+        compositor.set_xkb_registry(&self.dir.join("xkb"));
         let mut run = Run {
             scenario: self,
             options,
@@ -3513,6 +3516,8 @@ impl Run<'_> {
             // The scenarios' own copy of the zones' places: the map draws
             // the same wherever the tests run.
             zoneinfo: self.scenario.dir.join("zoneinfo"),
+            // And of XKB's registry of layouts and its translations.
+            xkb: hocus_platform::xkb::Registry::At(self.scenario.dir.join("xkb")),
             // The scenario's own home, never the developer's.
             home: self.home.as_ref().map(|h| h.path().to_owned()),
         })?;

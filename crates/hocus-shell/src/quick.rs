@@ -77,8 +77,8 @@ pub struct QuickState {
     pub brightness: Vec<(String, u8)>,
     /// `Battery 64 % · about 3 h 50`, or nothing.
     pub battery: Option<String>,
-    /// Short names, and the one in use.
-    pub layouts: Vec<String>,
+    /// The keyboard layouts kept, and the one in use.
+    pub layouts: std::sync::Arc<[crate::KeyboardLayout]>,
     pub layout: usize,
     pub notifications: usize,
 }
@@ -580,7 +580,7 @@ impl Sheet {
                 ),
             )
             .unwrap_or_else(missing);
-            for layout in &state.layouts {
+            for layout in state.layouts.iter() {
                 let id = t
                     .add(
                         keys,
@@ -589,8 +589,8 @@ impl Sheet {
                             ..Style::default()
                         },
                         Kind::Button(
-                            Button::new(layout.as_str(), ButtonKind::Chip, &theme)
-                                .with_name(lang.keyboard_layout(layout)),
+                            Button::new(layout.short.as_str(), ButtonKind::Chip, &theme)
+                                .with_name(lang.keyboard_layout(&layout.name)),
                         ),
                     )
                     .unwrap_or_else(missing);

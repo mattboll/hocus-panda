@@ -85,6 +85,9 @@ fn launch(harness: &HarnessOptions, config: &Path, clock: Clock) -> anyhow::Resu
         data_dirs: Some(harness.data_dirs.clone().unwrap_or_default()),
         child_env: harness.child_env.clone(),
         polkit_helper: harness.polkit_helper.clone(),
+        // Tests give their own copy (`set_xkb_registry`): never the
+        // machine's.
+        xkb_registry: hocus_platform::xkb::Registry::Off,
     };
     let mut started = crate::start(&options, clock)?;
     started.app.state.instant_motion = !harness.motion;
@@ -118,6 +121,8 @@ pub struct Headless {
     harness: HarnessOptions,
     /// The clock it started on, as it was then.
     clock: Clock,
+    /// The copy of XKB's data the layouts are named after.
+    xkb_registry: Option<crate::XkbRegistry>,
 }
 
 /// A control connection read without blocking, so that the harness can run
@@ -216,6 +221,9 @@ impl Headless {
             std::mem::replace(&mut self.runtime_dir, runtime_dir),
         );
         crate::allocations::counting(|| drop(old));
+        if let Some(registry) = self.xkb_registry.clone() {
+            self.app.state.set_xkb_registry(registry);
+        }
         self.ready()
     }
 
@@ -248,6 +256,7 @@ impl Headless {
             _config_dir: config_dir,
             harness,
             clock,
+            xkb_registry: None,
         };
         headless.ready()?;
         Ok(headless)
@@ -288,6 +297,15 @@ impl Headless {
     /// test) bus from now on.
     pub fn set_a11y_bus(&mut self, address: &str) {
         self.app.state.set_a11y_bus(address.to_owned());
+    }
+
+    /// Keyboard layouts are named after this copy of XKB's data
+    /// (`rules/evdev.xml`, `locale/`), never the machine's; again after a
+    /// restart.
+    pub fn set_xkb_registry(&mut self, dir: &Path) {
+        let registry = crate::XkbRegistry::At(dir.to_owned());
+        self.xkb_registry = Some(registry.clone());
+        self.app.state.set_xkb_registry(registry);
     }
 
     /// Where the session is saved.
