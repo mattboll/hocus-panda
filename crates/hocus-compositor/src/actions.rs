@@ -1,8 +1,6 @@
 //! What shortcuts do: the actions of `hocus_core::Action`, carried out on
 //! the compositor, and the keyboard's layouts from the configuration.
 
-use std::process::Command;
-
 use hocus_api::Event;
 use hocus_core::{Action, Combo, Key, Modifiers, Scope};
 use smithay::{
@@ -11,7 +9,7 @@ use smithay::{
     utils::Serial,
 };
 
-use crate::{State, surface};
+use crate::{State, programs::Asked, surface};
 
 /// Evdev codes of the top row's digits 1 to 9 then 0, and XKB's offset.
 const KEY_1: u32 = 2;
@@ -19,17 +17,6 @@ const KEY_0: u32 = 11;
 const XKB_OFFSET: u32 = 8;
 /// The key left of 1: a physical key, like the digits.
 const KEY_GRAVE: u32 = 41;
-
-/// Who a program is started for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Asked {
-    /// Alex, from the shell (a click, a key): its window may take the
-    /// focus.
-    ByUser,
-    /// The session, putting itself back or starting what it always does:
-    /// nobody waits for those.
-    BySession,
-}
 
 /// The combination a key press makes, as shortcuts name them: digits by
 /// position, other keys by their unshifted symbol in the active layout.
@@ -270,75 +257,15 @@ impl State {
         self.emit(|_| Event::KeyboardLayout { layout });
     }
 
-    /// Starts a command through the shell; a thread waits for it, so the
-    /// loop never does.
+    /// Starts a command through the shell, as [`Self::launch`] does.
     fn spawn_command(&mut self, command: &str) {
         self.launch("/bin/sh", &["-c".to_owned(), command.to_owned()]);
     }
 
-    /// Starts a program for the user, in a clean environment: what the
-    /// session has (or a test gives), without what must not leak into
-    /// applications, with this compositor's sockets. A thread waits for it,
-    /// so the loop never does.
+    /// Starts a program for the user (see [`State::start_program`]): a
+    /// thread starts it and waits for it, so the loop does neither.
     pub fn launch(&mut self, program: &str, args: &[String]) {
-        if let Err(err) = self.try_launch(program, args) {
-            tracing::warn!(%err, program, "could not start");
-        }
-    }
-
-    /// As [`Self::launch`], saying whether it started.
-    pub fn try_launch(&mut self, program: &str, args: &[String]) -> std::io::Result<()> {
-        self.start_program(program, args, Asked::ByUser)
-    }
-
-    /// Starts a program, for Alex or for the session: one Alex asked for
-    /// gets an activation token of the shell's (`XDG_ACTIVATION_TOKEN`,
-    /// and `DESKTOP_STARTUP_ID` for X11 ones), so that its window, or an
-    /// instance already running that it hands the token to, takes the
-    /// focus (#145).
-    pub fn start_program(
-        &mut self,
-        program: &str,
-        args: &[String],
-        asked: Asked,
-    ) -> std::io::Result<()> {
-        let mut cmd = Command::new(program);
-        cmd.args(args);
-        if let Some(env) = &self.child_env {
-            cmd.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
-        }
-        for leak in ["LD_PRELOAD", "LD_AUDIT", "WAYLAND_SOCKET", "DISPLAY"] {
-            cmd.env_remove(leak);
-        }
-        cmd.env("WAYLAND_DISPLAY", &self.socket_path)
-            .env(hocus_api::SOCKET_ENV, self.api.path())
-            .env("XDG_CURRENT_DESKTOP", hocus_platform::apps::DESKTOP)
-            .env("XDG_SESSION_TYPE", "wayland");
-        if let Some(dir) = self.socket_path.parent() {
-            cmd.env("XDG_RUNTIME_DIR", dir);
-        }
-        if let Some(n) = self.xdisplay {
-            cmd.env("DISPLAY", format!(":{n}"));
-        }
-        // The session's environment may carry a token of its own, used
-        // already.
-        cmd.env_remove("XDG_ACTIVATION_TOKEN")
-            .env_remove("DESKTOP_STARTUP_ID");
-        if asked == Asked::ByUser {
-            let token = self.shell_token();
-            cmd.env("XDG_ACTIVATION_TOKEN", &token)
-                .env("DESKTOP_STARTUP_ID", &token);
-        }
-        let mut child = cmd.spawn()?;
-        let spawned = std::thread::Builder::new()
-            .name("child".into())
-            .spawn(move || {
-                let _ = child.wait();
-            });
-        if let Err(err) = spawned {
-            tracing::warn!(%err, "could not watch a started program");
-        }
-        Ok(())
+        self.start_program(program, args, Asked::ByUser);
     }
 
     /// Layouts, options and key repeat from the configuration; Num Lock on

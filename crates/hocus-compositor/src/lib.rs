@@ -66,6 +66,7 @@ mod pandas;
 mod panel;
 mod phone;
 mod pointing;
+mod programs;
 mod quick;
 mod radial;
 mod recording;
@@ -290,6 +291,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         state.watchdog = Some(watchdog::start(&event_loop.handle(), config.clone())?);
     }
     state.loop_handle = Some(event_loop.handle());
+    programs::start(&event_loop.handle(), &mut state);
     state.system_bus = options.system_bus.clone();
     a11y::start(
         &mut state,

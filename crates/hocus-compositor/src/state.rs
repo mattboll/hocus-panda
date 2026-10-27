@@ -228,6 +228,8 @@ pub struct State {
     /// What started applications inherit, if not the compositor's own
     /// environment (tests).
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
+    /// The programs being started, each on a thread of its own (#285).
+    pub programs: crate::programs::Programs,
     /// The keyboard layout in use, by its place in the configuration.
     pub layout_index: usize,
     /// The names of the layouts kept, from XKB's registry.
@@ -378,6 +380,7 @@ impl State {
             settings_beside: None,
             user_dirs: None,
             child_env: None,
+            programs: Default::default(),
             layout_index: 0,
             layout_names: Default::default(),
             // Tests show the same name on every machine.

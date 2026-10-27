@@ -1,6 +1,7 @@
 //! The system's fonts, for what the bundled ones lack (emoji, other
-//! scripts): read once on a worker thread at start, then given to the
-//! loop, whose trees lay their text out again. Tests and the virtual clock
+//! scripts): read once on a worker thread at start, the files of every
+//! fallback mapped there too, then given to the loop, whose trees lay
+//! their text out again without opening a file. Tests and the virtual clock
 //! never read them, so that reference images are the same everywhere.
 
 use hocus_ui::text::SystemFonts;
@@ -13,8 +14,9 @@ pub fn start(handle: &LoopHandle<'static, App>) {
     let inserted = handle.insert_source(fonts, |event, _, app| {
         if let channel::Event::Msg(fonts) = event {
             app.timed("system fonts", |app| {
+                let files = fonts.files();
                 fonts.install();
-                tracing::info!("system fonts in use");
+                tracing::info!(files, "system fonts in use");
                 if let Some(launcher) = app.state.launcher.as_mut() {
                     launcher.fonts_changed();
                 }
