@@ -200,13 +200,16 @@ nothing at all are options (see
 - "Waiting for you": windows that request attention
 - Tasks, from a local list of iCalendar VTODO files
   (`$XDG_DATA_HOME/hocuspanda/tasks`, one file each, vdir style: its folders
-  are named lists), shown once the list exists: the summary ("3 to do",
+  are named lists), always shown: the summary ("3 to do",
   "1 late", "4 of 4"), the late ones and today's first with their due date
   (muted, or in the danger colour when late), those done today struck
   through after them, a box to tick each, "All done for today." with a
   panda when nothing is left; a field under them adds one (the launcher
   opens on it), and a task's menu (secondary button) edits it, sets it due
-  today or tomorrow or without a date, and deletes it. "todo …" or
+  today or tomorrow or without a date, and deletes it. Short of room, the
+  section gives room first: all done without its panda, then said beside
+  the caption, and a + there for the field; then, after the other
+  sections' details, fewer tasks (two, then one). "todo …" or
   "task: …" in the command field adds one; the control API and MCP list
   and add them. CalDAV task lists and Google Tasks come next
 - Command field ("Search, act, ask…")

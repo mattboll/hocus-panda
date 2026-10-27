@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use hocus_core::config::ClockFormat;
 use hocus_ui::{
-    Align, Canvas, Direction, Draw, Insets, Justify, Kind, Length, Look, NodeId, Paint, Point,
-    Rect, Size, Style, Theme, Tree,
+    Align, Button, ButtonKind, Canvas, Direction, Draw, Insets, Kind, Length, Look, NodeId, Paint,
+    Point, Rect, Size, Style, Theme, Tree,
 };
 
 use crate::{
@@ -82,6 +82,61 @@ pub enum DueChoice {
     Today,
     Tomorrow,
     None,
+}
+
+/// How much of the section the column has room for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Fit {
+    /// Tasks shown at most.
+    pub rows: usize,
+    /// "All done" with its panda.
+    pub panda: bool,
+    /// "All done" on a card of its own, rather than beside the caption.
+    pub card: bool,
+    /// The field to add one; otherwise a + beside the caption.
+    pub field: bool,
+}
+
+impl Fit {
+    pub(crate) const MOST: Self = Self {
+        rows: ROWS,
+        panda: true,
+        card: true,
+        field: true,
+    };
+
+    /// Without the panda, while it shows.
+    pub(crate) fn less_panda(self, view: &TasksView) -> Option<Self> {
+        (self.panda && view.pandas && view.open == 0).then_some(Self {
+            panda: false,
+            ..self
+        })
+    }
+
+    /// "All done" beside the caption, while on its card.
+    pub(crate) fn less_card(self, view: &TasksView) -> Option<Self> {
+        (self.card && view.open == 0).then_some(Self {
+            card: false,
+            ..self
+        })
+    }
+
+    /// One task fewer, down to `least`.
+    pub(crate) fn less_rows(self, view: &TasksView, least: usize) -> Option<Self> {
+        let rows = self.rows.min(view.rows.len());
+        (view.open > 0 && rows > least).then(|| Self {
+            rows: rows - 1,
+            ..self
+        })
+    }
+
+    /// A + beside the caption rather than the field.
+    pub(crate) fn less_field(self) -> Option<Self> {
+        self.field.then_some(Self {
+            field: false,
+            ..self
+        })
+    }
 }
 
 /// What a click in the section does.
@@ -250,6 +305,7 @@ pub(crate) fn fill(
     lang: Lang,
     view: &TasksView,
     clock: ClockFormat,
+    fit: Fit,
 ) -> Vec<(NodeId, Target)> {
     let missing = || unreachable!("adding to a node of this tree");
     let add = |tree: &mut Tree, parent, style, kind| {
@@ -262,22 +318,22 @@ pub(crate) fn fill(
         ..Style::default()
     };
     let mut targets = Vec::new();
-    let head = add(
-        tree,
-        room,
-        Style {
-            justify: Justify::SpaceBetween,
-            ..row(8.0)
-        },
-        Kind::Box(Look::default()),
-    );
+    let head = add(tree, room, row(8.0), Kind::Box(Look::default()));
+    // The caption takes what is left: the summary and the + go to the end.
     add(
         tree,
         head,
-        Style::default(),
+        Style {
+            width: Length::Fill,
+            ..Style::default()
+        },
         Kind::text_line(lang.tasks(), theme.text.caption),
     );
-    let summary = lang.tasks_summary(view);
+    let mut summary = lang.tasks_summary(view);
+    // Short of room, all done is said beside the caption.
+    if view.open == 0 && !fit.card {
+        summary = lang.all_done_today().to_owned();
+    }
     if !summary.is_empty() {
         add(
             tree,
@@ -292,7 +348,25 @@ pub(crate) fn fill(
             ),
         );
     }
-    if view.open == 0 {
+    if !fit.field {
+        let plus = add(
+            tree,
+            head,
+            Style {
+                width: Length::Px(24.0),
+                height: Length::Px(24.0),
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::Button(
+                Button::new("", ButtonKind::Ghost, theme)
+                    .with_icon(crate::column::stroked(icons::PLUS, 14.0))
+                    .with_name(lang.add_task()),
+            ),
+        );
+        targets.push((plus, Target::Add));
+    }
+    if view.open == 0 && fit.card {
         let chip = add(
             tree,
             room,
@@ -306,7 +380,7 @@ pub(crate) fn fill(
                 ..Look::default()
             }),
         );
-        if view.pandas {
+        if view.pandas && fit.panda {
             add(
                 tree,
                 chip,
@@ -331,8 +405,8 @@ pub(crate) fn fill(
             },
             Kind::text(lang.all_done_today(), theme.text.body),
         );
-    } else {
-        for task in view.rows.iter().take(ROWS) {
+    } else if view.open > 0 {
+        for task in view.rows.iter().take(fit.rows.min(ROWS)) {
             let line = add(
                 tree,
                 room,
@@ -433,6 +507,9 @@ pub(crate) fn fill(
             }
             targets.push((line, Target::Toggle(task.id.clone())));
         }
+    }
+    if !fit.field {
+        return targets;
     }
     let field = add(
         tree,

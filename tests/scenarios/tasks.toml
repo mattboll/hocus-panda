@@ -78,10 +78,10 @@ expect_ui = { label = "15:00" }
 
 # The late one first: above the one due today at 15:00.
 [[step]]
-expect_ui = { label = "Send the quote to the client", inside = [944, 460, 320, 45] }
+expect_ui = { label = "Send the quote to the client", inside = [944, 505, 320, 40] }
 
 [[step]]
-expect_ui = { label = "Review merge request #42", inside = [944, 505, 320, 40] }
+expect_ui = { label = "Review merge request #42", inside = [944, 545, 320, 40] }
 
 [[step]]
 mcp = { tool = "list_tasks", contains = ["[ ] Send the quote to the client (due 2026-10-20, late)", "[ ] Review merge request #42 (due 2026-10-21T15:00)", "[ ] Book hocuspanda.org"] }

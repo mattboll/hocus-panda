@@ -1,4 +1,4 @@
-description = "Adding tasks (#255): given no tasks, the column says All done for today; todo Buy milk in the command field adds a task Buy milk to the local list, the column's field adds another, and with both ticked it is all done again, 2 of 2; MCP lists and adds tasks, an agent that may only read is refused"
+description = "Adding tasks (#255): given no tasks, not even a list yet, the column says All done for today; todo Buy milk in the command field adds a task Buy milk to the local list, the column's field adds another, and with both ticked it is all done again, 2 of 2; MCP lists and adds tasks, an agent that may only read is refused"
 outputs = ["1280x800"]
 shell = true
 
@@ -15,22 +15,13 @@ name = "helper"
 access = "act"
 """
 
-# Never used, there is no list: the column says nothing of tasks.
-[[step]]
-expect_ui = { label = "TASKS", shown = false }
-
-# The list's folder, empty.
-[[step]]
-state_file = { name = "tasks/.keep", text = "" }
-
-[[step]]
-restart = true
-
-[[step]]
-wait_wallpapers = true
-
+# Never used, there is no list yet: the section says all is done, and
+# offers to add the first.
 [[step]]
 expect_ui = { label = "TASKS" }
+
+[[step]]
+expect_ui = { label = "Add a task" }
 
 [[step]]
 expect_ui = { label = "All done for today." }

@@ -789,6 +789,22 @@ impl Column {
                 want.compact_meeting,
             );
         }
+        if want.tasks != self.fit.tasks
+            && let Some(view) = &self.state.tasks
+        {
+            for child in self.tree.children(n.tasks) {
+                self.tree.remove(child);
+            }
+            self.task_targets = crate::tasks::fill(
+                &mut self.tree,
+                n.tasks,
+                &theme,
+                lang,
+                view,
+                self.state.time.format,
+                want.tasks,
+            );
+        }
         if want.agents != self.fit.agents
             && let Some(view) = &self.state.agents
         {
@@ -904,8 +920,15 @@ impl Column {
             self.task_targets.clear();
             if let Some(view) = &state.tasks {
                 let theme = t.theme().clone();
-                self.task_targets =
-                    crate::tasks::fill(t, n.tasks, &theme, lang, view, state.time.format);
+                self.task_targets = crate::tasks::fill(
+                    t,
+                    n.tasks,
+                    &theme,
+                    lang,
+                    view,
+                    state.time.format,
+                    fit.tasks,
+                );
             }
         }
         if all || old.agents != state.agents {
@@ -1602,6 +1625,7 @@ struct Fit {
     agents: crate::agents::Fit,
     /// The meeting card on one line.
     compact_meeting: bool,
+    tasks: crate::tasks::Fit,
 }
 
 impl Fit {
@@ -1610,14 +1634,31 @@ impl Fit {
         journal: crate::journal::ROWS,
         agents: crate::agents::Fit::MOST,
         compact_meeting: false,
+        tasks: crate::tasks::Fit::MOST,
     };
 
-    /// One less: a notification while more than one shows, else a journal
-    /// entry while more than one shows, else an other desktop's agents'
-    /// line, else the meeting card on one line, else the waiting agents'
-    /// rows in short, else the notifications altogether, else an agent
-    /// shown in full; `None` when nothing gives more.
+    /// One less: the tasks' panda, their all-done card (said beside the
+    /// caption instead), their field (a + beside the caption instead),
+    /// else a notification while more than one shows, else a journal entry
+    /// while more than one shows, else an other desktop's agents' line,
+    /// else a task while more than two show, else the meeting card on one
+    /// line, else the waiting agents' rows in short, else the
+    /// notifications altogether, else an agent shown in full, else a task
+    /// while more than one shows; `None` when nothing gives more.
     fn less(self, state: &ColumnState) -> Option<Self> {
+        // The tasks give room first, saying the same in less: all done
+        // without its panda, then beside the caption, and a + for the
+        // field.
+        let tasks = state.tasks.as_deref();
+        if let Some(tasks) = tasks.and_then(|t| self.tasks.less_panda(t)) {
+            return Some(Self { tasks, ..self });
+        }
+        if let Some(tasks) = tasks.and_then(|t| self.tasks.less_card(t)) {
+            return Some(Self { tasks, ..self });
+        }
+        if let Some(tasks) = tasks.and_then(|_| self.tasks.less_field()) {
+            return Some(Self { tasks, ..self });
+        }
         // "Nothing new" takes a line too.
         let notifications = self.notifications.min(state.notifications.len().max(1));
         if notifications > 1 {
@@ -1650,6 +1691,9 @@ impl Fit {
         if let Some(agents) = agents.and_then(|a| self.agents.less_lines(a)) {
             return Some(Self { agents, ..less });
         }
+        if let Some(tasks) = tasks.and_then(|t| self.tasks.less_rows(t, 2)) {
+            return Some(Self { tasks, ..less });
+        }
         if !self.compact_meeting {
             return Some(Self {
                 compact_meeting: true,
@@ -1665,9 +1709,12 @@ impl Fit {
                 ..less
             });
         }
-        agents
-            .and_then(|a| self.agents.less_rows(a))
-            .map(|agents| Self { agents, ..less })
+        if let Some(agents) = agents.and_then(|a| self.agents.less_rows(a)) {
+            return Some(Self { agents, ..less });
+        }
+        tasks
+            .and_then(|t| self.tasks.less_rows(t, 1))
+            .map(|tasks| Self { tasks, ..less })
     }
 }
 

@@ -64,7 +64,7 @@ mcp = { agent = "helper", tool = "journal", contains = [
 mcp = { agent = "reader", tool = "journal", contains = ["Nothing yet."] }
 
 # The column shows the last few, newest first, and the button that stops
-# every agent.
+# every agent: two on this screen, beside the tasks (#255).
 [[step]]
 expect_ui = { label = "Agents' journal" }
 
@@ -75,7 +75,7 @@ expect_ui = { label = "Stop every agent" }
 expect_ui = { label = "helper · Click refused · Passwords" }
 
 [[step]]
-expect_ui = { label = "helper · Typed 4 characters · Shopping list" }
+expect_ui = { label = "helper · Pressed Ctrl+S · Shopping list" }
 
 [[step]]
 advance_ms = 300
@@ -89,6 +89,9 @@ click_ui = "Agents' journal"
 
 [[step]]
 expect_ui = { label = "helper · Clicked · Shopping list" }
+
+[[step]]
+expect_ui = { label = "helper · Typed 4 characters · Shopping list" }
 
 [[step]]
 expect_ui = { label = "Agent \"helper\" may not act on windows of \"other\": its apps in [[agents.mcp]] do not match it" }

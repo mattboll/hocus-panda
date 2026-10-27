@@ -671,6 +671,33 @@ fn the_tasks_show_late_ones_first_tick_and_open_their_menu() -> anyhow::Result<(
 }
 
 #[test]
+fn short_of_room_all_done_is_said_beside_the_caption_with_a_plus() -> anyhow::Result<()> {
+    let empty = TasksView {
+        pandas: true,
+        ..TasksView::default()
+    };
+    // Tall: the card with its panda, and the field.
+    let mut column = Column::new(Theme::default(), Lang::En, 1000.0, 1.0);
+    let mut s = state();
+    s.tasks = Some(empty.clone().into());
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    assert!(access.contains("Panda done"), "{access}");
+    // A laptop's: neither; the + adds one all the same.
+    let mut column = Column::new(Theme::default(), Lang::En, 600.0, 1.0);
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    assert!(!access.contains("Panda done"), "{access}");
+    assert!(access.contains("All done for today."), "{access}");
+    let at = button(&column, "Add a task")?;
+    assert_eq!(click(&mut column, at), vec![Action::AddTask]);
+    rect_of(&column, "Account: Camille")?;
+    Ok(())
+}
+
+#[test]
 fn the_window_buttons_ask_for_their_actions() -> anyhow::Result<()> {
     let mut column = column(Lang::En);
     for (name, action) in [
