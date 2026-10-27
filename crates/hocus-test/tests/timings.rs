@@ -258,6 +258,7 @@ fn timings() -> anyhow::Result<()> {
             data: Vec::new(),
         }),
         zoneinfo: repository().join("tests/scenarios/zoneinfo"),
+        xkb: hocus_platform::xkb::Registry::At(repository().join("tests/scenarios/xkb")),
         home: None,
     })?;
     desktop.dispatch_until(TIMEOUT, |d| {

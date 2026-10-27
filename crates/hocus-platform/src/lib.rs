@@ -25,3 +25,4 @@ pub mod timedate;
 pub mod tray;
 pub mod updates;
 pub mod wifi;
+pub mod xkb;

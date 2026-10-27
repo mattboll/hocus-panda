@@ -1234,6 +1234,7 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-wlr",
  "x11rb",
+ "xkbcommon 0.8.0",
  "zbus",
 ]
 

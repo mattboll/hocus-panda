@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use hocus_shell::{Lang, QuickAction, QuickState, Sheet, Tile};
+use hocus_shell::{KeyboardLayout, Lang, QuickAction, QuickState, Sheet, Tile};
 use hocus_ui::{Input, Key, Point, Role, Theme};
 
 mod common;
@@ -33,7 +33,25 @@ fn state(lang: Lang) -> QuickState {
         output_device: String::new(),
         brightness: vec![("eDP-1".into(), 70), ("DP-1".into(), 85)],
         battery: Some(lang.battery_left(64, Some(230))),
-        layouts: vec!["FR".into(), "US".into()],
+        layouts: vec![
+            KeyboardLayout {
+                name: match lang {
+                    Lang::En => "French (AZERTY)",
+                    Lang::Fr => "Français (AZERTY)",
+                }
+                .into(),
+                short: "FR".into(),
+            },
+            KeyboardLayout {
+                name: match lang {
+                    Lang::En => "English (US)",
+                    Lang::Fr => "Anglais (US)",
+                }
+                .into(),
+                short: "US".into(),
+            },
+        ]
+        .into(),
         layout: 0,
         notifications: 2,
     }
@@ -80,7 +98,7 @@ fn tiles_profiles_sliders_and_layouts_ask_for_their_change() -> anyhow::Result<(
     );
     let at = find(&sheet, Role::Button, "Performance")?;
     assert_eq!(click(&mut sheet, at), vec![QuickAction::Profile(2)]);
-    let at = find(&sheet, Role::Button, "Keyboard layout: US")?;
+    let at = find(&sheet, Role::Button, "Keyboard layout: English (US)")?;
     assert_eq!(click(&mut sheet, at), vec![QuickAction::Layout(1)]);
     let at = find(&sheet, Role::Button, "Clear all")?;
     assert_eq!(click(&mut sheet, at), vec![QuickAction::ClearNotifications]);

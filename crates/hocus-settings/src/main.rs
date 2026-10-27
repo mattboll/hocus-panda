@@ -37,6 +37,7 @@ fn main() -> anyhow::Result<()> {
             system_bus: client::SystemBus::Machine,
             xdg: client::Xdg::Machine,
             zoneinfo: hocus_platform::timedate::zoneinfo(),
+            xkb: hocus_platform::xkb::Registry::Machine,
             // The session's, as the compositor reads `~/` in [search].
             home: std::env::var_os("HOME")
                 .map(PathBuf::from)

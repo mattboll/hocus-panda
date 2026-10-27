@@ -183,39 +183,18 @@ pub fn layout_before(name: &str, lang: Lang) -> String {
     }
 }
 
-/// Keyboard layouts offered, by XKB name, in both languages.
-pub const LAYOUT_NAMES: [(&str, Words); 22] = [
-    ("us", Words::new("English · US", "Anglais · US")),
-    ("gb", Words::new("English · UK", "Anglais · Royaume-Uni")),
-    ("fr", Words::new("French · AZERTY", "Français · AZERTY")),
-    ("be", Words::new("Belgian", "Belge")),
-    ("ch", Words::new("Swiss", "Suisse")),
-    ("ca", Words::new("Canadian French", "Français canadien")),
-    ("de", Words::new("German", "Allemand")),
-    ("es", Words::new("Spanish", "Espagnol")),
-    ("latam", Words::new("Latin American", "Latino-américain")),
-    ("it", Words::new("Italian", "Italien")),
-    ("pt", Words::new("Portuguese", "Portugais")),
-    ("br", Words::new("Brazilian", "Brésilien")),
-    ("nl", Words::new("Dutch", "Néerlandais")),
-    ("se", Words::new("Swedish", "Suédois")),
-    ("no", Words::new("Norwegian", "Norvégien")),
-    ("dk", Words::new("Danish", "Danois")),
-    ("fi", Words::new("Finnish", "Finnois")),
-    ("pl", Words::new("Polish", "Polonais")),
-    ("cz", Words::new("Czech", "Tchèque")),
-    ("ru", Words::new("Russian", "Russe")),
-    ("ua", Words::new("Ukrainian", "Ukrainien")),
-    ("gr", Words::new("Greek", "Grec")),
-];
-
-/// A layout's name, or its XKB name when it has none here.
-pub fn layout_name(code: &str, lang: Lang) -> String {
-    LAYOUT_NAMES
-        .iter()
-        .find(|(c, _)| *c == code)
-        .map_or_else(|| code.to_uppercase(), |(_, w)| w.get(lang).to_owned())
-}
+/// The search among the keyboard layouts and their variants.
+pub const LAYOUT_SEARCH_NAME: Words = Words::new("Search the layouts", "Chercher une disposition");
+pub const LAYOUT_SEARCH_HINT: Words = Words::new(
+    "A layout or a variant: BÉPO, Dvorak…",
+    "Une disposition ou une variante : BÉPO, Dvorak…",
+);
+pub const NO_LAYOUT: Words = Words::new(
+    "No layout goes by that name.",
+    "Aucune disposition ne porte ce nom.",
+);
+/// After the welcome's common layouts.
+pub const MORE_LAYOUTS: Words = Words::new("More…", "Plus…");
 
 pub const SCREENS_NOTE: Words = Words::new(
     "Each set of screens keeps its own layout.",

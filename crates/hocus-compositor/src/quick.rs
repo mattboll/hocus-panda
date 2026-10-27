@@ -362,13 +362,7 @@ impl State {
                 .battery
                 .as_ref()
                 .map(|b| lang.battery_left(b.percent, b.minutes_left)),
-            layouts: self
-                .config
-                .keyboard
-                .layouts
-                .iter()
-                .map(|l| l.chars().take(4).flat_map(char::to_uppercase).collect())
-                .collect(),
+            layouts: self.layout_names.kept.clone(),
             layout: self.layout_index,
             notifications: self.notification_count(),
         })
@@ -436,7 +430,10 @@ impl State {
     }
 
     /// Uses the `index`th layout of the configuration.
-    fn set_layout(&mut self, index: usize) {
+    pub(crate) fn set_layout(&mut self, index: usize) {
+        if index >= self.config.keyboard.layouts.len().max(1) {
+            return;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };

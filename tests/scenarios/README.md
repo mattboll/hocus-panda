@@ -3,7 +3,10 @@
 Each `.toml` file here is a scenario: steps and expectations run against its
 own headless compositor (pixman renderer, virtual clock, private runtime
 directory), through the control API. `cargo nextest run` runs them all, one
-test per file; `hocus scenario run FILE…` runs some.
+test per file; `hocus scenario run FILE…` runs some. Keyboard layouts are
+named, in the shell and the settings, after `xkb/` here (a part of XKB's
+registry and its French catalogue, made by `scripts/xkb-excerpt.py`), never
+the machine's; their keymaps are XKB's own.
 
 ```toml
 description = "A click on a window behind another focuses it and raises it"
@@ -195,7 +198,7 @@ Steps, one per `[[step]]` table:
 | `expect_focus = "app_id"` | checks which window has keyboard focus |
 | `expect_stack = ["below", "above"]` | checks the shown windows, bottom to top |
 | `expect_shown = { output, desktop }` | checks which desktop an output shows, from 1 |
-| `expect_received = { app_id, event = "key 30 pressed" }` | checks the client got an event: `configure WxH`, `pointer_enter`, `pointer_leave`, `button CODE pressed`, `keyboard_enter`, `keyboard_leave`, `key CODE pressed`, `close` (and `released`); an MCP agent's seat's events end with its name, `key 30 pressed on agent-helper`, and a `password = true` window says `password_field on agent-helper` once its field told that seat it is a password one; a `marks = true` window says `drew N marks` once the compositor has its picture of N marks, which a step waits for before a capture rather than a moment of real time |
+| `expect_received = { app_id, event = "key 30 pressed" }` | checks the client got an event: `configure WxH`, `pointer_enter`, `pointer_leave`, `button CODE pressed`, `keyboard_enter`, `keyboard_leave`, `key CODE pressed`, `close` (and `released`), `keymap LAYOUT, LAYOUT` (the names of the keymap's layouts, as XKB says them: `keymap French (BEPO), English (US)`), `typed TEXT` (what a key pressed types in that keymap, with the modifiers and layout in effect); an MCP agent's seat's events end with its name, `key 30 pressed on agent-helper`, and a `password = true` window says `password_field on agent-helper` once its field told that seat it is a password one; a `marks = true` window says `drew N marks` once the compositor has its picture of N marks, which a step waits for before a capture rather than a moment of real time |
 | `expect_not_received = { app_id, event }` | checks the client never got an event |
 | `expect_pixel = { output, at = [x, y], color = "#rrggbb", tolerance? = 24, is? = true }` | checks one pixel of an output, in its pixels; `is = false` checks it is not that colour |
 | `expect_screenshot = { output, reference = "file.png", channel_tolerance? = 2, pixel_tolerance? = 0.0, cursor? = false }` | compares the output with a reference image next to the scenario; `cursor` draws the pointer's cursor too |

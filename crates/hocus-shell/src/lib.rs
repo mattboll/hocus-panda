@@ -24,6 +24,7 @@ pub mod ink;
 pub mod intents;
 pub mod journal;
 pub mod launcher;
+pub mod layouts;
 pub mod leave;
 pub mod lock;
 pub mod matrix;
@@ -48,7 +49,8 @@ pub mod welcome;
 pub mod window_switcher;
 
 pub use column::{
-    Action, ActiveWindow, Column, ColumnState, ScreenDesktops, TrayApp, TrayMenuEntry, WallTime,
+    Action, ActiveWindow, Column, ColumnState, KeyboardLayout, ScreenDesktops, TrayApp,
+    TrayMenuEntry, WallTime,
 };
 pub use i18n::Lang;
 pub use launcher::{App, Choice, Launcher, LauncherEvent, Showcase};

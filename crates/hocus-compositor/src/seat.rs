@@ -901,9 +901,10 @@ impl State {
         let generation = self.config_generation;
         if self.agent_seat(connection).and_then(|s| s.keymap) != Some(generation) {
             let k = self.config.keyboard.clone();
-            let layout = k.layouts.join(",");
+            let (layout, variant) = hocus_core::keyboard::xkb_lists(&k.layouts);
             let config = XkbConfig {
                 layout: &layout,
+                variant: &variant,
                 options: (!k.options.is_empty()).then(|| k.options.clone()),
                 ..Default::default()
             };

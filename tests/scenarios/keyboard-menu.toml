@@ -1,0 +1,82 @@
+# The column's keyboard menu, after board D13 (#251): the layouts kept
+# with their variant, the one in use marked, each with its short name;
+# the keys that switch. Picking one is instant: the next key uses it.
+description = "The column's chip opens the keyboard menu of D13 (Français (AZERTY) FR, Anglais (US) US, Français (BÉPO) BÉPO); picking the second, then the third, makes the next key type with it"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+
+[keyboard]
+layouts = ["fr", "us", "fr(bepo)"]
+
+[shortcuts]
+"Super+Ctrl+Space" = "switch-layout"
+"""
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+expect_window = { app_id = "doc", focused = true }
+
+# AZERTY: the key of US Q types a.
+[[step]]
+key = 16
+
+[[step]]
+expect_received = { app_id = "doc", event = "typed a" }
+
+[[step]]
+click_ui = "Disposition du clavier : Français (AZERTY)"
+
+[[step]]
+expect_ui = { label = "Français (AZERTY)", selected = true }
+
+[[step]]
+expect_ui = { label = "Français (BÉPO)", selected = false }
+
+[[step]]
+pointer_move = [700, 700]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "keyboard-menu.png" }
+
+[[step]]
+click_ui = "Anglais (US)"
+
+[[step]]
+expect_event = { type = "keyboard_layout", has = "English (US)" }
+
+[[step]]
+expect_window = { app_id = "doc", focused = true }
+
+[[step]]
+key = 16
+
+[[step]]
+expect_received = { app_id = "doc", event = "typed q" }
+
+[[step]]
+expect_ui = { label = "Disposition du clavier : Anglais (US)" }
+
+[[step]]
+click_ui = "Disposition du clavier : Anglais (US)"
+
+[[step]]
+click_ui = "Français (BÉPO)"
+
+[[step]]
+expect_ui = { label = "Disposition du clavier : Français (BÉPO)" }
+
+[[step]]
+key = 16
+
+[[step]]
+expect_received = { app_id = "doc", event = "typed b" }

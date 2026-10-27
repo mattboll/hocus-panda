@@ -1,0 +1,49 @@
+# The Keyboard page's layouts (#251): Add searches every layout and
+# variant of XKB's registry (the scenarios' copy, xkb/ here), named in the
+# interface's language; accents and case do not matter. Chosen, a layout
+# is kept after the others.
+description = "On the Keyboard page, Alex searches bépo: Français (BÉPO) is offered with its other variants, and choosing it keeps it after AZERTY"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+
+[keyboard]
+layouts = ["fr"]
+"""
+
+[[step]]
+open_settings = { page = "keyboard" }
+
+[[step]]
+click_settings = "Ajouter une disposition"
+
+# Typed as on a US keyboard: without the accent, found all the same.
+[[step]]
+type = "bepo"
+
+[[step]]
+expect_settings = { label = "Français (BÉPO)" }
+
+[[step]]
+expect_settings = { label = "Français (BÉPO, AFNOR)" }
+
+[[step]]
+pointer_move = [1000, 760]
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-keyboard-layouts.png" }
+
+[[step]]
+click_settings = "Français (BÉPO)"
+
+[[step]]
+expect_config_file = { contains = ["layouts = [\"fr\", \"fr(bepo)\"]"] }
+
+[[step]]
+expect_settings = { label = "Retirer Français (BÉPO)" }

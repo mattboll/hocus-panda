@@ -1,4 +1,5 @@
-//! A to-do's box: an outline, or filled with the accent and ticked.
+//! A to-do's box: an outline, or filled with the accent and ticked; and
+//! a choice's round mark, ringed with the accent and dotted when chosen.
 
 use std::time::Duration;
 
@@ -27,6 +28,35 @@ impl Draw for Checkbox {
             );
         } else {
             canvas.stroke_rect(r, 5.0, 1.5, c.muted);
+        }
+    }
+
+    fn size(&self) -> Size {
+        Size::new(18.0, 18.0)
+    }
+}
+
+/// One choice among several, chosen or not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Radio(pub bool);
+
+impl Draw for Radio {
+    fn draw(&self, canvas: &mut Canvas, rect: Rect, theme: &Theme, _: Duration) {
+        let d = rect.w.min(rect.h).min(18.0);
+        let r = Rect::new(
+            rect.x + (rect.w - d) / 2.0,
+            rect.y + (rect.h - d) / 2.0,
+            d,
+            d,
+        );
+        let c = &theme.colors;
+        if self.0 {
+            canvas.stroke_rect(r, d / 2.0, 2.0, c.accent);
+            let dot = d * 0.45;
+            let inner = Rect::new(r.x + (d - dot) / 2.0, r.y + (d - dot) / 2.0, dot, dot);
+            canvas.fill_rect(inner, dot / 2.0, c.accent);
+        } else {
+            canvas.stroke_rect(r, d / 2.0, 1.5, c.muted);
         }
     }
 

@@ -221,6 +221,8 @@ pub struct State {
     pub child_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
     /// The keyboard layout in use, by its place in the configuration.
     pub layout_index: usize,
+    /// The names of the layouts kept, from XKB's registry.
+    pub layout_names: crate::layout_names::LayoutNames,
     /// Who is logged in, as the column shows it.
     pub user: String,
     pub snap_preview_buffer: SolidColorBuffer,
@@ -362,6 +364,7 @@ impl State {
             settings_started: None,
             child_env: None,
             layout_index: 0,
+            layout_names: Default::default(),
             // Tests show the same name on every machine.
             user: match clock {
                 Clock::Virtual { .. } => "Alex".into(),

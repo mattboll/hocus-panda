@@ -1,0 +1,46 @@
+# Layouts with their variant (#251): `fr(bepo)` is XKB's layout `fr` with
+# its variant `bepo`. A client reads BÉPO in the keymap it is given, and
+# the key in the place of US Q, labelled B on a BÉPO keyboard, types b.
+# Shortcuts follow keys, whatever the layout.
+description = "Given layouts = [\"fr(bepo)\", \"us\"], a client gets BÉPO's keymap and the key labelled B types b; the switch shortcut still works, and the same key types q in US"
+outputs = ["1280x800"]
+
+[[step]]
+config = """
+[keyboard]
+layouts = ["fr(bepo)", "us"]
+
+[shortcuts]
+"Super+Ctrl+Space" = "switch-layout"
+"""
+
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66" }
+
+[[step]]
+expect_received = { app_id = "doc", event = "keymap French (BEPO), English (US)" }
+
+[[step]]
+key = 16
+
+[[step]]
+expect_received = { app_id = "doc", event = "typed b" }
+
+# BÉPO's top row: É where US has W.
+[[step]]
+key = 17
+
+[[step]]
+expect_received = { app_id = "doc", event = "typed é" }
+
+[[step]]
+keys = "super+ctrl+space"
+
+[[step]]
+expect_event = { type = "keyboard_layout", has = "English (US)" }
+
+[[step]]
+key = 16
+
+[[step]]
+expect_received = { app_id = "doc", event = "typed q" }

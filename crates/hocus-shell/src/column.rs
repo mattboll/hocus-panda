@@ -99,9 +99,12 @@ pub struct ColumnState {
     pub active: Option<ActiveWindow>,
     /// Every screen, the column's first.
     pub screens: Vec<ScreenDesktops>,
-    /// The keyboard layout, short (`FR`) and long (`fr`).
-    pub layout: String,
-    pub layout_name: String,
+    /// The keyboard layouts kept, in order (shared: the state is made
+    /// after every turn of the loop); the one in use.
+    pub layouts: Arc<[KeyboardLayout]>,
+    pub layout: usize,
+    /// The keys that switch to the next layout, when some do.
+    pub switch_layout_keys: Option<Arc<str>>,
     pub user: String,
     /// The account menu offers hibernating only where it works.
     pub can_hibernate: bool,
@@ -128,6 +131,22 @@ pub struct ColumnState {
     /// What MCP agents did (#176), once one connected; or that they are
     /// stopped.
     pub journal: Option<crate::journal::JournalView>,
+}
+
+/// A keyboard layout kept, as the column says it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KeyboardLayout {
+    /// "French (AZERTY)".
+    pub name: String,
+    /// "FR", "BÉPO".
+    pub short: String,
+}
+
+impl ColumnState {
+    /// The layout in use.
+    pub fn active_layout(&self) -> Option<&KeyboardLayout> {
+        self.layouts.get(self.layout).or(self.layouts.first())
+    }
 }
 
 /// The meeting card, as board Bureau draws it.
@@ -228,7 +247,8 @@ pub enum Action {
     Minimize,
     ToggleMaximize,
     Close,
-    SwitchLayout,
+    /// Uses the kept layout of this index.
+    SetLayout(usize),
     /// Shows desktop `desktop` (from 1) of `output`.
     ShowDesktop {
         output: String,
@@ -449,6 +469,7 @@ struct Seats {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PopoverKind {
     Desktops,
+    Keyboard,
     Account,
     Tray,
     TrayMenu,
@@ -910,9 +931,10 @@ impl Column {
                 }),
             );
         }
-        if all_status || old.layout != state.layout || old.layout_name != state.layout_name {
-            t.set_text(n.layout, &state.layout);
-            t.set_name(n.layout, &lang.keyboard_layout(&state.layout_name));
+        if all_status || old.layouts != state.layouts || old.layout != state.layout {
+            let active = state.active_layout().cloned().unwrap_or_default();
+            t.set_text(n.layout, &active.short);
+            t.set_name(n.layout, &lang.keyboard_layout(&active.name));
         }
         if all || old.notifications != state.notifications {
             let theme = t.theme().clone();
@@ -950,6 +972,18 @@ impl Column {
                 .is_some_and(|p| p.kind == PopoverKind::Desktops)
         {
             self.open(PopoverKind::Desktops);
+        }
+        // An open keyboard menu follows the layouts.
+        if !all
+            && (old.layouts != state.layouts
+                || old.layout != state.layout
+                || old.switch_layout_keys != state.switch_layout_keys)
+            && self
+                .popover
+                .as_ref()
+                .is_some_and(|p| p.kind == PopoverKind::Keyboard)
+        {
+            self.open(PopoverKind::Keyboard);
         }
         // An open agenda follows the calendar and the day.
         if !all
@@ -1045,6 +1079,7 @@ impl Column {
         let scale = self.tree.scale();
         let anchor = match kind {
             PopoverKind::Desktops => self.nodes.desktops,
+            PopoverKind::Keyboard => self.nodes.layout,
             PopoverKind::Account => self.nodes.account,
             PopoverKind::Tray | PopoverKind::TrayMenu => match self.nodes.tray {
                 Some((ring, _)) => ring,
@@ -1065,6 +1100,7 @@ impl Column {
             PopoverKind::Desktops => {
                 desktops_popover(&theme, self.lang, &self.state.screens, scale)
             }
+            PopoverKind::Keyboard => keyboard_popover(&theme, self.lang, &self.state, scale),
             PopoverKind::Account => account_popover(
                 &theme,
                 self.lang,
@@ -1092,6 +1128,7 @@ impl Column {
         // Left of the column; level with the line, or above the account.
         let y = match kind {
             PopoverKind::Desktops
+            | PopoverKind::Keyboard
             | PopoverKind::Tray
             | PopoverKind::TrayMenu
             | PopoverKind::Agenda
@@ -1230,7 +1267,7 @@ impl Column {
             } else if id == n.close {
                 actions.push(Action::Close);
             } else if id == n.layout {
-                actions.push(Action::SwitchLayout);
+                self.toggle(PopoverKind::Keyboard);
             } else if id == n.command {
                 actions.push(Action::OpenLauncher);
             } else if id == n.desktops {
@@ -3225,6 +3262,150 @@ fn desktops_popover(
                 },
             ));
         }
+    }
+    (tree, targets)
+}
+
+/// Board D13's keyboard menu: each layout kept with its short name, the
+/// one in use marked; the keys that go to the next one.
+fn keyboard_popover(
+    theme: &Theme,
+    lang: Lang,
+    state: &ColumnState,
+    scale: f32,
+) -> (Tree, Vec<(NodeId, Action)>) {
+    const ROW: f32 = 48.0;
+    const GAP: f32 = 12.0;
+    let rows = state.layouts.len().max(1) as f32;
+    let keys = state.switch_layout_keys.as_deref();
+    let height =
+        20.0 * 2.0 + 24.0 + rows * (GAP + ROW) + if keys.is_some() { GAP + 28.0 } else { 0.0 };
+    let (mut tree, card) = popover_tree(theme, 360.0, height, scale);
+    let missing = || unreachable!("adding to a node of this tree");
+    tree.set_style(
+        card,
+        Style {
+            height: Length::Fill,
+            padding: Insets::all(20.0),
+            gap: GAP,
+            ..Style::default()
+        },
+    );
+    tree.add(
+        card,
+        Style::default(),
+        Kind::text(lang.keyboard_title(), theme.text.title.with_weight(700)),
+    )
+    .unwrap_or_else(missing);
+    let mono = TextStyle {
+        typeface: hocus_ui::Typeface::Mono,
+        ..theme.text.label
+    }
+    .with_color(Paint::Muted);
+    let mut targets = Vec::new();
+    let active = if state.layouts.is_empty() {
+        None
+    } else {
+        Some(state.layout.min(state.layouts.len() - 1))
+    };
+    for (i, layout) in state.layouts.iter().enumerate() {
+        let on = active == Some(i);
+        let line = tree
+            .add(
+                card,
+                Style {
+                    direction: Direction::Row,
+                    align: Align::Center,
+                    gap: 12.0,
+                    width: Length::Fill,
+                    height: Length::Px(ROW),
+                    padding: Insets::symmetric(0.0, 12.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: on.then(|| Paint::Rgba(theme.colors.accent.with_alpha(0x1a))),
+                    radius: 12.0,
+                    ..Look::default()
+                }),
+            )
+            .unwrap_or_else(missing);
+        tree.set_clickable(line, &layout.name);
+        tree.set_selected_box(line, on);
+        tree.add(
+            line,
+            Style {
+                width: Length::Px(18.0),
+                height: Length::Px(18.0),
+                ..Style::default()
+            },
+            Kind::Custom {
+                draw: Box::new(crate::checkbox::Radio(on)),
+                label: None,
+            },
+        )
+        .unwrap_or_else(missing);
+        tree.add(
+            line,
+            Style {
+                width: Length::Fill,
+                ..Style::default()
+            },
+            Kind::text_line(layout.name.as_str(), theme.text.body),
+        )
+        .unwrap_or_else(missing);
+        tree.add(
+            line,
+            Style::default(),
+            Kind::text_line(layout.short.as_str(), mono),
+        )
+        .unwrap_or_else(missing);
+        targets.push((line, Action::SetLayout(i)));
+    }
+    if let Some(keys) = keys {
+        let line = tree
+            .add(
+                card,
+                Style {
+                    direction: Direction::Row,
+                    align: Align::Center,
+                    justify: Justify::SpaceBetween,
+                    gap: 12.0,
+                    width: Length::Fill,
+                    height: Length::Px(28.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look::default()),
+            )
+            .unwrap_or_else(missing);
+        tree.add(
+            line,
+            Style::default(),
+            Kind::text_line(
+                lang.switch_layout(),
+                theme.text.label.with_color(Paint::Muted),
+            ),
+        )
+        .unwrap_or_else(missing);
+        let cap = tree
+            .add(
+                line,
+                Style {
+                    padding: Insets::symmetric(4.0, 10.0),
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    radius: 8.0,
+                    ..Look::default()
+                }),
+            )
+            .unwrap_or_else(missing);
+        tree.add(
+            cap,
+            Style::default(),
+            Kind::text_line(keys, mono.with_color(Paint::Text)),
+        )
+        .unwrap_or_else(missing);
     }
     (tree, targets)
 }

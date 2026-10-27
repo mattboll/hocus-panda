@@ -121,7 +121,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 
 ## 7. Input
 
-- Keyboard layouts, switched from the panel
+- Keyboard layouts with their variants (AZERTY, BÉPO, US international…), every one XKB knows, searched in the settings by name in English or French; switched from the panel's keyboard menu
 - Num Lock at start; lock keys shared between keyboards
 - **Fully free shortcuts**: any combination for any action, no imposed modifier
 - Actions parameterised by scope (screen under the pointer or all screens), each with its own shortcut: Alt+Tab for the active screen, Super+Tab for all by default

@@ -28,7 +28,9 @@ kind = "colour"     # as [wallpaper]: kind, image, folder, mode, colour
 colour = "#efe7d6"
 
 [keyboard]
-layouts = ["fr", "us"]   # XKB layouts, the first active at start
+layouts = ["fr", "fr(bepo)", "us"]   # XKB layouts, each with its variant in brackets as XKB
+                                     #   names it (fr is AZERTY, fr(bepo) BÉPO, us(intl)…);
+                                     #   the first active at start, US when none
 options = "caps:escape"  # XKB options
 repeat_delay = 200       # ms
 repeat_rate = 25         # per second

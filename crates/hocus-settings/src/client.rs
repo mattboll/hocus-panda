@@ -80,6 +80,8 @@ pub struct Options {
     /// The time zone database, whose `zone1970.tab` places the cities of
     /// the map.
     pub zoneinfo: PathBuf,
+    /// XKB's registry, which lists the keyboard layouts offered.
+    pub xkb: hocus_platform::xkb::Registry,
     /// The user's home, for `~/` in the Search page's folders and the
     /// places never read under it; only its path is read, never what is in
     /// it.
@@ -360,6 +362,23 @@ fn read_places(zoneinfo: PathBuf, to_window: Sender<FromApi>) {
     }
 }
 
+/// Reads the keyboard layouts XKB knows, on a thread of its own: their
+/// names in English and in French, the languages the settings speak.
+fn read_layouts(registry: hocus_platform::xkb::Registry, to_window: Sender<FromApi>) {
+    let spawned = std::thread::Builder::new()
+        .name("keyboard layouts".into())
+        .spawn(move || {
+            let layouts = registry.read("fr");
+            if layouts.is_empty() {
+                tracing::info!(?registry, "no XKB registry: the common layouts only");
+            }
+            let _ = to_window.send(FromApi::Layouts(layouts));
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "the keyboard layouts will not be listed");
+    }
+}
+
 /// The system bus timedated is on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SystemBus {
@@ -491,6 +510,8 @@ enum FromApi {
     AccountRefused(String),
     /// The time zones' places, for the map.
     Places(Vec<hocus_platform::timedate::Place>),
+    /// The keyboard layouts XKB knows.
+    Layouts(Vec<hocus_platform::xkb::Layout>),
     /// The networks in reach, as NetworkManager says.
     Wifi(Listed<hocus_platform::wifi::Wifi>),
     /// What was asked of a network is done, or why not.
@@ -707,7 +728,9 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     let (mut early_apps, mut early_account) = (None, None);
     apps_thread(options.xdg.clone(), zone_news.clone(), |_| {});
     read_places(options.zoneinfo.clone(), zone_news.clone());
+    read_layouts(options.xkb.clone(), zone_news.clone());
     let mut early_places = None;
+    let mut early_layouts = None;
     let (ctx, accent, file) = loop {
         match from_api.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(FromApi::Context(what)) => break *what,
@@ -716,6 +739,7 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
             Ok(FromApi::Apps(apps)) => early_apps = Some(apps),
             Ok(FromApi::Account(account)) => early_account = Some(account),
             Ok(FromApi::Places(places)) => early_places = Some(places),
+            Ok(FromApi::Layouts(layouts)) => early_layouts = Some(layouts),
             Ok(FromApi::Gone(err)) => anyhow::bail!("the compositor did not answer: {err}"),
             // No page asks yet.
             Ok(
@@ -748,6 +772,9 @@ pub fn run(options: Options, shown: Option<Arc<Mutex<Option<Shown>>>>) -> anyhow
     }
     if let Some(places) = early_places {
         view.set_places(places);
+    }
+    if let Some(layouts) = early_layouts {
+        view.set_layouts(layouts);
     }
     // The account is the compositor's user's.
     let user = view.context().user.clone();
@@ -960,6 +987,7 @@ impl App {
                 FromApi::Account(account) => self.view.set_account(account),
                 FromApi::AccountRefused(why) => self.view.account_refused(why),
                 FromApi::Places(places) => self.view.set_places(places),
+                FromApi::Layouts(layouts) => self.view.set_layouts(layouts),
                 FromApi::Wifi(wifi) => self.view.set_wifi(wifi),
                 FromApi::WifiDone(result) => self.view.wifi_done(result),
                 FromApi::Bluetooth(bluetooth) => self.view.set_bluetooth(bluetooth),

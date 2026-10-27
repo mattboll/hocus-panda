@@ -216,6 +216,19 @@ surfaces drawn again, scaled into the card (a rescale element: a surface
 element's size follows the output's scale, not the one it was made at), so
 there is no snapshot to keep up to date.
 
+Keyboard layouts (#251) are XKB's, each with its variant as XKB's rules
+write it (`fr(bepo)`): `hocus_core::keyboard` splits them into the two
+lists XKB takes, layouts and variants, for the user's keyboard and each
+agent's. The shell names the common ones itself, in both languages
+(`hocus_shell::layouts`: `fr` is "French (AZERTY)" and `FR`, `fr(bepo)`
+"French (BÉPO)" and `BÉPO`, as board D13 has them); the others take the
+name XKB's registry gives them (`rules/evdev.xml`) and its catalogue
+translates (`xkeyboard-config.mo`), read by `hocus_platform::xkb` on a
+thread each time the layouts or the language change, never on the loop;
+until then the column says their code. The column's chip opens D13's menu
+of the layouts kept; one picked is the keyboard's active group at once.
+Shortcuts are matched on keys, so they work whatever the layout.
+
 A mirroring screen (#125, `mirror` in its `[[outputs]]` entry) stays lit but
 leaves the layout as an unplugged one would: its windows wait on the
 primary screen and come back where they were when it shows its own desktops
@@ -675,7 +688,10 @@ without unlocking leaves our lock screen: a crash never unlocks.
   system's time zone (timedated), the account's name, picture and
   fingerprints (AccountsService, fprintd) on the system bus; the default
   applications and autostart entries in the XDG files (`mimeapps.list`,
-  the user's copy of an autostart entry), which every desktop reads.
+  the user's copy of an autostart entry), which every desktop reads;
+  the keyboard layouts and variants XKB's registry lists, named in English
+  and French (its catalogue), which the Keyboard page searches and the
+  welcome's More… too.
   While the Network page shows, a worker lists the Wi-Fi networks in reach
   through NetworkManager (a scan at once and every 10 s), joins, leaves
   and forgets them; a password typed there goes to NetworkManager, which
@@ -690,7 +706,9 @@ without unlocking leaves our lock screen: a crash never unlocks.
   1:110m outline (public domain), simplified to half degrees by
   `scripts/land-outline.py` into `crates/hocus-settings/data/land.txt`.
   Tests give it a private system bus with stand-ins, private XDG
-  directories and their own copy of `zone1970.tab`, never the machine's.
+  directories and their own copies of `zone1970.tab` and of a part of XKB's
+  registry and its French catalogue (`scripts/xkb-excerpt.py`), never the
+  machine's.
 
 ## Configuration
 
@@ -857,7 +875,8 @@ suspends and wakes.
 MIT for the code. Dependencies must be permissive (MIT, Apache-2.0, BSD,
 ISC, Zlib, Unicode, CC0; OFL for fonts), checked by `cargo deny` in CI;
 data shipped in the tree too (Natural Earth's land outline and tzdata's
-`zone1970.tab` copy for the tests are in the public domain). No
+`zone1970.tab` copy for the tests are in the public domain; the tests'
+excerpt of xkeyboard-config's registry and catalogue is MIT). No
 code copied or translated from GPL projects: niri and cosmic-comp (both
 smithay-based) are GPL-3.0, as are KWin and Mutter. Read their documentation
 and design discussions, not their code. smithay and its `anvil` example are

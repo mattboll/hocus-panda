@@ -488,7 +488,7 @@ impl Page {
                     .keyboard
                     .layouts
                     .iter()
-                    .map(|l| l.to_uppercase())
+                    .map(|l| hocus_shell::layouts::short(l))
                     .collect();
                 if layouts.is_empty() {
                     "US".into()
@@ -1429,12 +1429,21 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
                     "layout".into(),
                     "azerty".into(),
                     "qwerty".into(),
+                    "bépo".into(),
+                    "variant".into(),
+                    "variante".into(),
                     "keyboard".into(),
                     "clavier".into(),
                 ],
             ]
             .concat(),
-            ctx.config.keyboard.layouts.join(", ").to_uppercase(),
+            ctx.config
+                .keyboard
+                .layouts
+                .iter()
+                .map(|l| hocus_shell::layouts::short(l))
+                .collect::<Vec<_>>()
+                .join(", "),
         ),
     ];
     out.extend(hardware_entries(ctx, lang));
