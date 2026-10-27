@@ -985,7 +985,9 @@ suspends and wakes.
   ignored in the suite and run alone, by a CI job that publishes them and
   never fails (`timings`; the Matrix theme's GPU passes,
   `cargo nextest run -p hocus-compositor --run-ignored only the_refinements_cost`,
-  `--release` for the release budget). perf runs in the Debian VM only.
+  `--release` for the release budget). In the scenarios, an
+  `expect_budget` step's frame and handler times only warn (#295). perf
+  runs in the Debian VM only.
 - **VMs**: QEMU scripts for the DRM session, suspend/resume, several outputs,
   two GPUs (`HOCUS_VM_GPUS=2`; the second's screen can be made a VR
   headset, by its EDID, to lease it), and FreeBSD.

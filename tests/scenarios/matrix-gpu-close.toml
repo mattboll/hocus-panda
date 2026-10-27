@@ -1,5 +1,5 @@
 # The Matrix theme's GPU refinements (#169, docs/design/matrix-theme.md §2).
-description = "On the GPU in the Matrix theme, a closing window's glitch takes red and blue apart in each band, on every frame of its 120 ms and no longer; with reduced motion there is no glitch at all; frames keep within their budget"
+description = "On the GPU in the Matrix theme, a closing window's glitch takes red and blue apart in each band, on every frame of its 120 ms and no longer; with reduced motion there is no glitch at all; frame times are reported"
 renderer = "gles"
 shell = true
 motion = true

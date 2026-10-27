@@ -1,4 +1,4 @@
-description = "Super+Equal magnifies around the pointer; the view follows it as it moves, within the frame budget; Super+Minus back to 1 turns it off"
+description = "Super+Equal magnifies around the pointer; the view follows it as it moves, its frame times reported; Super+Minus back to 1 turns it off"
 outputs = ["1280x800"]
 
 [[step]]

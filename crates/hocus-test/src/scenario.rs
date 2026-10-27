@@ -477,7 +477,8 @@ pub enum Step {
     /// One pixel of an output's screenshot, in its pixels.
     ExpectPixel(ExpectPixel),
     /// Every frame so far drawn within `max_ms`, and no loop handler over
-    /// its budget.
+    /// its budget: wall-clock times, reported as warnings, never failed
+    /// (#295).
     ExpectBudget(ExpectBudget),
     /// The blur behind panels was computed so many times since the last
     /// such step, or the start: `{ at_least?, at_most? }`.
@@ -518,6 +519,9 @@ pub struct Measured {
     pub stats: hocus_api::Stats,
     /// What each `expect_cost` step counted, in order.
     pub costs: Vec<Cost>,
+    /// Wall-clock times over an `expect_budget` step's limits, each named
+    /// by its step: reported, never failed (#295).
+    pub warnings: Vec<String>,
 }
 
 /// What the compositor did between two steps.
@@ -1377,6 +1381,23 @@ fn counted(what: &str, done: u64, expected: &ExpectBlur) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What an `expect_budget` step finds over its limits: the slowest frame
+/// of each output and the handlers that held the loop. Wall-clock times
+/// measure the machine's load as much as the code, so they are reported,
+/// never failed (#295); counts gate, in `expect_cost`.
+fn over_budget(stats: &hocus_api::Stats, max_ms: f64) -> Vec<String> {
+    let frames = stats.outputs.iter().filter(|o| o.max_ms > max_ms).map(|o| {
+        format!(
+            "{} drew a frame in {:.1} ms, over {max_ms} ms",
+            o.name, o.max_ms
+        )
+    });
+    let held = crate::held_the_loop(stats)
+        .into_iter()
+        .map(|h| format!("{} held the loop {:.1} ms, at {} ms", h.name, h.ms, h.at_ms));
+    frames.chain(held).collect()
+}
+
 /// Where a run writes images, and whether it records new references.
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -1552,6 +1573,7 @@ impl Scenario {
             cost_from: None,
             costs: Vec::new(),
             check_costs,
+            warnings: Vec::new(),
             home,
         };
         run.request(Request::Subscribe)?;
@@ -1566,13 +1588,21 @@ impl Scenario {
         run.compositor
             .dispatch_until(CLIENT_TIMEOUT, Headless::apps_read)
             .context("the applications were never read")?;
+        let mut warnings = Vec::new();
         for (n, step) in self.steps.iter().enumerate() {
             run.step(step)
                 .with_context(|| format!("step {} ({step})", n + 1))?;
+            for warning in run.warnings.drain(..) {
+                let warning = format!("step {} ({step}): {warning}", n + 1);
+                // Shown with the test's output, without failing it.
+                eprintln!("warning: {warning}");
+                warnings.push(warning);
+            }
         }
         Ok(Measured {
             stats: run.compositor.stats(),
             costs: std::mem::take(&mut run.costs),
+            warnings,
         })
     }
 }
@@ -1637,6 +1667,8 @@ struct Run<'a> {
     costs: Vec<Cost>,
     /// Whether `expect_cost` budgets fail the scenario.
     check_costs: bool,
+    /// What the last step found over a wall-clock limit.
+    warnings: Vec<String>,
     /// The scenario's own home, last: the compositor is gone before it.
     home: Option<PrivateHome>,
 }
@@ -2880,16 +2912,7 @@ impl Run<'_> {
                 let Reply::Stats(stats) = self.request(Request::Stats)? else {
                     anyhow::bail!("expected stats");
                 };
-                for o in &stats.outputs {
-                    anyhow::ensure!(
-                        o.max_ms <= expected.max_ms,
-                        "{} drew a frame in {:.1} ms",
-                        o.name,
-                        o.max_ms
-                    );
-                }
-                let held = crate::held_the_loop(&stats);
-                anyhow::ensure!(held.is_empty(), "the loop was held: {held:?}");
+                self.warnings.extend(over_budget(&stats, expected.max_ms));
                 Ok(())
             }
             Step::ExpectBlur(expected) => {
@@ -5012,6 +5035,43 @@ mod tests {
         assert_eq!(parse_keys("ctrl+30")?, [29, 30]);
         assert!(parse_keys("super+nope").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn wall_clock_budgets_are_reported() {
+        let output = |name: &str, max_ms| hocus_api::OutputStats {
+            name: name.into(),
+            frames: 10,
+            renders: 10,
+            histogram: Vec::new(),
+            max_ms,
+            blurs: 0,
+            glitches: 0,
+        };
+        let stats = hocus_api::Stats {
+            outputs: vec![output("HEADLESS-1", 12.0), output("HEADLESS-2", 57.4)],
+            slow_handlers: vec![hocus_api::SlowHandler {
+                name: "control request".into(),
+                ms: 80.0,
+                at_ms: 1200,
+            }],
+            stalls: Vec::new(),
+            wakeups: 0,
+            handlers: Vec::new(),
+        };
+        assert_eq!(
+            over_budget(&stats, 50.0),
+            [
+                "HEADLESS-2 drew a frame in 57.4 ms, over 50 ms",
+                "control request held the loop 80.0 ms, at 1200 ms",
+            ]
+        );
+        let quick = hocus_api::Stats {
+            outputs: vec![output("HEADLESS-1", 12.0)],
+            slow_handlers: Vec::new(),
+            ..stats
+        };
+        assert!(over_budget(&quick, 50.0).is_empty());
     }
 
     #[test]
