@@ -15,6 +15,9 @@ layouts = ["fr", "us", "fr(bepo)"]
 
 [shortcuts]
 "Super+Ctrl+Space" = "switch-layout"
+
+[panel]
+form = "column"
 """
 
 [[step]]
