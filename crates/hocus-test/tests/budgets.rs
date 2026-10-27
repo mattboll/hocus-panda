@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use hocus_api::{HandlerRuns, Permission, Stats};
 use hocus_compositor::{
-    HarnessOptions, Headless, HeadlessConfig, OutputSpec, RendererChoice, WatchdogConfig,
+    FRAME, HarnessOptions, Headless, HeadlessConfig, OutputSpec, RendererChoice, WatchdogConfig,
     allocations::{self, Counting},
 };
 
@@ -31,6 +31,12 @@ const REST_ALLOCATIONS: u64 = 230_000;
 /// rest grows minute after minute: over 90 minutes the loop held 190 kB
 /// more in all, the wallpapers' light aside.
 const REST_HELD: i64 = 512 * 1024;
+
+/// The launcher's second opening allocates at most this part of what its
+/// first did (#242): measured at 288 of 5,091, a seventeenth (4,189 of
+/// 5,065 before the grid was kept and the card drawn again while closed;
+/// 2,687 with the grid kept, not drawn again).
+const LAUNCHER_REOPENING: u64 = 10;
 
 /// The desktop of the scenarios: a laptop panel at scale 2 and a wide
 /// screen, the shell, windows moving as in a session.
@@ -181,5 +187,103 @@ fn at_rest_the_loop_wakes_only_for_the_watchdog() -> anyhow::Result<()> {
     }
     let watchdog = woken.iter().find(|h| h.name == "watchdog");
     assert!(watchdog.is_some(), "the watchdog never woke the loop");
+    Ok(())
+}
+
+/// So many applications in the launcher's grid (#242): more than its
+/// eighteen tiles show.
+const LAUNCHER_APPS: usize = 40;
+
+/// Desktop entries of `LAUNCHER_APPS` applications under `dir`.
+fn applications(dir: &std::path::Path) -> anyhow::Result<()> {
+    let apps = dir.join("applications");
+    std::fs::create_dir_all(&apps)?;
+    for i in 0..LAUNCHER_APPS {
+        std::fs::write(
+            apps.join(format!("org.example.App{i}.desktop")),
+            format!("[Desktop Entry]\nType=Application\nName=Application {i}\nExec=true\n"),
+        )?;
+    }
+    Ok(())
+}
+
+/// Presses `keys` together and lets them go, the last first.
+fn press(desktop: &mut Headless, keys: &[u32]) -> anyhow::Result<()> {
+    let presses = keys.iter().map(|c| (*c, true));
+    let releases = keys.iter().rev().map(|c| (*c, false));
+    for (code, pressed) in presses.chain(releases) {
+        desktop.request(hocus_api::Request::Key { code, pressed })?;
+    }
+    Ok(())
+}
+
+/// How many times the applications' answers were handled.
+fn apps_read(desktop: &Headless) -> u64 {
+    desktop
+        .stats()
+        .handlers
+        .iter()
+        .find(|h| h.name == "applications")
+        .map_or(0, |h| h.runs)
+}
+
+/// Opens the launcher with Super+Space and draws its first frame: what
+/// the loop allocated meanwhile. Then waits for the applications it reads
+/// again on each opening, off the loop, types `typed` and closes it with
+/// Escape.
+fn open_and_close_launcher(
+    desktop: &mut Headless,
+    typed: &[u32],
+) -> anyhow::Result<allocations::Allocations> {
+    const KEY_ESC: u32 = 1;
+    const KEY_LEFTMETA: u32 = 125;
+    const KEY_SPACE: u32 = 57;
+    let read = apps_read(desktop);
+    let counted = allocations::counted();
+    press(desktop, &[KEY_LEFTMETA, KEY_SPACE])?;
+    desktop.advance(FRAME)?;
+    let opened = allocations::counted().since(&counted);
+    desktop.dispatch_until(TIMEOUT, |d| apps_read(d) > read)?;
+    for key in typed {
+        press(desktop, &[*key])?;
+        desktop.advance(FRAME)?;
+    }
+    press(desktop, &[KEY_ESC])?;
+    desktop.advance(FRAME)?;
+    Ok(opened)
+}
+
+/// Given the launcher on many applications, when it opens, searches,
+/// closes and opens again, then the second opening allocates a small part
+/// of what the first did (#242): the grid's tiles and their text are kept,
+/// and the closed card was drawn again as it opens.
+#[test]
+fn the_launcher_s_second_opening_allocates_little() -> anyhow::Result<()> {
+    assert!(allocations::installed(), "nothing would be counted");
+    let data = tempfile::tempdir()?;
+    applications(data.path())?;
+    let mut desktop = Headless::start_options(HarnessOptions {
+        data_dirs: Some(vec![data.path().to_path_buf()]),
+        ..options(None)
+    })?;
+    desktop.dispatch_until(TIMEOUT, Headless::wallpapers_ready)?;
+    // The applications read at start, for the dock; the launcher opens
+    // before it was drawn as it opens.
+    desktop.dispatch_until(TIMEOUT, |d| apps_read(d) > 0)?;
+    desktop.advance(FRAME)?;
+
+    // "ap": the grid gives way to what it finds.
+    let first = open_and_close_launcher(&mut desktop, &[30, 25])?;
+    // Closed, it is drawn again as it opens.
+    desktop.advance(Duration::from_secs(2))?;
+    let second = open_and_close_launcher(&mut desktop, &[])?;
+
+    eprintln!("first opening {first:?}, second {second:?}");
+    assert!(
+        second.count * LAUNCHER_REOPENING <= first.count,
+        "the second opening allocated {} times, the first {}: more than 1/{LAUNCHER_REOPENING}",
+        second.count,
+        first.count
+    );
     Ok(())
 }

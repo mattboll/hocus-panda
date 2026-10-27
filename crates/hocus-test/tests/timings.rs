@@ -39,6 +39,9 @@ const OPENING_TARGET_MS: f64 = 100.0;
 /// evdev codes.
 const KEY_LEFTMETA: u32 = 125;
 const KEY_SPACE: u32 = 57;
+const KEY_ESC: u32 = 1;
+const KEY_A: u32 = 30;
+const KEY_P: u32 = 25;
 
 /// So many applications installed: the launcher opens on all of them
 /// (#254), as on a desktop of some years.
@@ -207,6 +210,39 @@ fn open_windows(desktop: &mut Headless, count: u32) -> anyhow::Result<Vec<TestCl
     Ok(clients)
 }
 
+/// Presses a key and lets it go.
+fn press(desktop: &mut Headless, code: u32) -> anyhow::Result<()> {
+    desktop.request(Request::Key {
+        code,
+        pressed: true,
+    })?;
+    desktop.request(Request::Key {
+        code,
+        pressed: false,
+    })?;
+    Ok(())
+}
+
+/// Super+Space, to the launcher's first frame, in milliseconds.
+fn open_launcher(desktop: &mut Headless) -> anyhow::Result<f64> {
+    let frames = |d: &Headless| d.outputs().iter().map(|o| o.frames).sum::<u64>();
+    let before = frames(desktop);
+    let start = Instant::now();
+    for (code, pressed) in [
+        (KEY_LEFTMETA, true),
+        (KEY_SPACE, true),
+        (KEY_SPACE, false),
+        (KEY_LEFTMETA, false),
+    ] {
+        desktop.request(Request::Key { code, pressed })?;
+    }
+    while frames(desktop) == before {
+        desktop.advance(FRAME)?;
+        anyhow::ensure!(start.elapsed() < TIMEOUT, "the launcher never drew");
+    }
+    Ok(ms(start.elapsed()))
+}
+
 /// The cost of a turn of the loop with nothing to do: what every wakeup
 /// pays, the watchdog's included.
 fn idle_turn_us(desktop: &mut Headless) -> anyhow::Result<f64> {
@@ -243,37 +279,23 @@ fn timings() -> anyhow::Result<()> {
     );
 
     // The launcher: Super+Space, to its first frame, every application
-    // shown.
-    let frames = |d: &Headless| d.outputs().iter().map(|o| o.frames).sum::<u64>();
-    let before = frames(&desktop);
-    let start = Instant::now();
-    for (code, pressed) in [
-        (KEY_LEFTMETA, true),
-        (KEY_SPACE, true),
-        (KEY_SPACE, false),
-        (KEY_LEFTMETA, false),
-    ] {
-        desktop.request(Request::Key { code, pressed })?;
-    }
-    while frames(&desktop) == before {
-        desktop.advance(FRAME)?;
-        anyhow::ensure!(start.elapsed() < TIMEOUT, "the launcher never drew");
-    }
-    report.add_target_ms(
+    // shown; drawn as it opens while closed (#242).
+    report.add_frame_ms(
         format!("Opening the launcher on {APPLICATIONS} applications, to its first frame"),
-        ms(start.elapsed()),
-        OPENING_TARGET_MS,
-        "its target",
+        open_launcher(&mut desktop)?,
     );
-    desktop.request(Request::Key {
-        code: 1,
-        pressed: true,
-    })?;
-    desktop.request(Request::Key {
-        code: 1,
-        pressed: false,
-    })?;
-    desktop.advance(Duration::from_secs(1))?;
+    // A search, closed, and opened again at once: the grid comes back
+    // before the closed card was drawn again.
+    for code in [KEY_A, KEY_P, KEY_ESC] {
+        press(&mut desktop, code)?;
+        desktop.advance(FRAME)?;
+    }
+    report.add_frame_ms(
+        "Opening it again right after a search",
+        open_launcher(&mut desktop)?,
+    );
+    press(&mut desktop, KEY_ESC)?;
+    desktop.advance(Duration::from_secs(2))?;
 
     // The settings, a client of their own, to their first frame.
     let dirs = tempfile::tempdir()?;
