@@ -451,10 +451,13 @@ the index, the newest only. The text comes from readers of our own, small
 and fuzzed: plain text, HTML without its markup, PDF's text layer (objects
 found by scanning, object streams, Flate, ToUnicode maps), and office files
 (a minimal ZIP reader and quick-xml); screenshots' text through the OCR
-program. The index is an inverted index of folded words ranked by BM25,
-the last word taken as a prefix; with a model that embeds (ollama's
-`/api/embed`, `/v1/embeddings`), the start of each text has a few
-quantized vectors, and both rankings are fused (reciprocal rank fusion).
+program, shared with the screenshot toast's Copy the text
+(`search::Pictures`): a picture is read once, whoever asks second gets the
+first one's answer (#302). The index is an inverted index of folded
+words ranked by BM25, the last word taken as a prefix; with a model that
+embeds (ollama's `/api/embed`, `/v1/embeddings`), the start of each text
+has a few quantized vectors, and both rankings are fused (reciprocal rank
+fusion).
 What is never read (`search::deny`) is checked on an entry's name before
 its type is even asked, and again by the one gate every open goes through;
 symbolic links are never followed. The loop only sends the configuration,
