@@ -29,6 +29,8 @@ enum Handled {
     PaletteKeys(hocus_core::shortcuts::Combo),
     /// The modifier holding the window switcher was let go.
     AltTabDone,
+    /// Escape while the column is out over the windows (#263).
+    PanelEscape,
     /// A key for the open launcher or quick settings.
     Panel(
         smithay::input::keyboard::Keysym,
@@ -185,6 +187,15 @@ impl State {
                     .filter(|_| !state.shortcuts_inhibited())
                     .and_then(|combo| state.shortcuts.action(&combo).cloned());
                 let modal = state.modal_open();
+                // The column out goes back on Escape, unless a panel over
+                // it takes the keys.
+                if action.is_none()
+                    && !modal
+                    && keysym.modified_sym() == Keysym::Escape
+                    && state.panel_out()
+                {
+                    return FilterResult::Intercept(Handled::PanelEscape);
+                }
                 match action {
                     // A panel's own shortcut closes it; others still work.
                     Some(action)
@@ -219,6 +230,9 @@ impl State {
                 self.run_action(&action, serial);
             }
             Some(Handled::PaletteKeys(combo)) => self.palette_keys(&combo),
+            Some(Handled::PanelEscape) => {
+                self.panel_escape();
+            }
             Some(Handled::Vt(vt)) => {
                 use smithay::backend::session::Session as _;
                 if let Some(session) = &mut self.vt_switch
@@ -385,7 +399,9 @@ impl State {
                 },
             );
         }
-        // Over the column, windows do not see the pointer.
+        // Over the column, windows do not see the pointer. Out over the
+        // windows (#263), the column is over the toasts too.
+        let column_out = self.panel_out_drawn();
         let over_shell = !pointer.is_grabbed()
             && (self.radial_pointer_motion(location)
                 || self.seat_card_pointer(location, None)
@@ -401,8 +417,9 @@ impl State {
                 || self.showcase_pointer(None)
                 || self.quick_pointer_motion(location)
                 || self.launcher_pointer_motion(location)
+                || (column_out && self.shell_pointer_motion(location))
                 || self.toasts_pointer_motion(location)
-                || self.shell_pointer_motion(location)
+                || (!column_out && self.shell_pointer_motion(location))
                 || self.bars_pointer_motion(location));
         let under = if over_shell {
             None
@@ -473,6 +490,7 @@ impl State {
             return;
         }
         self.recording_click(at, pressed);
+        let column_out = self.panel_out_drawn();
         if button == BTN_LEFT
             && !pointer.is_grabbed()
             && (self.seat_card_pointer(at, Some(pressed))
@@ -487,8 +505,9 @@ impl State {
                 || self.showcase_pointer(Some(pressed))
                 || self.quick_pointer_button(at, pressed)
                 || self.launcher_pointer_button(at, pressed)
+                || (column_out && self.shell_pointer_button(at, pressed))
                 || self.toasts_pointer_button(at, pressed)
-                || self.shell_pointer_button(at, pressed))
+                || (!column_out && self.shell_pointer_button(at, pressed)))
         {
             return;
         }

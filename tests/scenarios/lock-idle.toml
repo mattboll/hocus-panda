@@ -7,6 +7,9 @@ config = """
 [idle]
 curtain_after = 60
 lock_after = 30
+
+[panel]
+form = "column"
 """
 
 [[step]]

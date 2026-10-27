@@ -172,7 +172,7 @@ drawn the same way, in `matrix_shell` and `matrix_screens`: the desktop
 left behind breaks into glyphs that rain away, Alt+Tab and the overview
 come over black and slow rain, the lock's rain cascades over the desktop
 and comes to rest behind its padlock of glyphs, toasts are typed in and
-scatter, the column comes and goes behind a band of rain, the launcher
+scatter, the column (in form `column`) comes and goes behind a band of rain, the launcher
 jacks in and rains away, the boot wakes, lists the windows as a terminal
 and says SYSTEM READY. The shell's views leave room for it (a variant
 without background, the padlock's place, the progress bar's) and say
@@ -196,8 +196,22 @@ whenever nothing should move: reduced motion, the power saver, a
 fullscreen window or the lock over it, and the pixman renderer, which
 keeps scenarios deterministic. Only while a wallpaper moves does the loop
 ask for frames.
+The widget panel takes one of four forms (#263, [decision
+0011](decisions/0011-panel-strip-by-default.md), `hocus-compositor::panel`):
+the column, or, by default, a strip on the right (`hocus_shell::strip`), a
+bar at the top (`hocus_shell::topbar`) or a hint at the right edge, which
+the work area leaves room for instead of the column. The strip and the bar
+show a glance of the column's state (`strip::Glance`), and are built again
+only when that glance changes. In those forms the column is kept up to date
+as in its own and drawn only while out: one slide value, set from where it
+is when the pointer rests on the strip or at the edge (an alarm wakes the
+loop when the rest is long enough, none on a virtual clock), on a click or
+Super+C, and evaluated at the clock's time when the scene is drawn. Out, it
+is drawn over the windows and their toasts and takes the pointer before
+them; it goes back once the pointer leaves its band (from its left edge to
+the screen's), on Escape, Super+C or a click elsewhere.
 Frosted glass (#37) is GLES shaders too. The shell's panels (the column,
-its popovers, quick settings, the launcher's card, toasts) are drawn on a
+the strip or the top bar, its popovers, quick settings, the launcher's card, toasts) are drawn on a
 `Glass` paint that the theme makes see-through when glass is on, and their
 trees say where those boxes are. Before a GLES backend draws an output,
 each pane of glass, from the back, has the scene behind it drawn into a

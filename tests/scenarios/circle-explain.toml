@@ -7,6 +7,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 ai_server = { delay_ms = 30, pieces = [
   "The header linux/input.h does not exist on FreeBSD.\n\n",
   "The input module includes a Linux header directly. On FreeBSD the key codes ",
@@ -23,6 +29,9 @@ ocr = "{scenario_dir}/circle/bin/ocr"
 enabled = true
 provider = "ollama"
 url = "{ai}"
+
+[panel]
+form = "column"
 """
 
 [[step]]

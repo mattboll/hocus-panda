@@ -173,6 +173,7 @@ impl State {
             Action::ZoomOut => self.zoom_step(false),
             Action::SwitchWindows(scope) => self.switch_windows(*scope),
             Action::Dock => self.toggle_dock(),
+            Action::Panel => self.toggle_panel(),
             Action::Overview => self.toggle_overview(),
             Action::Welcome => self.open_settings(Some("welcome".into())),
             Action::About => self.open_settings(Some("about".into())),

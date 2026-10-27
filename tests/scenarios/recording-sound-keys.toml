@@ -13,6 +13,9 @@ countdown = 1
 sound = "lavfi"
 microphone_device = "sine=frequency=440:sample_rate=48000"
 camera_device = "/nonexistent/video9"
+
+[panel]
+form = "column"
 """
 
 [[step]]

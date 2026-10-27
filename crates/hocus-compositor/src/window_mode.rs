@@ -59,7 +59,8 @@ impl WindowMode {
 
 impl State {
     /// Where windows go when maximized or placed: the output minus what the
-    /// shell reserves (nothing yet; the column will) and the outer gap.
+    /// shell keeps (the panel at rest: the column, the strip or the top
+    /// bar; nothing when hidden) and the outer gap.
     pub fn work_area(&self, output: &Output) -> Rectangle<i32, Logical> {
         let mut area = self.space.output_geometry(output).unwrap_or_default();
         // What layer surfaces reserve (third-party bars).
@@ -68,9 +69,15 @@ impl State {
         {
             area = inside;
         }
-        // The widget column takes the right of its output.
-        if let Some(column) = self.column_rect(output) {
-            area.size.w = (column.loc.x - area.loc.x).max(1);
+        // The panel at rest takes the right of its output, or its top.
+        if let Some(panel) = self.panel_rect(output) {
+            if self.panel_form() == hocus_core::config::PanelForm::Top {
+                let bottom = area.loc.y + area.size.h;
+                area.loc.y = area.loc.y.max(panel.loc.y + panel.size.h);
+                area.size.h = (bottom - area.loc.y).max(1);
+            } else {
+                area.size.w = (panel.loc.x - area.loc.x).max(1);
+            }
         }
         let gap = i32::try_from(self.config.windows.gaps.outer).unwrap_or(0);
         let inner = Rectangle::new(

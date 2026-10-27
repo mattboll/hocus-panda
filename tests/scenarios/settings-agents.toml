@@ -10,6 +10,9 @@ config = """
 [ai]
 enabled = true
 provider = "claude"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -123,6 +126,9 @@ theme = "light"
 [ai]
 enabled = true
 provider = "claude"
+
+[panel]
+form = "column"
 """
 
 [[step]]

@@ -7,6 +7,9 @@ config = """
 # Mine.
 [appearance]
 theme = "dark"  # for the evening
+
+[panel]
+form = "column"
 """
 
 [[step]]

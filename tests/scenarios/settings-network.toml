@@ -7,6 +7,12 @@ shell = true
 devices = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "network" }
 
 [[step]]
@@ -64,6 +70,9 @@ expect_screenshot = { output = "HEADLESS-1", reference = "settings-bluetooth.png
 config = """
 [appearance]
 theme = "light"
+
+[panel]
+form = "column"
 """
 
 [[step]]

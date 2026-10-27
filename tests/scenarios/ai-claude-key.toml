@@ -6,6 +6,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 ai_server = { delay_ms = 10, pieces = ["Forty", "-two."] }
 
 # Off by default: nothing about the AI shows, nothing is asked.
@@ -14,6 +20,9 @@ config = """
 [ai]
 provider = "claude"
 url = "{ai}"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -40,6 +49,9 @@ config = """
 enabled = true
 provider = "claude"
 url = "{ai}"
+
+[panel]
+form = "column"
 """
 
 [[step]]

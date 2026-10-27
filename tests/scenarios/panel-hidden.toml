@@ -1,0 +1,76 @@
+description = "With [panel] form = \"hidden\", windows get the whole screen (#263): a faint hint at the right edge, the pointer resting there slides the whole column out, and an agent's bubble still shows"
+outputs = ["1600x1000"]
+shell = true
+dbus = true
+
+[[step]]
+herdr = { agents = [
+  { name = "refacto", status = "working" },
+] }
+
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+
+[panel]
+form = "hidden"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 0, 1600, 1000], state = "maximized" }
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# An agent asks: its bubble shows, the panel hidden.
+[[step]]
+herdr_status = { agent = "refacto", status = "blocked", label = "Push the branch to origin?" }
+
+[[step]]
+expect_ui = { label = "herdr · refacto" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-hidden.png" }
+
+# Resting at the right edge brings the column out.
+[[step]]
+pointer_move = [1599, 500]
+
+[[step]]
+advance_ms = 200
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+[[step]]
+advance_ms = 150
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+expect_ui = { label = "refacto · Waits for an answer: “Push the branch to origin?”" }
+
+# Once its panda has moved its moment.
+[[step]]
+advance_ms = 2000
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-hidden-out.png" }
+
+# Leaving it, it goes back.
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }

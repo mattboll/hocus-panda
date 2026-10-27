@@ -2,6 +2,12 @@ description = "A projector mirroring the laptop shows its picture scaled to fit,
 outputs = ["1280x800", "1920x1080"]
 shell = true
 
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
 # A window of the projector's own.
 [[step]]
 pointer_move = [1900, 500]
@@ -17,6 +23,9 @@ config = """
 [[outputs]]
 name = "HEADLESS-2"
 mirror = "HEADLESS-1"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -36,7 +45,10 @@ expect_screenshot = { output = "HEADLESS-2", reference = "mirroring.png" }
 
 # Its own desktops again.
 [[step]]
-config = ""
+config = """
+[panel]
+form = "column"
+"""
 
 [[step]]
 expect_window = { app_id = "notes", output = "HEADLESS-2", geometry = [1990, 390, 500, 300] }

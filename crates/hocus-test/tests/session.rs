@@ -18,11 +18,14 @@ use hocus_compositor::{FRAME, HarnessOptions, Headless, HeadlessConfig, Renderer
 use hocus_test::bus::{PrivateBus, installed};
 use zbus::{OwnedObjectPath, Proxy, object_server::SignalEmitter};
 
+/// The column, which these tests read (#263: the strip by default).
+const COLUMN: &str = "[panel]\nform = \"column\"\n";
+
 fn compositor(
     session: Option<&PrivateBus>,
     system: Option<&PrivateBus>,
 ) -> anyhow::Result<Headless> {
-    Headless::start_options(HarnessOptions {
+    let mut compositor = Headless::start_options(HarnessOptions {
         headless: HeadlessConfig {
             renderer: RendererChoice::Pixman,
             ..Default::default()
@@ -39,7 +42,9 @@ fn compositor(
         motion: false,
         first_run: false,
         google_caldav: None,
-    })
+    })?;
+    compositor.write_config(COLUMN)?;
+    Ok(compositor)
 }
 
 fn shows(compositor: &mut Headless, label: &str) -> anyhow::Result<bool> {
@@ -111,7 +116,9 @@ fn an_inhibitor_keeps_the_screen_awake_and_lock_locks() -> anyhow::Result<()> {
     }
     let bus = PrivateBus::start()?;
     let mut compositor = compositor(Some(&bus), None)?;
-    compositor.write_config("[idle]\ncurtain_after = 60\nlock_after = 30\n")?;
+    compositor.write_config(&format!(
+        "[idle]\ncurtain_after = 60\nlock_after = 30\n{COLUMN}"
+    ))?;
     let ss = screensaver(bus.address.clone());
     let cookie = call(&mut compositor, {
         let ss = screensaver(bus.address.clone());
@@ -458,6 +465,7 @@ fn the_system_asks_for_a_password_over_everything() -> anyhow::Result<()> {
         first_run: false,
         google_caldav: None,
     })?;
+    compositor.write_config(COLUMN)?;
     let deadline = Instant::now() + Duration::from_secs(10);
     let (name, path) = loop {
         if let Some(found) = agent.lock().ok().and_then(|a| a.clone()) {

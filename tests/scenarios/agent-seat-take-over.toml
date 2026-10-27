@@ -10,6 +10,9 @@ layouts = ["us"]
 name = "helper"
 access = "act"
 apps = ["editor"]
+
+[panel]
+form = "column"
 """
 
 [[step]]

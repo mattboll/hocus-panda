@@ -8,6 +8,9 @@ first_run = true
 config = """
 [settings]
 command = "{test_client} --app-id hocus-settings --size 900x600 --color '#20242a'"
+
+[panel]
+form = "column"
 """
 
 [[step]]

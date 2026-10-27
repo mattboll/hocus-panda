@@ -7,6 +7,12 @@ data_dirs = ["../fixtures/system/data"]
 config_dirs = ["../fixtures/system/config"]
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "language" }
 
 [[step]]

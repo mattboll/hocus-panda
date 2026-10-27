@@ -11,6 +11,9 @@ image = "{scenario_dir}/../fixtures/wallpapers/blue.png"
 [[wallpaper.screens]]
 output = "HEADLESS-2"
 image = "{scenario_dir}/../fixtures/wallpapers/orange.png"
+
+[panel]
+form = "column"
 """
 
 [[step]]

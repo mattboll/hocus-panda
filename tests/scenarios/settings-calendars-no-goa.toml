@@ -7,6 +7,12 @@ goa = { identity = "alex.panda@example.com", dir = "calendar/google", running = 
 child_env = { PATH = "{scenario_dir}/calendar/google" }
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 expect_calendars = { online = "absent", online_accounts = 0, events = 0 }
 
 [[step]]

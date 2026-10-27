@@ -13,6 +13,9 @@ config = """
 [search]
 folders = ["{home}/Documents"]
 exclude = ["*.log"]
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -188,6 +191,9 @@ meaning = "on"
 
 [launcher]
 calculator = false
+
+[panel]
+form = "column"
 """
 
 [[step]]

@@ -7,6 +7,9 @@ dbus = true
 config = """
 [notifications]
 hold_while_sharing = false
+
+[panel]
+form = "column"
 """
 
 [[step]]

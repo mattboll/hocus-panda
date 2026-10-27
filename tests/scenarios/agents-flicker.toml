@@ -3,6 +3,12 @@ outputs = ["1600x1000"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 herdr = { agents = [
   { name = "refacto", status = "working" },
   { name = "docs", status = "idle" },
@@ -12,6 +18,9 @@ herdr = { agents = [
 config = """
 [agents]
 herdr_socket = "{herdr}"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -96,6 +105,9 @@ herdr_socket = "{herdr}"
 
 [pandas]
 enabled = false
+
+[panel]
+form = "column"
 """
 
 [[step]]

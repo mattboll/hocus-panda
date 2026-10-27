@@ -10,6 +10,9 @@ theme = "matrix"
 
 [decorations]
 title_bars = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

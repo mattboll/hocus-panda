@@ -9,6 +9,9 @@ data_dirs = ["../fixtures"]
 config = """
 [appearance]
 theme = "matrix"
+
+[panel]
+form = "column"
 """
 
 [[step]]

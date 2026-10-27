@@ -4,6 +4,12 @@ outputs = ["1920x1080", "1280x800+1920+0/1"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 expect_ui = { label = "Desktop 1 of 4 on this screen" }
 
 [[step]]

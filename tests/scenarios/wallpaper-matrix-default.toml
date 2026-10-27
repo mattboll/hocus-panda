@@ -6,6 +6,9 @@ shell = true
 config = """
 [appearance]
 theme = "matrix"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -18,6 +21,9 @@ expect_frames = { for_ms = 1000, at_least = 50 }
 config = """
 [appearance]
 theme = "dark"
+
+[panel]
+form = "column"
 """
 
 # The dark wallpaper made and drawn: what follows is at rest.

@@ -8,6 +8,9 @@ config = """
 [appearance]
 theme = "matrix"
 reduced_motion = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

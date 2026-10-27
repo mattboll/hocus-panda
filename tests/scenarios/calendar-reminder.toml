@@ -5,6 +5,12 @@ shell = true
 child_env = { PATH = "{scenario_dir}/calendar/bin:/usr/bin:/bin" }
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 caldav = { dir = "calendar/work", user = "alex", password = "panda" }
 
 [[step]]
@@ -13,6 +19,9 @@ config = """
 name = "Work"
 url = "{caldav}"
 user = "alex"
+
+[panel]
+form = "column"
 """
 
 [[step]]

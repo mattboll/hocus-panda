@@ -7,6 +7,9 @@ config = """
 [updates]
 check = "{scenario_dir}/updates/check.sh {runtime_dir}"
 install = "{scenario_dir}/updates/install-fails.sh"
+
+[panel]
+form = "column"
 """
 
 [[step]]

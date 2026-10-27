@@ -9,6 +9,12 @@ shell = true
 devices = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "network" }
 
 # Looked for as the page opens.
@@ -113,6 +119,9 @@ expect_settings = { label = "Forget Bamboo grove", shown = false }
 config = """
 [appearance]
 theme = "light"
+
+[panel]
+form = "column"
 """
 
 # The password never reaches the configuration.

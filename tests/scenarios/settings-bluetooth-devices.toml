@@ -9,6 +9,12 @@ shell = true
 devices = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "bluetooth" }
 
 [[step]]
@@ -108,6 +114,9 @@ expect_settings = { label = "Forget Panda mouse", shown = false }
 config = """
 [appearance]
 theme = "light"
+
+[panel]
+form = "column"
 """
 
 [[step]]

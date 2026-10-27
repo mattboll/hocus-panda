@@ -8,6 +8,9 @@ shell = true
 config = """
 [screenshots]
 save = false
+
+[panel]
+form = "column"
 """
 
 [[step]]

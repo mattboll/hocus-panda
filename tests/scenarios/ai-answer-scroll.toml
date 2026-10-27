@@ -5,6 +5,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 ai_server = { delay_ms = 5, pieces = [
   "The build is slow because three things changed this morning.\n\n",
   "1. The compilation cache is off since the sccache update.\n",
@@ -25,6 +31,9 @@ config = """
 [ai]
 enabled = true
 url = "{ai}"
+
+[panel]
+form = "column"
 """
 
 [[step]]
