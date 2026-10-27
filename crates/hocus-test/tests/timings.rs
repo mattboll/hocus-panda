@@ -42,6 +42,12 @@ const KEY_SPACE: u32 = 57;
 const KEY_ESC: u32 = 1;
 const KEY_A: u32 = 30;
 const KEY_P: u32 = 25;
+const KEY_V: u32 = 47;
+const KEY_N: u32 = 49;
+const KEY_DOT: u32 = 52;
+/// So many openings of each kind: the least is reported, what the code
+/// costs on a machine busy with something else (#288).
+const OPENINGS: usize = 5;
 
 /// So many applications installed: the launcher opens on all of them
 /// (#254), as on a desktop of some years.
@@ -226,22 +232,69 @@ fn press(desktop: &mut Headless, code: u32) -> anyhow::Result<()> {
 
 /// Super+Space, to the launcher's first frame, in milliseconds.
 fn open_launcher(desktop: &mut Headless) -> anyhow::Result<f64> {
-    let frames = |d: &Headless| d.outputs().iter().map(|o| o.frames).sum::<u64>();
-    let before = frames(desktop);
+    open_with(desktop, KEY_SPACE)
+}
+
+/// Super and `code`, to the first frame that follows, in milliseconds.
+fn open_with(desktop: &mut Headless, code: u32) -> anyhow::Result<f64> {
     let start = Instant::now();
     for (code, pressed) in [
         (KEY_LEFTMETA, true),
-        (KEY_SPACE, true),
-        (KEY_SPACE, false),
+        (code, true),
+        (code, false),
         (KEY_LEFTMETA, false),
     ] {
         desktop.request(Request::Key { code, pressed })?;
     }
+    first_frame(desktop, start)
+}
+
+/// From `start` to the first frame drawn, in milliseconds.
+fn first_frame(desktop: &mut Headless, start: Instant) -> anyhow::Result<f64> {
+    let frames = |d: &Headless| d.outputs().iter().map(|o| o.frames).sum::<u64>();
+    let before = frames(desktop);
     while frames(desktop) == before {
         desktop.advance(FRAME)?;
-        anyhow::ensure!(start.elapsed() < TIMEOUT, "the launcher never drew");
+        anyhow::ensure!(start.elapsed() < TIMEOUT, "nothing was drawn");
     }
     Ok(ms(start.elapsed()))
+}
+
+/// The least of `OPENINGS` runs of `opening`, each from the closed card
+/// as it is drawn while closed: closed by Escape, a moment later.
+fn least_opening(
+    desktop: &mut Headless,
+    mut opening: impl FnMut(&mut Headless) -> anyhow::Result<f64>,
+) -> anyhow::Result<f64> {
+    let mut least = f64::INFINITY;
+    for _ in 0..OPENINGS {
+        least = least.min(opening(desktop)?);
+        press(desktop, KEY_ESC)?;
+        desktop.advance(Duration::from_secs(2))?;
+    }
+    Ok(least)
+}
+
+/// Where the shell's element labelled `label` is: its centre.
+fn ui_centre(desktop: &mut Headless, label: &str) -> anyhow::Result<(f64, f64)> {
+    let start = Instant::now();
+    loop {
+        let hocus_api::Reply::Ui(nodes) = desktop.request(Request::Ui)? else {
+            anyhow::bail!("expected the interface");
+        };
+        if let Some(r) = nodes
+            .iter()
+            .find(|n| n.label.as_deref() == Some(label))
+            .map(|n| n.rect)
+        {
+            return Ok((
+                f64::from(r.x) + f64::from(r.width) / 2.0,
+                f64::from(r.y) + f64::from(r.height) / 2.0,
+            ));
+        }
+        anyhow::ensure!(start.elapsed() < TIMEOUT, "no {label:?} shown");
+        desktop.advance(FRAME)?;
+    }
 }
 
 /// The cost of a turn of the loop with nothing to do: what every wakeup
@@ -279,23 +332,87 @@ fn timings() -> anyhow::Result<()> {
         format!("{:.1} µs", idle_turn_us(&mut desktop)?),
     );
 
+    // What its modes list, as after some days of use: copies, emoji
+    // chosen, notes.
+    desktop.on_loop("timings", |state| {
+        for i in 0..12 {
+            state.copy_text(&format!("A line copied a while ago, number {i}"));
+        }
+        for glyph in ["😀", "👍", "🎉", "❤️", "🙏", "😂", "🔥", "✅"] {
+            state.emoji_chosen(glyph);
+        }
+        for i in 0..8 {
+            state.add_note(&format!("Something to remember, number {i}"));
+        }
+    });
+    desktop.advance(Duration::from_secs(2))?;
+
     // The launcher: Super+Space, to its first frame, every application
     // shown; drawn as it opens while closed (#242).
     report.add_frame_ms(
         format!("Opening the launcher on {APPLICATIONS} applications, to its first frame"),
-        open_launcher(&mut desktop)?,
+        least_opening(&mut desktop, open_launcher)?,
     );
     // A search, closed, and opened again at once: the grid comes back
     // before the closed card was drawn again.
-    for code in [KEY_A, KEY_P, KEY_ESC] {
-        press(&mut desktop, code)?;
-        desktop.advance(FRAME)?;
-    }
     report.add_frame_ms(
         "Opening it again right after a search",
-        open_launcher(&mut desktop)?,
+        least_opening(&mut desktop, |desktop| {
+            open_launcher(desktop)?;
+            for code in [KEY_A, KEY_P, KEY_ESC] {
+                press(desktop, code)?;
+                desktop.advance(FRAME)?;
+            }
+            open_launcher(desktop)
+        })?,
     );
-    press(&mut desktop, KEY_ESC)?;
+    // Its other modes, each from the closed card (#288).
+    for (mode, key) in [
+        ("the clipboard history", KEY_V),
+        ("emoji", KEY_DOT),
+        ("the palette", KEY_P),
+        ("the notes", KEY_N),
+    ] {
+        report.add_frame_ms(
+            format!("Opening the launcher on {mode}"),
+            least_opening(&mut desktop, |desktop| open_with(desktop, key))?,
+        );
+    }
+    // On the other screen than the one it was drawn on as it opens.
+    report.add_frame_ms(
+        "Opening the launcher on the other screen",
+        least_opening(&mut desktop, |desktop| {
+            desktop.request(Request::PointerMove {
+                x: 2900.0,
+                y: 700.0,
+            })?;
+            let opened = open_launcher(desktop);
+            desktop.request(Request::PointerMove { x: 640.0, y: 400.0 })?;
+            opened
+        })?,
+    );
+    // A task to add, from the column's button (#255): the column shown
+    // whole for it, the pointer already over the button.
+    desktop.write_config("[panel]\nform = \"column\"\n")?;
+    desktop.advance(Duration::from_secs(2))?;
+    let (x, y) = ui_centre(&mut desktop, "Add a task")?;
+    desktop.request(Request::PointerMove { x, y })?;
+    desktop.advance(Duration::from_secs(2))?;
+    report.add_frame_ms(
+        "Opening the launcher on a task to add",
+        least_opening(&mut desktop, |desktop| {
+            let start = Instant::now();
+            for pressed in [true, false] {
+                desktop.request(Request::PointerButton {
+                    button: hocus_api::Button::Left,
+                    pressed,
+                })?;
+            }
+            first_frame(desktop, start)
+        })?,
+    );
+    desktop.write_config("")?;
+    desktop.request(Request::PointerMove { x: 640.0, y: 400.0 })?;
     desktop.advance(Duration::from_secs(2))?;
 
     // The settings, a client of their own, to their first frame.
