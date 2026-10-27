@@ -164,7 +164,7 @@ Steps, one per `[[step]]` table:
 | `expect_timedated = "SetTimezone Asia/Tokyo interactive"` | the timedated stand-in was asked this (`interactive`: polkit may ask) |
 | `timedated_zone = "America/New_York"` | the system's zone changes in the stand-in, as if set elsewhere |
 | `timedated_refuses = true` | the stand-in refuses to set the zone from now on, as polkit would (`false`: no longer) |
-| `charger = false` | the charger is pulled out (`true`: plugged in), as the UPower stand-in says |
+| `charger = false` | the charger is pulled out (`true`: plugged in), as the UPower stand-in says; the step ends once the compositor took it in, with the clock still |
 | `expect_devices = "WirelessEnabled false"` | the devices' stand-ins were asked this: `WirelessEnabled BOOL`, `Powered BOOL` (Bluetooth), `ActiveProfile NAME`; NetworkManager's `RequestScan`, `ActivateConnection SSID`, `AddAndActivateConnection SSID KEY-MGMT` (`open`; never the password), `Disconnect`, `Delete SSID`; BlueZ's `StartDiscovery`, `StopDiscovery`, `RegisterAgent CAPABILITY`, `UnregisterAgent`, `Pair NAME` (`Pair NAME rejected`), `Trusted NAME BOOL`, `Connect NAME`, `Disconnect NAME`, `RemoveDevice NAME` |
 | `expect_accounts = "SetRealName Alex P."` | the account's stand-ins were asked this: `SetRealName NAME`, `SetIconFile PATH` |
 | `expect_xdg_file = { name, contains?, lacks? }` | a file of the user's private configuration directory the settings write (`mimeapps.list`, `autostart/NAME.desktop`) holds these strings, or lacks them |

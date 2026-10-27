@@ -454,6 +454,12 @@ impl Headless {
         self.app.state.locking.logind_following
     }
 
+    /// Whether the compositor took in that the machine runs on its battery
+    /// (UPower's news, off the loop): the battery's delays apply (#265).
+    pub fn on_battery(&self) -> bool {
+        self.app.state.power_source() == hocus_core::config::PowerSource::Battery
+    }
+
     /// Whether logind said what the machine can do (suspend, hibernate).
     pub fn power_caps_known(&self) -> bool {
         self.app.state.leaver.caps_known
