@@ -1,0 +1,57 @@
+# A screen's default scale follows its pixel density (#250): a unit per
+# 112 dpi, to the nearest quarter, from 1 to 3; a screen with no size stays
+# at 1; the configuration's scale wins, and the screen goes back to the
+# automatic one when it no longer sets it.
+description = "A screen with no scale set takes the one of its density; the configuration's wins"
+outputs = ["2560x1600:340x210mm", "1920x1080:530x300mm", "1280x800"]
+
+# A 16-inch laptop (about 192 dpi), a 24-inch 1920x1080 (about 92 dpi),
+# and a screen that gives no size.
+[[step]]
+expect_output = { name = "HEADLESS-1", scale = 1.75 }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", scale = 1.0 }
+
+[[step]]
+expect_output = { name = "HEADLESS-3", scale = 1.0 }
+
+# The Screens page says it is automatic, and which scale that is.
+[[step]]
+open_settings = { page = "screens" }
+
+[[step]]
+expect_settings = { label = "Automatic (1.75)", selected = true }
+
+# The configuration's scale wins…
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+scale = 1.25
+"""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", scale = 1.25 }
+
+# …until it no longer sets one.
+[[step]]
+config = """
+[[outputs]]
+name = "HEADLESS-1"
+primary = true
+"""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", scale = 1.75 }
+
+# Another screen on the same connector takes its own: a 27-inch 4K
+# (about 163 dpi).
+[[step]]
+unplug = "HEADLESS-2"
+
+[[step]]
+plug = { spec = "3840x2160:597x336mm", name = "HEADLESS-2" }
+
+[[step]]
+expect_output = { name = "HEADLESS-2", scale = 1.5 }

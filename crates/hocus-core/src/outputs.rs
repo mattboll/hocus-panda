@@ -8,8 +8,8 @@ use std::{collections::BTreeMap, fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 
 /// One screen's settings, by connector name; what is not set keeps the
-/// screen's own (its preferred mode, scale 1, no rotation, to the right of
-/// the others).
+/// screen's own (its preferred mode, the scale of its density, no rotation,
+/// to the right of the others).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OutputConfig {
@@ -19,7 +19,7 @@ pub struct OutputConfig {
     pub enabled: Option<bool>,
     /// `2560x1600`, or `2560x1600@59.95` (Hz).
     pub mode: Option<String>,
-    /// 0.5 to 4, in steps of 1/120.
+    /// 0.5 to 4, in steps of 1/120; [`default_scale`] when not set.
     pub scale: Option<f64>,
     pub transform: Option<Transform>,
     /// Logical position of its top-left corner.
@@ -233,6 +233,57 @@ pub fn round_scale(scale: f64) -> f64 {
     (scale * 120.0).round() / 120.0
 }
 
+/// Pixels per inch for each unit of a screen's default scale. Scale 1 is
+/// drawn for about 96 dpi, but the screens of 92 to 110 dpi most desks have
+/// (a 24-inch 1920x1080, a 27-inch 2560x1440) read well at 1; a scale is
+/// taken once a screen is clearly denser than those.
+const DPI_PER_SCALE: f64 = 112.0;
+/// The smallest diagonal believed, in millimetres (about 8 inches): below
+/// it, a TV or projector gave its aspect ratio or a placeholder, not its
+/// size.
+const SMALLEST_DIAGONAL_MM: f64 = 200.0;
+/// The densest screen believed, in dpi.
+const DENSEST: f64 = 600.0;
+/// How far a screen's shape in millimetres may differ from its shape in
+/// pixels (EDID rounds sizes to centimetres) before its size is not
+/// believed.
+const SHAPE_TOLERANCE: f64 = 1.15;
+
+/// How dense a screen of `pixels` (its mode, width and height) and
+/// `millimetres` (its physical size, from EDID) is, in dots per inch along
+/// its diagonal; `None` when it gave no size, or one that cannot be its
+/// own: under 8 inches across, denser than any screen, or of another shape
+/// than its pixels (projectors, some TVs).
+pub fn density(pixels: (i32, i32), millimetres: (i32, i32)) -> Option<f64> {
+    let (w, h) = (f64::from(pixels.0), f64::from(pixels.1));
+    let (w_mm, h_mm) = (f64::from(millimetres.0), f64::from(millimetres.1));
+    if w <= 0.0 || h <= 0.0 || w_mm <= 0.0 || h_mm <= 0.0 {
+        return None;
+    }
+    let diagonal_mm = w_mm.hypot(h_mm);
+    if diagonal_mm < SMALLEST_DIAGONAL_MM {
+        return None;
+    }
+    // Some panels give their size turned a quarter from their mode: only
+    // the shape counts, not which way it stands.
+    let shape = |a: f64, b: f64| a.max(b) / a.min(b);
+    let mismatch = shape(w, h) / shape(w_mm, h_mm);
+    if !(1.0 / SHAPE_TOLERANCE..=SHAPE_TOLERANCE).contains(&mismatch) {
+        return None;
+    }
+    let dpi = w.hypot(h) / (diagonal_mm / 25.4);
+    (dpi <= DENSEST).then_some(dpi)
+}
+
+/// The scale a screen takes when the configuration sets none: a unit per
+/// 112 dpi of its density in `pixels`, to the nearest quarter, from 1 to 3;
+/// 1 when its size is unknown or not believed (see [`density`]).
+pub fn default_scale(pixels: (i32, i32), millimetres: (i32, i32)) -> f64 {
+    density(pixels, millimetres).map_or(1.0, |dpi| {
+        ((dpi / DPI_PER_SCALE * 4.0).round() / 4.0).clamp(1.0, 3.0)
+    })
+}
+
 impl OutputConfig {
     /// What the file says is wrong with it, if anything.
     pub fn check(&self) -> Result<(), String> {
@@ -435,6 +486,62 @@ mod tests {
     fn scales_land_on_120ths() {
         assert_eq!(round_scale(1.5), 1.5);
         assert_eq!(round_scale(1.333), 160.0 / 120.0);
+    }
+
+    #[test]
+    fn a_screens_default_scale_follows_its_density() {
+        let cases = [
+            // A 16-inch laptop, about 192 dpi.
+            ((2560, 1600), (340, 210), 1.75),
+            // A 24-inch 1920x1080, about 92 dpi.
+            ((1920, 1080), (530, 300), 1.0),
+            // A 13-inch 1920x1200, about 170 dpi.
+            ((1920, 1200), (286, 179), 1.5),
+            // 27-inch screens: 2560x1440 (109 dpi), 4K (163), 5K (218).
+            ((2560, 1440), (597, 336), 1.0),
+            ((3840, 2160), (597, 336), 1.5),
+            ((5120, 2880), (597, 336), 2.0),
+            // 15.6-inch laptops: 1920x1080 (141 dpi), 4K (282).
+            ((1920, 1080), (344, 194), 1.25),
+            ((3840, 2160), (344, 194), 2.5),
+            // A 32-inch 4K, about 137 dpi.
+            ((3840, 2160), (708, 398), 1.25),
+            // A 14-inch 2880x1800, about 243 dpi.
+            ((2880, 1800), (301, 188), 2.25),
+            // A 9-inch panel of about 500 dpi: no more than 3.
+            ((3840, 2400), (196, 123), 3.0),
+        ];
+        for (pixels, mm, want) in cases {
+            assert_eq!(default_scale(pixels, mm), want, "{pixels:?} on {mm:?} mm");
+        }
+    }
+
+    #[test]
+    fn a_screen_of_unknown_or_unlikely_size_is_at_1() {
+        // No size, or half of one.
+        assert_eq!(default_scale((2560, 1600), (0, 0)), 1.0);
+        assert_eq!(default_scale((2560, 1600), (340, 0)), 1.0);
+        assert_eq!(default_scale((2560, 1600), (-340, -210)), 1.0);
+        // A TV giving its aspect ratio in centimetres.
+        assert_eq!(default_scale((3840, 2160), (160, 90)), 1.0);
+        // A projector of another shape than its pixels.
+        assert_eq!(default_scale((1920, 1080), (300, 300)), 1.0);
+        // A TV or projector giving a huge size.
+        assert_eq!(default_scale((3840, 2160), (1600, 900)), 1.0);
+        // QEMU's virtual GPU makes up a size at 100 dpi for any window.
+        let qemu = |w: i32, h: i32| (w * 254 / 1000, h * 254 / 1000);
+        for (w, h) in [(1280, 800), (1920, 1080), (2560, 1600), (3840, 2160)] {
+            assert_eq!(default_scale((w, h), qemu(w, h)), 1.0, "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn a_size_given_turned_a_quarter_is_believed() {
+        assert!(density((1200, 1920), (216, 135)).is_some());
+        assert_eq!(
+            default_scale((1200, 1920), (216, 135)),
+            default_scale((1920, 1200), (216, 135)),
+        );
     }
 
     #[test]

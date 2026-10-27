@@ -339,6 +339,16 @@ pub fn value_name(value: &str, lang: Lang) -> String {
         .map_or_else(|| value.to_owned(), |(_, w)| w.get(lang).to_owned())
 }
 
+/// "Automatic (1.5)": the scale a screen takes when none is chosen.
+pub fn automatic_scale(scale: f64, lang: Lang) -> String {
+    let s = format!("{scale:.2}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    match lang {
+        Lang::En => format!("Automatic ({s})"),
+        Lang::Fr => format!("Automatique ({})", s.replace('.', ",")),
+    }
+}
+
 /// `100 %` in French, `100%` in English.
 pub fn percent(value: u32, lang: Lang) -> String {
     match lang {

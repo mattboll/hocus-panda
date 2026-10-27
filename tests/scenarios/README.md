@@ -10,7 +10,10 @@ the machine's; their keymaps are XKB's own.
 
 ```toml
 description = "A click on a window behind another focuses it and raises it"
-# WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS]; default: one 1280x800 output with 4 desktops
+# WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS][:WIDTHxHEIGHTmm]; default: one 1280x800
+# output with 4 desktops. A size in millimetres, as a screen's EDID gives it,
+# makes the scale the one of its density unless @SCALE is given; without one,
+# the scale is @SCALE or 1
 outputs = ["2560x1600@2/1", "1920x1080"]
 # Starts XWayland for `open_x11`; the scenario is skipped where Xwayland is missing
 xwayland = false

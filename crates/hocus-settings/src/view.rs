@@ -3748,7 +3748,7 @@ impl SettingsView {
             parent,
             Style {
                 grow: 1.5,
-                ..fill_width(column(14.0))
+                ..fill_width(column(10.0))
             },
             Kind::Box(Look::default()),
         );
@@ -3844,7 +3844,8 @@ impl SettingsView {
             }
         }
 
-        // Scale, as segments.
+        // Scale, as segments: the automatic one, saying its scale, over the
+        // others.
         let scale_row = self.add(section, fill_width(row(14.0)), Kind::Box(Look::default()));
         self.add(
             scale_row,
@@ -3858,7 +3859,7 @@ impl SettingsView {
             scale_row,
             Style {
                 padding: Insets::all(4.0),
-                ..fill_width(row(4.0))
+                ..fill_width(column(4.0))
             },
             Kind::Box(Look {
                 background: Some(Paint::SurfaceHover),
@@ -3866,11 +3867,29 @@ impl SettingsView {
                 ..Look::default()
             }),
         );
-        for percent in [100u32, 125, 150, 175, 200] {
+        let lines = [
+            self.add(segments, fill_width(row(4.0)), Kind::Box(Look::default())),
+            self.add(segments, fill_width(row(4.0)), Kind::Box(Look::default())),
+        ];
+        // The one of its density until a scale is chosen; a scale chosen
+        // stays chosen, even the same as the automatic one (#250).
+        let chosen = self.ctx.config.output(&s.name).and_then(|o| o.scale);
+        let automatic = (
+            words::automatic_scale(s.automatic_scale, lang),
+            chosen.is_none(),
+            Change::output_unset(&s.name, "scale"),
+        );
+        let percents = [100u32, 125, 150, 175, 200].map(|percent| {
             let value = f64::from(percent) / 100.0;
-            let on = (s.scale - value).abs() < 0.01;
-            let mut b = Button::new(
+            (
                 words::percent(percent, lang),
+                chosen.is_some_and(|c| (c - value).abs() < 0.01),
+                Change::output(&s.name, "scale", value),
+            )
+        });
+        for (i, (label, on, change)) in std::iter::once(automatic).chain(percents).enumerate() {
+            let mut b = Button::new(
+                label,
                 if on {
                     ButtonKind::Primary
                 } else {
@@ -3881,16 +3900,15 @@ impl SettingsView {
             b.selected = on;
             b.enabled = s.enabled;
             let id = self.add(
-                segments,
+                lines[usize::from(i > 0)],
                 Style {
                     width: Length::Fill,
-                    height: Length::Px(40.0),
+                    height: Length::Px(36.0),
                     ..Style::default()
                 },
                 Kind::Button(b),
             );
-            self.targets
-                .insert(id, Target::Set(Change::output(&s.name, "scale", value)));
+            self.targets.insert(id, Target::Set(change));
         }
 
         // Its own desktops.
@@ -4735,6 +4753,7 @@ mod tests {
             current_mode: None,
             preferred_mode: None,
             scale: 1.0,
+            automatic_scale: 1.0,
             transform: "normal".into(),
             geometry: hocus_api::Rect {
                 x: 0,
@@ -4761,6 +4780,56 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_screen_s_scale_is_automatic_until_one_is_chosen() {
+        use crate::edit::Place;
+        let laptop = || hocus_api::ScreenInfo {
+            scale: 1.5,
+            automatic_scale: 1.5,
+            ..screen("HEADLESS-1", 4)
+        };
+        let selected = |v: &SettingsView, label: &str| {
+            find(&v.access(), label)
+                .unwrap_or_else(|| panic!("no {label}:\n{}", v.access().dump()))
+                .selected
+        };
+        let mut v = page_view("", Page::Screens, &[]);
+        let mut ctx = v.context().clone();
+        ctx.screens = vec![laptop()];
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        assert!(selected(&v, "Automatic (1.5)"));
+        assert!(!selected(&v, "150%"));
+        let out = click(&mut v, "150%");
+        assert_eq!(
+            values(&out),
+            [(
+                Place::Output("HEADLESS-1".into()),
+                "scale".into(),
+                Some("1.5".into())
+            )]
+        );
+        // Chosen, even the same as the automatic one, it stays chosen.
+        let mut v = page_view(
+            "[[outputs]]\nname = \"HEADLESS-1\"\nscale = 1.5\n",
+            Page::Screens,
+            &[],
+        );
+        let mut ctx = v.context().clone();
+        ctx.screens = vec![laptop()];
+        v.set_context(ctx);
+        v.draw(Duration::ZERO);
+        assert!(selected(&v, "150%"));
+        assert!(!selected(&v, "Automatic (1.5)"));
+        let out = click(&mut v, "Automatic (1.5)");
+        assert_eq!(
+            values(&out),
+            [(Place::Output("HEADLESS-1".into()), "scale".into(), None)]
+        );
+        assert_eq!(words::automatic_scale(1.75, Lang::Fr), "Automatique (1,75)");
+        assert_eq!(words::automatic_scale(1.0, Lang::En), "Automatic (1)");
     }
 
     #[test]

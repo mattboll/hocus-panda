@@ -114,6 +114,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 - Mirroring
 - Enable or disable a screen
 - Resolution, fractional scale, cursor at the right scale per screen
+- A screen's default scale from its pixel density (EDID): a unit per 112 dpi, to the nearest quarter, from 1 to 3 (a 24-inch 1920x1080 at 1, a 27-inch 4K at 1.5, a 16-inch 2560x1600 laptop at 1.75); 1 with no size or an unlikely one (projectors, TVs, VMs); the configuration's scale wins
 - Adaptive sync (VRR)
 - Per-screen panel margins
 - Screens of every GPU (a laptop's second GPU, a DisplayLink dock), drawn by the primary GPU and plugged and unplugged with their GPU
@@ -313,7 +314,7 @@ nothing at all are options (see
 - Bundled themes (Nord, Gruvbox, Catppuccin, Tokyo Night, Matrix…), user themes, colours, automatic accent, export
 - Dock, desktops, keyboard and shortcut editor, screenshots, window rules, modules, AI
 - Account: avatar, password, fingerprint `[linux]`
-- Screens: resolution, scale, position, primary, mirroring, enabled, VRR
+- Screens: resolution, scale (automatic, from the density, until one is chosen), position, primary, mirroring, enabled, VRR
 - Network (the Wi-Fi networks in reach: join with a password, leave, forget) `[linux]`, Bluetooth (devices paired and in reach: pair, with a passkey to confirm, connect, forget) `[linux]`, date and time with world map `[linux]`
 - Power: delays, suspend action, fullscreen keeps the screen awake
 - Calendar, advanced, updates

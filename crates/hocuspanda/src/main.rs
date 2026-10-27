@@ -38,8 +38,10 @@ struct Args {
     #[arg(long, value_name = "COMMAND")]
     spawn: Vec<String>,
 
-    /// Headless output, WIDTHxHEIGHT[@SCALE][+X+Y] (repeatable). Without a
-    /// position, it goes to the right of the previous one.
+    /// Headless output, WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS][:WIDTHxHEIGHTmm]
+    /// (repeatable). Without a position, it goes to the right of the
+    /// previous one; with a size in millimetres and no scale, it takes the
+    /// scale of its density, as a screen.
     #[arg(long = "output", value_name = "SPEC")]
     outputs: Vec<OutputSpec>,
 

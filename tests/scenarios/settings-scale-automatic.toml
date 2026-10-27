@@ -1,0 +1,47 @@
+# The Screens page shows a screen's automatic scale, the one of its density
+# (#250), in French: chosen, a scale stays chosen; Automatic takes it out
+# of the configuration and the screen goes back to its density's.
+description = "The Screens page says Automatique (1,75) for a dense screen; a scale chosen stays, Automatic gives the density's back"
+# A 9-inch 1280x800 panel (about 191 dpi): its scale is 1.75 until the
+# configuration sets 1, so that the page shows at its full size.
+outputs = ["1280x800:170x106mm"]
+
+[[step]]
+expect_output = { name = "HEADLESS-1", scale = 1.75 }
+
+[[step]]
+config = """
+[language]
+interface = "fr"
+
+[[outputs]]
+name = "HEADLESS-1"
+scale = 1
+"""
+
+[[step]]
+expect_output = { name = "HEADLESS-1", scale = 1.0 }
+
+[[step]]
+open_settings = { page = "screens" }
+
+[[step]]
+expect_settings = { label = "100\u202f%", selected = true }
+
+[[step]]
+expect_settings = { label = "Automatique (1,75)", selected = false }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-scale-automatic.png" }
+
+[[step]]
+click_settings = "Automatique (1,75)"
+
+[[step]]
+expect_output = { name = "HEADLESS-1", scale = 1.75 }
+
+[[step]]
+expect_config_file = { contains = ["interface = \"fr\""], lacks = ["scale ="] }
