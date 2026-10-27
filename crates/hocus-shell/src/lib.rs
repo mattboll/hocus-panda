@@ -51,8 +51,8 @@ pub mod welcome;
 pub mod window_switcher;
 
 pub use column::{
-    Action, ActiveWindow, Column, ColumnState, KeyboardLayout, ScreenDesktops, TrayApp,
-    TrayMenuEntry, WallTime,
+    Action, ActiveWindow, Column, ColumnState, KeyboardLayout, NotificationLine, ScreenDesktops,
+    TrayApp, TrayMenuEntry, WallTime,
 };
 pub use i18n::Lang;
 pub use launcher::{App, Choice, Launcher, LauncherEvent, Showcase};

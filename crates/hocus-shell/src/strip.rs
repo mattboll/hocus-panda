@@ -21,6 +21,7 @@ use crate::{
     agents::{AgentRow, AgentState},
     column::{ActiveWindow, ColumnState, Meeting, Ring, View, WallTime},
     i18n::Lang,
+    icons,
 };
 
 /// The strip's width, from board D12.
@@ -29,8 +30,8 @@ pub const WIDTH: f32 = 72.0;
 const AGENTS: usize = 3;
 /// A panda's side in the strip, from the board.
 const PANDA: f32 = 52.0;
-/// The sign of a list with nothing left to do.
-const DONE: &str = "M5 12.5l4.5 4.5L19 7";
+/// The most a counter shows; more is said "99+".
+const MOST: usize = 99;
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
 
@@ -89,7 +90,7 @@ impl Glance {
             pandas,
             still,
             todos: state.todos.len(),
-            notifications: state.notifications.len(),
+            notifications: state.notification_count,
             desktops: screen.map_or((1, 1), |s| (s.count.max(1), s.shown.max(1))),
             badges: screen.map(|s| s.badges.clone()).unwrap_or_default(),
             battery: state.status.battery,
@@ -130,7 +131,7 @@ impl Glance {
             && self.time == state.time
             && self.meeting == state.meeting
             && self.todos == state.todos.len()
-            && self.notifications == state.notifications.len()
+            && self.notifications == state.notification_count
             && self.desktops == screen.map_or((1, 1), |s| (s.count.max(1), s.shown.max(1)))
             && self.badges.as_slice() == screen.map_or(&[][..], |s| s.badges.as_slice())
             && self.battery == state.status.battery
@@ -676,12 +677,26 @@ impl Strip {
         }
         rule(tree);
 
-        // The to-dos and the notifications, counted.
-        let chip = |tree: &mut Tree, name: &str| {
+        // The to-dos and the notifications, counted beside their icons;
+        // with none, the icon alone.
+        let count = TextStyle {
+            size: 15.0,
+            weight: 700,
+            ..theme.text.label
+        };
+        let counter = |tree: &mut Tree, name: &str, icon: &str, n: usize, none: Paint| {
             let chip = add(
                 tree,
                 card,
-                square(36.0),
+                Style {
+                    direction: Direction::Row,
+                    gap: 4.0,
+                    align: Align::Center,
+                    justify: Justify::Center,
+                    height: Length::Px(36.0),
+                    padding: Insets::symmetric(0.0, 9.0),
+                    ..Style::default()
+                },
                 Kind::Box(Look {
                     background: Some(Paint::SurfaceHover),
                     radius: 10.0,
@@ -689,40 +704,44 @@ impl Strip {
                 }),
             );
             tree.set_clickable(chip, name);
-            chip
-        };
-        let count = TextStyle {
-            size: 15.0,
-            weight: 700,
-            ..theme.text.label
-        };
-        let tasks = chip(tree, &lang.strip_tasks(g.todos));
-        if g.todos == 0 {
+            let (side, ink) = if n == 0 {
+                (18.0, none)
+            } else {
+                (16.0, Paint::Text)
+            };
             add(
                 tree,
-                tasks,
+                chip,
                 Style::default(),
                 Kind::Icon {
-                    icon: Icon::stroked(DONE, 18.0, 2.4)
+                    icon: Icon::stroked(icon, side, 2.2)
                         .unwrap_or_else(|| unreachable!("a constant icon")),
-                    color: Paint::Text,
+                    color: ink,
                     label: None,
                 },
             );
-        } else {
-            add(
-                tree,
-                tasks,
-                Style::default(),
-                Kind::text_line(g.todos.to_string(), count),
-            );
-        }
-        let notes = chip(tree, &lang.strip_notifications(g.notifications));
-        add(
+            if n > 0 {
+                let text = if n > MOST {
+                    format!("{MOST}+")
+                } else {
+                    n.to_string()
+                };
+                add(tree, chip, Style::default(), Kind::text_line(text, count));
+            }
+        };
+        counter(
             tree,
-            notes,
-            Style::default(),
-            Kind::text_line(g.notifications.to_string(), count),
+            &lang.strip_tasks(g.todos),
+            icons::CHECK,
+            g.todos,
+            Paint::Text,
+        );
+        counter(
+            tree,
+            &lang.strip_notifications(g.notifications),
+            icons::BELL,
+            g.notifications,
+            Paint::Muted,
         );
 
         // What is left, then the desktops, the battery and the account.

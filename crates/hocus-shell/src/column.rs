@@ -14,8 +14,9 @@ use std::{sync::Arc, time::Duration};
 
 use hocus_ui::{
     AccessNode, Align, Button, ButtonKind, Canvas, Color, Direction, Draw, Event, Icon, Input,
-    Insets, Justify, Kind, Length, Look, NodeId, Paint, PixelRect, Point, Rect, Role, Size, Style,
-    Surface, TextStyle, Theme, Tree,
+    Insets, Justify, Kind, Length, Look, NodeId, Paint, PixelRect, Point, Property, Rect, Role,
+    Size, Style, Surface, TextStyle, Theme, Tree,
+    motion::{self, Curve, Easing},
 };
 
 use crate::{i18n::Lang, icons, phone};
@@ -33,6 +34,8 @@ const SHADOW_ROOM: f32 = 24.0;
 const ICON_STROKE: f32 = 2.1;
 /// Notifications shown at most.
 const NOTIFICATIONS: usize = 3;
+/// The notifications' Clear all.
+const CLEAR_HEIGHT: f32 = 28.0;
 
 /// The time on the wall, as the user reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -110,8 +113,10 @@ pub struct ColumnState {
     pub user: String,
     /// The account menu offers hibernating only where it works.
     pub can_hibernate: bool,
-    /// The latest notifications, newest first: application and summary.
-    pub notifications: Vec<(String, String)>,
+    /// The latest notifications, newest first.
+    pub notifications: Vec<NotificationLine>,
+    /// How many the history holds, shown or not: the strip counts them.
+    pub notification_count: usize,
     pub status: Status,
     /// The tray's applications, in the order they came.
     pub tray: Vec<TrayApp>,
@@ -133,6 +138,15 @@ pub struct ColumnState {
     /// What MCP agents did (#176), once one connected; or that they are
     /// stopped.
     pub journal: Option<crate::journal::JournalView>,
+}
+
+/// A notification of the history, as the column lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NotificationLine {
+    /// Its id, to dismiss it.
+    pub id: u32,
+    pub app: String,
+    pub summary: String,
 }
 
 /// A keyboard layout kept, as the column says it.
@@ -307,6 +321,10 @@ pub enum Action {
     StopAgents,
     /// Allowed again.
     AllowAgents,
+    /// Every notification of the history goes, dismissed (#253).
+    ClearNotifications,
+    /// The notification of this id goes, dismissed.
+    DismissNotification(u32),
     /// The user takes over from an MCP agent, by name (#43): its window
     /// gets their keyboard, and its actions are refused.
     TakeOver(String),
@@ -454,13 +472,32 @@ struct Nodes {
     agents: NodeId,
     /// The card everything sits in: the account must stay inside it.
     card: NodeId,
-    /// The notifications' caption and list, hidden when there is no room.
+    /// The notifications' caption and list, hidden when there is no room;
+    /// the caption's row, and its Clear all when there are some.
     notes: NodeId,
+    notes_head: NodeId,
+    clear_notifications: Option<NodeId>,
     /// The agents' journal's room, its stop button, and its entries (which
     /// open the popover).
     journal: NodeId,
     journal_button: Option<NodeId>,
     journal_entries: Option<NodeId>,
+}
+
+/// A notification's row in the column, and its dismiss button, shown
+/// while the pointer is over the row.
+#[derive(Debug, Clone, Copy)]
+struct NoteRow {
+    id: u32,
+    row: NodeId,
+    dismiss: NodeId,
+}
+
+/// What [`fill_history`] made.
+#[derive(Debug, Default)]
+struct Notes {
+    clear: Option<NodeId>,
+    rows: Vec<NoteRow>,
 }
 
 /// The agents' seats the journal shows (#43): their buttons and window
@@ -536,6 +573,12 @@ pub struct Column {
     tray_menu: Option<(String, Vec<TrayMenuEntry>)>,
     /// The to-dos shown, and their places in the notes.
     todo_rows: Vec<(NodeId, usize)>,
+    /// The notifications shown, and the one the pointer is over.
+    note_rows: Vec<NoteRow>,
+    hovered_note: Option<u32>,
+    /// Where the pointer is over the column, to show a row's dismiss
+    /// button again once the rows are built again under it.
+    pointer: Option<Point>,
     /// How many notifications and journal entries are shown: fewer when
     /// the column has no room for all.
     fit: Fit,
@@ -563,6 +606,9 @@ impl Column {
             closed_by_press: None,
             tray_menu: None,
             todo_rows: Vec::new(),
+            note_rows: Vec::new(),
+            hovered_note: None,
+            pointer: None,
             agent_targets: Vec::new(),
             seats: Seats::default(),
             fit: Fit::MOST,
@@ -581,6 +627,39 @@ impl Column {
             .filter_map(|(agent, id)| Some((agent.clone(), self.tree.rect(*id)?)))
             .filter(|(_, r)| r.h > 1.0)
             .collect()
+    }
+
+    /// What the notifications' section filled in.
+    fn take_notes(&mut self, notes: Notes) {
+        self.nodes.clear_notifications = notes.clear;
+        self.note_rows = notes.rows;
+        self.hovered_note = None;
+    }
+
+    /// The dismiss button of the notification under the pointer shows,
+    /// the others' do not.
+    fn hover_notes(&mut self) {
+        self.tree.layout();
+        let over = self.pointer.and_then(|at| {
+            self.note_rows
+                .iter()
+                .find(|r| self.tree.rect(r.row).is_some_and(|rect| rect.contains(at)))
+                .map(|r| r.id)
+        });
+        if over == self.hovered_note {
+            return;
+        }
+        // It shows at once, to be clicked at once (a hidden node takes no
+        // click), and fades away.
+        let fade = Curve::Ease(Easing::OutCubic, motion::SMALL);
+        for row in &self.note_rows {
+            if Some(row.id) == self.hovered_note {
+                self.tree.animate(row.dismiss, Property::Opacity, 0.0, fade);
+            } else if Some(row.id) == over {
+                self.tree.jump(row.dismiss, Property::Opacity, 1.0);
+            }
+        }
+        self.hovered_note = over;
     }
 
     /// What the journal's section filled in.
@@ -663,14 +742,15 @@ impl Column {
         let theme = self.tree.theme().clone();
         let n = self.nodes;
         if want.notifications != self.fit.notifications {
-            fill_history(
+            let notes = fill_history(
                 &mut self.tree,
-                (n.notes, n.history),
+                (n.notes, n.notes_head, n.history),
                 &theme,
                 lang,
                 &self.state.notifications,
                 want.notifications,
             );
+            self.take_notes(notes);
         }
         if want.journal != self.fit.journal
             && let Some(view) = &self.state.journal
@@ -941,17 +1021,21 @@ impl Column {
             t.set_text(n.layout, &active.short);
             t.set_name(n.layout, &lang.keyboard_layout(&active.name));
         }
-        if all || old.notifications != state.notifications {
+        let notes = (all || old.notifications != state.notifications).then(|| {
             let theme = t.theme().clone();
             fill_history(
                 t,
-                (n.notes, n.history),
+                (n.notes, n.notes_head, n.history),
                 &theme,
                 lang,
                 &state.notifications,
                 fit.notifications,
-            );
+            )
+        });
+        if let Some(notes) = notes {
+            self.take_notes(notes);
         }
+        let t = &mut self.tree;
         if all || old.user != state.user {
             let initial: String = state
                 .user
@@ -967,6 +1051,10 @@ impl Column {
         // the card: the notifications, then the journal, give room back.
         if all || takes_other_room(&old, state) {
             self.fit_room();
+        }
+        // Built again under the pointer, a row shows its dismiss button.
+        if self.hovered_note.is_none() && self.pointer.is_some() {
+            self.hover_notes();
         }
         // An open desktops popover follows the screens.
         if !all
@@ -1206,6 +1294,8 @@ impl Column {
     /// The pointer moved away from the column and its popover.
     pub fn pointer_left(&mut self) {
         self.tree.input(Input::PointerLeave);
+        self.pointer = None;
+        self.hover_notes();
         if let Some(p) = &mut self.popover {
             p.tree.input(Input::PointerLeave);
         }
@@ -1260,6 +1350,12 @@ impl Column {
             Input::PointerMove(_) => Input::PointerMove(at),
             other => other,
         };
+        match forwarded {
+            Input::PointerMove(at) => self.pointer = Some(at),
+            Input::PointerLeave => self.pointer = None,
+            _ => {}
+        }
+        self.hover_notes();
         let n = self.nodes;
         for event in self.tree.input(forwarded) {
             let Event::Activated(id) = event else {
@@ -1281,6 +1377,10 @@ impl Column {
                 self.toggle(PopoverKind::Account);
             } else if let Some((_, index)) = self.todo_rows.iter().find(|(row, _)| *row == id) {
                 actions.push(Action::TickTodo(*index));
+            } else if Some(id) == n.clear_notifications {
+                actions.push(Action::ClearNotifications);
+            } else if let Some(row) = self.note_rows.iter().find(|r| r.dismiss == id) {
+                actions.push(Action::DismissNotification(row.id));
             } else if let Some((_, action)) = self.agent_targets.iter().find(|(t, _)| *t == id) {
                 actions.push(action.clone());
             } else if id == n.time {
@@ -1517,27 +1617,67 @@ fn notes_room(shown: bool) -> Style {
 }
 
 /// The latest notifications, `limit` at most, or that there is none; with
-/// no room for any, the section takes none.
+/// no room for any, the section takes none. With some, the caption has
+/// Clear all, and each row a dismiss button the pointer over it shows.
 fn fill_history(
     tree: &mut Tree,
-    (notes, history): (NodeId, NodeId),
+    (notes, head, history): (NodeId, NodeId, NodeId),
     theme: &Theme,
     lang: Lang,
-    notifications: &[(String, String)],
+    notifications: &[NotificationLine],
     limit: usize,
-) {
+) -> Notes {
     tree.set_style(notes, notes_room(limit > 0));
-    for row in tree.children(history) {
-        tree.remove(row);
+    for child in tree
+        .children(head)
+        .into_iter()
+        .chain(tree.children(history))
+    {
+        tree.remove(child);
     }
+    let _ = tree.add(
+        head,
+        Style::default(),
+        Kind::text(lang.notifications(), caption(theme)),
+    );
+    let mut filled = Notes::default();
     if notifications.is_empty() {
         let _ = tree.add(
             history,
             Style::default(),
             Kind::text(lang.nothing_new(), theme.text.body.with_color(Paint::Muted)),
         );
+        return filled;
     }
-    for (app, summary) in notifications.iter().take(limit) {
+    // Board D14's Clear all, at the column's size, at the caption's end
+    // and centred on it, out of the flow: it reaches over the gaps around.
+    let line = caption_line(theme);
+    let Some(end) = tree.add(
+        head,
+        Style {
+            at: Some(Point::new(0.0, (line - CLEAR_HEIGHT) / 2.0)),
+            width: Length::Fill,
+            direction: Direction::Row,
+            justify: Justify::End,
+            ..Style::default()
+        },
+        Kind::Box(Look::default()),
+    ) else {
+        return filled;
+    };
+    filled.clear = tree.add(
+        end,
+        Style {
+            height: Length::Px(CLEAR_HEIGHT),
+            padding: Insets::symmetric(0.0, 10.0),
+            ..Style::default()
+        },
+        Kind::Button(
+            Button::new(lang.clear_all(), ButtonKind::Plain, theme)
+                .with_style(theme.text.caption.with_weight(600).with_color(Paint::Text)),
+        ),
+    );
+    for line in notifications.iter().take(limit) {
         let Some(row) = tree.add(
             history,
             Style {
@@ -1558,20 +1698,44 @@ fn fill_history(
                 ..Style::default()
             },
             Kind::Box(Look {
-                background: Some(Paint::Rgba(crate::toasts::app_color(app))),
+                background: Some(Paint::Rgba(crate::toasts::app_color(&line.app))),
                 radius: 6.0,
                 ..Look::default()
             }),
         );
+        let said = format!("{} · {}", line.app, line.summary);
         let _ = tree.add(
             row,
             Style {
                 width: Length::Fill,
                 ..Style::default()
             },
-            Kind::text_line(format!("{app} · {summary}"), theme.text.body),
+            Kind::text_line(said.as_str(), theme.text.body),
         );
+        let Some(dismiss) = tree.add(
+            row,
+            Style {
+                width: Length::Px(22.0),
+                height: Length::Px(22.0),
+                ..Style::default()
+            },
+            Kind::Button(
+                Button::new("", ButtonKind::Ghost, theme)
+                    .with_icon(stroked(icons::CLOSE, 12.0))
+                    .with_name(lang.dismiss(&said)),
+            ),
+        ) else {
+            continue;
+        };
+        // Hidden until the pointer is over its row.
+        tree.jump(dismiss, Property::Opacity, 0.0);
+        filled.rows.push(NoteRow {
+            id: line.id,
+            row,
+            dismiss,
+        });
     }
+    filled
 }
 
 fn translate(node: &mut AccessNode, by: Point) {
@@ -1583,6 +1747,11 @@ fn translate(node: &mut AccessNode, by: Point) {
 
 fn caption(theme: &Theme) -> TextStyle {
     theme.text.caption
+}
+
+/// A caption's height, on one line.
+fn caption_line(theme: &Theme) -> f32 {
+    caption(theme).size * caption(theme).line_height
 }
 
 /// The column's nodes, empty: [`Column::apply`] fills them.
@@ -1817,11 +1986,16 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
     let phone = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     let updates = add(tree, feed, tasks_room(false), Kind::Box(Look::default()));
     let notes = add(tree, feed, notes_room(true), Kind::Box(Look::default()));
-    add(
+    // As tall as its caption, with or without Clear all: the button
+    // reaches over the gaps around it, and nothing moves when it comes.
+    let notes_head = add(
         tree,
         notes,
-        Style::default(),
-        Kind::text(lang.notifications(), caption(theme)),
+        Style {
+            height: Length::Px(caption_line(theme)),
+            ..row(8.0)
+        },
+        Kind::Box(Look::default()),
     );
     let history = add(
         tree,
@@ -1919,6 +2093,8 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
         dots,
         command,
         history,
+        notes_head,
+        clear_notifications: None,
         account,
         initial,
         user,

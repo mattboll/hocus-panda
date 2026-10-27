@@ -1,0 +1,69 @@
+description = "Given two notifications, Alex dismisses one from the column with the close button its row shows under the pointer: the other stays, and the application of the one dismissed gets NotificationClosed with reason 2 (#253); the strip counts the one left beside its bell"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+notify = { app = "Mail", summary = "Review of MR 42", timeout_ms = 0 }
+
+[[step]]
+notify = { app = "Chat", summary = "Lunch at noon?", timeout_ms = 0 }
+
+[[step]]
+advance_ms = 1000
+
+# Over the row of the older one, below the newer: its close button shows.
+[[step]]
+pointer_move = [1100, 545]
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "column-dismiss-notification.png" }
+
+[[step]]
+click_ui = "Dismiss: Mail · Review of MR 42"
+
+[[step]]
+expect_ui = { label = "Mail · Review of MR 42", shown = false }
+
+[[step]]
+expect_ui = { label = "Review of MR 42", shown = false }
+
+[[step]]
+expect_ui = { label = "Chat · Lunch at noon?" }
+
+[[step]]
+expect_ui = { label = "Lunch at noon?" }
+
+[[step]]
+expect_notification_signals = ["NotificationClosed 1 2"]
+
+# The strip counts the one left.
+[[step]]
+config = """
+[panel]
+form = "strip"
+"""
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_ui = { label = "Notifications: 1" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "column-dismiss-notification-strip.png" }
