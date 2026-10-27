@@ -15,7 +15,7 @@ use crate::{
     geom::{Insets, PixelRect, Point, Rect, Size},
     motion::{Animated, Curve, Spring},
     text::{Fonts, TextBox},
-    theme::{Color, Paint, TextStyle, Theme},
+    theme::{Color, Paint, Shadow, TextStyle, Theme},
 };
 
 /// A node of a tree; stale ids (of removed nodes) are refused, not reused.
@@ -1259,8 +1259,8 @@ impl Tree {
         if let Kind::Box(look) = &node.kind
             && look.shadow > 0.0
         {
-            let s = self.theme.shadow;
-            r = r.union(&r.translate(s.dx, s.dy).grow(s.blur * 1.25));
+            let s = fit_shadow(self.theme.shadow, node.rect, self.size);
+            r = r.union(&r.translate(s.dx, s.dy).grow(s.blur * SHADOW_REACH));
         }
         if self.focus_visible && self.focused == Some(id) {
             r = r.grow(self.theme.focus_ring * 2.0);
@@ -1355,6 +1355,7 @@ impl Tree {
         }
         let rect = node.rect;
         let (style, hovered, pressed) = (node.style, node.hovered, node.pressed);
+        let shadow = fit_shadow(theme.shadow, rect, self.size);
         if touches {
             let Tree { nodes, fonts, .. } = self;
             if let Some(node) = nodes
@@ -1364,7 +1365,7 @@ impl Tree {
                 draw_kind(
                     canvas,
                     &mut node.kind,
-                    rect,
+                    (rect, shadow),
                     theme,
                     fonts,
                     scale,
@@ -1748,11 +1749,41 @@ impl Tree {
     }
 }
 
+/// How far a box's shadow reaches past it, in blur radii: where the
+/// canvas stops drawing it, faded to all but nothing.
+const SHADOW_REACH: f32 = 1.25;
+
+/// The shadow of the hour under a box at `rect` (#161), smaller where its
+/// surface, `bounds` large, has less room around the box than it reaches:
+/// it fades out before the surface's edge instead of stopping there in a
+/// hard line (#261). A side with no room at all is the screen's edge, where
+/// it would be cut anyway.
+fn fit_shadow(shadow: Shadow, rect: Rect, bounds: Size) -> Shadow {
+    let reach = shadow.blur * SHADOW_REACH;
+    let sides = [
+        (rect.x, reach - shadow.dx),
+        (bounds.w - rect.right(), reach + shadow.dx),
+        (rect.y, reach - shadow.dy),
+        (bounds.h - rect.bottom(), reach + shadow.dy),
+    ];
+    let k = sides
+        .iter()
+        .filter(|(room, need)| *room >= 1.0 && *need > 0.0)
+        .map(|(room, need)| room / need)
+        .fold(1.0_f32, f32::min);
+    Shadow {
+        dx: shadow.dx * k,
+        dy: shadow.dy * k,
+        blur: shadow.blur * k,
+        alpha: shadow.alpha,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_kind(
     canvas: &mut Canvas,
     kind: &mut Kind,
-    rect: Rect,
+    (rect, shadow): (Rect, Shadow),
     theme: &Theme,
     fonts: &mut Fonts,
     scale: f32,
@@ -1772,7 +1803,7 @@ fn draw_kind(
             let glass = look.background == Some(Paint::Glass) && theme.has_glass();
             // Panels cast the shadow of the hour, as windows do (#161).
             if look.shadow > 0.0 {
-                let s = theme.shadow;
+                let s = shadow;
                 let under = rect.translate(s.dx, s.dy);
                 let color = s.color();
                 if glass {

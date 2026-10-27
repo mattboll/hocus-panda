@@ -76,6 +76,15 @@ window_shadow`, offset and blurred by the hour.
 | Evening, 18 to 22 | −32, 28 | 64 | low on the other side |
 | Night | 0, 22 | 60 | ×1.3 darker (at most 0.85) |
 
+The blur is CSS's `box-shadow` blur: a Gaussian whose standard deviation
+is half of it, faded out at two and a half deviations. Windows' shadows
+are drawn at the screen's pixels, whatever its scale, placed on them
+exactly, and never under the window: a see-through one shows what is
+behind it (#261). A panel's shadow is drawn in its own surface: where the
+surface has less room around the panel than the shadow reaches, the
+shadow is smaller, the light's direction kept, so that it fades out before
+the surface's edge.
+
 Windows have 14 px corners.
 
 ## Colour

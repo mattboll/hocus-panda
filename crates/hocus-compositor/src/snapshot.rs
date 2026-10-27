@@ -1017,7 +1017,7 @@ impl State {
                 out.extend(
                     shadow_elements(renderer, &self.textures, &self.style, local, scale, alpha)
                         .into_iter()
-                        .map(SceneElement::Frame),
+                        .map(SceneElement::Shadow),
                 );
             }
         }
@@ -1178,7 +1178,7 @@ impl State {
             out.extend(
                 shadow_elements(renderer, &self.textures, &self.style, local, scale, alpha)
                     .into_iter()
-                    .map(SceneElement::Frame),
+                    .map(SceneElement::Shadow),
             );
         }
         out
