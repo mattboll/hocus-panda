@@ -12,6 +12,9 @@ interface = "fr"
 
 [keyboard]
 layouts = ["fr", "de(neo)"]
+
+[panel]
+form = "column"
 """
 
 [[step]]
