@@ -36,6 +36,8 @@ pub struct Config {
     /// Calendar accounts and subscriptions (#75): `[[calendars]]`.
     pub calendars: Vec<CalendarAccount>,
     pub dock: Dock,
+    /// The widget panel's form (#263, decision 0011).
+    pub panel: Panel,
     pub pandas: Pandas,
     pub agents: Agents,
     pub language: Language,
@@ -760,6 +762,43 @@ pub enum AgentAccess {
     Read,
     /// Reading, and clicks, typing and scrolls aimed at its apps' windows.
     Act,
+}
+
+/// What the widget panel looks like at rest (#263, decision 0011).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelForm {
+    /// A 72 px strip on the right; the column slides over the windows
+    /// from it.
+    #[default]
+    Strip,
+    /// The whole column on the right, always there.
+    Column,
+    /// One line at the top of the screen.
+    Top,
+    /// Nothing: the column slides out of the right edge.
+    Hidden,
+}
+
+impl PanelForm {
+    pub const ALL: [PanelForm; 4] = [Self::Strip, Self::Column, Self::Top, Self::Hidden];
+
+    /// Its name in the configuration file.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Strip => "strip",
+            Self::Column => "column",
+            Self::Top => "top",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+/// The widget panel (#263).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Panel {
+    pub form: PanelForm,
 }
 
 /// The discreet dock (#38): hidden while working, shown on an empty

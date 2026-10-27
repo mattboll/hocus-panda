@@ -6,6 +6,9 @@ shell = true
 config = """
 [wallpaper]
 kind = "stars"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -21,6 +24,9 @@ kind = "stars"
 
 [appearance]
 reduced_motion = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

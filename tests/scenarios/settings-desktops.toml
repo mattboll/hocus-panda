@@ -6,6 +6,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "desktops" }
 
 [[step]]
@@ -50,6 +56,9 @@ theme = "light"
 name = "HEADLESS-1"
 desktops = 3
 desktop_names = ["Mail", "", "Music"]
+
+[panel]
+form = "column"
 """
 
 [[step]]

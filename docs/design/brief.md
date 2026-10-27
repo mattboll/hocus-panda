@@ -27,8 +27,10 @@ work, alive when you look.
   pointer, widget panel, gestures, shortcuts.
 - **Discreet dock**: hidden while working, shown on demand or when the
   desktop is empty (after a restart).
-- **Widget column on the right**, chosen over a slim strip, a top bar and a
-  hidden panel ([decision 0007](../decisions/0007-widget-column-right.md)).
+- **Widget panel as a slim strip on the right**, opening into the whole
+  column over the windows; the column always there, a top bar and a hidden
+  panel are options ([decision 0011](../decisions/0011-panel-strip-by-default.md),
+  which superseded the column of [0007](../decisions/0007-widget-column-right.md)).
 - **Per-screen desktops**; actions aim at the screen under the pointer. No
   permanent desktop indicator taking room: a compact line in the panel, and
   the switcher appears when switching.

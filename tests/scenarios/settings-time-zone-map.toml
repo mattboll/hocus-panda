@@ -9,6 +9,12 @@ shell = true
 timedated = "Europe/Paris"
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "language" }
 
 [[step]]
@@ -55,6 +61,9 @@ expect_screenshot = { output = "HEADLESS-1", reference = "settings-time-zone-map
 config = """
 [appearance]
 theme = "light"
+
+[panel]
+form = "column"
 """
 
 [[step]]

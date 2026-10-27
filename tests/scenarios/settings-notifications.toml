@@ -7,6 +7,12 @@ shell = true
 dbus = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 notify = { app = "Slack", summary = "Standup in five minutes" }
 
 [[step]]
@@ -115,6 +121,9 @@ hold_while_sharing = false
 [notifications.apps]
 Mail = "history"
 Slack = "off"
+
+[panel]
+form = "column"
 """
 
 [[step]]

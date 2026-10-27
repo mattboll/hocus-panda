@@ -892,6 +892,8 @@ pub enum Setting {
     HighContrast,
     Transparency,
     ThemePerDesktop,
+    /// The panel's form (#263).
+    PanelForm,
     Layouts,
     /// A shortcut, by its combination.
     Shortcut(String),
@@ -965,7 +967,8 @@ impl Setting {
             | Self::ReducedMotion
             | Self::HighContrast
             | Self::Transparency
-            | Self::ThemePerDesktop => Page::Appearance,
+            | Self::ThemePerDesktop
+            | Self::PanelForm => Page::Appearance,
             Self::Layouts | Self::Shortcut(_) => Page::Keyboard,
             Self::Screen(_) => Page::Screens,
             Self::DesktopCount | Self::DesktopNames => Page::Desktops,
@@ -1106,6 +1109,23 @@ fn entries(ctx: &Context, lang: Lang) -> Vec<(Setting, String, Vec<String>, Stri
             words::THEME_PER_DESKTOP.get(lang).to_owned(),
             both(words::THEME_PER_DESKTOP),
             words::NOT_YET.get(lang).to_owned(),
+        ),
+        (
+            Setting::PanelForm,
+            words::PANEL.get(lang).to_owned(),
+            [
+                both(words::PANEL),
+                words::PANEL_FORMS
+                    .iter()
+                    .flat_map(|(_, name, _)| both(*name))
+                    .collect(),
+                vec!["bar".into(), "barre".into(), "widgets".into()],
+            ]
+            .concat(),
+            words::PANEL_FORMS
+                .iter()
+                .find(|(id, _, _)| *id == ctx.config.panel.form.name())
+                .map_or_else(String::new, |(_, name, _)| name.get(lang).to_owned()),
         ),
         (
             Setting::InterfaceLanguage,

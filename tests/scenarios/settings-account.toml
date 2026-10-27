@@ -7,6 +7,12 @@ shell = true
 accounts = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "account" }
 
 [[step]]
@@ -79,6 +85,9 @@ theme = "light"
 
 [updates]
 every_hours = 24
+
+[panel]
+form = "column"
 """
 
 [[step]]

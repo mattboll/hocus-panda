@@ -3,6 +3,12 @@ renderer = "gles"
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open = { app_id = "doc", size = [400, 300], color = "#3399ff" }
 
 [[step]]
@@ -71,6 +77,9 @@ expect_blur = { at_most = 0 }
 config = """
 [appearance]
 reduced_motion = true
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -84,6 +93,9 @@ expect_blur = { at_most = 0 }
 config = """
 [appearance]
 transparency = false
+
+[panel]
+form = "column"
 """
 
 [[step]]

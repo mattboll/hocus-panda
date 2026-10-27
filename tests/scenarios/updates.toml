@@ -7,6 +7,9 @@ config = """
 [updates]
 check = "{scenario_dir}/updates/check.sh {runtime_dir}"
 install = "{scenario_dir}/updates/install.sh {runtime_dir}"
+
+[panel]
+form = "column"
 """
 
 # The first look, half a minute after the start.

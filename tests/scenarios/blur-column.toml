@@ -3,6 +3,12 @@ shell = true
 dbus = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open = { app_id = "doc", size = [500, 400], color = "#3399ff" }
 
 [[step]]

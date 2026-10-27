@@ -1,0 +1,110 @@
+description = "With [panel] form = \"top\", the panel is one line at the top (#263): this screen's desktops, the active window and its buttons, the time with the date in the middle, the agents and the tasks; windows go under it, its buttons act on the active window, and a click elsewhere on it brings the whole column out"
+outputs = ["1600x1000"]
+shell = true
+
+[[step]]
+herdr = { agents = [
+  { name = "refacto", status = "working" },
+  { name = "docs", status = "idle" },
+] }
+
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+
+[panel]
+form = "top"
+"""
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff", title = "notes.md — Editor" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+# The bar takes y 12 to 64: the work area starts under it.
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 64, 1600, 936], state = "maximized" }
+
+[[step]]
+expect_ui = { label = "notes.md — Editor", inside = [16, 12, 1568, 52] }
+
+[[step]]
+expect_ui = { label = "Restore", inside = [16, 12, 1568, 52] }
+
+[[step]]
+expect_ui = { label = "14:37" }
+
+[[step]]
+expect_ui = { label = "refacto · Panda at work" }
+
+[[step]]
+expect_ui = { label = "+1" }
+
+[[step]]
+expect_ui = { label = "Tasks ✓" }
+
+[[step]]
+expect_ui = { label = "Notif. 0" }
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+[[step]]
+advance_ms = 4500
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-top.png" }
+
+# Its buttons act on the active window.
+[[step]]
+click_ui = "Restore"
+
+[[step]]
+expect_window = { app_id = "editor", state = "normal" }
+
+# Elsewhere on it, the whole column comes out over the windows, and stays
+# until Escape.
+[[step]]
+click_ui = "14:37"
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+pointer_move = [600, 500]
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-top-out.png" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# The column's form again, live: the window goes back beside it.
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+
+[panel]
+form = "column"
+"""
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+expect_ui = { label = "Notif. 0", shown = false }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 0, 1264, 1000], state = "maximized" }

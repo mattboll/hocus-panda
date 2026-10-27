@@ -15,6 +15,9 @@ ocr = "{scenario_dir}/circle/bin/ocr"
 
 [circle]
 modifiers = "Super+Ctrl"
+
+[panel]
+form = "column"
 """
 
 [[step]]

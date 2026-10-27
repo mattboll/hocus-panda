@@ -1,6 +1,6 @@
 # 0007 — The widget panel is a column on the right
 
-Date: 2026-10-21 · Status: accepted
+Date: 2026-10-21 · Status: superseded by [0011](0011-panel-strip-by-default.md)
 
 ## Context
 

@@ -16,6 +16,9 @@ fullscreen_awake = false
 [idle.battery]
 curtain_after = 60
 sleep_after = 120
+
+[panel]
+form = "column"
 """
 
 [[step]]

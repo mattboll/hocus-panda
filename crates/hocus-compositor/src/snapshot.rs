@@ -656,13 +656,14 @@ impl State {
     }
 
     /// Where a window minimizes to: its dock icon when the dock shows, the
-    /// column otherwise, or the bottom of its screen.
+    /// panel otherwise (the column, the strip or the top bar), or the
+    /// bottom of its screen.
     fn genie_target(&self, id: WindowId, window: &Window) -> Rectangle<f64, Logical> {
         if let Some(icon) = self.dock_icon_of(id) {
             return icon;
         }
         let output = self.output_of(window).cloned();
-        if let Some(column) = output.as_ref().and_then(|o| self.column_rect(o)) {
+        if let Some(column) = output.as_ref().and_then(|o| self.panel_rect(o)) {
             let c = column.to_f64();
             return Rectangle::new(
                 (c.loc.x + c.size.w * 0.2, c.loc.y + c.size.h * 0.4).into(),

@@ -10,6 +10,9 @@ apps = ["notes"]
 
 [[agents.mcp]]
 name = "reader"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -106,6 +109,9 @@ journal_text = true
 name = "helper"
 access = "act"
 apps = ["notes"]
+
+[panel]
+form = "column"
 """
 
 [[step]]

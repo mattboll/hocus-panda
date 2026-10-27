@@ -3,6 +3,12 @@ outputs = ["1600x1000/3"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 herdr = { name = "chapito", agents = [
   { name = "refacto", status = "working" },
 ] }
@@ -24,6 +30,9 @@ name = "Website"
 [[agents.herdr]]
 socket = "{herdr:chapito}"
 desktop = 2
+
+[panel]
+form = "column"
 """
 
 # The screen's own name wins over the look's.

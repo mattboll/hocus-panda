@@ -7,6 +7,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 ai_server = { delay_ms = 30, pieces = [
   "Le build prend 4 min 10 au lieu de 1 min 30 depuis 9 h 12 : ",
   "le cache de compilation est désactivé depuis la mise à jour du paquet sccache.\n\n",
@@ -23,6 +29,9 @@ interface = "fr"
 enabled = true
 provider = "ollama"
 url = "{ai}"
+
+[panel]
+form = "column"
 """
 
 [[step]]

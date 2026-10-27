@@ -63,6 +63,7 @@ mod notify;
 mod output_spec;
 mod outputs;
 mod pandas;
+mod panel;
 mod phone;
 mod pointing;
 mod quick;

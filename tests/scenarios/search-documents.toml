@@ -18,6 +18,9 @@ folders = ["{home}/Documents"]
 [screenshots]
 folder = "{home}/Pictures/Screenshots"
 ocr = "{scenario_dir}/circle/bin/ocr"
+
+[panel]
+form = "column"
 """
 
 [[step]]

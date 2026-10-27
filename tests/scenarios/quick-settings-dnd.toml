@@ -4,6 +4,12 @@ shell = true
 dbus = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 pointer_move = [400, 400]
 
 [[step]]

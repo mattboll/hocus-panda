@@ -1,4 +1,6 @@
-//! The widget column (decision 0007): on the right of the primary screen,
+//! The widget column (decisions 0007 and 0011): on the right of the
+//! primary screen, always there in form `column`, out over the windows
+//! from the strip, the top bar or the edge in the others;
 //! from top to bottom the status row, the clock, the next meeting, the
 //! active window with its controls and the line of this screen's desktops,
 //! and the account. The desktops line and the account open popovers to the
@@ -263,6 +265,9 @@ pub enum Action {
     ShutDown,
     /// The command field was clicked: the launcher opens.
     OpenLauncher,
+    /// The top bar was clicked away from its buttons: the whole column
+    /// slides out (#263).
+    OpenPanel,
     /// Every screen capture ends.
     StopSharing,
     /// The to-do at this place in the notes is ticked.
@@ -331,8 +336,8 @@ pub struct TrayMenuEntry {
 }
 
 /// The ring of the meeting card: how close the next meeting is.
-struct Ring {
-    progress: f32,
+pub(crate) struct Ring {
+    pub(crate) progress: f32,
 }
 
 impl Draw for Ring {
@@ -367,10 +372,10 @@ impl Draw for Ring {
 
 /// A screen's desktops as dots, the shown one in the accent; one where
 /// something goes on carries its badge (#192).
-struct Dots {
-    count: usize,
-    shown: usize,
-    badges: Vec<crate::activity::Badge>,
+pub(crate) struct Dots {
+    pub(crate) count: usize,
+    pub(crate) shown: usize,
+    pub(crate) badges: Vec<crate::activity::Badge>,
 }
 
 impl Draw for Dots {
@@ -400,7 +405,7 @@ impl Draw for Dots {
     }
 }
 
-fn stroked(path: &str, size: f32) -> Icon {
+pub(crate) fn stroked(path: &str, size: f32) -> Icon {
     // The icons are constants, tested to parse.
     Icon::stroked(path, size, ICON_STROKE).unwrap_or_else(|| unreachable!("icon {path}"))
 }

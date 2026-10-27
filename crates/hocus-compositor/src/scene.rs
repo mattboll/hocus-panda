@@ -149,6 +149,34 @@ impl State {
 
     /// The blur behind each of `spots` (#37), as `build` asks: listed,
     /// drawn, or where what is behind a pane starts.
+    /// The column and its popover, front first, each on its glass.
+    fn column_elements<R>(
+        &self,
+        elements: &mut Vec<SceneElement<R>>,
+        renderer: &mut R,
+        output: &Output,
+        build: &mut Build,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let (popover, fading, column) = self.shell_elements(renderer, output);
+        let (popover_glass, column_glass) = self.shell_glass(output);
+        if let Some(popover) = popover {
+            elements.push(SceneElement::Frame(popover));
+            self.glass(elements, renderer, output, popover_glass, build);
+        }
+        if let Some(fading) = fading {
+            elements.push(SceneElement::Frame(fading));
+        }
+        if let Some(column) = column {
+            // Each agent's window, live, in its slot of the journal (#43).
+            elements.extend(self.seat_slot_elements(renderer, output));
+            elements.push(SceneElement::Frame(column));
+            self.glass(elements, renderer, output, column_glass, build);
+        }
+    }
+
     fn glass<R>(
         &self,
         elements: &mut Vec<SceneElement<R>>,
@@ -407,6 +435,10 @@ impl State {
             self.glass(&mut elements, renderer, output, self.quick_glass(), build);
         }
         elements.extend(dim.map(SceneElement::Solid));
+        let over_toasts = self.panel_out_drawn();
+        if over_toasts {
+            self.column_elements(&mut elements, renderer, output, build);
+        }
         elements.extend(self.matrix_toasts_on(renderer, output));
         let toasts = self.toast_elements(renderer, output);
         if !toasts.is_empty() {
@@ -419,20 +451,22 @@ impl State {
                 build,
             );
         }
-        let (popover, fading, column) = self.shell_elements(renderer, output);
-        let (popover_glass, column_glass) = self.shell_glass(output);
-        if let Some(popover) = popover {
-            elements.push(SceneElement::Frame(popover));
-            self.glass(&mut elements, renderer, output, popover_glass, build);
+        // At rest, the column is beside the windows' toasts; out over the
+        // windows (#263), it is over them too.
+        if !over_toasts {
+            self.column_elements(&mut elements, renderer, output, build);
         }
-        if let Some(fading) = fading {
-            elements.push(SceneElement::Frame(fading));
-        }
-        if let Some(column) = column {
-            // Each agent's window, live, in its slot of the journal (#43).
-            elements.extend(self.seat_slot_elements(renderer, output));
-            elements.push(SceneElement::Frame(column));
-            self.glass(&mut elements, renderer, output, column_glass, build);
+        // What stays of the panel, under the column that slides over it.
+        let bar = self.panel_elements(renderer, output);
+        if !bar.is_empty() {
+            elements.extend(bar);
+            self.glass(
+                &mut elements,
+                renderer,
+                output,
+                self.panel_glass(output),
+                build,
+            );
         }
         elements.extend(self.matrix_column_on(renderer, output));
         let switcher = self.switcher_elements(renderer, output);

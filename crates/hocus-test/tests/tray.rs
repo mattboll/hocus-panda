@@ -35,6 +35,8 @@ fn a_slow_tray_application_never_holds_the_loop() -> anyhow::Result<()> {
         first_run: false,
         google_caldav: None,
     })?;
+    // The column, which shows the tray (#263: the strip by default).
+    compositor.write_config("[panel]\nform = \"column\"\n")?;
     // Wait for the watcher, then register an application that takes
     // 300 ms for each of its properties (a second or more for all).
     let deadline = Instant::now() + Duration::from_secs(5);

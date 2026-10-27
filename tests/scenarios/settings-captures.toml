@@ -6,6 +6,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "captures" }
 
 [[step]]
@@ -91,6 +97,9 @@ save = false
 fps = 60
 countdown = 5
 show_keys = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

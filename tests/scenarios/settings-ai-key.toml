@@ -7,6 +7,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 ai_server = { delay_ms = 10, pieces = ["Forty", "-two."] }
 
 [[step]]

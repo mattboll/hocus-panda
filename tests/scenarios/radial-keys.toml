@@ -6,6 +6,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open = { app_id = "editor", size = [800, 500], color = "#3399ff" }
 
 # Over the shell's column, nothing.

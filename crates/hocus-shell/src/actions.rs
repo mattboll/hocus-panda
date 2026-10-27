@@ -243,6 +243,11 @@ pub fn describe(action: &Action, lang: Lang) -> Described {
             G::System,
             EVERYWHERE,
         ),
+        A::Panel => (
+            w("Show or hide the panel", "Afficher ou masquer le panneau"),
+            G::System,
+            EVERYWHERE,
+        ),
         A::ZoomOut => (w("Zoom out", "Réduire (loupe)"), G::Screens, POINTER_SCREEN),
         A::Overview => (
             w("Overview of every window", "Vue d’ensemble des fenêtres"),
@@ -399,6 +404,7 @@ pub fn catalog() -> Vec<Action> {
         A::ZoomOut,
         A::Notes,
         A::Dock,
+        A::Panel,
         A::Overview,
         A::ShowDesktop,
         A::Welcome,

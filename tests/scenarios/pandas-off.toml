@@ -8,6 +8,9 @@ shell = true
 config = """
 [pandas]
 enabled = false
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -23,6 +26,9 @@ expect_ui = { label = "Panda watching a video", shown = false }
 config = """
 [pandas]
 enabled = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

@@ -3,6 +3,12 @@ outputs = ["1280x800", "1280x800+1280+0"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "wallpaper" }
 
 [[step]]
@@ -59,6 +65,9 @@ kind = "image"
 image = "~/Pictures/hills.jpg"
 mode = "fit"
 colour = "#e9e6df"
+
+[panel]
+form = "column"
 """
 
 [[step]]

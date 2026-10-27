@@ -5,6 +5,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "lock" }
 
 [[step]]
@@ -56,6 +62,9 @@ theme = "light"
 
 [idle]
 lock = false
+
+[panel]
+form = "column"
 """
 
 [[step]]

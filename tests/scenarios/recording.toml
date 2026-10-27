@@ -9,6 +9,9 @@ config = """
 folder = "{runtime_dir}/videos"
 hardware = false
 countdown = 2
+
+[panel]
+form = "column"
 """
 
 [[step]]

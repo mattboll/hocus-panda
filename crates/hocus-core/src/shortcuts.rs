@@ -85,6 +85,9 @@ pub enum Action {
     ZoomOut,
     /// Shows or hides the dock (#38).
     Dock,
+    /// The whole column out over the windows, or back, when the panel is
+    /// a strip, a bar or hidden (#263).
+    Panel,
     /// Every screen's windows in a grid, or closes it (#86).
     Overview,
     /// The desktop of the screen under the pointer, its windows out of the
@@ -200,6 +203,7 @@ impl fmt::Display for Action {
             Self::ZoomIn => write!(f, "zoom-in"),
             Self::ZoomOut => write!(f, "zoom-out"),
             Self::Dock => write!(f, "dock"),
+            Self::Panel => write!(f, "panel"),
             Self::Overview => write!(f, "overview"),
             Self::ShowDesktop => write!(f, "show-desktop"),
             Self::Welcome => write!(f, "welcome"),
@@ -284,6 +288,7 @@ impl FromStr for Action {
             "zoom-in" => bare(Self::ZoomIn),
             "zoom-out" => bare(Self::ZoomOut),
             "dock" => bare(Self::Dock),
+            "panel" => bare(Self::Panel),
             "overview" => bare(Self::Overview),
             "show-desktop" => bare(Self::ShowDesktop),
             "welcome" => bare(Self::Welcome),
@@ -465,6 +470,7 @@ pub fn defaults() -> Vec<(String, Action)> {
         ("Super+Equal", Action::ZoomIn),
         ("Super+Minus", Action::ZoomOut),
         ("Super+D", Action::Dock),
+        ("Super+C", Action::Panel),
         ("Print", Action::screenshot(ScreenshotMode::Screen)),
         ("Super+Print", Action::screenshot(ScreenshotMode::All)),
         ("Shift+Print", Action::screenshot(ScreenshotMode::Region)),

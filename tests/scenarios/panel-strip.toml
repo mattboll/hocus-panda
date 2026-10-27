@@ -1,0 +1,225 @@
+description = "By default the panel is a 72 px strip on the right (#263): the time stacked, the next meeting, a panda per active agent, the to-dos and notifications counted, the account; a maximized window fills the screen but the strip and its margin. The pointer resting on the strip slides the whole column over the windows, and leaving it slides it back; a click, Escape and Super+C too; with reduced motion it does not slide"
+outputs = ["1600x1000"]
+shell = true
+dbus = true
+motion = true
+
+# A herdr of the test's own, never the user's.
+[[step]]
+herdr = { agents = [
+  { name = "refacto", status = "working" },
+  { name = "tests", status = "working" },
+  { name = "docs", status = "idle" },
+  { name = "release-notes", status = "idle" },
+  { name = "ci-cache", status = "idle" },
+] }
+
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+"""
+
+[[step]]
+herdr_status = { agent = "refacto", status = "blocked", label = "Push the branch to origin?" }
+
+[[step]]
+notify = { app = "Chat", summary = "Lea", body = "The dock mockups are in the thread.", timeout_ms = 1000 }
+
+# A to-do, from the notes.
+[[step]]
+keys = "super+49"
+
+[[step]]
+type = "- [ ] review the merge request"
+
+[[step]]
+key = 28
+
+[[step]]
+key = 1
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#3399ff" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+# The strip takes x 1512 to 1584: the work area stops there.
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 0, 1512, 1000], state = "maximized" }
+
+[[step]]
+expect_ui = { label = "Time: 14:37", inside = [1512, 16, 72, 968] }
+
+[[step]]
+expect_ui = { label = "refacto · Panda waiting for an answer" }
+
+[[step]]
+expect_ui = { label = "tests · Panda at work" }
+
+[[step]]
+expect_ui = { label = "3 more agents" }
+
+[[step]]
+expect_ui = { label = "Tasks: 1 to do" }
+
+[[step]]
+expect_ui = { label = "Notifications: 2" }
+
+[[step]]
+expect_ui = { label = "Account: Alex" }
+
+# The column is in.
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# Once the pandas have moved their moment and the toast has gone.
+[[step]]
+advance_ms = 4500
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-strip.png" }
+
+[[step]]
+expect_idle = { for_ms = 500 }
+
+# Passing over it does nothing; resting on it brings the column out.
+[[step]]
+pointer_move = [1548, 500]
+
+[[step]]
+advance_ms = 100
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# Halfway out, over the maximized window.
+[[step]]
+advance_ms = 180
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-strip-sliding.png" }
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-strip-out.png" }
+
+# Over the windows: they keep their place.
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 0, 1512, 1000], state = "maximized" }
+
+[[step]]
+expect_idle = { for_ms = 500 }
+
+# Within the column, it stays; leaving it, it slides back.
+[[step]]
+pointer_move = [1300, 500]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-strip.png" }
+
+# A click on the strip brings it out at once; Escape sends it back.
+[[step]]
+pointer_move = [1548, 900]
+
+[[step]]
+click = "left"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# Still on the strip, resting there again does not bring it back.
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# Super+C, the pointer elsewhere: it stays out until asked again.
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+keys = "super+c"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+pointer_move = [600, 400]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+keys = "super+c"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# With reduced motion it is out and back at once.
+[[step]]
+config = """
+[agents]
+herdr_socket = "{herdr}"
+
+[appearance]
+reduced_motion = true
+"""
+
+[[step]]
+pointer_move = [1548, 900]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_ui = { label = "Command field" }
+
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }

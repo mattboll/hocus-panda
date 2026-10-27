@@ -9,6 +9,9 @@ child_env = { PATH = "{scenario_dir}/phone/none" }
 config = """
 [phone]
 adb = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

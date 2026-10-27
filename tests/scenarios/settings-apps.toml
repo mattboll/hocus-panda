@@ -8,6 +8,12 @@ data_dirs = ["../fixtures/system/data"]
 config_dirs = ["../fixtures/system/config"]
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "apps" }
 
 [[step]]
@@ -86,6 +92,9 @@ expect_screenshot = { output = "HEADLESS-1", reference = "settings-apps.png" }
 config = """
 [appearance]
 theme = "light"
+
+[panel]
+form = "column"
 """
 
 [[step]]

@@ -3,6 +3,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open = { app_id = "remote", size = [500, 400], color = "#2b2f36", inhibit_shortcuts = true }
 
 [[step]]

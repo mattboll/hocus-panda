@@ -4,6 +4,12 @@ shell = true
 dbus = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 phone = { name = "Pixel 8", battery = 82 }
 
 [[step]]

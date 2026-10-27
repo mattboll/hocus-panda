@@ -4,6 +4,12 @@ shell = true
 dbus = true
 needs = ["notify-send"]
 
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
 # On the screen with the column: the toast stays left of it (x 944).
 [[step]]
 pointer_move = [400, 400]

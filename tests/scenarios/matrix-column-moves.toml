@@ -10,6 +10,9 @@ motion = true
 config = """
 [appearance]
 theme = "matrix"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -58,6 +61,9 @@ config = """
 [appearance]
 theme = "matrix"
 reduced_motion = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

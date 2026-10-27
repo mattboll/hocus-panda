@@ -5,6 +5,12 @@ shell = true
 goa = { identity = "alex.panda@example.com", dir = "calendar/google", running = false }
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 expect_calendars = { online = "absent", online_accounts = 0, events = 0 }
 
 [[step]]

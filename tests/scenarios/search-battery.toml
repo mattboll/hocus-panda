@@ -8,6 +8,12 @@ devices = true
 home = "../fixtures/search-home"
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 charger = false
 
 [[step]]
@@ -17,6 +23,9 @@ expect_ui = { label = "Battery 80%" }
 config = """
 [search]
 folders = ["{home}/Documents"]
+
+[panel]
+form = "column"
 """
 
 [[step]]

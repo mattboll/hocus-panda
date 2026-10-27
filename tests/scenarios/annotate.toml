@@ -6,6 +6,9 @@ shell = true
 config = """
 [screenshots]
 folder = "{runtime_dir}/shots"
+
+[panel]
+form = "column"
 """
 
 [[step]]

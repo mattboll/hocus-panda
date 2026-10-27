@@ -6,6 +6,12 @@ goa = { identity = "alex.panda@example.com", dir = "calendar/google" }
 child_env = { PATH = "{scenario_dir}/calendar/bin" }
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 expect_calendars = { online = "installed", online_accounts = 1, contains = ["Family dinner"], error = false }
 
 [[step]]
