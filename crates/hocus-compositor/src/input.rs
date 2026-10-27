@@ -362,6 +362,7 @@ impl State {
         self.activity();
         // Locked: only a lock client's surface sees the pointer.
         if self.locked() {
+            self.set_frame_cursor(None);
             let under = self.lock_surface_under(location);
             pointer.motion(
                 self,
@@ -426,6 +427,12 @@ impl State {
         } else {
             self.surface_under(location)
         };
+        // Over a window's frame band, the cursor shows what a press there
+        // starts; a grab keeps the shape it began with.
+        if !pointer.is_grabbed() {
+            let band = !over_shell && !self.over_layer(location);
+            self.set_frame_cursor(band.then(|| self.frame_cursor_at(location)).flatten());
+        }
         pointer.motion(
             self,
             under,
@@ -527,11 +534,8 @@ impl State {
 
         // Over a third-party bar or overlay, a click is the surface's: no
         // window is focused or grabbed.
-        let on_layer = state == ButtonState::Pressed
-            && !pointer.is_grabbed()
-            && self
-                .layer_surface_under(at, &crate::handlers::layer_shell::ABOVE)
-                .is_some();
+        let on_layer =
+            state == ButtonState::Pressed && !pointer.is_grabbed() && self.over_layer(at);
         if on_layer {
             self.layer_click(at);
         } else if state == ButtonState::Pressed && !pointer.is_grabbed() {
@@ -575,6 +579,13 @@ impl State {
             },
         );
         pointer.frame(self);
+    }
+
+    /// Whether a third-party bar or overlay is under `pos`: its own, not a
+    /// window's frame band.
+    pub(crate) fn over_layer(&self, pos: Point<f64, Logical>) -> bool {
+        self.layer_surface_under(pos, &crate::handlers::layer_shell::ABOVE)
+            .is_some()
     }
 
     fn on_pointer_axis<I: InputBackend>(&mut self, event: I::PointerAxisEvent) {

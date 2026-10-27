@@ -432,6 +432,9 @@ pub enum Step {
     ExpectNoWindow(String),
     /// The app id of the focused window.
     ExpectFocus(String),
+    /// The cursor the pointer shows, as the scene says it: a shape's name
+    /// (`default`, `e-resize`, `move`…), `surface` or `hidden`.
+    ExpectCursor(String),
     /// The desktop an output shows, from 1.
     ExpectShown(ExpectShown),
     /// Sets a screen through wlr-output-management, as wlr-randr would.
@@ -562,6 +565,10 @@ pub struct OpenWindow {
     /// callbacks as applications are (#229).
     #[serde(default)]
     pub marks: bool,
+    /// The cursor shape it sets when the pointer comes onto its window
+    /// (cursor-shape-v1): `text`, `pointer`, `crosshair`, `wait`, `help`.
+    #[serde(default)]
+    pub cursor: Option<String>,
     /// Exposes an accessibility tree on a private accessibility bus the
     /// compositor reads (#175), its elements drawn where the tree says:
     /// `compose` (a subject, a password, Send, Send later, a disabled
@@ -1269,6 +1276,7 @@ impl fmt::Display for Step {
             Self::ExpectWindow(e) => write!(f, "expect_window {}", e.app_id),
             Self::ExpectNoWindow(app_id) => write!(f, "expect_no_window {app_id}"),
             Self::ExpectFocus(app_id) => write!(f, "expect_focus {app_id}"),
+            Self::ExpectCursor(name) => write!(f, "expect_cursor {name}"),
             Self::ExpectStack(_) => write!(f, "expect_stack"),
             Self::ExpectReceived(e) => write!(f, "expect_received {} `{}`", e.app_id, e.event),
             Self::ExpectBudget(e) => write!(f, "expect_budget {} ms", e.max_ms),
@@ -2716,6 +2724,24 @@ impl Run<'_> {
                     self.compositor.dispatch(Duration::from_millis(10))?;
                 }
             }
+            Step::ExpectCursor(expected) => {
+                // A client's shape comes after its pointer entered.
+                let deadline = Instant::now() + SETTLE_TIMEOUT;
+                loop {
+                    let Reply::Scene(scene) = self.request(Request::Scene)? else {
+                        anyhow::bail!("the compositor did not answer with its scene");
+                    };
+                    if scene.cursor == *expected {
+                        return Ok(());
+                    }
+                    anyhow::ensure!(
+                        Instant::now() < deadline,
+                        "cursor: expected {expected}, got {}",
+                        scene.cursor
+                    );
+                    self.compositor.dispatch(Duration::from_millis(10))?;
+                }
+            }
             Step::ExpectStack(expected) => {
                 let stack: Vec<String> = self
                     .windows()?
@@ -2817,6 +2843,7 @@ impl Run<'_> {
                 marks: open.marks,
                 elements,
                 min_size: open.min_size.map(|[w, h]| (w, h)),
+                cursor: open.cursor.clone(),
             },
         )?);
         self.compositor

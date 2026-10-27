@@ -12,6 +12,7 @@ use smithay::{
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
     desktop::Window,
+    input::pointer::CursorIcon,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::LoopHandle,
     utils::Transform,
@@ -22,6 +23,7 @@ use hocus_api::Event;
 use crate::{
     App, BACKGROUND, BackendState, State,
     capture::{self, Pixels},
+    cursor::Shown,
     output_spec::DEFAULT_DESKTOPS,
     outputs::{Head, Setting},
 };
@@ -35,6 +37,9 @@ pub struct WinitBackend {
     damage_tracker: OutputDamageTracker,
     /// Frames presented, for presentation-time.
     presented: u64,
+    /// The shape last asked of the host's cursor, which it draws over the
+    /// window; none while hidden.
+    host_cursor: Option<CursorIcon>,
 }
 
 impl std::fmt::Debug for WinitBackend {
@@ -93,6 +98,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         output,
         damage_tracker,
         presented: 0,
+        host_cursor: Some(CursorIcon::Default),
     })
 }
 
@@ -129,6 +135,28 @@ fn on_event(app: &mut App, event: WinitEvent) {
 }
 
 impl WinitBackend {
+    /// The host's cursor takes the shape the pointer shows: a client's own
+    /// image is not passed on, the host's arrow stands for it.
+    fn show_host_cursor(&mut self, state: &State) {
+        let wanted = match state.shown_cursor() {
+            Shown::Hidden => None,
+            Shown::Surface(_) => Some(CursorIcon::Default),
+            Shown::Named(icon) => Some(icon),
+        };
+        if wanted == self.host_cursor {
+            return;
+        }
+        let window = self.backend.window();
+        match wanted {
+            Some(icon) => {
+                window.set_cursor(icon);
+                window.set_cursor_visible(true);
+            }
+            None => window.set_cursor_visible(false),
+        }
+        self.host_cursor = wanted;
+    }
+
     /// Asks for a frame only when something changed: nothing is drawn at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
         if state.needs_redraw {
@@ -192,6 +220,7 @@ impl WinitBackend {
         state.paint_backdrop(self.backend.renderer(), &self.output);
         state.paint_glass(self.backend.renderer(), &self.output);
         state.paint_crt(self.backend.renderer(), &self.output);
+        self.show_host_cursor(state);
         let damage = {
             // The host draws the cursor of the nested window.
             let elements = state.scene_elements(self.backend.renderer(), &self.output, false);

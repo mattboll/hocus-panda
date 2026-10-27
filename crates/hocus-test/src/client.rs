@@ -52,6 +52,10 @@ use wayland_client::{
     },
 };
 use wayland_protocols::{
+    wp::cursor_shape::v1::client::{
+        wp_cursor_shape_device_v1::{Shape, WpCursorShapeDeviceV1},
+        wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+    },
     wp::idle_inhibit::zv1::client::{
         zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1,
         zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
@@ -109,6 +113,23 @@ pub struct ClientOptions {
     /// The smallest size it says it takes, `(width, height)`; its own size
     /// by default.
     pub min_size: Option<(u32, u32)>,
+    /// The cursor shape it sets when the session's pointer comes onto its
+    /// window (cursor-shape-v1): `text`, `pointer`, `crosshair`, `wait`,
+    /// `help`; none by default, as a client that leaves the cursor be.
+    pub cursor: Option<String>,
+}
+
+/// A cursor-shape-v1 shape by its name, among those a test asks for.
+fn cursor_shape(name: &str) -> Option<Shape> {
+    Some(match name {
+        "default" => Shape::Default,
+        "text" => Shape::Text,
+        "pointer" => Shape::Pointer,
+        "crosshair" => Shape::Crosshair,
+        "wait" => Shape::Wait,
+        "help" => Shape::Help,
+        _ => return None,
+    })
 }
 
 /// An element a test client draws: a rectangle of its window, in surface
@@ -393,6 +414,18 @@ impl SolidWindow {
             _ => Vec::new(),
         };
 
+        let cursor_shape = match options.cursor.as_deref() {
+            None => None,
+            Some(name) => {
+                let shape = cursor_shape(name)
+                    .with_context(|| format!("no cursor shape named {name} in the test client"))?;
+                let manager: WpCursorShapeManagerV1 = globals
+                    .bind(&qh, 1..=1, ())
+                    .context("no cursor shape manager")?;
+                Some((manager, shape))
+            }
+        };
+
         let pool = SlotPool::new((self.width * self.height * 4) as usize, &shm)?;
         let mut client = Client {
             spec: self,
@@ -418,6 +451,8 @@ impl SolidWindow {
             password: options.password,
             marks: options.marks.then(Marks::default),
             elements: options.elements,
+            cursor_shape,
+            cursor_device: None,
             pointers: vec![None; bound.len()],
             seat_names: vec![String::new(); bound.len()],
             keymaps: std::collections::HashMap::new(),
@@ -527,6 +562,10 @@ struct Client {
     marks: Option<Marks>,
     /// The elements it draws.
     elements: Vec<Drawn>,
+    /// The cursor shape it sets for the session's pointer, and the device
+    /// it sets it with once it has that pointer.
+    cursor_shape: Option<(WpCursorShapeManagerV1, Shape)>,
+    cursor_device: Option<WpCursorShapeDeviceV1>,
     /// Where each seat's pointer is on its window, by the order it was
     /// bound in.
     pointers: Vec<Option<(f64, f64)>>,
@@ -747,7 +786,12 @@ impl Dispatch<wl_seat::WlSeat, usize> for Client {
                 capabilities: WEnum::Value(caps),
             } => {
                 if caps.contains(wl_seat::Capability::Pointer) {
-                    seat.get_pointer(qh, *i);
+                    let pointer = seat.get_pointer(qh, *i);
+                    if *i == 0
+                        && let Some((manager, _)) = &client.cursor_shape
+                    {
+                        client.cursor_device = Some(manager.get_pointer(&pointer, qh, ()));
+                    }
                 }
                 if caps.contains(wl_seat::Capability::Keyboard) {
                     seat.get_keyboard(qh, *i);
@@ -774,10 +818,17 @@ impl Dispatch<wl_pointer::WlPointer, usize> for Client {
     ) {
         match event {
             wl_pointer::Event::Enter {
+                serial,
                 surface_x,
                 surface_y,
                 ..
             } => {
+                if *i == 0
+                    && let (Some(device), Some((_, shape))) =
+                        (&client.cursor_device, &client.cursor_shape)
+                {
+                    device.set_shape(serial, *shape);
+                }
                 client.point(*i, Some((surface_x, surface_y)));
                 client.record_on(*i, ClientEvent::PointerEnter);
             }
@@ -1216,6 +1267,30 @@ impl Dispatch<ZwpKeyboardShortcutsInhibitorV1, ()> for Client {
         _: &mut Self,
         _: &ZwpKeyboardShortcutsInhibitorV1,
         _: <ZwpKeyboardShortcutsInhibitorV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WpCursorShapeManagerV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &WpCursorShapeManagerV1,
+        _: <WpCursorShapeManagerV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WpCursorShapeDeviceV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &WpCursorShapeDeviceV1,
+        _: <WpCursorShapeDeviceV1 as wayland_client::Proxy>::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,

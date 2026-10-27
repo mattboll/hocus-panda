@@ -1,0 +1,171 @@
+description = "Over a window's frame band the cursor shows what a press there starts, keeps it while the window resizes, and is the client's inside"
+outputs = ["1280x800"]
+
+# At (440, 250), 400×300; it sets the text cursor when the pointer comes in.
+[[step]]
+open = { app_id = "doc", size = [400, 300], color = "#33cc66", cursor = "text" }
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+expect_cursor = "text"
+
+# The right band.
+[[step]]
+pointer_move = [844, 400]
+
+[[step]]
+expect_cursor = "e-resize"
+
+# A drag from it widens the window, the shape held all along, even with the
+# pointer off the band.
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [894, 400]
+
+[[step]]
+pointer_move = [944, 640]
+
+[[step]]
+expect_cursor = "e-resize"
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [440, 250, 500, 300] }
+
+[[step]]
+expect_cursor = "default"
+
+# 12 px from the bottom-right corner, along the bottom band and along the
+# right one: the corner.
+[[step]]
+pointer_move = [928, 554]
+
+[[step]]
+expect_cursor = "se-resize"
+
+[[step]]
+pointer_move = [944, 538]
+
+[[step]]
+expect_cursor = "se-resize"
+
+# Farther along, the edge alone.
+[[step]]
+pointer_move = [690, 554]
+
+[[step]]
+expect_cursor = "s-resize"
+
+[[step]]
+pointer_move = [436, 400]
+
+[[step]]
+expect_cursor = "w-resize"
+
+# The top band moves the window, but at its corners.
+[[step]]
+pointer_move = [690, 246]
+
+[[step]]
+expect_cursor = "move"
+
+[[step]]
+pointer_move = [450, 246]
+
+[[step]]
+expect_cursor = "nw-resize"
+
+[[step]]
+pointer_move = [930, 246]
+
+[[step]]
+expect_cursor = "ne-resize"
+
+[[step]]
+pointer_move = [436, 540]
+
+[[step]]
+expect_cursor = "sw-resize"
+
+# Back inside, the client's.
+[[step]]
+pointer_move = [690, 400]
+
+[[step]]
+expect_cursor = "text"
+
+# The corner resizes as it shows: both ways.
+[[step]]
+pointer_move = [928, 554]
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [948, 574]
+
+[[step]]
+expect_cursor = "se-resize"
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [440, 250, 520, 320] }
+
+# Still over the band once let go.
+[[step]]
+expect_cursor = "se-resize"
+
+# Alt+right drag resizes from the quarter under the pointer, and shows it.
+[[step]]
+pointer_move = [600, 300]
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+press = "right"
+
+[[step]]
+expect_cursor = "nw-resize"
+
+[[step]]
+pointer_move = [580, 290]
+
+[[step]]
+release = "right"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+expect_window = { app_id = "doc", geometry = [420, 240, 540, 330] }
+
+# A press on the top band moves the window, the move shape held.
+[[step]]
+pointer_move = [690, 236]
+
+[[step]]
+expect_cursor = "move"
+
+[[step]]
+press = "left"
+
+[[step]]
+pointer_move = [700, 300]
+
+[[step]]
+expect_cursor = "move"
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_not_received = { app_id = "doc", event = "button 272 pressed" }

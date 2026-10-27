@@ -23,7 +23,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 
 - Floating windows, cascade placement on the screen under the pointer
 - Work area that reserves the panel
-- Move (Alt+drag), resize (edges, Alt+right drag)
+- Move (Alt+drag, the top edge), resize (edges, Alt+right drag); over a window's edges the cursor shows the resize it starts (corners reach 16 px along each edge) or the move, and keeps it while the window moves or resizes
 - Drag a maximized window out of maximize, with resistance
 - Magnetic screen edges and window edges
 - Drag-to-snap with preview: halves, top = maximize, quarters

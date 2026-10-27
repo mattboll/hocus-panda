@@ -1172,6 +1172,12 @@ pub struct Scene {
     pub outputs: Vec<SceneOutput>,
     pub focused: Option<u64>,
     pub pointer: Point,
+    /// The cursor the pointer shows: its shape's name as cursor-shape-v1
+    /// and CSS say it (`default`, `text`, `e-resize`, `move`…), the
+    /// compositor's over a window's frame band, `surface` for a client's
+    /// own image, `hidden`.
+    #[serde(default)]
+    pub cursor: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
