@@ -23,8 +23,11 @@ to reproduce them.
   for, bytes held. Test clients run in threads of their own and are not
   counted.
 - **Wall-clock timings**: startup, a turn of the loop at rest, input to
-  photon, opening the launcher (and again right after a search) and the
-  settings, frame times (`hocus-test`'s `timings`).
+  photon, opening the launcher (again right after a search, in each of its
+  modes, on the other screen) and the settings, frame times (`hocus-test`'s
+  `timings`). Each launcher row is the least of five openings, each from
+  the closed card: what the code costs on a machine busy with something
+  else.
 
 ## Budgets that gate a build
 
@@ -205,6 +208,62 @@ before, with 194,748 allocations instead of 194,755. Their desktops
 switching hold 0.85 MB more: the shadows of the panels the switches show
 are three textures, kept for the next switch as windows' are.
 
+## The launcher's modes, #288
+
+The launcher opens on more than the grid: the clipboard history
+(Super+V), emoji (Super+.), the palette (Super+P), the notes (Super+N)
+and a task to add (the column's button). Only the grid is drawn ahead
+of time (#242): every other opening, and one on the other screen, draws
+the whole card on the loop. Since #281 that is under a frame. In a
+release build at scale 2, the card is laid out (0.4 ms), drawn by
+vello_cpu (2.1–2.8 ms for its 1720 × 1030 pixels) and copied into its
+buffer (0.6 ms); then comes the first frame, in pixman. What cost more:
+
+- **Emoji looked through every emoji's names at each opening.** The
+  hint shows the thumbs up in the chosen skin tone, found by a search of
+  about 1,900 names, each folded (lower case, without accents) at each
+  search; each recent emoji was found by copying every glyph. That was
+  4.6–5.1 ms. The sample is now found by its glyph, glyphs are compared
+  without a copy, and the names are folded once, the first time emoji
+  are searched: a search typed in the card no longer folds them either.
+- **The notes were laid out and drawn twice.** Opening them reads the
+  file again; the same notes coming back built the rows again and drew
+  them a second time before the first frame (2.2 ms). The same notes
+  now change nothing.
+- **Pixman converted every pixel of the shell's buffers.** The toolkit
+  draws red first, the screens' and clients' buffers blue first; the
+  launcher's buffer and the wallpaper were in the toolkit's order, and
+  pixman has no fast path from one to the other. An element put in
+  front of everything moves those behind it back in the stack, which
+  damages all of them: the launcher opening draws the whole wallpaper
+  again. The first frame took 5.5–5.8 ms, and the one after it closes
+  2.7–2.9 ms. The shell's buffers are now in the screens' order, put so
+  as they are copied (the wallpaper on its worker): 3.9–4.2 ms and
+  1.5–1.6 ms. Every reference screenshot is drawn as before.
+
+`timings` measures each mode with what a desktop in use lists: twelve
+copies in the history, eight recent emoji, eight notes. The same machine,
+loaded (other builds running), the builds run alternately (before, with
+the first two changes, with all three), three runs of each, each row the
+least of five openings:
+
+| Opening the launcher, to its first frame | Before | Emoji and notes | All three |
+|---|---|---|---|
+| On the grid, drawn as it opens (#242) | 5.6–5.8 ms | 5.6–6.2 ms | 4.4–4.7 ms |
+| Again right after a search | 11.6–12.1 ms | 11.7–12.1 ms | 10.2–10.3 ms |
+| On the clipboard history | 10.0–10.1 ms | 10.0–10.1 ms | 8.2–8.5 ms |
+| On emoji | 14.1–14.9 ms | 9.7–10.1 ms | 8.1–8.3 ms |
+| On the palette | 10.6–11.1 ms | 10.5–11.0 ms | 9.1–9.4 ms |
+| On the notes | 12.2–13.0 ms | 9.9–10.4 ms | 8.4–8.8 ms |
+| On a task to add | 9.5–9.6 ms | 9.2–9.5 ms | 7.8–8.4 ms |
+| On the other screen than it was drawn on | 11.2–11.6 ms | 11.4–11.6 ms | 8.6–8.8 ms |
+
+CI's runner was 1.4–1.6 times as slow on "again right after a search"
+before (16.2–19.0 ms, one opening each run). The counted budgets are
+unchanged: at rest 209,200 allocations; the launcher's second opening
+318 of the first's 5,012; the twenty windows opening 195,548 instead of
+195,544 (within a handful from run to run), holding the same 10.02 MB.
+
 ## Reproducing
 
 ```sh
@@ -259,8 +318,13 @@ tenth Mesa's software rasterizer.
 - **Opening the launcher where it was not drawn as it opens draws its
   whole card on the loop**: within a second of closing it, on another
   screen than the pointer was on, or in another mode (the history, emoji,
-  the palette, the notes). Its shadow is no longer drawn with it (#281),
-  about two thirds of it; the rest is the card itself.
+  the palette, the notes, a task). It is under a frame since #281 and
+  #288 (about 3.5 ms, then the first frame); drawing each mode ahead too
+  would cost a buffer each.
+- **An element put in front of everything damages all those behind
+  it**: smithay's damage tracker counts an element's place in the stack
+  from the front, so the launcher, a toast or a popup opening draws the
+  whole wallpaper again on the screen it shows on.
 - **Night light ticks every 30 s while on**, and asks for a redraw each
   time; the annotation window still damages all of itself on each draw.
 - **smithay's `Output::name()` copies the name** at every call, and
