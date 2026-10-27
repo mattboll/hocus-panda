@@ -36,7 +36,7 @@ updates the budget in the same pull request, with the numbers.
 
 | Budget | Where | Measured | Budget |
 |---|---|---|---|
-| At rest, two screens and the shell, 60 s on a virtual clock | `budgets` | 1 frame (the column's clock turning a minute) and 1 scene per screen, no handler run, 209,500 allocations (29 a turn of the loop), 4.1 MB fewer held | frames `[1, 0]`, scenes `[1, 1]`, no handler, ≤ 230,000 allocations, nothing more held |
+| At rest, two screens and the shell, 60 s on a virtual clock | `budgets` | 1 frame (the column's clock turning a minute) and 1 scene per screen, no handler run, 209,500 allocations (29 a turn of the loop), 4.1 MB fewer held, or 316 kB more when a buffer of the start went before the minute | frames `[1, 0]`, scenes `[1, 1]`, no handler, ≤ 230,000 allocations, ≤ 512 kB more held |
 | At rest, the same, 60 s of real time | `budgets` | the watchdog 60 times, the column's clock once, its frame, the session saved once after the start | anything for the watchdog; at most 2 for the column's clock, 2 for the wallpaper's light (every ten minutes), 4 frames, 2 session saves; nothing else |
 | Twenty windows open on two screens | `budget-twenty-windows` | frames `[160, 150]`, scenes `[320, 320]`, 180,600 allocations, 376 MB asked for, 9.1 MB held | `[176, 165]`, `[352, 352]`, 199,000, 414 MB, 10.5 MB |
 | Their desktops switch, three times on each screen | `budget-twenty-windows` | frames `[23, 21]`, scenes `[102, 102]`, 59,950 allocations, 91 MB, 0.9 MB | `[26, 24]`, `[113, 113]`, 66,000, 101 MB, 1 MB |

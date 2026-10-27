@@ -24,6 +24,14 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 /// turn), with a margin of 10 %.
 const REST_ALLOCATIONS: u64 = 230_000;
 
+/// What the loop may hold more after that minute. The minute's new digits
+/// are laid out and kept (about 316 kB measured), and whether a buffer of
+/// the start is let go before the minute or during it depends on when its
+/// release came, so `held` is either that or 4 MB less (#269). A leak at
+/// rest grows minute after minute: over 90 minutes the loop held 190 kB
+/// more in all, the wallpapers' light aside.
+const REST_HELD: i64 = 512 * 1024;
+
 /// The desktop of the scenarios: a laptop panel at scale 2 and a wide
 /// screen, the shell, windows moving as in a session.
 fn options(watchdog: Option<WatchdogConfig>) -> HarnessOptions {
@@ -113,7 +121,11 @@ fn at_rest_two_screens_draw_only_the_minute_turning() -> anyhow::Result<()> {
         "{} allocations at rest, budget {REST_ALLOCATIONS}",
         allocated.count
     );
-    assert!(allocated.held <= 0, "{} bytes more held", allocated.held);
+    assert!(
+        allocated.held <= REST_HELD,
+        "{} bytes more held, budget {REST_HELD}",
+        allocated.held
+    );
     Ok(())
 }
 
