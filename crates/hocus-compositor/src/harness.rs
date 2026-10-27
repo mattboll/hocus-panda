@@ -291,6 +291,12 @@ impl Headless {
         self.app.state.wallpapers_ready()
     }
 
+    /// Whether the applications read at start off the loop came in, when
+    /// the shell reads them: the dock holds them from then on (#287).
+    pub fn apps_read(&self) -> bool {
+        self.app.state.launcher.is_none() || self.app.state.dock.entries_read
+    }
+
     /// XWayland's display number, when it runs.
     pub fn x11_display(&self) -> Option<u32> {
         self.app.state.xdisplay

@@ -56,6 +56,9 @@ pub struct Dock {
     pub entries: Vec<Entry>,
     /// Bumped when the entries are read again.
     pub entries_generation: u64,
+    /// Whether the entries read at start came in, changed or not: until
+    /// then the dock may not hold what it will (tests wait for it).
+    pub entries_read: bool,
     items: Vec<Item>,
     /// What the items were built from, summed up: they are built again
     /// only when it changes, not after every turn of the loop (#88).
@@ -179,6 +182,22 @@ impl State {
         items
     }
 
+    /// Where the dock holding `apps` apps goes on `output`, output-local:
+    /// centred on the work area, beside the panel; its picture's room for
+    /// the shadow puts the pill as far from the bottom edge.
+    fn dock_place(&self, output: &Output, apps: usize) -> Point<i32, Logical> {
+        let size = DockView::size(apps);
+        let area = self.work_area(output);
+        let origin = self
+            .space
+            .output_geometry(output)
+            .map_or(area.loc, |g| g.loc);
+        Point::from((
+            area.loc.x - origin.x + ((area.size.w as f32 - size.w) / 2.0).round() as i32,
+            area.loc.y - origin.y + area.size.h - size.h.round() as i32,
+        ))
+    }
+
     /// The shortcut: shows it, or hides it.
     pub fn toggle_dock(&mut self) {
         self.dock.toggled = !self.dock.toggled;
@@ -260,22 +279,21 @@ impl State {
             }
             let apps: Vec<DockApp> = self.dock.items.iter().map(|i| i.app.clone()).collect();
             let view = DockView::new(theme.clone(), lang, scale, &apps);
-            let size = DockView::size(apps.len());
-            let area = self.work_area(&output);
-            let origin = self
-                .space
-                .output_geometry(&output)
-                .map_or(area.loc, |g| g.loc);
-            // Centred; its picture's room for the shadow puts the pill as
-            // far from the bottom edge.
-            let place = Point::from((
-                area.loc.x - origin.x + ((area.size.w as f32 - size.w) / 2.0).round() as i32,
-                area.loc.y - origin.y + area.size.h - size.h.round() as i32,
-            ));
+            let place = self.dock_place(&output, apps.len());
             let mut panel = Panel::new(view);
             panel.upload(&[]);
             self.dock.panel = Some((output.name(), place, panel));
             self.needs_redraw = true;
+        } else {
+            // The work area changes on its own: the panel takes another
+            // form, or is placed after the dock was (#287).
+            let place = self.dock_place(&output, self.dock.items.len());
+            if let Some((_, at, _)) = &mut self.dock.panel
+                && *at != place
+            {
+                *at = place;
+                self.needs_redraw = true;
+            }
         }
         let attention = self.dock.items.iter().any(|i| i.app.attention);
         if self.dock.hint.as_ref().is_none_or(|(a, _)| *a != attention) {
