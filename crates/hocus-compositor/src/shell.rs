@@ -20,7 +20,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
             element::{
                 Kind,
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+                memory::{MemoryBuffer, MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             },
         },
     },
@@ -190,19 +190,38 @@ pub fn start(
     }
 }
 
-/// Premultiplied RGBA is ABGR8888 in fourcc terms (little endian).
-pub fn buffer_for(view: &View<'_>) -> MemoryRenderBuffer {
-    MemoryRenderBuffer::from_slice(
-        view.pixels,
-        Fourcc::Abgr8888,
-        (view.width as i32, view.height as i32),
-        1,
-        smithay::utils::Transform::Normal,
-        None,
-    )
+/// The order of a shell buffer's bytes: blue, green, red, alpha, as
+/// clients' buffers and the screens' are, not the toolkit's red, green,
+/// blue, alpha. Pixman composites a buffer of the screen's order without
+/// converting each pixel: the frame that shows the launcher takes 30 %
+/// less (#288).
+pub(crate) const ORDER: Fourcc = Fourcc::Argb8888;
+
+/// Premultiplied RGBA pixels from `src` into `dst` in [`ORDER`].
+pub(crate) fn to_order(dst: &mut [u8], src: &[u8]) {
+    let (dst, src) = (dst.as_chunks_mut::<4>().0, src.as_chunks::<4>().0);
+    for (d, s) in dst.iter_mut().zip(src) {
+        let rgba = u32::from_le_bytes(*s);
+        let bgra = (rgba & 0xff00_ff00) | ((rgba & 0xff) << 16) | ((rgba >> 16) & 0xff);
+        *d = bgra.to_le_bytes();
+    }
 }
 
-/// Copies the damaged rectangles of `view` into `buffer`.
+/// Premultiplied RGBA pixels put in [`ORDER`] where they are.
+pub(crate) fn into_order(pixels: &mut [u8]) {
+    for p in pixels.as_chunks_mut::<4>().0 {
+        p.swap(0, 2);
+    }
+}
+
+/// A buffer of `view`'s pixels, in [`ORDER`].
+pub fn buffer_for(view: &View<'_>) -> MemoryRenderBuffer {
+    let mut mem = MemoryBuffer::new(ORDER, (view.width as i32, view.height as i32));
+    to_order(&mut mem, view.pixels);
+    MemoryRenderBuffer::from_memory(mem, 1, smithay::utils::Transform::Normal, None)
+}
+
+/// Copies the damaged rectangles of `view` into `buffer`, in [`ORDER`].
 pub fn upload(buffer: &mut MemoryRenderBuffer, view: &View<'_>, damage: &[hocus_ui::PixelRect]) {
     let stride = view.width as usize * 4;
     let mut ctx = buffer.render();
@@ -214,7 +233,7 @@ pub fn upload(buffer: &mut MemoryRenderBuffer, view: &View<'_>, damage: &[hocus_
                 if let (Some(dst), Some(src)) =
                     (mem.get_mut(start..end), view.pixels.get(start..end))
                 {
-                    dst.copy_from_slice(src);
+                    to_order(dst, src);
                 }
             }
         }
@@ -1014,5 +1033,22 @@ impl<V: Pixels> Panel<V> {
         )
         .inspect_err(|err| tracing::warn!(?err, "could not draw part of a panel"))
         .ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_toolkit_s_pixels_are_put_in_the_screens_order() {
+        let rgba = [0x11, 0x22, 0x33, 0x44, 0xaa, 0xbb, 0xcc, 0xff];
+        let bgra = [0x33, 0x22, 0x11, 0x44, 0xcc, 0xbb, 0xaa, 0xff];
+        let mut copied = [0; 8];
+        to_order(&mut copied, &rgba);
+        assert_eq!(copied, bgra);
+        let mut in_place = rgba;
+        into_order(&mut in_place);
+        assert_eq!(in_place, bgra);
     }
 }

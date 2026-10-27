@@ -13,14 +13,11 @@ use hocus_shell::{
 };
 use hocus_ui::{Accent, Color, Theme, ThemeName};
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::{
-            ImportMem, Renderer,
-            element::{
-                Kind,
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-            },
+    backend::renderer::{
+        ImportMem, Renderer,
+        element::{
+            Kind,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
         },
     },
     output::Output,
@@ -95,7 +92,11 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
                     latest.insert(more.0.clone(), more);
                 }
                 for (output, generation, request) in latest.into_values() {
-                    let picture = wallpaper::render(&request);
+                    // In the order the compositor's buffers are, off the loop.
+                    let picture = wallpaper::render(&request).map(|mut picture| {
+                        crate::shell::into_order(&mut picture.pixels);
+                        picture
+                    });
                     if done
                         .send(Done {
                             output,
@@ -317,9 +318,15 @@ impl State {
         paper.pending = false;
         match done.picture {
             Ok(picture) => {
+                // In the screens' order: an element put in front of
+                // everything (the launcher) moves it back in the stack,
+                // which damages all of it, and pixman draws it again whole
+                // without converting each pixel (#288). Said to be opaque,
+                // it would be copied, not blended, and so would the edge of
+                // a mirrored screen's picture, half covered, see-through.
                 paper.buffer = Some(MemoryRenderBuffer::from_slice(
                     &picture.pixels,
-                    Fourcc::Abgr8888,
+                    crate::shell::ORDER,
                     (picture.width as i32, picture.height as i32),
                     1,
                     Transform::Normal,
