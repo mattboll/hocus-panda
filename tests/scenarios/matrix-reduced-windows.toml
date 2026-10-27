@@ -13,8 +13,9 @@ reduced_motion = true
 [[step]]
 wait_wallpapers = true
 
+# It can be narrower than it opens, to fit the half it snaps to.
 [[step]]
-open = { app_id = "editor", size = [500, 340], color = "#3399ff" }
+open = { app_id = "editor", size = [500, 340], min_size = [300, 200], color = "#3399ff" }
 
 [[step]]
 advance_ms = 300

@@ -1,0 +1,121 @@
+description = "A maximized window minimized and brought back, from the shortcut, the dock, the column, Alt+Tab and the control API, with the magic lamp drawn all the way: it is never asked a size below its minimum, and the session goes on (#260)"
+outputs = ["1280x800"]
+motion = true
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+"""
+
+[[step]]
+open = { app_id = "notes", size = [400, 300], color = "#33cc66" }
+
+# Its minimum size is its size: every size it is asked is at least that.
+[[step]]
+open = { app_id = "firefox", size = [500, 360], color = "#e8642c" }
+
+[[step]]
+set_state = { app_id = "firefox", state = "maximized" }
+
+[[step]]
+advance_ms = 400
+
+# The shortcut minimizes into the dock, shown at the bottom edge, and the
+# dock brings it back; every frame of the lamp is drawn.
+[[step]]
+pointer_move = [640, 799]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Firefox" }
+
+[[step]]
+keys = "super+down"
+
+[[step]]
+frames = 40
+
+[[step]]
+expect_window = { app_id = "firefox", visible = false }
+
+[[step]]
+click_ui = "Firefox"
+
+[[step]]
+frames = 40
+
+[[step]]
+expect_window = { app_id = "firefox", state = "maximized", visible = true, focused = true }
+
+# The column's button minimizes into the column, the dock gone. Sampled
+# when the tall picture's first strips fold over on themselves on their way
+# up into it (a strip of negative height ended the session). Alt+Tab
+# brings it back.
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+advance_ms = 1000
+
+[[step]]
+expect_ui = { label = "Firefox", shown = false }
+
+[[step]]
+click_ui = "Minimize"
+
+[[step]]
+advance_ms = 252
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "minimize-restore-fold.png" }
+
+[[step]]
+frames = 30
+
+[[step]]
+expect_window = { app_id = "firefox", state = "minimized", visible = false }
+
+[[step]]
+key_down = "alt"
+
+[[step]]
+keys = "15"
+
+[[step]]
+key_up = "alt"
+
+[[step]]
+frames = 40
+
+[[step]]
+expect_window = { app_id = "firefox", state = "maximized", visible = true, focused = true }
+
+# The control API, both ways, then back to its own size.
+[[step]]
+set_state = { app_id = "firefox", state = "minimized" }
+
+[[step]]
+frames = 40
+
+[[step]]
+set_state = { app_id = "firefox", state = "maximized" }
+
+[[step]]
+frames = 40
+
+[[step]]
+set_state = { app_id = "firefox", state = "normal" }
+
+[[step]]
+frames = 40
+
+[[step]]
+expect_window = { app_id = "firefox", geometry = [222, 220, 500, 360], state = "normal", visible = true, focused = true }
+
+[[step]]
+expect_configures = { app_id = "firefox", at_least = [500, 360] }

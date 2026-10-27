@@ -44,7 +44,11 @@ Rules:
   decided with the DRM backend.
 - **Logs** go to the terminal and, for a session, to
   `$XDG_STATE_HOME/hocuspanda/hocuspanda.log` (the previous one kept as
-  `.old`), written by a worker thread through a bounded queue.
+  `.old`), written by a worker thread through a bounded queue. A panic is
+  logged there too, with its backtrace, before the session ends.
+- **Clients cannot end the session.** smithay checks some of what clients
+  send with `debug_assert!`; debug builds and tests build it without debug
+  assertions (the workspace's `Cargo.toml`), as a release does.
 - **Monotonic time everywhere.** Animations, timeouts, idle, caches. Wall
   clock only for what the user reads (the clock, the calendar).
   Compositor time is read from one clock, which tests replace with a

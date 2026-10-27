@@ -365,11 +365,13 @@ where
     ))
 }
 
-/// Whole-number edges, so neighbouring parts meet.
+/// Whole-number edges, so neighbouring parts meet. A part bent over on
+/// itself (its far edge before its near one, as the magic lamp's strips of
+/// a maximized window are for a moment) is empty: it is not drawn.
 fn snap(x0: f64, y0: f64, x1: f64, y1: f64) -> Rectangle<i32, Logical> {
     let (x0, y0) = (x0.round() as i32, y0.round() as i32);
     let (x1, y1) = (x1.round() as i32, y1.round() as i32);
-    Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
+    Rectangle::new((x0, y0).into(), ((x1 - x0).max(0), (y1 - y0).max(0)).into())
 }
 
 impl Snapshot {
@@ -1227,6 +1229,26 @@ mod tests {
             (bottom_y - 600.0) / 368.0 > (top_y - 100.0) / 800.0,
             "the far end is further along its way"
         );
+    }
+
+    /// A maximized window going up into the column: for a moment its first
+    /// rows overtake one another by a fraction of a pixel, and a strip
+    /// between them rounds to a height of -1 (#260). It is empty instead.
+    #[test]
+    fn a_strip_folded_over_is_empty() {
+        let window = rect(0.0, 0.0, 944.0, 800.0);
+        let column = rect(1011.0, 320.0, 201.0, 48.0);
+        let step = 5.0 / 800.0;
+        let folded = (0..160).any(|k| {
+            let k = f64::from(k);
+            let (a, _, _) = genie_row(window, column, k * step, 0.63);
+            let (b, _, _) = genie_row(window, column, (k + 1.0) * step, 0.63);
+            b.round() < a.round()
+        });
+        assert!(folded, "the lamp no longer folds: this test checks nothing");
+        let strip = snap(10.0, 302.58, 950.0, 302.43);
+        assert_eq!(strip.size.h, 0);
+        assert_eq!(strip.size.w, 940);
     }
 
     #[test]

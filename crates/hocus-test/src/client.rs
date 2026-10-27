@@ -106,6 +106,9 @@ pub struct ClientOptions {
     /// Elements it draws, as its accessibility tree says them (#175): a
     /// press on one is recorded as [`ClientEvent::Hit`].
     pub elements: Vec<Drawn>,
+    /// The smallest size it says it takes, `(width, height)`; its own size
+    /// by default.
+    pub min_size: Option<(u32, u32)>,
 }
 
 /// An element a test client draws: a rectangle of its window, in surface
@@ -351,7 +354,7 @@ impl SolidWindow {
         if let Some(title) = &options.title {
             window.set_title(title.clone());
         }
-        window.set_min_size(Some((self.width, self.height)));
+        window.set_min_size(Some(options.min_size.unwrap_or((self.width, self.height))));
         window.commit();
         if options.inhibit_shortcuts {
             let manager: ZwpKeyboardShortcutsInhibitManagerV1 = globals

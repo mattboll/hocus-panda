@@ -7,8 +7,11 @@ use smithay::{
         decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
         shell::server::xdg_toplevel,
     },
-    utils::{Logical, Rectangle},
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
+    utils::{Logical, Rectangle, Size},
+    wayland::{
+        compositor::with_states,
+        shell::xdg::{SurfaceCachedState, XdgToplevelSurfaceData},
+    },
 };
 
 /// How a window is shown, as far as its client is told.
@@ -56,12 +59,22 @@ pub fn hash_title_and_app_id(window: &Window, hasher: &mut impl std::hash::Hashe
 }
 
 /// Asks the client to show its window at `rect`'s size, in `shown` mode;
-/// `resizing` while an interactive resize is under way.
+/// `resizing` while an interactive resize is under way. Never smaller than
+/// the window's minimum size, nor than a pixel: a client asked for less may
+/// draw nothing, or compute negative sizes from it (#260).
 pub fn request_size(window: &Window, rect: Rectangle<i32, Logical>, shown: Shown, resizing: bool) {
     match window.underlying_surface() {
         WindowSurface::Wayland(toplevel) => {
+            let min = with_states(toplevel.wl_surface(), |states| {
+                states
+                    .cached_state
+                    .get::<SurfaceCachedState>()
+                    .current()
+                    .min_size
+            });
+            let size = least_size(rect.size, min);
             toplevel.with_pending_state(|pending| {
-                pending.size = Some(rect.size);
+                pending.size = Some(size);
                 let flags = [
                     (xdg_toplevel::State::Maximized, shown == Shown::Maximized),
                     (xdg_toplevel::State::Fullscreen, shown == Shown::Fullscreen),
@@ -79,6 +92,8 @@ pub fn request_size(window: &Window, rect: Rectangle<i32, Logical>, shown: Shown
         }
         WindowSurface::X11(x11) => {
             // X11 windows are placed by the window manager: position and size.
+            let min = x11.min_size().unwrap_or_default();
+            let rect = Rectangle::new(rect.loc, least_size(rect.size, min));
             if let Err(err) = x11.configure(Some(rect)) {
                 tracing::debug!(?err, "could not configure an X11 window");
             }
@@ -86,6 +101,11 @@ pub fn request_size(window: &Window, rect: Rectangle<i32, Logical>, shown: Shown
             let _ = x11.set_fullscreen(shown == Shown::Fullscreen);
         }
     }
+}
+
+/// `size`, at least `min` (0 for no minimum) and a pixel each way.
+fn least_size(size: Size<i32, Logical>, min: Size<i32, Logical>) -> Size<i32, Logical> {
+    (size.w.max(min.w).max(1), size.h.max(min.h).max(1)).into()
 }
 
 /// Tells the client whether its window is the focused one.

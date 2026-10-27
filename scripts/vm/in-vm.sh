@@ -68,11 +68,12 @@ case "${1:-}" in
         echo "$f" > ~/hocus.socket
         echo "session started on tty1 (pid $(cat ~/hocus.pid))" ;;
     run)
-        # On tty1, from the login shell: the session itself.
+        # On tty1, from the login shell: the session itself. What it says
+        # on stderr is kept, with backtraces, should it end (#260).
         echo $$ > ~/hocus.pid
         systemctl --user start dbus.socket
-        exec ~/bin/hocuspanda --backend tty --api-permission test \
-            --log-file ~/hocus.log --spawn foot > /dev/null 2>&1 ;;
+        RUST_BACKTRACE=1 exec ~/bin/hocuspanda --backend tty --api-permission test \
+            --log-file ~/hocus.log --spawn foot > /dev/null 2> ~/hocus.stderr ;;
     start)
         shift
         # The user's bus, installed after the user's manager started.

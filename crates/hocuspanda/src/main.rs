@@ -225,7 +225,7 @@ fn state_dir() -> Option<PathBuf> {
 /// Logs to the terminal and, when given, to `file`. The file is written by a
 /// worker thread through a bounded queue: the loop never waits on the disk.
 /// Levels come from `RUST_LOG` (default `info`) until the configuration file
-/// exists.
+/// exists. A panic is logged too, with its backtrace.
 fn init_logs(
     file: Option<&Path>,
 ) -> anyhow::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
@@ -235,6 +235,7 @@ fn init_logs(
         .with_filter(filter());
     let Some(path) = file else {
         tracing_subscriber::registry().with(terminal).init();
+        log_panics();
         return Ok(None);
     };
     if let Some(dir) = path.parent() {
@@ -259,8 +260,22 @@ fn init_logs(
         .with(terminal)
         .with(to_file)
         .init();
+    log_panics();
     tracing::info!(file = %path.display(), "logging");
     Ok(Some(guard))
+}
+
+/// Panics go to the log, with a backtrace whatever `RUST_BACKTRACE` says:
+/// on a terminal nobody reads stderr, and a session that ends must say why
+/// in its file (#260). A panic on the loop unwinds out of `main`, whose log
+/// guard then writes out what is queued.
+fn log_panics() {
+    std::panic::set_hook(Box::new(|info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let thread = std::thread::current();
+        let thread = thread.name().unwrap_or("unnamed");
+        tracing::error!(target: "panic", "thread '{thread}' {info}\nbacktrace:\n{backtrace}");
+    }));
 }
 
 /// Span fields are formatted once per formatter type and cached: the file
@@ -271,5 +286,31 @@ struct PlainFields(DefaultFields);
 impl<'w> FormatFields<'w> for PlainFields {
     fn format_fields<R: RecordFields>(&self, writer: Writer<'w>, fields: R) -> std::fmt::Result {
         self.0.format_fields(writer, fields)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_is_written_to_the_log_file_with_its_backtrace() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("hocuspanda.log");
+        let guard = init_logs(Some(&path))?;
+        let caught = std::panic::catch_unwind(|| panic!("the lamp broke"));
+        assert!(caught.is_err());
+        // As when `main` unwinds: what is queued is written out.
+        drop(guard);
+        let log = std::fs::read_to_string(&path)?;
+        assert!(log.contains("ERROR panic"), "{log}");
+        assert!(log.contains("panicked at"), "{log}");
+        assert!(log.contains("the lamp broke"), "{log}");
+        assert!(log.contains("backtrace:"), "{log}");
+        assert!(
+            log.contains("a_panic_is_written_to_the_log_file_with_its_backtrace"),
+            "no frame of the test in the backtrace: {log}"
+        );
+        Ok(())
     }
 }

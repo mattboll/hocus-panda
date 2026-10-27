@@ -25,3 +25,13 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# smithay checks some of what clients send with `debug_assert!`, such as a
+# `wl_region.add` of negative height: in a debug build, any client could end
+# the session (#260). Built without them, debug builds and tests take what a
+# release takes. Its other debug checks go too: sizes we build ourselves
+# (the scenarios check what windows are asked and drawn instead), and the
+# winit backend's GL debug context.
+[profile.dev.package.smithay]
+opt-level = 3
+debug-assertions = false
