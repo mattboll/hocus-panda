@@ -147,9 +147,15 @@ pub struct Ring {
     pub scale: f32,
 }
 
-/// What the worker says once the file is done.
+/// What the workers say: whether the camera is there, or the file done.
 #[derive(Debug)]
 enum Finished {
+    /// Whether the camera device is there, looked for when the picker
+    /// opened.
+    Camera {
+        device: String,
+        here: bool,
+    },
     Saved {
         path: PathBuf,
         width: u32,
@@ -174,6 +180,9 @@ pub struct Recorder {
     pub options: hocus_shell::picker::RecordOptions,
     /// The configuration's options they came from.
     options_from: Option<[bool; 4]>,
+    /// The camera device last looked for, and whether it was there: the
+    /// picker offers the camera from it while a worker looks again.
+    camera_seen: Option<(String, bool)>,
     bubble: Option<Bubble>,
 }
 
@@ -189,9 +198,11 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
     let (done, received) = channel::channel::<Finished>();
     let inserted = handle.insert_source(received, |event, _, app| {
         if let channel::Event::Msg(finished) = event {
-            app.timed("recording done", |app| {
-                app.state.recording_finished(finished)
-            });
+            let name = match finished {
+                Finished::Camera { .. } => "camera looked for",
+                Finished::Saved { .. } | Finished::Failed(_) => "recording done",
+            };
+            app.timed(name, |app| app.state.recording_finished(finished));
         }
     });
     match inserted {
@@ -251,14 +262,51 @@ impl State {
                 show_keys: r.show_keys,
             };
         }
-        // One look at the device, when asked to record.
-        let here = r.camera_input != "v4l2" || Path::new(&r.camera_device).exists();
+        if r.camera_input != "v4l2" {
+            self.offer_camera(true);
+            return;
+        }
+        // A webcam's device is looked for on a worker (#280), each time
+        // the picker opens: one plugged in meanwhile shows. Until it
+        // answers, the last answer for that device stands; none, no
+        // camera.
+        let device = r.camera_device.clone();
+        let seen = matches!(&self.recorder.camera_seen, Some((d, true)) if *d == device);
+        self.offer_camera(seen);
+        let Some(done) = self.recorder.done.clone() else {
+            return;
+        };
+        crate::screenshot::spawn("camera", move || {
+            let here = Path::new(&device).exists();
+            let _ = done.send(Finished::Camera { device, here });
+        });
+    }
+
+    /// The camera offered, as configured or as toggled, when it is there.
+    fn offer_camera(&mut self, here: bool) {
+        let r = &self.config.recording;
         let o = &mut self.recorder.options;
         o.camera = match (here, o.camera) {
             (false, _) => None,
             (true, Some(on)) => Some(on),
             (true, None) => Some(r.camera),
         };
+    }
+
+    /// The worker found whether the camera is there: the picker shows it
+    /// when it is still the device asked for.
+    fn camera_looked_for(&mut self, device: String, here: bool) {
+        let r = &self.config.recording;
+        let asked = r.camera_input == "v4l2" && r.camera_device == device;
+        self.recorder.camera_seen = Some((device, here));
+        if !asked {
+            return;
+        }
+        let before = self.recorder.options.camera;
+        self.offer_camera(here);
+        if self.recorder.options.camera != before {
+            self.show_record_options();
+        }
     }
 
     /// An option toggled in the picker.
@@ -390,7 +438,8 @@ impl State {
         let in_flight = Arc::new(AtomicUsize::new(0));
         let taken = in_flight.clone();
         let settings = Settings {
-            folder: folder(&self.config.recording.folder),
+            folder: self.config.recording.folder.clone(),
+            user_dirs: self.user_dirs.clone(),
             name: format!(
                 "Recording {}.mp4",
                 self.wall_civil().strftime("%Y-%m-%d %H-%M-%S")
@@ -514,14 +563,15 @@ impl State {
     }
 
     fn recording_finished(&mut self, finished: Finished) {
-        self.recorder.phase = Phase::Idle;
         let lang = self.shell_lang();
         match finished {
+            Finished::Camera { device, here } => self.camera_looked_for(device, here),
             Finished::Saved {
                 path,
                 width,
                 height,
             } => {
+                self.recorder.phase = Phase::Idle;
                 let file = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -541,6 +591,7 @@ impl State {
                 });
             }
             Finished::Failed(err) => {
+                self.recorder.phase = Phase::Idle;
                 tracing::warn!(err, "the recording failed");
                 self.shell_toast(lang.recording_failed(), &err);
             }
@@ -1112,7 +1163,9 @@ pub fn paint_ring(pixels: &mut Pixels, ring: Ring) {
 /// What the worker needs.
 #[derive(Debug, Clone)]
 struct Settings {
-    folder: PathBuf,
+    /// The configured folder: where it is, worked out on the worker.
+    folder: String,
+    user_dirs: Option<PathBuf>,
     name: String,
     size: (u32, u32),
     fps: u32,
@@ -1133,7 +1186,9 @@ fn encode(
     frames: &Receiver<Feed>,
     in_flight: &AtomicUsize,
 ) -> Result<PathBuf, String> {
-    let path = reserve(&settings.folder, &settings.name)?;
+    // The user's folders are read here, not on the loop (#280).
+    let folder = folder(&settings.folder, settings.user_dirs.as_deref());
+    let path = reserve(&folder, &settings.name)?;
     // With sound, the picture goes to a file of its own first.
     let video = match &settings.sound {
         Some(_) => hidden_beside(&path, "video.mp4"),
@@ -1401,30 +1456,9 @@ fn reserve(dir: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 /// Where recordings go: the configured folder, else `Screencasts` in the
-/// videos folder (`XDG_VIDEOS_DIR`, else `~/Videos`).
-fn folder(configured: &str) -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
-    if !configured.is_empty() {
-        return match configured.strip_prefix("~/") {
-            Some(rest) => home.join(rest),
-            None => PathBuf::from(configured),
-        };
-    }
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    let videos = std::fs::read_to_string(config.join("user-dirs.dirs"))
-        .ok()
-        .and_then(|dirs| {
-            dirs.lines().find_map(|l| {
-                let v = l.strip_prefix("XDG_VIDEOS_DIR=")?.trim_matches('"');
-                Some(PathBuf::from(v.replace("$HOME", &home.to_string_lossy())))
-            })
-        })
-        .unwrap_or_else(|| home.join("Videos"));
-    videos.join("Screencasts")
+/// videos folder (`XDG_VIDEOS_DIR`, else `~/Videos`). On the worker.
+fn folder(configured: &str, user_dirs: Option<&Path>) -> PathBuf {
+    crate::screenshot::user_folder(configured, user_dirs, ("VIDEOS", "Videos"), "Screencasts")
 }
 
 #[cfg(test)]
@@ -1507,7 +1541,8 @@ mod encoder_tests {
         }
         let dir = tempfile::tempdir().expect("a directory");
         let settings = Settings {
-            folder: dir.path().to_path_buf(),
+            folder: dir.path().display().to_string(),
+            user_dirs: None,
             name: "test.mp4".into(),
             size: (64, 48),
             fps: 30,
@@ -1565,7 +1600,8 @@ mod encoder_tests {
         }
         let dir = tempfile::tempdir().expect("a directory");
         let settings = Settings {
-            folder: dir.path().to_path_buf(),
+            folder: dir.path().display().to_string(),
+            user_dirs: None,
             name: "sound.mp4".into(),
             size: (160, 120),
             fps: 30,

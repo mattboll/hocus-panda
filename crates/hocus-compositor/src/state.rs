@@ -208,6 +208,13 @@ pub struct State {
     pub config_path: Option<std::path::PathBuf>,
     /// When the settings app was started, until its window comes.
     pub settings_started: Option<std::time::Duration>,
+    /// The settings app beside the compositor (built together, a nested
+    /// session from the source tree), quoted for the shell: looked for
+    /// once at start, before the loop runs.
+    pub settings_beside: Option<String>,
+    /// Where the user's folders are named, when not in
+    /// `$XDG_CONFIG_HOME/user-dirs.dirs` (a test's own). Read on workers.
+    pub user_dirs: Option<std::path::PathBuf>,
     /// Title bars, when they are on.
     pub bars: crate::bars::Bars,
     /// The drop-down terminal.
@@ -368,6 +375,8 @@ impl State {
             output_management: crate::handlers::output_management::OutputManagement::new(dh),
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
             settings_started: None,
+            settings_beside: None,
+            user_dirs: None,
             child_env: None,
             layout_index: 0,
             layout_names: Default::default(),

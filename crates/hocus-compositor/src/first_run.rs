@@ -27,7 +27,9 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<P
         return;
     };
     let mark = dir.join(MARK);
-    // At start, before the loop runs: a look at one file.
+    // One of the few looks at the file system on the loop's thread, and
+    // only here, before the loop runs (docs/architecture.md, #280): the
+    // welcome is due a moment later, from this answer.
     if mark.exists() {
         return;
     }
