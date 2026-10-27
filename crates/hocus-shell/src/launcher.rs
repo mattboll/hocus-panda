@@ -862,6 +862,11 @@ impl Launcher {
     /// The notes as they are now; an open card shows them again, the
     /// chosen line kept.
     pub fn set_notes(&mut self, notes: Vec<NoteItem>) {
+        // Read again as the notes open: the same ones are not laid out and
+        // drawn a second time before the first frame (#288).
+        if notes == self.notes {
+            return;
+        }
         self.notes = notes;
         if self.open && self.mode == Mode::Notes {
             let selected = self.selected;
@@ -986,8 +991,9 @@ impl Launcher {
     }
 
     fn tone_sample(&self) -> String {
-        crate::emoji::search("thumbs up")
-            .first()
+        // Found by its glyph: a search through every emoji's names took
+        // a third of a frame at each opening (#288).
+        crate::emoji::find("👍")
             .map(|e| e.with_tone(self.tone))
             .unwrap_or_default()
     }
@@ -3187,6 +3193,29 @@ mod tests {
         assert_eq!(l.selected, COLUMNS + COLUMNS * GRID_ROWS);
         l.key(Key::Home);
         assert_eq!((l.selected, l.grid_first), (0, 0));
+    }
+
+    #[test]
+    fn the_same_notes_read_again_as_they_open_draw_nothing() {
+        let notes = |texts: &[&str]| {
+            texts
+                .iter()
+                .enumerate()
+                .map(|(index, text)| NoteItem {
+                    index,
+                    text: (*text).into(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut l = launcher();
+        l.set_notes(notes(&["Buy bamboo", "Call the vet"]));
+        l.open_mode(Mode::Notes);
+        assert!(!l.draw(Duration::ZERO).is_empty());
+        l.set_notes(notes(&["Buy bamboo", "Call the vet"]));
+        assert_eq!(l.draw(Duration::ZERO), [], "nothing changed");
+        l.set_notes(notes(&["Buy bamboo"]));
+        assert!(!l.draw(Duration::ZERO).is_empty(), "one went");
+        assert!(!l.access().dump().contains("Call the vet"));
     }
 
     #[test]

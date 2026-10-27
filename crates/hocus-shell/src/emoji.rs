@@ -69,6 +69,33 @@ fn fold(s: &str) -> String {
     crate::fuzzy::fold(s).replace('œ', "oe").replace('æ', "ae")
 }
 
+/// An emoji's names and keywords as they are searched, folded once: a
+/// search goes through them all, and folding them at each one took
+/// longer than a frame (#288).
+struct Folded {
+    names: [String; 2],
+    words: Vec<String>,
+}
+
+/// The folded names of every emoji, in the order of [`all`].
+fn folded() -> &'static [Folded] {
+    static TABLE: OnceLock<Vec<Folded>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        all()
+            .iter()
+            .map(|e| Folded {
+                names: [fold(e.en), fold(e.fr)],
+                words: e
+                    .en_words
+                    .split('|')
+                    .chain(e.fr_words.split('|'))
+                    .map(fold)
+                    .collect(),
+            })
+            .collect()
+    })
+}
+
 /// The emoji matching `query` in either language, best first: a name that
 /// is it or starts with it as a word, then a name with a word starting
 /// with it, then a keyword that is it, starts with it or holds it; in
@@ -78,31 +105,24 @@ pub fn search(query: &str) -> Vec<&'static Emoji> {
     if q.is_empty() {
         return Vec::new();
     }
-    let rank_of = |e: &Emoji| -> Option<u8> {
-        let names = [fold(e.en), fold(e.fr)];
-        let in_name = |f: &dyn Fn(&str) -> bool| names.iter().any(|n| n.split(' ').any(f));
+    let q_word = format!("{q} ");
+    let rank_of = |f: &Folded| -> Option<u8> {
+        let names = &f.names;
+        let in_name = |m: &dyn Fn(&str) -> bool| names.iter().any(|n| n.split(' ').any(m));
         // A name that is it or starts with it ("cœur" is "cœur rouge"
         // before "visage avec des cœurs").
-        if names
-            .iter()
-            .any(|n| *n == q || n.starts_with(&format!("{q} ")))
-        {
+        if names.iter().any(|n| *n == q || n.starts_with(&q_word)) {
             return Some(0);
         }
         if in_name(&|w| w == q || w.starts_with(q.as_str())) {
             return Some(1);
         }
-        let words: Vec<String> = e
-            .en_words
-            .split('|')
-            .chain(e.fr_words.split('|'))
-            .map(fold)
-            .collect();
+        let words = &f.words;
         if words.contains(&q) {
             Some(2)
         } else if words.iter().any(|w| w.starts_with(&q)) {
             Some(3)
-        } else if names.iter().chain(&words).any(|w| w.contains(&q)) {
+        } else if names.iter().chain(words).any(|w| w.contains(&q)) {
             Some(4)
         } else {
             None
@@ -110,22 +130,26 @@ pub fn search(query: &str) -> Vec<&'static Emoji> {
     };
     let mut ranked: Vec<(u8, usize, &Emoji)> = all()
         .iter()
+        .zip(folded())
         .enumerate()
-        .filter_map(|(i, e)| Some((rank_of(e)?, i, e)))
+        .filter_map(|(i, (e, f))| Some((rank_of(f)?, i, e)))
         .collect();
     ranked.sort_by_key(|(rank, i, _)| (*rank, *i));
     ranked.into_iter().map(|(_, _, e)| e).collect()
 }
 
-/// The emoji whose glyph is `glyph`, with or without a tone.
+/// The emoji whose glyph is `glyph`, with or without a tone, its
+/// variation selectors aside. Compared as they are, without a copy: the
+/// recent ones are looked for each time emoji show (#288).
 pub fn find(glyph: &str) -> Option<&'static Emoji> {
-    let bare: String = glyph
+    let bare = |s: &'static str| s.chars().filter(|c| *c != '\u{FE0F}');
+    let wanted: Vec<char> = glyph
         .chars()
-        .filter(|c| !('\u{1F3FB}'..='\u{1F3FF}').contains(c))
+        .filter(|c| *c != '\u{FE0F}' && !('\u{1F3FB}'..='\u{1F3FF}').contains(c))
         .collect();
-    all().iter().find(|e| {
-        e.glyph == bare || e.glyph.replace('\u{FE0F}', "") == bare.replace('\u{FE0F}', "")
-    })
+    all()
+        .iter()
+        .find(|e| bare(e.glyph).eq(wanted.iter().copied()))
 }
 
 #[cfg(test)]
@@ -154,5 +178,9 @@ mod tests {
         let heart = search("red heart")[0];
         assert_eq!(heart.with_tone(3), "❤️", "a heart takes no tone");
         assert_eq!(find("👍🏽").map(|e| e.en), Some("thumbs up"));
+        // With or without its variation selector.
+        assert_eq!(find("❤").map(|e| e.glyph), Some("❤️"));
+        assert_eq!(find("❤️").map(|e| e.glyph), Some("❤️"));
+        assert_eq!(find("zz"), None);
     }
 }
