@@ -3334,7 +3334,20 @@ impl Run<'_> {
                 })?;
             }
         }
-        Ok(())
+        // The window handles the keys in its own time: the step ends once
+        // it answered after all of them, the clock still. A field that
+        // offers the same choices after "b" as after "bepo" was checked
+        // and captured half typed under load (#292).
+        self.compositor.ask_keyboard_answer();
+        self.apps_answered()
+    }
+
+    /// Every application asked to answer did: it handled what it was sent
+    /// before, however long its thread took.
+    fn apps_answered(&mut self) -> anyhow::Result<()> {
+        self.compositor
+            .dispatch_until(CLIENT_TIMEOUT, Headless::apps_answered)
+            .context("an application never answered")
     }
 
     /// Started programs run in their own time: the file gets a moment.
@@ -4001,11 +4014,13 @@ impl Run<'_> {
             );
             self.compositor.dispatch(Duration::from_millis(5))?;
         }
-        let until = Instant::now() + Duration::from_millis(40);
-        while Instant::now() < until {
-            self.compositor.dispatch(Duration::from_millis(5))?;
+        // It answers after what it was sent (a pointer moved, keys) and
+        // after the frame it drew of them: the compositor has that frame
+        // (#292).
+        if let Some(window) = self.find("hocus-settings")? {
+            self.compositor.ask_window_answer(window.id);
         }
-        Ok(())
+        self.apps_answered()
     }
 
     /// Waits until the window drew the same thing twice in a row: what is

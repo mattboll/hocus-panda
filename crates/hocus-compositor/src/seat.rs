@@ -1143,7 +1143,7 @@ impl State {
     /// another thread after it answered; on a virtual clock, the test
     /// harness moves the clock past such a wait once the application
     /// answered, however long its thread took (#235).
-    fn ask_answer(&mut self, id: WindowId) {
+    pub(crate) fn ask_answer(&mut self, id: WindowId) {
         use smithay::wayland::shell::PingError;
         let windows = &self.windows;
         self.seats.asked.retain(|(id, _)| windows.contains_key(id));

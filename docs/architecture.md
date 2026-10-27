@@ -968,7 +968,14 @@ suspends and wakes.
   are followed), and the clock never moves past a wait that depends on an
   application before it answered: an agent's capture or typing pings the
   application (`xdg_wm_base.ping`), and the harness advances only once it
-  answered, having drawn or said what its field is for (#235).
+  answered, having drawn or said what its field is for (#235). A
+  scenario's typing pings the window with the keyboard and ends once it
+  answered, having handled every key (the settings app sends its answer
+  with the frame it drew of them): a list that offers the same entries
+  after the first letter as after the word was checked and captured half
+  typed (#292). The settings app is pinged the same way before a capture
+  or a click, and the trim editor counts as busy until its thumbnails
+  came.
   Each runs on its own compositor in-process, through the control API;
   the format is described in `tests/scenarios/README.md`.
 - **Test clients**: a small in-repo client that draws known colours and

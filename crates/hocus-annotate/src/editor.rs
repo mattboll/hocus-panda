@@ -183,6 +183,9 @@ impl Editor for Annotate {
 enum Back {
     Info(Info),
     Thumbnails(Frames),
+    /// Opening is done: what it is, its first frame and its thumbnails
+    /// came, or could not be read.
+    Opened,
     /// A frame, its seek's number, and its time while playing.
     Frame(u64, Frames, Option<Duration>),
     /// Playing ended, for the play of this number.
@@ -212,6 +215,8 @@ pub struct Trim {
     shown: u64,
     /// Stops what plays.
     playing: Option<Arc<AtomicBool>>,
+    /// Its first frame and thumbnails are still being read.
+    opening: bool,
 }
 
 impl Trim {
@@ -229,6 +234,7 @@ impl Trim {
             seeks: Arc::new(AtomicU64::new(0)),
             shown: 0,
             playing: None,
+            opening: true,
         };
         // What it is, its thumbnails, its first frame.
         let (probe, encoder, file, send) = (
@@ -238,23 +244,26 @@ impl Trim {
             trim.sender.clone(),
         );
         spawn("trim open", move || {
-            let info = match video::info(&probe, &file) {
-                Ok(info) => info,
+            match video::info(&probe, &file) {
+                Ok(info) => {
+                    let _ = send.send(Back::Info(info));
+                    if let Ok(frame) =
+                        video::frame_at(&encoder, &file, &info, Duration::ZERO, PREVIEW)
+                    {
+                        let _ = send.send(Back::Frame(0, frame, None));
+                    }
+                    match video::thumbnails(&encoder, &file, &info, 12, 64) {
+                        Ok(thumbs) => {
+                            let _ = send.send(Back::Thumbnails(thumbs));
+                        }
+                        Err(err) => tracing::warn!(err, "no thumbnails"),
+                    }
+                }
                 Err(err) => {
                     let _ = send.send(Back::Failed(err));
-                    return;
                 }
-            };
-            let _ = send.send(Back::Info(info));
-            if let Ok(frame) = video::frame_at(&encoder, &file, &info, Duration::ZERO, PREVIEW) {
-                let _ = send.send(Back::Frame(0, frame, None));
             }
-            match video::thumbnails(&encoder, &file, &info, 12, 64) {
-                Ok(thumbs) => {
-                    let _ = send.send(Back::Thumbnails(thumbs));
-                }
-                Err(err) => tracing::warn!(err, "no thumbnails"),
-            }
+            let _ = send.send(Back::Opened);
         });
         trim
     }
@@ -367,11 +376,12 @@ impl Editor for Trim {
         self.view.access()
     }
 
-    /// Busy too while the latest seek's frame has not come.
+    /// Busy too while the latest seek's frame has not come, and while
+    /// the thumbnails are read: a test's capture waits for them (#292).
     fn pointer(&self) -> (Option<Point>, bool) {
         let (at, held) = self.view.pointer();
         let waiting = self.playing.is_none() && self.shown < self.seeks.load(Ordering::Relaxed);
-        (at, held || waiting)
+        (at, held || waiting || self.opening)
     }
 
     fn pointer_move(&mut self, at: Point) {
@@ -408,6 +418,7 @@ impl Editor for Trim {
                     self.view.set_length(info.length);
                 }
                 Back::Thumbnails(thumbs) => self.view.set_thumbnails(thumbs),
+                Back::Opened => self.opening = false,
                 // Older than what shows: a newer one is there.
                 Back::Frame(n, mut frame, at) if n >= self.shown => {
                     self.shown = n;
