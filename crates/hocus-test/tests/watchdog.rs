@@ -32,6 +32,7 @@ fn compositor(dump_dir: &std::path::Path, limit: Duration) -> anyhow::Result<Hea
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })
 }
 

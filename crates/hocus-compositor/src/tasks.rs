@@ -13,8 +13,15 @@
 //! one is written back by a thread of its own, PUT or DELETE on the ETag it
 //! was read with: changed on the server meanwhile (412), the server's
 //! version is kept and a toast says so; not written (offline), the task
-//! goes back to what its server has, and a toast says that too. Google
-//! Tasks (#257) is a source to come, of the same [`Task`].
+//! goes back to what its server has, and a toast says that too.
+//!
+//! Google Tasks (#257) is the same for a Google account of GNOME Online
+//! Accounts: its lists come with its calendars' sync, read with the same
+//! token from Google Tasks' API, and a change is written back by the same
+//! thread, with a token GOA hands out then: POST for a new task (whose id
+//! Google gives, its UID standing for it until then), PATCH of the fields
+//! changed, DELETE. A token without the tasks scope leaves the account's
+//! tasks out, and the settings say so; nothing else changes.
 //!
 //! The loop changes its own copy at once, so that a tick shows at once,
 //! and takes the folder as read only once the thread has written every
@@ -22,7 +29,7 @@
 //! the loop's copy of that task.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io,
     path::{Path, PathBuf},
     sync::{Arc, mpsc},
@@ -33,6 +40,8 @@ use hocus_core::config::CalendarAccount;
 use hocus_platform::{
     calendar::{
         caldav::{self, Expect, Resource, TaskList, WriteError},
+        goa::{self, GoogleAccount},
+        gtasks,
         ics::When,
     },
     sealed::Sealed,
@@ -73,20 +82,30 @@ struct ViewKey {
     offline: bool,
 }
 
-/// A CalDAV task list, as last synced (or cached), with what was changed
-/// here since.
+/// Where a remote task list is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Service {
+    CalDav,
+    Google,
+}
+
+/// A remote task list (CalDAV, Google Tasks), as last synced (or cached),
+/// with what was changed here since.
 #[derive(Debug, Clone)]
 struct RemoteList {
     /// Its account, by id.
     account: String,
+    service: Service,
+    /// Its address (CalDAV), or its id (Google Tasks).
     url: String,
     name: String,
     color: Option<String>,
     tasks: Vec<Task>,
 }
 
-/// The task lists' cache: each account's lists, with their address, name,
-/// colour and tasks (address, ETag, text).
+/// The task lists' cache: each account's lists, with their address (or
+/// id), name, colour and tasks (address or id, ETag, text: iCalendar's, or
+/// Google's JSON for a GOA account's).
 pub(crate) type Cache = HashMap<String, Vec<CachedList>>;
 type CachedList = (
     String,
@@ -110,26 +129,101 @@ struct Edit {
     before: Option<Task>,
 }
 
-/// A change for a CalDAV server, to the thread that writes them.
+/// A remote account's task lists as its sync read them, their tasks made
+/// on the sync's thread.
+#[derive(Debug)]
+pub(crate) enum SyncedTasks {
+    Lists(Vec<SyncedList>),
+    /// The account does not share its tasks: a Google token without the
+    /// tasks scope.
+    Unshared,
+    /// Not read this time: the lists known stay, and say they are offline.
+    Failed(String),
+}
+
+#[derive(Debug)]
+pub(crate) struct SyncedList {
+    service: Service,
+    url: String,
+    name: String,
+    color: Option<String>,
+    tasks: Vec<Task>,
+}
+
+/// A CalDAV account's task lists, with their tasks; on the sync's thread.
+pub(crate) fn caldav_lists(account: &str, lists: Vec<TaskList>) -> Vec<SyncedList> {
+    lists
+        .into_iter()
+        .map(|list| SyncedList {
+            service: Service::CalDav,
+            tasks: list_tasks(account, &list),
+            url: list.url,
+            name: list.name,
+            color: list.color,
+        })
+        .collect()
+}
+
+/// A Google account's task lists, as Google Tasks' API answered (`None`:
+/// not asked, in tests without its stand-in).
+pub(crate) fn google_lists(read: Option<Result<Vec<gtasks::List>, gtasks::Error>>) -> SyncedTasks {
+    match read {
+        None => SyncedTasks::Lists(Vec::new()),
+        Some(Ok(lists)) => SyncedTasks::Lists(
+            lists
+                .into_iter()
+                .map(|list| SyncedList {
+                    service: Service::Google,
+                    url: list.id,
+                    name: list.name,
+                    color: None,
+                    tasks: list.tasks,
+                })
+                .collect(),
+        ),
+        Some(Err(gtasks::Error::Unshared(why))) => {
+            tracing::debug!(why, "Google Tasks are not shared");
+            SyncedTasks::Unshared
+        }
+        Some(Err(err)) => SyncedTasks::Failed(err.to_string()),
+    }
+}
+
+/// Where a remote task is written, with what it takes to reach it.
+#[derive(Debug)]
+pub(crate) enum Target {
+    CalDav {
+        account: CalendarAccount,
+        secrets: Option<Secrets>,
+    },
+    /// A Google account of GOA's on `bus`, Google Tasks' API at `base`.
+    Google {
+        bus: String,
+        account: GoogleAccount,
+        base: String,
+    },
+}
+
+/// A change for a remote server, to the thread that writes them.
 #[derive(Debug)]
 enum Remote {
     Put {
         /// The task as written.
         task: Task,
+        /// iCalendar's text (CalDAV), the fields changed (Google).
         text: String,
         expect: Expect,
         /// A write of it was still on its way: the ETag that one brings
-        /// back is expected, not this one.
+        /// back is expected, not this one (CalDAV); the id that one got is
+        /// its own (Google).
         chained: bool,
-        account: CalendarAccount,
-        secrets: Option<Secrets>,
+        target: Target,
     },
     Delete {
         task: Task,
         expect: Expect,
         chained: bool,
-        account: CalendarAccount,
-        secrets: Option<Secrets>,
+        target: Target,
     },
 }
 
@@ -151,7 +245,7 @@ enum Outcome {
     Deleted,
     /// Changed on the server meanwhile: what it has now (`None`: deleted
     /// there), or why that could not be read.
-    Conflict(Result<Option<Resource>, String>),
+    Conflict(Result<Option<Box<Task>>, String>),
     /// Not taken: unreachable, or refused.
     Failed(String),
 }
@@ -168,11 +262,20 @@ pub struct TasksState {
     /// Bumped at each change.
     generation: u64,
     view: Option<(ViewKey, Option<Arc<TasksView>>)>,
-    /// The CalDAV task lists, by account in the configuration's order.
+    /// The remote task lists, by account in the configuration's order,
+    /// then GOA's.
     remote: Vec<RemoteList>,
-    /// The CalDAV tasks changed here lately, by address.
+    /// The remote tasks changed here lately, by address (CalDAV) or id
+    /// (Google; their UID until Google gave them one).
     edits: HashMap<String, Edit>,
-    /// The thread writing to CalDAV servers, once a first change was made.
+    /// The accounts whose tasks did not sync last time.
+    unreachable: HashSet<String>,
+    /// The accounts that do not share their tasks (#257).
+    unshared: HashSet<String>,
+    /// The UIDs that stood for tasks added to Google, by the ids Google
+    /// gave them: what was shown with the one may come back.
+    renamed: HashMap<String, String>,
+    /// The thread writing to remote servers, once a first change was made.
     remote_worker: Option<mpsc::Sender<Remote>>,
     /// Its way back, until it is started.
     remote_news: Option<channel::Sender<Written>>,
@@ -217,10 +320,20 @@ fn remote_task(account: &str, list: &str, name: &str, r: &Resource) -> Option<Ta
     tasks::parse(&r.ics, source, Some(name.to_owned()))
 }
 
-/// Its address on its server, for a CalDAV task.
-fn href(task: &Task) -> Option<&str> {
+/// What names a remote task while it is changed: its address on its
+/// CalDAV server, its id at Google (its UID until Google gave it one).
+fn key(task: &Task) -> Option<&str> {
     match &task.source {
         Source::CalDav { href, .. } => Some(href),
+        Source::Google { id, .. } => Some(id.as_deref().unwrap_or(&task.uid)),
+        Source::Local { .. } => None,
+    }
+}
+
+/// The list a remote task is in: its address, or its id.
+fn list_of(task: &Task) -> Option<&str> {
+    match &task.source {
+        Source::CalDav { list, .. } | Source::Google { list, .. } => Some(list),
         Source::Local { .. } => None,
     }
 }
@@ -237,79 +350,167 @@ fn expect_of(task: &Task, new: bool) -> Expect {
 }
 
 /// Writes the changes it is sent, one after the other, each on the ETag
-/// the one before brought back when it was still on its way.
+/// the one before brought back when it was still on its way (CalDAV), or
+/// to the id Google gave a task added here (Google Tasks).
 fn write_remote(wanted: mpsc::Receiver<Remote>, news: channel::Sender<Written>) {
     let mut etags: HashMap<String, Option<String>> = HashMap::new();
+    // Google's ids of the tasks added here, by their UID.
+    let mut ids: HashMap<String, String> = HashMap::new();
     while let Ok(change) = wanted.recv() {
-        let (task, chained, expect) = match &change {
+        let (mut task, text, expect, chained, target) = match change {
             Remote::Put {
                 task,
-                chained,
-                expect,
-                ..
-            }
-            | Remote::Delete {
-                task,
-                chained,
-                expect,
-                ..
-            } => (task.clone(), *chained, expect.clone()),
-        };
-        let Some(href) = href(&task).map(str::to_owned) else {
-            continue;
-        };
-        let expect = match etags.get(&href) {
-            Some(Some(etag)) if chained => Expect::Etag(etag.clone()),
-            Some(None) if chained => Expect::Any,
-            _ => expect,
-        };
-        let outcome = match change {
-            Remote::Put {
                 text,
-                account,
-                secrets,
-                ..
-            } => {
-                let source = crate::calendar::source_of(account, secrets.as_ref());
-                match caldav::put(&source, &href, &text, &expect) {
-                    Ok(etag) => {
-                        // Not said: asked, for the next change.
-                        let etag = match etag {
-                            Some(etag) => Some(etag),
-                            None => caldav::get(&source, &href)
-                                .ok()
-                                .flatten()
-                                .and_then(|r| r.etag),
-                        };
-                        etags.insert(href.clone(), etag.clone());
-                        Outcome::Saved { etag, text }
-                    }
-                    Err(WriteError::Conflict) => {
-                        etags.remove(&href);
-                        Outcome::Conflict(caldav::get(&source, &href).map_err(|e| e.to_string()))
-                    }
-                    Err(err) => {
-                        etags.remove(&href);
-                        Outcome::Failed(err.to_string())
-                    }
-                }
-            }
+                expect,
+                chained,
+                target,
+            } => (task, Some(text), expect, chained, target),
             Remote::Delete {
-                account, secrets, ..
-            } => {
+                task,
+                expect,
+                chained,
+                target,
+            } => (task, None, expect, chained, target),
+        };
+        let outcome = match target {
+            Target::CalDav { account, secrets } => {
+                let Some(href) = key(&task).map(str::to_owned) else {
+                    continue;
+                };
+                let expect = match etags.get(&href) {
+                    Some(Some(etag)) if chained => Expect::Etag(etag.clone()),
+                    Some(None) if chained => Expect::Any,
+                    _ => expect,
+                };
                 let source = crate::calendar::source_of(account, secrets.as_ref());
-                etags.remove(&href);
-                match caldav::delete(&source, &href, &expect) {
-                    Ok(()) => Outcome::Deleted,
-                    Err(WriteError::Conflict) => {
-                        Outcome::Conflict(caldav::get(&source, &href).map_err(|e| e.to_string()))
-                    }
-                    Err(err) => Outcome::Failed(err.to_string()),
+                caldav_write(&source, &task, &href, text, &expect, &mut etags)
+            }
+            Target::Google { bus, account, base } => {
+                let uid = task.uid.clone();
+                let Source::Google { list, id, .. } = &mut task.source else {
+                    continue;
+                };
+                if id.is_none() {
+                    id.clone_from(&ids.get(&uid).cloned());
                 }
+                let (outcome, got) =
+                    google_write(&bus, &account, &base, list, id.as_deref(), text, chained);
+                if let Some(got) = got {
+                    ids.insert(uid, got.clone());
+                    *id = Some(got);
+                }
+                outcome
             }
         };
         if news.send(Written { task, outcome }).is_err() {
             return;
+        }
+    }
+}
+
+/// A change written to a CalDAV server at `href`: `text` put there, or
+/// none, deleted.
+fn caldav_write(
+    source: &caldav::Source,
+    task: &Task,
+    href: &str,
+    text: Option<String>,
+    expect: &Expect,
+    etags: &mut HashMap<String, Option<String>>,
+) -> Outcome {
+    let theirs = |r: Option<Resource>| {
+        let (account, list) = match &task.source {
+            Source::CalDav { account, list, .. } => (account.as_str(), list.as_str()),
+            _ => ("", ""),
+        };
+        let name = task.list.clone().unwrap_or_default();
+        r.and_then(|r| remote_task(account, list, &name, &r))
+            .map(Box::new)
+    };
+    let Some(text) = text else {
+        etags.remove(href);
+        return match caldav::delete(source, href, expect) {
+            Ok(()) => Outcome::Deleted,
+            Err(WriteError::Conflict) => Outcome::Conflict(
+                caldav::get(source, href)
+                    .map(theirs)
+                    .map_err(|e| e.to_string()),
+            ),
+            Err(err) => Outcome::Failed(err.to_string()),
+        };
+    };
+    match caldav::put(source, href, &text, expect) {
+        Ok(etag) => {
+            // Not said: asked, for the next change.
+            let etag = match etag {
+                Some(etag) => Some(etag),
+                None => caldav::get(source, href)
+                    .ok()
+                    .flatten()
+                    .and_then(|r| r.etag),
+            };
+            etags.insert(href.to_owned(), etag.clone());
+            Outcome::Saved { etag, text }
+        }
+        Err(WriteError::Conflict) => {
+            etags.remove(href);
+            Outcome::Conflict(
+                caldav::get(source, href)
+                    .map(theirs)
+                    .map_err(|e| e.to_string()),
+            )
+        }
+        Err(err) => {
+            etags.remove(href);
+            Outcome::Failed(err.to_string())
+        }
+    }
+}
+
+/// A change written to Google Tasks, to the task `id` of `list` (none: a
+/// new one, added): `body`'s fields, or none, deleted; with the id Google
+/// gave a task it added.
+fn google_write(
+    bus: &str,
+    account: &GoogleAccount,
+    base: &str,
+    list: &str,
+    id: Option<&str>,
+    body: Option<String>,
+    chained: bool,
+) -> (Outcome, Option<String>) {
+    let failed = |err: gtasks::Error| Outcome::Failed(err.to_string());
+    match (body, id) {
+        // Its first write adds it; a later one, when that one failed, has
+        // nothing to change.
+        (Some(_), None) if chained => (Outcome::Failed("it was never added".into()), None),
+        (Some(body), None) => {
+            match goa::with_tasks(bus, account, |token| {
+                gtasks::insert(base, token, list, &body)
+            }) {
+                Ok(text) => {
+                    let got = gtasks::id_of(&text);
+                    (Outcome::Saved { etag: None, text }, got)
+                }
+                Err(err) => (failed(err), None),
+            }
+        }
+        (Some(body), Some(id)) => {
+            match goa::with_tasks(bus, account, |token| {
+                gtasks::patch(base, token, list, id, &body)
+            }) {
+                Ok(Some(text)) => (Outcome::Saved { etag: None, text }, None),
+                // Deleted at Google meanwhile.
+                Ok(None) => (Outcome::Conflict(Ok(None)), None),
+                Err(err) => (failed(err), None),
+            }
+        }
+        (None, None) => (Outcome::Deleted, None),
+        (None, Some(id)) => {
+            match goa::with_tasks(bus, account, |token| gtasks::delete(base, token, list, id)) {
+                Ok(()) => (Outcome::Deleted, None),
+                Err(err) => (failed(err), None),
+            }
         }
     }
 }
@@ -329,7 +530,7 @@ pub fn dir(is_session: bool, state_dir: Option<&Path>) -> Option<PathBuf> {
 }
 
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<PathBuf>) {
-    // The CalDAV servers' answers; the thread that writes to them starts
+    // The remote servers' answers; the thread that writes to them starts
     // with the first change.
     let (written, answers) = channel::channel::<Written>();
     let inserted = handle.insert_source(answers, |event, _, app| {
@@ -339,7 +540,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<P
     });
     match inserted {
         Ok(_) => state.tasks.remote_news = Some(written),
-        Err(err) => tracing::warn!(%err.error, "CalDAV tasks will not be written"),
+        Err(err) => tracing::warn!(%err.error, "remote tasks will not be written"),
     }
     let Some(dir) = dir else {
         return;
@@ -557,7 +758,7 @@ pub(crate) fn parse_due(text: &str, today: Date) -> Result<When, String> {
 pub(crate) enum ListTarget<'a> {
     /// The local list: this list of it, or its default one.
     Local(Option<&'a str>),
-    /// The CalDAV task list at this address.
+    /// The remote task list at this address (CalDAV) or id (Google).
     Remote(&'a str),
 }
 
@@ -602,8 +803,8 @@ impl State {
         }
     }
 
-    /// Writes `task` as it is now; `before`, a CalDAV task as its server
-    /// last took it.
+    /// Writes `task` as it is now; `before`, a remote task as it was
+    /// before this change.
     fn tasks_write(&mut self, task: &Task, before: Option<Task>) {
         match &task.source {
             Source::Local { file } => {
@@ -613,7 +814,9 @@ impl State {
                     text,
                 });
             }
-            Source::CalDav { .. } => self.remote_send(task, before, false, false),
+            Source::CalDav { .. } | Source::Google { .. } => {
+                self.remote_send(task, before, false, false)
+            }
         }
     }
 
@@ -626,7 +829,7 @@ impl State {
             .is_none_or(|a| a.shows_list(name))
     }
 
-    /// Every task shown: the local list's, then those of the CalDAV lists
+    /// Every task shown: the local list's, then those of the remote lists
     /// not hidden.
     fn shown_tasks(&self) -> Vec<&Task> {
         let mut out: Vec<&Task> = self.tasks.local.iter().collect();
@@ -645,8 +848,12 @@ impl State {
                 name: name.clone(),
                 color: None,
             }),
-            Source::CalDav { list, .. } => {
-                let found = self.tasks.remote.iter().find(|l| l.url == *list)?;
+            Source::CalDav { account, list, .. } | Source::Google { account, list, .. } => {
+                let found = self
+                    .tasks
+                    .remote
+                    .iter()
+                    .find(|l| l.url == *list && l.account == *account)?;
                 Some(ListMark {
                     name: found.name.clone(),
                     color: found
@@ -659,13 +866,17 @@ impl State {
         }
     }
 
-    /// Some CalDAV tasks are those of a sync that did not reach their
+    /// Some remote tasks are those of a sync that did not reach their
     /// server.
     fn tasks_offline(&self) -> bool {
-        self.tasks
-            .remote
-            .iter()
-            .any(|l| self.calendar_unreachable(&l.account))
+        self.tasks.remote.iter().any(|l| {
+            self.calendar_unreachable(&l.account) || self.tasks.unreachable.contains(&l.account)
+        })
+    }
+
+    /// The account of this id does not share its tasks (#257).
+    pub(crate) fn tasks_unshared(&self, account: &str) -> bool {
+        self.tasks.unshared.contains(account)
     }
 
     /// After each dispatch: the column's view of the tasks, made again
@@ -747,8 +958,15 @@ impl State {
                     return Err(format!("there is no task list at {url}"));
                 };
                 let list = &self.tasks.remote[at];
-                let task = Task::new_caldav(&list.account, &list.url, &list.name, text, due, now)
-                    .map_err(|e| e.to_string())?;
+                let task = match list.service {
+                    Service::CalDav => {
+                        Task::new_caldav(&list.account, &list.url, &list.name, text, due, now)
+                    }
+                    Service::Google => {
+                        Task::new_google(&list.account, &list.url, &list.name, text, due, now)
+                    }
+                }
+                .map_err(|e| e.to_string())?;
                 self.remote_send(&task, None, false, true);
                 if let Some(list) = self.tasks.remote.get_mut(at) {
                     list.tasks.push(task.clone());
@@ -762,7 +980,13 @@ impl State {
     }
 
     fn task_mut(&mut self, id: &str) -> Option<&mut Task> {
-        let TasksState { local, remote, .. } = &mut self.tasks;
+        let TasksState {
+            local,
+            remote,
+            renamed,
+            ..
+        } = &mut self.tasks;
+        let id = renamed.get(id).map_or(id, String::as_str);
         local
             .iter_mut()
             .chain(remote.iter_mut().flat_map(|l| l.tasks.iter_mut()))
@@ -770,6 +994,7 @@ impl State {
     }
 
     fn task(&self, id: &str) -> Option<&Task> {
+        let id = self.tasks.renamed.get(id).map_or(id, String::as_str);
         self.tasks
             .local
             .iter()
@@ -815,6 +1040,13 @@ impl State {
     }
 
     pub(crate) fn delete_task(&mut self, id: &str) {
+        let id = self
+            .tasks
+            .renamed
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| id.to_owned());
+        let id = id.as_str();
         if let Some(at) = self.tasks.local.iter().position(|t| t.uid == id) {
             let task = self.tasks.local.remove(at);
             if let Source::Local { file } = task.source {
@@ -834,7 +1066,7 @@ impl State {
     }
 
     /// The lists a task can be added to, for the launcher: the local one
-    /// first, its own lists, then the CalDAV lists shown.
+    /// first, its own lists, then the remote lists shown.
     fn task_list_choices(&self) -> Vec<TaskListChoice> {
         let lang = self.shell_lang();
         let here = lang.on_this_computer().to_owned();
@@ -865,15 +1097,13 @@ impl State {
             if !self.list_shown(&list.account, &list.name) {
                 continue;
             }
-            let place = self
-                .config
-                .calendars
-                .iter()
-                .find(|a| a.id() == list.account)
-                .map(|a| a.name.clone())
-                .unwrap_or_default();
+            let place = self.calendar_name(&list.account).unwrap_or_default();
+            let service = match list.service {
+                Service::CalDav => "caldav",
+                Service::Google => "google",
+            };
             out.push(TaskListChoice {
-                key: format!("caldav:{}", list.url),
+                key: format!("{service}:{}", list.url),
                 name: list.name.clone(),
                 place,
                 color: list
@@ -909,6 +1139,7 @@ impl State {
         }
         let target = match list {
             Some(key) if key.starts_with("caldav:") => ListTarget::Remote(&key["caldav:".len()..]),
+            Some(key) if key.starts_with("google:") => ListTarget::Remote(&key["google:".len()..]),
             Some(key) if key.starts_with("local:") => {
                 ListTarget::Local(Some(&key["local:".len()..]))
             }
@@ -972,6 +1203,7 @@ impl State {
                 source: match task.source {
                     Source::Local { .. } => "local".into(),
                     Source::CalDav { .. } => "caldav".into(),
+                    Source::Google { .. } => "google".into(),
                 },
             }
         };
@@ -1038,7 +1270,7 @@ impl State {
     }
 
     /// A task added through the control API, in the user's words: to the
-    /// CalDAV list shown of that name, else to the local list's.
+    /// remote list shown of that name, else to the local list's.
     pub fn add_task_info(
         &mut self,
         text: &str,
@@ -1085,17 +1317,17 @@ impl State {
             .collect()
     }
 
-    /// Sends a change of a CalDAV task to the thread that writes them,
+    /// Sends a change of a remote task to the thread that writes them,
     /// started with the first: `task` as it is now (or as it was, deleted),
-    /// `before` as its server last took it (`None` for a new one).
+    /// `before` as it was before this change (`None` for a new one).
     fn remote_send(&mut self, task: &Task, before: Option<Task>, delete: bool, new: bool) {
-        let Source::CalDav { account, .. } = &task.source else {
+        let Some(account) = task.source.account().map(str::to_owned) else {
             return;
         };
-        let Some(href) = href(task).map(str::to_owned) else {
+        let Some(at) = key(task).map(str::to_owned) else {
             return;
         };
-        let Some((config, secrets)) = self.calendar_account(account) else {
+        let Some(target) = self.task_target(&account) else {
             tracing::warn!("the account of a task is gone: the change is not written");
             return;
         };
@@ -1110,14 +1342,18 @@ impl State {
             match spawned {
                 Ok(_) => self.tasks.remote_worker = Some(worker),
                 Err(err) => {
-                    tracing::warn!(%err, "CalDAV tasks will not be written");
+                    tracing::warn!(%err, "remote tasks will not be written");
                     return;
                 }
             }
         }
-        let text = task.to_ics(self.tasks_now().timestamp());
-        let edit = self.tasks.edits.entry(href).or_insert_with(|| Edit {
-            account: account.clone(),
+        let text = match &task.source {
+            // Only what this change changed: what changed elsewhere stays.
+            Source::Google { .. } => gtasks::body(task, before.as_ref()),
+            _ => task.to_ics(self.tasks_now().timestamp()),
+        };
+        let edit = self.tasks.edits.entry(at).or_insert_with(|| Edit {
+            account,
             in_flight: 0,
             settled: None,
             deleted: false,
@@ -1137,8 +1373,7 @@ impl State {
                 task: task.clone(),
                 expect,
                 chained,
-                account: config,
-                secrets,
+                target,
             }
         } else {
             Remote::Put {
@@ -1146,8 +1381,7 @@ impl State {
                 text,
                 expect,
                 chained,
-                account: config,
-                secrets,
+                target,
             }
         };
         let sent = self
@@ -1161,17 +1395,54 @@ impl State {
         }
     }
 
-    /// A CalDAV server's answer to a change.
-    fn remote_written(&mut self, written: Written) {
-        let Some(href) = href(&written.task).map(str::to_owned) else {
+    /// A task added to Google Tasks got its id: it, and its change, go by
+    /// it from now on; a sync that already brought it does not show it
+    /// twice.
+    fn google_task_named(&mut self, uid: &str, id: &str) {
+        if let Some(edit) = self.tasks.edits.remove(uid) {
+            match self.tasks.edits.get_mut(id) {
+                Some(known) => {
+                    known.in_flight += edit.in_flight;
+                    known.settled = known.settled.max(edit.settled);
+                }
+                None => {
+                    self.tasks.edits.insert(id.to_owned(), edit);
+                }
+            }
+        }
+        for list in &mut self.tasks.remote {
+            if !list.tasks.iter().any(|t| key(t) == Some(uid)) {
+                continue;
+            }
+            list.tasks.retain(|t| key(t) != Some(id));
+            if let Some(task) = list.tasks.iter_mut().find(|t| key(t) == Some(uid)) {
+                if let Source::Google { id: known, .. } = &mut task.source {
+                    *known = Some(id.to_owned());
+                }
+                task.uid = id.to_owned();
+            }
+        }
+        self.tasks.renamed.insert(uid.to_owned(), id.to_owned());
+        self.tasks_changed();
+    }
+
+    /// A remote server's answer to a change.
+    fn remote_written(&mut self, mut written: Written) {
+        if let Source::Google { id: Some(id), .. } = &written.task.source
+            && *id != written.task.uid
+        {
+            let (uid, id) = (written.task.uid.clone(), id.clone());
+            self.google_task_named(&uid, &id);
+            written.task.uid = id;
+        }
+        let Some(at) = key(&written.task).map(str::to_owned) else {
             return;
         };
-        let Source::CalDav { account, list, .. } = written.task.source.clone() else {
+        let Some(list) = list_of(&written.task).map(str::to_owned) else {
             return;
         };
-        let name = written.task.list.clone().unwrap_or_default();
         let generation = self.calendar_generation();
-        if let Some(edit) = self.tasks.edits.get_mut(&href) {
+        if let Some(edit) = self.tasks.edits.get_mut(&at) {
             edit.in_flight = edit.in_flight.saturating_sub(1);
             edit.settled = Some(generation);
         }
@@ -1183,31 +1454,31 @@ impl State {
                 if let Source::CalDav { etag: e, .. } = &mut taken.source {
                     e.clone_from(&etag);
                 }
-                if let Some(task) = self.remote_task_mut(&href) {
+                if let Some(task) = self.remote_task_mut(&at) {
                     task.raw.clone_from(&taken.raw);
                     if let Source::CalDav { etag: e, .. } = &mut task.source {
                         e.clone_from(&etag);
                     }
                 }
-                if let Some(edit) = self.tasks.edits.get_mut(&href) {
+                if let Some(edit) = self.tasks.edits.get_mut(&at) {
                     edit.before = Some(taken);
                 }
                 self.save_remote_cache();
             }
             Outcome::Deleted => {
-                if let Some(edit) = self.tasks.edits.get_mut(&href) {
+                if let Some(edit) = self.tasks.edits.get_mut(&at) {
                     edit.before = None;
                 }
                 self.save_remote_cache();
             }
-            Outcome::Conflict(Ok(server)) => {
+            Outcome::Conflict(Ok(theirs)) => {
+                let theirs = theirs.map(|t| *t);
                 tracing::info!("a task changed on its server meanwhile: its version is kept");
-                let theirs = server.and_then(|r| remote_task(&account, &list, &name, &r));
-                if let Some(edit) = self.tasks.edits.get_mut(&href) {
+                if let Some(edit) = self.tasks.edits.get_mut(&at) {
                     edit.before.clone_from(&theirs);
                     edit.deleted = theirs.is_none();
                 }
-                self.replace_remote(&list, &href, theirs);
+                self.replace_remote(&list, &at, theirs);
                 self.shell_toast(
                     &lang.task_conflict(&written.task.summary),
                     lang.task_conflict_body(),
@@ -1215,11 +1486,11 @@ impl State {
             }
             Outcome::Conflict(Err(err)) | Outcome::Failed(err) => {
                 tracing::warn!(err, "a task was not written to its server: it goes back");
-                let before = self.tasks.edits.get_mut(&href).and_then(|e| {
+                let before = self.tasks.edits.get_mut(&at).and_then(|e| {
                     e.deleted = e.before.is_none();
                     e.before.clone()
                 });
-                self.replace_remote(&list, &href, before);
+                self.replace_remote(&list, &at, before);
                 self.shell_toast(
                     &lang.task_not_saved(&written.task.summary),
                     lang.task_not_saved_body(),
@@ -1233,28 +1504,53 @@ impl State {
             .remote
             .iter_mut()
             .flat_map(|l| l.tasks.iter_mut())
-            .find(|t| href(t) == Some(at))
+            .find(|t| key(t) == Some(at))
     }
 
     /// The task at `at` of the list at `list` is `with` from now on, or
     /// none.
     fn replace_remote(&mut self, list: &str, at: &str, with: Option<Task>) {
         if let Some(found) = self.tasks.remote.iter_mut().find(|l| l.url == list) {
-            found.tasks.retain(|t| href(t) != Some(at));
+            found.tasks.retain(|t| key(t) != Some(at));
             found.tasks.extend(with);
         }
         self.save_remote_cache();
         self.tasks_changed();
     }
 
-    /// An account's task lists as its sync of `generation` found them;
-    /// the tasks changed here since it started stay as the loop has them.
+    /// An account's task lists as its sync of `generation` read them; the
+    /// tasks changed here since it started stay as the loop has them.
     pub(crate) fn remote_tasks_synced(
         &mut self,
         account: &str,
         generation: u64,
-        lists: Vec<TaskList>,
+        synced: SyncedTasks,
     ) {
+        let lists = match synced {
+            SyncedTasks::Lists(lists) => {
+                self.tasks.unreachable.remove(account);
+                if self.tasks.unshared.remove(account) {
+                    tracing::info!("an account shares its tasks again");
+                }
+                lists
+            }
+            SyncedTasks::Unshared => {
+                self.tasks.unreachable.remove(account);
+                if self.tasks.unshared.insert(account.to_owned()) {
+                    tracing::info!(
+                        "a Google account does not share its tasks: its token lacks {}",
+                        gtasks::SCOPE
+                    );
+                }
+                Vec::new()
+            }
+            SyncedTasks::Failed(err) => {
+                tracing::warn!(err, "an account's tasks did not sync; those known stay");
+                self.tasks.unreachable.insert(account.to_owned());
+                self.remote_tasks_changed();
+                return;
+            }
+        };
         self.tasks.edits.retain(|_, e| {
             e.account != account || e.in_flight > 0 || e.settled.is_some_and(|g| g >= generation)
         });
@@ -1265,22 +1561,24 @@ impl State {
         self.tasks.remote = others;
         let edits = &self.tasks.edits;
         for list in lists {
-            let mut tasks: Vec<Task> = list_tasks(account, &list)
+            let mut tasks: Vec<Task> = list
+                .tasks
                 .into_iter()
-                .filter(|t| href(t).is_none_or(|h| !edits.contains_key(h)))
+                .filter(|t| key(t).is_none_or(|k| !edits.contains_key(k)))
                 .collect();
             let changed_here = old
                 .iter()
                 .filter(|l| l.url == list.url)
                 .flat_map(|l| l.tasks.iter())
                 .filter(|t| {
-                    href(t)
-                        .and_then(|h| edits.get(h))
+                    key(t)
+                        .and_then(|k| edits.get(k))
                         .is_some_and(|e| !e.deleted)
                 });
             tasks.extend(changed_here.cloned());
             self.tasks.remote.push(RemoteList {
                 account: account.to_owned(),
+                service: list.service,
                 url: list.url,
                 name: list.name,
                 color: list.color,
@@ -1292,34 +1590,48 @@ impl State {
         self.tasks_changed();
     }
 
-    /// The task lists of the cache read at start: of the accounts `known`
-    /// (all until the configuration is read), not synced yet.
-    pub(crate) fn remote_tasks_cached(&mut self, cache: Cache, known: Option<&[String]>) {
+    /// The task lists of the cache read at start: of the accounts `kept`
+    /// says, not synced yet.
+    pub(crate) fn remote_tasks_cached(&mut self, cache: Cache, kept: impl Fn(&str) -> bool) {
         let mut dropped = false;
         for (account, lists) in cache {
-            if known.is_some_and(|k| !k.contains(&account)) {
+            if !kept(&account) {
                 dropped = true;
                 continue;
             }
             if self.tasks.remote.iter().any(|l| l.account == account) {
                 continue;
             }
+            let service = if crate::calendar::is_goa(&account) {
+                Service::Google
+            } else {
+                Service::CalDav
+            };
             for (url, name, color, items) in lists {
-                let list = TaskList {
+                let tasks = match service {
+                    Service::CalDav => list_tasks(
+                        &account,
+                        &TaskList {
+                            url: url.clone(),
+                            name: name.clone(),
+                            color: color.clone(),
+                            items: items
+                                .into_iter()
+                                .map(|(href, etag, ics)| Resource { href, etag, ics })
+                                .collect(),
+                        },
+                    ),
+                    Service::Google => items
+                        .iter()
+                        .filter_map(|(_, _, text)| gtasks::parse(text, &account, &url, &name))
+                        .collect(),
+                };
+                self.tasks.remote.push(RemoteList {
+                    account: account.clone(),
+                    service,
                     url,
                     name,
                     color,
-                    items: items
-                        .into_iter()
-                        .map(|(href, etag, ics)| Resource { href, etag, ics })
-                        .collect(),
-                };
-                let tasks = list_tasks(&account, &list);
-                self.tasks.remote.push(RemoteList {
-                    account: account.clone(),
-                    url: list.url,
-                    name: list.name,
-                    color: list.color,
                     tasks,
                 });
             }
@@ -1332,11 +1644,16 @@ impl State {
         self.tasks_changed();
     }
 
-    /// The accounts not among `ids` take their task lists with them.
-    pub(crate) fn forget_remote_tasks(&mut self, ids: &[String]) {
+    /// The accounts not among `ids` take their task lists with them; GOA's
+    /// stay while `keep_goa` (it has not answered yet).
+    pub(crate) fn forget_remote_tasks(&mut self, ids: &[String], keep_goa: bool) {
+        let kept =
+            |id: &str| ids.iter().any(|i| i == id) || (keep_goa && crate::calendar::is_goa(id));
         let before = self.tasks.remote.len();
-        self.tasks.remote.retain(|l| ids.contains(&l.account));
-        self.tasks.edits.retain(|_, e| ids.contains(&e.account));
+        self.tasks.remote.retain(|l| kept(&l.account));
+        self.tasks.edits.retain(|_, e| kept(&e.account));
+        self.tasks.unreachable.retain(|a| kept(a));
+        self.tasks.unshared.retain(|a| kept(a));
         if self.tasks.remote.len() != before {
             self.save_remote_cache();
             self.tasks_changed();
@@ -1350,8 +1667,8 @@ impl State {
         }
     }
 
-    /// In the configuration's order of their accounts, a sort that keeps
-    /// each account's lists as its server listed them.
+    /// In the configuration's order of their accounts, GOA's after them, a
+    /// sort that keeps each account's lists as its server listed them.
     fn sort_remote(&mut self) {
         let order: Vec<String> = self.config.calendars.iter().map(|a| a.id()).collect();
         self.tasks.remote.sort_by_key(|l| {
@@ -1377,10 +1694,12 @@ impl State {
             let items = list
                 .tasks
                 .iter()
+                .filter(|t| !t.raw.is_empty())
                 .filter_map(|t| match &t.source {
-                    Source::CalDav { href, etag, .. } if !t.raw.is_empty() => {
+                    Source::CalDav { href, etag, .. } => {
                         Some((href.clone(), etag.clone(), t.raw.clone()))
                     }
+                    Source::Google { id: Some(id), .. } => Some((id.clone(), None, t.raw.clone())),
                     _ => None,
                 })
                 .collect();

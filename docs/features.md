@@ -218,7 +218,10 @@ nothing at all are options (see
   change made on the server meanwhile keeping the server's version (a
   toast says so); offline, the last tasks stay and the section says
   "offline". Lists can be hidden in the settings' Accounts and calendar.
-  Google Tasks comes next
+  A Google account of GNOME Online Accounts brings its Google Tasks lists
+  the same way, read and written through Google Tasks' API with the
+  account's token; one whose sign-in does not grant Google Tasks shows in
+  the settings as not sharing its tasks, with how to share them
 - Command field ("Search, act, ask…")
 - Status modules
 - Account: avatar, menu (log out, lock, about, settings, recent apps)
@@ -323,6 +326,7 @@ nothing at all are options (see
 - Multiple accounts, sync, local cache (CalDAV and ICS subscriptions)
 - CalDAV task lists with the column's tasks, written back on their ETags; each list shown or hidden in the settings
 - Google, through GNOME Online Accounts when installed `[linux]` (its accounts listed read-only in the settings); an OAuth client of our own later
+- Google Tasks of those accounts with the column's tasks, written back through Google Tasks' API; an account whose token lacks the tasks scope says so in the settings
 - Reminders with "Join"
 - Month view with week numbers from the clock, today's agenda
 - Inline commands

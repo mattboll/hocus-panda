@@ -22,6 +22,7 @@ fn the_headless_compositor_keeps_the_bundled_fonts() -> anyhow::Result<()> {
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.advance(hocus_compositor::FRAME * 10)?;
     assert!(!hocus_ui::text::system_fonts_installed());

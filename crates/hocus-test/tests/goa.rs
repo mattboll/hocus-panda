@@ -1,7 +1,8 @@
 //! Google calendars through GNOME Online Accounts (#137). Without GOA the
 //! session shows nothing of it and logs nothing about it above debug; GOA
 //! started later is found then. A token Google refuses is renewed through
-//! GOA once, never more. Following GOA, or not, never keeps the loop from
+//! GOA once, never more. Google Tasks (#257) are read and written with the
+//! same token; one without their scope leaves the calendars be. Following GOA, or not, never keeps the loop from
 //! sleeping. Stand-ins on a private bus and 127.0.0.1 only:
 //! never the session's bus, never Google. Needs `dbus-daemon`; skipped
 //! without it.
@@ -15,9 +16,13 @@ use std::{
 
 use hocus_api::{CalendarsInfo, Reply, Request};
 use hocus_compositor::{HarnessOptions, Headless, HeadlessConfig, RendererChoice};
-use hocus_platform::calendar::{
-    caldav::FetchError,
-    goa::{self, GoogleAccount},
+use hocus_platform::{
+    calendar::{
+        caldav::FetchError,
+        goa::{self, GoogleAccount},
+        gtasks,
+    },
+    tasks::Task,
 };
 use hocus_test::{
     bus::{PrivateBus, installed},
@@ -69,6 +74,7 @@ fn start(bus: Option<&PrivateBus>, google: Option<&str>) -> anyhow::Result<Headl
         motion: false,
         first_run: false,
         google_caldav: google.map(str::to_owned),
+        google_tasks: None,
     })
 }
 
@@ -233,5 +239,118 @@ fn a_refused_token_is_renewed_once() -> anyhow::Result<()> {
     goa.remove()?;
     let gone = fetch();
     assert!(gone.is_err(), "{gone:?}");
+    Ok(())
+}
+
+fn alex() -> GoogleAccount {
+    GoogleAccount {
+        path: format!("/org/gnome/OnlineAccounts/Accounts/{ACCOUNT_ID}"),
+        id: ACCOUNT_ID.into(),
+        identity: ALEX.into(),
+        name: ALEX.into(),
+    }
+}
+
+fn tasks_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/scenarios/calendar/google-tasks.json")
+}
+
+#[test]
+fn google_tasks_are_read_and_written_with_goa_s_token() -> anyhow::Result<()> {
+    if !installed("dbus-daemon") {
+        eprintln!("skipped: no dbus-daemon");
+        return Ok(());
+    }
+    let bus = PrivateBus::start()?;
+    let goa = FakeGoa::start(&bus.address, ALEX, fixture(), true)?;
+    goa.load_tasks(&tasks_fixture())?;
+    let account = alex();
+    let range = (
+        "2026-10-01T00:00:00Z".parse::<Timestamp>()?,
+        "2026-12-01T00:00:00Z".parse::<Timestamp>()?,
+    );
+    let id = format!("goa:{ACCOUNT_ID}");
+    let sync = || {
+        goa::sync(
+            &bus.address,
+            &account,
+            goa.google(),
+            Some(goa.tasks()),
+            &id,
+            range,
+        )
+    };
+
+    // One token for the calendar and the tasks.
+    let (calendars, lists) = sync()?;
+    assert!(calendars[0].ics.iter().any(|i| i.contains("Family dinner")));
+    let lists = lists.expect("asked").expect("read");
+    let names: Vec<_> = lists
+        .iter()
+        .map(|l| (l.name.as_str(), l.tasks.len()))
+        .collect();
+    assert_eq!(names, [("My Tasks", 3), ("Groceries", 1)]);
+    assert_eq!(count(&goa.asked(), "GetAccessToken"), 1);
+
+    // Written: added, changed, deleted.
+    let now: Timestamp = "2026-10-21T14:37:00Z".parse()?;
+    let new = Task::new_google(&id, "Z3JvY2VyaWVz", "Groceries", "Oat milk", None, now)?;
+    let added = goa::with_tasks(&bus.address, &account, |token| {
+        gtasks::insert(
+            goa.tasks(),
+            token,
+            "Z3JvY2VyaWVz",
+            &gtasks::body(&new, None),
+        )
+    })?;
+    let added_id = gtasks::id_of(&added).expect("an id");
+    let mut done = gtasks::parse(&added, &id, "Z3JvY2VyaWVz", "Groceries").expect("a task");
+    let before = done.clone();
+    done.set_done(true, now);
+    let patched = goa::with_tasks(&bus.address, &account, |token| {
+        gtasks::patch(
+            goa.tasks(),
+            token,
+            "Z3JvY2VyaWVz",
+            &added_id,
+            &gtasks::body(&done, Some(&before)),
+        )
+    })?;
+    assert!(patched.is_some_and(|t| t.contains("\"status\":\"completed\"")));
+    let kept = goa.google_task("Oat milk").expect("kept");
+    assert!(
+        kept.contains("\"completed\":\"2026-10-21T14:37:00.000Z\""),
+        "{kept}"
+    );
+    goa::with_tasks(&bus.address, &account, |token| {
+        gtasks::delete(goa.tasks(), token, "Z3JvY2VyaWVz", &added_id)
+    })?;
+    assert_eq!(goa.google_task("Oat milk"), None);
+    // Gone already: gone.
+    goa::with_tasks(&bus.address, &account, |token| {
+        gtasks::delete(goa.tasks(), token, "Z3JvY2VyaWVz", &added_id)
+    })?;
+
+    // A stale token is renewed once, for the tasks too.
+    goa.revoke();
+    let read = goa::with_tasks(&bus.address, &account, |token| {
+        gtasks::lists(goa.tasks(), token, &id)
+    })?;
+    assert_eq!(read.len(), 2);
+    assert_eq!(count(&goa.asked(), "EnsureCredentials"), 1);
+
+    // Without the tasks scope: the calendars still read, the tasks say so.
+    goa.share_tasks(false);
+    let (calendars, lists) = sync()?;
+    assert!(!calendars.is_empty());
+    let refused = lists.expect("asked");
+    assert!(
+        matches!(refused, Err(gtasks::Error::Unshared(_))),
+        "{refused:?}"
+    );
+    // No renewal for that: the token is good, its scope is not.
+    assert_eq!(count(&goa.asked(), "EnsureCredentials"), 1);
+    assert!(!format!("{refused:?}").contains("ya29"));
     Ok(())
 }

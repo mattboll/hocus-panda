@@ -42,6 +42,7 @@ fn compositor(
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.write_config(COLUMN)?;
     Ok(compositor)
@@ -464,6 +465,7 @@ fn the_system_asks_for_a_password_over_everything() -> anyhow::Result<()> {
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.write_config(COLUMN)?;
     let deadline = Instant::now() + Duration::from_secs(10);

@@ -1,0 +1,187 @@
+description = "Tasks from Google Tasks (#257): given a Google account of GNOME Online Accounts whose token grants Google Tasks, its task lists, read from Google Tasks' API with GOA's token, show in the column with the local ones, each with its list's name; ticking one sends status completed to the API; adding one from the column's field offers its lists and adds it there; editing and deleting write back too; MCP lists and adds them; a sync later, all is as written"
+outputs = ["1280x1024"]
+shell = true
+# GNOME Online Accounts' stand-in on the scenario's private bus, Google's
+# CalDAV and Google Tasks' API on 127.0.0.1: never the session's, never Google.
+goa = { identity = "alex.panda@example.com", dir = "calendar/google", tasks = "calendar/google-tasks.json" }
+
+[[step]]
+config = """
+[panel]
+form = "column"
+
+[idle]
+curtain_after = 0
+"""
+
+# A task of the local list, read as the session starts.
+[[step]]
+state_file = { name = "tasks/domain.ics", text = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Tasks//EN
+BEGIN:VTODO
+UID:domain
+DTSTAMP:20261018T080000Z
+CREATED:20261018T080000Z
+SUMMARY:Book hocuspanda.org
+STATUS:NEEDS-ACTION
+END:VTODO
+END:VCALENDAR
+""" }
+
+[[step]]
+restart = true
+
+[[step]]
+expect_calendars = { online = "installed", online_accounts = 1, contains = ["Family dinner"], error = false }
+
+# One token from GOA for the calendar and the tasks.
+[[step]]
+expect_goa = ["GetAccessToken", "REPORT /caldav/v2/alex.panda%40example.com/events/ ok", "GET /tasks/v1/users/@me/lists ok", "GET /tasks/v1/lists/bXktdGFza3M/tasks ok", "GET /tasks/v1/lists/Z3JvY2VyaWVz/tasks ok"]
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_ui = { label = "Renew the passport" }
+
+[[step]]
+expect_ui = { label = "4 to do" }
+
+[[step]]
+expect_ui = { label = "My Tasks" }
+
+[[step]]
+expect_ui = { label = "Groceries" }
+
+# Done long ago, it does not show.
+[[step]]
+expect_ui = { label = "Pick up the parcel", shown = false }
+
+[[step]]
+mcp = { tool = "list_tasks", contains = ["[ ] Renew the passport (due 2026-10-21, in My Tasks)", "[ ] Bamboo shoots (due 2026-10-23, in Groceries)", "[ ] Call the bank (in My Tasks)", "[ ] Book hocuspanda.org"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-google.png" }
+
+# Ticked: Google Tasks' API gets status completed, and the rest stays.
+[[step]]
+click_ui = "Renew the passport"
+
+[[step]]
+expect_google_task = { title = "Renew the passport", contains = ["\"status\":\"completed\"", "\"completed\":\"2026-10-21T14:37", "\"due\":\"2026-10-21T00:00:00.000Z\"", "\"notes\":\"The photo booth at the station\""] }
+
+[[step]]
+expect_goa = ["PATCH /tasks/v1/lists/bXktdGFza3M/tasks/cGFzc3BvcnQ ok"]
+
+[[step]]
+expect_ui = { label = "3 to do" }
+
+# Ticked again: not done, its completion gone.
+[[step]]
+click_ui = "Renew the passport"
+
+[[step]]
+expect_google_task = { title = "Renew the passport", contains = ["\"status\":\"needsAction\""], lacks = ["\"completed\":"] }
+
+[[step]]
+expect_ui = { label = "4 to do" }
+
+# Added from the column's field: the account's lists to choose from.
+[[step]]
+click_ui = "Add a task"
+
+[[step]]
+type = "Buy oat milk"
+
+# Down twice: Groceries, after My Tasks.
+[[step]]
+key = 108
+
+[[step]]
+key = 108
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-google-lists.png" }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_google_task = { title = "Buy oat milk", contains = ["\"id\":\"added-1\"", "\"status\":\"needsAction\""] }
+
+[[step]]
+expect_goa = ["POST /tasks/v1/lists/Z3JvY2VyaWVz/tasks ok"]
+
+[[step]]
+expect_ui = { label = "5 to do" }
+
+# Ticked at once, the id Google gave it may not be known yet: the change
+# goes to it all the same.
+[[step]]
+click_ui = "Buy oat milk"
+
+[[step]]
+expect_google_task = { title = "Buy oat milk", contains = ["\"id\":\"added-1\"", "\"status\":\"completed\""] }
+
+[[step]]
+expect_goa = ["PATCH /tasks/v1/lists/Z3JvY2VyaWVz/tasks/added-1 ok"]
+
+# Edited: its title written back, the rest as Google had it.
+[[step]]
+right_click_ui = "Call the bank"
+
+[[step]]
+click_ui = "Edit"
+
+[[step]]
+type = " about the loan"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_google_task = { title = "Call the bank about the loan", contains = ["\"id\":\"YmFuaw\"", "\"status\":\"needsAction\""] }
+
+# Deleted: gone from Google.
+[[step]]
+right_click_ui = "Bamboo shoots"
+
+[[step]]
+click_ui = "Delete"
+
+[[step]]
+expect_google_task = { title = "Bamboo shoots", gone = true }
+
+[[step]]
+expect_ui = { label = "Bamboo shoots", shown = false }
+
+# MCP adds to a list by its name.
+[[step]]
+mcp = { tool = "add_task", arguments = { text = "Rice noodles", list = "Groceries" }, contains = ["added: [ ] Rice noodles (in Groceries)"] }
+
+[[step]]
+expect_google_task = { title = "Rice noodles", contains = ["\"id\":\"added-2\""] }
+
+# A sync later, all is as written: nothing comes back, nothing twice.
+[[step]]
+advance_ms = 601000
+
+[[step]]
+expect_calendars = { error = false }
+
+[[step]]
+expect_ui = { label = "Bamboo shoots", shown = false }
+
+[[step]]
+expect_ui = { label = "4 to do" }
+
+[[step]]
+mcp = { tool = "list_tasks", contains = ["[ ] Renew the passport (due 2026-10-21, in My Tasks)", "[ ] Call the bank about the loan (in My Tasks)", "[ ] Rice noodles (in Groceries)", "[ ] Book hocuspanda.org"] }

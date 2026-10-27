@@ -74,7 +74,10 @@ pub struct Scenario {
     /// A stand-in for GNOME Online Accounts on the scenario's private
     /// session bus (never the session's), with a Google account signed in,
     /// and one for Google's CalDAV on 127.0.0.1 serving the `.ics` files of
-    /// `dir` as its calendar: `{ identity, dir, running? = true }` (#137).
+    /// `dir` as its calendar: `{ identity, dir, running? = true }` (#137);
+    /// and one for Google Tasks' API (#257), serving the task lists of the
+    /// JSON file `tasks` (none without one), refusing a token without the
+    /// tasks scope when `tasks_scope = false`.
     pub goa: Option<GoaFixture>,
     /// Programs the scenario runs; it is skipped where one is missing.
     #[serde(default)]
@@ -364,11 +367,17 @@ pub enum Step {
     /// Something changes in GNOME Online Accounts' stand-in: `run` (its
     /// name taken), `sign_in`, `remove`, `calendar_off`, `calendar_on`,
     /// `revoke` (Google refuses the token it holds until refreshed),
-    /// `break_tokens` (Google refuses every token).
+    /// `break_tokens` (Google refuses every token), `share_tasks` (the
+    /// token grants Google Tasks' scope from now on), `tasks_down` and
+    /// `tasks_up` (Google Tasks' API fails every request, or answers again).
     Goa(GoaChange),
     /// GOA's and Google's stand-ins were asked these, in this order, each
     /// the start of a line of their log: `["GetAccessToken", "REPORT"]`.
     ExpectGoa(Vec<String>),
+    /// Google Tasks' stand-in keeps the task of this title so, once
+    /// written: `{ title, contains? = […], lacks? = […], gone? = false }`
+    /// on its JSON.
+    ExpectGoogleTask(ExpectGoogleTask),
     /// Opens the annotation window on a capture (`{runtime_dir}` is the
     /// compositor's temporary directory), and waits for it.
     OpenAnnotate(String),
@@ -727,6 +736,24 @@ pub struct GoaFixture {
     /// Its name taken from the start; otherwise once a `goa = "run"` step.
     #[serde(default = "yes")]
     pub running: bool,
+    /// Google Tasks' lists, a JSON file relative to the scenario.
+    pub tasks: Option<PathBuf>,
+    /// The token GOA hands out grants Google Tasks' scope.
+    #[serde(default = "yes")]
+    pub tasks_scope: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectGoogleTask {
+    pub title: String,
+    #[serde(default)]
+    pub contains: Vec<String>,
+    #[serde(default)]
+    pub lacks: Vec<String>,
+    /// There is none of that title.
+    #[serde(default)]
+    pub gone: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -739,6 +766,11 @@ pub enum GoaChange {
     CalendarOn,
     Revoke,
     BreakTokens,
+    /// The token grants Google Tasks' scope from now on.
+    ShareTasks,
+    /// Google Tasks' API fails every request (503), or answers again.
+    TasksDown,
+    TasksUp,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1225,6 +1257,7 @@ impl fmt::Display for Step {
             Self::ExpectCalendarCache(e) => write!(f, "expect_calendar_cache {e:?}"),
             Self::Goa(change) => write!(f, "goa {change:?}"),
             Self::ExpectGoa(asked) => write!(f, "expect_goa {asked:?}"),
+            Self::ExpectGoogleTask(e) => write!(f, "expect_google_task {:?}", e.title),
             Self::ExpectAnnotate(e) => write!(f, "expect_annotate {:?}", e.label),
             Self::ClickAnnotate(label) => write!(f, "click_annotate {label:?}"),
             Self::DragAnnotate(d) => write!(f, "drag_annotate {:?}", d.label),
@@ -1405,12 +1438,19 @@ impl Scenario {
             None
         };
         let goa = match (&bus, &self.goa) {
-            (Some(bus), Some(goa)) => Some(crate::goa::FakeGoa::start(
-                &bus.address,
-                &goa.identity,
-                self.dir.join(&goa.dir),
-                goa.running,
-            )?),
+            (Some(bus), Some(goa)) => {
+                let fake = crate::goa::FakeGoa::start(
+                    &bus.address,
+                    &goa.identity,
+                    self.dir.join(&goa.dir),
+                    goa.running,
+                )?;
+                if let Some(tasks) = &goa.tasks {
+                    fake.load_tasks(&self.dir.join(tasks))?;
+                }
+                fake.share_tasks(goa.tasks_scope);
+                Some(fake)
+            }
             _ => None,
         };
         // The system bus, with the stand-ins asked for alone on it.
@@ -1471,6 +1511,7 @@ impl Scenario {
             motion: self.motion,
             first_run: self.first_run,
             google_caldav: goa.as_ref().map(|g| g.google().to_owned()),
+            google_tasks: goa.as_ref().map(|g| g.tasks().to_owned()),
         })?;
         // The scenarios' own copy of XKB's registry names the layouts: the
         // same names wherever the tests run.
@@ -2247,6 +2288,14 @@ impl Run<'_> {
                         goa.revoke();
                         Ok(())
                     }
+                    GoaChange::ShareTasks => {
+                        goa.share_tasks(true);
+                        Ok(())
+                    }
+                    GoaChange::TasksDown | GoaChange::TasksUp => {
+                        goa.set_tasks_down(*change == GoaChange::TasksDown);
+                        Ok(())
+                    }
                     GoaChange::BreakTokens => {
                         goa.break_tokens();
                         Ok(())
@@ -2254,6 +2303,7 @@ impl Run<'_> {
                 }
             }
             Step::ExpectGoa(expected) => self.expect_goa(expected),
+            Step::ExpectGoogleTask(expected) => self.expect_google_task(expected),
             Step::AiServer(a) => {
                 self.ai = Some(crate::ai::Server::start(crate::ai::Answers {
                     pieces: a.pieces.clone(),
@@ -3408,6 +3458,35 @@ impl Run<'_> {
                 return Ok(());
             }
             anyhow::ensure!(Instant::now() < deadline, "the calendar cache is:\n{text}");
+            self.compositor.dispatch(Duration::from_millis(10))?;
+        }
+    }
+
+    /// Writes run on a thread: waited for in real time.
+    fn expect_google_task(&mut self, expected: &ExpectGoogleTask) -> anyhow::Result<()> {
+        let deadline = Instant::now() + CLIENT_TIMEOUT;
+        loop {
+            let found = self
+                .goa
+                .as_ref()
+                .context("no GOA: the scenario needs `goa = { identity, dir, tasks }`")?
+                .google_task(&expected.title);
+            let done = match &found {
+                None => expected.gone,
+                Some(text) => {
+                    !expected.gone
+                        && expected.contains.iter().all(|c| text.contains(c.as_str()))
+                        && !expected.lacks.iter().any(|l| text.contains(l.as_str()))
+                }
+            };
+            if done {
+                return Ok(());
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "Google Tasks keeps {:?} as {found:?}",
+                expected.title
+            );
             self.compositor.dispatch(Duration::from_millis(10))?;
         }
     }

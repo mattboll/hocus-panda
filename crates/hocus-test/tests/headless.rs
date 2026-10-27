@@ -197,6 +197,7 @@ fn matrix_screen() -> anyhow::Result<Headless> {
         motion: true,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.write_config("[appearance]\ntheme = \"matrix\"\n")?;
     compositor.dispatch_until(CLIENT_TIMEOUT, Headless::wallpapers_ready)?;
@@ -383,6 +384,7 @@ fn real_time_passing_draws_nothing_at_rest() -> anyhow::Result<()> {
         motion: true,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.write_config("[appearance]\ntheme = \"matrix\"\n")?;
     compositor.dispatch_until(CLIENT_TIMEOUT, Headless::wallpapers_ready)?;

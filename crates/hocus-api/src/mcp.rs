@@ -989,7 +989,7 @@ fn tools() -> Vec<Value> {
                 "properties": {
                     "text": { "type": "string", "description": "What is to be done, one line." },
                     "due": { "type": "string", "description": "When: `today`, `tomorrow`, `2026-10-21`, or `2026-10-21T15:00` in the user's time." },
-                    "list": { "type": "string", "description": "A task list by name: a CalDAV account's shown in the column, else a list of the local one; the local default list otherwise." },
+                    "list": { "type": "string", "description": "A task list by name: a CalDAV or Google account's shown in the column, else a list of the local one; the local default list otherwise." },
                 },
                 "required": ["text"],
                 "additionalProperties": false,

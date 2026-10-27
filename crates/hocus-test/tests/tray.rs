@@ -34,6 +34,7 @@ fn a_slow_tray_application_never_holds_the_loop() -> anyhow::Result<()> {
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     // The column, which shows the tray (#263: the strip by default).
     compositor.write_config("[panel]\nform = \"column\"\n")?;

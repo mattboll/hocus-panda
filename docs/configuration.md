@@ -135,7 +135,8 @@ hidden_lists = []          # its task lists (calendars that hold VTODO) left out
                            #   the column's tasks, by name: ["Groceries"]; all show by default
                            #   (Settings → Accounts and calendar, a switch per list)
                            # Google calendars come from GNOME Online Accounts
-                           #   (sign in to Google there), not from this list
+                           #   (sign in to Google there), not from this list, and
+                           #   their Google Tasks with them: all their lists show
 
 [night_light]              # warmer colours in the evening (quick settings' tile)
 enabled = false

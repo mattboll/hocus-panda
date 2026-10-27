@@ -11,8 +11,9 @@
 //! off, takes its events and its cache with it. Until GOA first answered,
 //! their cache stays.
 //!
-//! The same sync brings a CalDAV account's task lists (#256), handed to
-//! the tasks ([`crate::tasks`]), which keep their own sealed cache.
+//! The same sync brings a CalDAV account's task lists (#256), and a Google
+//! account's Google Tasks (#257, with the same token), handed to the tasks
+//! ([`crate::tasks`]), which keep their own sealed cache.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -25,8 +26,9 @@ use hocus_api::{CalendarStatus, CalendarsInfo, Event, EventInfo, OnlineAccountsI
 use hocus_core::config::CalendarAccount;
 use hocus_platform::{
     calendar::{
-        caldav::{self, FetchError, Source, TaskList},
+        caldav::{self, FetchError, Source},
         goa::{self, OnlineAccounts},
+        gtasks,
         ics::{self, Occurrence},
     },
     sealed::Sealed,
@@ -64,7 +66,7 @@ enum News {
     Fetched(
         String,
         u64,
-        Result<(Vec<String>, Vec<TaskList>), FetchError>,
+        Result<(Vec<String>, crate::tasks::SyncedTasks), FetchError>,
     ),
     /// The secrets kept now; a password was just stored, so sync again.
     Secrets { count: usize, stored: bool },
@@ -83,12 +85,19 @@ struct Goa {
     held: Option<OnlineAccounts>,
     /// Google's CalDAV; a stand-in's in tests.
     base: Option<String>,
+    /// Google Tasks' API; a stand-in's in tests.
+    tasks: Option<String>,
     /// GNOME's settings for it are installed.
     settings: bool,
 }
 
 fn goa_id(account: &goa::GoogleAccount) -> String {
     format!("{GOA_ID}{}", account.id)
+}
+
+/// The account of this id is GOA's: its task lists are Google Tasks'.
+pub(crate) fn is_goa(id: &str) -> bool {
+    id.starts_with(GOA_ID)
 }
 
 #[derive(Debug, Default)]
@@ -209,11 +218,16 @@ impl State {
                 if dropped {
                     self.save_calendar_cache();
                 }
-                // A sync's lists came first: they stay.
+                // A sync's lists came first: they stay; those of accounts
+                // gone go, but GOA's until it answered.
                 let mut tasks = tasks;
                 tasks.retain(|id, _| !self.calendar.synced.contains(id));
                 let known = self.calendar.known.clone();
-                self.remote_tasks_cached(tasks, known.as_deref());
+                let kept = |id: &str| {
+                    known.as_ref().is_none_or(|k| k.iter().any(|k| k == id))
+                        || (pending && is_goa(id))
+                };
+                self.remote_tasks_cached(tasks, kept);
             }
             News::Fetched(id, generation, _)
                 if generation != self.calendar.generation
@@ -225,10 +239,10 @@ impl State {
             {
                 return;
             }
-            News::Fetched(id, generation, Ok((texts, lists))) => {
+            News::Fetched(id, generation, Ok((texts, tasks))) => {
                 self.calendar.errors.remove(&id);
                 self.calendar.synced.insert(id.clone());
-                self.remote_tasks_synced(&id, generation, lists);
+                self.remote_tasks_synced(&id, generation, tasks);
                 self.calendar.texts.insert(id, texts);
                 self.save_calendar_cache();
             }
@@ -419,6 +433,22 @@ impl State {
         self.calendar.goa.base = base;
     }
 
+    /// Google Tasks' API for this session: the harness's stand-in in
+    /// tests.
+    pub fn set_google_tasks(&mut self, base: Option<String>) {
+        self.calendar.goa.tasks = base;
+    }
+
+    /// Google Tasks' API: the stand-in's in tests, which never reach
+    /// Google; `None` there without one.
+    fn google_tasks(&self) -> Option<String> {
+        match (&self.calendar.goa.tasks, self.clock.is_virtual()) {
+            (Some(base), _) => Some(base.clone()),
+            (None, false) => Some(gtasks::GOOGLE_TASKS.to_owned()),
+            (None, true) => None,
+        }
+    }
+
     /// GNOME's settings for online accounts, when installed.
     pub fn open_online_accounts(&mut self) {
         if self.calendar.goa.settings {
@@ -445,7 +475,7 @@ impl State {
         gone.dedup();
         self.calendar.known = Some(ids.clone());
         self.calendar.known_pending = pending;
-        self.forget_remote_tasks(&ids);
+        self.forget_remote_tasks(&ids, pending);
         if gone.is_empty() && !first {
             return;
         }
@@ -492,11 +522,13 @@ impl State {
                 let source = source_of(account, secrets.as_ref());
                 let fetched = caldav::sync(&source, from, to).map(|synced| {
                     let texts = synced.events.into_iter().flat_map(|c| c.ics).collect();
-                    (texts, synced.lists)
+                    let lists = crate::tasks::caldav_lists(&id, synced.lists);
+                    (texts, crate::tasks::SyncedTasks::Lists(lists))
                 });
                 let _ = news.send(News::Fetched(id, generation, fetched));
             });
         }
+        let tasks = self.google_tasks();
         let goa = &self.calendar.goa;
         let base = match (&goa.base, self.clock.is_virtual()) {
             (Some(base), _) => base.clone(),
@@ -509,13 +541,16 @@ impl State {
         };
         for account in held.accounts {
             let (news, bus, base) = (news.clone(), bus.clone(), base.clone());
+            let tasks = tasks.clone();
             spawn("calendar sync", move || {
-                // Google's CalDAV serves no tasks (#257 reads Google Tasks).
-                let fetched = goa::fetch(&bus, &account, &base, from, to).map(|calendars| {
+                // Google's CalDAV serves no tasks: Google Tasks' API does.
+                let id = goa_id(&account);
+                let synced = goa::sync(&bus, &account, &base, tasks.as_deref(), &id, (from, to));
+                let fetched = synced.map(|(calendars, lists)| {
                     let texts = calendars.into_iter().flat_map(|c| c.ics).collect();
-                    (texts, Vec::new())
+                    (texts, crate::tasks::google_lists(lists))
                 });
-                let _ = news.send(News::Fetched(goa_id(&account), generation, fetched));
+                let _ = news.send(News::Fetched(id, generation, fetched));
             });
         }
     }
@@ -712,6 +747,7 @@ impl State {
             error: self.calendar.errors.get(&id).map(ToString::to_string),
             refused: matches!(self.calendar.errors.get(&id), Some(FetchError::Refused(_))),
             synced: self.calendar.synced.contains(&id),
+            tasks_unshared: self.tasks_unshared(&id),
             id,
         }
     }
@@ -771,11 +807,42 @@ impl State {
         matches!(self.calendar.errors.get(id), Some(FetchError::Failed(_)))
     }
 
-    /// The configured account of this id, and where its password is, to
-    /// write to it off the loop.
-    pub(crate) fn calendar_account(&self, id: &str) -> Option<(CalendarAccount, Option<Secrets>)> {
-        let account = self.config.calendars.iter().find(|a| a.id() == id)?;
-        Some((account.clone(), self.calendar.secrets.clone()))
+    /// The account of this id as the settings name it: the
+    /// configuration's, or GOA's.
+    pub(crate) fn calendar_name(&self, id: &str) -> Option<String> {
+        if let Some(account) = self.config.calendars.iter().find(|a| a.id() == id) {
+            return Some(account.name.clone());
+        }
+        self.calendar
+            .goa
+            .held
+            .iter()
+            .flat_map(|h| &h.accounts)
+            .find(|a| goa_id(a) == id)
+            .map(|a| a.name.clone())
+    }
+
+    /// Where the tasks of the account of this id are written, off the
+    /// loop: a configured CalDAV account and where its password is, or a
+    /// Google account of GOA's and the bus it is on.
+    pub(crate) fn task_target(&self, id: &str) -> Option<crate::tasks::Target> {
+        if let Some(account) = self.config.calendars.iter().find(|a| a.id() == id) {
+            return Some(crate::tasks::Target::CalDav {
+                account: account.clone(),
+                secrets: self.calendar.secrets.clone(),
+            });
+        }
+        let goa = &self.calendar.goa;
+        let account = goa
+            .held
+            .iter()
+            .flat_map(|h| &h.accounts)
+            .find(|a| goa_id(a) == id)?;
+        Some(crate::tasks::Target::Google {
+            bus: goa.bus.clone()?,
+            account: account.clone(),
+            base: self.google_tasks()?,
+        })
     }
 }
 

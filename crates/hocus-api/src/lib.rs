@@ -134,8 +134,8 @@ pub enum Request {
     Tasks,
     /// Adds a task: due `today`, `tomorrow`, `2026-10-21` or
     /// `2026-10-21T15:00` (the user's time), in the list of this name (a
-    /// CalDAV task list shown, else a list of the local one) or the local
-    /// list's default one.
+    /// CalDAV or Google Tasks list shown, else a list of the local one) or
+    /// the local list's default one.
     AddTask {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1017,9 +1017,13 @@ pub struct CalendarStatus {
     /// Its task lists (#256), whether shown with the tasks or not.
     #[serde(default)]
     pub lists: Vec<TaskListInfo>,
+    /// It does not share its tasks: a Google account whose token lacks
+    /// Google Tasks' scope (#257).
+    #[serde(default)]
+    pub tasks_unshared: bool,
 }
 
-/// A CalDAV task list of an account (#256).
+/// A task list of an account: CalDAV's (#256), Google Tasks' (#257).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskListInfo {
     pub name: String,
@@ -1141,7 +1145,8 @@ pub struct TaskInfo {
     /// The list it is in, by name; `None` for its source's default list.
     #[serde(default)]
     pub list: Option<String>,
-    /// `local` for the local list, `caldav` for a CalDAV account's.
+    /// `local` for the local list, `caldav` for a CalDAV account's,
+    /// `google` for Google Tasks'.
     pub source: String,
 }
 

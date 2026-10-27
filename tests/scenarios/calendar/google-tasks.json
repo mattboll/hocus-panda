@@ -1,0 +1,47 @@
+[
+  {
+    "id": "bXktdGFza3M",
+    "title": "My Tasks",
+    "tasks": [
+      {
+        "id": "cGFzc3BvcnQ",
+        "title": "Renew the passport",
+        "status": "needsAction",
+        "due": "2026-10-21T00:00:00.000Z",
+        "notes": "The photo booth at the station",
+        "updated": "2026-10-18T08:00:00.000Z",
+        "position": "00000000000000000000"
+      },
+      {
+        "id": "YmFuaw",
+        "title": "Call the bank",
+        "status": "needsAction",
+        "updated": "2026-10-20T09:00:00.000Z",
+        "position": "00000000000000000001"
+      },
+      {
+        "id": "cGFyY2Vs",
+        "title": "Pick up the parcel",
+        "status": "completed",
+        "completed": "2026-10-12T17:00:00.000Z",
+        "hidden": true,
+        "updated": "2026-10-12T17:00:00.000Z",
+        "position": "00000000000000000002"
+      }
+    ]
+  },
+  {
+    "id": "Z3JvY2VyaWVz",
+    "title": "Groceries",
+    "tasks": [
+      {
+        "id": "YmFtYm9v",
+        "title": "Bamboo shoots",
+        "status": "needsAction",
+        "due": "2026-10-23T00:00:00.000Z",
+        "updated": "2026-10-19T08:00:00.000Z",
+        "position": "00000000000000000000"
+      }
+    ]
+  }
+]

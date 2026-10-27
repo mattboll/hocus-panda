@@ -54,6 +54,9 @@ pub struct HarnessOptions {
     /// Google's CalDAV is this stand-in's (#137). Without one, tests never
     /// sync Google accounts: never Google itself.
     pub google_caldav: Option<String>,
+    /// Google Tasks' API is this stand-in's (#257); without one, tests
+    /// never read Google accounts' tasks.
+    pub google_tasks: Option<String>,
 }
 
 /// Starts a compositor for `harness`, its configuration file at `config`
@@ -96,6 +99,10 @@ fn launch(harness: &HarnessOptions, config: &Path, clock: Clock) -> anyhow::Resu
         .app
         .state
         .set_google_caldav(harness.google_caldav.clone());
+    started
+        .app
+        .state
+        .set_google_tasks(harness.google_tasks.clone());
     started
         .app
         .state
@@ -192,6 +199,7 @@ impl Headless {
             motion: false,
             first_run: false,
             google_caldav: None,
+            google_tasks: None,
         })
     }
 
