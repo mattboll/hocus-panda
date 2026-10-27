@@ -22,6 +22,7 @@ mod calendar;
 mod capture;
 mod circle;
 mod clipboard;
+mod clips;
 mod clock;
 mod comfort;
 mod config_watch;
