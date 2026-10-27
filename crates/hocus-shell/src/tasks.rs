@@ -1,8 +1,10 @@
 //! The column's tasks (#255), as boards Bureau and D13 draw them: a
 //! caption and its summary ("3 to do", "1 late", "4 of 4"), the tasks
 //! late or due today first, each with a box to tick and its due date,
-//! muted or in the danger colour when late; those done today struck
-//! through after them; "All done for today." with a panda when nothing is
+//! muted or in the danger colour when late, and the list it is in when it
+//! is not the local default one (a dot of its colour and its name, #256);
+//! those done today struck through after them; "offline" beside the
+//! summary while a CalDAV account's tasks are those of its last sync; "All done for today." with a panda when nothing is
 //! left. A field under them adds one, and a task's menu (the secondary
 //! button) edits it, sets when it is due or deletes it.
 //!
@@ -43,6 +45,17 @@ pub struct TasksView {
     pub done_today: usize,
     /// "All done" shows a panda.
     pub pandas: bool,
+    /// Some tasks are those of a CalDAV account's last sync: its server
+    /// cannot be reached.
+    pub offline: bool,
+}
+
+/// The list a task is in, on its row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListMark {
+    pub name: String,
+    /// Its colour, when its server keeps one.
+    pub color: Option<hocus_ui::Color>,
 }
 
 /// A task as the column lists it.
@@ -54,6 +67,8 @@ pub struct TaskRow {
     pub due: Option<Due>,
     pub late: bool,
     pub done: bool,
+    /// The list it is in, but the local default one.
+    pub list: Option<ListMark>,
 }
 
 /// When a task is due, as the column says it.
@@ -176,6 +191,50 @@ impl Lang {
         }
     }
 
+    /// Beside the summary, while a CalDAV account cannot be reached.
+    pub fn tasks_offline(self) -> &'static str {
+        self.pick("offline", "hors ligne")
+    }
+
+    /// A task changed on its server while it was changed here.
+    pub fn task_conflict(self, text: &str) -> String {
+        match self {
+            Self::En => format!("“{text}” was changed elsewhere"),
+            Self::Fr => format!("«\u{a0}{text}\u{a0}» a changé ailleurs"),
+        }
+    }
+
+    pub fn task_conflict_body(self) -> &'static str {
+        self.pick(
+            "Its server’s version is kept.",
+            "La version de son serveur est gardée.",
+        )
+    }
+
+    /// A change to a task its server did not take.
+    pub fn task_not_saved(self, text: &str) -> String {
+        match self {
+            Self::En => format!("“{text}” was not saved"),
+            Self::Fr => format!("«\u{a0}{text}\u{a0}» n’a pas été enregistrée"),
+        }
+    }
+
+    pub fn task_not_saved_body(self) -> &'static str {
+        self.pick(
+            "Its server cannot be reached: it stays as it was.",
+            "Son serveur est injoignable : elle reste comme elle était.",
+        )
+    }
+
+    /// The local list, in the launcher's choice of lists.
+    pub fn local_tasks(self) -> &'static str {
+        self.pick("Tasks", "Tâches")
+    }
+
+    pub fn on_this_computer(self) -> &'static str {
+        self.pick("On this computer", "Sur cet ordinateur")
+    }
+
     pub fn all_done_today(self) -> &'static str {
         self.pick("All done for today.", "Tout est fait pour aujourd’hui.")
     }
@@ -243,6 +302,14 @@ impl Lang {
                 "Entrée enregistre la tâche · Échap la laisse comme elle était",
             ),
         }
+    }
+
+    /// The launcher adding a task, its lists listed.
+    pub fn task_hint_lists(self) -> &'static str {
+        self.pick(
+            "Enter adds it to the list chosen · ↑↓ chooses another · Escape closes",
+            "Entrée l’ajoute à la liste choisie · ↑↓ en choisit une autre · Échap ferme",
+        )
     }
 
     /// The command field's offer, for "todo …".
@@ -333,6 +400,11 @@ pub(crate) fn fill(
     // Short of room, all done is said beside the caption.
     if view.open == 0 && !fit.card {
         summary = lang.all_done_today().to_owned();
+    } else if view.offline {
+        summary = match summary.is_empty() {
+            true => lang.tasks_offline().to_owned(),
+            false => format!("{summary} · {}", lang.tasks_offline()),
+        };
     }
     if !summary.is_empty() {
         add(
@@ -487,6 +559,9 @@ pub(crate) fn fill(
                     text,
                 );
             }
+            if let Some(list) = &task.list {
+                mark(tree, line, theme, list);
+            }
             if let Some(due) = task.due.filter(|_| !task.done) {
                 add(
                     tree,
@@ -550,6 +625,58 @@ pub(crate) fn fill(
     );
     targets.push((field, Target::Add));
     targets
+}
+
+/// A list's name, cut short: the task's text keeps most of the row.
+const MARK_CHARS: usize = 12;
+
+/// The list a task is in, at the end of its row: a dot of its colour and
+/// its name.
+fn mark(tree: &mut Tree, line: NodeId, theme: &Theme, list: &ListMark) {
+    let missing = || unreachable!("adding to a node of this tree");
+    let holder = tree
+        .add(
+            line,
+            Style {
+                direction: Direction::Row,
+                gap: 5.0,
+                align: Align::Center,
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        )
+        .unwrap_or_else(missing);
+    tree.add(
+        holder,
+        Style {
+            width: Length::Px(6.0),
+            height: Length::Px(6.0),
+            grow: 0.0,
+            ..Style::default()
+        },
+        Kind::Box(Look {
+            background: Some(list.color.map_or(Paint::Muted, Paint::Rgba)),
+            radius: 3.0,
+            ..Look::default()
+        }),
+    )
+    .unwrap_or_else(missing);
+    let name = if list.name.chars().count() > MARK_CHARS {
+        let cut: String = list.name.chars().take(MARK_CHARS - 1).collect();
+        format!("{}…", cut.trim_end())
+    } else {
+        list.name.clone()
+    };
+    tree.add(
+        holder,
+        Style {
+            grow: 0.0,
+            ..Style::default()
+        },
+        Kind::text_line(name, theme.text.caption.with_color(Paint::Muted)),
+    )
+    .unwrap_or_else(missing);
 }
 
 #[cfg(test)]

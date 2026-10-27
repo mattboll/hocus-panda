@@ -319,6 +319,14 @@ pub enum Step {
     Swipe(SwipeStep),
     /// The CalDAV server goes, as the network would.
     CaldavStop(bool),
+    /// Writes a file of the CalDAV server's home, as another client would
+    /// (a task changed elsewhere): `{ name, text }`, `name` from the home
+    /// (`chores/milk.ics`).
+    CaldavFile(StateFile),
+    /// A file of the CalDAV server's home, once so: `{ name, contains?,
+    /// lacks? }`; for a calendar's folder, one of its files holds
+    /// `contains` and none `lacks`.
+    ExpectCaldavFile(ExpectFile),
     /// A herdr for the test (never the user's), its socket in the
     /// compositor's runtime directory: `{ agents = [{ name, status }] }`;
     /// the socket is `{herdr}` in later configuration.
@@ -1202,6 +1210,8 @@ impl fmt::Display for Step {
             Self::Swipe(s) => write!(f, "swipe {} by {:?}", s.fingers, s.by),
             Self::Caldav(c) => write!(f, "caldav {}", c.dir.display()),
             Self::CaldavStop(_) => write!(f, "caldav_stop"),
+            Self::CaldavFile(file) => write!(f, "caldav_file {}", file.name),
+            Self::ExpectCaldavFile(e) => write!(f, "expect_caldav_file {}", e.name),
             Self::Herdr(h) => write!(f, "herdr with {} agents", h.agents.len()),
             Self::HerdrStatus(h) => write!(f, "herdr_status {} {}", h.agent, h.status),
             Self::ExpectHerdr(asked) => write!(f, "expect_herdr {asked:?}"),
@@ -2130,6 +2140,28 @@ impl Run<'_> {
             Step::CaldavStop(_) => {
                 self.caldav = None;
                 Ok(())
+            }
+            Step::CaldavFile(file) => {
+                anyhow::ensure!(
+                    !file.name.split('/').any(|p| p == ".." || p.is_empty()),
+                    "a CalDAV file is named from the server's home"
+                );
+                let home = self
+                    .caldav
+                    .as_ref()
+                    .and_then(|s| s.files())
+                    .context("no CalDAV home: `caldav = { dir }` with folders")?;
+                std::fs::write(home.join(&file.name), &file.text)?;
+                Ok(())
+            }
+            Step::ExpectCaldavFile(expected) => {
+                let home = self
+                    .caldav
+                    .as_ref()
+                    .and_then(|s| s.files())
+                    .context("no CalDAV home: `caldav = { dir }` with folders")?
+                    .to_path_buf();
+                self.expect_file_in(&home, expected)
             }
             Step::Herdr(h) => {
                 let agents: Vec<_> = h
@@ -3405,7 +3437,14 @@ impl Run<'_> {
     }
 
     fn expect_state_file(&mut self, expected: &ExpectFile) -> anyhow::Result<()> {
-        let path = self.compositor.state_dir().join(&expected.name);
+        let dir = self.compositor.state_dir().to_path_buf();
+        self.expect_file_in(&dir, expected)
+    }
+
+    /// A file of `dir`, or one of a folder's, once so; written off the
+    /// loop, waited for in real time.
+    fn expect_file_in(&mut self, dir: &Path, expected: &ExpectFile) -> anyhow::Result<()> {
+        let path = dir.join(&expected.name);
         let deadline = Instant::now() + CLIENT_TIMEOUT;
         loop {
             // A folder: each of its files, and those of its folders.

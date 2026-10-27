@@ -524,7 +524,7 @@ now: those found in it (as files written before #255 have them) or typed so
 move to the task list, done or not, and leave the notes.
 
 Tasks (#255) share one model, iCalendar's VTODO (`hocus_platform::tasks`),
-whatever their source: the local list now, CalDAV task lists (#256) and
+whatever their source: the local list and CalDAV task lists (#256) now,
 Google Tasks (#257) next, each a `Source` that knows where its tasks are
 written back. The local list is a folder of `.ics` files, one task each,
 as vdir has it (vdirsyncer's `filesystem` storage, so it can be synced
@@ -539,6 +539,26 @@ when the tasks, the minute or the pandas change. The section always shows,
 "All done for today." and the field to add one before any task exists;
 only without a data directory (a nested session with no state directory)
 is there none.
+
+CalDAV task lists (#256) are the calendars of an account whose
+`supported-calendar-component-set` names VTODO (one that does not say holds
+events only). The calendars' sync finds them with the same PROPFIND
+(their name and `calendar-color` too) and asks each for every VTODO with
+its ETag (one REPORT), on the same worker thread, interval and triggers as
+the events; the loop takes them in as `Source::CalDav` tasks, its own copy
+of those changed here kept over a sync started before their write was
+answered. A sealed cache in the state directory (`tasks-cache`) keeps them
+for a session started offline; an account whose last sync did not reach
+its server makes the column say "offline". A change goes to a thread of
+its own, started with the first one: PUT with `If-Match` on the ETag the
+task was read with (`If-None-Match: *` for a new one, at
+`<list>/<uid>.ics`), DELETE the same; the next change of a task still on
+its way expects the ETag the previous one brings back. A 412 (changed on
+the server meanwhile) reads the server's version, which the loop keeps,
+with a toast; a write that did not get through puts the task back as its
+server last took it, with a toast too. Lists hidden in the settings
+(`hidden_lists` of the account) are still synced, so showing one again is
+at once. Google's CalDAV holds no VTODO; Google Tasks is #257.
 
 Comfort over the whole screen (#78): focus mode puts a veil just under the
 focused window; the magnifier wraps every element of an output's scene in a

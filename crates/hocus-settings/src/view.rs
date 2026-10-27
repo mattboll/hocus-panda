@@ -2015,6 +2015,7 @@ impl SettingsView {
             .into(),
             url: url.clone(),
             user: user.clone(),
+            hidden_lists: Vec::new(),
         };
         self.dirty = true;
         self.accounts.bad_url = !account.url_is_safe();
@@ -2084,6 +2085,10 @@ impl SettingsView {
                 remove,
                 Target::Set(Change::forget_calendar(&account.url, &account.user)),
             );
+            // Its task lists (#256), each shown with the tasks or hidden.
+            for list in status.iter().flat_map(|s| &s.lists) {
+                self.task_list_line(theme, section, account, list);
+            }
         }
 
         self.online_accounts(theme, body);
@@ -2158,6 +2163,111 @@ impl SettingsView {
             )),
         );
         self.targets.insert(add, Target::AddCalendar);
+    }
+
+    /// A task list of a CalDAV account: its colour, its name, its tasks
+    /// to do, and a switch to show it with the tasks or hide it.
+    fn task_list_line(
+        &mut self,
+        theme: &Theme,
+        section: NodeId,
+        account: &hocus_core::config::CalendarAccount,
+        list: &hocus_api::TaskListInfo,
+    ) {
+        let lang = self.lang;
+        let line = self.add(
+            section,
+            Style {
+                height: Length::Px(56.0),
+                padding: Insets {
+                    top: 8.0,
+                    bottom: 8.0,
+                    left: 34.0,
+                    right: 18.0,
+                },
+                ..fill_width(row(12.0))
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 14.0,
+                ..Look::default()
+            }),
+        );
+        // The configuration says it, as soon as it changed.
+        let shown = account.shows_list(&list.name);
+        self.tree.set_clickable(line, &list.name);
+        self.tree.set_selected_box(line, shown);
+        let mut hidden: Vec<String> = account
+            .hidden_lists
+            .iter()
+            .filter(|h| h.trim() != list.name.trim())
+            .cloned()
+            .collect();
+        if shown {
+            hidden.push(list.name.clone());
+        }
+        let change = Change {
+            place: hocus_core::config_edit::Place::Calendar {
+                url: account.url.clone(),
+                user: account.user.clone(),
+            },
+            key: "hidden_lists".into(),
+            value: (!hidden.is_empty()).then(|| hidden.into_iter().collect()),
+        };
+        self.targets.insert(line, Target::Set(change));
+        let color = list
+            .color
+            .as_deref()
+            .and_then(hocus_ui::Color::hex)
+            .map_or(Paint::Muted, |c| Paint::Rgba(c.with_alpha(255)));
+        self.add(
+            line,
+            Style {
+                width: Length::Px(10.0),
+                height: Length::Px(10.0),
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(color),
+                radius: 5.0,
+                ..Look::default()
+            }),
+        );
+        let text = self.add(
+            line,
+            Style {
+                width: Length::Fill,
+                ..column(2.0)
+            },
+            Kind::Box(Look::default()),
+        );
+        self.add(
+            text,
+            fill_width(Style::default()),
+            Kind::text_line(list.name.clone(), theme.text.label.with_weight(600)),
+        );
+        self.add(
+            text,
+            fill_width(Style::default()),
+            Kind::text_line(
+                words::task_list(list.open, !shown, lang),
+                theme.text.label.with_weight(500).with_color(Paint::Muted),
+            ),
+        );
+        self.add(
+            line,
+            Style {
+                width: Length::Px(40.0),
+                height: Length::Px(24.0),
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::Custom {
+                draw: Box::new(Switch(shown)),
+                label: None,
+            },
+        );
     }
 
     /// A calendar account's line: its name, how it synced; what goes at

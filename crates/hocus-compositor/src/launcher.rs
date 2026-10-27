@@ -513,7 +513,9 @@ impl State {
                     self.close_launcher();
                     self.add_task_typed(&text);
                 }
-                LauncherEvent::Chosen(Choice::SaveTask { id, text }) => self.save_task(id, &text),
+                LauncherEvent::Chosen(Choice::SaveTask { id, text, list }) => {
+                    self.save_task(id, &text, list.as_deref());
+                }
                 LauncherEvent::RemoveNote(index) => self.remove_note(index),
                 LauncherEvent::Chosen(Choice::OpenNotes) => {
                     self.close_launcher();
@@ -571,7 +573,7 @@ impl State {
                     self.run_intent(intent);
                 }
                 // Asked and answered in the field itself.
-                LauncherEvent::Chosen(Choice::Ask(_) | Choice::Answer) => {}
+                LauncherEvent::Chosen(Choice::Ask(_) | Choice::Answer | Choice::TaskList(_)) => {}
                 LauncherEvent::Ask { id, question } => self.ask_ai(id, question),
                 LauncherEvent::Act(run) => {
                     self.close_launcher();

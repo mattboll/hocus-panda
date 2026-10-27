@@ -982,14 +982,14 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "add_task",
             "title": "Add a task",
-            "description": "Adds a task to the user's local task list; the column shows it. Only \
-                for an agent whose access is to act; kept in the agents' journal.",
+            "description": "Adds a task to the user's tasks, the local list unless `list` names \
+                another; the column shows it. Only for an agent whose access is to act; kept in the agents' journal.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "text": { "type": "string", "description": "What is to be done, one line." },
                     "due": { "type": "string", "description": "When: `today`, `tomorrow`, `2026-10-21`, or `2026-10-21T15:00` in the user's time." },
-                    "list": { "type": "string", "description": "A list of the local one, by name; its default list otherwise." },
+                    "list": { "type": "string", "description": "A task list by name: a CalDAV account's shown in the column, else a list of the local one; the local default list otherwise." },
                 },
                 "required": ["text"],
                 "additionalProperties": false,

@@ -132,9 +132,10 @@ pub enum Request {
     Phone,
     /// The tasks (#255): those not done first, as the column orders them.
     Tasks,
-    /// Adds a task to the local list: due `today`, `tomorrow`,
-    /// `2026-10-21` or `2026-10-21T15:00` (the user's time), in a list of
-    /// it by name or its default one.
+    /// Adds a task: due `today`, `tomorrow`, `2026-10-21` or
+    /// `2026-10-21T15:00` (the user's time), in the list of this name (a
+    /// CalDAV task list shown, else a list of the local one) or the local
+    /// list's default one.
     AddTask {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1013,6 +1014,23 @@ pub struct CalendarStatus {
     #[serde(default)]
     pub refused: bool,
     pub synced: bool,
+    /// Its task lists (#256), whether shown with the tasks or not.
+    #[serde(default)]
+    pub lists: Vec<TaskListInfo>,
+}
+
+/// A CalDAV task list of an account (#256).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskListInfo {
+    pub name: String,
+    /// `#RRGGBB` or `#RRGGBBAA`, when its server keeps one.
+    #[serde(default)]
+    pub color: Option<String>,
+    /// Its tasks not done.
+    pub open: usize,
+    /// Left out of the column's tasks.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1123,7 +1141,7 @@ pub struct TaskInfo {
     /// The list it is in, by name; `None` for its source's default list.
     #[serde(default)]
     pub list: Option<String>,
-    /// `local` for the local list.
+    /// `local` for the local list, `caldav` for a CalDAV account's.
     pub source: String,
 }
 

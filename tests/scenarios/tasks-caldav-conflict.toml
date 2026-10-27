@@ -1,0 +1,84 @@
+description = "A CalDAV task changed on its server meanwhile (#256): ticked in the column on the ETag it was read with, the server refuses the write (412); its version is kept, shown at once, and a toast says so"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+caldav = { dir = "calendar/nextcloud", user = "alex", password = "panda" }
+
+[[step]]
+config = """
+[[calendars]]
+name = "Nextcloud"
+url = "{caldav}"
+user = "alex"
+
+[panel]
+form = "column"
+"""
+
+[[step]]
+calendar_password = { id = "alex@{caldav}", password = "panda" }
+
+[[step]]
+expect_calendars = { secrets = 1, error = false }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_ui = { label = "Water the bamboo" }
+
+# Another client changes it, before the next sync.
+[[step]]
+caldav_file = { name = "chores/bamboo.ics", text = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nextcloud Tasks v0.16.1
+BEGIN:VTODO
+UID:bamboo@hocuspanda.test
+CREATED:20261019T080000Z
+LAST-MODIFIED:20261021T120000Z
+DTSTAMP:20261021T120000Z
+SUMMARY:Water the bamboo and the fern
+STATUS:NEEDS-ACTION
+DUE;VALUE=DATE:20261021
+END:VTODO
+END:VCALENDAR
+""" }
+
+[[step]]
+click_ui = "Water the bamboo"
+
+[[step]]
+expect_ui = { label = "“Water the bamboo” was changed elsewhere" }
+
+[[step]]
+expect_ui = { label = "Water the bamboo and the fern" }
+
+[[step]]
+expect_ui = { label = "3 to do" }
+
+[[step]]
+expect_caldav_file = { name = "chores/bamboo.ics", contains = ["SUMMARY:Water the bamboo and the fern"], lacks = ["STATUS:COMPLETED"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-caldav-conflict.png" }
+
+# On the server's version and its ETag, the tick goes through.
+[[step]]
+click_ui = "Water the bamboo and the fern"
+
+[[step]]
+expect_caldav_file = { name = "chores/bamboo.ics", contains = ["SUMMARY:Water the bamboo and the fern", "STATUS:COMPLETED\r\n"] }
+
+[[step]]
+expect_ui = { label = "2 to do" }

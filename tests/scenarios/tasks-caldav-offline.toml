@@ -1,0 +1,99 @@
+description = "CalDAV tasks offline (#256): synced once, the server goes; the next sync does not reach it, the column keeps the last tasks and says it is offline, and after a restart too, from the sealed cache; a task ticked meanwhile is not saved: it goes back and a toast says so; the account taken out takes its tasks"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+caldav = { dir = "calendar/nextcloud", user = "alex", password = "panda" }
+
+[[step]]
+config = """
+[[calendars]]
+name = "Nextcloud"
+url = "{caldav}"
+user = "alex"
+
+[panel]
+form = "column"
+
+[idle]
+curtain_after = 0
+"""
+
+[[step]]
+calendar_password = { id = "alex@{caldav}", password = "panda" }
+
+[[step]]
+expect_calendars = { secrets = 1, error = false }
+
+[[step]]
+expect_ui = { label = "3 to do" }
+
+[[step]]
+expect_calendar_cache = { contains = ["Quarterly planning"] }
+
+# The network goes: the next sync does not reach the server, the tasks stay.
+[[step]]
+caldav_stop = true
+
+[[step]]
+advance_ms = 601000
+
+[[step]]
+expect_calendars = { error = true }
+
+[[step]]
+expect_ui = { label = "3 to do · offline" }
+
+# The session restarts as after a crash: the cache keeps the tasks.
+[[step]]
+restart = true
+
+[[step]]
+advance_ms = 3000
+
+[[step]]
+expect_calendars = { error = true }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_ui = { label = "3 to do · offline" }
+
+[[step]]
+expect_ui = { label = "Water the bamboo" }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-caldav-offline.png" }
+
+# Ticked: not written, it goes back.
+[[step]]
+click_ui = "Water the bamboo"
+
+[[step]]
+expect_ui = { label = "“Water the bamboo” was not saved" }
+
+[[step]]
+expect_ui = { label = "3 to do · offline" }
+
+# Taken out of the configuration: its tasks go.
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+expect_ui = { label = "Water the bamboo", shown = false }
+
+[[step]]
+expect_ui = { label = "All done for today." }

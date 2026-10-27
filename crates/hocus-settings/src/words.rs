@@ -426,6 +426,24 @@ pub const GOOGLE_SIGN_IN_AGAIN: Words = Words::new(
     "Google a refusé la connexion : reconnectez-vous dans les comptes en ligne de GNOME",
 );
 
+/// A CalDAV task list of an account (#256): its tasks to do, and whether
+/// the column shows them.
+pub fn task_list(open: usize, hidden: bool, lang: Lang) -> String {
+    let tasks = match (lang, open) {
+        (Lang::En, 1) => "1 task to do".to_owned(),
+        (Lang::En, n) => format!("{n} tasks to do"),
+        (Lang::Fr, 1) => "1 tâche à faire".to_owned(),
+        (Lang::Fr, n) => format!("{n} tâches à faire"),
+    };
+    let shown = match (lang, hidden) {
+        (Lang::En, false) => "shown with the tasks",
+        (Lang::En, true) => "hidden from the tasks",
+        (Lang::Fr, false) => "affichée avec les tâches",
+        (Lang::Fr, true) => "masquée des tâches",
+    };
+    format!("{tasks} · {shown}")
+}
+
 pub fn synced(events: usize, lang: Lang) -> String {
     match (lang, events) {
         (Lang::En, 1) => "Synced · 1 event".into(),
