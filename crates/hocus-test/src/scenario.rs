@@ -36,6 +36,10 @@ use crate::{
 
 /// How long a step may wait for a client, in real time.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How many frames a `drew N marks` step lets the clock move while it
+/// waits: a second's worth, ten frame callbacks of a window no screen
+/// shows.
+const MARKS_FRAMES: u32 = 60;
 /// How long an expectation waits for a client to catch up (a resize takes
 /// milliseconds), before it fails.
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -4637,11 +4641,33 @@ impl Run<'_> {
 
     fn expect_received(&mut self, expected: &ExpectReceived) -> anyhow::Result<()> {
         let deadline = Instant::now() + CLIENT_TIMEOUT;
+        // Marks are drawn on frame callbacks, which a window no screen
+        // shows gets only as the clock moves (#229): once its application
+        // answered, all it sent is here, and the clock moves a frame for
+        // the next one (#304).
+        let mut frames = if expected.event.starts_with("drew ") {
+            MARKS_FRAMES
+        } else {
+            0
+        };
         // The client reads its events in its own thread.
         loop {
             let events = self.events_of(&expected.app_id)?;
             if events.iter().any(|e| e.to_string() == expected.event) {
                 return Ok(());
+            }
+            if frames > 0
+                && let Some(window) = self.find(&expected.app_id)?
+            {
+                self.compositor.ask_window_answer(window.id);
+                self.apps_answered()?;
+                let events = self.events_of(&expected.app_id)?;
+                if events.iter().any(|e| e.to_string() == expected.event) {
+                    return Ok(());
+                }
+                frames -= 1;
+                self.compositor.advance(FRAME)?;
+                continue;
             }
             if Instant::now() > deadline {
                 let got: Vec<String> = events.iter().map(ToString::to_string).collect();
