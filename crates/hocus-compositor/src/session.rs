@@ -651,6 +651,14 @@ impl State {
         self.sessions.card.is_some()
     }
 
+    /// Whether the card shows on `output`.
+    pub(crate) fn card_on(&self, output: &smithay::output::Output) -> bool {
+        self.sessions
+            .card
+            .as_ref()
+            .is_some_and(|card| card.output == output.name())
+    }
+
     fn card_chose(&mut self, choice: Option<hocus_shell::welcome::WelcomeChoice>) {
         use hocus_shell::welcome::WelcomeChoice;
         let Some(choice) = choice else { return };

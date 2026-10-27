@@ -1,0 +1,71 @@
+# #262: after a session ended unexpectedly, the next one asks what to put
+# back while the programs it starts (XDG autostart, a terminal given at
+# start) open their windows. Those wait unseen behind the card on its
+# screen: framed and ringed under its dim, such a window read as a second
+# card, the chooser already open underneath.
+description = "After a session ended unexpectedly the welcome-back card shows alone, windows opening meanwhile wait unseen behind it; Choose shows the chooser in its place"
+outputs = ["1920x1200@1.5"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+open = { app_id = "foot", title = "foot", size = [600, 400], color = "#2b2f36" }
+
+[[step]]
+save_session = true
+
+[[step]]
+expect_session_file = { contains = ["app_id = \"foot\""] }
+
+# The session ends as a crash would; the next one starts on its state.
+[[step]]
+restart = true
+
+[[step]]
+expect_ui = { label = "Welcome back" }
+
+[[step]]
+expect_ui = { label = "1 window was open." }
+
+# A terminal the session starts opens while the card asks.
+[[step]]
+open = { app_id = "foot", title = "foot", size = [700, 450], color = "#2b2f36" }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "session-welcome-alone.png" }
+
+[[step]]
+click_ui = "Choose"
+
+[[step]]
+expect_ui = { label = "Put these back" }
+
+[[step]]
+expect_ui = { label = "Choose", shown = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "session-welcome-alone.choose.png" }
+
+# Answered, the card goes and the window shows where it opened.
+[[step]]
+click_ui = "Start fresh"
+
+[[step]]
+expect_ui = { label = "Welcome back", shown = false }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "session-welcome-alone.after.png" }
