@@ -19,6 +19,7 @@ pub mod deny;
 mod extract;
 mod index;
 mod pdf;
+mod pictures;
 mod zip;
 
 use std::{
@@ -35,6 +36,7 @@ use std::{
 
 pub use extract::Format;
 pub use index::{Piece, fold};
+pub use pictures::Pictures;
 
 use crate::{
     ai::{self, Embedder},
@@ -218,11 +220,13 @@ pub struct Search {
 }
 
 impl Search {
-    /// Starts the threads, turned off until configured.
+    /// Starts the threads, turned off until configured. The pictures'
+    /// text is read through `pictures`, which others share.
     pub fn start(
         secrets: Option<Secrets>,
         news: impl Fn(News) + Send + Sync + 'static,
         probe: Option<Probe>,
+        pictures: Arc<Pictures>,
     ) -> io::Result<Self> {
         let news: Arc<dyn Fn(News) + Send + Sync> = Arc::new(news);
         let index = Arc::new(RwLock::new(Index::default()));
@@ -235,7 +239,11 @@ impl Search {
             index: index.clone(),
             embedder: embedder.clone(),
             secrets,
-            gate: Gate { home: None, probe },
+            gate: Gate {
+                home: None,
+                probe,
+                pictures,
+            },
             news: news.clone(),
             work: Work::Idle,
             status: Status::default(),
@@ -359,6 +367,8 @@ fn searcher(
 struct Gate {
     home: Option<PathBuf>,
     probe: Option<Probe>,
+    /// Shared with the screenshots' toasts: a picture is read once.
+    pictures: Arc<Pictures>,
 }
 
 impl Gate {
@@ -393,7 +403,7 @@ impl Gate {
 
     fn ocr(&self, program: &str, path: &Path) -> io::Result<Option<String>> {
         self.check(path)?;
-        Ok(extract::ocr(program, path))
+        Ok(self.pictures.read(program, path))
     }
 }
 

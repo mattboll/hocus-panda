@@ -23,6 +23,7 @@ fn start() -> Running {
         Some(Arc::new(move |p: &Path| {
             seen.lock().expect("a lock").push(p.to_owned());
         })),
+        Arc::default(),
     )
     .expect("the threads");
     Running {

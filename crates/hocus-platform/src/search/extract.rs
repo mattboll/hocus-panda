@@ -1,9 +1,9 @@
 //! The text of a document, by its kind: plain text and Markdown, HTML
 //! (without its markup, scripts and styles), PDF (its text layer),
 //! OpenDocument and OOXML office files (XML in a ZIP), and pictures in
-//! the screenshots folder through the OCR program.
+//! the screenshots folder through the OCR program ([`super::pictures`]).
 
-use std::{io::Read, path::Path, process::Command};
+use std::io::Read;
 
 use quick_xml::{Reader, events::Event as Xml};
 
@@ -276,23 +276,6 @@ fn xml_text(xml: &[u8], skipped: &[&str]) -> String {
         }
     }
     out
-}
-
-/// The text in a picture, through tesseract or what replaces it
-/// (`PROGRAM IMAGE -` prints it); `None` when there is none.
-pub fn ocr(program: &str, path: &Path) -> Option<String> {
-    let mut words = program.split_whitespace();
-    let mut command = Command::new(words.next()?);
-    command.args(words);
-    let out = command
-        .arg(path)
-        .arg("-")
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    (out.status.success() && !text.is_empty()).then_some(text)
 }
 
 /// Reads what a file of `format` needs: the start of a text, a whole

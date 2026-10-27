@@ -632,8 +632,11 @@ impl State {
             "text" => {
                 let done = self.shots.done.clone();
                 let ocr = self.config.screenshots.ocr.clone();
+                // The indexer reads the screenshots folder too: the one
+                // that asks second gets the other's answer (#302).
+                let pictures = self.pictures();
                 spawn("screenshot text", move || {
-                    let text = read_text(&ocr, &path);
+                    let text = pictures.read(&ocr, &path);
                     if let Some(done) = done {
                         let _ = done.send(Done::Text(text));
                     }

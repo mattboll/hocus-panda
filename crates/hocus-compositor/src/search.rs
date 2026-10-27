@@ -7,12 +7,15 @@
 //! developer's documents are not ours): only the folders the
 //! configuration names, and the screenshots folder when it names one.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use hocus_core::config::{Meaning, PowerSource};
 use hocus_platform::{
     ai::Embedder,
-    search::{Folder, News, Phase, Root, Search, Settings, Status},
+    search::{Folder, News, Phase, Pictures, Root, Search, Settings, Status},
 };
 use smithay::reexports::calloop::{LoopHandle, channel};
 
@@ -35,6 +38,9 @@ pub struct SearchState {
     pub status: Status,
     /// When the last look at the folders ended, on the compositor's clock.
     last_look: Option<std::time::Duration>,
+    /// The text in pictures, read once for the indexer and the
+    /// screenshots' toasts (#302).
+    pictures: Arc<Pictures>,
 }
 
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<&Path>) {
@@ -57,6 +63,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State, dir: Option<&
             }
         },
         None,
+        state.search.pictures.clone(),
     );
     match service {
         Ok(service) => state.search.service = Some(service),
@@ -260,6 +267,12 @@ impl State {
         if let Some(service) = &self.search.service {
             service.look_again();
         }
+    }
+
+    /// Where the text in pictures is read, for the indexer and the others
+    /// reading the same pictures.
+    pub(crate) fn pictures(&self) -> Arc<Pictures> {
+        self.search.pictures.clone()
     }
 
     /// Documents can be searched.
