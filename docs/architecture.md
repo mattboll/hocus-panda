@@ -590,7 +590,9 @@ state) is saved thirty seconds after something happened (a client, an
 input, a worker's result) when it changed, and when quitting, in
 `$XDG_STATE_HOME/hocuspanda/session.toml`, written on a worker thread. At
 the next start a card offers to put everything back, to choose which
-applications, or to start fresh (`[session] restore`); the applications
+applications, or to start fresh (`[session] restore`). It stands alone on
+its screen: windows that open while it asks (autostart, a program the
+session starts) wait unseen behind it until it is answered. The applications
 start again and their windows go back where they were as they come; one
 that cannot start, or whose window never comes, is reported in a toast.
 Several windows of one application (three browser windows on three

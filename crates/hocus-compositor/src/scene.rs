@@ -525,6 +525,13 @@ impl State {
             }
             Some((w.clone(), at))
         }));
+        // The card at start stands alone on its screen: windows that open
+        // while it asks (autostart, a program the session starts) wait
+        // unseen behind it, else framed and ringed under its dim they
+        // read as a second card (#262).
+        if self.card_on(output) {
+            windows.clear();
+        }
         // Focus mode: a veil over every window but the focused one, and
         // over what is behind them.
         let veil = |elements: &mut Vec<SceneElement<R>>| {
