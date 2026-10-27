@@ -1,0 +1,42 @@
+# A click held while the page is built anew (#296): the time zone, set
+# elsewhere between the press and the release, makes Language and region
+# make its nodes again. The chip pressed is still there, under the pointer,
+# and the release clicks it.
+description = "Language and region: Paris pressed, the system's zone set to New York elsewhere before the release, and the release still asks timedated for Paris"
+outputs = ["1280x800"]
+shell = true
+timedated = "UTC"
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+open_settings = { page = "language" }
+
+[[step]]
+expect_settings = { label = "UTC", selected = true }
+
+[[step]]
+pointer_move = [500, 500]
+
+[[step]]
+scroll = 600
+
+[[step]]
+press_settings = "Paris"
+
+[[step]]
+timedated_zone = "America/New_York"
+
+# Built anew, with the pointer's button still down.
+[[step]]
+expect_settings = { label = "New York", selected = true }
+
+[[step]]
+release = "left"
+
+[[step]]
+expect_timedated = "SetTimezone Europe/Paris interactive"

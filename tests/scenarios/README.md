@@ -141,6 +141,7 @@ Steps, one per `[[step]]` table:
 | `expect_settings = { label, focused?, selected?, shown? }` | the settings window shows an element with this label: with the keyboard or not, on (a switch, a choice) or not; `shown = false` checks it does not |
 | `click_settings = "Accent Amber"` | clicks the settings window's element with this label, through the compositor |
 | `click_settings_at = { label = "World map of the time zones", at = [0.89, 0.34] }` | clicks it elsewhere than its middle: `at` in fractions of its width and height from its corner |
+| `press_settings = "Paris"` | presses on the settings window's element with this label and holds, until a `release`: something can come between the press and the release |
 | `drag_settings = { label, by = [dx, dy] }` | presses on the settings window's element with this label, moves by so much in steps, and lets go |
 | `expect_budget = { max_ms = 50 }` | reports, without failing (#295), an output whose slowest frame so far took longer than that and a loop handler that held the loop (over three times its 16 ms budget): each is printed as a warning with its measured time (`warning: step 12 (expect_budget 50 ms): HEADLESS-1 drew a frame in 57.4 ms, over 50 ms`). Wall-clock times measure the machine's load as much as the code; counts gate, in `expect_cost` ([performance](../../docs/performance.md)) |
 | `measure = true` | starts counting what the compositor does (#88): frames drawn and scenes built per output, allocations on its loop, memory it holds |

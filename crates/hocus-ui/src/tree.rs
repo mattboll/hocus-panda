@@ -449,6 +449,23 @@ impl Node {
         self.kind.focusable() || self.clickable.is_some()
     }
 
+    /// What it is and is called, as screen readers have it, for the ones
+    /// that take clicks: how a press knows it again once its view made it
+    /// anew, as nodes have no keys.
+    fn said(&self) -> Option<(Role, &str)> {
+        match &self.kind {
+            Kind::Box(_) => self.clickable.as_deref().map(|n| (Role::Button, n)),
+            Kind::Button(b) => Some((
+                Role::Button,
+                b.name.as_deref().unwrap_or_else(|| b.label.text()),
+            )),
+            Kind::TextField(field) => Some((Role::Field, field.name.as_str())),
+            // Its name without its value, which a drag changes.
+            Kind::Slider { name, .. } => Some((Role::Slider, name.as_str())),
+            _ => None,
+        }
+    }
+
     fn is_moving(&self, now: Duration) -> bool {
         self.opacity.is_running(now)
             || self.offset_x.is_running(now)
@@ -573,6 +590,27 @@ impl TextField {
     }
 }
 
+/// Where the pointer's button went down, until it comes up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Press {
+    /// Up, or down where nothing takes clicks.
+    Up,
+    On(NodeId),
+    /// Down on a node removed since: views remove their nodes and make
+    /// them anew when something outside changes (the indexer, a device),
+    /// between a press and its release at times. The node called the same
+    /// that the pointer is over takes the press back, so that the release
+    /// still clicks it (#296). Known by its name, not its place in the
+    /// tree: a row that slid into a removed one's place is another thing,
+    /// which the click must not reach.
+    Lost {
+        role: Role,
+        name: String,
+        /// The press had focused it, and nothing had moved the focus since.
+        focused: bool,
+    },
+}
+
 /// A tree of widgets drawn on one surface.
 pub struct Tree {
     nodes: Vec<Slot>,
@@ -587,7 +625,7 @@ pub struct Tree {
     /// Regions to draw again for nodes that went away.
     removed: Vec<Rect>,
     hovered: Option<NodeId>,
-    pressed: Option<NodeId>,
+    press: Press,
     focused: Option<NodeId>,
     /// The ring shows once the keyboard is used, not after a click.
     focus_visible: bool,
@@ -628,7 +666,7 @@ impl Tree {
             relayout: true,
             removed: Vec::new(),
             hovered: None,
-            pressed: None,
+            press: Press::Up,
             focused: None,
             focus_visible: false,
             pointer: None,
@@ -758,6 +796,18 @@ impl Tree {
             return;
         };
         let (parent, children) = (node.parent, node.children.clone());
+        let lost = (self.press == Press::On(id)).then(|| match node.said() {
+            Some((role, name)) if !name.is_empty() => Press::Lost {
+                role,
+                name: name.to_owned(),
+                focused: self.focused == Some(id),
+            },
+            // Nothing to know it again by.
+            _ => Press::Up,
+        });
+        if let Some(lost) = lost {
+            self.press = lost;
+        }
         for child in children {
             self.remove(child);
         }
@@ -774,7 +824,7 @@ impl Tree {
             }
             self.free.push(id.index);
         }
-        for slot in [&mut self.hovered, &mut self.pressed, &mut self.focused] {
+        for slot in [&mut self.hovered, &mut self.focused] {
             if *slot == Some(id) {
                 *slot = None;
             }
@@ -894,10 +944,15 @@ impl Tree {
         node.changed = true;
         self.relayout = true;
         if hidden {
-            for slot in [&mut self.hovered, &mut self.pressed, &mut self.focused] {
+            for slot in [&mut self.hovered, &mut self.focused] {
                 if slot.is_some_and(|n| Self::is_within(&self.nodes, n, id)) {
                     *slot = None;
                 }
+            }
+            if let Press::On(n) = self.press
+                && Self::is_within(&self.nodes, n, id)
+            {
+                self.press = Press::Up;
             }
         }
     }
@@ -942,10 +997,13 @@ impl Tree {
             false
         };
         if changed && !enabled {
-            for slot in [&mut self.hovered, &mut self.pressed, &mut self.focused] {
+            for slot in [&mut self.hovered, &mut self.focused] {
                 if *slot == Some(id) {
                     *slot = None;
                 }
+            }
+            if self.press == Press::On(id) {
+                self.press = Press::Up;
             }
         }
     }
@@ -1610,6 +1668,33 @@ impl Tree {
         (rect.contains(p) && (!interactive || node.interactive())).then_some(id)
     }
 
+    /// The node under `p` is the hovered one; a lost press goes back to it
+    /// when it is called as the pressed one was.
+    fn hover(&mut self, p: Point) {
+        let hovered = self.hit(p, true);
+        if hovered != self.hovered {
+            let old = self.hovered;
+            self.set_flag(old, Some(false), None);
+            self.set_flag(hovered, Some(true), None);
+            self.hovered = hovered;
+        }
+        if let Press::Lost {
+            role,
+            name,
+            focused,
+        } = &self.press
+            && let Some(id) = hovered
+            && self.node(id).and_then(Node::said) == Some((*role, name.as_str()))
+        {
+            let focused = *focused;
+            self.press = Press::On(id);
+            self.set_flag(hovered, None, Some(true));
+            if focused {
+                self.focus(hovered);
+            }
+        }
+    }
+
     fn set_flag(&mut self, id: Option<NodeId>, hovered: Option<bool>, pressed: Option<bool>) {
         if let Some(node) = id.and_then(|id| self.node_mut(id)) {
             if let Some(h) = hovered
@@ -1669,13 +1754,7 @@ impl Tree {
                 if let Some(id) = self.dragging {
                     events.extend(self.slide_to(id, p));
                 }
-                let hovered = self.hit(p, true);
-                if hovered != self.hovered {
-                    let old = self.hovered;
-                    self.set_flag(old, Some(false), None);
-                    self.set_flag(hovered, Some(true), None);
-                    self.hovered = hovered;
-                }
+                self.hover(p);
             }
             Input::PointerLeave => {
                 self.pointer = None;
@@ -1683,8 +1762,8 @@ impl Tree {
                 self.set_flag(old, Some(false), Some(false));
             }
             Input::PointerButton { pressed: true } => {
-                self.pressed = self.hovered;
-                let pressed = self.pressed;
+                let pressed = self.hovered;
+                self.press = pressed.map_or(Press::Up, Press::On);
                 self.set_flag(pressed, None, Some(true));
                 if pressed.is_some() {
                     // Clicking a button focuses it; the ring is for the
@@ -1702,7 +1781,18 @@ impl Tree {
             }
             Input::PointerButton { pressed: false } => {
                 self.dragging = None;
-                let pressed = self.pressed.take();
+                // The view may not have looked under the pointer again
+                // since it made its nodes anew.
+                if matches!(self.press, Press::Lost { .. })
+                    && let Some(p) = self.pointer
+                {
+                    self.layout();
+                    self.hover(p);
+                }
+                let pressed = match std::mem::replace(&mut self.press, Press::Up) {
+                    Press::On(id) => Some(id),
+                    Press::Up | Press::Lost { .. } => None,
+                };
                 self.set_flag(pressed, None, Some(false));
                 if pressed.is_some() && pressed == self.hovered {
                     events.extend(pressed.map(Event::Activated));

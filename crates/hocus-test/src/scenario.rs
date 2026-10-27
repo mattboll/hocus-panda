@@ -292,6 +292,9 @@ pub enum Step {
     ExpectSettings(ExpectSettings),
     /// Clicks the element of the settings window with this label.
     ClickSettings(String),
+    /// Presses on it and holds, until a `release`: a click that something
+    /// else comes into the middle of.
+    PressSettings(String),
     /// Clicks it at a place other than its middle: `{ label, at = [x, y]
     /// }`, fractions of its width and height from its corner (a city on
     /// the world map).
@@ -1236,6 +1239,7 @@ impl fmt::Display for Step {
             Self::CloseLayer(namespace) => write!(f, "close_layer {namespace}"),
             Self::ExpectSettings(e) => write!(f, "expect_settings {:?}", e.label),
             Self::ClickSettings(label) => write!(f, "click_settings {label:?}"),
+            Self::PressSettings(label) => write!(f, "press_settings {label:?}"),
             Self::ClickSettingsAt(c) => write!(f, "click_settings_at {:?} {:?}", c.label, c.at),
             Self::OpenAnnotate(file) => write!(f, "open_annotate {file:?}"),
             Self::WaitWallpapers(_) => write!(f, "wait_wallpapers"),
@@ -2179,6 +2183,7 @@ impl Run<'_> {
             Step::AskAttention(app_id) => self.ask_attention(app_id),
             Step::ExpectSettings(expected) => self.expect_settings(expected),
             Step::ClickSettings(label) => self.click_settings(label),
+            Step::PressSettings(label) => self.press_settings(label),
             Step::ClickSettingsAt(c) => self.click_settings_at(&c.label, c.at),
             Step::DragSettings(drag) => self.drag_settings(drag),
             Step::OpenAnnotate(file) => {
@@ -4069,6 +4074,38 @@ impl Run<'_> {
     }
 
     fn click_settings_at(&mut self, label: &str, at: [f32; 2]) -> anyhow::Result<()> {
+        self.point_settings(label, at)?;
+        for pressed in [true, false] {
+            self.request(Request::PointerButton {
+                button: Button::Left,
+                pressed,
+            })?;
+        }
+        // The app gets the click.
+        let until = Instant::now() + Duration::from_millis(100);
+        while Instant::now() < until {
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        Ok(())
+    }
+
+    fn press_settings(&mut self, label: &str) -> anyhow::Result<()> {
+        self.point_settings(label, [0.5, 0.5])?;
+        self.request(Request::PointerButton {
+            button: Button::Left,
+            pressed: true,
+        })?;
+        // The app gets the press.
+        let until = Instant::now() + Duration::from_millis(100);
+        while Instant::now() < until {
+            self.compositor.dispatch(Duration::from_millis(5))?;
+        }
+        Ok(())
+    }
+
+    /// Moves the pointer onto the settings window's element with this
+    /// label, at `at` of its size, once the window is still.
+    fn point_settings(&mut self, label: &str, at: [f32; 2]) -> anyhow::Result<()> {
         self.settings_caught_up()?;
         self.settle_window()?;
         let (node, all) = self.settings_node(label)?;
@@ -4083,17 +4120,6 @@ impl Run<'_> {
             f64::from(g.y) + f64::from(node.rect.y + node.rect.h * at[1]),
         );
         self.request(Request::PointerMove { x, y })?;
-        for pressed in [true, false] {
-            self.request(Request::PointerButton {
-                button: Button::Left,
-                pressed,
-            })?;
-        }
-        // The app gets the click.
-        let until = Instant::now() + Duration::from_millis(100);
-        while Instant::now() < until {
-            self.compositor.dispatch(Duration::from_millis(5))?;
-        }
         Ok(())
     }
 
