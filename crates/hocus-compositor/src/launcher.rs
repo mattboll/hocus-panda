@@ -1,10 +1,11 @@
 //! The launcher in the compositor: shown over everything on the screen
 //! being worked on, it takes the keyboard and the pointer while open.
 //! Applications are read from desktop entries on a thread when it opens,
+//! their icons after them on the same thread, each once at a size (#254),
 //! and started in a clean environment; results are copied to the
 //! clipboard, for Wayland and X11 clients alike.
 
-use std::{os::fd::OwnedFd, path::PathBuf, sync::Arc};
+use std::{collections::BTreeSet, os::fd::OwnedFd, path::PathBuf, sync::Arc};
 
 use hocus_api::UiNode;
 use hocus_platform::apps::{self, Entry};
@@ -14,7 +15,7 @@ use hocus_shell::{
     providers::Enabled,
     showcase::Showcased,
 };
-use hocus_ui::{Input, Key, Point as UiPoint, Size as UiSize, Theme};
+use hocus_ui::{Input, Key, Picture, Point as UiPoint, Size as UiSize, Theme};
 use smithay::{
     backend::renderer::{
         ImportMem, Renderer,
@@ -43,6 +44,18 @@ pub enum Offer {
     Png(Arc<[u8]>),
 }
 
+/// What the applications' thread found.
+#[derive(Debug)]
+pub enum Found {
+    Entries(Vec<Entry>),
+    /// Icons at `size` pixels: the names looked for, those found.
+    Icons {
+        size: u32,
+        asked: Vec<String>,
+        found: Vec<(String, Picture)>,
+    },
+}
+
 /// The text formats the shell offers.
 const TEXT: [&str; 3] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"];
 
@@ -53,9 +66,13 @@ pub struct LauncherPanel {
     buffer: Option<MemoryRenderBuffer>,
     /// The buffer's size in pixels: the card grows with an answer.
     buffer_size: (u32, u32),
-    /// Where desktop entries are read from.
+    /// Where desktop entries are read from, and icons.
     dirs: Vec<PathBuf>,
-    apps: Option<channel::Sender<Vec<Entry>>>,
+    apps: Option<channel::Sender<Found>>,
+    /// The size icons are read at, and the names already looked for at
+    /// it: found or not, never again.
+    icon_size: u32,
+    icons_asked: BTreeSet<String>,
     pressed: bool,
     lang: Lang,
     /// Large type or a QR code over a screen.
@@ -96,44 +113,89 @@ pub fn start(
     lang: Lang,
     dirs: Option<Vec<PathBuf>>,
 ) {
-    let (sender, receiver) = channel::channel::<Vec<Entry>>();
+    let (sender, receiver) = channel::channel::<Found>();
     let inserted = handle.insert_source(receiver, |event, _, app| {
-        if let channel::Event::Msg(entries) = event {
-            app.timed("applications", |app| app.state.apps_found(entries));
+        if let channel::Event::Msg(found) = event {
+            app.timed("applications", |app| app.state.apps_found(found));
         }
     });
     if let Err(err) = inserted {
         tracing::warn!(%err.error, "the launcher will find no applications");
     }
-    // Read once at start, for the dock; again each time the launcher
-    // opens.
-    let first_dirs = dirs.clone().unwrap_or_else(apps::data_dirs);
-    let first_lang = std::env::var("LANG").ok();
-    let scan = std::thread::Builder::new()
-        .name("applications".into())
-        .spawn({
-            let sender = sender.clone();
-            move || {
-                let _ = sender.send(apps::scan(&first_dirs, first_lang.as_deref()));
-            }
-        });
-    if let Err(err) = scan {
-        tracing::warn!(%err, "could not read the applications");
-    }
-    state.launcher = Some(LauncherPanel {
+    // Read once at start, for the dock, with the icons at the largest
+    // screen's scale; again each time the launcher opens.
+    let scale = state
+        .space
+        .outputs()
+        .map(|o| o.current_scale().fractional_scale())
+        .fold(1.0, f64::max);
+    let mut panel = LauncherPanel {
+        icon_size: hocus_shell::launcher::icon_size(scale as f32),
         launcher: Launcher::new(Theme::default(), lang, 1.0),
         on: None,
         buffer: None,
         buffer_size: (0, 0),
         dirs: dirs.unwrap_or_else(apps::data_dirs),
         apps: Some(sender),
+        icons_asked: BTreeSet::new(),
         pressed: false,
         lang,
         showcase: None,
         providers_from: 0,
         action_recents: Vec::new(),
         drawn_parts: None,
-    });
+    };
+    panel.read_apps();
+    state.launcher = Some(panel);
+}
+
+impl LauncherPanel {
+    /// Reads the applications on a thread, then the icons not looked for
+    /// yet at the size the launcher wants them.
+    fn read_apps(&mut self) {
+        let Some(sender) = self.apps.clone() else {
+            return;
+        };
+        // At start, the largest screen's; then the screen it opens on.
+        let size = if self.on.is_some() {
+            self.launcher.icon_size()
+        } else {
+            self.icon_size
+        };
+        if size != self.icon_size {
+            self.icon_size = size;
+            self.icons_asked.clear();
+        }
+        let dirs = self.dirs.clone();
+        let asked = self.icons_asked.clone();
+        let lang = std::env::var("LANG").ok();
+        let scan = std::thread::Builder::new()
+            .name("applications".into())
+            .spawn(move || {
+                let entries = apps::scan(&dirs, lang.as_deref());
+                let names: BTreeSet<String> = entries
+                    .iter()
+                    .filter_map(|e| e.icon.clone())
+                    .filter(|n| !asked.contains(n))
+                    .collect();
+                if sender.send(Found::Entries(entries)).is_err() || names.is_empty() {
+                    return;
+                }
+                let names: Vec<String> = names.into_iter().collect();
+                let found = apps::icons(&names, &dirs, size)
+                    .into_iter()
+                    .filter_map(|(name, (w, h, pixels))| Some((name, Picture::new(w, h, &pixels)?)))
+                    .collect();
+                let _ = sender.send(Found::Icons {
+                    size,
+                    asked: names,
+                    found,
+                });
+            });
+        if let Err(err) = scan {
+            tracing::warn!(%err, "could not read the applications");
+        }
+    }
 }
 
 fn shell_app(e: Entry) -> ShellApp {
@@ -143,6 +205,7 @@ fn shell_app(e: Entry) -> ShellApp {
         generic: e.generic,
         keywords: e.keywords,
         exec: e.exec,
+        icon: e.icon,
     }
 }
 
@@ -220,16 +283,18 @@ impl State {
         if showing {
             self.close_launcher();
         } else {
-            self.open_launcher();
-            if let Some(panel) = self.launcher.as_mut() {
-                panel.launcher.open_mode(mode);
-            }
+            self.open_launcher_mode(mode);
         }
     }
 
-    /// Opens on the screen under the pointer; reads the applications again
-    /// meanwhile, off the loop.
+    /// Opens on the screen under the pointer, the field empty: every
+    /// application shows (#254). Reads them again meanwhile, off the loop.
     pub fn open_launcher(&mut self) {
+        self.open_launcher_mode(hocus_shell::launcher::Mode::Commands);
+    }
+
+    /// Opens on commands, the history, emoji, the palette or the notes.
+    fn open_launcher_mode(&mut self, mode: hocus_shell::launcher::Mode) {
         if self.quick_open() {
             self.close_quick();
         }
@@ -254,19 +319,8 @@ impl State {
         }
         panel.on = place;
         let was_open = panel.launcher.is_open();
-        panel.launcher.open();
-        if let Some(sender) = panel.apps.clone() {
-            let dirs = panel.dirs.clone();
-            let lang = std::env::var("LANG").ok();
-            let scan = std::thread::Builder::new()
-                .name("applications".into())
-                .spawn(move || {
-                    let _ = sender.send(apps::scan(&dirs, lang.as_deref()));
-                });
-            if let Err(err) = scan {
-                tracing::warn!(%err, "could not read the applications");
-            }
-        }
+        panel.launcher.open_mode(mode);
+        panel.read_apps();
         // Clients let go of the keyboard while it is open: no key stays
         // down for them.
         if let Some(keyboard) = self.seat.get_keyboard() {
@@ -294,14 +348,32 @@ impl State {
         self.needs_redraw = true;
     }
 
-    fn apps_found(&mut self, entries: Vec<Entry>) {
-        // The dock names and launches the same apps.
-        self.dock.entries = entries.clone();
-        self.dock.entries_generation += 1;
-        if let Some(panel) = self.launcher.as_mut() {
-            panel
-                .launcher
-                .set_apps(entries.into_iter().map(shell_app).collect());
+    fn apps_found(&mut self, found: Found) {
+        match found {
+            Found::Entries(entries) => {
+                // Read again at each opening: the same ones change nothing.
+                if entries == self.dock.entries {
+                    return;
+                }
+                // The dock names and launches the same apps.
+                self.dock.entries = entries.clone();
+                self.dock.entries_generation += 1;
+                if let Some(panel) = self.launcher.as_mut() {
+                    panel
+                        .launcher
+                        .set_apps(entries.into_iter().map(shell_app).collect());
+                }
+            }
+            Found::Icons { size, asked, found } => {
+                let Some(panel) = self.launcher.as_mut() else {
+                    return;
+                };
+                if size == panel.icon_size {
+                    panel.icons_asked.extend(asked);
+                }
+                tracing::debug!(size, icons = found.len(), "application icons read");
+                panel.launcher.set_icons(found);
+            }
         }
         self.needs_redraw = true;
     }

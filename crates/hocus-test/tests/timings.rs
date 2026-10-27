@@ -40,7 +40,38 @@ const OPENING_TARGET_MS: f64 = 100.0;
 const KEY_LEFTMETA: u32 = 125;
 const KEY_SPACE: u32 = 57;
 
-fn options() -> HarnessOptions {
+/// So many applications installed: the launcher opens on all of them
+/// (#254), as on a desktop of some years.
+const APPLICATIONS: usize = 60;
+
+/// Desktop entries of `APPLICATIONS` applications under `dir`, named as
+/// applications are, of a word or a few.
+fn applications(dir: &Path) -> anyhow::Result<()> {
+    const WORDS: [&str; 12] = [
+        "Text", "Image", "Sound", "Video", "Mail", "Map", "Disk", "Clock", "Code", "Chess",
+        "Paint", "Notes",
+    ];
+    let apps = dir.join("applications");
+    std::fs::create_dir_all(&apps)?;
+    for i in 0..APPLICATIONS {
+        let name = match i % 3 {
+            0 => WORDS[i % WORDS.len()].to_owned(),
+            1 => format!("{} Editor", WORDS[i % WORDS.len()]),
+            _ => format!(
+                "{} {} Viewer",
+                WORDS[i % WORDS.len()],
+                WORDS[(i / 3) % WORDS.len()]
+            ),
+        };
+        std::fs::write(
+            apps.join(format!("org.example.App{i}.desktop")),
+            format!("[Desktop Entry]\nType=Application\nName={name} {i}\nExec=true\n"),
+        )?;
+    }
+    Ok(())
+}
+
+fn options(data: &Path) -> HarnessOptions {
     HarnessOptions {
         headless: HeadlessConfig {
             outputs: vec![
@@ -55,7 +86,7 @@ fn options() -> HarnessOptions {
         shell: true,
         session_bus: None,
         system_bus: None,
-        data_dirs: None,
+        data_dirs: Some(vec![data.to_path_buf()]),
         child_env: None,
         polkit_helper: None,
         motion: true,
@@ -194,7 +225,9 @@ fn timings() -> anyhow::Result<()> {
 
     // Startup, to both screens drawn with their wallpapers and the shell.
     let start = Instant::now();
-    let mut desktop = Headless::start_options(options())?;
+    let data = tempfile::tempdir()?;
+    applications(data.path())?;
+    let mut desktop = Headless::start_options(options(data.path()))?;
     desktop.dispatch_until(TIMEOUT, Headless::wallpapers_ready)?;
     desktop.advance(FRAME)?;
     report.add_target_ms(
@@ -209,7 +242,8 @@ fn timings() -> anyhow::Result<()> {
         format!("{:.1} µs", idle_turn_us(&mut desktop)?),
     );
 
-    // The launcher: Super+Space, to its first frame.
+    // The launcher: Super+Space, to its first frame, every application
+    // shown.
     let frames = |d: &Headless| d.outputs().iter().map(|o| o.frames).sum::<u64>();
     let before = frames(&desktop);
     let start = Instant::now();
@@ -226,7 +260,7 @@ fn timings() -> anyhow::Result<()> {
         anyhow::ensure!(start.elapsed() < TIMEOUT, "the launcher never drew");
     }
     report.add_target_ms(
-        "Opening the launcher, to its first frame",
+        format!("Opening the launcher on {APPLICATIONS} applications, to its first frame"),
         ms(start.elapsed()),
         OPENING_TARGET_MS,
         "its target",

@@ -335,9 +335,54 @@ impl Kind {
         })
     }
 
+    /// An image of pixels made once: shown again without a copy.
+    pub fn picture(picture: &Picture, alt: &str) -> Self {
+        Self::Image {
+            pixmap: picture.0.clone(),
+            alt: alt.to_owned(),
+        }
+    }
+
     fn focusable(&self) -> bool {
         matches!(self, Self::Button(b) if b.enabled)
             || matches!(self, Self::TextField(_) | Self::Slider { .. })
+    }
+}
+
+/// Premultiplied RGBA pixels, ready to be shown by as many images as want
+/// them (an application's icon in a grid laid out again and again).
+#[derive(Clone)]
+pub struct Picture(Arc<Pixmap>);
+
+impl fmt::Debug for Picture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Picture")
+            .field("width", &self.0.width())
+            .field("height", &self.0.height())
+            .finish()
+    }
+}
+
+impl PartialEq for Picture {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Picture {
+    /// `None` when the pixels are not `width` × `height`.
+    pub fn new(width: u16, height: u16, premultiplied: &[u8]) -> Option<Self> {
+        let mut pixmap = Pixmap::new(width, height);
+        let data = pixmap.data_as_u8_slice_mut();
+        if data.len() != premultiplied.len() {
+            return None;
+        }
+        data.copy_from_slice(premultiplied);
+        Some(Self(Arc::new(pixmap)))
+    }
+
+    pub fn width(&self) -> u16 {
+        self.0.width()
     }
 }
 

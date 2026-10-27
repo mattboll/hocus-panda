@@ -161,6 +161,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 
 - **Discreet dock**: hidden while you work, shown on demand (screen edge, shortcut) or when the desktop is empty, after a restart for example
 - Pinned icons, reordered by drag and drop
+- An Applications button at its end, after a line (a square of three by three dots): it opens the launcher on every application
 - Open applications, windows grouped by app (optional)
 - Hover zoom with spring and bounce
 - Icon animations: hover, launch bounce, "open" dot, shake and breathe when a window waits (its dot, and the hidden dock's hint, in the accent)
@@ -222,6 +223,7 @@ nothing at all are options (see
 ## 12. Launcher and command palette
 
 - Launcher: fuzzy search, cascading results; at the pointer, centred or in the command field
+- Every application, with the field empty: a grid in alphabetical order, each with its icon from the icon theme (or its glyph on its colour, as the dock draws it), hidden entries left out (`NoDisplay`, `Hidden`, other desktops'); the arrows, Tab, Page Up and Down and the wheel move, Enter or a click opens, typing searches; entries and icons are read off the loop, each icon once at a size
 - Applications and their actions
 - Intents in French and English, with confirmation ("screenshot of the browser in 3 seconds")
 - Documents (words, then semantic search)

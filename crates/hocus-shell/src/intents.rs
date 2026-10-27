@@ -647,6 +647,7 @@ mod tests {
                 generic: None,
                 keywords: Vec::new(),
                 exec: vec![name.to_lowercase()],
+                icon: None,
             })
             .collect()
     }

@@ -68,6 +68,7 @@ machine, three runs:
 | A turn of the loop at rest | 4.4–5.4 µs |
 | A turn of the loop at rest, twenty windows | 9.7–10.1 µs |
 | Opening the launcher, to its first frame | 21.5–21.7 ms |
+| The same on 60 applications, the grid of all of them shown (#254), five runs on a busier machine | 22.7–26.5 ms (24.3–25.9 ms with none) |
 | Opening the settings, to their first frame | 23–28 ms |
 | Input to photon (pointer motion to the frame drawn), median / 95th percentile / worst | 0.4–0.5 / 0.6–0.7 / 1.9–2.4 ms |
 | The twenty windows' scenario: frames over 16 ms, laptop panel at scale 2 | 82–91 of 185, slowest 32–35 ms |

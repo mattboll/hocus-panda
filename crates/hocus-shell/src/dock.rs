@@ -3,7 +3,9 @@
 //! under those open. The one under the pointer rises on a spring; one
 //! launched bounces; one with a window asking for attention wiggles, its
 //! dot in the accent (#145). Hidden, only a thin hint shows where it is,
-//! in the accent while a window asks for attention.
+//! in the accent while a window asks for attention. At its end, after a
+//! line, the Applications button opens the launcher on every application
+//! (#254).
 
 use std::time::Duration;
 
@@ -13,7 +15,7 @@ use hocus_ui::{
     motion::{Curve, Spring},
 };
 
-use crate::column::View;
+use crate::{column::View, i18n::Lang};
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
 
@@ -25,6 +27,13 @@ const PAD_Y: f32 = 12.0;
 /// Room above for an icon that rises, and around for the shadow.
 const ROOM: f32 = 24.0;
 const RISE: f32 = 10.0;
+/// The line before the Applications button: its width, and its height
+/// across the squares.
+const LINE: f32 = 1.0;
+const LINE_H: f32 = 40.0;
+/// The button's dots: three by three, so wide, so far apart.
+const DOT: f32 = 8.0;
+const DOT_GAP: f32 = 6.0;
 /// How fast an icon asking for attention is pushed sideways, logical
 /// pixels per second: its first swing goes some 6 px.
 const WIGGLE: f32 = 300.0;
@@ -116,11 +125,21 @@ fn mono(theme: &Theme) -> TextStyle {
     }
 }
 
+/// What is under the pointer in the dock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spot {
+    /// The app at this place.
+    App(usize),
+    /// The Applications button, at the end.
+    Applications,
+}
+
 pub struct Dock {
     tree: Tree,
     surface: Surface,
     icons: Vec<NodeId>,
-    hovered: Option<usize>,
+    applications: NodeId,
+    hovered: Option<Spot>,
 }
 
 impl std::fmt::Debug for Dock {
@@ -132,16 +151,17 @@ impl std::fmt::Debug for Dock {
 }
 
 impl Dock {
-    /// Its size, shadow and rise included, for `count` apps.
+    /// Its size, shadow and rise included, for `count` apps and the
+    /// Applications button after its line.
     pub fn size(count: usize) -> Size {
-        let n = count.max(1) as f32;
+        let n = count as f32;
         Size::new(
-            n * ICON + (n - 1.0) * GAP + 2.0 * PAD_X + 2.0 * ROOM,
+            n * ICON + n * GAP + LINE + GAP + ICON + 2.0 * PAD_X + 2.0 * ROOM,
             ICON + 2.0 * PAD_Y + 2.0 * ROOM,
         )
     }
 
-    pub fn new(theme: Theme, scale: f32, apps: &[DockApp]) -> Self {
+    pub fn new(theme: Theme, lang: Lang, scale: f32, apps: &[DockApp]) -> Self {
         let size = Self::size(apps.len());
         let mut tree = Tree::new(theme.clone(), size, scale);
         let root = tree.root();
@@ -160,6 +180,7 @@ impl Dock {
                     direction: Direction::Row,
                     gap: GAP,
                     padding: Insets::symmetric(PAD_Y, PAD_X),
+                    align: Align::Center,
                     ..Style::default()
                 },
                 Kind::Box(Look {
@@ -228,6 +249,73 @@ impl Dock {
             }
             icons.push(icon);
         }
+        // A line, then the button: a square of the surface, its dots in
+        // the text's colour.
+        tree.add(
+            pill,
+            Style {
+                width: Length::Px(LINE),
+                height: Length::Px(LINE_H),
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: Some(Paint::Border),
+                ..Look::default()
+            }),
+        )
+        .unwrap_or_else(MISSING);
+        let applications = tree
+            .add(
+                pill,
+                Style {
+                    width: Length::Px(ICON),
+                    height: Length::Px(ICON),
+                    align: Align::Center,
+                    justify: Justify::Center,
+                    gap: DOT_GAP,
+                    ..Style::default()
+                },
+                Kind::Box(Look {
+                    background: Some(Paint::SurfaceHover),
+                    border: Some(Paint::Border),
+                    radius: 18.0,
+                    ..Look::default()
+                }),
+            )
+            .unwrap_or_else(MISSING);
+        tree.set_clickable(applications, lang.applications());
+        for _ in 0..3 {
+            let row = tree
+                .add(
+                    applications,
+                    Style {
+                        direction: Direction::Row,
+                        gap: DOT_GAP,
+                        grow: 0.0,
+                        ..Style::default()
+                    },
+                    Kind::Box(Look::default()),
+                )
+                .unwrap_or_else(MISSING);
+            for _ in 0..3 {
+                tree.add(
+                    row,
+                    Style {
+                        width: Length::Px(DOT),
+                        height: Length::Px(DOT),
+                        grow: 0.0,
+                        ..Style::default()
+                    },
+                    Kind::Box(Look {
+                        background: Some(Paint::Text),
+                        radius: DOT / 2.0,
+                        ..Look::default()
+                    }),
+                )
+                .unwrap_or_else(MISSING);
+            }
+        }
         let mut surface = Surface::new(size, scale);
         let damage = tree.update(Duration::ZERO);
         surface.draw(&mut tree, &damage);
@@ -235,15 +323,26 @@ impl Dock {
             tree,
             surface,
             icons,
+            applications,
             hovered: None,
         }
     }
 
+    /// What is at `at`, from the corner: an app or the button.
+    pub fn spot_at(&self, at: Point) -> Option<Spot> {
+        let on = |node: NodeId| self.tree.rect(node).is_some_and(|r| r.contains(at));
+        if on(self.applications) {
+            return Some(Spot::Applications);
+        }
+        self.icons.iter().position(|i| on(*i)).map(Spot::App)
+    }
+
     /// The app at `at`, from the corner.
     pub fn app_at(&self, at: Point) -> Option<usize> {
-        self.icons
-            .iter()
-            .position(|i| self.tree.rect(*i).is_some_and(|r| r.contains(at)))
+        match self.spot_at(at)? {
+            Spot::App(i) => Some(i),
+            Spot::Applications => None,
+        }
     }
 
     /// App `i`'s square, from the corner.
@@ -257,19 +356,24 @@ impl Dock {
         at.x >= ROOM && at.y >= ROOM && at.x <= s.w - ROOM && at.y <= s.h - ROOM
     }
 
-    /// The app under the pointer rises; the others settle.
-    pub fn hover(&mut self, app: Option<usize>) {
-        if app == self.hovered {
+    /// The square under the pointer rises, the button's too; the others
+    /// settle.
+    pub fn hover(&mut self, spot: Option<Spot>) {
+        if spot == self.hovered {
             return;
         }
         let curve = Curve::Spring(Spring::SMOOTH);
-        if let Some(old) = self.hovered.and_then(|i| self.icons.get(i)) {
-            self.tree.animate(*old, Property::OffsetY, 0.0, curve);
+        let node = |spot: Spot| match spot {
+            Spot::App(i) => self.icons.get(i).copied(),
+            Spot::Applications => Some(self.applications),
+        };
+        if let Some(old) = self.hovered.and_then(node) {
+            self.tree.animate(old, Property::OffsetY, 0.0, curve);
         }
-        if let Some(new) = app.and_then(|i| self.icons.get(i)) {
-            self.tree.animate(*new, Property::OffsetY, -RISE, curve);
+        if let Some(new) = spot.and_then(node) {
+            self.tree.animate(new, Property::OffsetY, -RISE, curve);
         }
-        self.hovered = app;
+        self.hovered = spot;
     }
 
     /// An app launched: its square jumps and bounces back.
@@ -411,14 +515,24 @@ mod tests {
                 attention: false,
             })
             .collect();
-        let mut dock = Dock::new(Theme::default(), 1.0, &apps);
+        let mut dock = Dock::new(Theme::default(), Lang::En, 1.0, &apps);
         let second = ROOM + PAD_X + ICON + GAP + ICON / 2.0;
-        assert_eq!(
-            dock.app_at(Point::new(second, ROOM + PAD_Y + 10.0)),
-            Some(1)
-        );
-        dock.hover(Some(1));
+        let y = ROOM + PAD_Y + 10.0;
+        assert_eq!(dock.app_at(Point::new(second, y)), Some(1));
+        dock.hover(Some(Spot::App(1)));
         assert!(dock.is_animating(Duration::from_millis(10)));
+        // After the two and the line, the button.
+        let button = ROOM + PAD_X + 2.0 * (ICON + GAP) + LINE + GAP + ICON / 2.0;
+        assert_eq!(
+            dock.spot_at(Point::new(button, y)),
+            Some(Spot::Applications)
+        );
+        assert_eq!(dock.app_at(Point::new(button, y)), None);
+        assert!(dock.access().dump().contains("Applications"));
+        assert_eq!(
+            Dock::size(2).w,
+            2.0 * ROOM + 2.0 * PAD_X + 3.0 * ICON + 2.0 * GAP + LINE + GAP
+        );
     }
 
     #[test]
@@ -431,13 +545,18 @@ mod tests {
             open: true,
             attention: true,
         }];
-        let mut dock = Dock::new(Theme::default(), 1.0, &apps);
+        let mut dock = Dock::new(Theme::default(), Lang::En, 1.0, &apps);
         dock.draw(Duration::from_secs(1));
         dock.wiggle(0);
         assert!(dock.is_animating(Duration::from_millis(1100)));
         assert!(!dock.is_animating(Duration::from_millis(2500)));
         // Reduced motion: nothing moves.
-        let mut still = Dock::new(Theme::default().with_reduced_motion(true), 1.0, &apps);
+        let mut still = Dock::new(
+            Theme::default().with_reduced_motion(true),
+            Lang::En,
+            1.0,
+            &apps,
+        );
         still.draw(Duration::from_secs(1));
         still.wiggle(0);
         assert!(!still.is_animating(Duration::from_millis(1010)));

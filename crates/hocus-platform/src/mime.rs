@@ -183,6 +183,7 @@ mod tests {
             exec: vec![name.to_lowercase()],
             terminal: false,
             mime_types: types.iter().map(|t| (*t).to_owned()).collect(),
+            icon: None,
         }
     }
 
