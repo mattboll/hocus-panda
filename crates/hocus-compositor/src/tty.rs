@@ -67,6 +67,7 @@ use hocus_api::Event;
 use crate::{
     App, BACKGROUND, BackendState, State,
     capture::{self, Pixels},
+    clips::clipped,
     copied::CopiedFrame,
     flip::{self, Flip, Health},
     gpus::{self, Change, Found, Known, Path, Probe, Use},
@@ -1531,6 +1532,7 @@ fn draw_direct(
     state.paint_glass(gles, &screen.output);
     state.paint_crt(gles, &screen.output);
     let elements = state.scene_elements(gles, &screen.output, true);
+    let elements = clipped(&elements);
     let result = screen
         .surface
         .render_frame(gles, &elements, BACKGROUND, FrameFlags::DEFAULT)
@@ -1645,6 +1647,7 @@ fn copy_across(
         texture,
         transform,
     )];
+    let elements = clipped(&elements);
     let result = surface
         .render_frame(&mut renderer, &elements, BACKGROUND, FrameFlags::DEFAULT)
         .map_err(|err| anyhow::anyhow!("{err:?}"))?;
