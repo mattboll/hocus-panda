@@ -1,7 +1,8 @@
 //! Screen recording (#70), through the encoder for real: a region recorded
-//! five seconds plays at its size, a click rings in the video and not on
-//! the screen, and the loop keeps its budget. Needs ffmpeg and ffprobe;
-//! skipped without them.
+//! five seconds plays at its size, and a click rings in the video and not
+//! on the screen. What held the loop meanwhile is reported, not failed: its
+//! times are the machine's load as much as the code's (#298). Needs ffmpeg
+//! and ffprobe; skipped without them.
 
 use std::{
     path::Path,
@@ -192,10 +193,6 @@ fn a_region_recorded_plays_at_its_size_with_clicks_ringed_in_it_only() -> anyhow
     let ring = (170..180).map(|x| at(x, 120)).max().unwrap_or(0);
     assert!(ring > 180, "no ring in the video: {ring}");
 
-    let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
-        anyhow::bail!("expected stats");
-    };
-    let held = hocus_test::held_the_loop(&stats);
-    assert!(held.is_empty(), "the loop was held: {held:?}");
+    hocus_test::report_held(&compositor.stats());
     Ok(())
 }

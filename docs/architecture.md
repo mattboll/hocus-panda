@@ -45,7 +45,9 @@ Rules:
   thread then waits for it to end. The system's fonts are read on a
   worker at start, with the fallback of every script, the emoji family
   and their files mapped there, so that text laid out on the loop opens
-  no font file.
+  no font file. Tests hold slow work back behind a gate they open
+  themselves (`hocus_test::gate`): a call put back on the loop keeps them
+  from opening it and fails them, with no time measured (#298).
 - **Nothing on a timer at rest.** The loop wakes for the watchdog, and
   otherwise when something happens or falls due: a moment on the clock is
   an alarm set for it (`alarm.rs`), never a timer ticking in case. The

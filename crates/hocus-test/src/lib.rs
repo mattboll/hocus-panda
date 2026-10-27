@@ -8,6 +8,7 @@ pub mod caldav;
 pub mod client;
 pub mod devices;
 pub mod fuzz;
+pub mod gate;
 pub mod goa;
 pub mod gtasks;
 pub mod herdr;
@@ -36,6 +37,22 @@ pub fn held_the_loop(stats: &hocus_api::Stats) -> Vec<&hocus_api::SlowHandler> {
         .collect()
 }
 
+/// The handlers that held the loop ([`held_the_loop`]), printed as
+/// warnings with the test's output and returned: wall-clock times measure
+/// the machine's load as much as the code, so they are reported, never
+/// failed (#298), as the scenarios' `expect_budget` steps do. What a test
+/// proves stays off the loop it shows with a [`gate::Gate`] or a count.
+pub fn report_held(stats: &hocus_api::Stats) -> Vec<String> {
+    let warnings: Vec<String> = held_the_loop(stats)
+        .into_iter()
+        .map(|h| format!("{} held the loop {:.1} ms, at {} ms", h.name, h.ms, h.at_ms))
+        .collect();
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
+    warnings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,5 +74,24 @@ mod tests {
         let held = held_the_loop(&stats);
         assert_eq!(held.len(), 1);
         assert_eq!(held[0].at_ms, 120);
+    }
+
+    #[test]
+    fn what_held_the_loop_is_reported() {
+        let stats = hocus_api::Stats {
+            outputs: Vec::new(),
+            slow_handlers: vec![hocus_api::SlowHandler {
+                name: "wayland clients".into(),
+                ms: 221.6,
+                at_ms: 1200,
+            }],
+            stalls: Vec::new(),
+            wakeups: 0,
+            handlers: Vec::new(),
+        };
+        assert_eq!(
+            report_held(&stats),
+            ["wayland clients held the loop 221.6 ms, at 1200 ms"]
+        );
     }
 }
