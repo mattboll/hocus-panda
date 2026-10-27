@@ -1510,6 +1510,11 @@ impl Scenario {
         run.compositor
             .dispatch_until(CLIENT_TIMEOUT, Headless::wallpapers_ready)
             .context("the wallpapers never came")?;
+        // So are the applications the dock holds: what the first frames
+        // show does not depend on their thread's time (#287).
+        run.compositor
+            .dispatch_until(CLIENT_TIMEOUT, Headless::apps_read)
+            .context("the applications were never read")?;
         for (n, step) in self.steps.iter().enumerate() {
             run.step(step)
                 .with_context(|| format!("step {} ({step})", n + 1))?;

@@ -413,6 +413,7 @@ impl State {
     fn apps_found(&mut self, found: Found) {
         match found {
             Found::Entries(entries) => {
+                self.dock.entries_read = true;
                 // Read again at each opening: the same ones change nothing.
                 if entries == self.dock.entries {
                     return;

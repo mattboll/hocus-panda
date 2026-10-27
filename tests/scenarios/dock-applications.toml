@@ -22,6 +22,29 @@ expect_ui = { label = "Applications" }
 [[step]]
 expect_screenshot = { output = "HEADLESS-1", reference = "dock-applications.png" }
 
+# It stays centred beside the panel when the panel takes another form,
+# its apps the same (#287): beside the strip, then the column again.
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop"]
+"""
+
+[[step]]
+expect_ui = { label = "Applications", inside = [640, 690, 92, 80] }
+
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop"]
+
+[panel]
+form = "column"
+"""
+
+[[step]]
+expect_ui = { label = "Applications", inside = [516, 690, 92, 80] }
+
 [[step]]
 click_ui = "Applications"
 

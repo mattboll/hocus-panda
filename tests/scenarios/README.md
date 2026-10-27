@@ -21,7 +21,9 @@ xwayland = false
 # Wednesday 21 October 14:37 UTC plus the virtual time, for user "Alex";
 # UTC is the system's time zone there, unless a timedated stand-in says another):
 # the strip by default; a scenario about the column itself writes
-# [panel] form = "column" in its first step and in each configuration it writes
+# [panel] form = "column" in its first step and in each configuration it writes.
+# The steps start once the applications read off the loop for the dock and the
+# launcher came in, the clock still
 shell = false
 # A private D-Bus bus for the compositor (notifications); never the session's
 dbus = false
