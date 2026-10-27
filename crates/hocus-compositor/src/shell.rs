@@ -29,9 +29,9 @@ use smithay::{
 
 use crate::{
     State,
-    blur::{Spot, Surface, spots},
+    blur::Surface,
     desktops::title_and_app_id,
-    scene::SceneElement,
+    scene::{Panes, SceneElement},
     window_mode::WindowMode,
 };
 
@@ -701,25 +701,36 @@ impl State {
         self.matrix_column_elements(renderer, buffer, column, f64::from(area.size.w), *scale)
     }
 
-    /// The column's panels on glass, and its popover's, on `output`.
-    pub(crate) fn shell_glass(&self, output: &Output) -> (Vec<Spot>, Vec<Spot>) {
+    /// The column's popover's panels on glass and their shadows, and the
+    /// column's, on `output`: out over the windows (#263), the column
+    /// casts a shadow on them (#281).
+    pub(crate) fn shell_panes(&self, output: &Output) -> (Panes, Panes) {
         let Some((shell, Some((name, area, _)))) = self.shell.as_ref().map(|s| (s, &s.on)) else {
-            return (Vec::new(), Vec::new());
+            return (Panes::default(), Panes::default());
         };
         if *name != output.name() {
-            return (Vec::new(), Vec::new());
+            return (Panes::default(), Panes::default());
         }
         let Some(shift) = self.column_shift() else {
-            return (Vec::new(), Vec::new());
+            return (Panes::default(), Panes::default());
         };
         let rect = column_rect(*area);
         let local = Point::<f64, Logical>::from((
             f64::from(rect.loc.x - area.loc.x) + shift,
             f64::from(rect.loc.y - area.loc.y),
         ));
+        let mut shadows = shell.column.shadows();
+        if self.panel_out_drawn() {
+            shadows.extend(shell.column.out_shadow());
+        }
         (
-            spots(Surface::Popover, local, &shell.column.popover_glass()),
-            spots(Surface::Column, local, &shell.column.glass()),
+            Panes::of(
+                Surface::Popover,
+                local,
+                &shell.column.popover_glass(),
+                &shell.column.popover_shadows(),
+            ),
+            Panes::of(Surface::Column, local, &shell.column.glass(), &shadows),
         )
     }
 

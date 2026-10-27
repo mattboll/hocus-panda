@@ -1050,6 +1050,12 @@ impl Radial {
     pub fn access(&self) -> AccessNode {
         self.tree.access()
     }
+
+    /// Its shadows, from its corner, for the compositor to draw under it
+    /// (#281).
+    pub fn shadows(&self) -> Vec<hocus_ui::Cast> {
+        self.tree.shadows()
+    }
 }
 
 /// From the middle to an action at `angle`; nothing for the middle.

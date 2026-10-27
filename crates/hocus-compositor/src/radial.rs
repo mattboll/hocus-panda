@@ -10,7 +10,7 @@
 use hocus_core::{WindowId, config::RadialButton};
 use hocus_shell::radial::{self, Act, Gesture, Outcome, Radial, RadialEvent, Subject};
 use smithay::{
-    backend::renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
+    backend::renderer::{ImportAll, ImportMem, Renderer, Texture},
     input::keyboard::Keysym,
     output::Output,
     utils::{Logical, Point, SERIAL_COUNTER, Serial},
@@ -417,20 +417,31 @@ impl State {
         &self,
         renderer: &mut R,
         output: &Output,
-    ) -> Vec<MemoryRenderBufferRenderElement<R>>
+    ) -> Vec<crate::scene::SceneElement<R>>
     where
-        R: Renderer + ImportMem,
-        R::TextureId: Send + Clone + 'static,
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
     {
         if self.locked() {
             return Vec::new();
         }
         let open = self.radials.open.as_ref().map(|o| &o.shown);
-        open.into_iter()
+        let mut out = Vec::new();
+        for shown in open
+            .into_iter()
             .chain(self.radials.closing.as_ref())
             .filter(|s| s.output == output.name())
-            .filter_map(|s| s.panel.element(renderer, output, s.place))
-            .collect()
+        {
+            let Some(menu) = shown.panel.element(renderer, output, shown.place) else {
+                continue;
+            };
+            out.push(crate::scene::SceneElement::Frame(menu));
+            // Each action's shadow under it (#281).
+            let shadows =
+                crate::decoration::casters(shown.place.to_f64(), &shown.panel.view.shadows());
+            out.extend(self.cast_elements(renderer, output, &shadows));
+        }
+        out
     }
 
     pub fn radial_ui(&self, out: &mut Vec<hocus_api::UiNode>) {

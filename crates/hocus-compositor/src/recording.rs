@@ -831,6 +831,9 @@ impl State {
             && let Some(e) = panel.element(renderer, output, *place)
         {
             out.push(SceneElement::Frame(e));
+            // Its shadow under it (#281).
+            let shadows = crate::decoration::casters(place.to_f64(), &panel.view.shadows());
+            out.extend(self.cast_elements(renderer, output, &shadows));
         }
         if let Some(bubble) = &self.recorder.bubble
             && bubble.output == output.name()

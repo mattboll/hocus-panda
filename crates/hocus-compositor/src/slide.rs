@@ -275,22 +275,24 @@ impl State {
     }
 
     /// The switcher on `output`, while it shows.
-    /// The desktop switcher on glass, while it shows on `output`.
-    pub(crate) fn switcher_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+    /// The desktop switcher on glass and its shadow, while it shows on
+    /// `output`.
+    pub(crate) fn switcher_panes(&self, output: &Output) -> crate::scene::Panes {
         let Some(slide) = self.slides.by_output.get(&output.name()) else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         if self.clock.now() >= slide.until && slide.swipe.is_none() {
-            return Vec::new();
+            return crate::scene::Panes::default();
         }
         slide
             .switcher
             .as_ref()
-            .map_or_else(Vec::new, |(place, panel)| {
-                crate::blur::spots(
+            .map_or_else(crate::scene::Panes::default, |(place, panel)| {
+                crate::scene::Panes::of(
                     crate::blur::Surface::DesktopSwitcher,
                     place.to_f64(),
                     &panel.view.glass(),
+                    &panel.view.shadows(),
                 )
             })
     }

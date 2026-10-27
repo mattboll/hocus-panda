@@ -80,10 +80,13 @@ The blur is CSS's `box-shadow` blur: a Gaussian whose standard deviation
 is half of it, faded out at two and a half deviations. Windows' shadows
 are drawn at the screen's pixels, whatever its scale, placed on them
 exactly, and never under the window: a see-through one shows what is
-behind it (#261). A panel's shadow is drawn in its own surface: where the
-surface has less room around the panel than the shadow reaches, the
-shadow is smaller, the light's direction kept, so that it fades out before
-the surface's edge.
+behind it (#261). Panels (the launcher, menus, cards, toasts, the dock,
+quick settings, the column out over the windows) cast the very same
+shadow, as deep as the boards draw it at every hour (#281): the
+compositor draws it under them, past their surface, and a click in it
+reaches what is under it. Only the toolkit alone in a window draws a
+panel's shadow in its own surface, smaller where the surface has less room
+around the panel than the shadow reaches.
 
 Windows have 14 px corners.
 
@@ -115,9 +118,9 @@ accent.
 Depth (#37), in each theme file's `[effects]`: panels are frosted glass
 where the compositor can blur, their surface see-through over the blur
 (dark 84 %, light 86 %, Matrix 88 %, HUD 72 %, paper 92 % opaque; the blur
-reaches 32 px), and solid otherwise. Windows' shadows are black, at most
-50 % dark, 20 % light, 70 % Matrix, 55 % HUD, 16 % paper. The main text
-reads at 4.5:1 on glass over black as over white.
+reaches 32 px), and solid otherwise. Windows' and panels' shadows are
+black, at most 50 % dark, 20 % light, 70 % Matrix, 55 % HUD, 16 % paper.
+The main text reads at 4.5:1 on glass over black as over white.
 
 ## Typography
 

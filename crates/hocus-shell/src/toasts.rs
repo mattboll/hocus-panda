@@ -917,6 +917,12 @@ impl Toasts {
         self.tree.glass()
     }
 
+    /// Its panels' shadows, from its corner, for the compositor to draw
+    /// under it (#281).
+    pub fn shadows(&self) -> Vec<hocus_ui::Cast> {
+        self.tree.shadows()
+    }
+
     pub fn access(&self) -> AccessNode {
         self.tree.access()
     }

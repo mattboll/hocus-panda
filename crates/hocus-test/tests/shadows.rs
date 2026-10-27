@@ -1,7 +1,9 @@
 //! Windows' shadows fall off smoothly at every scale (#261): drawn at the
 //! output's pixels, they lighten steadily away from the window, as the
 //! Gaussian of CSS's `box-shadow` does, in no steps wider than the screen's
-//! 8-bit levels make them, and keep their shape from scale 1 to 2.
+//! 8-bit levels make them, and keep their shape from scale 1 to 2. Panels
+//! cast the same shadow (#281): the launcher's is the boards', and the
+//! column out over a window casts it on the window.
 
 use std::time::Duration;
 
@@ -298,5 +300,218 @@ fn shadows_fall_off_smoothly_and_alike_at_every_scale() -> anyhow::Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+/// How much of the shadow of a box rounded to `radius` there is at pixel
+/// centre `(x, y)`, the box's corners at `(x0, y0)` and `(x1, y1)`, all in
+/// physical pixels: CSS's Gaussian over the box, its straight sides
+/// exactly, less what its rounded corners leave out, summed in quarter
+/// pixels.
+fn box_cover(
+    (x, y): (f64, f64),
+    (x0, y0, x1, y1): (f64, f64, f64, f64),
+    radius: f64,
+    scale: f64,
+) -> f64 {
+    let sigma = BLUR * scale / 2.0;
+    let side = |z: f64, a: f64, b: f64| normal_cdf((z - a) / sigma) - normal_cdf((z - b) / sigma);
+    let gauss = |d: f64| {
+        (-d * d / (2.0 * sigma * sigma)).exp() / (sigma * (2.0 * std::f64::consts::PI).sqrt())
+    };
+    let step = 0.25;
+    let n = (radius / step).ceil() as i32;
+    let mut missing = 0.0;
+    for (cx, cy, sx, sy) in [
+        (x0 + radius, y0 + radius, -1.0, -1.0),
+        (x1 - radius, y0 + radius, 1.0, -1.0),
+        (x0 + radius, y1 - radius, -1.0, 1.0),
+        (x1 - radius, y1 - radius, 1.0, 1.0),
+    ] {
+        for i in 0..n {
+            for j in 0..n {
+                let (u, v) = ((f64::from(i) + 0.5) * step, (f64::from(j) + 0.5) * step);
+                if u.hypot(v) > radius {
+                    missing += gauss(x - (cx + sx * u)) * gauss(y - (cy + sy * v)) * step * step;
+                }
+            }
+        }
+    }
+    (side(x, x0, x1) * side(y, y0, y1) - missing).max(0.0)
+}
+
+impl Line {
+    /// Out from the middle of a panel's bottom edge, down: the shadow of a
+    /// box its size, as the boards draw it.
+    fn below_panel(
+        shot: &Image,
+        scale: f64,
+        (rect, radius): ((f64, f64, f64, f64), f64),
+        bg: [u8; 3],
+    ) -> Self {
+        let (x, y, w, h) = rect;
+        let shadow = (
+            x * scale,
+            (y + DY) * scale,
+            (x + w) * scale,
+            (y + h + DY) * scale,
+        );
+        let column = ((x + w / 2.0) * scale) as u32;
+        let edge = ((y + h) * scale).ceil() as u32 + 2;
+        Self::sample(
+            shot,
+            scale,
+            bg,
+            brightest(bg),
+            "below the panel",
+            (0..(OUT * scale) as u32).map(|d| {
+                let row = edge + d;
+                let at = (f64::from(column) + 0.5, f64::from(row) + 0.5);
+                ((column, row), box_cover(at, shadow, radius * scale, scale))
+            }),
+        )
+    }
+
+    /// Out from a panel's left edge, to the left, through the middle of its
+    /// shadow.
+    fn left_of_panel(
+        shot: &Image,
+        scale: f64,
+        (rect, radius): ((f64, f64, f64, f64), f64),
+        bg: [u8; 3],
+        out: f64,
+    ) -> Self {
+        let (x, y, w, h) = rect;
+        let shadow = (
+            x * scale,
+            (y + DY) * scale,
+            (x + w) * scale,
+            (y + h + DY) * scale,
+        );
+        let row = ((y + h / 2.0 + DY) * scale) as u32;
+        let edge = (x * scale).floor() as u32 - 2;
+        Self::sample(
+            shot,
+            scale,
+            bg,
+            brightest(bg),
+            "left of the panel",
+            (0..(out * scale) as u32).map(|d| {
+                let column = edge - d;
+                let at = (f64::from(column) + 0.5, f64::from(row) + 0.5);
+                ((column, row), box_cover(at, shadow, radius * scale, scale))
+            }),
+        )
+    }
+}
+
+/// The shell's interface, as the control API lists it.
+fn ui(compositor: &mut Headless) -> anyhow::Result<Vec<hocus_api::UiNode>> {
+    let Reply::Ui(nodes) = compositor.request(Request::Ui)? else {
+        anyhow::bail!("no interface");
+    };
+    Ok(nodes)
+}
+
+fn logical(r: hocus_api::Rect) -> (f64, f64, f64, f64) {
+    (
+        f64::from(r.x),
+        f64::from(r.y),
+        f64::from(r.width),
+        f64::from(r.height),
+    )
+}
+
+/// Presses `keys` together and lets them go, the last first.
+fn press(compositor: &mut Headless, keys: &[u32]) -> anyhow::Result<()> {
+    let presses = keys.iter().map(|c| (*c, true));
+    let releases = keys.iter().rev().map(|c| (*c, false));
+    for (code, pressed) in presses.chain(releases) {
+        compositor.request(Request::Key { code, pressed })?;
+    }
+    Ok(())
+}
+
+const KEY_LEFTMETA: u32 = 125;
+const KEY_SPACE: u32 = 57;
+const KEY_C: u32 = 46;
+
+/// Given the launcher open in the afternoon, when its shadow is looked at
+/// below it and beside it, then it is the boards' (Bureau, D07): `0 36px
+/// 70px` half dark, as windows' is, within 2 levels at scales 1 and 2,
+/// on a dark wallpaper and a light one (#281). It no longer shrinks to its
+/// surface.
+#[test]
+fn the_launcher_casts_the_boards_shadow() -> anyhow::Result<()> {
+    for scale in [1.0, 2.0] {
+        let mut compositor = compositor(scale)?;
+        wallpaper(&mut compositor, DARK)?;
+        press(&mut compositor, &[KEY_LEFTMETA, KEY_SPACE])?;
+        compositor.advance(Duration::from_secs(1))?;
+        // Its card: the widest box of the shell's, its surface aside.
+        let card = ui(&mut compositor)?
+            .into_iter()
+            .filter(|n| n.depth == 1 && n.role == "group")
+            .max_by_key(|n| n.rect.width)
+            .map(|n| logical(n.rect))
+            .context("no launcher")?;
+        let dark = screenshot(&mut compositor)?;
+        wallpaper(&mut compositor, LIGHT)?;
+        let light = screenshot(&mut compositor)?;
+        // Its corners, as the shell rounds them.
+        let card = (card, 24.0);
+        for (shot, bg) in [(&dark, DARK), (&light, LIGHT)] {
+            Line::below_panel(shot, scale, card, bg).check(2.0);
+            Line::left_of_panel(shot, scale, card, bg, OUT).check(2.0);
+        }
+    }
+    Ok(())
+}
+
+/// Given a window under where the column comes out (the strip, by
+/// default), when Super+C brings the column out over it (#263), then the
+/// column casts the boards' shadow on the window, as windows do (#281).
+#[test]
+fn the_column_out_over_a_window_casts_a_shadow_on_it() -> anyhow::Result<()> {
+    let scale = 1.0;
+    let mut compositor = compositor(scale)?;
+    wallpaper(&mut compositor, DARK)?;
+    let blue = [0x33, 0x99, 0xff];
+    let _client = SolidWindow {
+        app_id: "under".into(),
+        width: 1100,
+        height: 700,
+        argb: 0xff_33_99_ff,
+    }
+    .spawn(compositor.socket_path())?;
+    compositor.dispatch_until(Duration::from_secs(10), |c| c.window_count() == 1)?;
+    compositor.advance(FRAME)?;
+    let window = window(&mut compositor)?;
+    press(&mut compositor, &[KEY_LEFTMETA, KEY_C])?;
+    compositor.advance(Duration::from_secs(1))?;
+    let nodes = ui(&mut compositor)?;
+    let field = nodes
+        .iter()
+        .find(|n| n.label.as_deref() == Some("Command field"))
+        .map(|n| n.rect)
+        .context("the column is not out")?;
+    let column = nodes
+        .iter()
+        .filter(|n| n.depth == 0)
+        .map(|n| n.rect)
+        .find(|r| r.x <= field.x && r.x + r.width >= field.x + field.width)
+        .map(logical)
+        .context("no column")?;
+    // The line, all over the window.
+    let out = 80.0;
+    anyhow::ensure!(
+        window.0 < column.0 - out - 2.0 && window.0 + window.2 > column.0,
+        "the window {window:?} is not under the column's shadow {column:?}"
+    );
+    let shot = screenshot(&mut compositor)?;
+    let line = Line::left_of_panel(&shot, scale, (column, 24.0), blue, out);
+    line.check(2.0);
+    // Clearly darker at the column's edge.
+    assert!(line.got[0] < 255.0 - 40.0, "no shadow: {:?}", line.got);
     Ok(())
 }

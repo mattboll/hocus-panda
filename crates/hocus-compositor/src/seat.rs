@@ -1710,10 +1710,12 @@ impl State {
         &self,
         renderer: &mut R,
         output: &Output,
-    ) -> Vec<smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement<R>>
+    ) -> Vec<crate::scene::SceneElement<R>>
     where
-        R: smithay::backend::renderer::Renderer + smithay::backend::renderer::ImportMem,
-        R::TextureId: Send + Clone + 'static,
+        R: smithay::backend::renderer::Renderer
+            + smithay::backend::renderer::ImportAll
+            + smithay::backend::renderer::ImportMem,
+        R::TextureId: Send + Clone + smithay::backend::renderer::Texture + 'static,
     {
         if self.locked() {
             return Vec::new();
@@ -1727,17 +1729,19 @@ impl State {
             .filter(|(k, _)| k.output == name)
             .collect();
         views.sort_by_key(|(k, _)| k.showing.confirm.is_none());
-        views
-            .into_iter()
-            .filter_map(|(_, panel)| {
-                let o = panel.view.origin();
-                panel.element(
-                    renderer,
-                    output,
-                    Point::from((o.x.round() as i32, o.y.round() as i32)),
-                )
-            })
-            .collect()
+        let mut out = Vec::new();
+        for (_, panel) in views {
+            let o = panel.view.origin();
+            let at = Point::from((o.x.round() as i32, o.y.round() as i32));
+            let Some(card) = panel.element(renderer, output, at) else {
+                continue;
+            };
+            out.push(crate::scene::SceneElement::Frame(card));
+            // Its shadow under it, over the cards behind (#281).
+            let shadows = crate::decoration::casters(at.to_f64(), &panel.view.shadows());
+            out.extend(self.cast_elements(renderer, output, &shadows));
+        }
+        out
     }
 
     /// The seats' labels and cards, for the control API.

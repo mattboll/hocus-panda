@@ -268,8 +268,9 @@ enum Piece {
 }
 
 /// How many shadows' textures are kept: one per scale shared by most
-/// windows, and those of windows too small for it.
-const SHADOWS_KEPT: usize = 12;
+/// windows, one per scale and corner radius by most panels (#281), and
+/// those of windows and panels too small for it.
+const SHADOWS_KEPT: usize = 16;
 
 /// Textures drawn once per piece and scale; shadows once per scale, and
 /// once per size for windows too small for the shared one.
@@ -287,12 +288,17 @@ struct Shadows {
 }
 
 /// A shadow's texture is the same for every window whose sides are long
-/// enough for its middle to stretch.
+/// enough for its middle to stretch, and for every panel with the same
+/// corners and light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ShadowKey {
     scale: u32,
     w: Span,
     h: Span,
+    /// Thousandths of a logical pixel, and the darkest level.
+    radius: u32,
+    blur: u32,
+    darkest: u8,
 }
 
 impl Textures {
@@ -326,6 +332,9 @@ impl Textures {
             scale: (scale * 1000.0).round() as u32,
             w: Span::new(size.w, reach),
             h: Span::new(size.h, reach),
+            radius: (style.radius.max(0.0) * 1000.0).round() as u32,
+            blur: (style.shadow_blur.max(0.0) * 1000.0).round() as u32,
+            darkest: (style.shadow_alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
         };
         let draw = || shadow_texture(style, scale, key.w, key.h);
         let Ok(mut shadows) = self.shadows.lock() else {
@@ -514,17 +523,21 @@ fn shadow_pixels(style: &Style, scale: f64, w: Span, h: Span) -> Vec<u8> {
     let (cover_y, corners_y) = h.profile(sigma, radius);
     let missing = radius * radius * (1.0 - std::f64::consts::FRAC_PI_4);
     let darkest = style.shadow_alpha.clamp(0.0, 1.0) * 255.0;
-    cover_y
-        .iter()
-        .zip(&corners_y)
-        .flat_map(|(cy, ky)| {
-            cover_x.iter().zip(&corners_x).map(move |(cx, kx)| {
-                let a = (cx * cy - missing * kx * ky).clamp(0.0, 1.0);
-                [0, 0, 0, (a * darkest).round() as u8]
-            })
-        })
-        .flatten()
-        .collect()
+    // Written in place: a panel's shadow is drawn again on the loop for
+    // each new height (#281).
+    let mut pixels = vec![0; cover_x.len() * cover_y.len() * 4];
+    let rows = pixels.chunks_exact_mut(cover_x.len().max(1) * 4);
+    for ((cy, ky), row) in cover_y.iter().zip(&corners_y).zip(rows) {
+        for ((cx, kx), px) in cover_x
+            .iter()
+            .zip(&corners_x)
+            .zip(row.as_chunks_mut::<4>().0)
+        {
+            let a = (cx * cy - missing * kx * ky).clamp(0.0, 1.0);
+            px[3] = (a * darkest).round() as u8;
+        }
+    }
+    pixels
 }
 
 /// A square holding a rounded ring hugging the window from outside.
@@ -716,6 +729,82 @@ where
         }
     }
     pieces
+}
+
+/// A shell panel's shadow on an output (#281): as deep as windows', the
+/// same Gaussian, with the panel's corners and the light of its theme.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Caster {
+    /// The panel's box, output-local, logical.
+    pub rect: Rectangle<f64, Logical>,
+    pub radius: f64,
+    /// Its own fading, 0 to 1.
+    pub alpha: f32,
+    pub shadow: hocus_ui::Shadow,
+}
+
+/// The shadows a shell surface's panels cast, `origin` its corner on the
+/// output, logical.
+pub fn casters(origin: Point<f64, Logical>, casts: &[hocus_ui::Cast]) -> Vec<Caster> {
+    casts
+        .iter()
+        .map(|c| Caster {
+            rect: Rectangle::new(
+                origin + Point::from((f64::from(c.rect.x), f64::from(c.rect.y))),
+                (f64::from(c.rect.w), f64::from(c.rect.h)).into(),
+            ),
+            radius: f64::from(c.radius),
+            alpha: c.opacity,
+            shadow: c.shadow,
+        })
+        .collect()
+}
+
+/// The style a panel's shadow is drawn with: the windows' with the
+/// panel's corners and the light of its theme.
+fn caster_style(style: &Style, caster: &Caster) -> Style {
+    let s = caster.shadow;
+    Style {
+        radius: caster.radius,
+        shadow_blur: f64::from(s.blur),
+        shadow_dx: f64::from(s.dx),
+        shadow_dy: f64::from(s.dy),
+        shadow_alpha: f64::from(s.alpha),
+        ..*style
+    }
+}
+
+impl Textures {
+    /// Draws the texture of a panel's shadow ahead of time, as the panel
+    /// is: showing it then draws nothing new.
+    pub fn prepare_caster(&self, style: &Style, caster: &Caster, scale: f64) {
+        let size: Rectangle<i32, Physical> = caster.rect.to_physical_precise_round(scale);
+        let _ = self.shadow(&caster_style(style, caster), scale, size.size);
+    }
+}
+
+/// The shadow under a panel, `alpha` opaque on top of its own fading:
+/// drawn as windows' are, and none of it under the panel.
+pub fn caster_elements<R>(
+    renderer: &mut R,
+    textures: &Textures,
+    style: &Style,
+    caster: &Caster,
+    scale: f64,
+    alpha: f32,
+) -> Vec<ShadowPiece<R>>
+where
+    R: Renderer + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    shadow_elements(
+        renderer,
+        textures,
+        &caster_style(style, caster),
+        caster.rect,
+        scale,
+        caster.alpha * alpha,
+    )
 }
 
 /// Rectangles on the stack, on the heap past a few.
