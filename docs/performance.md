@@ -49,6 +49,21 @@ minutes. The session is saved thirty seconds after something happened,
 not every thirty seconds; calendars and updates wake the loop only when
 there is a calendar or something to ask.
 
+## Work kept off the loop
+
+The integration tests that show slow work stays off the loop (a slow AI
+provider, tray application or UPower, a large wallpaper, the saved
+session or the user's folders on a slow disk, the screenshot's text
+reader) hold that work back behind a gate the test opens itself
+(`hocus_test::gate`): meanwhile the loop turns, draws frames and answers
+requests, and what was held has not come. Had the loop waited for it, the
+test could not have opened the gate: the gate gives up after 20 s and the
+test fails, on a fast machine as on a loaded one. A flood of
+notifications is answered while the loop does not turn, and the loop's
+`notification` handler runs once for each one let through. Nothing there
+is timed: the handlers that held the loop (`slow_handlers`, over three
+times their 16 ms budget) are printed as warnings, never failed (#298).
+
 ## Timings, reported only
 
 Wall-clock times measure the machine as much as the code: in a shared CI

@@ -1,27 +1,32 @@
 //! System services (#30): the status row follows a battery served on a
-//! private bus, and a service that takes seconds to answer never makes the
-//! loop late.
+//! private bus, and a service slow to answer never makes the loop wait.
 
 use std::time::{Duration, Instant};
 
 use hocus_api::{Reply, Request};
 use hocus_compositor::{FRAME, HarnessOptions, Headless, HeadlessConfig, RendererChoice};
-use hocus_test::bus::{PrivateBus, installed};
+use hocus_test::{
+    bus::{PrivateBus, installed},
+    gate::Gate,
+};
 use zbus::object_server::SignalEmitter;
 
 const PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
 
-/// A UPower display device; `delay` makes every answer slow.
+/// A UPower display device; a `gate` holds back whether it is present
+/// until it opens.
 struct Device {
     percent: f64,
-    delay: Duration,
+    gate: Option<Gate>,
 }
 
 #[zbus::interface(name = "org.freedesktop.UPower.Device")]
 impl Device {
     #[zbus(property)]
     fn is_present(&self) -> bool {
-        std::thread::sleep(self.delay);
+        if let Some(gate) = &self.gate {
+            gate.wait();
+        }
         true
     }
 
@@ -42,10 +47,10 @@ impl Device {
     }
 }
 
-fn serve(bus: &PrivateBus, percent: f64, delay: Duration) -> anyhow::Result<zbus::Connection> {
+fn serve(bus: &PrivateBus, percent: f64, gate: Option<Gate>) -> anyhow::Result<zbus::Connection> {
     Ok(zbus::block_on(
         zbus::connection::Builder::address(bus.address.as_str())
-            .serve_at(PATH, Device { percent, delay })
+            .serve_at(PATH, Device { percent, gate })
             .name("org.freedesktop.UPower")
             .build(),
     )?)
@@ -103,7 +108,7 @@ fn the_status_row_follows_the_battery() -> anyhow::Result<()> {
         return Ok(());
     }
     let bus = PrivateBus::start()?;
-    let service = serve(&bus, 64.0, Duration::ZERO)?;
+    let service = serve(&bus, 64.0, None)?;
     let mut compositor = compositor(&bus)?;
     wait_for(&mut compositor, "Battery 64%")?;
     zbus::block_on(async {
@@ -116,27 +121,34 @@ fn the_status_row_follows_the_battery() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Given a UPower that answers only once the test lets it, then frames are
+/// drawn and requests answered while it is asked, and the battery shows
+/// once it answers.
 #[test]
-fn a_slow_service_never_makes_the_loop_late() -> anyhow::Result<()> {
+fn a_slow_service_never_makes_the_loop_wait() -> anyhow::Result<()> {
     if !installed("dbus-daemon") {
         eprintln!("skipped: no dbus-daemon");
         return Ok(());
     }
     let bus = PrivateBus::start()?;
-    let _service = serve(&bus, 50.0, Duration::from_secs(5))?;
+    let gate = Gate::new();
+    let _service = serve(&bus, 50.0, Some(gate.clone()))?;
     let mut compositor = compositor(&bus)?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.reached() {
+        anyhow::ensure!(Instant::now() < deadline, "the battery was never asked for");
+        compositor.dispatch(Duration::from_millis(10))?;
+    }
     // Frames go on while the service takes its time.
-    let until = Instant::now() + Duration::from_secs(6);
-    while Instant::now() < until {
+    for _ in 0..10 {
         compositor.dispatch(Duration::from_millis(10))?;
         compositor.advance(FRAME)?;
     }
-    let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
-        anyhow::bail!("expected stats");
-    };
-    let held = hocus_test::held_the_loop(&stats);
-    assert!(held.is_empty(), "the loop was held: {held:?}");
-    // And the answer arrived in the end.
+    let early = shows(&mut compositor, "Battery 50%")?;
+    anyhow::ensure!(gate.open(), "the loop waited for the service");
+    assert!(!early, "the battery showed before the service answered");
+    // And the answer arrives in the end.
     wait_for(&mut compositor, "Battery 50%")?;
+    hocus_test::report_held(&compositor.stats());
     Ok(())
 }

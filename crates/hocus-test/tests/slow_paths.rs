@@ -4,22 +4,13 @@
 //! or when the settings open.
 
 use std::{
-    io::Write as _,
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
     time::{Duration, Instant},
 };
 
 use hocus_api::{Button, Event, Reply, Request};
 use hocus_compositor::{FRAME, HarnessOptions, Headless, HeadlessConfig, RendererChoice};
-use hocus_test::bus::installed;
-
-/// How long the stand-in's read takes unless the test lets it end.
-const SLOW: Duration = Duration::from_secs(5);
+use hocus_test::{bus::installed, gate::Gate};
 
 const LEFT_META: u32 = 125;
 const LEFT_SHIFT: u32 = 42;
@@ -49,33 +40,13 @@ fn compositor(empty: &Path) -> anyhow::Result<Headless> {
     })
 }
 
-/// `user-dirs.dirs` as a FIFO: reading it waits until `slow_read` writes.
-fn fifo(dir: &Path) -> anyhow::Result<PathBuf> {
+/// `user-dirs.dirs` read from a disk slow to answer, held back until the
+/// gate opens: the videos folder, then the end of the file.
+fn slow_read(dir: &Path, videos: &Path) -> anyhow::Result<(PathBuf, Gate)> {
     let path = dir.join("user-dirs.dirs");
-    rustix::fs::mkfifoat(
-        rustix::fs::CWD,
-        &path,
-        rustix::fs::Mode::from_raw_mode(0o600),
-    )?;
-    Ok(path)
-}
-
-/// A read of `path` that takes [`SLOW`], or ends when told: the videos
-/// folder, then the end of the file. `done` is set once it is written.
-fn slow_read(path: PathBuf, videos: &Path) -> (mpsc::Sender<()>, Arc<AtomicBool>) {
-    let (go, wait) = mpsc::channel::<()>();
-    let done = Arc::new(AtomicBool::new(false));
-    let written = done.clone();
-    let line = format!("XDG_VIDEOS_DIR=\"{}\"\n", videos.display());
-    std::thread::spawn(move || {
-        let _ = wait.recv_timeout(SLOW);
-        // Opening blocks until the compositor's reader opens its end.
-        if let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(&path) {
-            let _ = file.write_all(line.as_bytes());
-        }
-        written.store(true, Ordering::SeqCst);
-    });
-    (go, done)
+    let gate = Gate::new();
+    gate.fifo(&path, format!("XDG_VIDEOS_DIR=\"{}\"\n", videos.display()))?;
+    Ok((path, gate))
 }
 
 fn keys(compositor: &mut Headless, codes: &[u32]) -> anyhow::Result<()> {
@@ -119,22 +90,13 @@ fn run(compositor: &mut Headless, by: Duration) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn held(compositor: &mut Headless) -> anyhow::Result<Vec<hocus_api::SlowHandler>> {
-    let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
-        anyhow::bail!("expected stats");
-    };
-    Ok(hocus_test::held_the_loop(&stats)
-        .into_iter()
-        .cloned()
-        .collect())
-}
-
-/// Given a `user-dirs.dirs` whose read takes 5 s and no recordings folder
+/// Given a `user-dirs.dirs` slow to read and no recordings folder
 /// configured, when a region is recorded, then the recording begins and
 /// frames are drawn without waiting for the file; the video goes to the
 /// folder it names once read. Given a camera device, the picker offers
-/// it once a worker found it. Opening the settings then holds nothing
-/// either.
+/// it once a worker found it. Opening the settings then looks at no file
+/// (#280): what held the loop is only reported, its times being the
+/// machine's as much as the code's.
 #[test]
 fn slow_folders_hold_back_no_frame_when_recording_or_opening_the_settings() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
@@ -143,7 +105,7 @@ fn slow_folders_hold_back_no_frame_when_recording_or_opening_the_settings() -> a
     let camera = dir.path().join("video0");
     std::fs::write(&camera, b"")?;
     let videos = dir.path().join("Videos");
-    let user_dirs = fifo(dir.path())?;
+    let (user_dirs, gate) = slow_read(dir.path(), &videos)?;
 
     let mut compositor = compositor(&empty)?;
     compositor.set_user_dirs(&user_dirs);
@@ -152,7 +114,6 @@ fn slow_folders_hold_back_no_frame_when_recording_or_opening_the_settings() -> a
         "[recording]\nhardware = false\ncountdown = 1\ncamera_device = {:?}\n",
         camera.display().to_string()
     ))?;
-    let (go, done) = slow_read(user_dirs, &videos);
 
     // Super+Shift+R: the camera is looked for on a worker.
     keys(&mut compositor, &[LEFT_META, LEFT_SHIFT, KEY_R])?;
@@ -169,17 +130,25 @@ fn slow_folders_hold_back_no_frame_when_recording_or_opening_the_settings() -> a
         pressed: false,
     })?;
     run(&mut compositor, Duration::from_millis(1500))?;
-    assert!(
-        !done.load(Ordering::SeqCst),
-        "the recording waited for the user's folders to be read"
-    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.reached() {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "the user's folders were never read"
+        );
+        compositor.dispatch(Duration::from_millis(5))?;
+    }
     assert!(
         labels(&mut compositor)?
             .iter()
             .any(|l| l == "Stop the recording"),
         "the recording did not begin"
     );
-    let _ = go.send(());
+    run(&mut compositor, Duration::from_millis(300))?;
+    anyhow::ensure!(
+        gate.open(),
+        "the recording waited for the user's folders to be read"
+    );
     run(&mut compositor, Duration::from_millis(500))?;
     keys(&mut compositor, &[LEFT_META, LEFT_SHIFT, KEY_R])?;
 
@@ -205,7 +174,6 @@ fn slow_folders_hold_back_no_frame_when_recording_or_opening_the_settings() -> a
     // compositor when built together, else from PATH (here, nothing).
     compositor.request(Request::OpenSettings { page: None })?;
     run(&mut compositor, Duration::from_millis(300))?;
-    let held = held(&mut compositor)?;
-    assert!(held.is_empty(), "held the loop: {held:?}");
+    hocus_test::report_held(&compositor.stats());
     Ok(())
 }

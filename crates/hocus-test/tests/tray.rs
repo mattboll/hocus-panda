@@ -4,11 +4,19 @@
 use std::time::{Duration, Instant};
 
 use hocus_api::{Reply, Request};
-use hocus_compositor::{HarnessOptions, Headless, HeadlessConfig, RendererChoice};
+use hocus_compositor::{FRAME, HarnessOptions, Headless, HeadlessConfig, RendererChoice};
 use hocus_test::{
     bus::{PrivateBus, installed},
+    gate::Gate,
     tray::TrayApp,
 };
+
+fn shows(compositor: &mut Headless, label: &str) -> anyhow::Result<bool> {
+    let Reply::Ui(nodes) = compositor.request(Request::Ui)? else {
+        anyhow::bail!("expected the interface");
+    };
+    Ok(nodes.iter().any(|n| n.label.as_deref() == Some(label)))
+}
 
 #[test]
 fn a_slow_tray_application_never_holds_the_loop() -> anyhow::Result<()> {
@@ -38,17 +46,12 @@ fn a_slow_tray_application_never_holds_the_loop() -> anyhow::Result<()> {
     })?;
     // The column, which shows the tray (#263: the strip by default).
     compositor.write_config("[panel]\nform = \"column\"\n")?;
-    // Wait for the watcher, then register an application that takes
-    // 300 ms for each of its properties (a second or more for all).
+    // Wait for the watcher, then register an application that answers
+    // nothing until the test lets it.
+    let gate = Gate::new();
     let deadline = Instant::now() + Duration::from_secs(5);
     let app = loop {
-        match TrayApp::start(
-            &bus.address,
-            "Slow",
-            [200, 80, 80],
-            &[],
-            Duration::from_millis(300),
-        ) {
+        match TrayApp::start_held(&bus.address, "Slow", [200, 80, 80], gate.clone()) {
             Ok(app) => break app,
             Err(_) if Instant::now() < deadline => {
                 compositor.dispatch(Duration::from_millis(10))?;
@@ -57,31 +60,24 @@ fn a_slow_tray_application_never_holds_the_loop() -> anyhow::Result<()> {
         }
     };
     let deadline = Instant::now() + Duration::from_secs(10);
-    let mut longest = Duration::ZERO;
-    loop {
-        let start = Instant::now();
+    while !gate.reached() {
+        anyhow::ensure!(Instant::now() < deadline, "the application was never asked");
         compositor.dispatch(Duration::from_millis(5))?;
-        longest = longest.max(start.elapsed());
-        let Reply::Ui(nodes) = compositor.request(Request::Ui)? else {
-            anyhow::bail!("expected the interface");
-        };
-        if nodes
-            .iter()
-            .any(|n| n.label.as_deref() == Some("Tray: 1 application"))
-        {
-            break;
-        }
-        anyhow::ensure!(Instant::now() < deadline, "the application never showed");
     }
-    assert!(
-        longest < Duration::from_millis(100),
-        "a dispatch took {longest:?}"
-    );
-    let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
-        anyhow::bail!("expected stats");
-    };
-    let held = hocus_test::held_the_loop(&stats);
-    assert!(held.is_empty(), "the loop was held: {held:?}");
+    // Frames go on while it takes its time.
+    for _ in 0..10 {
+        compositor.dispatch(Duration::from_millis(5))?;
+        compositor.advance(FRAME)?;
+    }
+    let early = shows(&mut compositor, "Tray: 1 application")?;
+    anyhow::ensure!(gate.open(), "the loop waited for the application");
+    assert!(!early, "the application showed before it answered");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !shows(&mut compositor, "Tray: 1 application")? {
+        anyhow::ensure!(Instant::now() < deadline, "the application never showed");
+        compositor.dispatch(Duration::from_millis(5))?;
+    }
+    hocus_test::report_held(&compositor.stats());
     drop(app);
     Ok(())
 }

@@ -35,7 +35,10 @@ Rules:
   The start looks at a few files once, on the loop's thread before the loop
   runs: whether the last session ended locked (it must be locked before its
   first frame), whether the welcome was offered, and whether the settings
-  app is beside the compositor's own program.
+  app is beside the compositor's own program. Tests hold slow work back
+  behind a gate they open themselves (`hocus_test::gate`): a call put
+  back on the loop keeps them from opening it and fails them, with no
+  time measured (#298).
 - **Nothing on a timer at rest.** The loop wakes for the watchdog, and
   otherwise when something happens or falls due: a moment on the clock is
   an alarm set for it (`alarm.rs`), never a timer ticking in case. The

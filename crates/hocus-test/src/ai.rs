@@ -24,6 +24,8 @@ use std::{
     time::Duration,
 };
 
+use crate::gate::Gate;
+
 /// A request it got.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asked {
@@ -43,6 +45,14 @@ pub struct Answers {
     pub first: Duration,
 }
 
+/// Where an answer stops until the test lets it go on.
+#[derive(Debug, Clone)]
+pub struct Hold {
+    /// Pieces sent before it.
+    pub after: usize,
+    pub gate: Gate,
+}
+
 #[derive(Debug)]
 pub struct Server {
     url: String,
@@ -53,6 +63,16 @@ pub struct Server {
 
 impl Server {
     pub fn start(answers: Answers) -> std::io::Result<Self> {
+        Self::start_with(answers, None)
+    }
+
+    /// As [`Server::start`], each answer stopping at `hold` until its gate
+    /// opens.
+    pub fn start_held(answers: Answers, hold: Hold) -> std::io::Result<Self> {
+        Self::start_with(answers, Some(hold))
+    }
+
+    fn start_with(answers: Answers, hold: Option<Hold>) -> std::io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let url = format!("http://{}", listener.local_addr()?);
@@ -67,11 +87,13 @@ impl Server {
                         Ok((stream, _)) => {
                             // Each answer streams on its own: a question
                             // asked again does not wait for the first.
-                            let (answers, kept, stopped) =
-                                (answers.clone(), kept.clone(), stopped.clone());
+                            let (answers, hold, kept, stopped) =
+                                (answers.clone(), hold.clone(), kept.clone(), stopped.clone());
                             let _ = std::thread::Builder::new().name("ai answer".into()).spawn(
                                 move || {
-                                    if let Err(err) = serve(stream, &answers, &kept, &stopped) {
+                                    let served =
+                                        serve(stream, &answers, hold.as_ref(), &kept, &stopped);
+                                    if let Err(err) = served {
                                         tracing::debug!(%err, "an AI request failed");
                                     }
                                 },
@@ -154,6 +176,7 @@ fn json_string(s: &str) -> String {
 fn serve(
     stream: TcpStream,
     answers: &Answers,
+    hold: Option<&Hold>,
     asked: &Mutex<Vec<Asked>>,
     stop: &AtomicBool,
 ) -> std::io::Result<()> {
@@ -289,7 +312,10 @@ fn serve(
         stream.flush()
     };
     std::thread::sleep(answers.first);
-    for p in &answers.pieces {
+    for (i, p) in answers.pieces.iter().enumerate() {
+        if let Some(hold) = hold.filter(|h| h.after == i) {
+            hold.gate.wait();
+        }
         if stop.load(Ordering::Relaxed) {
             return Ok(());
         }
