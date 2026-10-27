@@ -372,7 +372,7 @@ impl App {
                 Reply::Done
             }
             Request::OfferSession => {
-                state.offer_session();
+                state.read_session();
                 Reply::Done
             }
             Request::OpenSettings { page } => {

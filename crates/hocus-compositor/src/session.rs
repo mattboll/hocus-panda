@@ -1,21 +1,40 @@
 //! The session saved and put back (#31). What is open (each window's
 //! application, output, desktop, place and state) is saved now and then and
-//! when quitting, the file written on a worker thread; at the next start
-//! the applications are started again and their windows put back where
-//! they were as they come. An application that does not start, or whose
-//! window never comes, is reported; the others are put back all the same.
+//! when quitting; at the next start the applications are started again and
+//! their windows put back where they were as they come. An application that
+//! does not start, or whose window never comes, is reported; the others are
+//! put back all the same.
+//!
+//! The file is read and written on one worker thread, in the order asked
+//! (#277): a home directory slow to answer holds back neither the start
+//! nor a frame, and a read asked after a save sees it. What is read comes
+//! back through a channel; the card waits for it as for the configuration.
+//! The one wait on the loop is at the session's very end, for the last
+//! save, and it is bounded.
 //!
 //! Only the session itself saves and restores: nested or headless, the
 //! developer's own session file is never touched (tests give a directory).
 
-use std::{collections::VecDeque, path::PathBuf, sync::mpsc, time::Duration};
+use std::{
+    collections::VecDeque,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
+    time::Duration,
+};
 
 use hocus_core::{
     OutputName,
     session::{SavedWindow, Session},
 };
 use smithay::{
-    reexports::wayland_server::Resource,
+    reexports::{
+        calloop::{LoopHandle, channel},
+        wayland_server::Resource,
+    },
     utils::{Logical, Rectangle, SERIAL_COUNTER},
     wayland::seat::WaylandFocus,
 };
@@ -23,7 +42,7 @@ use smithay::{
 use hocus_shell::boot::Boot;
 use hocus_ui::motion::{Animated, Curve, Easing, STANDARD};
 
-use crate::{State, desktops::title_and_app_id, window_mode::WindowMode};
+use crate::{App, State, desktops::title_and_app_id, window_mode::WindowMode};
 
 /// How long a restored application has to show its window.
 const PATIENCE: Duration = Duration::from_secs(15);
@@ -33,15 +52,45 @@ const SAVE_AFTER: Duration = Duration::from_secs(30);
 /// back is reported, and the desktop is there meanwhile.
 const BOOT_AT_MOST: Duration = Duration::from_secs(5);
 
-/// What the writer gets: the file, the session, and the windows whose
-/// command comes from their process (index, pid).
-type Job = (PathBuf, Session, Vec<(usize, u32)>);
+/// How long the end of the session waits for the last save to be written:
+/// a disk that does not answer by then does not keep the machine from
+/// shutting down.
+const EXIT_PATIENCE: Duration = Duration::from_secs(3);
+
+/// What the session's worker does, in the order asked.
+enum Job {
+    /// Reads the file; what it holds goes back with this number.
+    Read(u64),
+    /// Writes the session; the commands of these windows (index, pid) are
+    /// their processes' own.
+    Write(Session, Vec<(usize, u32)>),
+    /// Answers once everything asked before is done.
+    Flush(mpsc::Sender<()>),
+}
+
+/// The saved session on its way to the card.
+#[derive(Debug, Default)]
+enum Offer {
+    /// Nothing to offer, or offered already.
+    #[default]
+    Done,
+    /// The worker reads the file.
+    Reading,
+    /// Read: offered once the configuration is read and a screen is there.
+    Read(Option<Session>),
+}
 
 #[derive(Debug, Default)]
 pub struct Sessions {
     /// Where the session file goes; none: nothing is saved nor restored.
     pub dir: Option<PathBuf>,
-    writer: Option<mpsc::Sender<Job>>,
+    worker: Option<mpsc::Sender<Job>>,
+    /// The last read asked: an earlier one coming back late is dropped.
+    reads: u64,
+    /// Saves asked, and saves the worker wrote (or failed to): a test
+    /// waits for one to be on disk without the loop being woken.
+    saves: u64,
+    written: Arc<AtomicU64>,
     /// What was last saved, to write only changes.
     last: Option<Session>,
     /// Windows to put back as they come, by app id.
@@ -49,8 +98,10 @@ pub struct Sessions {
     /// Applications started again, and when: those whose window does not
     /// come are reported.
     started: Vec<(String, Duration)>,
-    /// Whether the saved session was offered at start.
-    offered: bool,
+    /// The saved session, read off the loop, to offer.
+    offer: Offer,
+    /// Whether the XDG autostart entries were started.
+    autostarted: bool,
     /// The card asking what to put back.
     card: Option<Card>,
     /// The boot screen while windows come back (#48).
@@ -104,46 +155,163 @@ fn command_of(pid: u32) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// What the saved session file holds, if anything is to be put back.
+fn read(path: &Path) -> Option<Session> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(err) => {
+            tracing::warn!(%err, "the saved session does not read");
+            return None;
+        }
+    };
+    Session::parse(&text)
+        .inspect_err(|err| tracing::warn!(err, "the saved session is unreadable"))
+        .ok()
+        .filter(|s| !s.windows.is_empty())
+}
+
+/// Writes `session` beside the file, then over it: a crash halfway leaves
+/// the last one whole.
+fn write(path: &Path, mut session: Session, pids: Vec<(usize, u32)>) {
+    // Commands not known from desktop entries: the processes' own.
+    for (i, pid) in pids {
+        if let Some(w) = session.windows.get_mut(i)
+            && w.command.is_empty()
+        {
+            w.command = command_of(pid);
+        }
+    }
+    let written = (|| -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = path.with_extension("toml.new");
+        std::fs::write(&tmp, session.to_toml())?;
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(err) = written {
+        tracing::warn!(%err, "could not save the session");
+    }
+}
+
 impl State {
-    /// Starts the writer; called once the directory is known.
-    pub fn start_sessions(&mut self, dir: Option<PathBuf>) {
+    /// Starts the session's worker, which reads the saved session at once;
+    /// called once the directory is known.
+    pub(crate) fn start_sessions(
+        &mut self,
+        handle: &LoopHandle<'static, App>,
+        dir: Option<PathBuf>,
+    ) {
         self.sessions.dir = dir;
-        if self.sessions.dir.is_none() {
+        let Some(dir) = &self.sessions.dir else {
+            return;
+        };
+        let path = file(dir);
+        // Nothing comes back without a worker: the card does not wait.
+        self.sessions.offer = Offer::Read(None);
+        let (back, came) = channel::channel::<(u64, Option<Session>)>();
+        let inserted = handle.insert_source(came, |event, _, app| {
+            // Quietly: reading is not something happening on the desktop,
+            // which would have the session saved again (#88).
+            app.timed_quietly("session read", |app| match event {
+                channel::Event::Msg((read, session)) => app.state.session_read(read, session),
+                channel::Event::Closed => {
+                    let read = app.state.sessions.reads;
+                    app.state.session_read(read, None);
+                }
+            });
+        });
+        if let Err(err) = inserted {
+            tracing::warn!(err = %err.error, "the saved session will not be offered");
             return;
         }
-        let (tx, rx) = mpsc::channel::<Job>();
+        let (worker, jobs) = mpsc::channel::<Job>();
+        let written = self.sessions.written.clone();
         let spawned = std::thread::Builder::new()
             .name("session".into())
             .spawn(move || {
-                for (path, mut session, pids) in rx {
-                    // Commands not known from desktop entries: the
-                    // processes' own.
-                    for (i, pid) in pids {
-                        if let Some(w) = session.windows.get_mut(i)
-                            && w.command.is_empty()
-                        {
-                            w.command = command_of(pid);
+                for job in jobs {
+                    match job {
+                        Job::Read(n) => {
+                            let _ = back.send((n, read(&path)));
                         }
-                    }
-                    let write = (|| -> std::io::Result<()> {
-                        if let Some(parent) = path.parent() {
-                            std::fs::create_dir_all(parent)?;
+                        Job::Write(session, pids) => {
+                            write(&path, session, pids);
+                            written.fetch_add(1, Ordering::Release);
                         }
-                        let tmp = path.with_extension("toml.new");
-                        std::fs::write(&tmp, session.to_toml())?;
-                        std::fs::rename(&tmp, &path)
-                    })();
-                    if let Err(err) = write {
-                        tracing::warn!(%err, "could not save the session");
+                        Job::Flush(done) => {
+                            let _ = done.send(());
+                        }
                     }
                 }
             });
         match spawned {
-            Ok(_) => self.sessions.writer = Some(tx),
-            Err(err) => tracing::warn!(%err, "the session will not be saved"),
+            Ok(_) => {
+                self.sessions.worker = Some(worker);
+                self.read_session();
+            }
+            Err(err) => tracing::warn!(%err, "the session will not be saved nor offered"),
         }
         // Saved now and then; tests save when they ask.
         self.sessions.periodic = self.waker().is_some();
+    }
+
+    /// Reads the saved session again, off the loop, to offer it once read:
+    /// at start, and when a test asks.
+    pub fn read_session(&mut self) {
+        let Some(worker) = &self.sessions.worker else {
+            return;
+        };
+        self.sessions.reads += 1;
+        if worker.send(Job::Read(self.sessions.reads)).is_ok() {
+            self.sessions.offer = Offer::Reading;
+        }
+    }
+
+    /// The worker read the saved session: the last read asked is offered.
+    fn session_read(&mut self, read: u64, session: Option<Session>) {
+        if read == self.sessions.reads && matches!(self.sessions.offer, Offer::Reading) {
+            self.sessions.offer = Offer::Read(session);
+        }
+    }
+
+    /// Whether the saved session was read and offered (or there was none).
+    pub fn session_offered(&self) -> bool {
+        matches!(self.sessions.offer, Offer::Done)
+    }
+
+    /// Whether every save asked is written.
+    pub fn session_saved(&self) -> bool {
+        self.sessions.written.load(Ordering::Acquire) >= self.sessions.saves
+    }
+
+    /// Hands what is open to the worker, to write as it comes.
+    fn send_save(&mut self, session: Session, pids: Vec<(usize, u32)>) {
+        let Some(worker) = &self.sessions.worker else {
+            return;
+        };
+        if worker.send(Job::Write(session.clone(), pids)).is_ok() {
+            self.sessions.saves += 1;
+        }
+        self.sessions.last = Some(session);
+    }
+
+    /// At the session's end (quitting, logging out, shutting down): waits
+    /// for the last save to be on disk, for at most [`EXIT_PATIENCE`]. The
+    /// one wait for the file on the loop's thread, once, as the session
+    /// ends: the loop has stopped, or the machine is about to go.
+    pub fn finish_sessions(&mut self) {
+        let Some(worker) = &self.sessions.worker else {
+            return;
+        };
+        let (done, flushed) = mpsc::channel();
+        if worker.send(Job::Flush(done)).is_err() {
+            return;
+        }
+        if flushed.recv_timeout(EXIT_PATIENCE).is_err() {
+            tracing::warn!("the session may not have been saved");
+        }
     }
 
     /// Saves the session thirty seconds after something happened (a
@@ -232,25 +400,14 @@ impl State {
 
     /// Saves what is open, if it changed.
     pub fn save_session(&mut self) {
-        let (Some(dir), Some(writer)) = (&self.sessions.dir, &self.sessions.writer) else {
+        if self.sessions.worker.is_none() {
             return;
-        };
+        }
         let (session, pids) = self.snapshot();
         if self.sessions.last.as_ref() == Some(&session) {
             return;
         }
-        let _ = writer.send((file(dir), session.clone(), pids));
-        self.sessions.last = Some(session);
-    }
-
-    /// The saved session, if there is one to put back.
-    pub fn saved_session(&self) -> Option<Session> {
-        let dir = self.sessions.dir.as_ref()?;
-        let text = std::fs::read_to_string(file(dir)).ok()?;
-        Session::parse(&text)
-            .inspect_err(|err| tracing::warn!(err, "the saved session is unreadable"))
-            .ok()
-            .filter(|s| !s.windows.is_empty())
+        self.send_save(session, pids);
     }
 
     /// Starts the applications of `session` again, `only` these when
@@ -536,18 +693,22 @@ pub struct Card {
 }
 
 impl State {
-    /// Once the configuration is read: put the session back, ask, or not.
+    /// Once the configuration and the saved session are read: put the
+    /// session back, ask, or not; then the autostart entries, once.
     fn offer_when_ready(&mut self) {
-        if self.sessions.offered
-            || self.sessions.dir.is_none()
+        if !matches!(self.sessions.offer, Offer::Read(_))
             || (self.config_path.is_some() && self.config_generation == 0)
             || self.space.outputs().next().is_none()
         {
             return;
         }
-        self.sessions.offered = true;
-        self.offer_session();
-        self.autostart();
+        if let Offer::Read(session) = std::mem::take(&mut self.sessions.offer) {
+            self.offer_session(session);
+        }
+        if !self.sessions.autostarted {
+            self.sessions.autostarted = true;
+            self.autostart();
+        }
     }
 
     /// The XDG autostart entries, read on a worker thread, started on the
@@ -597,8 +758,8 @@ impl State {
 
     /// As the configuration says: put the saved session back, show the
     /// card, or nothing.
-    pub fn offer_session(&mut self) {
-        let Some(session) = self.saved_session() else {
+    fn offer_session(&mut self, session: Option<Session>) {
+        let Some(session) = session else {
             return;
         };
         match self.config.session.restore.as_str() {
@@ -765,25 +926,11 @@ impl State {
         }
     }
 
-    /// Saves at once, on the loop: when quitting, and for tests.
+    /// Saves what is open now, changed or not, off the loop: when
+    /// quitting or leaving (then [`State::finish_sessions`] waits for it),
+    /// and for tests.
     pub fn save_session_now(&mut self) {
-        let Some(dir) = self.sessions.dir.clone() else {
-            return;
-        };
-        let (mut session, pids) = self.snapshot();
-        for (i, pid) in pids {
-            if let Some(w) = session.windows.get_mut(i)
-                && w.command.is_empty()
-            {
-                w.command = command_of(pid);
-            }
-        }
-        let path = file(&dir);
-        let written =
-            std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, session.to_toml()));
-        if let Err(err) = written {
-            tracing::warn!(%err, "could not save the session");
-        }
-        self.sessions.last = Some(session);
+        let (session, pids) = self.snapshot();
+        self.send_save(session, pids);
     }
 }

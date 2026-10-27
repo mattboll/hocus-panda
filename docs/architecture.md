@@ -588,9 +588,16 @@ not be revoked, and the headset is no part of what that terminal shows.
 What is open (each window's application, output, desktop, place and
 state) is saved thirty seconds after something happened (a client, an
 input, a worker's result) when it changed, and when quitting, in
-`$XDG_STATE_HOME/hocuspanda/session.toml`, written on a worker thread. At
-the next start a card offers to put everything back, to choose which
-applications, or to start fresh (`[session] restore`). It stands alone on
+`$XDG_STATE_HOME/hocuspanda/session.toml`. One worker thread reads and
+writes that file, in the order asked (#277): a home directory slow to
+answer holds back neither the start nor a frame, and the saved session
+comes back to the loop through a channel. The one wait for it on the
+loop's thread is at the session's very end: quitting, logging out or
+shutting down, the last save is on disk before the process goes or logind
+is asked, waited for at most three seconds, once, when nothing else is
+left to draw. At the next start, once the file is read (the autostart
+entries wait for it too), a card offers to put everything back, to choose
+which applications, or to start fresh (`[session] restore`). It stands alone on
 its screen: windows that open while it asks (autostart, a program the
 session starts) wait unseen behind it until it is answered. The applications
 start again and their windows go back where they were as they come; one

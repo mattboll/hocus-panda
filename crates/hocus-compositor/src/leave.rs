@@ -265,6 +265,9 @@ impl State {
                 self.loop_signal.stop();
             }
             Leaving::Restart | Leaving::ShutDown if self.asks_logind() => {
+                // The session saved when the windows were asked to close
+                // is on disk before the machine goes (#277).
+                self.finish_sessions();
                 self.ask_logind(if what == Leaving::Restart {
                     Power::Reboot
                 } else {

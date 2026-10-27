@@ -1886,10 +1886,15 @@ impl Run<'_> {
             }
             Step::SaveSession(_) => {
                 self.request(Request::SaveSession)?;
-                Ok(())
+                // Written off the loop (#277).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, Headless::session_saved)
             }
             Step::OfferSession(_) => {
                 self.request(Request::OfferSession)?;
+                // Read off the loop (#277).
+                self.compositor
+                    .dispatch_until(CLIENT_TIMEOUT, Headless::session_offered)?;
                 self.compositor.advance(FRAME)
             }
             Step::ExpectSessionFile(expected) => {

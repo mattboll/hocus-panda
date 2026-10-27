@@ -332,7 +332,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
         state_dir.clone(),
         options.session_bus.as_deref(),
     );
-    state.start_sessions(state_dir.clone());
+    state.start_sessions(&event_loop.handle(), state_dir.clone());
     layout_names::start(
         &event_loop.handle(),
         &mut state,
@@ -427,6 +427,9 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         }
     })?;
 
+    // Quitting or logging out saved the session on its worker: on disk
+    // before the process goes.
+    app.state.finish_sessions();
     stop(&mut children);
     tracing::info!("compositor stopped");
     Ok(())

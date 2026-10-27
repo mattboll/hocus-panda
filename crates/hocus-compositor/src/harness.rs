@@ -460,6 +460,18 @@ impl Headless {
         self.app.state.power_source() == hocus_core::config::PowerSource::Battery
     }
 
+    /// Whether every session save asked is on disk: the file is written
+    /// off the loop (#277).
+    pub fn session_saved(&self) -> bool {
+        self.app.state.session_saved()
+    }
+
+    /// Whether the saved session was read, off the loop, and offered
+    /// (#277).
+    pub fn session_offered(&self) -> bool {
+        self.app.state.session_offered()
+    }
+
     /// Whether logind said what the machine can do (suspend, hibernate).
     pub fn power_caps_known(&self) -> bool {
         self.app.state.leaver.caps_known
