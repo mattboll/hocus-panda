@@ -166,7 +166,7 @@ enum Message {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
-    /// Plug a headless output, WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS].
+    /// Plug a headless output, WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS][:WIDTHxHEIGHTmm].
     Plug {
         spec: String,
         /// Bring back an output unplugged before.

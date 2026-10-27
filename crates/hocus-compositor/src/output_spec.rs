@@ -1,14 +1,20 @@
 //! Outputs described by hand, for the headless backend:
-//! `WxH[@SCALE][+X+Y][/DESKTOPS]`.
+//! `WxH[@SCALE][+X+Y][/DESKTOPS][:WMMxHMMmm]`.
 
 use std::{fmt, str::FromStr};
+
+use hocus_core::outputs::default_scale;
 
 /// An output's pixel size, scale and logical position.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OutputSpec {
     pub width: i32,
     pub height: i32,
+    /// What it is lit at: as given, else the one its density gives (as a
+    /// screen's, see [`hocus_core::outputs::default_scale`]), else 1.
     pub scale: f64,
+    /// Millimetres, as a screen's EDID gives them; `None` as a VM's.
+    pub physical_size: Option<(i32, i32)>,
     /// Logical position; `None` puts it to the right of the previous output.
     pub position: Option<(i32, i32)>,
     /// How many desktops it has when first plugged.
@@ -26,6 +32,7 @@ impl OutputSpec {
             width,
             height,
             scale: 1.0,
+            physical_size: None,
             position: None,
             desktops: DEFAULT_DESKTOPS,
         }
@@ -37,6 +44,16 @@ impl OutputSpec {
 
     pub fn scale(self, scale: f64) -> Self {
         Self { scale, ..self }
+    }
+
+    /// A size in millimetres, and the scale its density gives; a scale
+    /// set after it is kept.
+    pub fn physical_size(self, width_mm: i32, height_mm: i32) -> Self {
+        Self {
+            physical_size: Some((width_mm, height_mm)),
+            scale: default_scale((self.width, self.height), (width_mm, height_mm)),
+            ..self
+        }
     }
 
     pub fn at(self, x: i32, y: i32) -> Self {
@@ -79,8 +96,8 @@ impl fmt::Display for ParseOutputSpecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}: expected WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS], e.g. 2560x1600@2 or \
-             1920x1080+0+0/1",
+            "{}: expected WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS][:WIDTHxHEIGHTmm], e.g. \
+             2560x1600@2, 1920x1080+0+0/1 or 2560x1600:340x210mm",
             self.0
         )
     }
@@ -93,6 +110,22 @@ impl FromStr for OutputSpec {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let err = || ParseOutputSpecError(s.to_string());
+        let (s, physical_size) = match s.split_once(':') {
+            Some((rest, mm)) => {
+                let (w, h) = mm
+                    .strip_suffix("mm")
+                    .ok_or_else(err)?
+                    .split_once('x')
+                    .ok_or_else(err)?;
+                let w: i32 = w.parse().map_err(|_| err())?;
+                let h: i32 = h.parse().map_err(|_| err())?;
+                if w <= 0 || h <= 0 {
+                    return Err(err());
+                }
+                (rest, Some((w, h)))
+            }
+            None => (s, None),
+        };
         let (s, desktops) = match s.split_once('/') {
             Some((rest, n)) => (rest, n.parse().map_err(|_| err())?),
             None => (s, DEFAULT_DESKTOPS),
@@ -110,12 +143,14 @@ impl FromStr for OutputSpec {
             None => (s, None),
         };
         let (size, scale) = match rest.split_once('@') {
-            Some((size, scale)) => (size, scale.parse().map_err(|_| err())?),
-            None => (rest, 1.0),
+            Some((size, scale)) => (size, Some(scale.parse().map_err(|_| err())?)),
+            None => (rest, None),
         };
         let (width, height) = size.split_once('x').ok_or_else(err)?;
         let width: i32 = width.parse().map_err(|_| err())?;
         let height: i32 = height.parse().map_err(|_| err())?;
+        let scale = scale
+            .unwrap_or_else(|| physical_size.map_or(1.0, |mm| default_scale((width, height), mm)));
         if width <= 0 || height <= 0 || !(0.25..=8.0).contains(&scale) {
             return Err(err());
         }
@@ -123,6 +158,7 @@ impl FromStr for OutputSpec {
             width,
             height,
             scale,
+            physical_size,
             position,
             desktops,
         })
@@ -148,6 +184,34 @@ mod tests {
             "1280x800/1".parse(),
             Ok(OutputSpec::new(1280, 800).desktops(1))
         );
+    }
+
+    #[test]
+    fn a_physical_size_gives_the_scale_unless_one_is_given() {
+        let laptop: OutputSpec = "2560x1600+0+0/1:340x210mm"
+            .parse()
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(laptop.physical_size, Some((340, 210)));
+        assert_eq!(laptop.scale, 1.75);
+        assert_eq!(laptop.position, Some((0, 0)));
+        assert_eq!(laptop.desktops, 1);
+        assert_eq!(
+            "2560x1600:340x210mm".parse(),
+            Ok(OutputSpec::new(2560, 1600).physical_size(340, 210))
+        );
+        assert_eq!(
+            "2560x1600@1:340x210mm"
+                .parse::<OutputSpec>()
+                .map(|s| s.scale),
+            Ok(1.0)
+        );
+        assert_eq!(
+            "1920x1080:530x300mm".parse::<OutputSpec>().map(|s| s.scale),
+            Ok(1.0)
+        );
+        for bad in ["10x10:", "10x10:5x5", "10x10:0x5mm", "10x10:axbmm"] {
+            assert!(bad.parse::<OutputSpec>().is_err(), "{bad} was accepted");
+        }
     }
 
     #[test]

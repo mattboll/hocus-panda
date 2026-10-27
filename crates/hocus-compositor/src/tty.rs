@@ -47,7 +47,7 @@ use smithay::{
         udev::{UdevBackend, UdevEvent, all_gpus, primary_gpu},
     },
     desktop::Window,
-    output::{Mode, Output, PhysicalProperties},
+    output::{Mode, Output, PhysicalProperties, Scale},
     reexports::{
         calloop::{
             LoopHandle, RegistrationToken,
@@ -871,7 +871,13 @@ impl TtyBackend {
             Change::Unplug(connector) => self.unplug(node, connector, state),
             Change::Forget(connector) => {
                 if let Some(device) = self.devices.get_mut(&node) {
-                    device.off.retain(|o| o.connector != connector);
+                    device.off.retain(|o| {
+                        let gone = o.connector == connector;
+                        if gone {
+                            state.output_unplugged(&o.head.name);
+                        }
+                        !gone
+                    });
                 }
             }
             Change::Withdraw(connector) => state.leases.withdraw(node, connector),
@@ -924,6 +930,7 @@ impl TtyBackend {
             }
         });
         state.unplug_output(&screen.output);
+        state.output_unplugged(&screen.output.name());
         state.retire_global(screen.global);
         for token in [screen.health, screen.pace].into_iter().flatten() {
             if let Some(handle) = &state.loop_handle {
@@ -1061,10 +1068,20 @@ impl TtyBackend {
             .map(|g| g.loc.x + g.size.w)
             .max()
             .unwrap_or(0);
+        // At the scale of its density, until the configuration sets one
+        // (#250): lit at 1 first, its clients would draw twice.
+        let scale = hocus_core::outputs::default_scale(
+            (mode.size.w, mode.size.h),
+            (width_mm as i32, height_mm as i32),
+        );
         output.change_current_state(
             Some(mode),
             Some(Transform::Normal),
-            None,
+            Some(if scale.fract() == 0.0 {
+                Scale::Integer(scale as i32)
+            } else {
+                Scale::Fractional(scale)
+            }),
             Some((x, 0).into()),
         );
         output.set_preferred(mode);
@@ -1119,6 +1136,8 @@ impl TtyBackend {
             output = name,
             gpu = %device.path.display(),
             mode = %format!("{}x{}@{:.2}", mode.size.w, mode.size.h, f64::from(mode.refresh) / 1000.0),
+            size_mm = %format!("{width_mm}x{height_mm}"),
+            scale,
             "screen lit"
         );
         let vrr_capable = surface.with_compositor(|c| {

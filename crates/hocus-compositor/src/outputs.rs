@@ -159,6 +159,18 @@ impl State {
         );
     }
 
+    /// The screen `name` is unplugged: the next one on its connector may be
+    /// another, lit afresh at its own mode and scale.
+    pub fn output_unplugged(&mut self, name: &str) {
+        self.output_settings.base.remove(name);
+    }
+
+    /// What `name` goes back to when the file sets no scale: the scale it
+    /// was first lit at, the one of its density (#250).
+    pub fn automatic_scale(&self, name: &str) -> Option<f64> {
+        self.output_settings.base.get(name).map(|b| b.scale)
+    }
+
     /// The file changed: what it says wins over what tools set.
     pub fn outputs_config_changed(&mut self) {
         self.output_settings.overrides.clear();
@@ -652,6 +664,7 @@ impl App {
                     current_mode: head.modes.iter().position(|m| *m == head.now.mode),
                     preferred_mode: head.preferred,
                     scale: head.now.scale,
+                    automatic_scale: state.automatic_scale(&head.name).unwrap_or(head.now.scale),
                     transform: transform_name(head.now.transform).into(),
                     geometry: hocus_api::Rect {
                         x: geometry.x,

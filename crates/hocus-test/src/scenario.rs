@@ -45,7 +45,8 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct Scenario {
     /// What the scenario shows, in a sentence.
     pub description: String,
-    /// Output specs, `WIDTHxHEIGHT[@SCALE][+X+Y]`; one 1280×800 by default.
+    /// Output specs, `WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS][:WIDTHxHEIGHTmm]`;
+    /// one 1280×800 by default.
     #[serde(default)]
     pub outputs: Vec<String>,
     /// Starts XWayland, for X11 test clients; skipped where it is missing.
@@ -1012,7 +1013,7 @@ pub struct SetState {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlugOutput {
-    /// `WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS]`.
+    /// `WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS][:WIDTHxHEIGHTmm]`.
     pub spec: String,
     pub name: Option<String>,
 }

@@ -281,6 +281,7 @@ where
             state.unplug_output(&out.output);
             state.retire_global(global);
         }
+        state.output_unplugged(name);
         true
     }
 
@@ -372,7 +373,7 @@ fn create_output(
     let output = Output::new(
         name.to_string(),
         PhysicalProperties {
-            size: (0, 0).into(),
+            size: spec.physical_size.unwrap_or((0, 0)).into(),
             subpixel: Subpixel::Unknown,
             make: "Hocuspanda".into(),
             model: "Headless".into(),
@@ -442,7 +443,7 @@ where
                     name: o.output.name(),
                     make: "Hocuspanda".into(),
                     model: "Headless".into(),
-                    physical_size: (0, 0),
+                    physical_size: o.spec.physical_size.unwrap_or((0, 0)),
                     modes,
                     preferred: Some(0),
                     vrr_capable: false,

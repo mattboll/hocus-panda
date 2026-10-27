@@ -213,7 +213,8 @@ pub enum Request {
         output: String,
         desktop: Option<usize>,
     },
-    /// Plugs a headless output, `WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS]`;
+    /// Plugs a headless output,
+    /// `WIDTHxHEIGHT[@SCALE][+X+Y][/DESKTOPS][:WIDTHxHEIGHTmm]`;
     /// `name` brings back one unplugged before.
     PlugOutput {
         spec: String,
@@ -934,6 +935,10 @@ fn daylight() -> u32 {
     6500
 }
 
+fn one() -> f64 {
+    1.0
+}
+
 /// Calendars as the session knows them.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CalendarsInfo {
@@ -1107,6 +1112,10 @@ pub struct ScreenInfo {
     pub current_mode: Option<usize>,
     pub preferred_mode: Option<usize>,
     pub scale: f64,
+    /// The scale it takes when the configuration sets none: the one of its
+    /// density.
+    #[serde(default = "one")]
+    pub automatic_scale: f64,
     /// `normal`, `90`, `180`, `270`, `flipped`, `flipped-90`…
     pub transform: String,
     /// Logical; for a screen off, where it was.

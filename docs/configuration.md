@@ -311,7 +311,7 @@ blur = true                # what is behind it blurred, for a see-through window
 name = "eDP-1"
 enabled = true             # false: off; its desktops and windows wait for it
 mode = "2560x1600@60"      # WIDTHxHEIGHT[@HZ]; the screen's preferred one otherwise
-scale = 1.5                # 0.5 to 4, rounded to 1/120
+scale = 1.5                # 0.5 to 4, rounded to 1/120; the one of its density otherwise (see Screens)
 transform = "normal"       # 90, 180, 270, flipped, flipped-90, flipped-180, flipped-270
 position = [0, 0]          # logical, top-left corner
 vrr = false                # adaptive sync, where the screen and GPU can
@@ -380,8 +380,8 @@ rule is written in the file.
 ## Screens
 
 Each `[[outputs]]` sets one screen; what it does not set goes back to how the
-screen was lit (its preferred mode, scale 1, no rotation, to the right of the
-others). Changes apply at once and move nothing else: each window keeps its
+screen was lit (its preferred mode, the scale of its density, no rotation, to
+the right of the others). Changes apply at once and move nothing else: each window keeps its
 place on its screen, maximized and fullscreen ones fill it again, and a
 layout seen before puts every window back where it was. When a connected
 screen comes to offer other modes (a monitor behind a dock or a switch, a
@@ -391,6 +391,35 @@ the mode chosen for it is still offered. Screen tools
 through wlr-output-management; the file wins again once it changes. Turning
 a screen's light off and on (output-power, as swayidle does) keeps it in the
 layout.
+
+A screen with no `scale` set takes the one of its pixel density, from its
+physical size (EDID) and the mode it is lit with: a unit of scale per 112
+dpi along its diagonal, to the nearest quarter, from 1 to 3. Scale 1 is
+drawn for about 96 dpi, but desk screens of 92 to 110 dpi read well at it;
+a scale is taken once a screen is clearly denser. A screen that gives no
+size, or one that cannot be its own, stays at 1: under 8 inches across (a
+TV or projector giving its aspect ratio), of another shape than its pixels,
+or denser than 600 dpi. Virtual machines stay at 1 too: QEMU's virtual GPU
+gives a size at 100 dpi whatever its window. For example:
+
+| Screen | Pixels | Size | Density | Scale |
+|---|---|---|---|---|
+| 24-inch | 1920x1080 | 530x300 mm | 92 dpi | 1 |
+| 27-inch | 2560x1440 | 597x336 mm | 109 dpi | 1 |
+| 32-inch 4K | 3840x2160 | 708x398 mm | 137 dpi | 1.25 |
+| 15.6-inch laptop | 1920x1080 | 344x194 mm | 141 dpi | 1.25 |
+| 27-inch 4K | 3840x2160 | 597x336 mm | 163 dpi | 1.5 |
+| 13-inch laptop | 1920x1200 | 286x179 mm | 170 dpi | 1.5 |
+| 16-inch laptop | 2560x1600 | 340x210 mm | 192 dpi | 1.75 |
+| 27-inch 5K | 5120x2880 | 597x336 mm | 218 dpi | 2 |
+| 14-inch laptop | 2880x1800 | 301x188 mm | 243 dpi | 2.25 |
+| 15.6-inch 4K laptop | 3840x2160 | 344x194 mm | 282 dpi | 2.5 |
+
+The scale `scale` sets wins; without it again, the screen goes back to the
+one of its density. The Screens page shows it as Automatic (1.75) beside
+the scales to choose; a scale chosen stays chosen, even the same as the
+automatic one, and Automatic takes `scale` out. Another screen plugged
+where one was takes its own.
 
 Where screens are depends on which are connected: each `[[layouts]]` places
 one set of screens, and wins over the `position` of `[[outputs]]` while
