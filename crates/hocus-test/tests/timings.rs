@@ -95,6 +95,7 @@ fn options(data: &Path) -> HarnessOptions {
         motion: true,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     }
 }
 

@@ -123,6 +123,7 @@ fn a_region_recorded_plays_at_its_size_with_clicks_ringed_in_it_only() -> anyhow
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.request(Request::Subscribe)?;
     compositor.write_config(&format!(

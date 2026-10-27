@@ -1,8 +1,9 @@
 //! A stand-in for GNOME Online Accounts on a private session bus (never the
-//! session's), with one Google account, Alex's, its calendar on; and a
-//! stand-in for Google's CalDAV on 127.0.0.1, at Google's paths, which
-//! takes only the access token the stand-in handed out last. Both write
-//! down what they were asked, in one log.
+//! session's), with one Google account, Alex's, its calendar on; and
+//! stand-ins for Google's CalDAV and Google Tasks' API ([`crate::gtasks`])
+//! on 127.0.0.1, at Google's paths, which take only the access token the
+//! stand-in handed out last. All write down what they were asked, in one
+//! log.
 //!
 //! GOA's side is its public D-Bus API: an object manager at
 //! `/org/gnome/OnlineAccounts`, accounts below it with
@@ -10,7 +11,7 @@
 //! `org.gnome.OnlineAccounts.OAuth2Based`.
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -26,7 +27,8 @@ pub const ACCOUNT_ID: &str = "account_1761055200_0";
 const ACCOUNT: &str = "/org/gnome/OnlineAccounts/Accounts/account_1761055200_0";
 
 /// What was asked, in order: `GetAccessToken`, `EnsureCredentials`, and
-/// Google's `PROPFIND /caldav/v2/ ok` or `REPORT … refused`.
+/// Google's `PROPFIND /caldav/v2/ ok`, `REPORT … refused`, `GET
+/// /tasks/v1/users/@me/lists ok` or `… unshared`.
 pub type Log = Arc<Mutex<Vec<String>>>;
 
 fn note(log: &Log, line: String) {
@@ -131,6 +133,9 @@ pub struct FakeGoa {
     pub log: Log,
     _google: Server,
     google: String,
+    tasks: crate::gtasks::Shared,
+    _tasks_server: Server,
+    tasks_url: String,
 }
 
 impl std::fmt::Debug for FakeGoa {
@@ -156,6 +161,14 @@ impl FakeGoa {
         let tokens = Shared::default();
         let google = google(dir, identity, tokens.clone(), log.clone())?;
         let base = google.url().to_owned();
+        let tasks = crate::gtasks::Shared::default();
+        let (taken, noted) = (tokens.clone(), log.clone());
+        let tasks_server = crate::gtasks::serve(
+            tasks.clone(),
+            move |request| accepts(&taken, request),
+            move |line| note(&noted, line),
+        )?;
+        let tasks_url = tasks_server.url().to_owned();
         let connection = zbus::block_on(
             zbus::connection::Builder::address(address)
                 .serve_at(ROOT, zbus::fdo::ObjectManager)
@@ -169,6 +182,9 @@ impl FakeGoa {
             log,
             _google: google,
             google: base,
+            tasks,
+            _tasks_server: tasks_server,
+            tasks_url,
         };
         goa.sign_in()?;
         if running {
@@ -187,6 +203,41 @@ impl FakeGoa {
     /// Where Google's stand-in is, as Google's CalDAV base.
     pub fn google(&self) -> &str {
         &self.google
+    }
+
+    /// Where Google Tasks' stand-in is, as its API's base.
+    pub fn tasks(&self) -> &str {
+        &self.tasks_url
+    }
+
+    /// The account's task lists are those of the JSON fixture at `file`
+    /// ([`crate::gtasks`]); none until then.
+    pub fn load_tasks(&self, file: &Path) -> anyhow::Result<()> {
+        self.tasks
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Google Tasks' stand-in is poisoned"))?
+            .load(file)
+            .with_context(|| format!("the Google Tasks fixture {}", file.display()))
+    }
+
+    /// The token GOA hands out grants Google Tasks' scope, or not.
+    pub fn share_tasks(&self, granted: bool) {
+        if let Ok(mut tasks) = self.tasks.lock() {
+            tasks.share(granted);
+        }
+    }
+
+    /// Google Tasks' stand-in fails every request (503), as when Google
+    /// cannot be reached, or answers again.
+    pub fn set_tasks_down(&self, down: bool) {
+        if let Ok(mut tasks) = self.tasks.lock() {
+            tasks.set_down(down);
+        }
+    }
+
+    /// The task titled `title` as Google Tasks' stand-in keeps it, as JSON.
+    pub fn google_task(&self, title: &str) -> Option<String> {
+        self.tasks.lock().ok()?.find(title)
     }
 
     /// The account is added, as signing in to Google in GOA's settings
@@ -267,6 +318,16 @@ impl FakeGoa {
     }
 }
 
+/// The request carries the token Google takes now.
+fn accepts(tokens: &Shared, request: &HttpRequest) -> bool {
+    let taken = tokens
+        .lock()
+        .ok()
+        .filter(|t| !t.broken)
+        .map(|t| format!("Bearer {}", token(t.taken)));
+    taken.is_some() && request.authorization == taken
+}
+
 /// Google's CalDAV as far as discovery goes: the base names the user's
 /// principal, the principal its calendar home, the home the calendars;
 /// each calendar is `<calendar id>/events/`, the primary one's id the
@@ -279,13 +340,8 @@ fn google(dir: PathBuf, identity: &str, tokens: Shared, log: Log) -> anyhow::Res
     let calendar = format!("{BASE}{user}/events/");
     let name = identity.to_owned();
     let server = Server::serve("google caldav", BASE, move |request: &HttpRequest| {
-        let taken = tokens
-            .lock()
-            .ok()
-            .filter(|t| !t.broken)
-            .map(|t| format!("Bearer {}", token(t.taken)));
         let path = request.path.as_str();
-        if taken.is_none() || request.authorization != taken {
+        if !accepts(&tokens, request) {
             note(&log, format!("{} {path} refused", request.method));
             return ("401 Unauthorized", String::new());
         }

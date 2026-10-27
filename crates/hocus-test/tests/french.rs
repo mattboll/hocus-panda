@@ -39,6 +39,7 @@ fn texts(language: &str) -> anyhow::Result<BTreeSet<String>> {
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     let mut all = BTreeSet::new();
     let mut read = |compositor: &mut Headless| -> anyhow::Result<()> {

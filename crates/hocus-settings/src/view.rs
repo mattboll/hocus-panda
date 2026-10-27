@@ -2087,7 +2087,7 @@ impl SettingsView {
             );
             // Its task lists (#256), each shown with the tasks or hidden.
             for list in status.iter().flat_map(|s| &s.lists) {
-                self.task_list_line(theme, section, account, list);
+                self.task_list_line(theme, section, Some(account), list);
             }
         }
 
@@ -2166,12 +2166,14 @@ impl SettingsView {
     }
 
     /// A task list of a CalDAV account: its colour, its name, its tasks
-    /// to do, and a switch to show it with the tasks or hide it.
+    /// to do, and a switch to show it with the tasks or hide it; of a
+    /// Google account of GOA's (no `account` in the configuration), always
+    /// shown, without a switch.
     fn task_list_line(
         &mut self,
         theme: &Theme,
         section: NodeId,
-        account: &hocus_core::config::CalendarAccount,
+        account: Option<&hocus_core::config::CalendarAccount>,
         list: &hocus_api::TaskListInfo,
     ) {
         let lang = self.lang;
@@ -2194,27 +2196,29 @@ impl SettingsView {
             }),
         );
         // The configuration says it, as soon as it changed.
-        let shown = account.shows_list(&list.name);
-        self.tree.set_clickable(line, &list.name);
-        self.tree.set_selected_box(line, shown);
-        let mut hidden: Vec<String> = account
-            .hidden_lists
-            .iter()
-            .filter(|h| h.trim() != list.name.trim())
-            .cloned()
-            .collect();
-        if shown {
-            hidden.push(list.name.clone());
+        let shown = account.is_none_or(|a| a.shows_list(&list.name));
+        if let Some(account) = account {
+            self.tree.set_clickable(line, &list.name);
+            self.tree.set_selected_box(line, shown);
+            let mut hidden: Vec<String> = account
+                .hidden_lists
+                .iter()
+                .filter(|h| h.trim() != list.name.trim())
+                .cloned()
+                .collect();
+            if shown {
+                hidden.push(list.name.clone());
+            }
+            let change = Change {
+                place: hocus_core::config_edit::Place::Calendar {
+                    url: account.url.clone(),
+                    user: account.user.clone(),
+                },
+                key: "hidden_lists".into(),
+                value: (!hidden.is_empty()).then(|| hidden.into_iter().collect()),
+            };
+            self.targets.insert(line, Target::Set(change));
         }
-        let change = Change {
-            place: hocus_core::config_edit::Place::Calendar {
-                url: account.url.clone(),
-                user: account.user.clone(),
-            },
-            key: "hidden_lists".into(),
-            value: (!hidden.is_empty()).then(|| hidden.into_iter().collect()),
-        };
-        self.targets.insert(line, Target::Set(change));
         let color = list
             .color
             .as_deref()
@@ -2255,6 +2259,9 @@ impl SettingsView {
                 theme.text.label.with_weight(500).with_color(Paint::Muted),
             ),
         );
+        if account.is_none() {
+            return;
+        }
         self.add(
             line,
             Style {
@@ -2267,6 +2274,45 @@ impl SettingsView {
                 draw: Box::new(Switch(shown)),
                 label: None,
             },
+        );
+    }
+
+    /// A Google account that does not share its tasks (#257): it says so,
+    /// and how to share them.
+    fn tasks_unshared_line(&mut self, theme: &Theme, section: NodeId) {
+        let lang = self.lang;
+        let line = self.add(
+            section,
+            Style {
+                padding: Insets {
+                    top: 10.0,
+                    bottom: 10.0,
+                    left: 34.0,
+                    right: 18.0,
+                },
+                ..fill_width(column(2.0))
+            },
+            Kind::Box(Look {
+                background: Some(Paint::SurfaceHover),
+                radius: 14.0,
+                ..Look::default()
+            }),
+        );
+        self.add(
+            line,
+            fill_width(Style::default()),
+            Kind::text_line(
+                words::TASKS_UNSHARED.get(lang),
+                theme.text.label.with_weight(600).with_color(Paint::Waiting),
+            ),
+        );
+        self.add(
+            line,
+            fill_width(Style::default()),
+            Kind::text(
+                words::TASKS_SHARE_HOW.get(lang),
+                theme.text.label.with_weight(500).with_color(Paint::Muted),
+            ),
         );
     }
 
@@ -2344,6 +2390,13 @@ impl SettingsView {
         }
         for account in &online.accounts {
             self.calendar_line(theme, section, &account.name, Some(account), true);
+            // Its Google Tasks (#257), or why there are none.
+            if account.tasks_unshared {
+                self.tasks_unshared_line(theme, section);
+            }
+            for list in &account.lists {
+                self.task_list_line(theme, section, None, list);
+            }
         }
         if online.settings {
             // Its own width, as the form's Add.

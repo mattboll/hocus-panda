@@ -31,6 +31,7 @@ fn a_flood_from_one_app_is_rate_limited_and_the_loop_keeps_its_budget() -> anyho
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.request(Request::Subscribe)?;
 

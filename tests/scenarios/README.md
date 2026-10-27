@@ -50,8 +50,13 @@ timedated = "UTC"
 # its calendar on, and one for Google's CalDAV on 127.0.0.1, at Google's
 # paths, serving the .ics files of dir as its calendar; it takes only the
 # token GOA handed out last. With running = false, GOA's name is taken only
-# at a `goa = "run"` step: until then, it is not installed
-goa = { identity = "alex.panda@example.com", dir = "calendar/google", running = true }
+# at a `goa = "run"` step: until then, it is not installed. Beside them, a
+# stand-in for Google Tasks' API (#257) serves the task lists of the JSON
+# file tasks (none without one: `[{ id, title, tasks = [{ id, title,
+# status, due?, completed?, updated? }] }]`), kept in memory, which POST,
+# PATCH and DELETE change; with tasks_scope = false it refuses the token as
+# Google does one without the tasks scope (403, insufficientPermissions)
+goa = { identity = "alex.panda@example.com", dir = "calendar/google", running = true, tasks = "calendar/google-tasks.json", tasks_scope = true }
 # Windows move as in a session, to sample motion at a virtual time;
 # otherwise they appear and go at once
 motion = false
@@ -164,8 +169,9 @@ Steps, one per `[[step]]` table:
 | `calendar_password = { id, password }` | the settings keep this account's (`user@url`) password |
 | `expect_calendars = { events?, secrets?, contains? = […], error?, online?, online_accounts? }` | the calendars, once so: events from now on, passwords kept, events by title, whether an account failed its last sync, GNOME Online Accounts (`unknown`, `absent` or `installed`) and its Google accounts with their calendar on |
 | `expect_calendar_cache = { contains? = […], lacks? = […] }` | the sealed calendar cache of the state directory, opened, holds these strings and not those (accounts' ids, events' texts) |
-| `goa = "remove"` | something changes in GNOME Online Accounts' stand-in: `run` (its name taken), `sign_in`, `remove` (the account), `calendar_off`, `calendar_on`, `revoke` (Google refuses the token GOA holds until GOA renews it), `break_tokens` (Google refuses every token) |
-| `expect_goa = ["GetAccessToken", "REPORT /caldav/v2/"]` | GOA's and Google's stand-ins were asked these, in this order, each the start of a line of their log: `GetAccessToken`, `EnsureCredentials`, and Google's `METHOD PATH ok` or `METHOD PATH refused` |
+| `goa = "remove"` | something changes in GNOME Online Accounts' stand-in: `run` (its name taken), `sign_in`, `remove` (the account), `calendar_off`, `calendar_on`, `revoke` (Google refuses the token GOA holds until GOA renews it), `break_tokens` (Google refuses every token), `share_tasks` (the token grants Google Tasks' scope from now on), `tasks_down` and `tasks_up` (Google Tasks' API fails every request with a 503, or answers again) |
+| `expect_goa = ["GetAccessToken", "REPORT /caldav/v2/"]` | GOA's and Google's stand-ins were asked these, in this order, each the start of a line of their log: `GetAccessToken`, `EnsureCredentials`, and Google's `METHOD PATH ok`, `METHOD PATH refused`, or for Google Tasks' API (the path without its query) `METHOD PATH unshared` or `METHOD PATH down` |
+| `expect_google_task = { title, contains? = […], lacks? = […], gone? }` | Google Tasks' stand-in keeps the task of this title so, once written: its JSON holds these strings (`"\"status\":\"completed\""`) and not those; `gone = true` checks there is none of that title |
 | `wait_wallpapers = true` | waits until the wallpapers are made and drawn, as pictures do: before a capture the compositor takes itself |
 | `open_annotate = "{last_screenshot}"` | opens the annotation window on a capture (`{last_screenshot}` is the last one saved, `{runtime_dir}` the compositor's temporary directory), and waits for it |
 | `expect_annotate`, `click_annotate`, `drag_annotate` | as the settings steps, in the annotation window (its capture is labelled `Capture`) |

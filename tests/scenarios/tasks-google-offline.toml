@@ -1,0 +1,77 @@
+description = "Google Tasks offline (#257): synced once, Google Tasks' API stops answering; the next sync keeps the last tasks and the column says it is offline, and after a restart too, from the sealed cache; a task ticked meanwhile is not saved: it goes back and a toast says so; Google answering again, the tasks are no longer offline"
+outputs = ["1280x800"]
+shell = true
+goa = { identity = "alex.panda@example.com", dir = "calendar/google", tasks = "calendar/google-tasks.json" }
+
+[[step]]
+config = """
+[panel]
+form = "column"
+
+[idle]
+curtain_after = 0
+"""
+
+[[step]]
+expect_calendars = { online_accounts = 1, contains = ["Family dinner"], error = false }
+
+[[step]]
+expect_ui = { label = "3 to do" }
+
+# Google Tasks cannot be reached: the next sync keeps what it had.
+[[step]]
+goa = "tasks_down"
+
+[[step]]
+advance_ms = 601000
+
+[[step]]
+expect_goa = ["GET /tasks/v1/users/@me/lists down"]
+
+[[step]]
+expect_ui = { label = "3 to do · offline" }
+
+[[step]]
+expect_ui = { label = "Renew the passport" }
+
+# The session restarts as after a crash: the cache keeps the tasks.
+[[step]]
+restart = true
+
+[[step]]
+advance_ms = 3000
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_ui = { label = "3 to do · offline" }
+
+[[step]]
+expect_ui = { label = "Renew the passport" }
+
+[[step]]
+expect_ui = { label = "Groceries" }
+
+# Ticked: not written, it goes back.
+[[step]]
+click_ui = "Renew the passport"
+
+[[step]]
+expect_ui = { label = "“Renew the passport” was not saved" }
+
+[[step]]
+expect_ui = { label = "3 to do · offline" }
+
+[[step]]
+expect_google_task = { title = "Renew the passport", contains = ["\"status\":\"needsAction\""] }
+
+# Google answers again: at the next sync, the tasks are no longer offline.
+[[step]]
+goa = "tasks_up"
+
+[[step]]
+advance_ms = 601000
+
+[[step]]
+expect_ui = { label = "3 to do" }

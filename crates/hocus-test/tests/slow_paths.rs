@@ -45,6 +45,7 @@ fn compositor(empty: &Path) -> anyhow::Result<Headless> {
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })
 }
 

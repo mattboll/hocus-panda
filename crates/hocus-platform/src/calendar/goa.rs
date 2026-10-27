@@ -15,7 +15,9 @@
 //! are read through Google's CalDAV endpoint with the token GOA hands out,
 //! asked afresh at each sync and never kept: GOA refreshes it when it
 //! expires. A token Google refuses is renewed once (`EnsureCredentials`,
-//! then `GetAccessToken`), and goes to Google's server only.
+//! then `GetAccessToken`), and goes to Google's server only. The same sync
+//! reads the account's Google Tasks (#257, [`super::gtasks`]) with the
+//! same token; a token without the tasks scope leaves the calendars be.
 //!
 //! Everything here blocks or runs on threads of its own. Without GOA,
 //! nothing is said but at debug level.
@@ -29,7 +31,10 @@ use zbus::{
     names::BusName,
 };
 
-use super::caldav::{self, FetchError, Fetched, Source, Token};
+use super::{
+    caldav::{self, FetchError, Fetched, Source, Token},
+    gtasks,
+};
 
 const SERVICE: &str = "org.gnome.OnlineAccounts";
 const ROOT: &str = "/org/gnome/OnlineAccounts";
@@ -322,6 +327,63 @@ fn google(
     }
 }
 
+/// A connection to GOA for one account, and the token it handed out,
+/// asked once and renewed once when refused.
+struct Session<'a> {
+    conn: Connection,
+    path: &'a str,
+    token: Option<Token>,
+    renewed: bool,
+}
+
+impl<'a> Session<'a> {
+    fn open(bus: &str, account: &'a GoogleAccount) -> Result<Self, FetchError> {
+        let conn = zbus::block_on(connect(bus))
+            .map_err(|e| FetchError::Failed(format!("the session bus: {e}")))?;
+        Ok(Self {
+            conn,
+            path: &account.path,
+            token: None,
+            renewed: false,
+        })
+    }
+
+    fn token(&mut self) -> Result<Token, FetchError> {
+        if let Some(token) = &self.token {
+            return Ok(token.clone());
+        }
+        let token = zbus::block_on(access_token(&self.conn, self.path)).map_err(refused)?;
+        self.token = Some(token.clone());
+        Ok(token)
+    }
+
+    /// `work` with the token; refused, with a renewed one, once a
+    /// session.
+    fn attempt<T, E: From<FetchError>>(
+        &mut self,
+        is_refused: impl Fn(&E) -> bool,
+        work: impl Fn(Token) -> Result<T, E>,
+    ) -> Result<T, E> {
+        match work(self.token()?) {
+            Err(err) if is_refused(&err) && !self.renewed => {
+                self.renewed = true;
+                zbus::block_on(ensure_credentials(&self.conn, self.path)).map_err(refused)?;
+                self.token = None;
+                work(self.token()?)
+            }
+            other => other,
+        }
+    }
+}
+
+fn caldav_refused(err: &FetchError) -> bool {
+    matches!(err, FetchError::Refused(_))
+}
+
+fn tasks_refused(err: &gtasks::Error) -> bool {
+    matches!(err, gtasks::Error::Refused(_))
+}
+
 /// Every calendar of `account`, with the events of `from`..`to`, read with
 /// GOA's token from the bus at `bus`; blocking, for a worker thread. A
 /// token refused is renewed once.
@@ -332,17 +394,50 @@ pub fn fetch(
     from: Timestamp,
     to: Timestamp,
 ) -> Result<Vec<Fetched>, FetchError> {
-    let conn = zbus::block_on(connect(bus))
-        .map_err(|e| FetchError::Failed(format!("the session bus: {e}")))?;
-    let token = zbus::block_on(access_token(&conn, &account.path)).map_err(refused)?;
-    match google(base, &account.identity, token, from, to) {
-        Err(FetchError::Refused(_)) => {
-            zbus::block_on(ensure_credentials(&conn, &account.path)).map_err(refused)?;
-            let token = zbus::block_on(access_token(&conn, &account.path)).map_err(refused)?;
-            google(base, &account.identity, token, from, to)
-        }
-        other => other,
-    }
+    let mut session = Session::open(bus, account)?;
+    session.attempt(caldav_refused, |token| {
+        google(base, &account.identity, token, from, to)
+    })
+}
+
+/// What an account's sync brings: its calendars, and its Google Tasks
+/// when they are read.
+pub type Synced = (
+    Vec<Fetched>,
+    Option<Result<Vec<gtasks::List>, gtasks::Error>>,
+);
+
+/// Every calendar of `account` with the events of `from`..`to`, then, when
+/// `tasks` names Google Tasks' API (or a stand-in), its task lists, of
+/// the account `id`; with one token from GOA, renewed once when refused.
+/// The calendars not read, the tasks are not either.
+pub fn sync(
+    bus: &str,
+    account: &GoogleAccount,
+    caldav: &str,
+    tasks: Option<&str>,
+    id: &str,
+    range: (Timestamp, Timestamp),
+) -> Result<Synced, FetchError> {
+    let mut session = Session::open(bus, account)?;
+    let (from, to) = range;
+    let calendars = session.attempt(caldav_refused, |token| {
+        google(caldav, &account.identity, token, from, to)
+    })?;
+    let lists =
+        tasks.map(|base| session.attempt(tasks_refused, |token| gtasks::lists(base, &token, id)));
+    Ok((calendars, lists))
+}
+
+/// `work` on the account's Google Tasks with GOA's token; refused, with a
+/// renewed one, once. Blocking, for a worker thread.
+pub fn with_tasks<T>(
+    bus: &str,
+    account: &GoogleAccount,
+    work: impl Fn(&Token) -> Result<T, gtasks::Error>,
+) -> Result<T, gtasks::Error> {
+    let mut session = Session::open(bus, account)?;
+    session.attempt(tasks_refused, |token| work(&token))
 }
 
 #[cfg(test)]

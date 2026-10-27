@@ -59,6 +59,7 @@ fn a_slow_provider_streams_while_the_loop_keeps_its_budget() -> anyhow::Result<(
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     compositor.write_config(&format!(
         "[ai]\nenabled = true\nurl = \"{}\"\n",

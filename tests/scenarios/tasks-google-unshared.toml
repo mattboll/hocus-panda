@@ -1,0 +1,97 @@
+description = "A Google account whose token does not grant Google Tasks (#257): Google Tasks' API refuses it for its scope, the settings say the account does not share its tasks and how to share them, and nothing else changes: its calendar syncs, the local tasks show in the column; once the account shares them, they show too"
+outputs = ["1280x800"]
+shell = true
+# Google Tasks' stand-in refuses GOA's token as Google does a token without
+# https://www.googleapis.com/auth/tasks: 403, insufficientPermissions.
+goa = { identity = "alex.panda@example.com", dir = "calendar/google", tasks = "calendar/google-tasks.json", tasks_scope = false }
+
+[[step]]
+config = """
+[panel]
+form = "column"
+
+[idle]
+curtain_after = 0
+"""
+
+[[step]]
+state_file = { name = "tasks/domain.ics", text = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Tasks//EN
+BEGIN:VTODO
+UID:domain
+DTSTAMP:20261018T080000Z
+CREATED:20261018T080000Z
+SUMMARY:Book hocuspanda.org
+STATUS:NEEDS-ACTION
+END:VTODO
+END:VCALENDAR
+""" }
+
+[[step]]
+restart = true
+
+# The calendar syncs as ever.
+[[step]]
+expect_calendars = { online = "installed", online_accounts = 1, contains = ["Family dinner"], error = false }
+
+[[step]]
+expect_goa = ["GetAccessToken", "REPORT /caldav/v2/alex.panda%40example.com/events/ ok", "GET /tasks/v1/users/@me/lists unshared"]
+
+# The other sources show: the local list.
+[[step]]
+expect_ui = { label = "Book hocuspanda.org" }
+
+[[step]]
+expect_ui = { label = "1 to do" }
+
+[[step]]
+expect_ui = { label = "Renew the passport", shown = false }
+
+[[step]]
+expect_ui = { label = "Family dinner" }
+
+[[step]]
+open_settings = { page = "accounts" }
+
+[[step]]
+expect_settings = { label = "alex.panda@example.com" }
+
+[[step]]
+expect_settings = { label = "Synced · 2 events" }
+
+[[step]]
+expect_settings = { label = "Tasks not shared by this account" }
+
+[[step]]
+expect_settings = { label = "Its sign-in does not let Hocuspanda read Google Tasks. To share them, remove the account in GNOME Online Accounts and add it again, allowing Google Tasks." }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-tasks-google-unshared.png" }
+
+# Signed in again, allowing Google Tasks: at the next sync its tasks show,
+# and its lists in the settings.
+[[step]]
+goa = "share_tasks"
+
+[[step]]
+advance_ms = 601000
+
+[[step]]
+expect_ui = { label = "Renew the passport" }
+
+[[step]]
+expect_ui = { label = "4 to do" }
+
+[[step]]
+expect_settings = { label = "Tasks not shared by this account", shown = false }
+
+[[step]]
+expect_settings = { label = "My Tasks" }
+
+[[step]]
+expect_settings = { label = "2 tasks to do · shown with the tasks" }

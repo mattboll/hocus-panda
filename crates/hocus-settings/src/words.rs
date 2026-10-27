@@ -426,6 +426,15 @@ pub const GOOGLE_SIGN_IN_AGAIN: Words = Words::new(
     "Google a refusé la connexion : reconnectez-vous dans les comptes en ligne de GNOME",
 );
 
+pub const TASKS_UNSHARED: Words = Words::new(
+    "Tasks not shared by this account",
+    "Tâches non partagées par ce compte",
+);
+pub const TASKS_SHARE_HOW: Words = Words::new(
+    "Its sign-in does not let Hocuspanda read Google Tasks. To share them, remove the account in GNOME Online Accounts and add it again, allowing Google Tasks.",
+    "Sa connexion ne laisse pas Hocuspanda lire Google Tasks. Pour les partager, retirez le compte dans les comptes en ligne de GNOME et ajoutez-le de nouveau en autorisant Google Tasks.",
+);
+
 /// A CalDAV task list of an account (#256): its tasks to do, and whether
 /// the column shows them.
 pub fn task_list(open: usize, hidden: bool, lang: Lang) -> String {

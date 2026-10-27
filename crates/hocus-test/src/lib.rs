@@ -9,6 +9,7 @@ pub mod client;
 pub mod devices;
 pub mod fuzz;
 pub mod goa;
+pub mod gtasks;
 pub mod herdr;
 pub mod image;
 pub mod layer;

@@ -326,7 +326,7 @@ fn origin(url: &str) -> &str {
     &url[..end]
 }
 
-struct Client {
+pub(crate) struct Client {
     agent: ureq::Agent,
     auth: Option<String>,
     /// A token goes to this origin only, whatever the server's answers
@@ -347,7 +347,7 @@ impl Client {
         }
     }
 
-    fn bearer(token: &Token, url: &str) -> Self {
+    pub(crate) fn bearer(token: &Token, url: &str) -> Self {
         Self {
             agent: agent(),
             auth: Some(format!("Bearer {}", token.0)),
@@ -382,6 +382,28 @@ impl Client {
         headers: &[(&str, &str)],
         body: &str,
     ) -> Result<Answer, FetchError> {
+        let answer = self.exchange(method, url, headers, body)?;
+        if matches!(answer.status, 401 | 403) {
+            return Err(FetchError::Refused(format!(
+                "{url}: the server refused the {}",
+                if self.only.is_some() {
+                    "access token"
+                } else {
+                    "name or password"
+                }
+            )));
+        }
+        Ok(answer)
+    }
+
+    /// A request and its answer, whatever its status.
+    pub(crate) fn exchange(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> Result<Answer, FetchError> {
         let failed = |e: &dyn std::fmt::Display| FetchError::Failed(format!("{url}: {e}"));
         if self.only.as_deref().is_some_and(|o| o != origin(url)) {
             return Err(failed(&"elsewhere than the account's server"));
@@ -402,29 +424,31 @@ impl Client {
             .and_then(|v| v.to_str().ok())
             .map(|v| v.trim().to_owned())
             .filter(|v| !v.is_empty());
+        let challenge = response
+            .headers()
+            .get("www-authenticate")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let text = response
             .body_mut()
             .read_to_string()
             .map_err(|e| failed(&e))?;
-        if matches!(status, 401 | 403) {
-            return Err(FetchError::Refused(format!(
-                "{url}: the server refused the {}",
-                if self.only.is_some() {
-                    "access token"
-                } else {
-                    "name or password"
-                }
-            )));
-        }
-        Ok(Answer { status, etag, text })
+        Ok(Answer {
+            status,
+            etag,
+            challenge,
+            text,
+        })
     }
 }
 
 /// What a server answered.
-struct Answer {
-    status: u16,
+pub(crate) struct Answer {
+    pub(crate) status: u16,
     etag: Option<String>,
-    text: String,
+    /// Its `WWW-Authenticate`, which says why a token was refused.
+    pub(crate) challenge: Option<String>,
+    pub(crate) text: String,
 }
 
 fn agent() -> ureq::Agent {

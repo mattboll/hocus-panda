@@ -524,9 +524,9 @@ now: those found in it (as files written before #255 have them) or typed so
 move to the task list, done or not, and leave the notes.
 
 Tasks (#255) share one model, iCalendar's VTODO (`hocus_platform::tasks`),
-whatever their source: the local list and CalDAV task lists (#256) now,
-Google Tasks (#257) next, each a `Source` that knows where its tasks are
-written back. The local list is a folder of `.ics` files, one task each,
+whatever their source: the local list, CalDAV task lists (#256) and Google
+Tasks (#257), each a `Source` that knows where its tasks are written
+back. The local list is a folder of `.ics` files, one task each,
 as vdir has it (vdirsyncer's `filesystem` storage, so it can be synced
 too): its files are the default list, its folders named lists. A thread of
 its own reads the folder at start and writes each change sent to it, then
@@ -558,7 +558,32 @@ the server meanwhile) reads the server's version, which the loop keeps,
 with a toast; a write that did not get through puts the task back as its
 server last took it, with a toast too. Lists hidden in the settings
 (`hidden_lists` of the account) are still synced, so showing one again is
-at once. Google's CalDAV holds no VTODO; Google Tasks is #257.
+at once. Google's CalDAV holds no VTODO.
+
+Google Tasks (#257) is not CalDAV: its own REST API, tasks/v1
+(`hocus_platform::calendar::gtasks`). The sync of a Google account of GOA
+asks GOA for one token, reads the calendars with it, then
+`users/@me/lists` and each list's `lists/{id}/tasks` (`showCompleted`,
+`showHidden`, a page of 100 at a time) on the same worker thread; the loop
+takes them in as `Source::Google` tasks (Google's JSON kept as they were
+read, for the same sealed cache), their UID Google's id. A change goes to
+the same writing thread, which asks GOA for a token then: POST for a new
+task (its UID stands for it until Google gives it an id, which the thread
+and the loop use from then on), PATCH of the fields the change changed
+(title, status and completion, due date: what changed elsewhere stays),
+DELETE; Google keeps due dates without their time. A 404 on a PATCH is a
+task deleted there meanwhile, kept so; a write that did not get through
+puts the task back, with a toast. A token without the tasks scope
+(`https://www.googleapis.com/auth/tasks`) is refused with a 403
+(`insufficientPermissions`): the account's tasks are left out, the
+settings say it does not share them and how to share them (removing the
+account in GOA and adding it again, allowing Google Tasks), and the
+calendars sync as ever. A list or task request that fails otherwise keeps
+the last tasks, the column saying "offline". GOA's Google provider asks
+for that scope; an account added with an older GOA, or whose sign-in
+left Google Tasks unticked on Google's consent screen, may not have it.
+Tests run Google Tasks' stand-in beside GOA's and Google's CalDAV's
+(`hocus_test::gtasks`), from a JSON fixture.
 
 Comfort over the whole screen (#78): focus mode puts a veil just under the
 focused window; the magnifier wraps every element of an output's scene in a
@@ -904,8 +929,8 @@ guarded by these rules (#134):
   configuration, and travel only over https (plain http is refused but to
   this machine); the cache of events is sealed. Google's access tokens
   (#137) are GNOME Online Accounts': asked for each sync, never stored
-  nor logged, and sent only to the origin of Google's CalDAV endpoint,
-  whatever its answers point at.
+  nor logged, and sent only to the origin of Google's CalDAV endpoint, or
+  of Google Tasks' API (#257), whatever their answers point at.
 - **Search never reads secrets (#45).** The document indexer never opens
   `~/.ssh`, `~/.gnupg`, keyrings, password stores, cloud credentials,
   browser profiles, hidden folders named for secrets, `.env*`, `id_*` or

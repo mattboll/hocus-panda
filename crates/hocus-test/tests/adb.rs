@@ -57,6 +57,7 @@ fn without_adb_nothing_shows_and_nothing_is_logged() -> anyhow::Result<()> {
         motion: false,
         first_run: false,
         google_caldav: None,
+        google_tasks: None,
     })?;
     let phone = |compositor: &mut Headless| -> anyhow::Result<hocus_api::PhoneInfo> {
         let Reply::Phone(info) = compositor.request(Request::Phone)? else {
