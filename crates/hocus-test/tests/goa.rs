@@ -108,6 +108,36 @@ fn wait_calendars(
     }
 }
 
+/// Whether a line of the log is about GOA: it names it, Google, or
+/// GNOME's online accounts, as words. Not a part of a word: the
+/// compositor's private directory, logged at start, has a random name, and
+/// one in some thousands holds "goa" (`/tmp/hocus-ggOAlK`, #292).
+fn about_goa(line: &str) -> bool {
+    let line = line.to_lowercase();
+    line.contains("online accounts")
+        || line
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| word == "goa" || word == "google")
+}
+
+#[test]
+fn a_random_name_is_not_about_goa() {
+    assert!(!about_goa(
+        "INFO hocus_compositor: compositor ready socket=/tmp/hocus-ggOAlK/hocus-0 \
+         control=/tmp/hocus-ggOAlK/hocus-0.api permission=Test"
+    ));
+    assert!(!about_goa("socket=/tmp/hocus-xGooGLe/hocus-0"));
+    assert!(about_goa(
+        "DEBUG hocus_platform::calendar::goa: GNOME Online Accounts is not followed"
+    ));
+    assert!(about_goa(
+        "WARN hocus_compositor::calendar: Google calendars will not be followed"
+    ));
+    assert!(about_goa(
+        "WARN a calendar did not sync id=\"goa:account_1\""
+    ));
+}
+
 #[test]
 fn without_goa_nothing_shows_and_nothing_is_logged() -> anyhow::Result<()> {
     if !installed("dbus-daemon") {
@@ -137,13 +167,7 @@ fn without_goa_nothing_shows_and_nothing_is_logged() -> anyhow::Result<()> {
 
     let log = String::from_utf8_lossy(&captured.0.lock().map(|l| l.clone()).unwrap_or_default())
         .into_owned();
-    let said: Vec<&str> = log
-        .lines()
-        .filter(|l| {
-            let l = l.to_lowercase();
-            l.contains("online accounts") || l.contains("goa") || l.contains("google")
-        })
-        .collect();
+    let said: Vec<&str> = log.lines().filter(|l| about_goa(l)).collect();
     assert!(said.is_empty(), "GOA was logged about: {said:#?}");
 
     // GOA started later is found then, and its calendar synced.

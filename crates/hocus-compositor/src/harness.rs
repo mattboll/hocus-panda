@@ -527,6 +527,24 @@ impl Headless {
         self.app.state.apps_answered()
     }
 
+    /// Asks the application with the keyboard to answer once it handled
+    /// what it was sent (keys typed, a pointer moved):
+    /// [`Headless::apps_answered`] says when it did, however long its
+    /// thread took (#292). One that draws before it reads again sends its
+    /// answer with the frame it drew of them. Nothing is asked when no
+    /// window has the keyboard.
+    pub fn ask_keyboard_answer(&mut self) {
+        let focused = self.app.state.focused_window();
+        if let Some(id) = focused.as_ref().and_then(crate::desktops::model_id) {
+            self.app.state.ask_answer(id);
+        }
+    }
+
+    /// The same for window `id`'s application.
+    pub fn ask_window_answer(&mut self, id: u64) {
+        self.app.state.ask_answer(hocus_core::WindowId(id));
+    }
+
     /// Whether window `id`'s application drew the size it was last asked
     /// for, in its own time: the clock moves on once it did, or what a
     /// frame shows would depend on how fast its thread ran (#235). Windows

@@ -116,7 +116,7 @@ Steps, one per `[[step]]` table:
 | `x11_urgent = { app_id, urgent = true }` | that X11 client sets its urgency hint (WM_HINTS), or takes it back |
 | `copy = { app_id, text }` | the client of that app id, Wayland or X11, takes the clipboard with `text` |
 | `expect_clipboard = { app_id, text }` | the client of that app id reads `text` from the clipboard (a Wayland client is offered it when it gets the keyboard) |
-| `type = "fir"` | types text as on a US keyboard |
+| `type = "fir"` | types text as on a US keyboard; the step ends once the window with the keyboard answered after the keys (it handled them) |
 | `expect_runtime_file = { name, lines?, contains?, lacks? }` | a file a started program wrote in the compositor's runtime directory: so many lines, with or without these strings (the test client adds a line to `<app id>.starts` each time it starts) |
 | `notify_send = ["--app-name=Mail", "Title", "Body"]` | runs `notify-send` on the private bus |
 | `notify = { app, summary, body?, actions? = [["key", "Label"]], urgency?, timeout_ms?, replaces?, hints? = { "x-kde-appname" = "…" } }` | sends a notification on the private bus (urgency `low`, `normal`, `critical`; `timeout_ms = 0` never expires; `hints` of text) |
