@@ -1,0 +1,55 @@
+# Programs start on threads of their own (#285): one put back from the
+# saved session that cannot start is said once its thread answers, and the
+# boot screen no longer waits for its window.
+description = "An application of the saved session that cannot start is said, and the boot screen goes once the others are back"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+session_file = """
+[[window]]
+app_id = "editor"
+title = "notes.txt"
+command = ["{test_client}", "--app-id", "editor", "--size", "500x300", "--color", "#3399ff"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [100, 100, 500, 300]
+state = "normal"
+
+[[window]]
+app_id = "missing"
+title = "gone"
+command = ["/nonexistent/hocus-no-such-program"]
+output = "HEADLESS-1"
+desktop = 1
+geometry = [0, 0, 300, 200]
+state = "normal"
+"""
+
+[[step]]
+offer_session = true
+
+[[step]]
+click_ui = "Put everything back"
+
+[[step]]
+expect_ui = { label = "missing was not put back" }
+
+[[step]]
+expect_window = { app_id = "editor", visible = true }
+
+[[step]]
+frames = 1
+
+# Gone at once, without its few seconds' wait for a slow application.
+[[step]]
+expect_ui = { label = "The pandas are putting your 2 windows back", shown = false }
+
+[[step]]
+expect_ui = { label = "The pandas are putting your window back", shown = false }

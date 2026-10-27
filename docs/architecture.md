@@ -35,7 +35,17 @@ Rules:
   The start looks at a few files once, on the loop's thread before the loop
   runs: whether the last session ended locked (it must be locked before its
   first frame), whether the welcome was offered, and whether the settings
-  app is beside the compositor's own program.
+  app is beside the compositor's own program; the `--spawn` commands start
+  then too. A program started later (from the shell, a shortcut, the
+  autostart, a restored session) is made on the loop, its environment and
+  activation token included, and started on a thread of its own: the
+  search through `PATH`, the fork and the exec (#285). Until that thread
+  says through a channel how it went (the pid, or why not: a restored
+  application that cannot start is said), the program is starting; the
+  thread then waits for it to end. The system's fonts are read on a
+  worker at start, with the fallback of every script, the emoji family
+  and their files mapped there, so that text laid out on the loop opens
+  no font file.
 - **Nothing on a timer at rest.** The loop wakes for the watchdog, and
   otherwise when something happens or falls due: a moment on the clock is
   an alarm set for it (`alarm.rs`), never a timer ticking in case. The
