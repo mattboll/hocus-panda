@@ -1261,6 +1261,7 @@ dependencies = [
  "clap",
  "hocus-api",
  "hocus-compositor",
+ "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

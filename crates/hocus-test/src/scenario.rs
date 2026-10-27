@@ -442,6 +442,8 @@ pub enum Step {
     ExpectReceived(ExpectReceived),
     /// The client never got this event.
     ExpectNotReceived(ExpectReceived),
+    /// Every size the client was asked is at least so large.
+    ExpectConfigures(ExpectConfigures),
     ExpectScreenshot(ExpectScreenshot),
     /// One pixel of an output's screenshot, in its pixels.
     ExpectPixel(ExpectPixel),
@@ -547,6 +549,9 @@ pub struct OpenWindow {
     /// Its title; none by default.
     #[serde(default)]
     pub title: Option<String>,
+    /// The smallest size it says it takes; its size by default.
+    #[serde(default)]
+    pub min_size: Option<[u32; 2]>,
     /// Its field is for a password, as its text inputs say (#43).
     #[serde(default)]
     pub password: bool,
@@ -1097,6 +1102,15 @@ pub struct ExpectReceived {
     pub event: String,
 }
 
+/// Every configure the client got either leaves its size to it (0×0) or
+/// asks at least `at_least`, width and height.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectConfigures {
+    pub app_id: String,
+    pub at_least: [u32; 2],
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectScreenshot {
@@ -1219,6 +1233,10 @@ impl fmt::Display for Step {
             Self::KeyUp(key) => write!(f, "key_up {key}"),
             Self::ExpectNotReceived(e) => {
                 write!(f, "expect_not_received {} `{}`", e.app_id, e.event)
+            }
+            Self::ExpectConfigures(e) => {
+                let [w, h] = e.at_least;
+                write!(f, "expect_configures {} at least {w}x{h}", e.app_id)
             }
             Self::Key(code) => write!(f, "key {code}"),
             Self::Keys(keys) => write!(f, "keys {keys}"),
@@ -2390,6 +2408,31 @@ impl Run<'_> {
                 );
                 Ok(())
             }
+            Step::ExpectConfigures(expected) => {
+                use crate::client::ClientEvent;
+                let events = self.events_of(&expected.app_id)?;
+                let [min_w, min_h] = expected.at_least;
+                let sizes: Vec<(u32, u32)> = events
+                    .iter()
+                    .filter_map(|e| match e {
+                        ClientEvent::Configure { width, height } => Some((*width, *height)),
+                        _ => None,
+                    })
+                    .collect();
+                anyhow::ensure!(!sizes.is_empty(), "{} got no configure", expected.app_id);
+                let bad: Vec<String> = sizes
+                    .iter()
+                    .filter(|&&(w, h)| (w, h) != (0, 0) && (w < min_w || h < min_h))
+                    .map(|(w, h)| format!("{w}x{h}"))
+                    .collect();
+                anyhow::ensure!(
+                    bad.is_empty(),
+                    "{} was asked {} (less than {min_w}x{min_h})",
+                    expected.app_id,
+                    bad.join(", ")
+                );
+                Ok(())
+            }
             Step::Key(code) => {
                 for pressed in [true, false] {
                     self.request(Request::Key {
@@ -2744,6 +2787,7 @@ impl Run<'_> {
                 password: open.password,
                 marks: open.marks,
                 elements,
+                min_size: open.min_size.map(|[w, h]| (w, h)),
             },
         )?);
         self.compositor

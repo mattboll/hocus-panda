@@ -9,8 +9,10 @@ inner = 8
 outer = 8
 """
 
+# It can be narrower than it opens: never asked less than its minimum, it
+# would not fit the half.
 [[step]]
-open = { app_id = "editor", size = [500, 400], color = "#3399ff" }
+open = { app_id = "editor", size = [500, 400], min_size = [300, 200], color = "#3399ff" }
 
 [[step]]
 keys = "super+right"
