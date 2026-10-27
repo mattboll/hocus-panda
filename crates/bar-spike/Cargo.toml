@@ -1,0 +1,30 @@
+[package]
+name = "bar-spike"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Throwaway spike: part of the bar drawn with iced as a layer-shell client (issue #315)"
+
+[dependencies]
+# No x11, no winit-side theme detection: the bar only talks Wayland through
+# iced_layershell, and PNG is the only image format it reads.
+iced = { version = "0.14", default-features = false, features = [
+    "wgpu",
+    "tiny-skia",
+    "crisp",
+    "image-without-codecs",
+    "canvas",
+    "tokio",
+    "advanced",
+    "wayland",
+    # Blend in gamma space as browsers do: the mockup is CSS, and linear
+    # blending makes every translucent white about twice as bright.
+    "web-colors",
+] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Without its default theme detection (mundy, over the session's D-Bus):
+# the bar has its own theme.
+iced_layershell = { version = "0.19.1", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+tokio = { version = "1", features = ["time"] }
