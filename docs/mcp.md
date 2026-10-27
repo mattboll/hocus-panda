@@ -56,7 +56,7 @@ With Claude Code: `claude mcp add hocuspanda -- hocus mcp --agent assistant`.
 | `wait_for` | until a window (`app_id`, a part of its `title`) or an element (`label`) is shown, or with `gone` until none is; `timeout_ms` |
 | `journal` | what this agent did this session, oldest first, one line each (see below); `limit` (the last so many, 50 by default), `agent` |
 | `list_tasks` | the user's tasks, those not done, late ones and today's first as the column orders them: id, text, due date (`2026-10-21`, or `2026-10-21T15:00` in the user's time), late, list, source; `done` for those done too |
-| `add_task` | adds a task to the user's local list: `text`, `due` (`today`, `tomorrow`, `2026-10-21`, `2026-10-21T15:00`), `list`; only for an `act` agent, kept in the journal |
+| `add_task` | adds a task to the user's local list, or the list `list` names (a CalDAV task list shown in the column, else a list of the local one): `text`, `due` (`today`, `tomorrow`, `2026-10-21`, `2026-10-21T15:00`), `list`; only for an `act` agent, kept in the journal |
 
 `intent` is what the action is for, in one short line the user reads before
 it happens ("Sends the message"); without it, the desktop says it plainly

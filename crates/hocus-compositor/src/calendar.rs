@@ -10,6 +10,9 @@
 //! the token GOA hands out; one removed there, or its calendar switched
 //! off, takes its events and its cache with it. Until GOA first answered,
 //! their cache stays.
+//!
+//! The same sync brings a CalDAV account's task lists (#256), handed to
+//! the tasks ([`crate::tasks`]), which keep their own sealed cache.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -22,7 +25,7 @@ use hocus_api::{CalendarStatus, CalendarsInfo, Event, EventInfo, OnlineAccountsI
 use hocus_core::config::CalendarAccount;
 use hocus_platform::{
     calendar::{
-        caldav::{self, FetchError, Source},
+        caldav::{self, FetchError, Source, TaskList},
         goa::{self, OnlineAccounts},
         ics::{self, Occurrence},
     },
@@ -54,10 +57,15 @@ const GOA_ID: &str = "goa:";
 
 #[derive(Debug)]
 enum News {
-    /// The cache, read at start.
-    Cached(HashMap<String, Vec<String>>),
-    /// An account's events, from the sync of this generation.
-    Fetched(String, u64, Result<Vec<String>, FetchError>),
+    /// The caches, read at start: the events', the task lists'.
+    Cached(HashMap<String, Vec<String>>, crate::tasks::Cache),
+    /// An account's events and task lists, from the sync of this
+    /// generation.
+    Fetched(
+        String,
+        u64,
+        Result<(Vec<String>, Vec<TaskList>), FetchError>,
+    ),
     /// The secrets kept now; a password was just stored, so sync again.
     Secrets { count: usize, stored: bool },
     /// What GNOME Online Accounts holds, and whether its settings can be
@@ -141,6 +149,8 @@ pub fn start(
     };
     let cache = dir.join("calendar-cache");
     state.calendar.cache = Some(cache.clone());
+    let tasks_cache = dir.join("tasks-cache");
+    state.tasks.set_remote_cache(tasks_cache.clone());
     let secrets = Secrets {
         // The session's own keyring only: nested, the developer's is not ours.
         bus: state
@@ -160,7 +170,8 @@ pub fn start(
                 HashMap::new()
             }
         };
-        let _ = news.send(News::Cached(cached));
+        let tasks = crate::tasks::read_cache(&tasks_cache);
+        let _ = news.send(News::Cached(cached, tasks));
     });
 }
 
@@ -180,7 +191,7 @@ impl State {
 
     fn calendar_news(&mut self, news: News) {
         match news {
-            News::Cached(cached) => {
+            News::Cached(cached, tasks) => {
                 // What a sync brought meanwhile stays, and accounts gone
                 // stay gone.
                 let mut dropped = false;
@@ -198,6 +209,11 @@ impl State {
                 if dropped {
                     self.save_calendar_cache();
                 }
+                // A sync's lists came first: they stay.
+                let mut tasks = tasks;
+                tasks.retain(|id, _| !self.calendar.synced.contains(id));
+                let known = self.calendar.known.clone();
+                self.remote_tasks_cached(tasks, known.as_deref());
             }
             News::Fetched(id, generation, _)
                 if generation != self.calendar.generation
@@ -209,15 +225,18 @@ impl State {
             {
                 return;
             }
-            News::Fetched(id, _, Ok(texts)) => {
+            News::Fetched(id, generation, Ok((texts, lists))) => {
                 self.calendar.errors.remove(&id);
                 self.calendar.synced.insert(id.clone());
+                self.remote_tasks_synced(&id, generation, lists);
                 self.calendar.texts.insert(id, texts);
                 self.save_calendar_cache();
             }
             News::Fetched(id, _, Err(err)) => {
                 tracing::warn!(id, %err, "a calendar did not sync; its cache stays");
                 self.calendar.errors.insert(id, err);
+                // Its tasks say they are offline.
+                self.remote_tasks_changed();
             }
             News::Secrets { count, stored } => {
                 self.calendar.secrets_kept = count;
@@ -426,6 +445,7 @@ impl State {
         gone.dedup();
         self.calendar.known = Some(ids.clone());
         self.calendar.known_pending = pending;
+        self.forget_remote_tasks(&ids);
         if gone.is_empty() && !first {
             return;
         }
@@ -469,20 +489,11 @@ impl State {
             let (news, secrets) = (news.clone(), self.calendar.secrets.clone());
             spawn("calendar sync", move || {
                 let id = account.id();
-                let source = if account.kind == "subscription" {
-                    Source::Subscription { url: account.url }
-                } else {
-                    let password = secrets
-                        .and_then(|s| s.lookup(&id).ok().flatten())
-                        .unwrap_or_default();
-                    Source::CalDav {
-                        url: account.url,
-                        user: account.user,
-                        password,
-                    }
-                };
-                let fetched = caldav::fetch(&source, from, to)
-                    .map(|calendars| calendars.into_iter().flat_map(|c| c.ics).collect());
+                let source = source_of(account, secrets.as_ref());
+                let fetched = caldav::sync(&source, from, to).map(|synced| {
+                    let texts = synced.events.into_iter().flat_map(|c| c.ics).collect();
+                    (texts, synced.lists)
+                });
                 let _ = news.send(News::Fetched(id, generation, fetched));
             });
         }
@@ -499,8 +510,11 @@ impl State {
         for account in held.accounts {
             let (news, bus, base) = (news.clone(), bus.clone(), base.clone());
             spawn("calendar sync", move || {
-                let fetched = goa::fetch(&bus, &account, &base, from, to)
-                    .map(|calendars| calendars.into_iter().flat_map(|c| c.ics).collect());
+                // Google's CalDAV serves no tasks (#257 reads Google Tasks).
+                let fetched = goa::fetch(&bus, &account, &base, from, to).map(|calendars| {
+                    let texts = calendars.into_iter().flat_map(|c| c.ics).collect();
+                    (texts, Vec::new())
+                });
                 let _ = news.send(News::Fetched(goa_id(&account), generation, fetched));
             });
         }
@@ -687,6 +701,7 @@ impl State {
 
     fn calendar_status(&self, id: String, name: String) -> CalendarStatus {
         CalendarStatus {
+            lists: self.task_lists_info(&id),
             name,
             events: self
                 .calendar
@@ -741,6 +756,42 @@ impl State {
                 })
                 .collect(),
         }
+    }
+}
+
+impl State {
+    /// The sync of this generation is the last one started.
+    pub(crate) fn calendar_generation(&self) -> u64 {
+        self.calendar.generation
+    }
+
+    /// The account's last sync did not reach its server: what it shows is
+    /// its last sync's.
+    pub(crate) fn calendar_unreachable(&self, id: &str) -> bool {
+        matches!(self.calendar.errors.get(id), Some(FetchError::Failed(_)))
+    }
+
+    /// The configured account of this id, and where its password is, to
+    /// write to it off the loop.
+    pub(crate) fn calendar_account(&self, id: &str) -> Option<(CalendarAccount, Option<Secrets>)> {
+        let account = self.config.calendars.iter().find(|a| a.id() == id)?;
+        Some((account.clone(), self.calendar.secrets.clone()))
+    }
+}
+
+/// Where `account`'s calendars are read and written, its password looked
+/// up in `secrets`; blocking, for a worker thread.
+pub(crate) fn source_of(account: CalendarAccount, secrets: Option<&Secrets>) -> Source {
+    if account.kind == "subscription" {
+        return Source::Subscription { url: account.url };
+    }
+    let password = secrets
+        .and_then(|s| s.lookup(&account.id()).ok().flatten())
+        .unwrap_or_default();
+    Source::CalDav {
+        url: account.url,
+        user: account.user,
+        password,
     }
 }
 

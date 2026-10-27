@@ -9,7 +9,7 @@ use hocus_shell::{
     agents::{AgentAsk, AgentState, AgentsView, Board, Elsewhere},
     column::{AdbLine, Agenda, Meeting, PairStage, Pairing, PhoneLine},
     journal::{Did, JournalLine, JournalView, Pressed},
-    tasks::{Due, DueChoice, TaskRow, TasksView},
+    tasks::{Due, DueChoice, ListMark, TaskRow, TasksView},
 };
 use hocus_ui::{Input, Point, Role, Theme};
 
@@ -589,6 +589,7 @@ fn tasks() -> TasksView {
         due,
         late,
         done,
+        list: None,
     };
     TasksView {
         rows: vec![
@@ -607,6 +608,7 @@ fn tasks() -> TasksView {
         late: 1,
         done_today: 1,
         pandas: true,
+        offline: false,
     }
 }
 
@@ -654,6 +656,7 @@ fn the_tasks_show_late_ones_first_tick_and_open_their_menu() -> anyhow::Result<(
             late: 0,
             done_today: 4,
             pandas: true,
+            offline: false,
         }
         .into(),
     );
@@ -667,6 +670,36 @@ fn the_tasks_show_late_ones_first_tick_and_open_their_menu() -> anyhow::Result<(
     ] {
         assert!(access.contains(said), "{said} in {access}");
     }
+    Ok(())
+}
+
+#[test]
+fn a_task_of_a_caldav_list_says_its_list_and_offline_says_so() -> anyhow::Result<()> {
+    let mut view = tasks();
+    view.rows[1].list = Some(ListMark {
+        name: "Courses de la semaine".into(),
+        color: Some(hocus_ui::Color::rgb(0x2E, 0x7D, 0x4F)),
+    });
+    view.offline = true;
+    let mut column = Column::new(Theme::default(), Lang::Fr, 900.0, 1.0);
+    let mut s = state();
+    s.tasks = Some(view.into());
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    let access = column.access().dump();
+    for said in [
+        "1 en retard · hors ligne",
+        "Courses de…",
+        "Relire la MR #42",
+    ] {
+        assert!(access.contains(said), "{said} in {access}");
+    }
+    // The row still ticks the task.
+    let at = button(&column, "Relire la MR #42")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::ToggleTask("review".into())]
+    );
     Ok(())
 }
 

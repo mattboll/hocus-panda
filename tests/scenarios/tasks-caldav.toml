@@ -1,0 +1,194 @@
+description = "Tasks from CalDAV task lists (#256): given an account whose server has two task lists (calendars that hold VTODO) beside a calendar of events, their tasks show in the column with the local ones, each with its list's name and colour; ticking one writes it back done with its ETag, the server's VTODO STATUS:COMPLETED; adding one from the column's field offers the lists, the local one first, and writes it to the list chosen; editing and deleting write back too; MCP lists them with their list"
+outputs = ["1280x1024"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+
+[idle]
+curtain_after = 0
+"""
+
+# A task of the local list, read as the session starts.
+[[step]]
+state_file = { name = "tasks/domain.ics", text = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Tasks//EN
+BEGIN:VTODO
+UID:domain
+DTSTAMP:20261018T080000Z
+CREATED:20261018T080000Z
+SUMMARY:Book hocuspanda.org
+STATUS:NEEDS-ACTION
+END:VTODO
+END:VCALENDAR
+""" }
+
+[[step]]
+restart = true
+
+# A home of three calendars: Work holds events, Chores tasks, Design team both.
+[[step]]
+caldav = { dir = "calendar/nextcloud", user = "alex", password = "panda" }
+
+[[step]]
+config = """
+[[calendars]]
+name = "Nextcloud"
+url = "{caldav}"
+user = "alex"
+
+[panel]
+form = "column"
+
+[idle]
+curtain_after = 0
+"""
+
+[[step]]
+calendar_password = { id = "alex@{caldav}", password = "panda" }
+
+[[step]]
+expect_calendars = { secrets = 1, contains = ["Quarterly planning"], error = false }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_ui = { label = "Water the bamboo" }
+
+[[step]]
+expect_ui = { label = "4 to do" }
+
+[[step]]
+expect_ui = { label = "Chores" }
+
+[[step]]
+expect_ui = { label = "Design team" }
+
+# Done long ago, it does not show.
+[[step]]
+expect_ui = { label = "Buy rice", shown = false }
+
+# Due today first, then Friday's, then those without a date, the newest first.
+[[step]]
+expect_ui = { label = "Water the bamboo", inside = [944, 542, 320, 38] }
+
+[[step]]
+expect_ui = { label = "Write the design brief", inside = [944, 580, 320, 38] }
+
+[[step]]
+mcp = { tool = "list_tasks", contains = ["[ ] Water the bamboo (due 2026-10-21, in Chores)", "[ ] Write the design brief (due 2026-10-23, in Design team)", "[ ] Fix the shelf (in Chores)", "[ ] Book hocuspanda.org"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-caldav.png" }
+
+# Ticked: written back done, the rest of it as the server had it.
+[[step]]
+click_ui = "Water the bamboo"
+
+[[step]]
+expect_caldav_file = { name = "chores/bamboo.ics", contains = ["STATUS:COMPLETED\r\n", "PERCENT-COMPLETE:100\r\n", "COMPLETED:20261021T1437", "PRIORITY:5\r\n", "DUE;VALUE=DATE:20261021\r\n"], lacks = ["NEEDS-ACTION"] }
+
+[[step]]
+expect_ui = { label = "3 to do" }
+
+# Ticked again, at once: the second write goes on the ETag the first brought.
+[[step]]
+click_ui = "Water the bamboo"
+
+[[step]]
+expect_caldav_file = { name = "chores/bamboo.ics", contains = ["STATUS:NEEDS-ACTION\r\n"], lacks = ["COMPLETED:"] }
+
+[[step]]
+expect_ui = { label = "4 to do" }
+
+# Added from the column's field: the lists to choose from, the local one first.
+[[step]]
+click_ui = "Add a task"
+
+[[step]]
+expect_ui = { label = "On this computer" }
+
+[[step]]
+expect_ui = { label = "Enter adds it to the list chosen · ↑↓ chooses another · Escape closes" }
+
+[[step]]
+type = "Oil the bike"
+
+# Down: Chores.
+[[step]]
+key = 108
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-caldav-lists.png" }
+
+[[step]]
+key = 28
+
+[[step]]
+expect_caldav_file = { name = "chores", contains = ["SUMMARY:Oil the bike\r\n", "STATUS:NEEDS-ACTION\r\n"] }
+
+[[step]]
+expect_state_file = { name = "tasks", lacks = ["Oil the bike"] }
+
+[[step]]
+expect_ui = { label = "5 to do" }
+
+# Edited: its text written back, the rest of it as the server had it.
+[[step]]
+right_click_ui = "Water the bamboo"
+
+[[step]]
+click_ui = "Edit"
+
+[[step]]
+type = " and the fern"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_caldav_file = { name = "chores/bamboo.ics", contains = ["SUMMARY:Water the bamboo and the fern\r\n", "PRIORITY:5\r\n"] }
+
+# Deleted: gone from its server.
+[[step]]
+right_click_ui = "Write the design brief"
+
+[[step]]
+click_ui = "Delete"
+
+[[step]]
+expect_caldav_file = { name = "shared", lacks = ["Write the design brief"] }
+
+[[step]]
+expect_ui = { label = "Write the design brief", shown = false }
+
+# MCP adds to a list by its name.
+[[step]]
+mcp = { tool = "add_task", arguments = { text = "Call the plumber", list = "Chores" }, contains = ["added: [ ] Call the plumber (in Chores)"] }
+
+[[step]]
+expect_caldav_file = { name = "chores", contains = ["SUMMARY:Call the plumber\r\n"] }
+
+# A sync later, all is as written: nothing comes back.
+[[step]]
+advance_ms = 601000
+
+[[step]]
+expect_calendars = { error = false }
+
+[[step]]
+expect_ui = { label = "Write the design brief", shown = false }
+
+[[step]]
+mcp = { tool = "list_tasks", contains = ["[ ] Water the bamboo and the fern (due 2026-10-21, in Chores)", "[ ] Fix the shelf (in Chores)", "[ ] Oil the bike (in Chores)", "[ ] Call the plumber (in Chores)"] }

@@ -13,6 +13,8 @@
 //!
 //! And a task (#255), from the column's field or a task's menu: what is
 //! typed is added to the tasks, or replaces the text of the one edited.
+//! With CalDAV task lists (#256), the lists it can go to are listed under
+//! the field, the local one first and chosen; the arrows choose another.
 //! The command field adds one too: "todo …", "task: …".
 //!
 //! And the action palette (Super+P, #68): every action, with its keys as
@@ -206,11 +208,15 @@ pub enum Choice {
     AddNote(String),
     /// A task to add, from the command field (#255).
     AddTask(String),
-    /// A task typed in the card: added, or the text of the one of this id.
+    /// A task typed in the card: added, to the list of this key when one
+    /// was chosen, or the text of the one of this id.
     SaveTask {
         id: Option<String>,
         text: String,
+        list: Option<String>,
     },
+    /// A list a task can be added to, by its key: chosen in the card.
+    TaskList(String),
     /// The notes, opened from the command field.
     OpenNotes,
     /// A request understood offline, confirmed (#44).
@@ -219,6 +225,17 @@ pub enum Choice {
     Ask(String),
     /// The answer shown: Enter acts on it.
     Answer,
+}
+
+/// A list a task can be added to, as the card lists it (#256).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskListChoice {
+    /// What names it to the compositor.
+    pub key: String,
+    pub name: String,
+    /// Where it is: its account, or this computer.
+    pub place: String,
+    pub color: Option<hocus_ui::Color>,
 }
 
 /// A line of the notes, as the card shows it.
@@ -343,6 +360,8 @@ pub struct Launcher {
     notes: Vec<NoteItem>,
     /// The task being edited, by id; `None` adds one.
     editing: Option<String>,
+    /// The lists a task can be added to, the local one first (#256).
+    task_lists: Vec<TaskListChoice>,
     /// The keys that open what the card shows, in the field's corner.
     chip_text: NodeId,
     /// The hint under the list in the history and the picker, and its box.
@@ -551,6 +570,7 @@ impl Launcher {
             action_recents: Vec::new(),
             notes: Vec::new(),
             editing: None,
+            task_lists: Vec::new(),
             chip_text,
             hint,
             hint_box,
@@ -763,7 +783,31 @@ impl Launcher {
             self.tree.set_field_value(self.field, &text);
             self.editing = Some(id);
             self.show_hint();
+            // A task edited stays in its list: none to choose.
+            self.search();
         }
+    }
+
+    /// The lists a task can be added to, the local one first; with one
+    /// only, none is listed.
+    pub fn set_task_lists(&mut self, lists: Vec<TaskListChoice>) {
+        if lists == self.task_lists {
+            return;
+        }
+        self.task_lists = lists;
+        if self.open && self.mode == Mode::Tasks {
+            let selected = self.selected;
+            let query = self.query().to_owned();
+            self.hits = self.hits(&query);
+            self.selected = selected.min(self.hits.len().saturating_sub(1));
+            self.show_hint();
+            self.render();
+        }
+    }
+
+    /// The task card lists the lists to choose from.
+    fn lists_shown(&self) -> bool {
+        self.mode == Mode::Tasks && self.editing.is_none() && self.task_lists.len() > 1
     }
 
     /// The clipboard history, as it is shown: text and pinned.
@@ -898,6 +942,7 @@ impl Launcher {
             Mode::Actions => self.lang.palette_hint().to_owned(),
             Mode::Clipboard => self.lang.history_hint().to_owned(),
             Mode::Notes => self.lang.notes_hint().to_owned(),
+            Mode::Tasks if self.lists_shown() => self.lang.task_hint_lists().to_owned(),
             Mode::Tasks => self.lang.task_hint(self.editing.is_some()).to_owned(),
             Mode::Emoji => self.lang.emoji_hint(&self.tone_sample()),
         };
@@ -1010,7 +1055,18 @@ impl Launcher {
                     choice: Choice::Copy(n.text.clone()),
                 })
                 .collect(),
-            // What is typed is the task, not a search.
+            // What is typed is the task, not a search; the lists it can go
+            // to are listed.
+            Mode::Tasks if self.lists_shown() => self
+                .task_lists
+                .iter()
+                .map(|l| Hit {
+                    title: l.name.clone(),
+                    kind: l.place.clone(),
+                    color: l.color,
+                    choice: Choice::TaskList(l.key.clone()),
+                })
+                .collect(),
             Mode::Tasks => Vec::new(),
             Mode::Emoji => {
                 let emoji: Vec<&crate::emoji::Emoji> = if query.is_empty() {
@@ -1057,6 +1113,8 @@ impl Launcher {
             self.answer_scroll = 0.0;
         }
         self.ask_documents(&query);
+        // The list chosen for a task stays chosen while it is typed.
+        let kept = (self.mode == Mode::Tasks).then_some(self.selected);
         self.hits = self.hits(&query);
         // Only the palette scrolls: it lists everything.
         if self.has_card() {
@@ -1064,7 +1122,7 @@ impl Launcher {
         } else if !matches!(self.mode, Mode::Actions | Mode::Notes | Mode::Tasks) {
             fit(&mut self.hits, MAX_RESULTS);
         }
-        self.selected = 0;
+        self.selected = kept.map_or(0, |k| k.min(self.hits.len().saturating_sub(1)));
         self.first = 0;
         self.grid_first = 0;
         self.wheel_left = 0.0;
@@ -1351,6 +1409,22 @@ impl Launcher {
                     Kind::Box(Look {
                         background: Some(Paint::Rgba(color)),
                         radius: 7.0,
+                        ..Look::default()
+                    }),
+                );
+            }
+            // A task's lists, by their colour (#256).
+            if self.mode == Mode::Tasks {
+                let _ = self.tree.add(
+                    row,
+                    Style {
+                        width: Length::Px(10.0),
+                        height: Length::Px(10.0),
+                        ..Style::default()
+                    },
+                    Kind::Box(Look {
+                        background: Some(hit.color.map_or(Paint::Muted, Paint::Rgba)),
+                        radius: 5.0,
                         ..Look::default()
                     }),
                 );
@@ -1889,6 +1963,10 @@ impl Launcher {
             // A task: Enter keeps it and closes; nothing typed, nothing kept.
             Key::Enter if self.mode == Mode::Tasks => {
                 let text = self.query().trim().to_owned();
+                let list = match self.hits.get(self.selected).map(|h| &h.choice) {
+                    Some(Choice::TaskList(key)) if self.lists_shown() => Some(key.clone()),
+                    _ => None,
+                };
                 let id = self.editing.take();
                 self.close();
                 if text.is_empty() {
@@ -1896,7 +1974,7 @@ impl Launcher {
                 } else {
                     vec![
                         LauncherEvent::Closed,
-                        LauncherEvent::Chosen(Choice::SaveTask { id, text }),
+                        LauncherEvent::Chosen(Choice::SaveTask { id, text, list }),
                     ]
                 }
             }
@@ -1996,6 +2074,16 @@ impl Launcher {
                 && let Some(index) = self.row_hits.get(i).copied()
             {
                 events.extend(self.act(index));
+                continue;
+            }
+            // A list for the task: chosen, the card stays.
+            if self.mode == Mode::Tasks
+                && let Some(i) = self.rows.iter().position(|r| *r == node)
+            {
+                if let Some(index) = self.row_hits.get(i).copied() {
+                    self.selected = index;
+                    self.show_selection();
+                }
                 continue;
             }
             if let Some(i) = self.rows.iter().position(|r| *r == node)
@@ -2376,6 +2464,53 @@ mod tests {
         ]);
         l.open();
         l
+    }
+
+    #[test]
+    fn a_task_goes_to_the_local_list_unless_another_is_chosen() {
+        let mut l = Launcher::new(Theme::default(), Lang::En, 1.0);
+        let list = |key: &str, name: &str| TaskListChoice {
+            key: key.into(),
+            name: name.into(),
+            place: "Nextcloud".into(),
+            color: None,
+        };
+        // One list only: none listed, the local one.
+        l.set_task_lists(vec![list("local", "Tasks")]);
+        l.open_task(None);
+        l.text("Buy milk");
+        assert!(l.hits.is_empty());
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![
+                LauncherEvent::Closed,
+                LauncherEvent::Chosen(Choice::SaveTask {
+                    id: None,
+                    text: "Buy milk".into(),
+                    list: None,
+                })
+            ]
+        );
+        l.set_task_lists(vec![list("local", "Tasks"), list("chores", "Chores")]);
+        l.open_task(None);
+        assert_eq!(l.hits.len(), 2);
+        l.key(Key::Down);
+        // Typing keeps the list chosen.
+        l.text("Water the bamboo");
+        assert_eq!(
+            l.key(Key::Enter),
+            vec![
+                LauncherEvent::Closed,
+                LauncherEvent::Chosen(Choice::SaveTask {
+                    id: None,
+                    text: "Water the bamboo".into(),
+                    list: Some("chores".into()),
+                })
+            ]
+        );
+        // Editing, the task stays in its list.
+        l.open_task(Some(("t1".into(), "Water the bamboo".into())));
+        assert!(l.hits.is_empty());
     }
 
     #[test]

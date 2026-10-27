@@ -1,6 +1,9 @@
 //! Fetching calendars: a CalDAV account (RFC 4791), found from its server,
 //! its principal or a calendar's own address, or a subscription (an ICS
-//! link). Blocking: the compositor calls it on worker threads.
+//! link). The calendars that say they hold VTODO are task lists (#256):
+//! their tasks come with their ETags, and are written back with PUT and
+//! DELETE on those ETags, a change made elsewhere meanwhile refused (412).
+//! Blocking: the compositor calls it on worker threads.
 
 use std::time::Duration;
 
@@ -60,10 +63,87 @@ pub struct Fetched {
     pub ics: Vec<String>,
 }
 
+/// A task list: a calendar that holds VTODO, and its tasks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskList {
+    /// Its address, which names it.
+    pub url: String,
+    /// Its name; its address's last part when it has none.
+    pub name: String,
+    /// `#RRGGBB` or `#RRGGBBAA`, when the server keeps one.
+    pub color: Option<String>,
+    pub items: Vec<Resource>,
+}
+
+/// One calendar object: its address, its ETag, its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resource {
+    pub href: String,
+    pub etag: Option<String>,
+    pub ics: String,
+}
+
+/// What an account's sync brings: its calendars' events, its task lists.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Synced {
+    pub events: Vec<Fetched>,
+    pub lists: Vec<TaskList>,
+}
+
+/// What a write expects of the resource on the server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Expect {
+    /// Nothing there yet: a new one.
+    New,
+    /// As it was at this ETag; changed since, the write is refused.
+    Etag(String),
+    /// Whatever it is (its ETag was never known).
+    Any,
+}
+
+/// Why a write failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteError {
+    /// Changed on the server since it was read (412).
+    Conflict,
+    /// The server refused the name or password.
+    Refused(String),
+    /// Unreachable, or refused for another reason.
+    Failed(String),
+}
+
+impl std::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict => f.write_str("changed on the server meanwhile"),
+            Self::Refused(e) | Self::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+impl std::error::Error for WriteError {}
+
+impl From<FetchError> for WriteError {
+    fn from(err: FetchError) -> Self {
+        match err {
+            FetchError::Refused(e) => Self::Refused(e),
+            FetchError::Failed(e) => Self::Failed(e),
+        }
+    }
+}
+
 const PROPFIND: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
-  <d:prop><d:resourcetype/><d:displayname/><d:current-user-principal/><c:calendar-home-set/></d:prop>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
+  <d:prop><d:resourcetype/><d:displayname/><d:current-user-principal/><c:calendar-home-set/><c:supported-calendar-component-set/><a:calendar-color/></d:prop>
 </d:propfind>"#;
+
+/// Every task of a list, with its ETag: those done too, which the column
+/// shows the day they were done.
+const TASKS_REPORT: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:getetag/><c:calendar-data/></d:prop>
+  <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VTODO"/></c:comp-filter></c:filter>
+</c:calendar-query>"#;
 
 fn report(from: Timestamp, to: Timestamp) -> String {
     let at = |t: Timestamp| t.strftime("%Y%m%dT%H%M%SZ").to_string();
@@ -90,6 +170,33 @@ struct Response {
     principal: Option<String>,
     home: Option<String>,
     data: String,
+    etag: String,
+    color: String,
+    /// The components it says it holds; `None` when it does not say.
+    components: Option<Vec<String>>,
+}
+
+impl Response {
+    /// Says it holds `component`. A calendar that does not say holds
+    /// events only, as far as the desktop goes: task lists say so.
+    fn holds(&self, component: &str) -> bool {
+        match &self.components {
+            Some(c) => c.iter().any(|c| c.eq_ignore_ascii_case(component)),
+            None => component == "VEVENT",
+        }
+    }
+}
+
+/// A component of a `supported-calendar-component-set`: its name.
+fn component(r: &mut Response, e: &quick_xml::events::BytesStart<'_>) {
+    let name = e
+        .attributes()
+        .flatten()
+        .find(|a| a.key.local_name().as_ref() == b"name")
+        .map(|a| String::from_utf8_lossy(&a.value).trim().to_owned());
+    if let Some(name) = name.filter(|n| !n.is_empty()) {
+        r.components.get_or_insert_with(Vec::new).push(name);
+    }
 }
 
 /// A WebDAV multistatus, by local names: namespaces' prefixes differ
@@ -106,16 +213,24 @@ fn multistatus(xml: &str) -> Vec<Response> {
                 if name == "response" {
                     current = Some(Response::default());
                 }
+                if let (Some(r), Some(parent)) = (current.as_mut(), path.last()) {
+                    match (parent.as_str(), name.as_str()) {
+                        ("supported-calendar-component-set", "comp") => component(r, &e),
+                        (_, "supported-calendar-component-set") => {
+                            r.components.get_or_insert_with(Vec::new);
+                        }
+                        _ => {}
+                    }
+                }
                 path.push(name);
             }
             Ok(Xml::Empty(e)) => {
                 let name = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
-                if let (Some(r), Some(parent)) = (current.as_mut(), path.last())
-                    && parent == "resourcetype"
-                {
-                    match name.as_str() {
-                        "calendar" => r.calendar = true,
-                        "collection" => r.collection = true,
+                if let (Some(r), Some(parent)) = (current.as_mut(), path.last()) {
+                    match (parent.as_str(), name.as_str()) {
+                        ("resourcetype", "calendar") => r.calendar = true,
+                        ("resourcetype", "collection") => r.collection = true,
+                        ("supported-calendar-component-set", "comp") => component(r, &e),
                         _ => {}
                     }
                 }
@@ -188,6 +303,8 @@ fn text_into(current: &mut Option<Response>, path: &[String], text: &str) {
         (Some("calendar-home-set"), Some("href")) => r.home = Some(text.trim().to_owned()),
         (_, Some("displayname")) => r.name.push_str(text),
         (_, Some("calendar-data")) => r.data.push_str(text),
+        (_, Some("getetag")) => r.etag.push_str(text.trim()),
+        (_, Some("calendar-color")) => r.color.push_str(text.trim()),
         _ => {}
     }
 }
@@ -239,38 +356,75 @@ impl Client {
     }
 
     fn send(&self, method: &str, url: &str, depth: &str, body: &str) -> Result<String, FetchError> {
+        let answer = self.request(
+            method,
+            url,
+            &[
+                ("Depth", depth),
+                ("Content-Type", "application/xml; charset=utf-8"),
+            ],
+            body,
+        )?;
+        match answer.status {
+            200..=299 => Ok(answer.text),
+            s => Err(FetchError::Failed(format!(
+                "{url}: the server answered {s}"
+            ))),
+        }
+    }
+
+    /// A request and its answer, whatever its status but a refusal of
+    /// the name, password or token.
+    fn request(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> Result<Answer, FetchError> {
         let failed = |e: &dyn std::fmt::Display| FetchError::Failed(format!("{url}: {e}"));
         if self.only.as_deref().is_some_and(|o| o != origin(url)) {
             return Err(failed(&"elsewhere than the account's server"));
         }
-        let mut request = ureq::http::Request::builder()
-            .method(method)
-            .uri(url)
-            .header("Depth", depth)
-            .header("Content-Type", "application/xml; charset=utf-8");
+        let mut request = ureq::http::Request::builder().method(method).uri(url);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
         if let Some(auth) = &self.auth {
             request = request.header("Authorization", auth);
         }
         let request = request.body(body.to_owned()).map_err(|e| failed(&e))?;
         let mut response = self.agent.run(request).map_err(|e| failed(&e))?;
         let status = response.status().as_u16();
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
         let text = response
             .body_mut()
             .read_to_string()
             .map_err(|e| failed(&e))?;
-        match status {
-            200..=299 => Ok(text),
-            401 | 403 => Err(FetchError::Refused(format!(
+        if matches!(status, 401 | 403) {
+            return Err(FetchError::Refused(format!(
                 "{url}: the server refused the {}",
                 if self.only.is_some() {
                     "access token"
                 } else {
                     "name or password"
                 }
-            ))),
-            s => Err(failed(&format!("the server answered {s}"))),
+            )));
         }
+        Ok(Answer { status, etag, text })
     }
+}
+
+/// What a server answered.
+struct Answer {
+    status: u16,
+    etag: Option<String>,
+    text: String,
 }
 
 fn agent() -> ureq::Agent {
@@ -283,13 +437,17 @@ fn agent() -> ureq::Agent {
 }
 
 /// The calendars of a CalDAV account: the address itself when it is one,
-/// else those of its home, found through the principal if needed.
-fn calendars(client: &Client, url: &str) -> Result<Vec<(String, String)>, FetchError> {
+/// else those of its home, found through the principal if needed; each
+/// with its address.
+fn calendars(client: &Client, url: &str) -> Result<Vec<Response>, FetchError> {
     let nothing = |at: &str| FetchError::Failed(format!("{at}: no calendars here"));
     let here = multistatus(&client.send("PROPFIND", url, "0", PROPFIND)?);
     let first = here.first().cloned().unwrap_or_default();
     if first.calendar {
-        return Ok(vec![(url.to_owned(), first.name)]);
+        return Ok(vec![Response {
+            href: url.to_owned(),
+            ..first
+        }]);
     }
     let home = match (first.home, first.principal) {
         (Some(home), _) => join(url, &home),
@@ -305,10 +463,13 @@ fn calendars(client: &Client, url: &str) -> Result<Vec<(String, String)>, FetchE
         (None, None) => url.to_owned(),
     };
     let listed = multistatus(&client.send("PROPFIND", &home, "1", PROPFIND)?);
-    let found: Vec<(String, String)> = listed
+    let found: Vec<Response> = listed
         .into_iter()
         .filter(|r| r.calendar)
-        .map(|r| (join(url, &r.href), r.name))
+        .map(|r| Response {
+            href: join(url, &r.href),
+            ..r
+        })
         .collect();
     if found.is_empty() {
         return Err(nothing(url));
@@ -319,15 +480,24 @@ fn calendars(client: &Client, url: &str) -> Result<Vec<(String, String)>, FetchE
 /// Every calendar of `source`, with the events that overlap `from`..`to`
 /// (a subscription gives them all).
 pub fn fetch(source: &Source, from: Timestamp, to: Timestamp) -> Result<Vec<Fetched>, FetchError> {
+    sync(source, from, to).map(|s| s.events)
+}
+
+/// Every calendar of `source` with the events that overlap `from`..`to`
+/// (a subscription gives them all), and its task lists with their tasks.
+pub fn sync(source: &Source, from: Timestamp, to: Timestamp) -> Result<Synced, FetchError> {
     match source {
         Source::Subscription { url } => {
             let url = url.replacen("webcal://", "https://", 1);
             let client = Client::new(None);
             let ics = client.send("GET", &url, "0", "")?;
-            Ok(vec![Fetched {
-                calendar: url,
-                ics: vec![ics],
-            }])
+            Ok(Synced {
+                events: vec![Fetched {
+                    calendar: url,
+                    ics: vec![ics],
+                }],
+                lists: Vec::new(),
+            })
         }
         Source::CalDav {
             url,
@@ -338,31 +508,143 @@ pub fn fetch(source: &Source, from: Timestamp, to: Timestamp) -> Result<Vec<Fetc
     }
 }
 
-/// Every calendar of the account at `url`, with the events of `from`..`to`.
+/// Every calendar of the account at `url`, with the events of `from`..`to`;
+/// those that hold tasks, with all of them.
 fn account(
     client: &Client,
     url: &str,
     from: Timestamp,
     to: Timestamp,
-) -> Result<Vec<Fetched>, FetchError> {
+) -> Result<Synced, FetchError> {
     let body = report(from, to);
-    let mut out = Vec::new();
-    for (calendar, name) in calendars(client, url)? {
-        let answer = multistatus(&client.send("REPORT", &calendar, "1", &body)?);
-        out.push(Fetched {
-            calendar: if name.trim().is_empty() {
-                calendar
-            } else {
-                name
-            },
-            ics: answer
-                .into_iter()
-                .map(|r| r.data)
-                .filter(|d| !d.is_empty())
-                .collect(),
-        });
+    let mut out = Synced::default();
+    for calendar in calendars(client, url)? {
+        if calendar.holds("VEVENT") {
+            let answer = multistatus(&client.send("REPORT", &calendar.href, "1", &body)?);
+            out.events.push(Fetched {
+                calendar: if calendar.name.trim().is_empty() {
+                    calendar.href.clone()
+                } else {
+                    calendar.name.clone()
+                },
+                ics: answer
+                    .into_iter()
+                    .map(|r| r.data)
+                    .filter(|d| !d.is_empty())
+                    .collect(),
+            });
+        }
+        if calendar.holds("VTODO") {
+            let answer = multistatus(&client.send("REPORT", &calendar.href, "1", TASKS_REPORT)?);
+            let name = match calendar.name.trim() {
+                "" => last_part(&calendar.href).to_owned(),
+                name => name.to_owned(),
+            };
+            out.lists.push(TaskList {
+                name,
+                color: color(&calendar.color),
+                items: answer
+                    .into_iter()
+                    .filter(|r| !r.data.is_empty() && !r.href.is_empty())
+                    .map(|r| Resource {
+                        href: join(url, &r.href),
+                        etag: Some(r.etag).filter(|e| !e.is_empty()),
+                        ics: r.data,
+                    })
+                    .collect(),
+                url: calendar.href,
+            });
+        }
     }
     Ok(out)
+}
+
+/// A calendar's colour, as servers keep it: `#RRGGBB` or `#RRGGBBAA`.
+fn color(text: &str) -> Option<String> {
+    let hex = text.trim().strip_prefix('#')?;
+    (matches!(hex.len(), 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| format!("#{hex}"))
+}
+
+/// The last part of an address's path: a list's name when it has none.
+fn last_part(url: &str) -> &str {
+    url.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|p| !p.is_empty())
+        .unwrap_or(url)
+}
+
+/// The client for writing to `source`'s account: a subscription is read
+/// only.
+fn writer(source: &Source, href: &str) -> Result<Client, WriteError> {
+    match source {
+        Source::CalDav { user, password, .. } => Ok(Client::new(Some((user, password)))),
+        Source::Bearer { url, token } => Ok(Client::bearer(token, url)),
+        Source::Subscription { .. } => Err(WriteError::Failed(format!(
+            "{href}: a subscription cannot be written to"
+        ))),
+    }
+}
+
+/// Writes a task's text at `href`, as `expect` says it should be there;
+/// its new ETag, when the server says it.
+pub fn put(
+    source: &Source,
+    href: &str,
+    ics: &str,
+    expect: &Expect,
+) -> Result<Option<String>, WriteError> {
+    let client = writer(source, href)?;
+    let mut headers = vec![("Content-Type", "text/calendar; charset=utf-8")];
+    match expect {
+        Expect::New => headers.push(("If-None-Match", "*")),
+        Expect::Etag(etag) => headers.push(("If-Match", etag)),
+        Expect::Any => {}
+    }
+    let answer = client.request("PUT", href, &headers, ics)?;
+    match answer.status {
+        200..=299 => Ok(answer.etag),
+        412 => Err(WriteError::Conflict),
+        s => Err(WriteError::Failed(format!(
+            "{href}: the server answered {s}"
+        ))),
+    }
+}
+
+/// Removes the task at `href`, as `expect` says it should be there; one
+/// already gone is gone.
+pub fn delete(source: &Source, href: &str, expect: &Expect) -> Result<(), WriteError> {
+    let client = writer(source, href)?;
+    let mut headers = Vec::new();
+    if let Expect::Etag(etag) = expect {
+        headers.push(("If-Match", etag.as_str()));
+    }
+    let answer = client.request("DELETE", href, &headers, "")?;
+    match answer.status {
+        200..=299 | 404 | 410 => Ok(()),
+        412 => Err(WriteError::Conflict),
+        s => Err(WriteError::Failed(format!(
+            "{href}: the server answered {s}"
+        ))),
+    }
+}
+
+/// The task at `href` as the server has it now; `None` when it is gone.
+pub fn get(source: &Source, href: &str) -> Result<Option<Resource>, WriteError> {
+    let client = writer(source, href)?;
+    let answer = client.request("GET", href, &[], "")?;
+    match answer.status {
+        200..=299 => Ok(Some(Resource {
+            href: href.to_owned(),
+            etag: answer.etag,
+            ics: answer.text,
+        })),
+        404 | 410 => Ok(None),
+        s => Err(WriteError::Failed(format!(
+            "{href}: the server answered {s}"
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -388,6 +670,7 @@ END:VCALENDAR]]></C:calendar-data>
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].home.as_deref(), Some("/dav/calendars/alex/"));
         assert!(r[1].calendar && r[1].name == "Work");
+        assert!(r[1].holds("VEVENT") && !r[1].holds("VTODO"));
         assert!(r[1].data.starts_with("BEGIN:VCALENDAR"));
         assert_eq!(
             join(
@@ -396,5 +679,41 @@ END:VCALENDAR]]></C:calendar-data>
             ),
             "https://dav.example.org/dav/calendars/alex/work/"
         );
+    }
+
+    #[test]
+    fn a_calendar_that_says_vtodo_is_a_task_list_with_its_colour() {
+        let xml = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:x1="http://apple.com/ns/ical/">
+  <d:response><d:href>/remote.php/dav/calendars/alex/chores/</d:href>
+    <d:propstat><d:prop>
+      <d:resourcetype><d:collection/><cal:calendar/></d:resourcetype>
+      <d:displayname>Chores</d:displayname>
+      <cal:supported-calendar-component-set><cal:comp name="VTODO"/></cal:supported-calendar-component-set>
+      <x1:calendar-color>#2E7D4FFF</x1:calendar-color>
+    </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response><d:href>/remote.php/dav/calendars/alex/work/</d:href>
+    <d:propstat><d:prop>
+      <d:resourcetype><d:collection/><cal:calendar/></d:resourcetype>
+      <cal:supported-calendar-component-set><cal:comp name="VEVENT"></cal:comp><cal:comp name="VTODO"></cal:comp></cal:supported-calendar-component-set>
+    </d:prop></d:propstat>
+    <d:propstat><d:prop><x1:calendar-color/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat>
+  </d:response>
+  <d:response><d:href>/remote.php/dav/calendars/alex/chores/milk.ics</d:href>
+    <d:propstat><d:prop><d:getetag>"3f2a"</d:getetag></d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let r = multistatus(xml);
+        assert!(r[0].holds("VTODO") && !r[0].holds("VEVENT"));
+        assert_eq!(color(&r[0].color).as_deref(), Some("#2E7D4FFF"));
+        assert!(r[1].holds("VTODO") && r[1].holds("VEVENT"));
+        assert_eq!(color(&r[1].color), None);
+        assert_eq!(r[2].etag, "\"3f2a\"");
+        assert_eq!(
+            last_part("https://dav.example.com/cal/alex/chores/"),
+            "chores"
+        );
+        assert_eq!(color("red"), None);
     }
 }

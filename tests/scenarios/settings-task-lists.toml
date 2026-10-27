@@ -1,0 +1,87 @@
+description = "A CalDAV account's task lists in the settings (#256): under the account, each list with its colour, its tasks to do and a switch; switched off, the list goes to hidden_lists in the configuration and its tasks leave the column; on again, they come back"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+caldav = { dir = "calendar/nextcloud", user = "alex", password = "panda" }
+
+[[step]]
+config = """
+[[calendars]]
+name = "Nextcloud"
+url = "{caldav}"
+user = "alex"
+
+[panel]
+form = "column"
+"""
+
+[[step]]
+calendar_password = { id = "alex@{caldav}", password = "panda" }
+
+[[step]]
+expect_calendars = { secrets = 1, error = false }
+
+[[step]]
+expect_ui = { label = "Water the bamboo" }
+
+[[step]]
+open_settings = { page = "accounts" }
+
+[[step]]
+expect_settings = { label = "Chores", selected = true }
+
+[[step]]
+expect_settings = { label = "2 tasks to do · shown with the tasks" }
+
+[[step]]
+expect_settings = { label = "Design team", selected = true }
+
+# The calendar of events alone is no task list: its one event is counted.
+[[step]]
+expect_settings = { label = "Synced · 1 event" }
+
+[[step]]
+click_settings = "Chores"
+
+[[step]]
+expect_config_file = { contains = ["hidden_lists = [\"Chores\"]"] }
+
+[[step]]
+expect_settings = { label = "2 tasks to do · hidden from the tasks" }
+
+[[step]]
+expect_settings = { label = "Chores", selected = false }
+
+[[step]]
+expect_ui = { label = "Water the bamboo", shown = false }
+
+[[step]]
+expect_ui = { label = "Write the design brief" }
+
+[[step]]
+expect_ui = { label = "1 to do" }
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "settings-task-lists.png" }
+
+[[step]]
+click_settings = "Chores"
+
+[[step]]
+expect_config_file = { lacks = ["hidden_lists"] }
+
+[[step]]
+expect_ui = { label = "Water the bamboo" }
+
+[[step]]
+expect_ui = { label = "3 to do" }

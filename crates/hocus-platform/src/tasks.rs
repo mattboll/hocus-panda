@@ -2,8 +2,8 @@
 //! The local list is a folder of `.ics` files, one task each, as vdir has
 //! it (vdirsyncer's `filesystem` storage): the files at its top are the
 //! default list, each folder in it a list of its own, named by its
-//! `displayname` file or else by the folder. CalDAV task lists (#256) and
-//! Google Tasks (#257) come as other [`Source`]s of the same [`Task`].
+//! `displayname` file or else by the folder. CalDAV task lists (#256) are
+//! another [`Source`] of the same [`Task`], and Google Tasks (#257) will be.
 //!
 //! A task written back keeps what it was read with: only the properties
 //! the desktop manages (its summary, status, completion, due date and
@@ -45,6 +45,17 @@ pub struct Task {
 pub enum Source {
     /// A file of the local list's folder.
     Local { file: PathBuf },
+    /// A resource of a CalDAV task list.
+    CalDav {
+        /// The account, by its id.
+        account: String,
+        /// The list's address.
+        list: String,
+        /// The task's own address.
+        href: String,
+        /// Its ETag as last read or written: a write expects it there.
+        etag: Option<String>,
+    },
 }
 
 impl Task {
@@ -72,6 +83,36 @@ impl Task {
             created: Some(now),
             list: list.map(|l| l.trim().to_owned()),
             source: Source::Local { file },
+            raw: String::new(),
+        })
+    }
+
+    /// A new task of the CalDAV list at `list`, of `account`, named
+    /// `name`, made at `now`: its address is the list's and its UID.
+    pub fn new_caldav(
+        account: &str,
+        list: &str,
+        name: &str,
+        summary: &str,
+        due: Option<When>,
+        now: Timestamp,
+    ) -> io::Result<Self> {
+        let uid = new_uid()?;
+        let href = format!("{}/{uid}.ics", list.trim_end_matches('/'));
+        Ok(Self {
+            uid,
+            summary: one_line(summary),
+            done: false,
+            completed: None,
+            due,
+            created: Some(now),
+            list: Some(name.to_owned()),
+            source: Source::CalDav {
+                account: account.to_owned(),
+                list: list.to_owned(),
+                href,
+                etag: None,
+            },
             raw: String::new(),
         })
     }
@@ -488,7 +529,9 @@ mod tests {
         let long = "Buy milk ".repeat(12);
         let due = When::Local(datetime(2026, 10, 21, 15, 0, 0, 0), None);
         let task = Task::new_local(dir, &long, Some(due.clone()), Some("Home"), now).expect("new");
-        let Source::Local { file } = &task.source;
+        let Source::Local { file } = &task.source else {
+            panic!("a local task");
+        };
         assert_eq!(file.parent(), Some(Path::new("/tasks/Home")));
         assert_eq!(task.uid.len(), 36);
         let text = task.to_ics(now);
@@ -500,6 +543,24 @@ mod tests {
         assert_eq!(again.summary, long.trim());
         assert_eq!(again.due, Some(due));
         assert!(Task::new_local(dir, "x", None, Some("../out"), now).is_err());
+        let remote = Task::new_caldav(
+            "alex@https://dav.example.com/",
+            "https://dav.example.com/cal/chores/",
+            "Chores",
+            "Water the bamboo",
+            None,
+            now,
+        )
+        .expect("new");
+        let Source::CalDav { href, etag, .. } = &remote.source else {
+            panic!("a CalDAV task");
+        };
+        assert_eq!(
+            *href,
+            format!("https://dav.example.com/cal/chores/{}.ics", remote.uid)
+        );
+        assert_eq!(*etag, None);
+        assert_eq!(remote.list.as_deref(), Some("Chores"));
     }
 
     #[test]

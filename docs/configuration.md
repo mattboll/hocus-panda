@@ -131,6 +131,9 @@ name = "Work"
 kind = "caldav"            # or "subscription": an ICS link, read as it is
 url = "https://dav.example.org/calendars/alex/"  # https (or webcal); plain http to this machine only
 user = "alex"              # the password is in the keyring, never here
+hidden_lists = []          # its task lists (calendars that hold VTODO) left out of
+                           #   the column's tasks, by name: ["Groceries"]; all show by default
+                           #   (Settings → Accounts and calendar, a switch per list)
                            # Google calendars come from GNOME Online Accounts
                            #   (sign in to Google there), not from this list
 

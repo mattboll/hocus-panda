@@ -1103,6 +1103,9 @@ pub struct CalendarAccount {
     pub url: String,
     #[serde(default)]
     pub user: String,
+    /// Its task lists left out of the column's tasks, by name (#256).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_lists: Vec<String>,
 }
 
 fn caldav() -> String {
@@ -1113,6 +1116,11 @@ impl CalendarAccount {
     /// What names it, for its secret and its cache.
     pub fn id(&self) -> String {
         format!("{}@{}", self.user, self.url)
+    }
+
+    /// Whether its task list of this name is shown with the tasks.
+    pub fn shows_list(&self, name: &str) -> bool {
+        !self.hidden_lists.iter().any(|h| h.trim() == name.trim())
     }
 
     /// Passwords never travel in the clear: https, or plain http to this

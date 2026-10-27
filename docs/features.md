@@ -211,7 +211,14 @@ nothing at all are options (see
   the caption, and a + there for the field; then, after the other
   sections' details, fewer tasks (two, then one). "todo …" or
   "task: …" in the command field adds one; the control API and MCP list
-  and add them. CalDAV task lists and Google Tasks come next
+  and add them. A CalDAV account's task lists (its calendars that hold
+  VTODO) show with the local ones, each task with its list's name and
+  colour; checking, adding (the launcher lists the lists, the local one
+  first and chosen), editing and deleting write back with their ETags, a
+  change made on the server meanwhile keeping the server's version (a
+  toast says so); offline, the last tasks stay and the section says
+  "offline". Lists can be hidden in the settings' Accounts and calendar.
+  Google Tasks comes next
 - Command field ("Search, act, ask…")
 - Status modules
 - Account: avatar, menu (log out, lock, about, settings, recent apps)
@@ -314,6 +321,7 @@ nothing at all are options (see
 ## 18. Calendar
 
 - Multiple accounts, sync, local cache (CalDAV and ICS subscriptions)
+- CalDAV task lists with the column's tasks, written back on their ETags; each list shown or hidden in the settings
 - Google, through GNOME Online Accounts when installed `[linux]` (its accounts listed read-only in the settings); an OAuth client of our own later
 - Reminders with "Join"
 - Month view with week numbers from the clock, today's agenda
