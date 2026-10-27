@@ -31,7 +31,7 @@ use crate::{
     Clock,
     api::EncodedScreenshot,
     config_watch::ConfigWatch,
-    cursor::Arrows,
+    cursor::CursorImages,
     decoration::{Style, Textures},
     desktops::{Managed, Places},
     handlers::WorkspaceState,
@@ -228,7 +228,10 @@ pub struct State {
     pub snap_preview_buffer: SolidColorBuffer,
     /// What the pointer looks like, as clients set it.
     pub cursor: CursorImageStatus,
-    pub arrows: Arrows,
+    /// The compositor's own shape, shown instead: over a window's frame
+    /// band, and while it moves or resizes one.
+    pub frame_cursor: Option<smithay::input::pointer::CursorIcon>,
+    pub cursor_images: CursorImages,
     /// Opacity set with Super+wheel, per app id.
     pub app_opacity: std::collections::HashMap<String, f32>,
     /// Where windows were, per layout of outputs.
@@ -374,7 +377,8 @@ impl State {
             },
             snap_preview_buffer: SolidColorBuffer::default(),
             cursor: CursorImageStatus::default_named(),
-            arrows: Arrows::default(),
+            frame_cursor: None,
+            cursor_images: CursorImages::default(),
             // Sandboxed clients do not see the list of windows.
             foreign_toplevels: ForeignToplevelListState::new_with_filter::<Self>(
                 dh,

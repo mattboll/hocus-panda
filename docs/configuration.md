@@ -477,8 +477,9 @@ Defaults:
 | Super+Shift+Escape | `stop-agents` |
 | Ctrl+Alt+BackSpace | `quit` |
 
-With the pointer, besides: Alt+drag moves a window and Alt+right drag
-resizes it, Super+drag draws on the screen, `[circle] modifiers` (Super+
+With the pointer, besides: a drag on a window's edge (the 8 px band around
+it, where the cursor shows the resize) resizes it, from its top edge moves
+it; Alt+drag moves a window and Alt+right drag resizes it, Super+drag draws on the screen, `[circle] modifiers` (Super+
 Shift) with a drag circles something to ask about it, and `[radial]`
 (Super and the right button) over a window opens its radial menu: held, a
 flick or a slow move picks an action on release; clicked, it stays for a

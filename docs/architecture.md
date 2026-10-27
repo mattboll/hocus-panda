@@ -517,6 +517,16 @@ sunset to sunrise (NOAA's approximation) where the user says they are.
   ([decision 0009](decisions/0009-ui-rendering-stack.md)).
 - Frame pacing per output, driven by presentation feedback. Animations
   advance on that clock and never schedule work per tick.
+- The cursor (`cursor.rs`) is what the client under the pointer sets, its
+  own surface or a cursor-shape name, except over a window's frame band
+  (the 8 px around it, `grabs.rs`) and while a move or resize lasts: then
+  the compositor's own shape, the resize of that edge or corner or the
+  move (#252), worked out on pointer motion and at a grab's start and end.
+  The compositor draws its shapes itself, sharp at any scale and the same
+  on every machine: the arrow, double arrows for the edges and corners, a
+  four-way arrow for moving; a name close to one of them (`ns-resize`,
+  `col-resize`, `all-scroll`) shows it, any other the arrow, until cursor
+  themes come. Nested, the host's cursor takes the shape's name.
 
 ## Protocols
 
@@ -592,7 +602,8 @@ without unlocking leaves our lock screen: a crash never unlocks.
 
 - UNIX socket next to the Wayland one (`hocus-0.api` beside `hocus-0`),
   JSON lines, versioned, typed in `hocus-api`. Requests (windows, desktops,
-  outputs, focus, input injection, screenshots, scene dump) and an event
+  outputs, focus, input injection, screenshots, scene dump with the
+  pointer and the cursor it shows) and an event
   stream (subscriptions). Commands the compositor starts get its path in
   `HOCUS_SOCKET`.
 - Served on the loop with non-blocking sockets; a client that stops reading

@@ -1,0 +1,33 @@
+description = "The compositor's cursor shapes over a window's frame band, drawn sharp at scale 2: a double arrow on an edge, a diagonal one at a corner, four arrows on the top band"
+outputs = ["1280x800@2"]
+
+# At (120, 100), 400×200.
+[[step]]
+open = { app_id = "doc", size = [400, 200], color = "#33cc66" }
+
+[[step]]
+pointer_move = [524, 200]
+
+[[step]]
+expect_cursor = "e-resize"
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "frame-cursor-shapes.edge.png", cursor = true }
+
+[[step]]
+pointer_move = [512, 304]
+
+[[step]]
+expect_cursor = "se-resize"
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "frame-cursor-shapes.corner.png", cursor = true }
+
+[[step]]
+pointer_move = [320, 96]
+
+[[step]]
+expect_cursor = "move"
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "frame-cursor-shapes.move.png", cursor = true }

@@ -7,7 +7,7 @@ use hocus_core::{WindowId, Zone, snap::magnet};
 use smithay::{
     desktop::Window,
     input::pointer::{
-        AxisFrame, ButtonEvent, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
+        AxisFrame, ButtonEvent, CursorIcon, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
         GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
         GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
         MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
@@ -36,6 +36,9 @@ const SNAP_EDGE: f64 = 8.0;
 const MAGNET: i32 = 12;
 /// The band around a window, outside it, that resizes (or moves, on top).
 pub const FRAME: i32 = 8;
+/// How far along each edge a corner reaches: a corner of the band alone is
+/// too small a target.
+pub const CORNER: i32 = 16;
 /// Windows are never resized below this.
 const MIN_SIZE: (i32, i32) = (120, 80);
 
@@ -156,7 +159,32 @@ pub struct Edges {
     pub bottom: bool,
 }
 
+impl FrameHit {
+    /// The cursor shown over the band, and while the grab it starts lasts.
+    pub fn cursor(self) -> CursorIcon {
+        match self {
+            Self::Move => CursorIcon::Move,
+            Self::Resize(edges) => edges.cursor(),
+        }
+    }
+}
+
 impl Edges {
+    /// The resize cursor of these edges, by the compass point they pull.
+    pub fn cursor(self) -> CursorIcon {
+        match (self.top, self.bottom, self.left, self.right) {
+            (true, _, true, _) => CursorIcon::NwResize,
+            (true, _, _, true) => CursorIcon::NeResize,
+            (_, true, true, _) => CursorIcon::SwResize,
+            (_, true, _, true) => CursorIcon::SeResize,
+            (true, ..) => CursorIcon::NResize,
+            (_, true, ..) => CursorIcon::SResize,
+            (.., true, _) => CursorIcon::WResize,
+            (.., true) => CursorIcon::EResize,
+            _ => CursorIcon::Default,
+        }
+    }
+
     fn from_xdg(edge: xdg_toplevel::ResizeEdge) -> Self {
         use xdg_toplevel::ResizeEdge as E;
         Self {
@@ -272,6 +300,17 @@ impl PointerGrab<State> for MoveGrab {
     }
 
     fn unset(&mut self, state: &mut State) {
+        // Let go over a band, its shape stays, without waiting for the
+        // pointer to move (the window moved with it, at once).
+        let pointer = self
+            .trail
+            .last()
+            .map_or(self.start_data.location, |(_, at)| *at);
+        state.frame_cursor = None;
+        let cursor = (!state.over_layer(pointer))
+            .then(|| state.frame_cursor_at(pointer))
+            .flatten();
+        state.set_frame_cursor(cursor);
         if let Some(id) = model_id(&self.window) {
             state.matrix_let_go(id);
         }
@@ -337,6 +376,8 @@ pub struct ResizeGrab {
     /// The last place and size asked for: the client may not have drawn it
     /// yet.
     last: Rectangle<i32, Logical>,
+    /// Where the pointer last was.
+    pointer: Point<f64, Logical>,
 }
 
 impl PointerGrab<State> for ResizeGrab {
@@ -363,6 +404,7 @@ impl PointerGrab<State> for ResizeGrab {
             rect.size.h = (self.initial.size.h + delta.y).max(MIN_SIZE.1);
         }
         self.last = rect;
+        self.pointer = event.location;
         state.resize_to(self.id, rect, true);
         state.matrix_resizing(self.id, event.location);
     }
@@ -386,6 +428,11 @@ impl PointerGrab<State> for ResizeGrab {
     }
 
     fn unset(&mut self, state: &mut State) {
+        // Let go over the band of the size asked for, its shape stays: the
+        // client may not have drawn that size yet.
+        let cursor = FrameHit::at(self.last, self.pointer).map(FrameHit::cursor);
+        state.frame_cursor = None;
+        state.set_frame_cursor(cursor);
         state.resize_to(self.id, self.last, false);
         state.matrix_resized(self.id);
     }
@@ -429,6 +476,8 @@ impl State {
             self.wobble_held(id, window, start_data.location);
             self.matrix_held(id, initial_location);
         }
+        // The move shape stays on while the window moves, whatever is under.
+        self.set_frame_cursor(Some(FrameHit::Move.cursor()));
         let grab = MoveGrab {
             start_data,
             window: window.clone(),
@@ -469,7 +518,9 @@ impl State {
             button,
             location: pointer.current_location(),
         });
+        self.set_frame_cursor(Some(edges.cursor()));
         let grab = ResizeGrab {
+            pointer: start_data.location,
             start_data,
             id,
             edges,
@@ -499,8 +550,8 @@ impl State {
     }
 
     /// The window whose frame band is under `pos`, and what that band does:
-    /// the top edge moves, the others and the corners resize. Inside a
-    /// window is the client's.
+    /// the top edge moves, the others and the corners resize; a corner
+    /// reaches [`CORNER`] along each edge. Inside a window is the client's.
     pub fn frame_hit(&self, pos: Point<f64, Logical>) -> Option<(Window, FrameHit)> {
         for window in self.space.elements().rev() {
             let Some(mut rect) = self.space.element_geometry(window) else {
@@ -511,30 +562,34 @@ impl State {
                 rect.loc.y -= bar;
                 rect.size.h += bar;
             }
-            let outer = Rectangle::new(
-                rect.loc - Point::from((FRAME, FRAME)),
-                rect.size + Size::from((2 * FRAME, 2 * FRAME)),
-            );
-            if !outer.to_f64().contains(pos) {
+            if !outer(rect).to_f64().contains(pos) {
                 continue;
             }
-            if rect.to_f64().contains(pos) {
-                return None;
-            }
-            let edges = Edges {
-                left: pos.x < f64::from(rect.loc.x),
-                right: pos.x >= f64::from(rect.loc.x + rect.size.w),
-                top: pos.y < f64::from(rect.loc.y),
-                bottom: pos.y >= f64::from(rect.loc.y + rect.size.h),
-            };
-            let hit = if edges.top && !edges.left && !edges.right {
-                FrameHit::Move
-            } else {
-                FrameHit::Resize(edges)
-            };
-            return Some((window.clone(), hit));
+            return FrameHit::at(rect, pos).map(|hit| (window.clone(), hit));
         }
         None
+    }
+
+    /// The cursor the frame band under `pos` shows: what a press there
+    /// would start, none where it would start nothing (a maximized
+    /// window does not resize, a fullscreen one does not move either).
+    pub fn frame_cursor_at(&self, pos: Point<f64, Logical>) -> Option<CursorIcon> {
+        let (window, hit) = self.frame_hit(pos)?;
+        let mode = model_id(&window).and_then(|id| self.windows.get(&id).map(|m| m.mode))?;
+        let starts = match hit {
+            FrameHit::Move => !matches!(mode, WindowMode::Fullscreen { .. }),
+            FrameHit::Resize(_) => matches!(mode, WindowMode::Normal),
+        };
+        starts.then(|| hit.cursor())
+    }
+
+    /// Shows the compositor's own cursor over the client's, or the
+    /// client's again with none.
+    pub fn set_frame_cursor(&mut self, cursor: Option<CursorIcon>) {
+        if self.frame_cursor != cursor {
+            self.frame_cursor = cursor;
+            self.needs_redraw = true;
+        }
     }
 
     /// The edges Alt+right drag resizes: those of the window's quarter under
@@ -553,7 +608,108 @@ impl State {
     }
 }
 
+/// `rect` with its band around it.
+fn outer(rect: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
+    Rectangle::new(
+        rect.loc - Point::from((FRAME, FRAME)),
+        rect.size + Size::from((2 * FRAME, 2 * FRAME)),
+    )
+}
+
+impl FrameHit {
+    /// What the band of `rect` (the window with its bar) does at `pos`, if
+    /// `pos` is on it.
+    fn at(rect: Rectangle<i32, Logical>, pos: Point<f64, Logical>) -> Option<Self> {
+        let on_band = outer(rect).to_f64().contains(pos) && !rect.to_f64().contains(pos);
+        on_band.then(|| Self::of(rect, pos))
+    }
+
+    /// What the band of `rect` (the window with its bar) does at `pos`,
+    /// outside `rect`: along each edge, the stretch within [`CORNER`] of a
+    /// corner takes that corner.
+    fn of(rect: Rectangle<i32, Logical>, pos: Point<f64, Logical>) -> Self {
+        let (left, top) = (f64::from(rect.loc.x), f64::from(rect.loc.y));
+        let (right, bottom) = (
+            f64::from(rect.loc.x + rect.size.w),
+            f64::from(rect.loc.y + rect.size.h),
+        );
+        // A small window's corners share its edges half and half.
+        let across = f64::from(CORNER.min(rect.size.w / 2));
+        let down = f64::from(CORNER.min(rect.size.h / 2));
+        let beside = pos.x < left || pos.x >= right;
+        let level = pos.y < top || pos.y >= bottom;
+        let edges = Edges {
+            left: pos.x < left || (level && pos.x < left + across),
+            right: pos.x >= right || (level && pos.x >= right - across),
+            top: pos.y < top || (beside && pos.y < top + down),
+            bottom: pos.y >= bottom || (beside && pos.y >= bottom - down),
+        };
+        if edges.top && !edges.left && !edges.right {
+            Self::Move
+        } else {
+            Self::Resize(edges)
+        }
+    }
+}
+
 /// The edges of a client's resize request.
 pub fn edges_of(edge: xdg_toplevel::ResizeEdge) -> Edges {
     Edges::from_xdg(edge)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hit(x: f64, y: f64) -> FrameHit {
+        // A window at (100, 100), 400×300: the band runs 8 px around it.
+        FrameHit::of(
+            Rectangle::new((100, 100).into(), (400, 300).into()),
+            (x, y).into(),
+        )
+    }
+
+    fn resize(top: bool, bottom: bool, left: bool, right: bool) -> FrameHit {
+        FrameHit::Resize(Edges {
+            left,
+            right,
+            top,
+            bottom,
+        })
+    }
+
+    #[test]
+    fn the_band_resizes_by_its_edge_and_moves_on_top() {
+        assert_eq!(hit(300.0, 96.0), FrameHit::Move);
+        assert_eq!(hit(504.0, 250.0), resize(false, false, false, true));
+        assert_eq!(hit(96.0, 250.0), resize(false, false, true, false));
+        assert_eq!(hit(300.0, 404.0), resize(false, true, false, false));
+        assert_eq!(hit(504.0, 404.0).cursor(), CursorIcon::SeResize);
+        assert_eq!(hit(300.0, 96.0).cursor(), CursorIcon::Move);
+        assert_eq!(hit(504.0, 250.0).cursor(), CursorIcon::EResize);
+    }
+
+    #[test]
+    fn corners_reach_along_each_edge() {
+        // 12 px from the bottom-right corner, along the bottom band.
+        assert_eq!(hit(488.0, 404.0).cursor(), CursorIcon::SeResize);
+        // 12 px from it along the right band.
+        assert_eq!(hit(504.0, 388.0).cursor(), CursorIcon::SeResize);
+        // On top, the corners resize and the rest moves.
+        assert_eq!(hit(110.0, 96.0).cursor(), CursorIcon::NwResize);
+        assert_eq!(hit(490.0, 96.0).cursor(), CursorIcon::NeResize);
+        assert_eq!(hit(120.0, 96.0), FrameHit::Move);
+        assert_eq!(hit(96.0, 390.0).cursor(), CursorIcon::SwResize);
+        // Past 16 px, the edge alone.
+        assert_eq!(hit(483.0, 404.0).cursor(), CursorIcon::SResize);
+    }
+
+    #[test]
+    fn a_small_window_shares_its_edges_between_its_corners() {
+        let small = Rectangle::new((0, 0).into(), (20, 20).into());
+        let left = FrameHit::of(small, (9.0, 24.0).into());
+        let right = FrameHit::of(small, (10.0, 24.0).into());
+        assert_eq!(left.cursor(), CursorIcon::SwResize);
+        assert_eq!(right.cursor(), CursorIcon::SeResize);
+    }
 }
