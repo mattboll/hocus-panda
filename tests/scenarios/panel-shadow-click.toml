@@ -1,0 +1,76 @@
+description = "Panels cast the boards' shadow over the windows (#281), but it takes no clicks: a click in a toast's shadow, in the room its surface keeps around the card, reaches the window under it, and so does a click in the shadow the column casts out over the windows"
+outputs = ["1280x800"]
+shell = true
+dbus = true
+motion = true
+
+[[step]]
+open = { app_id = "under", size = [900, 600], color = "#3399ff" }
+
+[[step]]
+set_state = { app_id = "under", state = "maximized" }
+
+[[step]]
+open = { app_id = "front", size = [300, 200], color = "#ff6633" }
+
+[[step]]
+expect_focus = "front"
+
+[[step]]
+notify = { app = "Chat", summary = "Lea", body = "The dock mockups are in the thread.", timeout_ms = 0 }
+
+[[step]]
+advance_ms = 400
+
+# The toast's card ends at y 128, over the maximized window; its surface
+# keeps 24 px of room around it, under its shadow.
+[[step]]
+expect_ui = { label = "Lea", inside = [796, 8, 388, 120] }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-shadow-toast.png" }
+
+[[step]]
+pointer_move = [990, 140]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_focus = "under"
+
+[[step]]
+expect_received = { app_id = "under", event = "button 272 pressed" }
+
+# The toast stays: the click was not its.
+[[step]]
+expect_ui = { label = "Lea" }
+
+# Out over the windows, the column casts its shadow on them; a click in it
+# reaches the window too.
+[[step]]
+open = { app_id = "again", size = [300, 200], color = "#ff6633" }
+
+[[step]]
+expect_focus = "again"
+
+[[step]]
+keys = "super+c"
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", inside = [944, 16, 320, 768] }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-shadow-column.png" }
+
+[[step]]
+pointer_move = [920, 600]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_focus = "under"

@@ -249,15 +249,16 @@ impl State {
         dialog.panel.element(renderer, output, Point::default())
     }
 
-    /// Its panel on glass, on the output it shows on.
-    pub(crate) fn auth_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+    /// Its panel on glass and its shadow, on the output it shows on.
+    pub(crate) fn auth_panes(&self, output: &smithay::output::Output) -> crate::scene::Panes {
         match self.authorizer.dialog.as_ref() {
-            Some(dialog) if dialog.output == output.name() => crate::blur::spots(
+            Some(dialog) if dialog.output == output.name() => crate::scene::Panes::of(
                 crate::blur::Surface::Authorize,
                 Default::default(),
                 &dialog.panel.view.glass(),
+                &dialog.panel.view.shadows(),
             ),
-            _ => Vec::new(),
+            _ => crate::scene::Panes::default(),
         }
     }
 

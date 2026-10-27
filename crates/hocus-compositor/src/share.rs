@@ -234,15 +234,16 @@ impl State {
         picking.panel.element(renderer, output, Point::default())
     }
 
-    /// Its panel on glass, on the output it shows on.
-    pub(crate) fn share_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+    /// Its panel on glass and its shadow, on the output it shows on.
+    pub(crate) fn share_panes(&self, output: &smithay::output::Output) -> crate::scene::Panes {
         match self.share.as_ref() {
-            Some(picking) if picking.output == output.name() => crate::blur::spots(
+            Some(picking) if picking.output == output.name() => crate::scene::Panes::of(
                 crate::blur::Surface::Share,
                 Default::default(),
                 &picking.panel.view.glass(),
+                &picking.panel.view.shadows(),
             ),
-            _ => Vec::new(),
+            _ => crate::scene::Panes::default(),
         }
     }
 

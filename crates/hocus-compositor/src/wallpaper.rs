@@ -163,6 +163,8 @@ impl State {
             .with_reduced_motion(a.reduced_motion)
             // See-through panels where what is behind them is blurred.
             .with_glass(self.glass_on())
+            // Panels cast windows' shadow, drawn under them (#281).
+            .with_casting(hocus_ui::Casting::Compositor)
     }
 
     /// After each dispatch: asks for the wallpapers that changed, and gives

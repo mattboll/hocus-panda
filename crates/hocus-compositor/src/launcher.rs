@@ -667,24 +667,25 @@ impl State {
         Some(Point::from((x, y)))
     }
 
-    /// The launcher's card on glass, output-local (#37); the showcase has
-    /// none.
-    pub(crate) fn launcher_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+    /// The launcher's card on glass and its shadow, output-local (#37,
+    /// #281); the showcase has neither.
+    pub(crate) fn launcher_panes(&self, output: &Output) -> crate::scene::Panes {
         let (Some(panel), Some(origin)) = (&self.launcher, self.launcher_origin()) else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         let (Some(area), None, true) = (
             self.space.output_geometry(output),
             &panel.showcase,
             panel.launcher.is_open(),
         ) else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         let origin = origin - area.loc.to_f64();
-        crate::blur::spots(
+        crate::scene::Panes::of(
             crate::blur::Surface::Launcher,
             origin,
             &panel.launcher.glass(),
+            &panel.launcher.shadows(),
         )
     }
 
@@ -897,6 +898,14 @@ impl State {
         panel.set_place(place);
         panel.launcher.prepare();
         panel.draw(now);
+        // Its shadow's texture too (#281).
+        let scale = panel.on.as_ref().map(|(_, _, scale)| *scale);
+        let shadows = panel.launcher.shadows();
+        if let Some(scale) = scale {
+            for caster in crate::decoration::casters(Point::default(), &shadows) {
+                self.textures.prepare_caster(&self.style, &caster, scale);
+            }
+        }
         tracing::debug!("launcher drawn as it opens");
     }
 

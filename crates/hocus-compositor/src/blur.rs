@@ -320,14 +320,14 @@ impl State {
     /// Whether something on `output` may be on glass: a shell surface's
     /// panels, or a window a rule asks it for.
     fn glass_may_show(&self, output: &Output) -> bool {
-        let (popover, column) = self.shell_glass(output);
+        let (popover, column) = self.shell_panes(output);
         self.config.rules.iter().any(|r| r.blur == Some(true))
-            || !popover.is_empty()
-            || !column.is_empty()
-            || !self.panel_glass(output).is_empty()
-            || !self.quick_glass().is_empty()
-            || !self.launcher_glass(output).is_empty()
-            || !self.toasts_glass(output).is_empty()
+            || !popover.glass.is_empty()
+            || !column.glass.is_empty()
+            || !self.panel_panes(output).glass.is_empty()
+            || !self.quick_panes().glass.is_empty()
+            || !self.launcher_panes(output).glass.is_empty()
+            || !self.toasts_panes(output).glass.is_empty()
     }
 
     /// How far the blur reaches, logical pixels.

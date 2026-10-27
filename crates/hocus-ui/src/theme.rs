@@ -504,6 +504,19 @@ pub struct Shadow {
     pub alpha: f32,
 }
 
+/// Who draws the shadows panels cast (#281).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Casting {
+    /// The toolkit, in the panel's own surface: alone in a window of
+    /// another session. Each shadow shrinks to fade out before the
+    /// surface's edge (#261).
+    #[default]
+    InSurface,
+    /// The compositor, under the surface, as deep as windows' shadows:
+    /// trees list them ([`crate::Tree::shadows`]) and draw none.
+    Compositor,
+}
+
 impl Shadow {
     pub fn color(&self) -> Color {
         Color::rgba(0, 0, 0, (self.alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
@@ -520,6 +533,8 @@ pub struct Theme {
     pub effects: Effects,
     /// The shadow of the hour, from [`Theme::with_daylight`].
     pub shadow: Shadow,
+    /// Who draws panels' shadows.
+    pub casting: Casting,
     pub radii: Radii,
     pub spacing: Spacing,
     pub text: TypeScale,
@@ -561,6 +576,7 @@ impl Theme {
                 blur: 0.0,
                 alpha: 0.0,
             },
+            casting: Casting::InSurface,
             radii: Radii {
                 small: 8.0,
                 medium: 12.0,
@@ -639,6 +655,13 @@ impl Theme {
         c.window_border = c.window_border.mix(c.text, 0.5);
         c.surface_hover = c.surface_hover.mix(c.text, 0.06);
         self.focus_ring = 3.0;
+        self
+    }
+
+    /// Panels' shadows drawn by `casting`: the compositor draws them under
+    /// its panels.
+    pub fn with_casting(mut self, casting: Casting) -> Self {
+        self.casting = casting;
         self
     }
 

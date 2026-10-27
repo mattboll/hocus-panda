@@ -592,24 +592,24 @@ impl State {
         element.map(SceneElement::Frame).into_iter().collect()
     }
 
-    /// The strip's or the bar's panel on glass, output-local.
-    pub(crate) fn panel_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+    /// The strip's or the bar's panel on glass and its shadows, output-local.
+    pub(crate) fn panel_panes(&self, output: &Output) -> crate::scene::Panes {
         let Some(shell) = &self.shell else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         let Some((name, area, _)) = &shell.on else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         if *name != output.name() {
-            return Vec::new();
+            return crate::scene::Panes::default();
         }
-        let (rect, glass) = match &shell.panel.bar {
-            Some(Bar::Strip(p)) => (strip_rect(*area), p.view.glass()),
-            Some(Bar::Top(p)) => (top_rect(*area), p.view.glass()),
-            _ => return Vec::new(),
+        let (rect, glass, shadows) = match &shell.panel.bar {
+            Some(Bar::Strip(p)) => (strip_rect(*area), p.view.glass(), p.view.shadows()),
+            Some(Bar::Top(p)) => (top_rect(*area), p.view.glass(), p.view.shadows()),
+            _ => return crate::scene::Panes::default(),
         };
         let origin = (rect.loc - area.loc).to_f64();
-        crate::blur::spots(crate::blur::Surface::Bar, origin, &glass)
+        crate::scene::Panes::of(crate::blur::Surface::Bar, origin, &glass, &shadows)
     }
 
     /// The strip's or the bar's interface for the control API.

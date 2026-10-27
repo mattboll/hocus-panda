@@ -385,15 +385,16 @@ impl State {
         card.panel.element(renderer, output, Point::default())
     }
 
-    /// Its panel on glass, on the output it shows on.
-    pub(crate) fn leave_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+    /// Its panel on glass and its shadow, on the output it shows on.
+    pub(crate) fn leave_panes(&self, output: &smithay::output::Output) -> crate::scene::Panes {
         match self.leaver.card.as_ref() {
-            Some(card) if card.output == output.name() => crate::blur::spots(
+            Some(card) if card.output == output.name() => crate::scene::Panes::of(
                 crate::blur::Surface::Leave,
                 Default::default(),
                 &card.panel.view.glass(),
+                &card.panel.view.shadows(),
             ),
-            _ => Vec::new(),
+            _ => crate::scene::Panes::default(),
         }
     }
 

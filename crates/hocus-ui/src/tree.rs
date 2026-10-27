@@ -15,7 +15,7 @@ use crate::{
     geom::{Insets, PixelRect, Point, Rect, Size},
     motion::{Animated, Curve, Spring},
     text::{Fonts, TextBox},
-    theme::{Color, Paint, Shadow, TextStyle, Theme},
+    theme::{Casting, Color, Paint, Shadow, TextStyle, Theme},
 };
 
 /// A node of a tree; stale ids (of removed nodes) are refused, not reused.
@@ -107,6 +107,19 @@ pub struct Glass {
     pub radius: f32,
     /// Its own opacity and its parents', 0 to 1.
     pub opacity: f32,
+}
+
+/// A box's shadow for the compositor to draw under the surface, as drawn
+/// now (#281): the theme's [`Casting::Compositor`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Cast {
+    /// Its box, offsets included, logical pixels from the surface's corner.
+    pub rect: Rect,
+    pub radius: f32,
+    /// Its own opacity and its parents', 0 to 1.
+    pub opacity: f32,
+    /// The shadow of the hour in the tree's theme.
+    pub shadow: Shadow,
 }
 
 /// How a box looks; children draw on top.
@@ -1088,6 +1101,43 @@ impl Tree {
         }
     }
 
+    /// The boxes casting a shadow while the compositor draws them, front
+    /// last, as drawn at the last update.
+    pub fn shadows(&self) -> Vec<Cast> {
+        let mut out = Vec::new();
+        if self.theme.casting == Casting::Compositor {
+            self.shadows_of(self.root, (0.0, 0.0), 1.0, &mut out);
+        }
+        out
+    }
+
+    fn shadows_of(&self, id: NodeId, offset: (f32, f32), opacity: f32, out: &mut Vec<Cast>) {
+        let Some(node) = self.node(id).filter(|n| !n.hidden) else {
+            return;
+        };
+        let offset = (
+            offset.0 + node.offset_x.value(self.now),
+            offset.1 + node.offset_y.value(self.now),
+        );
+        let opacity = opacity * node.opacity.value(self.now);
+        if opacity <= 0.0 {
+            return;
+        }
+        if let Kind::Box(look) = &node.kind
+            && look.shadow > 0.0
+        {
+            out.push(Cast {
+                rect: node.rect.translate(offset.0, offset.1),
+                radius: look.radius,
+                opacity: opacity.min(1.0),
+                shadow: self.theme.shadow,
+            });
+        }
+        for child in &node.children {
+            self.shadows_of(*child, offset, opacity, out);
+        }
+    }
+
     pub fn focused(&self) -> Option<NodeId> {
         self.focused
     }
@@ -1349,6 +1399,7 @@ impl Tree {
         let mut r = node.rect.translate(offset.0, offset.1);
         if let Kind::Box(look) = &node.kind
             && look.shadow > 0.0
+            && self.theme.casting == Casting::InSurface
         {
             let s = fit_shadow(self.theme.shadow, node.rect, self.size);
             r = r.union(&r.translate(s.dx, s.dy).grow(s.blur * SHADOW_REACH));
@@ -1472,7 +1523,9 @@ impl Tree {
         }
         let rect = node.rect;
         let (style, hovered, pressed) = (node.style, node.hovered, node.pressed);
-        let shadow = fit_shadow(theme.shadow, rect, self.size);
+        // The compositor draws it otherwise, under the surface (#281).
+        let shadow = (theme.casting == Casting::InSurface)
+            .then(|| fit_shadow(theme.shadow, rect, self.size));
         if touches {
             let Tree { nodes, fonts, .. } = self;
             if let Some(node) = nodes
@@ -1900,7 +1953,7 @@ fn fit_shadow(shadow: Shadow, rect: Rect, bounds: Size) -> Shadow {
 fn draw_kind(
     canvas: &mut Canvas,
     kind: &mut Kind,
-    (rect, shadow, region): (Rect, Shadow, Rect),
+    (rect, shadow, region): (Rect, Option<Shadow>, Rect),
     theme: &Theme,
     fonts: &mut Fonts,
     scale: f32,
@@ -1937,8 +1990,7 @@ fn draw_kind(
                 && region.right() <= inside.right()
                 && region.bottom() <= inside.bottom();
             // Panels cast the shadow of the hour, as windows do (#161).
-            if look.shadow > 0.0 && !unseen {
-                let s = shadow;
+            if let Some(s) = shadow.filter(|_| look.shadow > 0.0 && !unseen) {
                 let under = rect.translate(s.dx, s.dy);
                 let color = s.color();
                 if glass {

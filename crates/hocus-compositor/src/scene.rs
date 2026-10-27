@@ -23,10 +23,11 @@ use smithay::{
 
 use crate::{
     State,
-    blur::{Pane, Spot},
+    blur::{Pane, Spot, Surface, spots},
     cursor::CursorElement,
     decoration::{
-        Rounded, ShadowPiece, hairline_elements, ring_elements, ring_elements_in, shadow_elements,
+        Caster, Rounded, ShadowPiece, caster_elements, casters, hairline_elements, ring_elements,
+        ring_elements_in, shadow_elements,
     },
     desktops::{model_id, rect},
     handlers::layer_shell::LayerKind as Layer,
@@ -68,6 +69,30 @@ pub(crate) enum Build {
     /// To draw what is behind one pane of glass: what is in front of it is
     /// left out; `found` once it is.
     Behind { pane: Pane, found: bool },
+}
+
+/// What a shell surface's panels need behind them: the blur of what is
+/// behind each pane of glass (#37), and the shadows they cast (#281),
+/// output-local.
+#[derive(Debug, Default)]
+pub(crate) struct Panes {
+    pub glass: Vec<Spot>,
+    pub shadows: Vec<Caster>,
+}
+
+impl Panes {
+    /// The panes of a surface whose corner is at `origin` on the output.
+    pub(crate) fn of(
+        surface: Surface,
+        origin: Point<f64, Logical>,
+        glass: &[hocus_ui::Glass],
+        shadows: &[hocus_ui::Cast],
+    ) -> Self {
+        Self {
+            glass: spots(surface, origin, glass),
+            shadows: casters(origin, shadows),
+        }
+    }
 }
 
 render_elements! {
@@ -151,9 +176,8 @@ impl State {
         self.scene_build(renderer, output, cursor, &mut Build::Draw)
     }
 
-    /// The blur behind each of `spots` (#37), as `build` asks: listed,
-    /// drawn, or where what is behind a pane starts.
-    /// The column and its popover, front first, each on its glass.
+    /// The column and its popover, front first, each on its glass with
+    /// its shadows.
     fn column_elements<R>(
         &self,
         elements: &mut Vec<SceneElement<R>>,
@@ -165,10 +189,10 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let (popover, fading, column) = self.shell_elements(renderer, output);
-        let (popover_glass, column_glass) = self.shell_glass(output);
+        let (popover_panes, column_panes) = self.shell_panes(output);
         if let Some(popover) = popover {
             elements.push(SceneElement::Frame(popover));
-            self.glass(elements, renderer, output, popover_glass, build);
+            self.panes(elements, renderer, output, popover_panes, build);
         }
         if let Some(fading) = fading {
             elements.push(SceneElement::Frame(fading));
@@ -177,10 +201,50 @@ impl State {
             // Each agent's window, live, in its slot of the journal (#43).
             elements.extend(self.seat_slot_elements(renderer, output));
             elements.push(SceneElement::Frame(column));
-            self.glass(elements, renderer, output, column_glass, build);
+            self.panes(elements, renderer, output, column_panes, build);
         }
     }
 
+    /// What a shell surface's panels need behind them, the surface just
+    /// pushed: their shadows, then the blur of what is behind them. Their
+    /// own shadows are in front of their panes, so that the blur behind
+    /// them leaves them out, as when the toolkit drew them.
+    fn panes<R>(
+        &self,
+        elements: &mut Vec<SceneElement<R>>,
+        renderer: &mut R,
+        output: &Output,
+        panes: Panes,
+        build: &mut Build,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        elements.extend(self.cast_elements(renderer, output, &panes.shadows));
+        self.glass(elements, renderer, output, panes.glass, build);
+    }
+
+    /// The shadows of shell panels (#281), output-local: as windows' are.
+    pub(crate) fn cast_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        casters: &[Caster],
+    ) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let scale = output.current_scale().fractional_scale();
+        casters
+            .iter()
+            .flat_map(|c| caster_elements(renderer, &self.textures, &self.style, c, scale, 1.0))
+            .map(SceneElement::Shadow)
+            .collect()
+    }
+
+    /// The blur behind each of `spots` (#37), as `build` asks: listed,
+    /// drawn, or where what is behind a pane starts.
     fn glass<R>(
         &self,
         elements: &mut Vec<SceneElement<R>>,
@@ -233,11 +297,7 @@ impl State {
         }
         // MCP agents' pointers, rings and cards (#43), over everything
         // but the user's own pointer.
-        elements.extend(
-            self.seat_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        elements.extend(self.seat_elements(renderer, output));
         // Drawing on the screen (#86), over everything.
         elements.extend(self.ink_elements(renderer, output));
         // The Matrix theme's scanlines and vignette over a fullscreen
@@ -283,50 +343,46 @@ impl State {
         // What to share, asked by a portal.
         if let Some(panel) = self.share_elements(renderer, output) {
             elements.push(SceneElement::Frame(panel));
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.share_glass(output),
+                self.share_panes(output),
                 build,
             );
         }
         // The system's password dialog, over everything but the cursor.
         if let Some(panel) = self.auth_elements(renderer, output) {
             elements.push(SceneElement::Frame(panel));
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.auth_glass(output),
+                self.auth_panes(output),
                 build,
             );
         }
         // Leaving: the countdown, over everything else.
         if let Some(panel) = self.leave_elements(renderer, output) {
             elements.push(SceneElement::Frame(panel));
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.leave_glass(output),
+                self.leave_panes(output),
                 build,
             );
         }
         // The window menu at the pointer (#40).
-        elements.extend(
-            self.radial_elements(renderer, output)
-                .into_iter()
-                .map(SceneElement::Frame),
-        );
+        elements.extend(self.radial_elements(renderer, output));
         // A circled area, its menu and the answer (#46).
         if let Some(panel) = self.circle_elements(renderer, output) {
             elements.push(SceneElement::Frame(panel));
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.circle_glass(output),
+                self.circle_panes(output),
                 build,
             );
         }
@@ -343,11 +399,11 @@ impl State {
         // The card asking what to put back.
         if let Some(panel) = self.card_elements(renderer, output) {
             elements.push(SceneElement::Frame(panel));
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.card_glass(output),
+                self.card_panes(output),
                 build,
             );
         }
@@ -411,22 +467,22 @@ impl State {
         let alt_tab = self.alt_tab_elements(renderer, output);
         if !alt_tab.is_empty() {
             elements.extend(alt_tab);
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.alt_tab_glass(output),
+                self.alt_tab_panes(output),
                 build,
             );
         }
         let launcher = self.launcher_elements(renderer, output);
         if !launcher.is_empty() {
             elements.extend(launcher.into_iter().map(SceneElement::Frame));
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.launcher_glass(output),
+                self.launcher_panes(output),
                 build,
             );
         }
@@ -436,7 +492,7 @@ impl State {
         let (sheet, dim) = self.quick_elements(renderer, output);
         if !sheet.is_empty() {
             elements.extend(sheet.into_iter().map(SceneElement::Frame));
-            self.glass(&mut elements, renderer, output, self.quick_glass(), build);
+            self.panes(&mut elements, renderer, output, self.quick_panes(), build);
         }
         elements.extend(dim.map(SceneElement::Solid));
         let over_toasts = self.panel_out_drawn();
@@ -447,11 +503,11 @@ impl State {
         let toasts = self.toast_elements(renderer, output);
         if !toasts.is_empty() {
             elements.extend(toasts.into_iter().map(SceneElement::Frame));
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.toasts_glass(output),
+                self.toasts_panes(output),
                 build,
             );
         }
@@ -464,11 +520,11 @@ impl State {
         let bar = self.panel_elements(renderer, output);
         if !bar.is_empty() {
             elements.extend(bar);
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.panel_glass(output),
+                self.panel_panes(output),
                 build,
             );
         }
@@ -476,22 +532,22 @@ impl State {
         let switcher = self.switcher_elements(renderer, output);
         if !switcher.is_empty() {
             elements.extend(switcher);
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.switcher_glass(output),
+                self.switcher_panes(output),
                 build,
             );
         }
         let dock = self.dock_elements(renderer, output);
         if !dock.is_empty() {
             elements.extend(dock);
-            self.glass(
+            self.panes(
                 &mut elements,
                 renderer,
                 output,
-                self.dock_glass(output),
+                self.dock_panes(output),
                 build,
             );
         }

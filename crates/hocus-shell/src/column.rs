@@ -29,6 +29,9 @@ pub const MARGIN: f32 = 16.0;
 const CARD_PADDING: f32 = 16.0;
 /// Between a popover and the column.
 const POPOVER_GAP: f32 = 12.0;
+/// The corners of the card everything sits in.
+const CARD_RADIUS: f32 = 24.0;
+
 /// Room around a popover's card for its shadow.
 const SHADOW_ROOM: f32 = 24.0;
 const ICON_STROKE: f32 = 2.1;
@@ -1576,6 +1579,12 @@ impl Column {
         self.tree.glass()
     }
 
+    /// Its panels' shadows, from its corner, for the compositor to draw
+    /// under it (#281).
+    pub fn shadows(&self) -> Vec<hocus_ui::Cast> {
+        self.tree.shadows()
+    }
+
     /// The popover's see-through panels, from the column's corner.
     pub fn popover_glass(&self) -> Vec<hocus_ui::Glass> {
         self.popover.as_ref().map_or_else(Vec::new, |p| {
@@ -1584,6 +1593,30 @@ impl Column {
                 g.rect = g.rect.translate(p.at.x, p.at.y);
             }
             glass
+        })
+    }
+
+    /// The popover's shadows, from the column's corner.
+    pub fn popover_shadows(&self) -> Vec<hocus_ui::Cast> {
+        self.popover.as_ref().map_or_else(Vec::new, |p| {
+            let mut shadows = p.tree.shadows();
+            for s in &mut shadows {
+                s.rect = s.rect.translate(p.at.x, p.at.y);
+            }
+            shadows
+        })
+    }
+
+    /// The shadow of the card everything sits in, from its corner: the
+    /// column casts it out over the windows (#263), not at rest beside
+    /// them.
+    pub fn out_shadow(&self) -> Option<hocus_ui::Cast> {
+        let theme = self.tree.theme();
+        (theme.casting == hocus_ui::Casting::Compositor).then(|| hocus_ui::Cast {
+            rect: self.tree.rect(self.nodes.card).unwrap_or_default(),
+            radius: CARD_RADIUS,
+            opacity: 1.0,
+            shadow: theme.shadow,
         })
     }
 
@@ -1897,7 +1930,7 @@ fn build(tree: &mut Tree, theme: &Theme, lang: Lang) -> Nodes {
             },
             Kind::Box(Look {
                 background: Some(Paint::Glass),
-                radius: 24.0,
+                radius: CARD_RADIUS,
                 border: Some(Paint::Border),
                 shadow: 0.0,
             }),

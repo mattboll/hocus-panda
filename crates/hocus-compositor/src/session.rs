@@ -902,15 +902,16 @@ impl State {
             .element(renderer, output, smithay::utils::Point::default())
     }
 
-    /// Its panel on glass, on the output it shows on.
-    pub(crate) fn card_glass(&self, output: &smithay::output::Output) -> Vec<crate::blur::Spot> {
+    /// Its panel on glass and its shadow, on the output it shows on.
+    pub(crate) fn card_panes(&self, output: &smithay::output::Output) -> crate::scene::Panes {
         match self.sessions.card.as_ref() {
-            Some(card) if card.output == output.name() => crate::blur::spots(
+            Some(card) if card.output == output.name() => crate::scene::Panes::of(
                 crate::blur::Surface::Welcome,
                 Default::default(),
                 &card.panel.view.glass(),
+                &card.panel.view.shadows(),
             ),
-            _ => Vec::new(),
+            _ => crate::scene::Panes::default(),
         }
     }
 

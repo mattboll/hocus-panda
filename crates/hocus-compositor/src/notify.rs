@@ -629,16 +629,33 @@ impl State {
         Some(Point::from((f64::from(x), f64::from(y))))
     }
 
-    /// The toasts on glass, output-local (#37).
-    pub(crate) fn toasts_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+    /// The toasts on glass and their shadows, output-local (#37, #281).
+    pub(crate) fn toasts_panes(&self, output: &Output) -> crate::scene::Panes {
         let (Some(panel), Some(origin)) = (&self.toasts, self.toasts_origin()) else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         let Some(area) = self.space.output_geometry(output) else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         let origin = origin - area.loc.to_f64();
-        crate::blur::spots(crate::blur::Surface::Toasts, origin, &panel.toasts.glass())
+        let mut panes = crate::scene::Panes::of(
+            crate::blur::Surface::Toasts,
+            origin,
+            &panel.toasts.glass(),
+            &panel.toasts.shadows(),
+        );
+        // In the Matrix theme, a card being typed in casts the shadow of
+        // what is typed of it, as it showed in its surface.
+        for hidden in self.matrix_toasts_hidden() {
+            let hidden = Rectangle::new(hidden.loc + origin, hidden.size);
+            panes.shadows.retain_mut(|c| {
+                if c.rect.overlaps(hidden) {
+                    c.rect.size.w = c.rect.size.w.min(hidden.loc.x - c.rect.loc.x);
+                }
+                c.rect.size.w > 0.0
+            });
+        }
+        panes
     }
 
     fn toasts_local(&self, location: Point<f64, Logical>) -> Option<UiPoint> {

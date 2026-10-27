@@ -433,19 +433,20 @@ impl State {
     }
 
     /// On its screen: the dock, or the hint where it hides.
-    /// The dock's panel on glass, while it shows on `output`.
-    pub(crate) fn dock_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+    /// The dock's panel on glass and its shadow, while it shows on `output`.
+    pub(crate) fn dock_panes(&self, output: &Output) -> crate::scene::Panes {
         match &self.dock.panel {
             Some((name, place, panel))
                 if *name == output.name() && self.dock.shown.is_some() && !self.locked() =>
             {
-                crate::blur::spots(
+                crate::scene::Panes::of(
                     crate::blur::Surface::Dock,
                     place.to_f64(),
                     &panel.view.glass(),
+                    &panel.view.shadows(),
                 )
             }
-            _ => Vec::new(),
+            _ => crate::scene::Panes::default(),
         }
     }
 

@@ -162,6 +162,33 @@ What changed:
   inside of the box is drawn again (a result typed, a tile chosen): the
   box would cover it whole. The pixels are the same.
 
+## Panels' shadows, #281
+
+Panels cast windows' shadow, drawn by the compositor under their surface
+from the textures windows' shadows use (a Gaussian drawn once per scale,
+corner radius and light, and per size for a panel too short for the shared
+one), no longer by vello_cpu in the panel's own buffer. A panel drawn whole
+draws no blurred rectangle any more; the compositor draws a few more pieces
+on each frame it shows. The shadow's texture is written in place: 0.5 ms
+for the launcher's at scale 2 instead of 4.8 ms, for windows' too, and the
+closed launcher card's is made as the card is drawn ahead of time (#242).
+The same machine, loaded (other builds running), the shadows drawn in the
+surface or by the compositor alternately, release, twelve openings each,
+three runs of each, the least of each run:
+
+| Measure | In the surface | By the compositor |
+|---|---|---|
+| The launcher's card drawn whole by the toolkit (scale 2, 60 applications) | 9.9–13.8 ms | 2.7–3.7 ms |
+| Opening the launcher, to its first frame (pixman) | 5.7–5.9 ms | 7.0–7.7 ms |
+| Opening it again right after a search | 19.6–23.3 ms | 13.9–14.5 ms |
+
+The first opening, drawn ahead of time, pays for the pieces pixman
+composites on its first frame (a GPU stretches and mirrors them for
+nothing); every other opening, where the card is drawn on the loop, is
+drawn without its shadow. The counted budgets are unchanged: the twenty
+windows' scenario holds 10.02 MB as before (no panel casts a shadow
+there), its allocations 194,748 instead of 194,755.
+
 ## Reproducing
 
 ```sh
@@ -214,11 +241,10 @@ tenth Mesa's software rasterizer.
 - **The dock's picture is made again for each new app**, buffers
   included: most of the 376 MB asked for while twenty windows open.
 - **Opening the launcher where it was not drawn as it opens draws its
-  whole card on the loop**: within a second of closing it (17–20 ms to its
-  first frame), on another screen than the pointer was on, or in another
-  mode (the history, emoji, the palette, the notes). Most of it is the
-  card's shadow, which only shows around the card; a shadow drawn once
-  and kept, or one drawn only where it shows, would make it a fraction.
+  whole card on the loop**: within a second of closing it, on another
+  screen than the pointer was on, or in another mode (the history, emoji,
+  the palette, the notes). Its shadow is no longer drawn with it (#281),
+  about two thirds of it; the rest is the card itself.
 - **Night light ticks every 30 s while on**, and asks for a redraw each
   time; the annotation window still damages all of itself on each draw.
 - **smithay's `Output::name()` copies the name** at every call, and

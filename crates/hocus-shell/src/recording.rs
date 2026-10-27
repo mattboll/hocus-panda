@@ -257,6 +257,12 @@ impl RecordBar {
     pub fn access(&self) -> AccessNode {
         self.tree.access()
     }
+
+    /// Its shadows, from its corner, for the compositor to draw under it
+    /// (#281).
+    pub fn shadows(&self) -> Vec<hocus_ui::Cast> {
+        self.tree.shadows()
+    }
 }
 
 /// A picture drawn for the video only: premultiplied RGBA.
@@ -272,6 +278,8 @@ pub struct Overlay {
 pub fn key_caps(theme: &Theme, keys: &[String], scale: f32) -> Overlay {
     // Room for the longest combinations; the picture is cut to the caps.
     let room = Size::new(1400.0, 90.0);
+    // In the video only: no compositor draws their shadows.
+    let theme = &theme.clone().with_casting(hocus_ui::Casting::InSurface);
     let mut tree = Tree::new(theme.clone(), room, scale);
     let root = tree.root();
     tree.set_look(root, Look::default());

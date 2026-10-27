@@ -1,0 +1,92 @@
+description = "The launcher casts the boards' shadow over the windows at every hour (#281), as windows do: straight down in the afternoon, from one side in the morning, from the other in the evening, darker at night; lighter in the light theme"
+outputs = ["1280x800"]
+shell = true
+timedated = "UTC"
+
+[[step]]
+open = { app_id = "under", size = [1000, 600], color = "#3399ff" }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+keys = "super+57"
+
+[[step]]
+advance_ms = 400
+
+# 14:37 in UTC: the afternoon's light, 36 px down, 70 px blurred.
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-shadows-afternoon.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "light"
+"""
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-shadows-light.png" }
+
+[[step]]
+config = """
+[appearance]
+theme = "dark"
+"""
+
+# 10:37 in New York: the morning sun, low on one side.
+[[step]]
+timedated_zone = "America/New_York"
+
+# Once the shell follows the zone, and that hour's wallpaper is drawn.
+[[step]]
+expect_ui = { label = "Time: 10:37" }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-shadows-morning.png" }
+
+# 18:37 in Dubai: the evening sun, low on the other.
+[[step]]
+timedated_zone = "Asia/Dubai"
+
+# Once the shell follows the zone, and that hour's wallpaper is drawn.
+[[step]]
+expect_ui = { label = "Time: 18:37" }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-shadows-evening.png" }
+
+# 23:37 in Tokyo: the night's lamp, darker.
+[[step]]
+timedated_zone = "Asia/Tokyo"
+
+# Once the shell follows the zone, and that hour's wallpaper is drawn.
+[[step]]
+expect_ui = { label = "Time: 23:37" }
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-shadows-night.png" }

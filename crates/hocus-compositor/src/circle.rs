@@ -514,15 +514,18 @@ impl State {
         c.panel.element(renderer, output, Point::default())
     }
 
-    /// Its menu and card on glass.
-    pub(crate) fn circle_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+    /// Its menu and card on glass, and their shadows.
+    pub(crate) fn circle_panes(&self, output: &Output) -> crate::scene::Panes {
         match self.circles.circle.as_ref() {
-            Some(c) if c.output == output.name() && !self.circles.hidden => crate::blur::spots(
-                crate::blur::Surface::Circle,
-                Default::default(),
-                &c.panel.view.glass(),
-            ),
-            _ => Vec::new(),
+            Some(c) if c.output == output.name() && !self.circles.hidden => {
+                crate::scene::Panes::of(
+                    crate::blur::Surface::Circle,
+                    Default::default(),
+                    &c.panel.view.glass(),
+                    &c.panel.view.shadows(),
+                )
+            }
+            _ => crate::scene::Panes::default(),
         }
     }
 

@@ -524,19 +524,20 @@ impl State {
         elements
     }
 
-    /// The switcher's panel on glass, under its previews.
-    pub(crate) fn alt_tab_glass(&self, output: &Output) -> Vec<crate::blur::Spot> {
+    /// The switcher's panel on glass and its shadow, under its previews.
+    pub(crate) fn alt_tab_panes(&self, output: &Output) -> crate::scene::Panes {
         let Some(open) = &self.alt_tab.open else {
-            return Vec::new();
+            return crate::scene::Panes::default();
         };
         open.views
             .iter()
             .find(|v| v.output == output.name())
-            .map_or_else(Vec::new, |view| {
-                crate::blur::spots(
+            .map_or_else(crate::scene::Panes::default, |view| {
+                crate::scene::Panes::of(
                     crate::blur::Surface::WindowSwitcher,
                     view.place.to_f64(),
                     &view.panel.view.glass(),
+                    &view.panel.view.shadows(),
                 )
             })
     }

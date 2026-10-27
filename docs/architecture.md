@@ -231,6 +231,16 @@ output, so that scenarios check a still scene is never blurred again.
 Without shaders (pixman), with transparency off, high contrast or the
 power saver, the theme has no glass and the panels are solid. Windows'
 shadows take their darkness from the theme.
+Panels cast the same shadow as windows (#281), drawn by the compositor
+under their surfaces rather than in them: the compositor's theme says so
+(`Casting::Compositor`), a tree then draws none and lists its boxes that
+cast one (`Tree::shadows`, as it lists its glass), and the scene draws
+each with the textures of windows' shadows (`decoration::caster_elements`:
+a Gaussian drawn once per scale, corner radius and light, kept), between
+the panel and its glass. Panel surfaces keep their size, place and input
+region: the shadow reaches past them, takes no clicks, and costs the
+toolkit nothing to draw. Alone in a window, the toolkit draws them in the
+surface, smaller where it has no room (`Casting::InSurface`).
 The Matrix theme's refinements on the GPU (#169, `crt`) are painted the
 same way, before a GLES backend draws an output: a closing window's
 picture is flattened once into a texture, and on each frame of its glitch
