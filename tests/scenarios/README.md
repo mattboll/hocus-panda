@@ -93,7 +93,7 @@ Steps, one per `[[step]]` table:
 | `open_layer = { namespace, layer, anchor?, size = [w, h], exclusive_zone?, keyboard?, color }` | starts a layer-shell client (`background`, `bottom`, `top`, `overlay`; anchors among `top`, `bottom`, `left`, `right`; 0 for a length anchored at both ends; keyboard `none`, `exclusive`, `on_demand`), waits until it is shown; `expect_received` reads it by its namespace |
 | `close_layer = "namespace"` | closes that layer client |
 | `session_file = """…"""` | writes the saved session file (TOML, `[[window]]` with `app_id`, `title`, `command`, `output`, `desktop`, `geometry`, `state`, `pinned`); `{test_client}` is the test client program (`--app-id`, `--size`, `--color`, `--title`) |
-| `save_session = true`, `offer_session = true` | saves the session now; offers to put the saved one back, as at start |
+| `save_session = true`, `offer_session = true` | saves the session now, waiting for the file to be written; reads the saved one again and offers to put it back, as at start, waiting for the read |
 | `expect_session_file = { contains?, lacks? }` | the saved session file holds these strings, or lacks them |
 | `lock_client = "#rrggbb"` | a lock client locks the session (ext-session-lock) with a surface of that colour on every output, waits until it is locked |
 | `unlock_client = true`, `crash_lock_client = true` | the lock client unlocks, or goes away without unlocking as a crash would |

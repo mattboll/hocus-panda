@@ -191,9 +191,11 @@ pub enum Request {
     WindowTree {
         window: u64,
     },
-    /// Saves the session now.
+    /// Saves the session now, on the compositor's worker: the reply comes
+    /// before the file is written (#277).
     SaveSession,
-    /// Offers to put the saved session back, as at start.
+    /// Reads the saved session again and offers to put it back, as at
+    /// start, once read (off the loop, #277).
     OfferSession,
     /// Opens the settings app on a page (`hocus settings keyboard`), or
     /// brings it forward.
