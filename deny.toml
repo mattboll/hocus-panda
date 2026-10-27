@@ -1,0 +1,47 @@
+# Licenses and advisories, checked in CI (see docs/decisions/0002).
+
+# The systems the session runs on: what other targets pull (wasm's bundled
+# certificates) is not shipped.
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-freebsd",
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "OFL-1.1",
+]
+confidence-threshold = 0.9
+# The list is a policy, not an inventory.
+unused-allowed-license = "allow"
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # cgmath is unmaintained; smithay 0.7 depends on it. Revisit on the next smithay release.
+    { id = "RUSTSEC-2026-0196", reason = "transitive through smithay 0.7" },
+    # paste is unmaintained; a compile-time macro of pixman, which smithay's
+    # software renderer uses. Revisit on the next pixman release.
+    { id = "RUSTSEC-2024-0436", reason = "proc-macro, transitive through pixman" },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
