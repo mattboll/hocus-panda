@@ -13,6 +13,8 @@ use zbus::{
     object_server::SignalEmitter,
 };
 
+use crate::gate::Gate;
+
 const MENU_PATH: &str = "/MenuBar";
 
 /// What it shows and how it answers.
@@ -26,6 +28,8 @@ struct Shown {
     menu: Vec<String>,
     /// How long it takes to answer anything.
     delay: Duration,
+    /// What it holds its answers back on, until it opens.
+    gate: Option<Gate>,
 }
 
 /// What it was asked, in order: `token` (an activation token given),
@@ -45,6 +49,9 @@ impl Item {
             .map(|s| s.clone())
             .unwrap_or_else(|e| e.into_inner().clone());
         std::thread::sleep(shown.delay);
+        if let Some(gate) = &shown.gate {
+            gate.wait();
+        }
         shown
     }
 }
@@ -168,6 +175,9 @@ impl Menu {
             .map(|s| s.clone())
             .unwrap_or_else(|e| e.into_inner().clone());
         std::thread::sleep(shown.delay);
+        if let Some(gate) = &shown.gate {
+            gate.wait();
+        }
         let value = |v: Value<'_>| {
             OwnedValue::try_from(v).map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
         };
@@ -231,12 +241,34 @@ impl TrayApp {
         menu: &[String],
         delay: Duration,
     ) -> anyhow::Result<Self> {
+        Self::start_with(address, title, color, menu, delay, None)
+    }
+
+    /// As [`TrayApp::start`], answering nothing until `gate` opens.
+    pub fn start_held(
+        address: &str,
+        title: &str,
+        color: [u8; 3],
+        gate: Gate,
+    ) -> anyhow::Result<Self> {
+        Self::start_with(address, title, color, &[], Duration::ZERO, Some(gate))
+    }
+
+    fn start_with(
+        address: &str,
+        title: &str,
+        color: [u8; 3],
+        menu: &[String],
+        delay: Duration,
+        gate: Option<Gate>,
+    ) -> anyhow::Result<Self> {
         let shown = Arc::new(Mutex::new(Shown {
             title: title.to_owned(),
             attention: false,
             color: [255, color[0], color[1], color[2]],
             menu: menu.to_vec(),
             delay,
+            gate,
         }));
         let log = Log::default();
         let connection = zbus::block_on(async {

@@ -3,22 +3,11 @@
 //! nor a frame, and the welcome-back card offers the saved windows once
 //! the file is read.
 
-use std::{
-    io::Write as _,
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use hocus_api::{Reply, Request};
 use hocus_compositor::{FRAME, HarnessOptions, Headless, HeadlessConfig, RendererChoice};
-
-/// How long the stand-in's reads take unless the test lets them end.
-const SLOW: Duration = Duration::from_secs(2);
+use hocus_test::gate::Gate;
 
 const SAVED: &str = r#"
 [[window]]
@@ -53,33 +42,24 @@ fn compositor() -> anyhow::Result<Headless> {
     })
 }
 
-/// The session file as a FIFO: reading it waits until `slow_read` writes.
-fn fifo(state_dir: &Path) -> anyhow::Result<PathBuf> {
-    std::fs::create_dir_all(state_dir)?;
-    let path = state_dir.join("session.toml");
-    rustix::fs::mkfifoat(
-        rustix::fs::CWD,
-        &path,
-        rustix::fs::Mode::from_raw_mode(0o600),
-    )?;
-    Ok(path)
+/// The session file, read from a disk slow to answer: held back until
+/// the gate opens.
+fn slow_read(compositor: &Headless) -> anyhow::Result<Gate> {
+    let dir = compositor.state_dir();
+    std::fs::create_dir_all(&dir)?;
+    let gate = Gate::new();
+    gate.fifo(&dir.join("session.toml"), SAVED)?;
+    Ok(gate)
 }
 
-/// A read of `path` that takes [`SLOW`], or ends when told: the saved
-/// session, then the end of the file. `done` is set once it is written.
-fn slow_read(path: PathBuf) -> (mpsc::Sender<()>, Arc<AtomicBool>) {
-    let (go, wait) = mpsc::channel::<()>();
-    let done = Arc::new(AtomicBool::new(false));
-    let written = done.clone();
-    std::thread::spawn(move || {
-        let _ = wait.recv_timeout(SLOW);
-        // Opening blocks until the compositor's reader opens its end.
-        if let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(&path) {
-            let _ = file.write_all(SAVED.as_bytes());
-        }
-        written.store(true, Ordering::SeqCst);
-    });
-    (go, done)
+/// Turns the loop until the session file is being read.
+fn until_reached(compositor: &mut Headless, gate: &Gate) -> anyhow::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.reached() {
+        anyhow::ensure!(Instant::now() < deadline, "the session was never read");
+        compositor.dispatch(Duration::from_millis(5))?;
+    }
+    Ok(())
 }
 
 fn labels(compositor: &mut Headless) -> anyhow::Result<Vec<String>> {
@@ -121,54 +101,47 @@ fn click(compositor: &mut Headless, label: &str) -> anyhow::Result<()> {
     compositor.advance(FRAME)
 }
 
-fn held(compositor: &mut Headless) -> anyhow::Result<Vec<hocus_api::SlowHandler>> {
-    let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
-        anyhow::bail!("expected stats");
-    };
-    Ok(hocus_test::held_the_loop(&stats)
-        .into_iter()
-        .cloned()
-        .collect())
-}
-
-/// Given a session file whose read takes 2 s, when the compositor starts,
-/// then it starts and draws without waiting for it, and the card offers
-/// the saved windows once it is read; asked again later, the same.
+/// Given a session file slow to read, when the compositor starts, then
+/// it starts and draws without waiting for it, and the card offers the
+/// saved windows once it is read; asked again later, the same.
 #[test]
 fn a_slow_session_file_holds_back_neither_the_start_nor_a_frame() -> anyhow::Result<()> {
     let mut compositor = compositor()?;
-    let path = fifo(&compositor.state_dir())?;
-    let (go, done) = slow_read(path.clone());
+    let gate = slow_read(&compositor)?;
 
     // The session ends as a crash would; the next one starts on its state.
     compositor.restart()?;
-    assert!(
-        !done.load(Ordering::SeqCst),
-        "the start waited for the saved session to be read"
-    );
+    until_reached(&mut compositor, &gate)?;
     compositor.advance(FRAME * 3)?;
     let shown = labels(&mut compositor)?;
+    anyhow::ensure!(
+        gate.open(),
+        "the start waited for the saved session to be read"
+    );
     assert!(
         !shown.iter().any(|l| l == "Welcome back"),
         "the card showed before the file was read: {shown:?}"
     );
-    let _ = go.send(());
     wait_for(&mut compositor, "Welcome back")?;
     wait_for(&mut compositor, "1 window was open.")?;
     click(&mut compositor, "Start fresh")?;
 
     // Asked again a second later (as tests do): the loop goes on meanwhile.
     compositor.advance(Duration::from_secs(1))?;
-    let (go, done) = slow_read(path);
+    let gate = slow_read(&compositor)?;
     compositor.request(Request::OfferSession)?;
-    assert!(
-        !done.load(Ordering::SeqCst),
+    until_reached(&mut compositor, &gate)?;
+    compositor.advance(FRAME * 3)?;
+    let shown = labels(&mut compositor)?;
+    anyhow::ensure!(
+        gate.open(),
         "the request waited for the saved session to be read"
     );
-    compositor.advance(FRAME * 3)?;
-    let _ = go.send(());
+    assert!(
+        !shown.iter().any(|l| l == "Welcome back"),
+        "the card showed again before the file was read: {shown:?}"
+    );
     wait_for(&mut compositor, "Welcome back")?;
-    let held = held(&mut compositor)?;
-    assert!(held.is_empty(), "held the loop: {held:?}");
+    hocus_test::report_held(&compositor.stats());
     Ok(())
 }

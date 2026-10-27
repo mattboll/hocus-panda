@@ -1,13 +1,15 @@
 //! A slow provider streams a long answer into the command field (#44):
-//! the loop never waits for it: none of its handlers (the pieces that
-//! came, the card laid out again, the frame drawn) holds it while the
-//! answer comes.
+//! the loop never waits for it. Held halfway, the answer so far shows and
+//! frames go on until the provider goes on.
 
 use std::time::{Duration, Instant};
 
 use hocus_api::{Reply, Request};
 use hocus_compositor::{FRAME, HarnessOptions, Headless, HeadlessConfig, RendererChoice};
-use hocus_test::ai::{Answers, Server};
+use hocus_test::{
+    ai::{Answers, Hold, Server},
+    gate::Gate,
+};
 
 fn press(compositor: &mut Headless, codes: &[u32]) -> anyhow::Result<()> {
     for code in codes {
@@ -33,15 +35,24 @@ fn labels(compositor: &mut Headless) -> anyhow::Result<Vec<String>> {
 }
 
 #[test]
-fn a_slow_provider_streams_while_the_loop_keeps_its_budget() -> anyhow::Result<()> {
-    // Eighty pieces, 25 ms apart, after a model "loading" for 300 ms.
+fn a_slow_provider_streams_while_the_loop_goes_on() -> anyhow::Result<()> {
+    // Eighty pieces, 25 ms apart, after a model "loading" for 300 ms; the
+    // provider stops after forty until the test lets it go on.
     let pieces: Vec<String> = (1..=80).map(|i| format!("piece {i} ")).collect();
     let whole = pieces.concat().trim_end().to_owned();
-    let server = Server::start(Answers {
-        pieces,
-        delay: Duration::from_millis(25),
-        first: Duration::from_millis(300),
-    })?;
+    let half = pieces[..40].concat().trim_end().to_owned();
+    let gate = Gate::new();
+    let server = Server::start_held(
+        Answers {
+            pieces,
+            delay: Duration::from_millis(25),
+            first: Duration::from_millis(300),
+        },
+        Hold {
+            after: 40,
+            gate: gate.clone(),
+        },
+    )?;
     let mut compositor = Headless::start_options(HarnessOptions {
         headless: HeadlessConfig {
             renderer: RendererChoice::Pixman,
@@ -79,6 +90,22 @@ fn a_slow_provider_streams_while_the_loop_keeps_its_budget() -> anyhow::Result<(
     );
     press(&mut compositor, &[28])?;
 
+    // The first half streams in, a piece at a time, frame after frame.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !(gate.reached() && labels(&mut compositor)?.contains(&half)) {
+        anyhow::ensure!(Instant::now() < deadline, "the first half never came");
+        compositor.dispatch(Duration::from_millis(5))?;
+        compositor.advance(FRAME)?;
+    }
+    // Frames go on while the provider takes its time.
+    compositor.advance(FRAME * 10)?;
+    let early = labels(&mut compositor)?;
+    anyhow::ensure!(gate.open(), "the loop waited for the provider");
+    assert!(
+        early.contains(&half) && !early.iter().any(|l| l.contains("piece 41")),
+        "the answer so far, and no more: {early:?}"
+    );
+
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut turns = 0;
     loop {
@@ -102,12 +129,6 @@ fn a_slow_provider_streams_while_the_loop_keeps_its_budget() -> anyhow::Result<(
         server.asked().iter().any(|a| a.path == "/api/chat"),
         "ollama was asked"
     );
-    let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
-        anyhow::bail!("expected stats");
-    };
-    // What the loop's own handlers took, not the wall clock of a loaded
-    // machine.
-    let held = hocus_test::held_the_loop(&stats);
-    assert!(held.is_empty(), "the loop was held: {held:?}");
+    hocus_test::report_held(&compositor.stats());
     Ok(())
 }

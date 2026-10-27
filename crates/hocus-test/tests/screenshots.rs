@@ -7,7 +7,7 @@ use hocus_api::{Event, Reply, Request};
 use hocus_compositor::{
     FRAME, HarnessOptions, Headless, HeadlessConfig, OutputSpec, RendererChoice,
 };
-use hocus_test::client::SolidWindow;
+use hocus_test::{client::SolidWindow, gate::Gate};
 
 fn compositor() -> anyhow::Result<Headless> {
     Headless::start_options(HarnessOptions {
@@ -56,9 +56,16 @@ fn click(compositor: &mut Headless, label: &str) -> anyhow::Result<()> {
 #[test]
 fn a_screenshot_is_saved_and_its_text_read_off_the_loop() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    // tesseract, slowly: a second to read "the picture".
+    // tesseract, held back: "the picture" is read once the test lets it.
+    let gate = Gate::new();
     let ocr = dir.path().join("ocr");
-    std::fs::write(&ocr, "#!/bin/sh\nsleep 1\necho 'Hello from the picture'\n")?;
+    std::fs::write(
+        &ocr,
+        format!(
+            "#!/bin/sh\n{}echo 'Hello from the picture'\n",
+            gate.shell(dir.path())?
+        ),
+    )?;
     std::fs::set_permissions(&ocr, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
     let folder = dir.path().join("shots");
     let mut compositor = compositor()?;
@@ -105,22 +112,30 @@ fn a_screenshot_is_saved_and_its_text_read_off_the_loop() -> anyhow::Result<()> 
     // The toast comes in.
     compositor.advance(Duration::from_millis(600))?;
 
-    // Its toast copies its text; the loop never waits for it.
+    // Its toast copies its text; the loop never waits for it: it turns,
+    // draws and answers while the reader is held back.
     click(&mut compositor, "Copy the text")?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.reached() {
+        anyhow::ensure!(Instant::now() < deadline, "the text was never read");
+        compositor.dispatch(Duration::from_millis(10))?;
+    }
+    compositor.advance(FRAME * 10)?;
+    compositor.request(Request::Version)?;
+    anyhow::ensure!(gate.open(), "the loop waited for the text to be read");
+    // Nothing reaches the window but through the loop, not turned since;
+    // the clipboard holds the picture until then.
+    assert_ne!(
+        reader.clipboard().as_deref(),
+        Some("Hello from the picture"),
+        "the text came before it was read"
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
     while reader.clipboard().as_deref() != Some("Hello from the picture") {
         anyhow::ensure!(Instant::now() < deadline, "the text never came");
         compositor.dispatch(Duration::from_millis(10))?;
         compositor.advance(FRAME)?;
     }
-    let Reply::Stats(stats) = compositor.request(Request::Stats)? else {
-        anyhow::bail!("no stats");
-    };
-    let slow: Vec<_> = stats
-        .slow_handlers
-        .iter()
-        .filter(|h| h.ms >= 200.0)
-        .collect();
-    assert!(slow.is_empty(), "the loop waited: {slow:?}");
+    hocus_test::report_held(&compositor.stats());
     Ok(())
 }
