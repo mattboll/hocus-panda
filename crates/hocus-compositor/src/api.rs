@@ -179,6 +179,7 @@ impl State {
                 x: pointer.x,
                 y: pointer.y,
             },
+            cursor: self.shown_cursor().name().to_owned(),
         }
     }
 
