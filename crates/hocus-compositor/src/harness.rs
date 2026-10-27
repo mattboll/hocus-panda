@@ -308,6 +308,13 @@ impl Headless {
         self.app.state.set_xkb_registry(registry);
     }
 
+    /// The user's folders (pictures, videos) are named in this file, in
+    /// place of `$XDG_CONFIG_HOME/user-dirs.dirs`: a test's own, never the
+    /// machine's.
+    pub fn set_user_dirs(&mut self, path: &Path) {
+        self.app.state.user_dirs = Some(path.to_owned());
+    }
+
     /// Where the session is saved.
     pub fn state_dir(&self) -> std::path::PathBuf {
         self.config.with_file_name("state")

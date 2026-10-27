@@ -30,6 +30,12 @@ Rules:
   spawning that waits. Every loop handler is timed against a frame (16 ms);
   one over budget is logged with its name and duration, and kept in the
   `stats` of the control API with the frame-time histogram of each output.
+  The file system counts as slow, a single look at a file included (a home
+  on the network, a disk waking up): handlers leave it to workers (#280).
+  The start looks at a few files once, on the loop's thread before the loop
+  runs: whether the last session ended locked (it must be locked before its
+  first frame), whether the welcome was offered, and whether the settings
+  app is beside the compositor's own program.
 - **Nothing on a timer at rest.** The loop wakes for the watchdog, and
   otherwise when something happens or falls due: a moment on the clock is
   an alarm set for it (`alarm.rs`), never a timer ticking in case. The
@@ -269,9 +275,13 @@ owned, to a worker thread that feeds an encoder process (ffmpeg, VA-API when
 the card has it) at a steady rate and paints click rings into it. A frame
 the worker has no room for is dropped; the loop never waits for it.
 
-Its options (#131) stay off the loop too. Sound is recorded by the encoder,
-one segment per stretch between pauses, and put with the picture once it is
-done, cut or padded to its length. The webcam is read by an encoder process
+Its options (#131) stay off the loop too, as do the folder it goes to (the
+worker reads `user-dirs.dirs`) and the look for the webcam's device each
+time the picker opens (#280): until a worker answers, the picker offers the
+camera as the last answer for that device did, and with none, offers no
+camera. Sound is recorded by the encoder, one segment per stretch between
+pauses, and put with the picture once it is done, cut or padded to its
+length. The webcam is read by an encoder process
 of its own as small square frames that the worker cuts into a circle in each
 frame; on the screen only a mark shows where it goes, and the pointer moves
 it. Keys are drawn into a small picture on the loop when a combination is

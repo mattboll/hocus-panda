@@ -237,6 +237,19 @@ impl State {
         self.needs_redraw = true;
     }
 
+    /// The record picker, when it shows, shows the options as they are.
+    pub(crate) fn show_record_options(&mut self) {
+        let options = self.recorder.options;
+        if let Some(picking) = &mut self.shots.picking
+            && picking.mode == PickMode::Record
+        {
+            for (_, panel) in &mut picking.panels {
+                panel.view.set_options(options);
+            }
+            self.needs_redraw = true;
+        }
+    }
+
     pub fn picking(&self) -> bool {
         self.shots.picking.is_some()
     }
@@ -284,14 +297,10 @@ impl State {
             (PickMode::Record, Some(true)) => {
                 if let Some(option) = self.picker_option_at(at) {
                     self.toggle_record_option(option);
-                    let options = self.recorder.options;
                     if let Some(picking) = &mut self.shots.picking {
                         picking.on_option = true;
-                        for (_, panel) in &mut picking.panels {
-                            panel.view.set_options(options);
-                        }
                     }
-                    self.needs_redraw = true;
+                    self.show_record_options();
                     return true;
                 }
                 let output = self.space.output_under(at).next().map(Output::name);
@@ -751,6 +760,7 @@ impl App {
             return;
         };
         let config = self.state.config.screenshots.clone();
+        let user_dirs = self.state.user_dirs.clone();
         let name = format!(
             "Screenshot {}.png",
             self.state.wall_civil().strftime("%Y-%m-%d %H-%M-%S")
@@ -765,7 +775,7 @@ impl App {
                 }
             };
             let path = if config.save {
-                match save(&folder(&config.folder), &name, &png) {
+                match save(&folder(&config.folder, user_dirs.as_deref()), &name, &png) {
                     Ok(path) => Some(path),
                     Err(err) => {
                         let _ = done.send(Done::Failed(err));
@@ -844,7 +854,25 @@ fn arrange(parts: &[(Rectangle<i32, Logical>, Pixels)]) -> Pixels {
 
 /// Where screenshots go: the configured folder, else `Screenshots` in the
 /// pictures folder (`XDG_PICTURES_DIR`, else `~/Pictures`).
-fn folder(configured: &str) -> PathBuf {
+fn folder(configured: &str, user_dirs: Option<&Path>) -> PathBuf {
+    user_folder(
+        configured,
+        user_dirs,
+        ("PICTURES", "Pictures"),
+        "Screenshots",
+    )
+}
+
+/// The configured folder (`~/` is the home), else `sub` in the user's
+/// folder `XDG_<key>_DIR` as `user_dirs` (else
+/// `$XDG_CONFIG_HOME/user-dirs.dirs`) names it, else `~/<fallback>`. On a
+/// worker: it reads a file, which a home slow to answer makes slow.
+pub(crate) fn user_folder(
+    configured: &str,
+    user_dirs: Option<&Path>,
+    (key, fallback): (&str, &str),
+    sub: &str,
+) -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
@@ -854,19 +882,26 @@ fn folder(configured: &str) -> PathBuf {
             None => PathBuf::from(configured),
         };
     }
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    let pictures = std::fs::read_to_string(config.join("user-dirs.dirs"))
+    let file = user_dirs.map_or_else(
+        || {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".config"))
+                .join("user-dirs.dirs")
+        },
+        Path::to_path_buf,
+    );
+    let prefix = format!("XDG_{key}_DIR=");
+    std::fs::read_to_string(file)
         .ok()
         .and_then(|dirs| {
             dirs.lines().find_map(|l| {
-                let v = l.strip_prefix("XDG_PICTURES_DIR=")?.trim_matches('"');
+                let v = l.strip_prefix(&prefix)?.trim_matches('"');
                 Some(PathBuf::from(v.replace("$HOME", &home.to_string_lossy())))
             })
         })
-        .unwrap_or_else(|| home.join("Pictures"));
-    pictures.join("Screenshots")
+        .unwrap_or_else(|| home.join(fallback))
+        .join(sub)
 }
 
 /// Writes the file, never over another: a number is added when the name is

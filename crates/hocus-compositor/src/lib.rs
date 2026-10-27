@@ -301,6 +301,7 @@ fn start(options: &Options, clock: Clock) -> anyhow::Result<Started> {
     leave::start(&event_loop.handle(), &mut state);
     screenshot::start(&event_loop.handle(), &mut state);
     recording::start(&event_loop.handle(), &mut state);
+    settings::start(&mut state);
     updates::start(&event_loop.handle(), &mut state);
     timezone::start(&event_loop.handle(), &state);
     authorize::start(

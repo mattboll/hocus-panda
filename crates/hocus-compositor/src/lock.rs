@@ -203,6 +203,10 @@ pub fn persist(state: &mut State, dir: Option<std::path::PathBuf>) {
         return;
     };
     let path = dir.join("locked");
+    // One of the few looks at the file system on the loop's thread, and
+    // only here, before the loop runs (docs/architecture.md, #280): a
+    // session that ended locked must be locked before its first frame,
+    // so this cannot wait for a worker.
     let was_locked = path.exists();
     let (marker, wanted) = std::sync::mpsc::channel::<bool>();
     let spawned = std::thread::Builder::new()

@@ -12,6 +12,18 @@ use crate::{State, desktops::title_and_app_id};
 /// How long a start may take before asking again starts it again.
 const START_PATIENCE: Duration = Duration::from_secs(5);
 
+/// At start, before the loop runs: the settings app beside the
+/// compositor, when they were built together, quoted for the shell. The
+/// one look at the file system for it; opening the settings asks none.
+pub fn start(state: &mut State) {
+    let command = hocus_core::config::Settings::default().command;
+    state.settings_beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join(&command)))
+        .filter(|p| p.is_file())
+        .map(|p| format!("'{}'", p.to_string_lossy().replace('\'', "'\\''")));
+}
+
 impl State {
     /// Shows the settings, on `page` when given (`appearance`,
     /// `keyboard`…).
@@ -36,13 +48,9 @@ impl State {
                 // Next to the compositor when built together (a nested
                 // session from the source tree), else from PATH.
                 if command == hocus_core::config::Settings::default().command
-                    && let Some(sibling) = std::env::current_exe()
-                        .ok()
-                        .and_then(|exe| Some(exe.parent()?.join(&command)))
-                        .filter(|p| p.is_file())
+                    && let Some(beside) = &self.settings_beside
                 {
-                    // Quoted for the shell.
-                    command = format!("'{}'", sibling.to_string_lossy().replace('\'', "'\\''"));
+                    command.clone_from(beside);
                 }
                 if let Some(page) =
                     page.filter(|p| p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
