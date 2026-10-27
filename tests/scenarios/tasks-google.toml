@@ -1,6 +1,9 @@
 description = "Tasks from Google Tasks (#257): given a Google account of GNOME Online Accounts whose token grants Google Tasks, its task lists, read from Google Tasks' API with GOA's token, show in the column with the local ones, each with its list's name; ticking one sends status completed to the API; adding one from the column's field offers its lists and adds it there; editing and deleting write back too; MCP lists and adds them; a sync later, all is as written"
 outputs = ["1280x1024"]
 shell = true
+# The fixtures' gnome-control-center, never the machine's: the settings offer
+# to open it.
+child_env = { PATH = "{scenario_dir}/calendar/bin" }
 # GNOME Online Accounts' stand-in on the scenario's private bus, Google's
 # CalDAV and Google Tasks' API on 127.0.0.1: never the session's, never Google.
 goa = { identity = "alex.panda@example.com", dir = "calendar/google", tasks = "calendar/google-tasks.json" }

@@ -1,6 +1,9 @@
 description = "A Google account whose token does not grant Google Tasks (#257): Google Tasks' API refuses it for its scope, the settings say the account does not share its tasks and how to share them, and nothing else changes: its calendar syncs, the local tasks show in the column; once the account shares them, they show too"
 outputs = ["1280x800"]
 shell = true
+# The fixtures' gnome-control-center, never the machine's: the settings offer
+# to open it.
+child_env = { PATH = "{scenario_dir}/calendar/bin" }
 # Google Tasks' stand-in refuses GOA's token as Google does a token without
 # https://www.googleapis.com/auth/tasks: 403, insufficientPermissions.
 goa = { identity = "alex.panda@example.com", dir = "calendar/google", tasks = "calendar/google-tasks.json", tasks_scope = false }
