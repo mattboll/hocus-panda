@@ -1,14 +1,14 @@
 //! The panel as a thin strip (#263, decision 0011), as board D12 draws its
 //! form B: 72 px on the right of the primary screen, from top to bottom
 //! the time, stacked, the next meeting's ring, a panda for each active
-//! agent and how many others there are, the to-dos and the notifications
+//! agent and how many others there are, the tasks and the notifications
 //! counted, then the screen's desktops, the battery and the account. It
 //! only shows: over it, or clicked, the compositor slides the whole column
 //! out over the windows from the right edge.
 //!
 //! Its contents are a [`Glance`] at the column's state: the strip is built
 //! again only when what it shows changes, which is rare (the minute, an
-//! agent, a to-do), never per frame.
+//! agent, a task), never per frame.
 
 use std::time::Duration;
 
@@ -48,8 +48,9 @@ pub struct Glance {
     pub pandas: bool,
     /// They hold still (battery saver).
     pub still: bool,
-    /// To-dos not done.
+    /// Tasks not done (#255), and those of them late.
     pub todos: usize,
+    pub late: usize,
     pub notifications: usize,
     /// This screen's desktops, and the one shown (from 1).
     pub desktops: (usize, usize),
@@ -89,7 +90,8 @@ impl Glance {
             agents_total,
             pandas,
             still,
-            todos: state.todos.len(),
+            todos: state.tasks.as_ref().map_or(0, |t| t.open),
+            late: state.tasks.as_ref().map_or(0, |t| t.late),
             notifications: state.notification_count,
             desktops: screen.map_or((1, 1), |s| (s.count.max(1), s.shown.max(1))),
             badges: screen.map(|s| s.badges.clone()).unwrap_or_default(),
@@ -130,7 +132,8 @@ impl Glance {
         agents_match
             && self.time == state.time
             && self.meeting == state.meeting
-            && self.todos == state.todos.len()
+            && self.todos == state.tasks.as_ref().map_or(0, |t| t.open)
+            && self.late == state.tasks.as_ref().map_or(0, |t| t.late)
             && self.notifications == state.notification_count
             && self.desktops == screen.map_or((1, 1), |s| (s.count.max(1), s.shown.max(1)))
             && self.badges.as_slice() == screen.map_or(&[][..], |s| s.badges.as_slice())
@@ -171,13 +174,15 @@ impl Lang {
         }
     }
 
-    /// The to-dos' counter.
-    pub fn strip_tasks(self, open: usize) -> String {
-        match (self, open) {
-            (Self::En, 0) => "Tasks: all done".into(),
-            (Self::Fr, 0) => "Tâches\u{a0}: tout est fait".into(),
-            (Self::En, n) => format!("Tasks: {n} to do"),
-            (Self::Fr, n) => format!("Tâches\u{a0}: {n} à faire"),
+    /// The tasks' counter.
+    pub fn strip_tasks(self, open: usize, late: usize) -> String {
+        match (self, open, late) {
+            (Self::En, 0, _) => "Tasks: all done".into(),
+            (Self::Fr, 0, _) => "Tâches\u{a0}: tout est fait".into(),
+            (Self::En, n, 0) => format!("Tasks: {n} to do"),
+            (Self::Fr, n, 0) => format!("Tâches\u{a0}: {n} à faire"),
+            (Self::En, n, late) => format!("Tasks: {n} to do, {late} late"),
+            (Self::Fr, n, late) => format!("Tâches\u{a0}: {n} à faire, {late} en retard"),
         }
     }
 
@@ -233,7 +238,7 @@ impl Lang {
         }
     }
 
-    /// The top bar's to-dos.
+    /// The top bar's tasks.
     pub fn bar_tasks(self, open: usize) -> String {
         match (self, open) {
             (Self::En, 0) => "Tasks ✓".into(),
@@ -677,71 +682,81 @@ impl Strip {
         }
         rule(tree);
 
-        // The to-dos and the notifications, counted beside their icons;
+        // The tasks and the notifications, counted beside their icons;
         // with none, the icon alone.
         let count = TextStyle {
             size: 15.0,
             weight: 700,
             ..theme.text.label
         };
-        let counter = |tree: &mut Tree, name: &str, icon: &str, n: usize, none: Paint| {
-            let chip = add(
-                tree,
-                card,
-                Style {
-                    direction: Direction::Row,
-                    gap: 4.0,
-                    align: Align::Center,
-                    justify: Justify::Center,
-                    height: Length::Px(36.0),
-                    padding: Insets::symmetric(0.0, 9.0),
-                    ..Style::default()
-                },
-                Kind::Box(Look {
-                    background: Some(Paint::SurfaceHover),
-                    radius: 10.0,
-                    ..Look::default()
-                }),
-            );
-            tree.set_clickable(chip, name);
-            let (side, ink) = if n == 0 {
-                (18.0, none)
-            } else {
-                (16.0, Paint::Text)
+        let counter =
+            |tree: &mut Tree, name: &str, icon: &str, n: usize, (none, some): (Paint, Paint)| {
+                let chip = add(
+                    tree,
+                    card,
+                    Style {
+                        direction: Direction::Row,
+                        gap: 4.0,
+                        align: Align::Center,
+                        justify: Justify::Center,
+                        height: Length::Px(36.0),
+                        padding: Insets::symmetric(0.0, 9.0),
+                        ..Style::default()
+                    },
+                    Kind::Box(Look {
+                        background: Some(Paint::SurfaceHover),
+                        radius: 10.0,
+                        ..Look::default()
+                    }),
+                );
+                tree.set_clickable(chip, name);
+                let (side, ink) = if n == 0 { (18.0, none) } else { (16.0, some) };
+                add(
+                    tree,
+                    chip,
+                    Style::default(),
+                    Kind::Icon {
+                        icon: Icon::stroked(icon, side, 2.2)
+                            .unwrap_or_else(|| unreachable!("a constant icon")),
+                        color: ink,
+                        label: None,
+                    },
+                );
+                if n > 0 {
+                    let text = if n > MOST {
+                        format!("{MOST}+")
+                    } else {
+                        n.to_string()
+                    };
+                    add(
+                        tree,
+                        chip,
+                        Style::default(),
+                        Kind::text_line(text, count.with_color(some)),
+                    );
+                }
             };
-            add(
-                tree,
-                chip,
-                Style::default(),
-                Kind::Icon {
-                    icon: Icon::stroked(icon, side, 2.2)
-                        .unwrap_or_else(|| unreachable!("a constant icon")),
-                    color: ink,
-                    label: None,
-                },
-            );
-            if n > 0 {
-                let text = if n > MOST {
-                    format!("{MOST}+")
-                } else {
-                    n.to_string()
-                };
-                add(tree, chip, Style::default(), Kind::text_line(text, count));
-            }
-        };
         counter(
             tree,
-            &lang.strip_tasks(g.todos),
+            &lang.strip_tasks(g.todos, g.late),
             icons::CHECK,
             g.todos,
-            Paint::Text,
+            // Late ones count in the danger colour, as board Bureau has it.
+            (
+                Paint::Text,
+                if g.late > 0 {
+                    Paint::Error
+                } else {
+                    Paint::Text
+                },
+            ),
         );
         counter(
             tree,
             &lang.strip_notifications(g.notifications),
             icons::BELL,
             g.notifications,
-            Paint::Muted,
+            (Paint::Muted, Paint::Text),
         );
 
         // What is left, then the desktops, the battery and the account.

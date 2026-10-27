@@ -130,6 +130,18 @@ pub enum Request {
     },
     /// The phone as the session knows it, through KDE Connect (#85).
     Phone,
+    /// The tasks (#255): those not done first, as the column orders them.
+    Tasks,
+    /// Adds a task to the local list: due `today`, `tomorrow`,
+    /// `2026-10-21` or `2026-10-21T15:00` (the user's time), in a list of
+    /// it by name or its default one.
+    AddTask {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        due: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        list: Option<String>,
+    },
     /// Sends files to the phone within reach, by absolute path.
     SendToPhone {
         paths: Vec<String>,
@@ -316,6 +328,10 @@ impl Request {
             // As quick settings: the user's own toasts.
             | Self::SetDoNotDisturb { .. }
             | Self::Phone
+            | Self::Tasks
+            // The user's own list, as the column's field adds to it; an
+            // agent's needs its access to act (`[[agents.mcp]]`).
+            | Self::AddTask { .. }
             // Files of the user's own, to the user's own paired phone.
             | Self::SendToPhone { .. }
             // A picture the user asked to copy.
@@ -382,6 +398,8 @@ impl Request {
                 | Self::Agent { .. }
                 | Self::Act { .. }
                 | Self::AgentsJournal
+                | Self::Tasks
+                | Self::AddTask { .. }
         )
     }
 }
@@ -514,6 +532,13 @@ pub enum JournalAction {
         #[serde(default)]
         text: Option<String>,
     },
+    /// It added a task (#255), its text when `[agents] journal_text`
+    /// keeps it.
+    AddTask {
+        characters: usize,
+        #[serde(default)]
+        text: Option<String>,
+    },
 }
 
 /// What an agent aimed at, as it was then.
@@ -573,6 +598,12 @@ impl std::fmt::Display for JournalEntry {
             } => write!(f, "prompted {text:?}")?,
             JournalAction::Prompt { characters, .. } => {
                 write!(f, "prompted with {characters} characters")?;
+            }
+            JournalAction::AddTask {
+                text: Some(text), ..
+            } => write!(f, "added the task {text:?}")?,
+            JournalAction::AddTask { characters, .. } => {
+                write!(f, "added a task of {characters} characters")?;
             }
         }
         match &self.target {
@@ -663,6 +694,9 @@ pub enum Reply {
     Hardware(HardwareInfo),
     Notifications(NotificationsInfo),
     Phone(PhoneInfo),
+    Tasks(Vec<TaskInfo>),
+    /// The task added.
+    Task(TaskInfo),
     Calendars(CalendarsInfo),
     Windows(Vec<WindowInfo>),
     Scene(Scene),
@@ -1072,6 +1106,25 @@ pub enum HardwareChange {
     Profile {
         profile: String,
     },
+}
+
+/// A task (#255), from whichever source.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TaskInfo {
+    /// Its UID.
+    pub id: String,
+    pub text: String,
+    pub done: bool,
+    /// `2026-10-21`, or `2026-10-21T15:00` in the user's time.
+    #[serde(default)]
+    pub due: Option<String>,
+    /// Not done, and its due date or time is past.
+    pub late: bool,
+    /// The list it is in, by name; `None` for its source's default list.
+    #[serde(default)]
+    pub list: Option<String>,
+    /// `local` for the local list.
+    pub source: String,
 }
 
 /// The phone as the session knows it (#85).

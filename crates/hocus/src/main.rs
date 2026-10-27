@@ -157,6 +157,20 @@ enum Message {
     /// The phone, through KDE Connect: whether it runs, the phones within
     /// reach and their battery.
     Phone,
+    /// The tasks: those not done first, as the column orders them, with
+    /// their due dates.
+    Tasks,
+    /// Add a task to the local list.
+    TaskAdd {
+        text: String,
+        /// When it is due: today, tomorrow, 2026-10-21 or 2026-10-21T15:00.
+        #[arg(long)]
+        due: Option<String>,
+        /// The list it goes in (a folder of the local list); its default
+        /// one otherwise.
+        #[arg(long)]
+        list: Option<String>,
+    },
     /// Keep an AI provider's key in the keyring (`claude`, `openai`,
     /// `llamacpp`), read from the standard input: `hocus msg ai-key claude
     /// < key.txt`. An empty one forgets it.
@@ -366,6 +380,10 @@ fn msg(socket: Option<PathBuf>, message: Message) -> anyhow::Result<()> {
         }
         Message::Notifications => print(client.request(Request::Notifications)?),
         Message::Phone => print(client.request(Request::Phone)?),
+        Message::Tasks => print(client.request(Request::Tasks)?),
+        Message::TaskAdd { text, due, list } => {
+            print(client.request(Request::AddTask { text, due, list })?)
+        }
         Message::AiKey { provider } => {
             // Read, never an argument: arguments show in the process list.
             let mut key = String::new();

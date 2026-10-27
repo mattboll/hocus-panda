@@ -25,5 +25,6 @@ pub const FILE: &str = "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6";
 pub const BELL: &str = "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0";
 /// A tick: to-dos.
 pub const CHECK: &str = "M5 12.5l4.5 4.5L19 7";
+pub const PLUS: &str = "M12 5v14M5 12h14";
 pub const TRAY: &str = "M4 6h16v12H4zM8 10h2M12 10h2M16 10h0";
 pub const MORE: &str = "M5 12h0M12 12h0M19 12h0";

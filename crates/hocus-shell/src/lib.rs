@@ -42,6 +42,7 @@ pub mod share;
 pub mod showcase;
 pub mod strip;
 pub mod switcher;
+pub mod tasks;
 pub mod titlebar;
 pub mod toasts;
 pub mod topbar;

@@ -181,8 +181,8 @@ nothing at all are options (see
 
 - Four forms, `[panel] form`, on the settings' Appearance page and live:
   the strip (72 px: the time stacked, the next meeting's ring, a panda per
-  active agent, the to-dos and notifications counted beside a tick and a
-  bell, the desktops, the battery, the account), the column (320 px), a
+  active agent, the tasks and notifications counted beside a tick and a
+  bell (the tasks in the danger colour when some are late), the desktops, the battery, the account), the column (320 px), a
   top bar (one line: the active window and its buttons, the time and the
   date, the agents, the tasks) and hidden (a faint hint at the right
   edge); windows leave room for the strip, the column or the bar only
@@ -198,6 +198,17 @@ nothing at all are options (see
   for its application as dismissed by the user (`NotificationClosed`,
   reason 2); animated bell with badge
 - "Waiting for you": windows that request attention
+- Tasks, from a local list of iCalendar VTODO files
+  (`$XDG_DATA_HOME/hocuspanda/tasks`, one file each, vdir style: its folders
+  are named lists), shown once the list exists: the summary ("3 to do",
+  "1 late", "4 of 4"), the late ones and today's first with their due date
+  (muted, or in the danger colour when late), those done today struck
+  through after them, a box to tick each, "All done for today." with a
+  panda when nothing is left; a field under them adds one (the launcher
+  opens on it), and a task's menu (secondary button) edits it, sets it due
+  today or tomorrow or without a date, and deletes it. "todo …" or
+  "task: …" in the command field adds one; the control API and MCP list
+  and add them. CalDAV task lists and Google Tasks come next
 - Command field ("Search, act, ask…")
 - Status modules
 - Account: avatar, menu (log out, lock, about, settings, recent apps)
@@ -262,7 +273,7 @@ nothing at all are options (see
 - Copy files
 - Emoji picker: recent, groups, search
 - Emoji inserted directly into the application; recent Unicode emoji
-- Notes: window, checkboxes, preview in the panel, quick edit
+- Notes: window, quick edit; a line typed as a to-do (`- [ ] …`) goes to the tasks
 
 ## 16. Status modules
 

@@ -146,8 +146,10 @@ pub struct State {
     pub ai: crate::ai::Ai,
     /// Document search (#45).
     pub search: crate::search::SearchState,
-    /// Notes and to-dos (#79).
+    /// Notes (#79).
     pub notes: crate::notes::NotesState,
+    /// Tasks (#255).
+    pub tasks: crate::tasks::TasksState,
     /// Focus mode, the magnifier, night light (#78).
     pub comfort: crate::comfort::Comfort,
     /// Gamma each screen should get, for backends that set it.
@@ -353,6 +355,7 @@ impl State {
             recorder: Default::default(),
             comfort: Default::default(),
             notes: Default::default(),
+            tasks: Default::default(),
             updates: Default::default(),
             phone: Default::default(),
             calendar: Default::default(),

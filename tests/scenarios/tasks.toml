@@ -1,0 +1,175 @@
+description = "The column's tasks (#255), from the local list (iCalendar VTODO files in the data directory): given three tasks, one late, the summary says 1 late and the late one comes first, its date in the danger colour; ticking it writes it done in its file, the summary counts one fewer and it stays struck through after the others; a task's menu sets its due date, edits it and deletes it"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+# Three tasks, as another application (or vdirsyncer) wrote them.
+[[step]]
+state_file = { name = "tasks/quote.ics", text = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Tasks//EN
+BEGIN:VTODO
+UID:quote
+DTSTAMP:20261019T080000Z
+CREATED:20261019T080000Z
+SUMMARY:Send the quote to the client
+PRIORITY:1
+STATUS:NEEDS-ACTION
+DUE;VALUE=DATE:20261020
+END:VTODO
+END:VCALENDAR
+""" }
+
+[[step]]
+state_file = { name = "tasks/review.ics", text = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Tasks//EN
+BEGIN:VTODO
+UID:review
+DTSTAMP:20261020T080000Z
+CREATED:20261020T080000Z
+SUMMARY:Review merge request #42
+STATUS:NEEDS-ACTION
+DUE:20261021T150000
+END:VTODO
+END:VCALENDAR
+""" }
+
+[[step]]
+state_file = { name = "tasks/domain.ics", text = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Tasks//EN
+BEGIN:VTODO
+UID:domain
+DTSTAMP:20261018T080000Z
+CREATED:20261018T080000Z
+SUMMARY:Book hocuspanda.org
+STATUS:NEEDS-ACTION
+END:VTODO
+END:VCALENDAR
+""" }
+
+# The tasks are read as the session starts.
+[[step]]
+restart = true
+
+[[step]]
+wait_wallpapers = true
+
+[[step]]
+expect_ui = { label = "TASKS" }
+
+[[step]]
+expect_ui = { label = "1 late" }
+
+[[step]]
+expect_ui = { label = "yesterday" }
+
+[[step]]
+expect_ui = { label = "15:00" }
+
+# The late one first: above the one due today at 15:00.
+[[step]]
+expect_ui = { label = "Send the quote to the client", inside = [944, 460, 320, 45] }
+
+[[step]]
+expect_ui = { label = "Review merge request #42", inside = [944, 505, 320, 40] }
+
+[[step]]
+mcp = { tool = "list_tasks", contains = ["[ ] Send the quote to the client (due 2026-10-20, late)", "[ ] Review merge request #42 (due 2026-10-21T15:00)", "[ ] Book hocuspanda.org"] }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks.png" }
+
+# Ticked: done in its file, the rest of the file as it was.
+[[step]]
+click_ui = "Send the quote to the client"
+
+[[step]]
+expect_state_file = { name = "tasks/quote.ics", contains = ["STATUS:COMPLETED\r\n", "PERCENT-COMPLETE:100\r\n", "COMPLETED:20261021T1437", "PRIORITY:1\r\n", "DUE;VALUE=DATE:20261020\r\n"], lacks = ["NEEDS-ACTION"] }
+
+[[step]]
+expect_ui = { label = "2 to do" }
+
+[[step]]
+expect_ui = { label = "1 late", shown = false }
+
+[[step]]
+expect_ui = { label = "yesterday", shown = false }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-ticked.png" }
+
+# A task's menu: the secondary button on it.
+[[step]]
+right_click_ui = "Book hocuspanda.org"
+
+[[step]]
+expect_ui = { label = "Due today" }
+
+[[step]]
+expect_ui = { label = "No due date", shown = false }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "tasks-menu.png" }
+
+[[step]]
+click_ui = "Due tomorrow"
+
+[[step]]
+expect_state_file = { name = "tasks/domain.ics", contains = ["DUE;VALUE=DATE:20261022\r\n", "SUMMARY:Book hocuspanda.org\r\n"] }
+
+[[step]]
+expect_ui = { label = "tomorrow" }
+
+# Edit: the launcher on its text.
+[[step]]
+right_click_ui = "Review merge request #42"
+
+[[step]]
+click_ui = "Edit"
+
+[[step]]
+type = " again"
+
+[[step]]
+key = 28
+
+[[step]]
+expect_state_file = { name = "tasks/review.ics", contains = ["SUMMARY:Review merge request #42 again\r\n", "DUE:20261021T150000\r\n"] }
+
+[[step]]
+expect_ui = { label = "Review merge request #42 again" }
+
+# Delete: its file goes.
+[[step]]
+right_click_ui = "Book hocuspanda.org"
+
+[[step]]
+click_ui = "Delete"
+
+[[step]]
+expect_state_file = { name = "tasks", lacks = ["Book hocuspanda.org"] }
+
+[[step]]
+expect_ui = { label = "Book hocuspanda.org", shown = false }
+
+[[step]]
+expect_ui = { label = "1 to do" }

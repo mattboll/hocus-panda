@@ -445,7 +445,11 @@ impl State {
                     self.open_settings(None);
                 }
                 LauncherEvent::Chosen(Choice::AddNote(text)) => self.add_note(&text),
-                LauncherEvent::Chosen(Choice::ToggleNote(index)) => self.tick_note(index),
+                LauncherEvent::Chosen(Choice::AddTask(text)) => {
+                    self.close_launcher();
+                    self.add_task_typed(&text);
+                }
+                LauncherEvent::Chosen(Choice::SaveTask { id, text }) => self.save_task(id, &text),
                 LauncherEvent::RemoveNote(index) => self.remove_note(index),
                 LauncherEvent::Chosen(Choice::OpenNotes) => {
                     self.close_launcher();

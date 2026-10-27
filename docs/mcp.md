@@ -55,6 +55,8 @@ With Claude Code: `claude mcp add hocuspanda -- hocus mcp --agent assistant`.
 | `press_keys` | a combination into `window`: `Ctrl+A`, `Return`, `Shift+Tab`; `intent` |
 | `wait_for` | until a window (`app_id`, a part of its `title`) or an element (`label`) is shown, or with `gone` until none is; `timeout_ms` |
 | `journal` | what this agent did this session, oldest first, one line each (see below); `limit` (the last so many, 50 by default), `agent` |
+| `list_tasks` | the user's tasks, those not done, late ones and today's first as the column orders them: id, text, due date (`2026-10-21`, or `2026-10-21T15:00` in the user's time), late, list, source; `done` for those done too |
+| `add_task` | adds a task to the user's local list: `text`, `due` (`today`, `tomorrow`, `2026-10-21`, `2026-10-21T15:00`), `list`; only for an `act` agent, kept in the journal |
 
 `intent` is what the action is for, in one short line the user reads before
 it happens ("Sends the message"); without it, the desktop says it plainly
@@ -246,7 +248,8 @@ Key combinations are kept (`Ctrl+S`), but neither keys nor text while the
 session is locked or a password is asked for, when agents are refused
 anyway. A question the user hands a coding agent from an AI's answer is
 kept too, as that agent's (`refacto: prompted with 170 characters`, the
-text only with `journal_text`).
+text only with `journal_text`), and so is a task an agent adds, or a `read`
+agent tries to (`helper: added a task of 16 characters`).
 
 ```
 $ hocus msg agents-journal

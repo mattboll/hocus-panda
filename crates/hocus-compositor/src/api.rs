@@ -295,6 +295,14 @@ impl App {
                 Reply::Done
             }
             Request::Phone => Reply::Phone(state.phone_info()),
+            Request::Tasks => Reply::Tasks(state.tasks_info()),
+            Request::AddTask { text, due, list } => {
+                return Some(
+                    state
+                        .add_task_asked(connection, &text, due.as_deref(), list.as_deref())
+                        .map(Reply::Task),
+                );
+            }
             Request::SendToPhone { paths } => {
                 let paths: Vec<std::path::PathBuf> =
                     paths.into_iter().map(std::path::PathBuf::from).collect();

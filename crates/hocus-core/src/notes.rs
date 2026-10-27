@@ -1,6 +1,7 @@
-//! Notes and to-dos (#79): a plain Markdown file, one line each. `- [ ] …`
-//! is a to-do, `- [x] …` a done one, any other text a note; lines it does
-//! not understand (headings, blank lines) are kept as they were.
+//! Notes (#79): a plain Markdown file, one line each. `- [ ] …` is a to-do,
+//! `- [x] …` a done one, any other text a note; lines it does not
+//! understand (headings, blank lines) are kept as they were. The desktop
+//! moves to-dos to its task list (#255): they are read here to be moved.
 
 /// One line of the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,17 +109,6 @@ impl Notes {
         true
     }
 
-    /// Ticks the to-do at `index`, or unticks it.
-    pub fn toggle(&mut self, index: usize) -> bool {
-        match self.lines.get_mut(index) {
-            Some(Line::Todo { done, .. }) => {
-                *done = !*done;
-                true
-            }
-            _ => false,
-        }
-    }
-
     pub fn remove(&mut self, index: usize) -> bool {
         if index < self.lines.len() && !matches!(self.lines[index], Line::Other(_)) {
             self.lines.remove(index);
@@ -126,18 +116,6 @@ impl Notes {
         } else {
             false
         }
-    }
-
-    /// The to-dos not done, with their place in the file.
-    pub fn open_todos(&self) -> Vec<(usize, &str)> {
-        self.lines
-            .iter()
-            .enumerate()
-            .filter_map(|(i, l)| match l {
-                Line::Todo { done: false, text } => Some((i, text.as_str())),
-                _ => None,
-            })
-            .collect()
     }
 }
 
@@ -151,23 +129,27 @@ mod tests {
             "# Notes\n\n- [ ] buy bamboo\n- [x] call Léa\n- the wifi code is on the fridge\n";
         let notes = Notes::parse(text);
         assert_eq!(notes.to_markdown(), text);
-        assert_eq!(notes.open_todos(), [(2, "buy bamboo")]);
+        assert_eq!(
+            notes.lines[2],
+            Line::Todo {
+                done: false,
+                text: "buy bamboo".into()
+            }
+        );
     }
 
     #[test]
-    fn typed_lines_become_todos_or_notes_and_tick() {
+    fn typed_lines_become_todos_or_notes() {
         let mut notes = Notes::default();
         assert!(notes.add("- [ ] buy bamboo"));
         assert!(notes.add("[] water the plant"));
         assert!(notes.add("remember the milk"));
         assert!(!notes.add("   "));
-        assert!(notes.toggle(0));
-        assert!(!notes.toggle(2), "a note does not tick");
         assert_eq!(
             notes.to_markdown(),
-            "- [x] buy bamboo\n- [ ] water the plant\n- remember the milk\n"
+            "- [ ] buy bamboo\n- [ ] water the plant\n- remember the milk\n"
         );
         assert!(notes.remove(1));
-        assert_eq!(notes.open_todos(), []);
+        assert_eq!(notes.lines.len(), 2);
     }
 }

@@ -324,7 +324,7 @@ impl State {
             status: self.status(),
             tray: self.tray.apps.clone(),
             sharing: self.sharing(),
-            todos: self.open_todos(),
+            tasks: self.tasks_view(),
             updates: self.updates_line(),
             phone: self.phone_line(),
             meeting: self.meeting_card(),
@@ -358,6 +358,7 @@ impl State {
         self.refresh_updates();
         self.refresh_phone();
         self.refresh_calendar();
+        self.refresh_tasks();
         self.refresh_motion();
         self.refresh_slides();
         self.refresh_alt_tab();
@@ -562,7 +563,11 @@ impl State {
             ShellAction::StopSharing => self.stop_sharing(),
             ShellAction::ClearNotifications => self.clear_notifications(),
             ShellAction::DismissNotification(id) => self.dismiss_notification(id),
-            ShellAction::TickTodo(index) => self.tick_note(index),
+            ShellAction::ToggleTask(id) => self.toggle_task(&id),
+            ShellAction::AddTask => self.open_task_card(None),
+            ShellAction::EditTask(id) => self.open_task_card(Some(&id)),
+            ShellAction::TaskDue { id, due } => self.set_task_due(&id, due),
+            ShellAction::DeleteTask(id) => self.delete_task(&id),
             ShellAction::InstallUpdates => self.install_updates(),
             ShellAction::RingPhone => self.ring_phone(),
             ShellAction::SendClipboardToPhone => self.send_clipboard_to_phone(),

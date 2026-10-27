@@ -9,6 +9,7 @@ use hocus_shell::{
     agents::{AgentAsk, AgentState, AgentsView, Board, Elsewhere},
     column::{AdbLine, Agenda, Meeting, PairStage, Pairing, PhoneLine},
     journal::{Did, JournalLine, JournalView, Pressed},
+    tasks::{Due, DueChoice, TaskRow, TasksView},
 };
 use hocus_ui::{Input, Point, Role, Theme};
 
@@ -20,7 +21,7 @@ fn state() -> ColumnState {
         status: Default::default(),
         tray: Vec::new(),
         sharing: false,
-        todos: Vec::new(),
+        tasks: None,
         updates: None,
         phone: None,
         meeting: None,
@@ -577,6 +578,95 @@ fn on_a_laptop_screen_a_waiting_agent_and_the_meeting_fit_with_the_account() -> 
     let access = column.access().dump();
     assert!(access.contains("Show refacto"), "{access}");
     assert!(access.contains("\"In 12 min\""), "{access}");
+    Ok(())
+}
+
+/// Board Bureau's tasks, one late.
+fn tasks() -> TasksView {
+    let row = |id: &str, text: &str, due, late, done| TaskRow {
+        id: id.into(),
+        text: text.into(),
+        due,
+        late,
+        done,
+    };
+    TasksView {
+        rows: vec![
+            row(
+                "quote",
+                "Envoyer le devis au client",
+                Some(Due::Yesterday),
+                true,
+                false,
+            ),
+            row("review", "Relire la MR #42", Some(Due::Today), false, false),
+            row("domain", "Réserver hocuspanda.org", None, false, false),
+            row("brief", "Écrire le brief design", None, false, true),
+        ],
+        open: 3,
+        late: 1,
+        done_today: 1,
+        pandas: true,
+    }
+}
+
+#[test]
+fn the_tasks_show_late_ones_first_tick_and_open_their_menu() -> anyhow::Result<()> {
+    let mut column = Column::new(Theme::default(), Lang::Fr, 900.0, 1.0);
+    let mut s = state();
+    s.tasks = Some(tasks().into());
+    column.set_state(&s);
+    column.draw(Duration::ZERO);
+    common::expect_reference(&column.view(), "column-tasks-fr.png")?;
+    let access = column.access().dump();
+    for said in ["TÂCHES", "1 en retard", "hier", "auj."] {
+        assert!(access.contains(said), "{said} in {access}");
+    }
+    let at = button(&column, "Relire la MR #42")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::ToggleTask("review".into())]
+    );
+    let at = button(&column, "Ajouter une tâche")?;
+    assert_eq!(click(&mut column, at), vec![Action::AddTask]);
+    // Its menu, on the secondary button.
+    let at = button(&column, "Réserver hocuspanda.org")?;
+    assert!(column.secondary_click(at).is_empty());
+    column.draw(Duration::from_millis(16));
+    let menu = column.access().dump();
+    for entry in ["Modifier", "Pour aujourd’hui", "Pour demain", "Supprimer"] {
+        assert!(menu.contains(entry), "{entry} in {menu}");
+    }
+    assert!(!menu.contains("Sans date"), "it has none: {menu}");
+    let at = button(&column, "Pour demain")?;
+    assert_eq!(
+        click(&mut column, at),
+        vec![Action::TaskDue {
+            id: "domain".into(),
+            due: DueChoice::Tomorrow
+        }]
+    );
+    // Nothing left: all done, the panda says so.
+    s.tasks = Some(
+        TasksView {
+            rows: Vec::new(),
+            open: 0,
+            late: 0,
+            done_today: 4,
+            pandas: true,
+        }
+        .into(),
+    );
+    column.set_state(&s);
+    column.draw(Duration::from_millis(32));
+    let access = column.access().dump();
+    for said in [
+        "Tout est fait pour aujourd’hui.",
+        "4 sur 4",
+        "Panda qui a fini",
+    ] {
+        assert!(access.contains(said), "{said} in {access}");
+    }
     Ok(())
 }
 

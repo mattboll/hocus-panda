@@ -2,7 +2,7 @@
 //! draws its form C: one line across the primary screen, with this
 //! screen's desktops, the active window and its buttons, the time, the
 //! date and the next meeting in the middle, then the active agents, the
-//! to-dos, the notifications and the battery. Its buttons act on the
+//! tasks, the notifications and the battery. Its buttons act on the
 //! active window; a click elsewhere on it asks for the whole column.
 
 use std::time::Duration;
@@ -320,7 +320,7 @@ impl TopBar {
             ),
         );
 
-        // The active agents, the to-dos, the notifications, the battery.
+        // The active agents, the tasks, the notifications, the battery.
         let right = add(
             tree,
             card,
@@ -382,7 +382,14 @@ impl TopBar {
             tree,
             right,
             Style::default(),
-            Kind::text_line(lang.bar_tasks(g.todos), line.with_weight(700)),
+            Kind::text_line(
+                lang.bar_tasks(g.todos),
+                line.with_weight(700).with_color(if g.late > 0 {
+                    Paint::Error
+                } else {
+                    Paint::Text
+                }),
+            ),
         );
         add(
             tree,

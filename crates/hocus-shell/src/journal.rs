@@ -46,6 +46,11 @@ pub enum Did {
         characters: usize,
         text: Option<String>,
     },
+    /// It added a task (#255); the text when the configuration keeps it.
+    AddTask {
+        characters: usize,
+        text: Option<String>,
+    },
 }
 
 /// One entry, newest first in [`JournalView::lines`].
@@ -182,6 +187,7 @@ impl Lang {
                 Did::Keys(_) => self.pick("Keys refused", "Touches refusées"),
                 Did::Connect => self.pick("Connection refused", "Connexion refusée"),
                 Did::Prompt { .. } => self.pick("Question refused", "Question refusée"),
+                Did::AddTask { .. } => self.pick("Task refused", "Tâche refusée"),
             }
             .into();
         }
@@ -232,6 +238,13 @@ impl Lang {
                 false => format!("Was handed a question, {characters} characters"),
                 true => format!("A reçu une question, {characters} caractères"),
             },
+            Did::AddTask {
+                text: Some(text), ..
+            } => match fr {
+                false => format!("Added the task “{text}”"),
+                true => format!("A ajouté la tâche «\u{a0}{text}\u{a0}»"),
+            },
+            Did::AddTask { .. } => self.pick("Added a task", "A ajouté une tâche").into(),
         }
     }
 
