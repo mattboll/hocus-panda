@@ -51,8 +51,11 @@ fn serve(bus: &PrivateBus, percent: f64, delay: Duration) -> anyhow::Result<zbus
     )?)
 }
 
+/// The column, which these tests read (#263: the strip by default).
+const COLUMN: &str = "[panel]\nform = \"column\"\n";
+
 fn compositor(bus: &PrivateBus) -> anyhow::Result<Headless> {
-    Headless::start_options(HarnessOptions {
+    let mut compositor = Headless::start_options(HarnessOptions {
         headless: HeadlessConfig {
             renderer: RendererChoice::Pixman,
             ..Default::default()
@@ -69,7 +72,9 @@ fn compositor(bus: &PrivateBus) -> anyhow::Result<Headless> {
         motion: false,
         first_run: false,
         google_caldav: None,
-    })
+    })?;
+    compositor.write_config(COLUMN)?;
+    Ok(compositor)
 }
 
 fn shows(compositor: &mut Headless, label: &str) -> anyhow::Result<bool> {

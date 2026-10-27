@@ -3,6 +3,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 caldav = { dir = "calendar/work", user = "alex", password = "panda" }
 
 [[step]]
@@ -11,6 +17,9 @@ config = """
 name = "Work"
 url = "{caldav}"
 user = "alex"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -37,7 +46,10 @@ expect_ui = { label = "Weekly review" }
 
 # Taken out of the configuration.
 [[step]]
-config = ""
+config = """
+[panel]
+form = "column"
+"""
 
 [[step]]
 expect_calendars = { events = 0, secrets = 0 }

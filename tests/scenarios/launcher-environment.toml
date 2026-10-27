@@ -4,6 +4,12 @@ shell = true
 data_dirs = ["../fixtures"]
 child_env = { LD_PRELOAD = "/tmp/not-a-library.so", LANG = "C.UTF-8" }
 
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
 # From the column's command field this time.
 [[step]]
 click_ui = "Command field"

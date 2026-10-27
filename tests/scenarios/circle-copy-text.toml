@@ -11,6 +11,9 @@ shell = true
 config = """
 [screenshots]
 ocr = "{scenario_dir}/circle/bin/ocr"
+
+[panel]
+form = "column"
 """
 
 [[step]]

@@ -10,6 +10,9 @@ data_dirs = ["../fixtures"]
 config = """
 [dock]
 enabled = false
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -92,6 +95,9 @@ three_up = "launcher"
 
 [hot_corners]
 top_left = "overview"
+
+[panel]
+form = "column"
 """
 
 [[step]]

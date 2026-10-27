@@ -10,6 +10,9 @@ apps = ["editor"]
 
 [[agents.mcp]]
 name = "reader"
+
+[panel]
+form = "column"
 """
 
 # A window that holds the shortcuts back does not hold this one.

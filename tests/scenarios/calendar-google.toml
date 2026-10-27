@@ -6,6 +6,12 @@ shell = true
 goa = { identity = "alex.panda@example.com", dir = "calendar/google" }
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 expect_calendars = { online = "installed", online_accounts = 1, contains = ["Family dinner", "Dentist"], error = false }
 
 # Discovered from Google's base, with the token GOA handed out.

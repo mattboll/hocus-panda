@@ -6,6 +6,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 herdr = { agents = [{ name = "refacto", status = "idle" }] }
 
 [[step]]
@@ -27,6 +33,9 @@ herdr_socket = "{herdr}"
 enabled = true
 provider = "ollama"
 url = "{ai}"
+
+[panel]
+form = "column"
 """
 
 [[step]]

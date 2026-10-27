@@ -85,7 +85,7 @@ impl WallClock {
 pub struct Shell {
     pub(crate) column: Column,
     /// The output it is on, and that output's logical rectangle.
-    on: Option<(String, Rectangle<i32, Logical>, f64)>,
+    pub(crate) on: Option<(String, Rectangle<i32, Logical>, f64)>,
     buffer: Option<MemoryRenderBuffer>,
     popover: Option<(MemoryRenderBuffer, UiPoint)>,
     pointer_inside: bool,
@@ -96,6 +96,9 @@ pub struct Shell {
     fading: Option<(MemoryRenderBuffer, (u32, u32), Animated)>,
     /// The desktop shown where it is, when its theme was last given.
     pub(crate) themed_desktop: Option<usize>,
+    /// The panel's form, and what stays of it when the column is in
+    /// (#263).
+    pub(crate) panel: crate::panel::Forms,
 }
 
 /// One of what the column draws: its popover, its old picture fading, or
@@ -109,6 +112,7 @@ impl Shell {
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
+        self.panel.set_theme(theme.clone());
         self.column.set_theme(theme);
     }
 
@@ -121,16 +125,19 @@ impl Shell {
             fade.set(0.0, Curve::Ease(Easing::InOutCubic, LARGE), now);
             self.fading = Some((buffer_for(&view), (view.width, view.height), fade));
         }
+        self.panel.set_theme(theme.clone());
         self.column.set_theme(theme);
     }
 
     pub fn set_lang(&mut self, lang: Lang) {
+        self.panel.set_lang(lang);
         self.column.set_lang(lang);
     }
 
     pub fn new(theme: Theme, lang: Lang) -> Self {
         Self {
-            column: Column::new(theme, lang, 600.0, 1.0),
+            column: Column::new(theme.clone(), lang, 600.0, 1.0),
+            panel: crate::panel::Forms::new(theme, lang),
             on: None,
             buffer: None,
             popover: None,
@@ -232,13 +239,17 @@ impl State {
         self.find_output(&primary.name.0)
     }
 
-    /// Where the column is, in the global logical space.
+    /// Where the column is drawn now, in the global logical space: in its
+    /// place, or sliding, while it shows.
     pub fn column_rect(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
         let (name, area, _) = self.shell.as_ref()?.on.as_ref()?;
         if *name != output.name() {
             return None;
         }
-        Some(column_rect(*area))
+        let shift = self.column_shift()?;
+        let mut rect = column_rect(*area);
+        rect.loc.x += shift.round() as i32;
+        Some(rect)
     }
 
     /// The user's time, as the column shows it.
@@ -407,27 +418,41 @@ impl State {
             shell.buffer = None;
         }
         shell.column.set_state(&state);
-        let damage = shell.column.draw(now);
-        let mut changed =
-            !damage.column.is_empty() || !damage.popover.is_empty() || damage.popover_changed;
-        match &mut shell.buffer {
-            Some(buffer) => upload(buffer, &shell.column.view(), &damage.column),
-            None if shell.on.is_some() => {
-                shell.buffer = Some(buffer_for(&shell.column.view()));
-                changed = true;
+        // The strip or the bar, and the column coming out or going back.
+        let mut changed = self.refresh_panel(&state);
+        // In, in a form that keeps it in, the column waits to be drawn
+        // until it shows: nothing is drawn for it meanwhile.
+        let shown = self.column_shift().is_some();
+        let Some(shell) = self.shell.as_mut() else {
+            return;
+        };
+        if !shown {
+            if !shell.column.phone_popover_open() {
+                self.phone_popover_closed();
             }
-            None => {}
-        }
-        match (shell.column.popover_view(), &mut shell.popover) {
-            (Some(view), Some((buffer, at))) if !damage.popover_changed => {
-                upload(buffer, &view, &damage.popover);
-                *at = view.at;
+        } else {
+            let damage = shell.column.draw(now);
+            changed |=
+                !damage.column.is_empty() || !damage.popover.is_empty() || damage.popover_changed;
+            match &mut shell.buffer {
+                Some(buffer) => upload(buffer, &shell.column.view(), &damage.column),
+                None if shell.on.is_some() => {
+                    shell.buffer = Some(buffer_for(&shell.column.view()));
+                    changed = true;
+                }
+                None => {}
             }
-            (Some(view), _) => shell.popover = Some((buffer_for(&view), view.at)),
-            (None, _) => shell.popover = None,
-        }
-        if damage.popover_changed && !shell.column.phone_popover_open() {
-            self.phone_popover_closed();
+            match (shell.column.popover_view(), &mut shell.popover) {
+                (Some(view), Some((buffer, at))) if !damage.popover_changed => {
+                    upload(buffer, &view, &damage.popover);
+                    *at = view.at;
+                }
+                (Some(view), _) => shell.popover = Some((buffer_for(&view), view.at)),
+                (None, _) => shell.popover = None,
+            }
+            if damage.popover_changed && !shell.column.phone_popover_open() {
+                self.phone_popover_closed();
+            }
         }
         if moved {
             // The work area of the column's output changed.
@@ -440,32 +465,38 @@ impl State {
 
     /// The pointer moved to `location`: whether the shell took it.
     pub fn shell_pointer_motion(&mut self, location: Point<f64, Logical>) -> bool {
+        let live = self.column_live();
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
         let Some((_, area, _)) = &shell.on else {
             return false;
         };
+        // Out, the column takes the pointer in its place, not where it
+        // slides: what is under the pointer stays put.
         let origin = column_rect(*area).loc.to_f64();
         let at = UiPoint::new(
             (location.x - origin.x) as f32,
             (location.y - origin.y) as f32,
         );
-        if shell.column.hit(at) || shell.pressed {
+        if live && (shell.column.hit(at) || shell.pressed) {
             shell.pointer_inside = true;
-            let _ = shell.column.input(at, Input::PointerMove(at));
-            true
-        } else {
-            if shell.pointer_inside {
-                shell.pointer_inside = false;
-                shell.column.pointer_left();
+            if shell.panel.out == crate::panel::Out::Asked {
+                shell.panel.out = crate::panel::Out::Hovered;
             }
-            false
+            let _ = shell.column.input(at, Input::PointerMove(at));
+            return true;
         }
+        if shell.pointer_inside {
+            shell.pointer_inside = false;
+            shell.column.pointer_left();
+        }
+        self.panel_pointer_motion(location)
     }
 
     /// The primary button: whether the shell took it.
     pub fn shell_pointer_button(&mut self, location: Point<f64, Logical>, pressed: bool) -> bool {
+        let live = self.column_live();
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
@@ -478,7 +509,7 @@ impl State {
             (location.y - origin.y) as f32,
         );
         let mine = if pressed {
-            shell.column.hit(at)
+            live && shell.column.hit(at)
         } else {
             std::mem::take(&mut shell.pressed)
         };
@@ -486,7 +517,7 @@ impl State {
             if pressed {
                 shell.column.clicked_elsewhere();
             }
-            return false;
+            return self.panel_pointer_button(location, pressed);
         }
         if pressed {
             shell.pressed = true;
@@ -500,6 +531,9 @@ impl State {
 
     /// The secondary button pressed: over a tray application, its menu.
     pub fn shell_secondary_click(&mut self, location: Point<f64, Logical>) -> bool {
+        if !self.column_live() {
+            return false;
+        }
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
@@ -520,7 +554,7 @@ impl State {
         true
     }
 
-    fn shell_action(&mut self, action: ShellAction) {
+    pub(crate) fn shell_action(&mut self, action: ShellAction) {
         use hocus_core::shortcuts::Action as A;
         let serial = SERIAL_COUNTER.next_serial();
         match action {
@@ -536,6 +570,7 @@ impl State {
             ShellAction::Restart => self.run_action(&A::Restart, serial),
             ShellAction::ShutDown => self.run_action(&A::ShutDown, serial),
             ShellAction::OpenLauncher => self.open_launcher(),
+            ShellAction::OpenPanel => self.toggle_panel(),
             ShellAction::StopSharing => self.stop_sharing(),
             ShellAction::TickTodo(index) => self.tick_note(index),
             ShellAction::InstallUpdates => self.install_updates(),
@@ -585,9 +620,13 @@ impl State {
         if *name != output.name() || self.fullscreen_on(output) {
             return (None, None, None);
         }
+        // In, in a form that keeps it in, it does not show.
+        let Some(shift) = self.column_shift() else {
+            return (None, None, None);
+        };
         let rect = column_rect(*area);
         let local = Point::<f64, Logical>::from((
-            f64::from(rect.loc.x - area.loc.x),
+            f64::from(rect.loc.x - area.loc.x) + shift,
             f64::from(rect.loc.y - area.loc.y),
         ));
         let now = self.clock.now();
@@ -623,11 +662,13 @@ impl State {
         let fading = shell.fading.as_ref().and_then(|(buffer, size, fade)| {
             element(buffer, local, *size, Some(fade.value(now).clamp(0.0, 1.0)))
         });
-        // Coming or going in the Matrix theme, it is drawn in rain.
+        // Coming or going in the Matrix theme, it is drawn in rain; only
+        // in its own form: in the others it slides (#263).
+        let column_form = self.panel_form() == hocus_core::config::PanelForm::Column;
         let column = shell
             .buffer
             .as_ref()
-            .filter(|_| self.matrix_column_moment().is_none())
+            .filter(|_| !column_form || self.matrix_column_moment().is_none())
             .and_then(|buffer| {
                 let view = shell.column.view();
                 element(buffer, local, (view.width, view.height), None)
@@ -648,7 +689,10 @@ impl State {
         let (Some((name, area, scale)), Some(buffer)) = (&shell.on, &shell.buffer) else {
             return Vec::new();
         };
-        if *name != output.name() || self.matrix_column_moment().is_none() {
+        if *name != output.name()
+            || self.matrix_column_moment().is_none()
+            || self.panel_form() != hocus_core::config::PanelForm::Column
+        {
             return Vec::new();
         }
         let rect = column_rect(*area);
@@ -670,9 +714,12 @@ impl State {
         if *name != output.name() {
             return (Vec::new(), Vec::new());
         }
+        let Some(shift) = self.column_shift() else {
+            return (Vec::new(), Vec::new());
+        };
         let rect = column_rect(*area);
         let local = Point::<f64, Logical>::from((
-            f64::from(rect.loc.x - area.loc.x),
+            f64::from(rect.loc.x - area.loc.x) + shift,
             f64::from(rect.loc.y - area.loc.y),
         ));
         (
@@ -727,8 +774,13 @@ impl State {
         let Some((_, area, _)) = &shell.on else {
             return out;
         };
-        let origin = column_rect(*area).loc;
-        flatten(&shell.column.access(), origin, 0, &mut out);
+        self.panel_ui(&mut out);
+        // The column as it shows: in its place, or out over the windows.
+        if let Some(shift) = self.column_shift() {
+            let mut origin = column_rect(*area).loc;
+            origin.x += shift.round() as i32;
+            flatten(&shell.column.access(), origin, 0, &mut out);
+        }
         self.toasts_ui(&mut out);
         self.launcher_ui(&mut out);
         self.quick_ui(&mut out);

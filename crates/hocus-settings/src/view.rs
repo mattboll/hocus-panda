@@ -2379,6 +2379,26 @@ impl SettingsView {
             }
         }
 
+        // The panel's form (#263), applied at once.
+        let form = self.ctx.config.panel.form.name();
+        let section = self.section(theme, body, words::PANEL);
+        let line = self.add(section, row(8.0), Kind::Box(Look::default()));
+        for (id, name, _) in words::PANEL_FORMS {
+            let target = Target::Set(Change::new("panel", "form", id));
+            self.choice(theme, line, name.get(lang), id == form, target);
+        }
+        if let Some((_, _, note)) = words::PANEL_FORMS.iter().find(|(id, _, _)| *id == form) {
+            self.add(
+                section,
+                fill_width(Style::default()),
+                Kind::text(
+                    note.get(lang),
+                    theme.text.label.with_weight(500).with_color(Paint::Muted),
+                ),
+            );
+        }
+        self.highlighted(section, &Setting::PanelForm, Look::default());
+
         // Accent and text, side by side when there is room.
         let wide = self.tree.size().w >= 1180.0;
         let pair = self.add(

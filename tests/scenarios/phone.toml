@@ -6,6 +6,12 @@ dbus = true
 child_env = { PATH = "{scenario_dir}/calendar/bin:/usr/bin:/bin" }
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 expect_phone_state = "absent"
 
 [[step]]

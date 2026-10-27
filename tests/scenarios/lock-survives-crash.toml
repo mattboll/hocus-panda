@@ -3,6 +3,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open = { app_id = "mail", size = [600, 400], color = "#3399ff" }
 
 [[step]]

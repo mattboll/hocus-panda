@@ -13,6 +13,9 @@ name = "assistant"
 access = "act"
 apps = ["*"]
 shell = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

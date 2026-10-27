@@ -11,6 +11,9 @@ desktop_names = ["Me", "Chapitô", "Website"]
 
 [shortcuts]
 "Super+O" = "overview"
+
+[panel]
+form = "column"
 """
 
 [[step]]

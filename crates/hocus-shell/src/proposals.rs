@@ -117,6 +117,11 @@ const KEYS: &[(&str, &str, Kind)] = &[
     ("idle", "fullscreen_awake", Kind::Bool),
     ("pandas", "enabled", Kind::Bool),
     ("dock", "enabled", Kind::Bool),
+    (
+        "panel",
+        "form",
+        Kind::Choice(&["strip", "column", "top", "hidden"]),
+    ),
     ("clock", "format", Kind::Choice(&["24h", "12h"])),
     ("language", "interface", Kind::Choice(&["auto", "en", "fr"])),
 ];

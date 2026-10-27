@@ -10,6 +10,9 @@ config = """
 desktop = 2
 output = "HEADLESS-1"
 theme = "paper"
+
+[panel]
+form = "column"
 """
 
 [[step]]

@@ -7,6 +7,9 @@ config = """
 [windows.gaps]
 inner = 8
 outer = 8
+
+[panel]
+form = "column"
 """
 
 [[step]]

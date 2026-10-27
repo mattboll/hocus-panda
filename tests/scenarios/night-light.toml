@@ -9,6 +9,9 @@ enabled = true
 from = "14:38"
 to = "07:00"
 temperature = 3500
+
+[panel]
+form = "column"
 """
 
 [[step]]

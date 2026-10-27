@@ -3,6 +3,12 @@ outputs = ["1600x1000/3"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 herdr = { name = "chapito", agents = [
   { name = "refacto", status = "working" },
 ] }
@@ -16,6 +22,9 @@ desktop_names = ["Me", "Chapitô", "Website"]
 [[agents.herdr]]
 socket = "{herdr:chapito}"
 desktop = 2
+
+[panel]
+form = "column"
 """
 
 [[step]]

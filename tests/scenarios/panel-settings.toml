@@ -1,0 +1,45 @@
+description = "The panel's form is chosen on the settings' Appearance page (#263), the strip by default, and applied at once"
+outputs = ["1280x800"]
+shell = true
+
+[[step]]
+open = { app_id = "editor", size = [500, 300], color = "#3399ff" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 0, 1192, 800] }
+
+[[step]]
+open_settings = { page = "appearance" }
+
+[[step]]
+expect_settings = { label = "Strip", selected = true }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-settings.png" }
+
+[[step]]
+click_settings = "Hidden"
+
+[[step]]
+expect_config_file = { contains = ["[panel]", "form = \"hidden\""] }
+
+[[step]]
+expect_settings = { label = "Hidden", selected = true }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 0, 1280, 800] }
+
+[[step]]
+click_settings = "Top bar"
+
+[[step]]
+expect_config_file = { contains = ["form = \"top\""] }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [0, 64, 1280, 736] }

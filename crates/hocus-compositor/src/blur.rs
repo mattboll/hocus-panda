@@ -46,6 +46,8 @@ use crate::{State, decoration::Rounded, scene::Build};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Surface {
     Column,
+    /// The panel's strip or top bar (#263).
+    Bar,
     Popover,
     Toasts,
     Quick,
@@ -322,6 +324,7 @@ impl State {
         self.config.rules.iter().any(|r| r.blur == Some(true))
             || !popover.is_empty()
             || !column.is_empty()
+            || !self.panel_glass(output).is_empty()
             || !self.quick_glass().is_empty()
             || !self.launcher_glass(output).is_empty()
             || !self.toasts_glass(output).is_empty()

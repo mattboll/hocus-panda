@@ -171,8 +171,23 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 
 ## 10. Widget panel
 
-The column on the right of the screen is the chosen form (see
-[decision 0007](decisions/0007-widget-column-right.md)).
+A thin strip on the right of the screen by default, which opens into the
+whole column over the windows; the column always there, a bar at the top or
+nothing at all are options (see
+[decision 0011](decisions/0011-panel-strip-by-default.md), which supersedes
+[0007](decisions/0007-widget-column-right.md)).
+
+- Four forms, `[panel] form`, on the settings' Appearance page and live:
+  the strip (72 px: the time stacked, the next meeting's ring, a panda per
+  active agent, the to-dos and notifications counted, the desktops, the
+  battery, the account), the column (320 px), a top bar (one line: the
+  active window and its buttons, the time and the date, the agents, the
+  tasks) and hidden (a faint hint at the right edge); windows leave room
+  for the strip, the column or the bar only
+- The whole column slides over the windows from the right edge: the pointer
+  resting on the strip or at the right edge, a click on the strip or the
+  bar, or Super+C; it slides back when the pointer leaves it, on Escape,
+  Super+C again or a click elsewhere; at once with reduced motion
 
 - Clock 12/24 h, seconds, follows the time zone
 - Date; calendar on touch (month, events, today's agenda)

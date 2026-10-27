@@ -8,6 +8,9 @@ shell = true
 config = """
 [screenshots]
 ocr = "{scenario_dir}/circle/bin/ocr-slow"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -53,6 +56,9 @@ expect_ui = { label = "Copy the text", shown = false }
 config = """
 [screenshots]
 ocr = "{scenario_dir}/circle/bin/ocr-blank"
+
+[panel]
+form = "column"
 """
 
 [[step]]

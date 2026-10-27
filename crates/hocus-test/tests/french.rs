@@ -1,5 +1,5 @@
-//! The interface in French (#51): the column, quick settings, the
-//! launcher and the palette say nothing in English. The same screens are shown in both languages; a
+//! The interface in French (#51): the column, the strip, the top bar,
+//! quick settings, the launcher and the palette say nothing in English. The same screens are shown in both languages; a
 //! text the same in both is English left over, unless it is a name, a
 //! number or a symbol.
 
@@ -16,6 +16,8 @@ const SAME: &[&str] = &[
     "Agenda",
     "NOTIFICATIONS",
     "Notifications · 0",
+    // The top bar's, short in both.
+    "Notif. 0",
     "Pandas",
     "Performance",
     // The slider's name and value, as the toolkit says it.
@@ -38,8 +40,6 @@ fn texts(language: &str) -> anyhow::Result<BTreeSet<String>> {
         first_run: false,
         google_caldav: None,
     })?;
-    compositor.write_config(&format!("[language]\ninterface = \"{language}\"\n"))?;
-    compositor.advance(FRAME * 4)?;
     let mut all = BTreeSet::new();
     let mut read = |compositor: &mut Headless| -> anyhow::Result<()> {
         let Reply::Ui(nodes) = compositor.request(Request::Ui)? else {
@@ -48,7 +48,14 @@ fn texts(language: &str) -> anyhow::Result<BTreeSet<String>> {
         all.extend(nodes.into_iter().filter_map(|n| n.label));
         Ok(())
     };
-    read(&mut compositor)?;
+    // Each form of the panel (#263), the column last.
+    for form in ["strip", "top", "column"] {
+        compositor.write_config(&format!(
+            "[language]\ninterface = \"{language}\"\n[panel]\nform = \"{form}\"\n"
+        ))?;
+        compositor.advance(FRAME * 4)?;
+        read(&mut compositor)?;
+    }
     compositor.on_loop("quick settings", |state| state.toggle_quick());
     compositor.advance(FRAME * 4)?;
     read(&mut compositor)?;

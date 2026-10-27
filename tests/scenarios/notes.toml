@@ -3,6 +3,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 keys = "super+49"
 
 [[step]]

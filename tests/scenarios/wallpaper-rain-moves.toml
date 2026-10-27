@@ -6,6 +6,9 @@ shell = true
 config = """
 [wallpaper]
 kind = "rain"
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -43,6 +46,9 @@ kind = "rain"
 
 [appearance]
 reduced_motion = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

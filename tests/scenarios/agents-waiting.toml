@@ -2,6 +2,12 @@ description = "herdr's agents in the column: one switching to blocked shows wait
 outputs = ["1600x1000"]
 shell = true
 
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
 # A herdr of the test's own, never the user's.
 [[step]]
 herdr = { agents = [
@@ -16,6 +22,9 @@ herdr = { agents = [
 config = """
 [agents]
 herdr_socket = "{herdr}"
+
+[panel]
+form = "column"
 """
 
 [[step]]

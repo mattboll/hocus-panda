@@ -2,6 +2,12 @@ description = "Two herdr tied to desktops 2 and 3: the column groups the agents 
 outputs = ["1600x1000/3"]
 shell = true
 
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
 # Two herdr of the test's own, never the user's.
 [[step]]
 herdr = { name = "chapito", agents = [
@@ -27,6 +33,9 @@ desktop = 2
 [[agents.herdr]]
 socket = "{herdr:website}"
 desktop = 3
+
+[panel]
+form = "column"
 """
 
 # On "Me", which has no agents of its own: each project in a line.

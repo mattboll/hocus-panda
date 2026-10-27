@@ -217,6 +217,17 @@ pinned = [                 # desktop entries, in order; those not installed are 
   "org.gnome.Nautilus.desktop", "thunderbird.desktop",
 ]
 
+[panel]                    # the widget panel's form (Settings → Appearance), applied at once
+form = "strip"             # "strip": 72 px on the right (the time, the next meeting, a panda per active
+                           #   agent, the to-dos and notifications counted, the account); resting the
+                           #   pointer on it (150 ms), a click or Super+C slides the whole column over
+                           #   the windows, leaving it or Escape slides it back
+                           # "column": the whole column on the right, always there (320 px)
+                           # "top": one line at the top (the active window and its buttons, the time,
+                           #   the agents, the tasks); a click on it brings the column out
+                           # "hidden": the whole screen to the windows; resting at the right edge
+                           #   (300 ms) or Super+C brings the column out; toasts still show
+
 [pandas]                   # they show what happens; they move a moment when it changes, then hold still
 enabled = true             # false: no panda anywhere (also from quick settings, for the session)
 
@@ -426,6 +437,7 @@ is the key left of 1 whatever the layout (on AZERTY, the `²` key).
 | `dropdown` | shows the drop-down terminal on the screen under the pointer, starting it the first time, or hides it (it keeps running) |
 | `switch-windows`, `switch-windows all` | the window switcher (#39) |
 | `dock` | shows the dock, or hides it again |
+| `panel` | slides the whole column out over the windows, or back, when the panel is a strip, a top bar or hidden (`[panel] form`); nothing when it is the column |
 | `overview` | every screen's windows in a grid, or closes it |
 | `show-desktop` | the desktop of the screen under the pointer, its windows out of the way, or back |
 | `welcome` | the first session's welcome again: language, keyboard, theme, and where to go next |
@@ -456,6 +468,7 @@ Defaults:
 | Super+Ctrl+Space | `switch-layout` |
 | Super+Space | `launcher` |
 | Super+D | `dock` |
+| Super+C | `panel` |
 | Super+V | `clipboard-history` |
 | Super+Period | `emoji` |
 | Super+P | `palette` |

@@ -6,6 +6,9 @@ shell = true
 config = """
 [shortcuts]
 "Super+M" = "toggle-maximized"
+
+[panel]
+form = "column"
 """
 
 [[step]]

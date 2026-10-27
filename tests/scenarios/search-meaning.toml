@@ -10,6 +10,12 @@ shell = true
 home = "../fixtures/search-home"
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 ai_server = { pieces = ["Not asked."] }
 
 [[step]]
@@ -21,6 +27,9 @@ url = "{ai}"
 
 [search]
 folders = ["{home}/Documents"]
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -66,6 +75,9 @@ url = "{ai}"
 [search]
 folders = ["{home}/Documents"]
 meaning = "off"
+
+[panel]
+form = "column"
 """
 
 [[step]]

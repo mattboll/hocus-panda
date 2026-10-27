@@ -9,6 +9,9 @@ kind = "rain"
 
 [appearance]
 reduced_motion = true
+
+[panel]
+form = "column"
 """
 
 [[step]]
@@ -30,6 +33,9 @@ kind = "stars"
 
 [appearance]
 reduced_motion = true
+
+[panel]
+form = "column"
 """
 
 [[step]]

@@ -56,6 +56,43 @@ pub const THEME_PER_DESKTOP_NOTE: Words = Words::new(
     "Know where you are at a glance. Comes with #49.",
     "On sait d’un coup d’œil où l’on est. Arrive avec #49.",
 );
+pub const PANEL: Words = Words::new("Panel", "Panneau");
+/// The panel's forms (#263): their names in the file, names and what
+/// each does.
+pub const PANEL_FORMS: [(&str, Words, Words); 4] = [
+    (
+        "strip",
+        Words::new("Strip", "Bande fine"),
+        Words::new(
+            "72 px on the right: the time, the next meeting, the agents, counters. The whole column slides over the windows on hover, a click or Super+C.",
+            "72 px à droite : l’heure, la prochaine réunion, les agents, des compteurs. La colonne entière glisse sur les fenêtres au survol, d’un clic ou avec Super+C.",
+        ),
+    ),
+    (
+        "column",
+        Words::new("Column", "Colonne"),
+        Words::new(
+            "Everything at a glance on the right, 320 px taken for good.",
+            "Tout d’un coup d’œil à droite, 320 px pris en permanence.",
+        ),
+    ),
+    (
+        "top",
+        Words::new("Top bar", "Barre en haut"),
+        Words::new(
+            "One line: the active window and its buttons, the time, the agents, the tasks. A click on it brings the column out.",
+            "Une ligne : la fenêtre active et ses boutons, l’heure, les agents, les tâches. Un clic dessus fait sortir la colonne.",
+        ),
+    ),
+    (
+        "hidden",
+        Words::new("Hidden", "Caché"),
+        Words::new(
+            "The whole screen to the windows: the column slides out of the right edge, the agents’ bubbles stay.",
+            "Tout l’écran aux fenêtres : la colonne sort du bord droit, les bulles des agents restent.",
+        ),
+    ),
+];
 pub const REDUCED_MOTION: Words = Words::new("Reduced motion", "Mouvement réduit");
 pub const REDUCED_MOTION_SUB: Words =
     Words::new("Short fades, no bounce", "Fondus courts, pas de rebond");

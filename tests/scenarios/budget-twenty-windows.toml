@@ -5,6 +5,12 @@ shell = true
 motion = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 wait_wallpapers = true
 [[step]]
 advance_ms = 1000

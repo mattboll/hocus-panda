@@ -6,6 +6,9 @@ shell = true
 config = """
 [appearance]
 theme = "matrix"
+
+[panel]
+form = "column"
 """
 
 [[step]]

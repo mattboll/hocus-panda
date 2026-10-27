@@ -11,9 +11,11 @@ description = "A click on a window behind another focuses it and raises it"
 outputs = ["2560x1600@2/1", "1920x1080"]
 # Starts XWayland for `open_x11`; the scenario is skipped where Xwayland is missing
 xwayland = false
-# Shows the widget column on the primary output (in English, at a fixed
+# Shows the shell's panel on the primary output (in English, at a fixed
 # Wednesday 21 October 14:37 UTC plus the virtual time, for user "Alex";
-# UTC is the system's time zone there, unless a timedated stand-in says another)
+# UTC is the system's time zone there, unless a timedated stand-in says another):
+# the strip by default; a scenario about the column itself writes
+# [panel] form = "column" in its first step and in each configuration it writes
 shell = false
 # A private D-Bus bus for the compositor (notifications); never the session's
 dbus = false

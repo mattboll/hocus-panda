@@ -4,6 +4,12 @@ shell = true
 dbus = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 expect_phone_state = "absent"
 
 [[step]]

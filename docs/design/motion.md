@@ -68,6 +68,7 @@ of the moment: the client follows at its own pace.
 - Bell swing on a new notification; clipboard copy pulse
 - Dock: spring magnification, launch bounce and dot, attention wiggle and breathing
 - Panels and popovers: open/close fade + scale from where they come from
+- The whole column out of the strip, the top bar or the right edge: it slides over the windows from the right edge, out-cubic `STANDARD`, and back in-cubic `STANDARD`, retargeted from where it is; with reduced motion it is out and back at once
 - Launcher: results cascade in, the selection glides
 - Screenshot: flash, then the picture flies into its notification
 - Recorder: breathing dot while recording

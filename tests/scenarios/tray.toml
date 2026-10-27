@@ -4,6 +4,12 @@ shell = true
 dbus = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 tray_app = { title = "Chat", color = "#3b82f6", menu = ["Open Chat", "Do not disturb", "-", "Quit"] }
 
 [[step]]

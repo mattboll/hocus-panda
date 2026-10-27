@@ -4,6 +4,12 @@ shell = true
 devices = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 open_settings = { page = "language" }
 
 [[step]]

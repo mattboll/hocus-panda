@@ -10,6 +10,9 @@ reduced_motion = true
 
 [dock]
 pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop", "org.example.Files.desktop"]
+
+[panel]
+form = "column"
 """
 
 [[step]]

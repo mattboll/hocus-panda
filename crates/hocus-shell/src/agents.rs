@@ -41,7 +41,7 @@ pub enum AgentState {
 }
 
 impl AgentState {
-    fn mood(self) -> Mood {
+    pub(crate) fn mood(self) -> Mood {
         match self {
             Self::Rest => Mood::Rest,
             Self::Work => Mood::Work,
@@ -52,7 +52,7 @@ impl AgentState {
     }
 
     /// Its colour: the panda's magic ear, or the dot without pandas.
-    fn paint(self) -> Paint {
+    pub(crate) fn paint(self) -> Paint {
         match self {
             Self::Wait => Paint::Waiting,
             Self::Stuck => Paint::Error,
@@ -735,7 +735,7 @@ pub(crate) fn room(shown: bool) -> Style {
 }
 
 /// A panda in `state`'s colour, moving a moment from `moved_at`.
-fn panda(
+pub(crate) fn panda(
     theme: &Theme,
     character: Character,
     mood: Mood,

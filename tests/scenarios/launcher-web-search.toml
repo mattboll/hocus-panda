@@ -3,6 +3,12 @@ outputs = ["1280x800"]
 shell = true
 
 [[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
 keys = "super+space"
 
 [[step]]
@@ -18,6 +24,9 @@ keys = "escape"
 config = """
 [launcher]
 web_search = false
+
+[panel]
+form = "column"
 """
 
 [[step]]

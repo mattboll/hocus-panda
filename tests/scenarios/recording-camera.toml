@@ -13,6 +13,9 @@ countdown = 1
 camera = true
 camera_input = "lavfi"
 camera_device = "testsrc=size=320x240:rate=15"
+
+[panel]
+form = "column"
 """
 
 [[step]]
