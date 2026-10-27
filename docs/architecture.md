@@ -1002,7 +1002,10 @@ suspends and wakes.
   after the first letter as after the word was checked and captured half
   typed (#292). The settings app is pinged the same way before a capture
   or a click, and the trim editor counts as busy until its thumbnails
-  came.
+  came. What the configuration decides waits for it to be read: the Matrix
+  column placed before it came has not shown yet, or after a restart it
+  opened or not depending on how soon the configuration's thread read the
+  file (#307).
   Each runs on its own compositor in-process, through the control API;
   the format is described in `tests/scenarios/README.md`.
 - **Test clients**: a small in-repo client that draws known colours and

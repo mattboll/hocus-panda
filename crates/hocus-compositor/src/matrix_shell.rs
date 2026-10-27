@@ -660,14 +660,17 @@ impl State {
                 .is_some_and(|l| millis(l.since, now) < launcher_ms(l.moment))
     }
 
-    /// After each dispatch: moments over go, the column's shows and goes,
-    /// the toasts' cards are found.
-    pub fn refresh_matrix_shell(&mut self) {
-        let now = self.clock.now();
-        let moves = self.matrix_moves();
-        // The column opens when it first shows, when it comes to another
-        // screen and when a fullscreen window over it goes; it closes when
-        // one comes over it.
+    /// The column opens when it first shows, when it comes to another
+    /// screen and when a fullscreen window over it goes; it closes when one
+    /// comes over it.
+    fn refresh_matrix_column(&mut self, now: Duration, moves: bool) {
+        // Until the configuration is read, its theme is not known: the
+        // column is not looked at yet, or placed before the configuration
+        // came it would have shown already, and not open as the session
+        // starts (#307).
+        if self.config_path.is_some() && self.config_generation == 0 {
+            return;
+        }
         let placed = self.shell.as_ref().is_some_and(|s| s.is_placed());
         let on = self
             .column_output()
@@ -684,6 +687,14 @@ impl State {
                 self.matrix_shell.column = Some((moment, now));
             }
         }
+    }
+
+    /// After each dispatch: moments over go, the column's shows and goes,
+    /// the toasts' cards are found.
+    pub fn refresh_matrix_shell(&mut self) {
+        let now = self.clock.now();
+        let moves = self.matrix_moves();
+        self.refresh_matrix_column(now, moves);
         if let Some(panel) = self.toasts.as_mut() {
             for (id, rect) in panel.toasts.take_gone() {
                 if moves {
