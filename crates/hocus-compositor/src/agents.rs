@@ -394,7 +394,7 @@ impl State {
             return None;
         }
         let here = self
-            .column_output()
+            .column_screen()
             .and_then(|o| self.model.output(&OutputName(o.name())))
             .map(|o| o.shown);
         let count = self.agents.tried.as_ref().map_or(0, Vec::len);
@@ -499,7 +499,7 @@ impl State {
             return Vec::new();
         }
         let here = self
-            .column_output()
+            .column_screen()
             .and_then(|o| self.model.output(&OutputName(o.name())))
             .map(|o| o.shown);
         let mut choices: Vec<(u8, String, String)> = self

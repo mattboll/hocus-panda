@@ -1,0 +1,196 @@
+description = "With [panel] screens = \"all\" (#282), each screen has its own strip, and its windows leave room for it; resting the pointer on the second screen's strip slides the column out there and not on the first, leaving it slides it back; a click on a strip and Super+C bring it out on that strip's screen, or the one under the pointer. Back to the primary screen alone, the second screen's strip goes"
+outputs = ["1600x1000", "1600x1000"]
+shell = true
+
+[[step]]
+config = """
+[panel]
+screens = "all"
+"""
+
+[[step]]
+pointer_move = [800, 500]
+
+[[step]]
+open = { app_id = "chat", size = [600, 400], color = "#3399ff", title = "Chat" }
+
+[[step]]
+set_state = { app_id = "chat", state = "maximized" }
+
+[[step]]
+pointer_move = [2400, 500]
+
+[[step]]
+open = { app_id = "editor", size = [600, 400], color = "#ff6600", title = "Editor" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+# Each strip takes the right of its screen: x 1512 to 1584 on the first,
+# 3112 to 3184 on the second.
+[[step]]
+expect_window = { app_id = "chat", output = "HEADLESS-1", geometry = [0, 0, 1512, 1000], state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-2", geometry = [1600, 0, 1512, 1000], state = "maximized" }
+
+[[step]]
+expect_ui = { label = "Time: 14:37", inside = [1512, 16, 72, 968] }
+
+[[step]]
+expect_ui = { label = "Time: 14:37", inside = [3112, 16, 72, 968] }
+
+[[step]]
+expect_ui = { label = "Account: Alex", inside = [3112, 16, 72, 968] }
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-every-screen.first.png" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "panel-every-screen.second.png" }
+
+# Resting on the second screen's strip brings the column out there, over
+# its window; the first screen does not change.
+[[step]]
+pointer_move = [3148, 500]
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_ui = { label = "Command field", inside = [1600, 0, 1600, 1000] }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [1600, 0, 1512, 1000], state = "maximized" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "panel-every-screen.second-out.png" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-every-screen.first.png" }
+
+# Leaving it, it slides back.
+[[step]]
+pointer_move = [2000, 500]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-2", reference = "panel-every-screen.second.png" }
+
+# Resting on the first screen's strip, it comes out on the first.
+[[step]]
+pointer_move = [1548, 500]
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_ui = { label = "Command field", inside = [0, 0, 1600, 1000] }
+
+[[step]]
+pointer_move = [700, 500]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# A click on the second's strip brings it out there; Escape sends it back.
+[[step]]
+pointer_move = [3148, 900]
+
+[[step]]
+click = "left"
+
+[[step]]
+expect_ui = { label = "Command field", inside = [1600, 0, 1600, 1000] }
+
+[[step]]
+keys = "escape"
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# Super+C: on the screen under the pointer.
+[[step]]
+pointer_move = [2400, 500]
+
+[[step]]
+keys = "super+c"
+
+[[step]]
+expect_ui = { label = "Command field", inside = [1600, 0, 1600, 1000] }
+
+[[step]]
+keys = "super+c"
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+[[step]]
+pointer_move = [800, 500]
+
+[[step]]
+keys = "super+c"
+
+[[step]]
+expect_ui = { label = "Command field", inside = [0, 0, 1600, 1000] }
+
+[[step]]
+keys = "super+c"
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# Hidden, resting at the second screen's right edge brings the column out
+# there; windows take every screen whole.
+[[step]]
+config = """
+[panel]
+form = "hidden"
+screens = "all"
+"""
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [1600, 0, 1600, 1000], state = "maximized" }
+
+[[step]]
+pointer_move = [3199, 500]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", inside = [1600, 0, 1600, 1000] }
+
+[[step]]
+pointer_move = [2000, 500]
+
+[[step]]
+advance_ms = 400
+
+[[step]]
+expect_ui = { label = "Command field", shown = false }
+
+# The primary screen alone again, the strip: the second's window takes its
+# whole width back.
+[[step]]
+config = """
+[panel]
+screens = "primary"
+"""
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [1600, 0, 1600, 1000], state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "chat", geometry = [0, 0, 1512, 1000], state = "maximized" }

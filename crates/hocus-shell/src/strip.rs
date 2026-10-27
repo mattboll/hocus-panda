@@ -1,5 +1,6 @@
 //! The panel as a thin strip (#263, decision 0011), as board D12 draws its
-//! form B: 72 px on the right of the primary screen, from top to bottom
+//! form B: 72 px on the right of the primary screen (or of each, #282),
+//! from top to bottom
 //! the time, stacked, the next meeting's ring, a panda for each active
 //! agent and how many others there are, the tasks and the notifications
 //! counted, then the screen's desktops, the battery and the account. It
@@ -19,7 +20,7 @@ use hocus_ui::{
 
 use crate::{
     agents::{AgentRow, AgentState},
-    column::{ActiveWindow, ColumnState, Meeting, Ring, View, WallTime},
+    column::{ActiveWindow, ColumnState, Meeting, Ring, ScreenDesktops, View, WallTime},
     i18n::Lang,
     icons,
 };
@@ -34,6 +35,24 @@ const PANDA: f32 = 52.0;
 const MOST: usize = 99;
 
 const MISSING: fn() -> NodeId = || unreachable!("adding to a node of this tree");
+
+/// The screen a strip or a bar is on (#282): its desktops and its active
+/// window, out of the column's state.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Here<'a> {
+    pub screen: Option<&'a ScreenDesktops>,
+    pub active: Option<&'a ActiveWindow>,
+}
+
+impl<'a> Here<'a> {
+    /// The column's screen and the focused window, as `state` has them.
+    pub fn of(state: &'a ColumnState) -> Self {
+        Self {
+            screen: state.screens.first(),
+            active: state.active.as_ref(),
+        }
+    }
+}
 
 /// What the strip and the top bar show of the column's state.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -62,8 +81,13 @@ pub struct Glance {
 }
 
 impl Glance {
-    /// What `state` shows at a glance.
+    /// What `state` shows at a glance, on the column's screen.
     pub fn of(state: &ColumnState) -> Self {
+        Self::here(state, Here::of(state))
+    }
+
+    /// What `state` shows at a glance on the screen `here`.
+    pub fn here(state: &ColumnState, here: Here<'_>) -> Self {
         let (agents, agents_total, pandas, still) = match &state.agents {
             Some(view) => {
                 let agents = view
@@ -82,7 +106,7 @@ impl Glance {
             }
             None => (Vec::new(), None, false, false),
         };
-        let screen = state.screens.first();
+        let screen = here.screen;
         Self {
             time: state.time,
             meeting: state.meeting.clone(),
@@ -97,15 +121,15 @@ impl Glance {
             badges: screen.map(|s| s.badges.clone()).unwrap_or_default(),
             battery: state.status.battery,
             user: state.user.clone(),
-            active: state.active.clone(),
+            active: here.active.cloned(),
         }
     }
 
-    /// Whether it is what `state` shows at a glance (its active window
-    /// too, `with_active`), found without copying anything: the state is
-    /// given after every turn of the loop.
-    pub fn matches(&self, state: &ColumnState, with_active: bool) -> bool {
-        let screen = state.screens.first();
+    /// Whether it is what `state` shows at a glance on the screen `here`
+    /// (its active window too, `with_active`), found without copying
+    /// anything: the state is given after every turn of the loop.
+    pub fn matches(&self, state: &ColumnState, here: Here<'_>, with_active: bool) -> bool {
+        let screen = here.screen;
         let agents_match = match &state.agents {
             Some(view) => {
                 let mut shown = view
@@ -139,7 +163,7 @@ impl Glance {
             && self.badges.as_slice() == screen.map_or(&[][..], |s| s.badges.as_slice())
             && self.battery == state.status.battery
             && self.user == state.user
-            && (!with_active || self.active == state.active)
+            && (!with_active || self.active.as_ref() == here.active)
     }
 
     /// What is said of the agents not shown: `+11` beside the pandas, or
@@ -444,13 +468,24 @@ impl Strip {
     /// Shows what `state` shows at a glance; built again only when that
     /// changes, and only its clock's text when the minute turns.
     pub fn set_state(&mut self, state: &ColumnState) {
-        if self.shown.matches(state, false) {
+        self.set_state_here(state, Here::of(state));
+    }
+
+    /// The same, on the screen `here` (#282).
+    pub fn set_state_here(&mut self, state: &ColumnState, here: Here<'_>) {
+        if self.shown.matches(state, here, false) {
             return;
         }
         let glance = Glance {
             // The top bar's alone.
             active: None,
-            ..Glance::of(state)
+            ..Glance::here(
+                state,
+                Here {
+                    active: None,
+                    ..here
+                },
+            )
         };
         let mut old = std::mem::take(&mut self.shown);
         // The same lines: the same clock, the same half of the day.

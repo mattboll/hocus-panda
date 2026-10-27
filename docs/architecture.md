@@ -225,7 +225,12 @@ loop when the rest is long enough, none on a virtual clock), on a click or
 Super+C, and evaluated at the clock's time when the scene is drawn. Out, it
 is drawn over the windows and their toasts and takes the pointer before
 them; it goes back once the pointer leaves its band (from its left edge to
-the screen's), on Escape, Super+C or a click elsewhere.
+the screen's), on Escape, Super+C or a click elsewhere. With `[panel]
+screens = "all"` (#282) each screen keeps its own strip, bar or hint, given
+the glance with its own desktops and active window (`strip::Here`, the
+model's `active_on`), and the one column is placed on the screen it was
+last asked on before it is drawn; moving it there lays no window out
+again, as every screen's work area already leaves room for its own.
 Frosted glass (#37) is GLES shaders too. The shell's panels (the column,
 the strip or the top bar, its popovers, quick settings, the launcher's card, toasts) are drawn on a
 `Glass` paint that the theme makes see-through when glass is on, and their

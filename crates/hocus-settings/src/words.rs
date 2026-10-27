@@ -93,6 +93,20 @@ pub const PANEL_FORMS: [(&str, Words, Words); 4] = [
         ),
     ),
 ];
+/// Which screens the panel is on (#282): their names in the file, and
+/// names.
+pub const PANEL_SCREENS: Words = Words::new("Panel on every screen", "Panneau sur chaque écran");
+pub const PANEL_SCREENS_CHOICES: [(&str, Words); 2] = [
+    (
+        "primary",
+        Words::new("On the primary screen", "Sur l’écran principal"),
+    ),
+    ("all", Words::new("On every screen", "Sur chaque écran")),
+];
+pub const PANEL_SCREENS_NOTE: Words = Words::new(
+    "On every screen, each has its own; the column comes out on the screen it is asked on. The column form stays on the primary screen.",
+    "Sur chaque écran, chacun a le sien ; la colonne sort sur l’écran où on la demande. La forme colonne reste sur l’écran principal.",
+);
 pub const REDUCED_MOTION: Words = Words::new("Reduced motion", "Mouvement réduit");
 pub const REDUCED_MOTION_SUB: Words =
     Words::new("Short fades, no bounce", "Fondus courts, pas de rebond");

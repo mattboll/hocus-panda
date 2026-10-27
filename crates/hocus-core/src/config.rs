@@ -794,11 +794,37 @@ impl PanelForm {
     }
 }
 
+/// Which screens the widget panel shows on (#282).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelScreens {
+    /// The primary screen alone.
+    #[default]
+    Primary,
+    /// Each screen its own strip, bar or hint; the column comes out on
+    /// the screen it is asked on. The column form stays on the primary
+    /// screen.
+    All,
+}
+
+impl PanelScreens {
+    pub const ALL: [PanelScreens; 2] = [Self::Primary, Self::All];
+
+    /// Its name in the configuration file.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::All => "all",
+        }
+    }
+}
+
 /// The widget panel (#263).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Panel {
     pub form: PanelForm,
+    pub screens: PanelScreens,
 }
 
 /// The discreet dock (#38): hidden while working, shown on an empty
@@ -1974,6 +2000,20 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_panel_is_on_the_primary_screen_unless_asked_for_on_all() -> Result<(), ConfigError> {
+        let panel = Config::parse("")?.panel;
+        assert_eq!(panel.screens, PanelScreens::Primary);
+        let all = Config::parse("[panel]\nform = \"top\"\nscreens = \"all\"\n")?.panel;
+        assert_eq!((all.form, all.screens), (PanelForm::Top, PanelScreens::All));
+        for screens in PanelScreens::ALL {
+            let text = format!("[panel]\nscreens = \"{}\"\n", screens.name());
+            assert_eq!(Config::parse(&text)?.panel.screens, screens);
+        }
+        assert!(Config::parse("[panel]\nscreens = \"each\"\n").is_err());
+        Ok(())
+    }
 
     #[test]
     fn the_clock_reads_its_format() -> Result<(), ConfigError> {

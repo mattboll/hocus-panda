@@ -1,0 +1,51 @@
+description = "With two screens, the settings' Appearance page offers the panel on the primary screen (the default) or on every screen (#282), applied at once: the second screen's window leaves room for its own strip"
+outputs = ["1280x800", "1280x800"]
+shell = true
+
+[[step]]
+pointer_move = [1920, 400]
+
+[[step]]
+open = { app_id = "editor", size = [500, 300], color = "#3399ff" }
+
+[[step]]
+set_state = { app_id = "editor", state = "maximized" }
+
+[[step]]
+expect_window = { app_id = "editor", output = "HEADLESS-2", geometry = [1280, 0, 1280, 800] }
+
+[[step]]
+pointer_move = [640, 400]
+
+[[step]]
+open_settings = { page = "appearance" }
+
+[[step]]
+expect_settings = { label = "On the primary screen", selected = true }
+
+[[step]]
+advance_ms = 300
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "panel-every-screen-settings.png" }
+
+[[step]]
+click_settings = "On every screen"
+
+[[step]]
+expect_config_file = { contains = ["[panel]", "screens = \"all\""] }
+
+[[step]]
+expect_settings = { label = "On every screen", selected = true }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [1280, 0, 1192, 800] }
+
+[[step]]
+click_settings = "On the primary screen"
+
+[[step]]
+expect_config_file = { contains = ["screens = \"primary\""] }
+
+[[step]]
+expect_window = { app_id = "editor", geometry = [1280, 0, 1280, 800] }

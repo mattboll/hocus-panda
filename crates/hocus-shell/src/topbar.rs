@@ -1,9 +1,10 @@
 //! The panel as a bar at the top (#263, decision 0011), as board D12
-//! draws its form C: one line across the primary screen, with this
-//! screen's desktops, the active window and its buttons, the time, the
-//! date and the next meeting in the middle, then the active agents, the
-//! tasks, the notifications and the battery. Its buttons act on the
-//! active window; a click elsewhere on it asks for the whole column.
+//! draws its form C: one line across the primary screen (or each, #282),
+//! with this screen's desktops, the active window and its buttons, the
+//! time, the date and the next meeting in the middle, then the active
+//! agents, the tasks, the notifications and the battery. Its buttons act
+//! on the active window (that screen's, on each screen); a click elsewhere
+//! on it asks for the whole column.
 
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use crate::{
     column::{Action, ColumnState, Dots, View, stroked},
     i18n::Lang,
     icons,
-    strip::{Glance, Others, agent_mark},
+    strip::{Glance, Here, Others, agent_mark},
 };
 
 /// The bar's height, from board D12.
@@ -68,10 +69,16 @@ impl TopBar {
     /// Shows what `state` shows at a glance; built again only when that
     /// changes.
     pub fn set_state(&mut self, state: &ColumnState) {
-        if self.shown.matches(state, true) {
+        self.set_state_here(state, Here::of(state));
+    }
+
+    /// The same, on the screen `here`: its desktops and its active window
+    /// (#282).
+    pub fn set_state_here(&mut self, state: &ColumnState, here: Here<'_>) {
+        if self.shown.matches(state, here, true) {
             return;
         }
-        let glance = Glance::of(state);
+        let glance = Glance::here(state, here);
         if glance != self.shown {
             self.shown = glance;
             self.build();

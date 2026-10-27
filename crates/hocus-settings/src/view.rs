@@ -2807,6 +2807,25 @@ impl SettingsView {
             );
         }
         self.highlighted(section, &Setting::PanelForm, Look::default());
+        // On every screen (#282): offered once there is more than one, or
+        // when the file already asks for it.
+        let screens = self.ctx.config.panel.screens.name();
+        if self.ctx.outputs.len() > 1 || screens != "primary" {
+            let line = self.add(section, row(8.0), Kind::Box(Look::default()));
+            for (id, name) in words::PANEL_SCREENS_CHOICES {
+                let target = Target::Set(Change::new("panel", "screens", id));
+                self.choice(theme, line, name.get(lang), id == screens, target);
+            }
+            self.add(
+                section,
+                fill_width(Style::default()),
+                Kind::text(
+                    words::PANEL_SCREENS_NOTE.get(lang),
+                    theme.text.label.with_weight(500).with_color(Paint::Muted),
+                ),
+            );
+            self.highlighted(line, &Setting::PanelScreens, Look::default());
+        }
 
         // Accent and text, side by side when there is room.
         let wide = self.tree.size().w >= 1180.0;

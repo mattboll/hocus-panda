@@ -110,7 +110,7 @@ Brainstormed features beyond this list live in [ideas.md](ideas.md).
 
 - Hot plug without losing anything
 - Relative layout (left, right, above, below), saved
-- Primary screen; panel on each screen
+- Primary screen; panel on each screen (`[panel] screens = "all"`)
 - Mirroring
 - Enable or disable a screen
 - Resolution, fractional scale, cursor at the right scale per screen
@@ -190,6 +190,13 @@ nothing at all are options (see
   resting on the strip or at the right edge, a click on the strip or the
   bar, or Super+C; it slides back when the pointer leaves it, on Escape,
   Super+C again or a click elsewhere; at once with reduced motion
+- On the primary screen by default, or on every screen, `[panel] screens`
+  (offered on the Appearance page with two screens or more): each screen
+  has its own strip, bar or hint, with its own desktops; the column comes
+  out on the screen it was asked on (the strip or the edge rested on or
+  clicked, the bar clicked, the screen under the pointer for Super+C); each
+  top bar shows its screen's active window, and its buttons act on it. The
+  column form stays on the primary screen
 
 - Clock 12/24 h, seconds, follows the time zone
 - Date; calendar on touch (month, events, today's agenda)

@@ -1,4 +1,5 @@
-//! The shell in the compositor: the widget column on the primary output,
+//! The shell in the compositor: the widget column on the primary output
+//! (or on the screen it comes out on, with the panel on every screen),
 //! fed with the desktop's state after each dispatch, drawn into memory
 //! buffers when something it shows changed, given the pointer when over it,
 //! and its actions carried out here.
@@ -232,7 +233,9 @@ pub fn upload(buffer: &mut MemoryRenderBuffer, view: &View<'_>, damage: &[hocus_
 }
 
 impl State {
-    /// The output the column is on: the primary one.
+    /// The shell's screen: the primary one. The column is there but when
+    /// the panel is on every screen (`State::column_screen`, #282); the
+    /// theme and the wallpaper's accent come from it.
     pub fn column_output(&self) -> Option<Output> {
         self.shell.as_ref()?;
         let primary = self.model.primary()?;
@@ -282,19 +285,23 @@ impl State {
         }
     }
 
+    /// A window as the column and the top bar show it: its title, or its
+    /// application's id, and whether it is maximized.
+    pub(crate) fn active_window(&self, id: hocus_core::WindowId) -> Option<ActiveWindow> {
+        let m = self.windows.get(&id)?;
+        let (title, app_id) = title_and_app_id(&m.window);
+        Some(ActiveWindow {
+            title: title
+                .filter(|t| !t.is_empty())
+                .or(app_id)
+                .unwrap_or_default(),
+            maximized: matches!(m.mode, WindowMode::Maximized { .. }),
+        })
+    }
+
     /// What the column shows, from the desktop's state.
     fn column_state(&self, output: Option<&Output>) -> ColumnState {
-        let focused = self.model.focused();
-        let active = focused.and_then(|id| self.windows.get(&id)).map(|m| {
-            let (title, app_id) = title_and_app_id(&m.window);
-            ActiveWindow {
-                title: title
-                    .filter(|t| !t.is_empty())
-                    .or(app_id)
-                    .unwrap_or_default(),
-                maximized: matches!(m.mode, WindowMode::Maximized { .. }),
-            }
-        });
+        let active = self.model.focused().and_then(|id| self.active_window(id));
         let first = output.map(Output::name);
         let mut screens: Vec<ScreenDesktops> = self
             .model
@@ -387,17 +394,24 @@ impl State {
         if self.shell.is_none() {
             return;
         }
-        let output = self.column_output();
+        // Rested on a strip or an edge: the column comes out there, so it
+        // is placed on that screen first.
+        let rested = self.panel_rested();
+        let output = self.column_screen();
         let place = output.as_ref().and_then(|o| {
             let area = self.space.output_geometry(o)?;
             Some((o.name(), area, o.current_scale().fractional_scale()))
         });
         let state = self.column_state(output.as_ref());
         let now = self.clock.now();
+        let everywhere = self.panel_everywhere();
         let Some(shell) = self.shell.as_mut() else {
             return;
         };
         let moved = shell.on != place;
+        // On every screen, the column going to another one changes no
+        // work area: each keeps its own strip or bar (#282).
+        let relayout = moved && (shell.on.is_none() || place.is_none() || !everywhere);
         if moved {
             shell.on = place.clone();
             if let Some((_, area, scale)) = &place {
@@ -408,7 +422,7 @@ impl State {
         }
         shell.column.set_state(&state);
         // The strip or the bar, and the column coming out or going back.
-        let mut changed = self.refresh_panel(&state);
+        let mut changed = self.refresh_panel(&state) || rested;
         // In, in a form that keeps it in, the column waits to be drawn
         // until it shows: nothing is drawn for it meanwhile.
         let shown = self.column_shift().is_some();
@@ -443,7 +457,7 @@ impl State {
                 self.phone_popover_closed();
             }
         }
-        if moved {
+        if relayout {
             // The work area of the column's output changed.
             self.relayout();
         }

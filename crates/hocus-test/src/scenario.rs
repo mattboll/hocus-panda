@@ -4329,20 +4329,26 @@ impl Run<'_> {
         let deadline = Instant::now() + SETTLE_TIMEOUT;
         loop {
             let nodes = self.ui()?;
-            let found = nodes
-                .iter()
-                .find(|n| n.label.as_deref() == Some(expected.label.as_str()));
             let within = |r: &hocus_api::Rect| {
                 expected.inside.is_none_or(|[x, y, w, h]| {
                     r.x >= x && r.y >= y && r.x + r.width <= x + w && r.y + r.height <= y + h
                 })
             };
+            let fits = |n: &hocus_api::UiNode| {
+                expected.disabled.is_none_or(|d| d == n.disabled)
+                    && expected.selected.is_none_or(|s| s == n.selected)
+                    && within(&n.rect)
+            };
+            // Several may be so labelled (a strip on each screen, #282):
+            // one that fits will do.
+            let labelled = |n: &&hocus_api::UiNode| n.label.as_deref() == Some(&expected.label);
+            let found = nodes
+                .iter()
+                .filter(labelled)
+                .find(|n| fits(n))
+                .or_else(|| nodes.iter().find(labelled));
             let ok = match (found, expected.shown) {
-                (Some(n), true) => {
-                    expected.disabled.is_none_or(|d| d == n.disabled)
-                        && expected.selected.is_none_or(|s| s == n.selected)
-                        && within(&n.rect)
-                }
+                (Some(n), true) => fits(n),
                 (None, false) => true,
                 _ => false,
             };
