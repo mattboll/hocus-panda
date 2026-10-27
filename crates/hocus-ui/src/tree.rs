@@ -425,6 +425,9 @@ struct Node {
     clickable: Option<String>,
     /// A clickable box that is the current choice (a result in a list).
     chosen: bool,
+    /// Left out with everything below it: not laid out, drawn, hit nor
+    /// read, but kept with its text laid out, to show again as it was.
+    hidden: bool,
 }
 
 impl Node {
@@ -672,6 +675,7 @@ impl Tree {
             moving: false,
             clickable: None,
             chosen: false,
+            hidden: false,
         };
         if let Some(index) = self.free.pop() {
             let slot = &mut self.nodes[index as usize];
@@ -862,6 +866,45 @@ impl Tree {
         }
     }
 
+    /// Hides a node and everything below it, or shows it again: hidden,
+    /// it takes no room, and is neither drawn, hit nor read by screen
+    /// readers, but its subtree stays as it is, text laid out, to come
+    /// back without being made again (the launcher's grid, #242).
+    pub fn set_hidden(&mut self, id: NodeId, hidden: bool) {
+        let Some(node) = self.node_mut(id) else {
+            return;
+        };
+        if node.hidden == hidden {
+            return;
+        }
+        node.hidden = hidden;
+        node.changed = true;
+        self.relayout = true;
+        if hidden {
+            for slot in [&mut self.hovered, &mut self.pressed, &mut self.focused] {
+                if slot.is_some_and(|n| Self::is_within(&self.nodes, n, id)) {
+                    *slot = None;
+                }
+            }
+        }
+    }
+
+    /// Whether `id` is `ancestor` or below it.
+    fn is_within(nodes: &[Slot], id: NodeId, ancestor: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(n) = at {
+            if n == ancestor {
+                return true;
+            }
+            at = nodes
+                .get(n.index as usize)
+                .filter(|s| s.generation == n.generation)
+                .and_then(|s| s.node.as_ref())
+                .and_then(|node| node.parent);
+        }
+        false
+    }
+
     /// Turns a toggle button on or off.
     pub fn set_selected(&mut self, id: NodeId, selected: bool) {
         if let Some(node) = self.node_mut(id)
@@ -1020,7 +1063,7 @@ impl Tree {
     }
 
     fn glass_of(&self, id: NodeId, offset: (f32, f32), opacity: f32, out: &mut Vec<Glass>) {
-        let Some(node) = self.node(id) else {
+        let Some(node) = self.node(id).filter(|n| !n.hidden) else {
             return;
         };
         let offset = (
@@ -1054,7 +1097,7 @@ impl Tree {
     /// The size a node wants within `avail`.
     fn measure(&mut self, id: NodeId, avail: Size) -> Size {
         let scale = self.scale;
-        let Some(node) = self.node(id) else {
+        let Some(node) = self.node(id).filter(|n| !n.hidden) else {
             return Size::default();
         };
         let style = node.style;
@@ -1077,8 +1120,9 @@ impl Tree {
                     inner_w.max(0.0),
                     (fh.unwrap_or(avail.h) - pad.vertical()).max(0.0),
                 );
-                let flowing =
-                    |t: &Self, c: &NodeId| t.node(*c).is_none_or(|n| n.style.at.is_none());
+                let flowing = |t: &Self, c: &NodeId| {
+                    t.node(*c).is_none_or(|n| n.style.at.is_none() && !n.hidden)
+                };
                 let children: Vec<NodeId> = children
                     .iter()
                     .filter(|c| flowing(self, c))
@@ -1178,9 +1222,11 @@ impl Tree {
             return;
         }
         let inner = rect.inset(style.padding);
-        // Placed children first, at their offset and their own size.
+        // Placed children first, at their offset and their own size; hidden
+        // ones keep where they were.
         let (placed, children): (Vec<NodeId>, Vec<NodeId>) = children
             .into_iter()
+            .filter(|c| self.node(*c).is_some_and(|n| !n.hidden))
             .partition(|c| self.node(*c).is_some_and(|n| n.style.at.is_some()));
         for child in placed {
             let at = self
@@ -1324,6 +1370,13 @@ impl Tree {
         let Some(node) = self.node(id) else {
             return;
         };
+        if node.hidden {
+            // Where it was drawn shows what is behind it now.
+            if node.painted.is_some() {
+                self.unpaint(id, out);
+            }
+            return;
+        }
         let offset = (
             offset.0 + node.offset_x.value(now),
             offset.1 + node.offset_y.value(now),
@@ -1359,6 +1412,25 @@ impl Tree {
         }
     }
 
+    /// A subtree hidden: where it was drawn is damaged, and it is drawn
+    /// whole once shown again.
+    fn unpaint(&mut self, id: NodeId, out: &mut Vec<Rect>) {
+        let Some(node) = self.node_mut(id) else {
+            return;
+        };
+        if let Some(painted) = node.painted.take() {
+            out.push(painted);
+        }
+        node.moving = false;
+        let count = node.children.len();
+        for i in 0..count {
+            let Some(child) = self.node(id).and_then(|n| n.children.get(i).copied()) else {
+                break;
+            };
+            self.unpaint(child, out);
+        }
+    }
+
     // Drawing.
 
     /// Draws the parts of the tree that touch `region`.
@@ -1379,7 +1451,7 @@ impl Tree {
         let now = self.now;
         let focused = self.focus_visible && self.focused == Some(id);
         let scale = self.scale;
-        let Some(node) = self.node(id) else {
+        let Some(node) = self.node(id).filter(|n| !n.hidden) else {
             return;
         };
         let (dx, dy) = (node.offset_x.value(now), node.offset_y.value(now));
@@ -1410,7 +1482,7 @@ impl Tree {
                 draw_kind(
                     canvas,
                     &mut node.kind,
-                    (rect, shadow),
+                    (rect, shadow, region.translate(-offset.0, -offset.1)),
                     theme,
                     fonts,
                     scale,
@@ -1468,7 +1540,7 @@ impl Tree {
         offset: (f32, f32),
         interactive: bool,
     ) -> Option<NodeId> {
-        let node = self.node(id)?;
+        let node = self.node(id).filter(|n| !n.hidden)?;
         let offset = (
             offset.0 + node.offset_x.value(self.now),
             offset.1 + node.offset_y.value(self.now),
@@ -1526,7 +1598,7 @@ impl Tree {
         let mut out = Vec::new();
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
-            if let Some(node) = self.node(id) {
+            if let Some(node) = self.node(id).filter(|n| !n.hidden) {
                 if node.interactive() {
                     out.push(id);
                 }
@@ -1757,7 +1829,7 @@ impl Tree {
     /// A node as screen readers get it: where it shows, scrolled or
     /// moving with its parents.
     fn access_node(&self, id: NodeId, offset: (f32, f32)) -> Option<AccessNode> {
-        let node = self.node(id)?;
+        let node = self.node(id).filter(|n| !n.hidden)?;
         let offset = (
             offset.0 + node.offset_x.value(self.now),
             offset.1 + node.offset_y.value(self.now),
@@ -1828,7 +1900,7 @@ fn fit_shadow(shadow: Shadow, rect: Rect, bounds: Size) -> Shadow {
 fn draw_kind(
     canvas: &mut Canvas,
     kind: &mut Kind,
-    (rect, shadow): (Rect, Shadow),
+    (rect, shadow, region): (Rect, Shadow, Rect),
     theme: &Theme,
     fonts: &mut Fonts,
     scale: f32,
@@ -1846,8 +1918,26 @@ fn draw_kind(
             // A see-through panel: its shadow stays outside, and its hover
             // as see-through as its surface.
             let glass = look.background == Some(Paint::Glass) && theme.has_glass();
+            let fill = tint.map(|t| {
+                if glass {
+                    t.with_alpha(theme.colors.glass.a)
+                } else {
+                    t
+                }
+            });
+            let fill = fill.or(look.background.map(|bg| theme.color(bg)));
+            // Drawn again only inside an opaque box, the shadow under it
+            // would not show: it is left out, the most of a panel's cost
+            // (#242). Glass casts none inside itself either.
+            let covers = glass || fill.is_some_and(|f| f.a == u8::MAX);
+            let inside = rect.inset(Insets::all(look.radius + 1.0));
+            let unseen = covers
+                && region.x >= inside.x
+                && region.y >= inside.y
+                && region.right() <= inside.right()
+                && region.bottom() <= inside.bottom();
             // Panels cast the shadow of the hour, as windows do (#161).
-            if look.shadow > 0.0 {
+            if look.shadow > 0.0 && !unseen {
                 let s = shadow;
                 let under = rect.translate(s.dx, s.dy);
                 let color = s.color();
@@ -1857,14 +1947,7 @@ fn draw_kind(
                     canvas.shadow(under, look.radius, s.blur, color);
                 }
             }
-            let tint = tint.map(|t| {
-                if glass {
-                    t.with_alpha(theme.colors.glass.a)
-                } else {
-                    t
-                }
-            });
-            if let Some(bg) = tint.or(look.background.map(|bg| theme.color(bg))) {
+            if let Some(bg) = fill {
                 canvas.fill_rect(rect, look.radius, bg);
             }
             if let Some(border) = look.border {
@@ -2145,6 +2228,48 @@ mod tests {
         assert_eq!(rect(first).map(|r| r.y), Some(10.0));
         // As if the placed one were not there.
         assert_eq!(rect(second).map(|r| r.y), Some(35.0));
+    }
+
+    #[test]
+    fn a_hidden_node_takes_no_room_and_comes_back_as_it_was() {
+        let mut tree = Tree::new(Theme::default(), Size::new(400.0, 300.0), 1.0);
+        let root = tree.root();
+        tree.set_style(
+            root,
+            Style {
+                gap: 10.0,
+                ..Style::default()
+            },
+        );
+        let text = |t: &str| Kind::text(t, Theme::default().text.body);
+        let first = tree.add(root, Style::default(), text("first"));
+        let hidden = tree.add(root, Style::default(), Kind::Box(Look::default()));
+        let inside = hidden.and_then(|h| tree.add(h, Style::default(), text("inside")));
+        let last = tree.add(root, Style::default(), text("last"));
+        let rect = |tree: &Tree, id: Option<NodeId>| id.and_then(|id| tree.rect(id));
+        tree.update(Duration::ZERO);
+        let shown_at = rect(&tree, last).map(|r| r.y);
+        let inside_at = rect(&tree, inside);
+
+        let Some(hidden) = hidden else {
+            unreachable!("added to the root");
+        };
+        tree.set_hidden(hidden, true);
+        let damage = tree.update(Duration::ZERO);
+        // As if it were not there, gap included; where it was is drawn again.
+        let first_bottom = rect(&tree, first).map(|r| r.bottom() + 10.0);
+        assert_eq!(rect(&tree, last).map(|r| r.y), first_bottom);
+        let was = inside_at.unwrap_or_default();
+        assert!(damage.iter().any(|d| d.intersects(&was)), "{damage:?}");
+        assert!(!tree.access().dump().contains("inside"));
+        let center = Point::new(was.x + was.w / 2.0, was.y + was.h / 2.0);
+        assert_ne!(tree.hit(center, false), inside);
+
+        tree.set_hidden(hidden, false);
+        tree.update(Duration::ZERO);
+        assert_eq!(rect(&tree, last).map(|r| r.y), shown_at);
+        assert_eq!(rect(&tree, inside), inside_at);
+        assert!(tree.access().dump().contains("inside"));
     }
 
     #[test]

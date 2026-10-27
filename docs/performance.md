@@ -23,8 +23,8 @@ to reproduce them.
   for, bytes held. Test clients run in threads of their own and are not
   counted.
 - **Wall-clock timings**: startup, a turn of the loop at rest, input to
-  photon, opening the launcher and the settings, frame times
-  (`hocus-test`'s `timings`).
+  photon, opening the launcher (and again right after a search) and the
+  settings, frame times (`hocus-test`'s `timings`).
 
 ## Budgets that gate a build
 
@@ -41,6 +41,7 @@ updates the budget in the same pull request, with the numbers.
 | Twenty windows open on two screens | `budget-twenty-windows` | frames `[160, 150]`, scenes `[320, 320]`, 180,600 allocations, 376 MB asked for, 9.1 MB held | `[176, 165]`, `[352, 352]`, 199,000, 414 MB, 10.5 MB |
 | Their desktops switch, three times on each screen | `budget-twenty-windows` | frames `[23, 21]`, scenes `[102, 102]`, 59,950 allocations, 91 MB, 0.9 MB | `[26, 24]`, `[113, 113]`, 66,000, 101 MB, 1 MB |
 | A minute at rest with the twenty windows | `budget-twenty-windows` | frames `[1, 0]`, scenes `[1, 1]`, 274,700 allocations (38 a turn), 8.5 MB, 0.1 MB | `[1, 0]`, `[1, 1]`, 302,000, 10 MB, 0.25 MB |
+| The launcher on 40 applications opened, searched in, closed, and opened again (#242) | `budgets` | the second opening 288 allocations, the first 5,091 | the second at most a tenth of the first |
 
 At rest the loop wakes for the watchdog (once a second) and for what the
 clock shows: the column's minute, and the wallpaper's light every ten
@@ -54,8 +55,8 @@ Wall-clock times measure the machine as much as the code: in a shared CI
 runner they flaked (#235). CI's `timings` job runs them alone, in a release
 build, publishes the table in the run's summary and warns, without failing,
 where a target is passed: a frame's budget (16 ms, the one the
-architecture sets), 1 s for startup, 100 ms for opening the launcher or
-the settings.
+architecture sets, opening the launcher from the keyboard included,
+#242), 1 s for startup, 100 ms for opening the settings.
 Headless outputs are drawn by pixman, on the CPU: frame times there are an
 upper bound of what a GPU draws.
 
@@ -67,8 +68,8 @@ machine, three runs:
 | Startup: two screens and the shell drawn | 220–232 ms |
 | A turn of the loop at rest | 4.4–5.4 µs |
 | A turn of the loop at rest, twenty windows | 9.7–10.1 µs |
-| Opening the launcher, to its first frame | 21.5–21.7 ms |
-| The same on 60 applications, the grid of all of them shown (#254), five runs on a busier machine | 22.7–26.5 ms (24.3–25.9 ms with none) |
+| Opening the launcher on 60 applications, the grid of all of them shown (#254), to its first frame, drawn as it opens while closed (#242) | 6.7–7.0 ms (22.0–24.3 ms before) |
+| The same right after a search, before the closed card was drawn again | 17.2–19.8 ms |
 | Opening the settings, to their first frame | 23–28 ms |
 | Input to photon (pointer motion to the frame drawn), median / 95th percentile / worst | 0.4–0.5 / 0.6–0.7 / 1.9–2.4 ms |
 | The twenty windows' scenario: frames over 16 ms, laptop panel at scale 2 | 82–91 of 185, slowest 32–35 ms |
@@ -118,6 +119,45 @@ What changed:
 - **The settings app tells what it drew again.** It damaged its whole
   window on every pointer motion over it; the compositor redrew 2.7
   million pixels each time.
+
+## The launcher's card, #242
+
+Opening the launcher drew its whole card on the loop: 940 × 564 logical
+pixels, 1880 × 1128 on the laptop panel at scale 2. Measured in a release
+build, the opening was the card laid out (1 ms: every tile made again and
+its name shaped), drawn (13 ms, two thirds of it the card's shadow:
+vello_cpu evaluates its blurred rectangle under the whole card), copied
+into a new buffer (2 ms), then the first frame (5–7 ms, pixman). The same
+machine, three runs of `timings` each (a debug build costs about what a
+release build does here: the drawing is in dependencies built optimised):
+
+| Measure | Before | After |
+|---|---|---|
+| Opening the launcher on 60 applications, to its first frame, debug | 22.0–24.3 ms | 6.7–7.0 ms |
+| The same, release | 20.4–23.2 ms | 6.4–6.8 ms |
+| Opening it again right after a search, debug | 17.1–19.2 ms | 17.2–19.8 ms |
+| The same, release | 16.8–18.4 ms | 16.6–18.7 ms |
+| A second opening after a search, allocations (`budgets`), of the first's | 4,189 of 5,065 | 288 of 5,091 |
+
+What changed:
+
+- **The grid is kept.** Its caption, rows and tiles are made once; while
+  something is typed it is hidden (`Tree::set_hidden`: no room taken,
+  neither drawn, hit nor read, its text still laid out), and it shows
+  again as it was. Scrolling changes only the names and icons of the
+  tiles that show another application. Opening again on the grid as it
+  was left changes nothing, and draws nothing.
+- **The closed card is drawn as it opens.** A second after what it shows
+  changed (it closed, the applications, their icons, the theme, the
+  language or the system's fonts), the card is put back on its empty
+  field and drawn, off screen, into its buffer, on the screen under the
+  pointer. No alarm of its own wakes the loop for it: the first turn after
+  that second does it (the watchdog's, each second in a session): nothing
+  wakes a desktop at rest for it. Opening there then draws nothing
+  new: its first frame is the frame alone.
+- **A shadow hidden under an opaque box is left out** when only the
+  inside of the box is drawn again (a result typed, a tile chosen): the
+  box would cover it whole. The pixels are the same.
 
 ## Reproducing
 
@@ -170,8 +210,12 @@ tenth Mesa's software rasterizer.
   make a turn at rest allocate nothing.
 - **The dock's picture is made again for each new app**, buffers
   included: most of the 376 MB asked for while twenty windows open.
-- **Opening the launcher rasterises its card on the loop**, 21 ms in a
-  debug build, over a handler's 16 ms.
+- **Opening the launcher where it was not drawn as it opens draws its
+  whole card on the loop**: within a second of closing it (17–20 ms to its
+  first frame), on another screen than the pointer was on, or in another
+  mode (the history, emoji, the palette, the notes). Most of it is the
+  card's shadow, which only shows around the card; a shadow drawn once
+  and kept, or one drawn only where it shows, would make it a fraction.
 - **Night light ticks every 30 s while on**, and asks for a redraw each
   time; the annotation window still damages all of itself on each draw.
 - **smithay's `Output::name()` copies the name** at every call, and

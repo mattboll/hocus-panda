@@ -4,8 +4,12 @@
 //! their icons after them on the same thread, each once at a size (#254),
 //! and started in a clean environment; results are copied to the
 //! clipboard, for Wayland and X11 clients alike.
+//!
+//! Drawing the whole card takes longer than a frame (#242): while closed,
+//! a moment after what it shows changed, it is drawn as it will open, so
+//! that opening draws nothing new.
 
-use std::{collections::BTreeSet, os::fd::OwnedFd, path::PathBuf, sync::Arc};
+use std::{collections::BTreeSet, os::fd::OwnedFd, path::PathBuf, sync::Arc, time::Duration};
 
 use hocus_api::UiNode;
 use hocus_platform::apps::{self, Entry};
@@ -59,10 +63,19 @@ pub enum Found {
 /// The text formats the shell offers.
 const TEXT: [&str; 3] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"];
 
+/// How long after what the closed card shows changed (it closed, the
+/// applications, their icons, the theme or the fonts) it is drawn as it
+/// will open: once things settled, not while an application it started
+/// opens.
+const PREPARE_AFTER: Duration = Duration::from_secs(1);
+
+/// Where the card opens: the screen's name, its work area and its scale.
+type Place = (String, Rectangle<i32, Logical>, f64);
+
 #[derive(Debug)]
 pub struct LauncherPanel {
     pub(crate) launcher: Launcher,
-    on: Option<(String, Rectangle<i32, Logical>, f64)>,
+    on: Option<Place>,
     buffer: Option<MemoryRenderBuffer>,
     /// The buffer's size in pixels: the card grows with an answer.
     buffer_size: (u32, u32),
@@ -84,6 +97,12 @@ pub struct LauncherPanel {
     /// Where its parts were last drawn while open: the Matrix theme rains
     /// them away once it closes (#155).
     drawn_parts: Option<hocus_shell::launcher::Parts>,
+    /// What the closed card shows changed since it was drawn as it opens.
+    stale: bool,
+    /// When it is drawn as it opens. No timer of its own wakes the loop
+    /// for it: the first turn after then does it (each second at least in
+    /// a session, for the watchdog), so a desktop at rest is not woken.
+    prepare_at: Option<Duration>,
 }
 
 /// Something shown over a whole screen.
@@ -97,13 +116,53 @@ struct Shown {
 impl LauncherPanel {
     pub fn set_theme(&mut self, theme: Theme) {
         self.launcher.set_theme(theme);
+        self.stale = true;
     }
 
     pub fn set_lang(&mut self, lang: Lang) {
         if lang != self.lang {
             self.lang = lang;
             self.launcher.set_lang(lang);
+            self.stale = true;
         }
+    }
+
+    /// The system's fonts came: text is laid out again in them.
+    pub fn fonts_changed(&mut self) {
+        self.stale = true;
+    }
+
+    /// Shows the card on `place` from now on: at its scale, in a buffer of
+    /// its own on another screen.
+    fn set_place(&mut self, place: Option<Place>) {
+        if let Some((_, _, scale)) = &place {
+            self.launcher.set_scale(*scale as f32);
+        }
+        if self.on != place {
+            self.buffer = None;
+        }
+        self.on = place;
+    }
+
+    /// Draws what changed and copies it into the buffer the compositor
+    /// shows; whether anything did.
+    fn draw(&mut self, now: Duration) -> bool {
+        let damage = self.launcher.draw(now);
+        let view = self.launcher.view();
+        let size = (view.width, view.height);
+        match &mut self.buffer {
+            Some(buffer) if self.buffer_size == size => {
+                if damage.is_empty() {
+                    return false;
+                }
+                crate::shell::upload(buffer, &view, &damage);
+            }
+            _ => {
+                self.buffer = Some(crate::shell::buffer_for(&view));
+                self.buffer_size = size;
+            }
+        }
+        true
     }
 }
 
@@ -144,6 +203,8 @@ pub fn start(
         providers_from: 0,
         action_recents: Vec::new(),
         drawn_parts: None,
+        stale: true,
+        prepare_at: None,
     };
     panel.read_apps();
     state.launcher = Some(panel);
@@ -293,31 +354,31 @@ impl State {
         self.open_launcher_mode(hocus_shell::launcher::Mode::Commands);
     }
 
+    /// Where the card opens: the screen under the pointer.
+    fn launcher_place(&self) -> Option<Place> {
+        let output = self.output_under_pointer()?;
+        // Centred in the work area: beside the column, not over it.
+        self.space.output_geometry(&output)?;
+        Some((
+            output.name(),
+            self.work_area(&output),
+            output.current_scale().fractional_scale(),
+        ))
+    }
+
     /// Opens on commands, the history, emoji, the palette or the notes.
     fn open_launcher_mode(&mut self, mode: hocus_shell::launcher::Mode) {
         if self.quick_open() {
             self.close_quick();
         }
-        let output = self.output_under_pointer();
-        let place = output.as_ref().and_then(|o| {
-            // Centred in the work area: beside the column, not over it.
-            self.space.output_geometry(o)?;
-            Some((
-                o.name(),
-                self.work_area(o),
-                o.current_scale().fractional_scale(),
-            ))
-        });
+        let place = self.launcher_place();
         let Some(panel) = self.launcher.as_mut() else {
             return;
         };
-        if let Some((_, _, scale)) = &place {
-            panel.launcher.set_scale(*scale as f32);
-        }
-        if panel.on != place {
-            panel.buffer = None;
-        }
-        panel.on = place;
+        panel.set_place(place);
+        // Drawn as it opens from now on: nothing to prepare.
+        panel.prepare_at = None;
+        panel.stale = false;
         let was_open = panel.launcher.is_open();
         panel.launcher.open_mode(mode);
         panel.read_apps();
@@ -339,6 +400,7 @@ impl State {
             // It may have closed itself (Escape) before saying so.
             closed = panel.drawn_parts.take();
             panel.launcher.close();
+            panel.stale = true;
         }
         // Its text rains away in the Matrix theme (#155).
         if let Some(parts) = closed {
@@ -362,6 +424,7 @@ impl State {
                     panel
                         .launcher
                         .set_apps(entries.into_iter().map(shell_app).collect());
+                    panel.stale = true;
                 }
             }
             Found::Icons { size, asked, found } => {
@@ -372,6 +435,7 @@ impl State {
                     panel.icons_asked.extend(asked);
                 }
                 tracing::debug!(size, icons = found.len(), "application icons read");
+                panel.stale |= !found.is_empty();
                 panel.launcher.set_icons(found);
             }
         }
@@ -606,7 +670,11 @@ impl State {
         let (Some(panel), Some(origin)) = (&self.launcher, self.launcher_origin()) else {
             return Vec::new();
         };
-        let (Some(area), None) = (self.space.output_geometry(output), &panel.showcase) else {
+        let (Some(area), None, true) = (
+            self.space.output_geometry(output),
+            &panel.showcase,
+            panel.launcher.is_open(),
+        ) else {
             return Vec::new();
         };
         let origin = origin - area.loc.to_f64();
@@ -789,26 +857,44 @@ impl State {
         }
         if !panel.launcher.is_open() {
             panel.drawn_parts = None;
+            // A burst of changes is drawn once, after the last.
+            if std::mem::take(&mut panel.stale) {
+                panel.prepare_at = Some(now + PREPARE_AFTER);
+            }
+            if panel.prepare_at.is_some_and(|at| now >= at) {
+                self.prepare_launcher(now);
+            }
             return;
         }
-        let damage = panel.launcher.draw(now);
-        panel.drawn_parts = panel.launcher.parts();
-        let view = panel.launcher.view();
-        let mut changed = !damage.is_empty();
-        let size = (view.width, view.height);
-        match &mut panel.buffer {
-            Some(buffer) if panel.buffer_size == size => {
-                crate::shell::upload(buffer, &view, &damage)
-            }
-            _ => {
-                panel.buffer = Some(crate::shell::buffer_for(&view));
-                panel.buffer_size = size;
-                changed = true;
-            }
+        let changed = panel.draw(now);
+        if changed || panel.drawn_parts.is_none() {
+            panel.drawn_parts = panel.launcher.parts();
         }
         if changed {
             self.needs_redraw = true;
         }
+    }
+
+    /// Draws the closed card as it will open, on the screen under the
+    /// pointer, into the buffer it is shown from: opening there then draws
+    /// nothing new (#242). Nothing shows meanwhile.
+    fn prepare_launcher(&mut self, now: Duration) {
+        // Its text rains away from what it showed (#155): later.
+        if self.matrix_launcher_playing() {
+            return;
+        }
+        let place = self.launcher_place();
+        let Some(panel) = self.launcher.as_mut() else {
+            return;
+        };
+        panel.prepare_at = None;
+        if place.is_none() {
+            return;
+        }
+        panel.set_place(place);
+        panel.launcher.prepare();
+        panel.draw(now);
+        tracing::debug!("launcher drawn as it opens");
     }
 
     /// The launcher on `output`, above everything; what it shows over a

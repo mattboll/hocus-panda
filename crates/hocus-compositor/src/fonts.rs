@@ -15,6 +15,9 @@ pub fn start(handle: &LoopHandle<'static, App>) {
             app.timed("system fonts", |app| {
                 fonts.install();
                 tracing::info!("system fonts in use");
+                if let Some(launcher) = app.state.launcher.as_mut() {
+                    launcher.fonts_changed();
+                }
                 app.state.needs_redraw = true;
             });
         }

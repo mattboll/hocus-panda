@@ -386,11 +386,15 @@ pub struct Launcher {
     documents_wanted: Option<(u64, String)>,
     /// Applications' icons by name, read off the loop.
     icons: BTreeMap<String, Picture>,
-    /// The grid's tiles shown, the application each is, and the ring
-    /// around the chosen one.
+    /// The room of the grid of every application, in place of the list
+    /// while the field is empty; hidden otherwise.
+    grid_box: NodeId,
+    /// The grid, made once and kept, hidden or not, with its text laid
+    /// out: opening again shows it as it was, nothing made again (#242).
+    grid: Option<Grid>,
+    /// The grid's tiles shown, and the application each is.
     tiles: Vec<NodeId>,
     tile_apps: Vec<usize>,
-    ring: Option<NodeId>,
     /// The grid's first row shown.
     grid_first: usize,
     /// Wheel turned over the grid, not yet a row.
@@ -517,6 +521,10 @@ impl Launcher {
         let list = tree
             .add(card, list_style(false), Kind::Box(Look::default()))
             .unwrap_or_else(missing);
+        let grid_box = tree
+            .add(card, list_style(false), Kind::Box(Look::default()))
+            .unwrap_or_else(missing);
+        tree.set_hidden(grid_box, true);
         // Only in the history and the picker: commands have no hint.
         let hint_box = tree
             .add(card, hint_style(false), Kind::Box(Look::default()))
@@ -574,9 +582,10 @@ impl Launcher {
             documents_asked: 0,
             documents_wanted: None,
             icons: BTreeMap::new(),
+            grid_box,
+            grid: None,
             tiles: Vec::new(),
             tile_apps: Vec::new(),
-            ring: None,
             grid_first: 0,
             wheel_left: 0.0,
             now: Duration::ZERO,
@@ -623,7 +632,19 @@ impl Launcher {
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
+        if theme == *self.tree.theme() {
+            return;
+        }
+        // The grid's text and corners follow the theme's: made again.
+        let made = self.grid.take();
+        if let Some(grid) = &made {
+            self.tree.remove(grid.caption);
+            self.tree.remove(grid.body);
+        }
         self.tree.set_theme(theme);
+        if made.is_some() && self.grid_shown() {
+            self.render();
+        }
     }
 
     /// The applications to search; an open launcher searches them again.
@@ -726,6 +747,8 @@ impl Launcher {
         self.open = true;
         self.mode = mode;
         self.editing = None;
+        // The tiles are kept: none stays under a pointer gone since.
+        let _ = self.tree.input(Input::PointerLeave);
         self.answer = None;
         self.offers.clear();
         self.confirming = None;
@@ -749,6 +772,17 @@ impl Launcher {
         self.tree.set_placeholder(self.field, placeholder);
         self.show_hint();
         self.search();
+    }
+
+    /// While closed, puts the card as it opens on commands, the field
+    /// empty on every application, for the caller to draw at a quiet
+    /// moment: opening then changes nothing, and draws nothing (#242).
+    pub fn prepare(&mut self) {
+        if self.open {
+            return;
+        }
+        self.open_mode(Mode::Commands);
+        self.open = false;
     }
 
     pub fn mode(&self) -> Mode {
@@ -1194,7 +1228,6 @@ impl Launcher {
         self.row_hits.clear();
         self.tiles.clear();
         self.tile_apps.clear();
-        self.ring = None;
         self.answer_text = None;
         let card = if self.has_card() {
             self.hits.first().and_then(|h| self.card_for(h))
@@ -1226,11 +1259,14 @@ impl Launcher {
                 },
             );
         }
-        let theme = self.tree.theme().clone();
-        if card.is_none() && self.grid_shown() {
-            self.render_grid(&theme);
+        let grid = card.is_none() && self.grid_shown();
+        self.tree.set_hidden(self.list, grid);
+        self.tree.set_hidden(self.grid_box, !grid);
+        if grid {
+            self.render_grid();
             return self.show_selection();
         }
+        let theme = self.tree.theme().clone();
         let (start, shown, row_height) = match &card {
             Some(_) => (1, MAX_ALSO, ALSO_ROW),
             None => (self.first, MAX_RESULTS, ROW),
@@ -1382,8 +1418,13 @@ impl Launcher {
 
     /// A group's name above its rows, as "Also".
     fn add_caption(&mut self, text: &str, theme: &Theme) {
-        if let Some(caption) = self.tree.add(
-            self.list,
+        self.caption_in(self.list, text, theme);
+    }
+
+    /// A group's name in `parent`.
+    fn caption_in(&mut self, parent: NodeId, text: &str, theme: &Theme) -> Option<NodeId> {
+        let caption = self.tree.add(
+            parent,
             Style {
                 padding: Insets {
                     top: 4.0,
@@ -1394,51 +1435,84 @@ impl Launcher {
                 ..Style::default()
             },
             Kind::Box(Look::default()),
-        ) {
-            let _ = self.tree.add(
-                caption,
-                Style::default(),
-                Kind::text(text.to_uppercase(), theme.text.caption),
-            );
-        }
+        )?;
+        let _ = self.tree.add(
+            caption,
+            Style::default(),
+            Kind::text(text.to_uppercase(), theme.text.caption),
+        );
+        Some(caption)
     }
 
     /// Every application, `GRID_ROWS` rows of tiles from `grid_first`,
-    /// under their caption; the ring on the chosen one.
-    fn render_grid(&mut self, theme: &Theme) {
-        self.add_caption(self.lang.all_applications(), theme);
-        let Some(grid) = self.tree.add(
-            self.list,
+    /// under their caption; the ring on the chosen one. The tiles are kept
+    /// and shown again as they are: only those that show another
+    /// application change, and only what changed in them.
+    fn render_grid(&mut self) {
+        let Some(mut grid) = self.grid.take().or_else(|| self.new_grid()) else {
+            return;
+        };
+        let start = self.grid_first * COLUMNS;
+        let end = (start + COLUMNS * GRID_ROWS).min(self.apps.len());
+        let wanted = end.saturating_sub(start);
+        // Fewer tiles: the last ones go, and the rows left empty.
+        while grid.tiles.len() > wanted {
+            if let Some(tile) = grid.tiles.pop() {
+                self.tree.remove(tile.node);
+            }
+        }
+        while grid.rows.len() > wanted.div_ceil(COLUMNS) {
+            if let Some(row) = grid.rows.pop() {
+                self.tree.remove(row);
+            }
+        }
+        while grid.tiles.len() < wanted {
+            let i = grid.tiles.len();
+            if i / COLUMNS == grid.rows.len() {
+                // Before the ring, which is drawn over the tiles.
+                let Some(row) = self.tree.insert(
+                    grid.body,
+                    grid.rows.len(),
+                    Style {
+                        direction: Direction::Row,
+                        height: Length::Px(TILE_H),
+                        gap: TILE_GAP,
+                        grow: 0.0,
+                        ..Style::default()
+                    },
+                    Kind::Box(Look::default()),
+                ) else {
+                    break;
+                };
+                grid.rows.push(row);
+            }
+            let Some(tile) = self.new_tile(grid.rows[i / COLUMNS]) else {
+                break;
+            };
+            grid.tiles.push(tile);
+        }
+        for (i, tile) in grid.tiles.iter_mut().enumerate() {
+            self.show_app(tile, start + i);
+            self.tiles.push(tile.node);
+            self.tile_apps.push(start + i);
+        }
+        self.grid = Some(grid);
+    }
+
+    /// The grid's caption, its body and its ring, without tiles yet.
+    fn new_grid(&mut self) -> Option<Grid> {
+        let theme = self.tree.theme().clone();
+        let caption = self.caption_in(self.grid_box, self.lang.all_applications(), &theme)?;
+        let body = self.tree.add(
+            self.grid_box,
             Style {
                 gap: TILE_GAP,
                 ..Style::default()
             },
             Kind::Box(Look::default()),
-        ) else {
-            return;
-        };
-        let start = self.grid_first * COLUMNS;
-        let end = (start + COLUMNS * GRID_ROWS).min(self.apps.len());
-        for row_start in (start..end).step_by(COLUMNS) {
-            let Some(row) = self.tree.add(
-                grid,
-                Style {
-                    direction: Direction::Row,
-                    height: Length::Px(TILE_H),
-                    gap: TILE_GAP,
-                    grow: 0.0,
-                    ..Style::default()
-                },
-                Kind::Box(Look::default()),
-            ) else {
-                continue;
-            };
-            for index in row_start..(row_start + COLUMNS).min(end) {
-                self.add_tile(row, index, theme);
-            }
-        }
-        self.ring = self.tree.add(
-            grid,
+        )?;
+        let ring = self.tree.add(
+            body,
             Style {
                 at: Some(self.tile_at(self.selected)),
                 width: Length::Px(TILE_W),
@@ -1451,7 +1525,14 @@ impl Launcher {
                 }),
                 label: None,
             },
-        );
+        )?;
+        Some(Grid {
+            caption,
+            body,
+            rows: Vec::new(),
+            tiles: Vec::new(),
+            ring,
+        })
     }
 
     /// Where application `index`'s tile is in the grid shown, from its
@@ -1465,12 +1546,11 @@ impl Launcher {
         )
     }
 
-    /// An application's tile: its icon over its name.
-    fn add_tile(&mut self, row: NodeId, index: usize, theme: &Theme) {
-        let Some(app) = self.apps.get(index) else {
-            return;
-        };
-        let Some(tile) = self.tree.add(
+    /// A tile in `row`, showing no application yet: its icon over its name.
+    fn new_tile(&mut self, row: NodeId) -> Option<GridTile> {
+        let theme = self.tree.theme();
+        let (radius, label) = (theme.radii.medium, theme.text.label.with_weight(500));
+        let node = self.tree.add(
             row,
             Style {
                 width: Length::Px(TILE_W),
@@ -1483,75 +1563,99 @@ impl Launcher {
                 ..Style::default()
             },
             Kind::Box(Look {
-                background: (index == self.selected).then_some(Paint::SurfaceHover),
-                radius: theme.radii.medium,
+                radius,
                 ..Look::default()
             }),
-        ) else {
+        )?;
+        let icon = self
+            .tree
+            .add(node, icon_style(), Kind::Box(Look::default()))?;
+        let name = self.tree.add(
+            node,
+            Style {
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::text_line("", label),
+        )?;
+        Some(GridTile {
+            node,
+            icon,
+            name,
+            face: None,
+        })
+    }
+
+    /// Application `index` in `tile`: its name, and its icon, or its
+    /// glyph on its colour as the dock draws it; what it showed already
+    /// stays as it is.
+    fn show_app(&mut self, tile: &mut GridTile, index: usize) {
+        let Some(app) = self.apps.get(index) else {
             return;
         };
-        self.tree.set_clickable(tile, &app.name);
-        let icon_style = Style {
-            width: Length::Px(GRID_ICON),
-            height: Length::Px(GRID_ICON),
-            grow: 0.0,
-            align: Align::Center,
-            justify: hocus_ui::Justify::Center,
-            ..Style::default()
+        self.tree.set_clickable(tile.node, &app.name);
+        self.tree.set_text(tile.name, &app.name);
+        let picture = app.icon.as_ref().and_then(|n| self.icons.get(n));
+        let same = match (&tile.face, picture) {
+            (Some(Face::Picture(shown)), Some(picture)) => shown == picture,
+            (Some(Face::Glyph { id, name }), None) => *id == app.id && *name == app.name,
+            _ => false,
         };
-        match app.icon.as_ref().and_then(|n| self.icons.get(n)) {
+        if same {
+            return;
+        }
+        self.tree.remove(tile.icon);
+        let icon = match picture {
             Some(picture) => {
-                let _ = self.tree.add(tile, icon_style, Kind::picture(picture, ""));
+                tile.face = Some(Face::Picture(picture.clone()));
+                self.tree
+                    .insert(tile.node, 0, icon_style(), Kind::picture(picture, ""))
             }
-            // No icon: the dock's square, its glyph on its colour.
             None => {
+                tile.face = Some(Face::Glyph {
+                    id: app.id.clone(),
+                    name: app.name.clone(),
+                });
                 let (glyph, color) = crate::dock::look_of(&app.id, &app.name);
-                if let Some(square) = self.tree.add(
-                    tile,
-                    icon_style,
+                let square = self.tree.insert(
+                    tile.node,
+                    0,
+                    icon_style(),
                     Kind::Box(Look {
                         background: Some(Paint::Rgba(color)),
                         radius: 13.0,
                         ..Look::default()
                     }),
-                ) {
-                    let white = Paint::Rgba(hocus_ui::Color::rgb(0xFF, 0xFF, 0xFF));
-                    let glyph = match glyph {
-                        crate::dock::Glyph::Text(t) => Some(Kind::text_line(
-                            t,
-                            hocus_ui::TextStyle {
-                                typeface: hocus_ui::Typeface::Mono,
-                                size: 14.0,
-                                weight: 700,
-                                ..theme.text.title
-                            }
-                            .with_color(white),
-                        )),
-                        crate::dock::Glyph::Path(path) => {
-                            Icon::stroked(path, 22.0, 1.8).map(|icon| Kind::Icon {
-                                icon,
-                                color: white,
-                                label: None,
-                            })
+                );
+                let white = Paint::Rgba(hocus_ui::Color::rgb(0xFF, 0xFF, 0xFF));
+                let glyph = match glyph {
+                    crate::dock::Glyph::Text(t) => Some(Kind::text_line(
+                        t,
+                        hocus_ui::TextStyle {
+                            typeface: hocus_ui::Typeface::Mono,
+                            size: 14.0,
+                            weight: 700,
+                            ..self.tree.theme().text.title
                         }
-                    };
-                    if let Some(glyph) = glyph {
-                        let _ = self.tree.add(square, Style::default(), glyph);
+                        .with_color(white),
+                    )),
+                    crate::dock::Glyph::Path(path) => {
+                        Icon::stroked(path, 22.0, 1.8).map(|icon| Kind::Icon {
+                            icon,
+                            color: white,
+                            label: None,
+                        })
                     }
+                };
+                if let (Some(square), Some(glyph)) = (square, glyph) {
+                    let _ = self.tree.add(square, Style::default(), glyph);
                 }
+                square
             }
+        };
+        if let Some(icon) = icon {
+            tile.icon = icon;
         }
-        let name = app.name.clone();
-        let _ = self.tree.add(
-            tile,
-            Style {
-                grow: 0.0,
-                ..Style::default()
-            },
-            Kind::text_line(name, theme.text.label.with_weight(500)),
-        );
-        self.tiles.push(tile);
-        self.tile_apps.push(index);
     }
 
     /// Moves the grid's choice to `index`, the rows following it.
@@ -1797,7 +1901,7 @@ impl Launcher {
             );
             self.tree.set_selected_box(*tile, chosen);
         }
-        if let Some(ring) = self.ring {
+        if let Some(ring) = self.grid.as_ref().map(|g| g.ring) {
             self.tree.set_style(
                 ring,
                 Style {
@@ -2257,6 +2361,45 @@ impl Launcher {
 
     pub fn access(&self) -> AccessNode {
         self.tree.access()
+    }
+}
+
+/// The grid of every application, as made: kept between openings.
+#[derive(Debug)]
+struct Grid {
+    caption: NodeId,
+    body: NodeId,
+    rows: Vec<NodeId>,
+    tiles: Vec<GridTile>,
+    ring: NodeId,
+}
+
+/// A tile of the grid and what it shows.
+#[derive(Debug)]
+struct GridTile {
+    node: NodeId,
+    icon: NodeId,
+    name: NodeId,
+    face: Option<Face>,
+}
+
+/// What a tile's icon shows: a picture, or the glyph of an application
+/// without one.
+#[derive(Debug)]
+enum Face {
+    Picture(Picture),
+    Glyph { id: String, name: String },
+}
+
+/// A tile's icon, or its square.
+fn icon_style() -> Style {
+    Style {
+        width: Length::Px(GRID_ICON),
+        height: Length::Px(GRID_ICON),
+        grow: 0.0,
+        align: Align::Center,
+        justify: hocus_ui::Justify::Center,
+        ..Style::default()
     }
 }
 
@@ -2797,6 +2940,70 @@ mod tests {
         l.key(Key::Backspace);
         assert_eq!(l.tiles.len(), 4);
         assert_eq!(l.selected, 0);
+    }
+
+    /// Twenty applications, the grid's eighteen tiles and two more.
+    fn many() -> Launcher {
+        let mut l = Launcher::new(Theme::default(), Lang::En, 1.0);
+        l.set_apps((0..20).map(|i| app(&format!("App {i:02}"), None)).collect());
+        l
+    }
+
+    #[test]
+    fn opening_again_on_the_grid_keeps_its_tiles_and_draws_nothing() {
+        let mut l = many();
+        l.open();
+        assert!(!l.draw(Duration::ZERO).is_empty());
+        let tiles = l.tiles.clone();
+        l.key(Key::Escape);
+        l.open();
+        assert_eq!(l.tiles, tiles, "the same tiles");
+        assert_eq!(l.draw(Duration::ZERO), [], "nothing changed");
+        // Scrolled a row, the tiles show the next applications; back at
+        // the top, they show the first again.
+        l.key(Key::End);
+        assert_eq!(l.tile_apps.first(), Some(&6));
+        assert_eq!(l.tiles.len(), 14);
+        l.key(Key::Home);
+        assert_eq!(l.tile_apps.first(), Some(&0));
+        let dump = l.access().dump();
+        assert!(dump.contains("App 00") && dump.contains("App 17"), "{dump}");
+        assert!(!dump.contains("App 18"), "{dump}");
+    }
+
+    #[test]
+    fn the_grid_is_made_again_in_a_new_theme() {
+        let mut l = many();
+        l.open();
+        l.draw(Duration::ZERO);
+        let tiles = l.tiles.clone();
+        l.set_theme(Theme::default().with_text_size(120));
+        assert_eq!(l.tiles.len(), 18, "shown at once");
+        assert_ne!(l.tiles, tiles, "made again");
+        assert!(l.access().dump().contains("App 00"));
+    }
+
+    #[test]
+    fn prepared_while_closed_it_opens_drawing_nothing() {
+        let mut l = many();
+        l.open();
+        l.text("app 19");
+        l.draw(Duration::ZERO);
+        assert!(l.tiles.is_empty(), "results in place of the grid");
+        let dump = l.access().dump();
+        assert!(
+            !dump.contains("ALL APPLICATIONS"),
+            "the grid is hidden: {dump}"
+        );
+        l.key(Key::Escape);
+        l.prepare();
+        assert!(!l.is_open(), "prepared, still closed");
+        assert!(!l.draw(Duration::ZERO).is_empty(), "drawn as it opens");
+        l.open();
+        assert_eq!(l.draw(Duration::ZERO), []);
+        assert_eq!(l.query(), "");
+        assert_eq!(l.tiles.len(), 18);
+        assert!(l.access().dump().contains("ALL APPLICATIONS"));
     }
 
     #[test]
