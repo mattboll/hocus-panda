@@ -30,5 +30,5 @@ pub use theme::{
 };
 pub use tree::{
     Align, Button, ButtonKind, Direction, Draw, Event, Glass, Icon, Input, Justify, Key, Kind,
-    Length, Look, NodeId, Property, Style, Surface, TextField, Tree,
+    Length, Look, NodeId, Picture, Property, Style, Surface, TextField, Tree,
 };

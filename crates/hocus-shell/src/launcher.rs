@@ -26,13 +26,17 @@
 //! indexed, off the loop; those found come under "Documents", after the
 //! applications, each with its folder and a line around the words that
 //! matched. Enter opens one with its default application.
+//!
+//! With its field empty, it shows every application (#254): a grid in
+//! alphabetical order, each with its icon, or its glyph on its colour as
+//! the dock draws it. The arrows move, Enter opens, typing searches.
 
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use hocus_core::{Action, shortcuts::Combo};
 use hocus_ui::{
     AccessNode, Align, Direction, Event, Icon, Input, Insets, Key, Kind, Length, Look, NodeId,
-    Paint, PixelRect, Point, Property, Rect, Size, Style, Surface, TextField, Theme, Tree,
+    Paint, Picture, PixelRect, Point, Property, Rect, Size, Style, Surface, TextField, Theme, Tree,
 };
 
 use crate::{
@@ -124,6 +128,23 @@ const ANSWER_MAX: f32 = 300.0;
 const ANSWER_PAGE: f32 = ANSWER_MAX - 40.0;
 /// The card's room inside its padding, for its buttons.
 const PANEL: f32 = WIDTH - 2.0 * 28.0;
+/// The grid of every application (#254): so many tiles a row, so many
+/// rows shown, in the room the list of results takes.
+const COLUMNS: usize = 6;
+const GRID_ROWS: usize = 3;
+const TILE_GAP: f32 = 4.0;
+/// A tile fills its share of the list's width.
+const TILE_W: f32 = (WIDTH - 2.0 * 12.0 - (COLUMNS as f32 - 1.0) * TILE_GAP) / COLUMNS as f32;
+const TILE_H: f32 = 116.0;
+/// A tile's icon, logical pixels: icons are read at this size times the
+/// screen's scale.
+pub const GRID_ICON: f32 = 48.0;
+/// The size of the grid's icons on a screen of `scale`, in pixels.
+pub fn icon_size(scale: f32) -> u32 {
+    (GRID_ICON * scale.max(1.0)).ceil() as u32
+}
+/// So much wheel moves the grid a row: a notch.
+const WHEEL_ROW: f32 = 15.0;
 
 /// An application the launcher can start.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +156,9 @@ pub struct App {
     pub keywords: Vec<String>,
     /// The program and its arguments.
     pub exec: Vec<String>,
+    /// Its icon's name (`Icon`); the pixels come on their own, read off
+    /// the loop.
+    pub icon: Option<String>,
 }
 
 /// A document the search found (#45).
@@ -349,6 +373,17 @@ pub struct Launcher {
     documents_asked: u64,
     /// A query to ask, taken by the compositor.
     documents_wanted: Option<(u64, String)>,
+    /// Applications' icons by name, read off the loop.
+    icons: BTreeMap<String, Picture>,
+    /// The grid's tiles shown, the application each is, and the ring
+    /// around the chosen one.
+    tiles: Vec<NodeId>,
+    tile_apps: Vec<usize>,
+    ring: Option<NodeId>,
+    /// The grid's first row shown.
+    grid_first: usize,
+    /// Wheel turned over the grid, not yet a row.
+    wheel_left: f32,
     now: Duration,
 }
 
@@ -526,6 +561,12 @@ impl Launcher {
             documents_query: String::new(),
             documents_asked: 0,
             documents_wanted: None,
+            icons: BTreeMap::new(),
+            tiles: Vec::new(),
+            tile_apps: Vec::new(),
+            ring: None,
+            grid_first: 0,
+            wheel_left: 0.0,
             now: Duration::ZERO,
         }
     }
@@ -542,6 +583,7 @@ impl Launcher {
         }
         let mut fresh = Self::new(self.tree.theme().clone(), lang, self.tree.scale());
         fresh.apps = std::mem::take(&mut self.apps);
+        fresh.icons = std::mem::take(&mut self.icons);
         fresh.providers = std::mem::take(&mut self.providers);
         fresh.history = std::mem::take(&mut self.history);
         fresh.recents = std::mem::take(&mut self.recents);
@@ -590,8 +632,13 @@ impl Launcher {
 
     /// The applications, found on a worker thread: they may come while
     /// the card is open. Only the command field lists them, and the line
-    /// chosen there stays chosen.
-    pub fn set_apps(&mut self, apps: Vec<App>) {
+    /// chosen there stays chosen. Kept in alphabetical order, for the grid;
+    /// the same ones read again change nothing.
+    pub fn set_apps(&mut self, mut apps: Vec<App>) {
+        apps.sort_by_cached_key(|a| (crate::fuzzy::fold(&a.name), a.name.clone()));
+        if apps == self.apps {
+            return;
+        }
         self.apps = apps;
         if self.open && self.mode == Mode::Commands {
             let selected = self.selected;
@@ -599,6 +646,29 @@ impl Launcher {
             self.selected = selected.min(self.hits.len().saturating_sub(1));
             self.show_selection();
         }
+    }
+
+    /// The size its icons are wanted at, in pixels: the grid's at its
+    /// scale.
+    pub fn icon_size(&self) -> u32 {
+        icon_size(self.tree.scale())
+    }
+
+    /// Icons read off the loop, by name; the grid shows them at once.
+    pub fn set_icons(&mut self, icons: Vec<(String, Picture)>) {
+        if icons.is_empty() {
+            return;
+        }
+        self.icons.extend(icons);
+        if self.open && self.grid_shown() {
+            self.render();
+        }
+    }
+
+    /// Whether the card shows the grid of every application: the command
+    /// field, empty.
+    fn grid_shown(&self) -> bool {
+        self.mode == Mode::Commands && !self.apps.is_empty() && self.query().trim().is_empty()
     }
 
     /// Which providers run, from the configuration.
@@ -970,6 +1040,8 @@ impl Launcher {
         }
         self.selected = 0;
         self.first = 0;
+        self.grid_first = 0;
+        self.wheel_left = 0.0;
         self.render();
     }
 
@@ -1094,6 +1166,9 @@ impl Launcher {
         }
         self.card_buttons.clear();
         self.row_hits.clear();
+        self.tiles.clear();
+        self.tile_apps.clear();
+        self.ring = None;
         self.answer_text = None;
         let card = if self.has_card() {
             self.hits.first().and_then(|h| self.card_for(h))
@@ -1126,6 +1201,10 @@ impl Launcher {
             );
         }
         let theme = self.tree.theme().clone();
+        if card.is_none() && self.grid_shown() {
+            self.render_grid(&theme);
+            return self.show_selection();
+        }
         let (start, shown, row_height) = match &card {
             Some(_) => (1, MAX_ALSO, ALSO_ROW),
             None => (self.first, MAX_RESULTS, ROW),
@@ -1319,6 +1398,183 @@ impl Launcher {
         }
     }
 
+    /// Every application, `GRID_ROWS` rows of tiles from `grid_first`,
+    /// under their caption; the ring on the chosen one.
+    fn render_grid(&mut self, theme: &Theme) {
+        self.add_caption(self.lang.all_applications(), theme);
+        let Some(grid) = self.tree.add(
+            self.list,
+            Style {
+                gap: TILE_GAP,
+                ..Style::default()
+            },
+            Kind::Box(Look::default()),
+        ) else {
+            return;
+        };
+        let start = self.grid_first * COLUMNS;
+        let end = (start + COLUMNS * GRID_ROWS).min(self.apps.len());
+        for row_start in (start..end).step_by(COLUMNS) {
+            let Some(row) = self.tree.add(
+                grid,
+                Style {
+                    direction: Direction::Row,
+                    height: Length::Px(TILE_H),
+                    gap: TILE_GAP,
+                    grow: 0.0,
+                    ..Style::default()
+                },
+                Kind::Box(Look::default()),
+            ) else {
+                continue;
+            };
+            for index in row_start..(row_start + COLUMNS).min(end) {
+                self.add_tile(row, index, theme);
+            }
+        }
+        self.ring = self.tree.add(
+            grid,
+            Style {
+                at: Some(self.tile_at(self.selected)),
+                width: Length::Px(TILE_W),
+                height: Length::Px(TILE_H),
+                ..Style::default()
+            },
+            Kind::Custom {
+                draw: Box::new(Ring {
+                    radius: theme.radii.medium,
+                }),
+                label: None,
+            },
+        );
+    }
+
+    /// Where application `index`'s tile is in the grid shown, from its
+    /// corner.
+    fn tile_at(&self, index: usize) -> Point {
+        let shown = index.saturating_sub(self.grid_first * COLUMNS);
+        let (row, column) = (shown / COLUMNS, shown % COLUMNS);
+        Point::new(
+            column as f32 * (TILE_W + TILE_GAP),
+            row as f32 * (TILE_H + TILE_GAP),
+        )
+    }
+
+    /// An application's tile: its icon over its name.
+    fn add_tile(&mut self, row: NodeId, index: usize, theme: &Theme) {
+        let Some(app) = self.apps.get(index) else {
+            return;
+        };
+        let Some(tile) = self.tree.add(
+            row,
+            Style {
+                width: Length::Px(TILE_W),
+                height: Length::Px(TILE_H),
+                padding: Insets::symmetric(0.0, 10.0),
+                gap: 10.0,
+                grow: 0.0,
+                align: Align::Center,
+                justify: hocus_ui::Justify::Center,
+                ..Style::default()
+            },
+            Kind::Box(Look {
+                background: (index == self.selected).then_some(Paint::SurfaceHover),
+                radius: theme.radii.medium,
+                ..Look::default()
+            }),
+        ) else {
+            return;
+        };
+        self.tree.set_clickable(tile, &app.name);
+        let icon_style = Style {
+            width: Length::Px(GRID_ICON),
+            height: Length::Px(GRID_ICON),
+            grow: 0.0,
+            align: Align::Center,
+            justify: hocus_ui::Justify::Center,
+            ..Style::default()
+        };
+        match app.icon.as_ref().and_then(|n| self.icons.get(n)) {
+            Some(picture) => {
+                let _ = self.tree.add(tile, icon_style, Kind::picture(picture, ""));
+            }
+            // No icon: the dock's square, its glyph on its colour.
+            None => {
+                let (glyph, color) = crate::dock::look_of(&app.id, &app.name);
+                if let Some(square) = self.tree.add(
+                    tile,
+                    icon_style,
+                    Kind::Box(Look {
+                        background: Some(Paint::Rgba(color)),
+                        radius: 13.0,
+                        ..Look::default()
+                    }),
+                ) {
+                    let white = Paint::Rgba(hocus_ui::Color::rgb(0xFF, 0xFF, 0xFF));
+                    let glyph = match glyph {
+                        crate::dock::Glyph::Text(t) => Some(Kind::text_line(
+                            t,
+                            hocus_ui::TextStyle {
+                                typeface: hocus_ui::Typeface::Mono,
+                                size: 14.0,
+                                weight: 700,
+                                ..theme.text.title
+                            }
+                            .with_color(white),
+                        )),
+                        crate::dock::Glyph::Path(path) => {
+                            Icon::stroked(path, 22.0, 1.8).map(|icon| Kind::Icon {
+                                icon,
+                                color: white,
+                                label: None,
+                            })
+                        }
+                    };
+                    if let Some(glyph) = glyph {
+                        let _ = self.tree.add(square, Style::default(), glyph);
+                    }
+                }
+            }
+        }
+        let name = app.name.clone();
+        let _ = self.tree.add(
+            tile,
+            Style {
+                grow: 0.0,
+                ..Style::default()
+            },
+            Kind::text_line(name, theme.text.label.with_weight(500)),
+        );
+        self.tiles.push(tile);
+        self.tile_apps.push(index);
+    }
+
+    /// Moves the grid's choice to `index`, the rows following it.
+    fn grid_choose(&mut self, index: usize) {
+        self.selected = index.min(self.apps.len().saturating_sub(1));
+        self.show_selection();
+    }
+
+    /// An arrow, Tab, Home or End in the grid: where the choice goes.
+    fn grid_move(&self, key: Key) -> Option<usize> {
+        let (n, at) = (self.apps.len(), self.selected);
+        let last = n.checked_sub(1)?;
+        Some(match key {
+            Key::Right => (at + 1).min(last),
+            Key::Left => at.saturating_sub(1),
+            Key::Tab => (at + 1) % n,
+            Key::BackTab => (at + n - 1) % n,
+            // Down from a row above a shorter last one: its last tile.
+            Key::Down if at + COLUMNS <= last => at + COLUMNS,
+            Key::Down if at / COLUMNS < last / COLUMNS => last,
+            Key::Down => at,
+            Key::Up => at.checked_sub(COLUMNS).unwrap_or(at),
+            Key::Home => 0,
+            Key::End => last,
+            _ => return None,
+        })
+    }
+
     /// A document found: its name over a line around the words matched,
     /// those in the text's colour; its folder on the right.
     fn add_document_row(&mut self, index: usize, document: &Document, height: f32, theme: &Theme) {
@@ -1484,6 +1740,9 @@ impl Launcher {
 
     /// Marks the chosen row, scrolling the list to it.
     fn show_selection(&mut self) {
+        if self.grid_shown() {
+            return self.show_tile();
+        }
         if !self.has_card() {
             if self.selected < self.first {
                 self.first = self.selected;
@@ -1507,6 +1766,52 @@ impl Launcher {
             );
             self.tree.set_selected_box(*row, chosen);
         }
+    }
+
+    /// Marks the chosen tile with the ring, scrolling the grid to its row.
+    fn show_tile(&mut self) {
+        let row = self.selected / COLUMNS;
+        if row < self.grid_first {
+            self.grid_first = row;
+            return self.render();
+        }
+        if row >= self.grid_first + GRID_ROWS {
+            self.grid_first = row + 1 - GRID_ROWS;
+            return self.render();
+        }
+        let radius = self.tree.theme().radii.medium;
+        for (tile, index) in self.tiles.iter().zip(&self.tile_apps) {
+            let chosen = *index == self.selected;
+            self.tree.set_look(
+                *tile,
+                Look {
+                    background: chosen.then_some(Paint::SurfaceHover),
+                    radius,
+                    ..Look::default()
+                },
+            );
+            self.tree.set_selected_box(*tile, chosen);
+        }
+        if let Some(ring) = self.ring {
+            self.tree.set_style(
+                ring,
+                Style {
+                    at: Some(self.tile_at(self.selected)),
+                    width: Length::Px(TILE_W),
+                    height: Length::Px(TILE_H),
+                    ..Style::default()
+                },
+            );
+        }
+    }
+
+    /// The application of the grid at `index`, launched.
+    fn grid_launch(&mut self, index: usize) -> Vec<LauncherEvent> {
+        let Some(app) = self.apps.get(index).cloned() else {
+            return Vec::new();
+        };
+        self.close();
+        vec![LauncherEvent::Chosen(Choice::Launch(app))]
     }
 
     fn selected_paste(&self) -> Option<String> {
@@ -1540,6 +1845,15 @@ impl Launcher {
     pub fn key(&mut self, key: Key) -> Vec<LauncherEvent> {
         if !self.open {
             return Vec::new();
+        }
+        if self.grid_shown() {
+            if let Some(to) = self.grid_move(key) {
+                self.grid_choose(to);
+                return Vec::new();
+            }
+            if key == Key::Enter {
+                return self.grid_launch(self.selected);
+            }
         }
         match key {
             Key::Escape => {
@@ -1659,6 +1973,12 @@ impl Launcher {
                 events.extend(self.card_action(*action));
                 continue;
             }
+            if let Some(i) = self.tiles.iter().position(|t| *t == node)
+                && let Some(index) = self.tile_apps.get(i).copied()
+            {
+                events.extend(self.grid_launch(index));
+                continue;
+            }
             if self.mode == Mode::Commands
                 && let Some(i) = self.rows.iter().position(|r| *r == node)
                 && let Some(index) = self.row_hits.get(i).copied()
@@ -1720,13 +2040,40 @@ impl Launcher {
     }
 
     /// The wheel over the card, `at` relative to the surface: a long
-    /// answer scrolls.
+    /// answer scrolls; the grid moves a row a notch, its choice with it.
     pub fn wheel(&mut self, at: Point, dy: f32) -> bool {
-        self.hit(at) && self.scroll(dy)
+        if !self.hit(at) {
+            return false;
+        }
+        if self.open && self.grid_shown() {
+            self.wheel_left += dy;
+            while self.wheel_left.abs() >= WHEEL_ROW {
+                let down = self.wheel_left > 0.0;
+                self.wheel_left -= WHEEL_ROW.copysign(self.wheel_left);
+                let key = if down { Key::Down } else { Key::Up };
+                if let Some(to) = self.grid_move(key) {
+                    self.grid_choose(to);
+                }
+            }
+            return true;
+        }
+        self.scroll(dy)
     }
 
-    /// Page Up or Page Down while the field has the keyboard.
+    /// Page Up or Page Down while the field has the keyboard: a long
+    /// answer scrolls, the grid's choice goes a page of rows.
     pub fn page(&mut self, down: bool) -> bool {
+        if self.open && self.grid_shown() {
+            let page = COLUMNS * GRID_ROWS;
+            let last = self.apps.len().saturating_sub(1);
+            let to = if down {
+                (self.selected + page).min(last)
+            } else {
+                self.selected.saturating_sub(page)
+            };
+            self.grid_choose(to);
+            return true;
+        }
         self.scroll(if down { ANSWER_PAGE } else { -ANSWER_PAGE })
     }
 
@@ -1886,6 +2233,7 @@ impl Launcher {
         let rows = self
             .rows
             .iter()
+            .chain(&self.tiles)
             .filter_map(|r| self.tree.rect(*r))
             .filter(|r| r.h > 0.0 && r.y < card.y + card.h)
             .collect();
@@ -1900,6 +2248,23 @@ impl Launcher {
 
     pub fn access(&self) -> AccessNode {
         self.tree.access()
+    }
+}
+
+/// The keyboard's ring around the grid's chosen tile, in the accent and
+/// the theme's width for focus, inside the tile's edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Ring {
+    radius: f32,
+}
+
+impl hocus_ui::Draw for Ring {
+    fn draw(&self, canvas: &mut hocus_ui::Canvas, rect: Rect, theme: &Theme, _: Duration) {
+        canvas.stroke_rect(rect, self.radius, theme.focus_ring, theme.colors.accent);
+    }
+
+    fn size(&self) -> Size {
+        Size::new(TILE_W, TILE_H)
     }
 }
 
@@ -1988,6 +2353,7 @@ mod tests {
             generic: generic.map(str::to_owned),
             keywords: Vec::new(),
             exec: vec![name.to_lowercase()],
+            icon: None,
         }
     }
 
@@ -2383,6 +2749,119 @@ mod tests {
             .filter(|h| matches!(h.choice, Choice::OpenFile(_)))
             .count();
         assert_eq!(documents, 3);
+    }
+
+    fn launched(events: Vec<LauncherEvent>) -> Option<String> {
+        match events.as_slice() {
+            [LauncherEvent::Chosen(Choice::Launch(app))] => Some(app.name.clone()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn the_empty_field_shows_every_application_in_order_and_enter_opens_the_first() {
+        let mut l = Launcher::new(Theme::default(), Lang::En, 1.0);
+        l.set_apps(vec![
+            app("Terminal", None),
+            app("Éditeur", None),
+            app("files", None),
+            app("Firefox", None),
+        ]);
+        l.open();
+        let names: Vec<&str> = l
+            .tile_apps
+            .iter()
+            .map(|i| l.apps[*i].name.as_str())
+            .collect();
+        assert_eq!(names, ["Éditeur", "files", "Firefox", "Terminal"]);
+        let dump = l.access().dump();
+        assert!(dump.contains("ALL APPLICATIONS"), "{dump}");
+        assert_eq!(launched(l.key(Key::Enter)), Some("Éditeur".into()));
+        assert!(!l.is_open());
+        // Typing searches; emptied, the field shows them all again.
+        l.open();
+        l.text("ter");
+        assert!(l.tiles.is_empty());
+        assert_eq!(l.hits.first().map(|h| h.title.as_str()), Some("Terminal"));
+        l.key(Key::Backspace);
+        l.key(Key::Backspace);
+        l.key(Key::Backspace);
+        assert_eq!(l.tiles.len(), 4);
+        assert_eq!(l.selected, 0);
+    }
+
+    #[test]
+    fn the_arrows_move_through_the_grid_and_it_scrolls_by_rows() {
+        let mut l = Launcher::new(Theme::default(), Lang::En, 1.0);
+        l.set_apps((0..26).map(|i| app(&format!("App {i:02}"), None)).collect());
+        l.open();
+        assert_eq!(l.tiles.len(), COLUMNS * GRID_ROWS);
+        l.key(Key::Right);
+        l.key(Key::Down);
+        assert_eq!(l.selected, 1 + COLUMNS);
+        l.key(Key::Left);
+        l.key(Key::Left);
+        assert_eq!(l.selected, COLUMNS - 1, "to the row above's last");
+        l.key(Key::Up);
+        assert_eq!(l.selected, COLUMNS - 1, "the first row stays");
+        l.key(Key::Home);
+        l.key(Key::Left);
+        assert_eq!(l.selected, 0, "no further than the first");
+        // Down past the rows shown: the grid follows, a row at a time.
+        for _ in 0..3 {
+            l.key(Key::Down);
+        }
+        assert_eq!(l.selected, 3 * COLUMNS);
+        assert_eq!(l.grid_first, 1);
+        assert_eq!(l.tile_apps.first(), Some(&COLUMNS));
+        // From above the shorter last row: its last one.
+        l.key(Key::Right);
+        l.key(Key::Right);
+        l.key(Key::Right);
+        l.key(Key::Down);
+        assert_eq!(l.selected, 25);
+        assert_eq!(launched(l.key(Key::Enter)), Some("App 25".into()));
+        // The wheel goes a row a notch; Page Up a page.
+        l.open();
+        l.draw(Duration::ZERO);
+        assert!(l.wheel(Point::new(400.0, 300.0), 15.0));
+        assert_eq!(l.selected, COLUMNS);
+        assert!(l.page(true));
+        assert_eq!(l.selected, COLUMNS + COLUMNS * GRID_ROWS);
+        l.key(Key::Home);
+        assert_eq!((l.selected, l.grid_first), (0, 0));
+    }
+
+    #[test]
+    fn the_same_applications_read_again_change_nothing() {
+        let mut l = launcher();
+        l.key(Key::Right);
+        l.key(Key::Right);
+        let tiles = l.tiles.clone();
+        l.set_apps(vec![
+            app("Terminal", None),
+            app("Fish", None),
+            app("Firefox", Some("Web Browser")),
+            app("Files", Some("File Manager")),
+        ]);
+        assert_eq!(l.selected, 2);
+        assert_eq!(l.tiles, tiles, "not laid out again");
+    }
+
+    #[test]
+    fn an_icon_read_shows_in_its_tile() {
+        let mut l = launcher();
+        l.apps[0].icon = Some("files".into());
+        let red = [200u8, 0, 0, 255].repeat(48 * 48);
+        let picture = Picture::new(48, 48, &red).expect("pixels");
+        l.set_icons(vec![("files".into(), picture)]);
+        let images = l
+            .access()
+            .walk()
+            .into_iter()
+            .filter(|n| n.role == hocus_ui::Role::Image)
+            .count();
+        assert_eq!(images, 1);
     }
 
     #[test]

@@ -1183,6 +1183,17 @@ impl Lang {
         self.pick("Also", "Aussi")
     }
 
+    /// The caption over the grid of every application, in the command
+    /// field left empty (#254).
+    pub fn all_applications(self) -> &'static str {
+        self.pick("All applications", "Toutes les applications")
+    }
+
+    /// The dock's button that opens that grid.
+    pub fn applications(self) -> &'static str {
+        self.pick("Applications", "Applications")
+    }
+
     /// The group of documents found in the command field (#45).
     pub fn documents_caption(self) -> &'static str {
         self.pick("Documents", "Documents")

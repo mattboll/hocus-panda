@@ -1,0 +1,98 @@
+# Every application (#254): the launcher's field left empty shows them all.
+description = "With its field empty, the launcher shows every application in a grid, in alphabetical order with their icons, the hidden one left out; the arrows move, typing searches as before, and Enter opens the first"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[panel]
+form = "column"
+"""
+
+[[step]]
+pointer_move = [400, 400]
+
+[[step]]
+keys = "super+space"
+
+[[step]]
+expect_ui = { label = "ALL APPLICATIONS" }
+
+# In alphabetical order, the first chosen; NoDisplay=true is left out.
+[[step]]
+expect_ui = { label = "Environment Probe", selected = true }
+
+[[step]]
+expect_ui = { label = "Files", selected = false }
+
+[[step]]
+expect_ui = { label = "Foot", selected = false }
+
+[[step]]
+expect_ui = { label = "Fireworks Helper", shown = false }
+
+# Files has its icon, read off the loop; the others their glyph.
+[[step]]
+frames = 2
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "launcher-all-apps.png" }
+
+[[step]]
+keys = "right"
+
+[[step]]
+expect_ui = { label = "Files", selected = true }
+
+[[step]]
+keys = "right"
+
+[[step]]
+keys = "right"
+
+[[step]]
+expect_ui = { label = "Firewall", selected = true }
+
+[[step]]
+frames = 1
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "launcher-all-apps.chosen.png" }
+
+[[step]]
+keys = "left"
+
+[[step]]
+expect_ui = { label = "Firefox", selected = true }
+
+# Typing searches as before; the grid comes back with the field empty.
+[[step]]
+type = "foo"
+
+[[step]]
+expect_ui = { label = "Foot", selected = true }
+
+[[step]]
+expect_ui = { label = "Environment Probe", shown = false }
+
+[[step]]
+keys = "backspace"
+
+[[step]]
+keys = "backspace"
+
+[[step]]
+keys = "backspace"
+
+[[step]]
+expect_ui = { label = "Environment Probe", selected = true }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_ui = { label = "ALL APPLICATIONS", shown = false }
+
+[[step]]
+expect_runtime_file = { name = "launched-env", contains = ["WAYLAND_DISPLAY="] }

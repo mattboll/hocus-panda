@@ -1,0 +1,42 @@
+# The dock's Applications button (#254).
+description = "The dock ends with an Applications button after a line; a click opens the launcher on every application, and Enter opens the one chosen"
+outputs = ["1280x800"]
+shell = true
+data_dirs = ["../fixtures"]
+
+[[step]]
+config = """
+[dock]
+pinned = ["org.codeberg.dnkl.foot.desktop", "firefox.desktop"]
+
+[panel]
+form = "column"
+"""
+
+[[step]]
+frames = 2
+
+[[step]]
+expect_ui = { label = "Applications" }
+
+[[step]]
+expect_screenshot = { output = "HEADLESS-1", reference = "dock-applications.png" }
+
+[[step]]
+click_ui = "Applications"
+
+[[step]]
+expect_ui = { label = "ALL APPLICATIONS" }
+
+[[step]]
+expect_ui = { label = "Environment Probe", selected = true }
+
+# The dock waits behind the launcher.
+[[step]]
+expect_ui = { label = "Applications", shown = false }
+
+[[step]]
+keys = "enter"
+
+[[step]]
+expect_runtime_file = { name = "launched-env", contains = ["WAYLAND_DISPLAY="] }

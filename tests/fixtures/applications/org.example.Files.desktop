@@ -4,3 +4,4 @@ Name=Files
 GenericName=File Manager
 Keywords=folder;manager;explore;
 Exec=true %U
+Icon=org.example.Files

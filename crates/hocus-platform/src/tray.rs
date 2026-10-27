@@ -581,7 +581,7 @@ pub fn from_theme(name: &str, size: u32, extra: Option<&Path>) -> Option<Icon> {
         .and_then(|p| load(&p, size))
 }
 
-fn load(path: &Path, size: u32) -> Option<Icon> {
+pub(crate) fn load(path: &Path, size: u32) -> Option<Icon> {
     if path.extension().is_some_and(|e| e == "svg") {
         let data = std::fs::read(path).ok()?;
         let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;

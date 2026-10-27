@@ -23,6 +23,8 @@ pub struct Entry {
     pub terminal: bool,
     /// The MIME types it opens (`MimeType`), for default applications.
     pub mime_types: Vec<String>,
+    /// Its icon (`Icon`): a name in the icon themes, or a file's path.
+    pub icon: Option<String>,
 }
 
 /// Where entries are looked for, first wins: the user's data directory,
@@ -230,6 +232,7 @@ fn parse_keys(id: &str, keys: &BTreeMap<String, String>, lang: Option<&str>) -> 
         exec,
         terminal: yes("Terminal"),
         mime_types: list(get("MimeType")),
+        icon: get("Icon").filter(|i| !i.is_empty()),
     })
 }
 
@@ -461,6 +464,154 @@ fn found(program: &str) -> bool {
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
+/// The icon themes looked in, in this order: hicolor, where applications
+/// install theirs, then the two most common full themes.
+const ICON_THEMES: [&str; 3] = ["hicolor", "Adwaita", "breeze"];
+
+/// An application's icon, decoded: width, height, premultiplied RGBA.
+pub type IconPixels = (u16, u16, std::sync::Arc<[u8]>);
+
+/// The icons named by `names` (desktop entries' `Icon`), at `size` pixels
+/// square: from the icon themes under each of `data`
+/// (`<dir>/icons/<theme>/<size>/apps`, the nearest size, an SVG drawn at
+/// `size`), else `<dir>/pixmaps`; a name that is a path is that file. A
+/// name found nowhere is left out. Reads and decodes files: for a worker
+/// thread.
+pub fn icons(names: &[String], data: &[PathBuf], size: u32) -> Vec<(String, IconPixels)> {
+    let size = size.clamp(1, 1024);
+    // The themes' folders are read once for all the names: an index of
+    // what is wanted, the best file of each.
+    let wanted: std::collections::BTreeSet<&str> = names
+        .iter()
+        .filter(|n| !n.starts_with('/'))
+        .map(String::as_str)
+        .collect();
+    let mut best: BTreeMap<&str, ((usize, u32), PathBuf)> = BTreeMap::new();
+    for dir in data {
+        for (rank, theme) in ICON_THEMES.iter().enumerate() {
+            let Ok(sizes) = std::fs::read_dir(dir.join("icons").join(theme)) else {
+                continue;
+            };
+            for sized in sizes.flatten() {
+                let name = sized.file_name().to_string_lossy().into_owned();
+                let Some(px) = folder_size(&name) else {
+                    continue;
+                };
+                let Ok(files) = std::fs::read_dir(sized.path().join("apps")) else {
+                    continue;
+                };
+                for file in files.flatten() {
+                    let path = file.path();
+                    let (Some(stem), Some(ext)) = (
+                        path.file_stem().and_then(|s| s.to_str()),
+                        path.extension().and_then(|e| e.to_str()),
+                    ) else {
+                        continue;
+                    };
+                    let Some(&key) = wanted.get(stem) else {
+                        continue;
+                    };
+                    let score = match (ext, px) {
+                        ("svg", _) => 0,
+                        // Larger is drawn smaller, sharp; smaller blurs.
+                        ("png", Some(px)) if px >= size => px - size,
+                        ("png", Some(px)) => 2 * (size - px),
+                        _ => continue,
+                    };
+                    let rank = (rank, score);
+                    if best.get(key).is_none_or(|(r, _)| rank < *r) {
+                        best.insert(key, (rank, path));
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for name in names {
+        let path = if name.starts_with('/') {
+            Some(PathBuf::from(name))
+        } else {
+            best.get(name.as_str())
+                .map(|(_, p)| p.clone())
+                .or_else(|| pixmap(name, data))
+        };
+        let Some(icon) = path.and_then(|p| crate::tray::load(&p, size)) else {
+            continue;
+        };
+        if let Some(pixels) = premultiplied(&icon, size) {
+            out.push((name.clone(), pixels));
+        }
+    }
+    out
+}
+
+/// The size of an icon theme's folder (`48x48`, `48x48@2`), `None` inside
+/// for `scalable`; `None` outside for what is not one.
+fn folder_size(name: &str) -> Option<Option<u32>> {
+    if name == "scalable" || name.starts_with("scalable@") {
+        return Some(None);
+    }
+    let (dims, times) = name.split_once('@').unwrap_or((name, "1"));
+    let px: u32 = dims.split('x').next()?.parse().ok()?;
+    let times: u32 = times.trim_end_matches('x').parse().unwrap_or(1);
+    Some(Some(px * times.max(1)))
+}
+
+/// `<dir>/pixmaps/<name>.png` or `.svg`, the first found.
+fn pixmap(name: &str, data: &[PathBuf]) -> Option<PathBuf> {
+    data.iter()
+        .flat_map(|d| ["png", "svg"].map(|e| d.join("pixmaps").join(format!("{name}.{e}"))))
+        .find(|p| p.is_file())
+}
+
+/// An icon at most `size` pixels square, premultiplied: a larger picture is
+/// made smaller by averaging, its proportions kept.
+fn premultiplied(icon: &crate::tray::Icon, size: u32) -> Option<IconPixels> {
+    let (w, h) = (icon.width, icon.height);
+    if w == 0 || h == 0 || icon.rgba.len() != (w * h * 4) as usize {
+        return None;
+    }
+    let mut pre: Vec<u8> = icon
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let a = u32::from(p[3]);
+            let m = |c: u8| ((u32::from(c) * a + 127) / 255) as u8;
+            [m(p[0]), m(p[1]), m(p[2]), p[3]]
+        })
+        .collect();
+    let (mut w, mut h) = (w, h);
+    let longest = w.max(h);
+    if longest > size {
+        let (nw, nh) = ((w * size / longest).max(1), (h * size / longest).max(1));
+        let mut small = vec![0u8; (nw * nh * 4) as usize];
+        for y in 0..nh {
+            let (y0, y1) = (y * h / nh, ((y + 1) * h / nh).max(y * h / nh + 1));
+            for x in 0..nw {
+                let (x0, x1) = (x * w / nw, ((x + 1) * w / nw).max(x * w / nw + 1));
+                let mut sum = [0u32; 4];
+                for sy in y0..y1 {
+                    for sx in x0..x1 {
+                        let i = ((sy * w + sx) * 4) as usize;
+                        for (c, s) in sum.iter_mut().enumerate() {
+                            *s += u32::from(pre[i + c]);
+                        }
+                    }
+                }
+                let n = (y1 - y0) * (x1 - x0);
+                let o = ((y * nw + x) * 4) as usize;
+                for (c, s) in sum.iter().enumerate() {
+                    small[o + c] = (s / n) as u8;
+                }
+            }
+        }
+        (pre, w, h) = (small, nw, nh);
+    }
+    Some((u16::try_from(w).ok()?, u16::try_from(h).ok()?, pre.into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +631,7 @@ mod tests {
                 exec: vec!["firefox".into()],
                 terminal: false,
                 mime_types: vec!["text/html".into(), "x-scheme-handler/https".into()],
+                icon: None,
             })
         );
         assert_eq!(
@@ -609,6 +761,55 @@ mod tests {
         assert_eq!(names(&dirs)[1], ("Tray".to_owned(), false));
         set_autostart(&dirs, "tray.desktop", true)?;
         assert!(autostart(&dirs).iter().any(|e| e.id == "tray.desktop"));
+        Ok(())
+    }
+
+    fn write_png(path: &Path, size: u32, rgba: [u8; 4]) -> std::io::Result<()> {
+        std::fs::create_dir_all(path.parent().expect("a folder"))?;
+        let file = std::fs::File::create(path)?;
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), size, size);
+        encoder.set_color(png::ColorType::Rgba);
+        let mut writer = encoder.write_header().map_err(std::io::Error::other)?;
+        writer
+            .write_image_data(&rgba.repeat((size * size) as usize))
+            .map_err(std::io::Error::other)
+    }
+
+    #[test]
+    fn icons_come_from_the_themes_at_the_nearest_size_then_pixmaps() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let data = dir.path().to_path_buf();
+        let hicolor = data.join("icons/hicolor");
+        write_png(&hicolor.join("48x48/apps/mail.png"), 48, [0, 0, 255, 255])?;
+        write_png(
+            &hicolor.join("256x256/apps/mail.png"),
+            256,
+            [255, 0, 0, 255],
+        )?;
+        std::fs::create_dir_all(hicolor.join("scalable/apps"))?;
+        std::fs::write(
+            hicolor.join("scalable/apps/notes.svg"),
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#00ff00"/></svg>"##,
+        )?;
+        // Half see-through, larger than asked: made smaller, premultiplied.
+        write_png(&data.join("pixmaps/old.png"), 96, [200, 100, 0, 128])?;
+        let names: Vec<String> = ["mail", "notes", "old", "missing"].map(String::from).into();
+        let found = icons(&names, &[data], 48);
+        let got: Vec<(&str, u16, u16, &[u8])> = found
+            .iter()
+            .map(|(n, (w, h, px))| (n.as_str(), *w, *h, &px[..4]))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("mail", 48, 48, &[0, 0, 255, 255][..]),
+                ("notes", 48, 48, &[0, 255, 0, 255][..]),
+                ("old", 48, 48, &[100, 50, 0, 128][..]),
+            ]
+        );
+        assert_eq!(folder_size("48x48@2"), Some(Some(96)));
+        assert_eq!(folder_size("scalable"), Some(None));
+        assert_eq!(folder_size("symbolic"), None);
         Ok(())
     }
 

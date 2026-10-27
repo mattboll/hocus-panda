@@ -5,13 +5,14 @@
 //! the open ones: a click focuses an open app's window, or launches it,
 //! its square bouncing. An app with a window asking for attention wiggles
 //! once when the dock shows, its dot in the accent, and the hint takes
-//! the accent meanwhile (#145).
+//! the accent meanwhile (#145). Its last button, after a line, opens the
+//! launcher on every application (#254).
 
 use std::{collections::BTreeSet, time::Duration};
 
 use hocus_core::WindowId;
 use hocus_platform::apps::Entry;
-use hocus_shell::dock::{Dock as DockView, DockApp, DockHint, look_of};
+use hocus_shell::dock::{Dock as DockView, DockApp, DockHint, Spot, look_of};
 use smithay::{
     output::Output,
     reexports::calloop::timer::{TimeoutAction, Timer},
@@ -65,8 +66,10 @@ pub struct Dock {
     /// Windows asking for attention whose icon wiggled already: once.
     wiggled: BTreeSet<WindowId>,
     /// The theme it was drawn in: glass, the accent and the hour's shadow
-    /// come with it.
+    /// come with it; and the language its button speaks.
     theme: Option<hocus_ui::Theme>,
+    /// Read again only when the configuration changes: it says it.
+    lang: Option<(u64, hocus_shell::Lang)>,
     shown: Option<Shown>,
     /// Asked by the shortcut, until asked again.
     toggled: bool,
@@ -231,14 +234,21 @@ impl State {
                     .any(|(a, b)| a.app != b.app)
         });
         let theme = self.theme();
+        let lang = match self.dock.lang {
+            Some((generation, lang)) if generation == self.config_generation => lang,
+            _ => self.shell_lang(),
+        };
         let scale = output.current_scale().fractional_scale() as f32;
         let restyled = self.dock.theme.as_ref() != Some(&theme);
         if restyled {
             self.dock.theme = Some(theme.clone());
             self.dock.hint = None;
         }
+        let relabelled = self.dock.lang.is_none_or(|(_, l)| l != lang);
+        self.dock.lang = Some((self.config_generation, lang));
         if changed
             || restyled
+            || relabelled
             || self
                 .dock
                 .panel
@@ -249,7 +259,7 @@ impl State {
                 self.dock.items = items;
             }
             let apps: Vec<DockApp> = self.dock.items.iter().map(|i| i.app.clone()).collect();
-            let view = DockView::new(theme.clone(), scale, &apps);
+            let view = DockView::new(theme.clone(), lang, scale, &apps);
             let size = DockView::size(apps.len());
             let area = self.work_area(&output);
             let origin = self
@@ -356,13 +366,18 @@ impl State {
             }
             return false;
         }
-        let app = panel.view.app_at(p);
-        panel.view.hover(app);
+        let spot = panel.view.spot_at(p);
+        panel.view.hover(spot);
         self.needs_redraw = true;
-        if pressed == Some(true)
-            && let Some(i) = app
-        {
-            self.dock_pick(i);
+        match (pressed, spot) {
+            (Some(true), Some(Spot::App(i))) => self.dock_pick(i),
+            // Every application, in the launcher on the dock's screen.
+            (Some(true), Some(Spot::Applications)) => {
+                tracing::debug!("the applications, from the dock");
+                panel.view.hover(None);
+                self.open_launcher();
+            }
+            _ => {}
         }
         true
     }

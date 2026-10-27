@@ -4,7 +4,9 @@ Data the scenarios use. `applications/` holds desktop entries, read by the
 launcher when a scenario sets `data_dirs = ["../fixtures"]`: a few entries
 named like real applications (their command does nothing), one hidden one,
 and one that writes the environment it was started with into the
-compositor's runtime directory.
+compositor's runtime directory. `icons/` is their icon theme: Files has an
+icon (a folder drawn for the project, SVG), the others none, to show the
+glyph the dock draws instead.
 
 `wallpapers/` holds two small pictures for the wallpaper scenarios: one
 mostly orange (with a blue corner), one blue.
