@@ -427,14 +427,10 @@ impl State {
             let Some((program, args)) = command.split_first() else {
                 continue;
             };
-            match self.start_program(program, args, crate::actions::Asked::BySession) {
-                Ok(()) => self.sessions.started.push((app_id, now)),
-                Err(err) => {
-                    tracing::warn!(app_id, %err, "could not restore");
-                    self.sessions.pending.retain(|w| w.app_id != app_id);
-                    self.report_restore(&app_id, &err.to_string());
-                }
-            }
+            // Waited for from now; one that cannot start is said when its
+            // thread answers (`restore_failed`).
+            self.sessions.started.push((app_id.clone(), now));
+            self.start_program(program, args, crate::programs::Asked::Restoring(app_id));
         }
         if !self.sessions.pending.is_empty() {
             self.sessions.boot = Some(Booting {
@@ -678,6 +674,23 @@ impl State {
         }
     }
 
+    /// An application put back could not start: said, its windows no
+    /// longer waited for, and the boot screen no longer counts them.
+    pub(crate) fn restore_failed(&mut self, app_id: &str, why: &str) {
+        if let Some(i) = self.sessions.started.iter().position(|(a, _)| a == app_id) {
+            self.sessions.started.remove(i);
+        }
+        let before = self.sessions.pending.len();
+        self.sessions.pending.retain(|w| w.app_id != app_id);
+        let gone = before - self.sessions.pending.len();
+        if let Some(boot) = self.sessions.boot.as_mut() {
+            boot.total = boot.total.saturating_sub(gone);
+            boot.apps.retain(|a| a != app_id);
+            self.needs_redraw = true;
+        }
+        self.report_restore(app_id, why);
+    }
+
     fn report_restore(&mut self, app_id: &str, why: &str) {
         let lang = self.shell_lang();
         self.shell_toast(&lang.not_restored(app_id), why);
@@ -728,14 +741,11 @@ impl State {
                     for entry in entries {
                         tracing::info!(id = entry.id, "autostart");
                         if let Some((program, args)) = entry.exec.split_first() {
-                            let started = app.state.start_program(
+                            app.state.start_program(
                                 program,
                                 args,
-                                crate::actions::Asked::BySession,
+                                crate::programs::Asked::BySession,
                             );
-                            if let Err(err) = started {
-                                tracing::warn!(%err, program, "could not start");
-                            }
                         }
                     }
                 });

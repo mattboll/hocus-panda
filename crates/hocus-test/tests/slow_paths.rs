@@ -1,14 +1,16 @@
-//! What the loop asks of the file system runs off it (#280): a folder
-//! slow to answer (a network home, a disk waking up) holds back no frame
-//! when a recording begins, when the record picker looks for the camera,
-//! or when the settings open.
+//! What the loop asks of the file system runs off it (#280, #285): a
+//! folder slow to answer (a network home, a disk waking up) holds back no
+//! frame when a recording begins, when the record picker looks for the
+//! camera, when the settings open, or when a program starts.
 
 use std::{
+    ffi::OsString,
     io::Write as _,
+    os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
     time::{Duration, Instant},
@@ -24,10 +26,16 @@ const SLOW: Duration = Duration::from_secs(5);
 const LEFT_META: u32 = 125;
 const LEFT_SHIFT: u32 = 42;
 const KEY_R: u32 = 19;
+const KEY_F9: u32 = 67;
 
 /// With the shell, and a `PATH` where nothing is found: the settings'
 /// default command starts nothing.
 fn compositor(empty: &Path) -> anyhow::Result<Headless> {
+    compositor_with(vec![("PATH".into(), empty.as_os_str().to_owned())])
+}
+
+/// With the shell, and `env` for what it starts.
+fn compositor_with(env: Vec<(OsString, OsString)>) -> anyhow::Result<Headless> {
     Headless::start_options(HarnessOptions {
         headless: HeadlessConfig {
             renderer: RendererChoice::Pixman,
@@ -40,7 +48,7 @@ fn compositor(empty: &Path) -> anyhow::Result<Headless> {
         session_bus: None,
         system_bus: None,
         data_dirs: None,
-        child_env: Some(vec![("PATH".into(), empty.as_os_str().to_owned())]),
+        child_env: Some(env),
         polkit_helper: None,
         motion: false,
         first_run: false,
@@ -205,6 +213,100 @@ fn slow_folders_hold_back_no_frame_when_recording_or_opening_the_settings() -> a
     // compositor when built together, else from PATH (here, nothing).
     compositor.request(Request::OpenSettings { page: None })?;
     run(&mut compositor, Duration::from_millis(300))?;
+    let held = held(&mut compositor)?;
+    assert!(held.is_empty(), "held the loop: {held:?}");
+    Ok(())
+}
+
+/// Given a `PATH` whose first directory is slow to answer (the thread
+/// that starts each program waits for 5 s unless the test lets it go: no
+/// directory can be made slow without FUSE), when a shortcut starts a
+/// program, then the key is handled at once and the loop draws on while
+/// the program is starting; once let go, the program starts with the
+/// session's environment and an activation token of the shell's in place
+/// of the session's own, and no handler held the loop.
+#[test]
+fn a_slow_path_holds_back_no_frame_when_a_program_starts() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let slow = dir.path().join("slow");
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&slow)?;
+    std::fs::create_dir(&bin)?;
+    // What it was started with, written whole.
+    let probe = bin.join("probe");
+    std::fs::write(
+        &probe,
+        "#!/bin/sh\nexport -p > \"$XDG_RUNTIME_DIR/probe.new\"\n\
+         mv \"$XDG_RUNTIME_DIR/probe.new\" \"$XDG_RUNTIME_DIR/probe-env\"\n",
+    )?;
+    std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o755))?;
+    let path = std::env::join_paths([
+        slow.as_path(),
+        &bin,
+        Path::new("/usr/bin"),
+        Path::new("/bin"),
+    ])?;
+    let mut compositor = compositor_with(vec![
+        ("PATH".into(), path),
+        ("HOCUS_SESSION_SAYS".into(), "kept".into()),
+        ("XDG_ACTIVATION_TOKEN".into(), "used-already".into()),
+        ("LD_PRELOAD".into(), "".into()),
+    ])?;
+    let (go, wait) = mpsc::channel::<()>();
+    let wait = Mutex::new(wait);
+    let reached = Arc::new(AtomicUsize::new(0));
+    let at_gate = reached.clone();
+    compositor.set_program_gate(move |_| {
+        at_gate.fetch_add(1, Ordering::SeqCst);
+        if let Ok(wait) = wait.lock() {
+            let _ = wait.recv_timeout(SLOW);
+        }
+    });
+    compositor.write_config("[shortcuts]\n\"Super+F9\" = \"spawn probe\"\n")?;
+
+    keys(&mut compositor, &[LEFT_META, KEY_F9])?;
+    // Answered at once: the program is starting, on its own thread.
+    assert_eq!(compositor.programs_starting(), 1);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while reached.load(Ordering::SeqCst) == 0 {
+        anyhow::ensure!(Instant::now() < deadline, "the program was never started");
+        compositor.dispatch(Duration::from_millis(10))?;
+    }
+    run(&mut compositor, Duration::from_millis(1500))?;
+    assert_eq!(
+        compositor.programs_starting(),
+        1,
+        "it started before let go"
+    );
+    let env = compositor.runtime_dir().join("probe-env");
+    assert!(!env.exists(), "it ran before let go");
+
+    let _ = go.send(());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while compositor.programs_starting() > 0 || !env.exists() {
+        anyhow::ensure!(Instant::now() < deadline, "the program never started");
+        compositor.dispatch(Duration::from_millis(10))?;
+    }
+    let env = std::fs::read_to_string(&env)?;
+    let token = env
+        .lines()
+        .find_map(|l| l.strip_prefix("export XDG_ACTIVATION_TOKEN="))
+        .map(|t| t.trim_matches(['\'', '"']));
+    assert!(
+        token.is_some_and(|t| !t.is_empty() && t != "used-already"),
+        "no token of the shell's: {env}"
+    );
+    for line in [
+        "HOCUS_SESSION_SAYS=",
+        "DESKTOP_STARTUP_ID=",
+        "WAYLAND_DISPLAY=",
+        "XDG_CURRENT_DESKTOP=",
+        "XDG_SESSION_TYPE=",
+    ] {
+        assert!(env.contains(line), "no {line} in {env}");
+    }
+    assert!(!env.contains("LD_PRELOAD"), "{env}");
+    assert_eq!(reached.load(Ordering::SeqCst), 1);
     let held = held(&mut compositor)?;
     assert!(held.is_empty(), "held the loop: {held:?}");
     Ok(())

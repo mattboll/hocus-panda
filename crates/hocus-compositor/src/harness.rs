@@ -329,6 +329,19 @@ impl Headless {
         self.app.state.user_dirs = Some(path.to_owned());
     }
 
+    /// Each program the compositor starts waits on its thread for `gate`
+    /// to return, in place of a slow `PATH` (a network home, an
+    /// automount): the loop must not wait with it (#285).
+    pub fn set_program_gate(&mut self, gate: impl Fn(&str) + Send + Sync + 'static) {
+        self.app.state.set_program_gate(std::sync::Arc::new(gate));
+    }
+
+    /// How many programs were asked for and have not yet started (or
+    /// failed to).
+    pub fn programs_starting(&self) -> usize {
+        self.app.state.programs_starting()
+    }
+
     /// Where the session is saved.
     pub fn state_dir(&self) -> std::path::PathBuf {
         self.config.with_file_name("state")

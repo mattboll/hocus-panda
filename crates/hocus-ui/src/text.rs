@@ -34,9 +34,10 @@ const FONTS: [&[u8]; 5] = [
 const FALLBACK: &str = "DejaVu Sans, emoji";
 
 thread_local! {
-    /// The system's fonts once given to this thread, and how many times
-    /// they were.
-    static SYSTEM: RefCell<(u64, Option<Collection>)> = const { RefCell::new((0, None)) };
+    /// The system's fonts once given to this thread (their families and
+    /// their files, mapped), and how many times they were.
+    static SYSTEM: RefCell<(u64, Option<(Collection, SourceCache)>)> =
+        const { RefCell::new((0, None)) };
 }
 
 fn bundled() -> Collection {
@@ -50,10 +51,23 @@ fn bundled() -> Collection {
     collection
 }
 
+/// The bundled faces, which are in memory: no file to map.
+fn only_bundled() -> (Collection, SourceCache) {
+    (bundled(), SourceCache::default())
+}
+
 /// The system's fonts behind the bundled ones, with the fallback of every
-/// script already looked up: reading them is slow, so it is done once on
-/// a worker thread, then given to the thread that draws.
-pub struct SystemFonts(Collection);
+/// script already looked up and their files mapped: reading them is slow,
+/// so it is done once on a worker thread, then given to the thread that
+/// draws, which then opens no font file (#285).
+pub struct SystemFonts {
+    collection: Collection,
+    /// The files of every family a layout may fall back on, mapped:
+    /// fontique opens a file it does not find in a layout's cache.
+    sources: SourceCache,
+    /// The ids of those files' blobs.
+    mapped: Vec<u64>,
+}
 
 impl fmt::Debug for SystemFonts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -71,21 +85,49 @@ impl SystemFonts {
         for data in FONTS {
             collection.register_fonts(Blob::new(Arc::new(data)), None);
         }
-        // Everything a layout may ask the system later, asked now.
+        // Everything a layout may ask the system later, asked now. Text
+        // carries no locale, so each script's fallback is all there is to
+        // ask; a script fontique has no sample of falls back on
+        // fontconfig's default family, asked for an unknown one.
         let mut families = Vec::new();
         for (script, _) in Script::all_samples() {
             families.extend(collection.fallback_families(FallbackKey::new(*script, None)));
         }
+        families.extend(collection.fallback_families(FallbackKey::new(Script::UNKNOWN, None)));
         families.extend(collection.generic_families(GenericFamily::Emoji));
+        families.sort_unstable();
+        families.dedup();
+        // A family's files are opened when a layout first uses one of its
+        // faces: mapped here, each once.
+        let mut sources = SourceCache::default();
+        let mut mapped = Vec::new();
         for id in families {
-            let _ = collection.family(id);
+            let Some(family) = collection.family(id) else {
+                continue;
+            };
+            for font in family.fonts() {
+                if let Some(blob) = font.load(Some(&mut sources)) {
+                    mapped.push(blob.id());
+                }
+            }
         }
-        Self(collection)
+        mapped.sort_unstable();
+        mapped.dedup();
+        Self {
+            collection,
+            sources,
+            mapped,
+        }
     }
 
     /// How many families there are, the bundled ones included.
     pub fn families(&mut self) -> usize {
-        self.0.family_names().count()
+        self.collection.family_names().count()
+    }
+
+    /// How many font files are mapped.
+    pub fn files(&self) -> usize {
+        self.mapped.len()
     }
 
     /// From now on, text on this thread falls back on these fonts; trees
@@ -94,7 +136,7 @@ impl SystemFonts {
         SYSTEM.with(|s| {
             let mut s = s.borrow_mut();
             s.0 += 1;
-            s.1 = Some(self.0);
+            s.1 = Some((self.collection, self.sources));
         });
     }
 }
@@ -122,14 +164,14 @@ impl fmt::Debug for Fonts {
 
 impl Fonts {
     pub fn new(faces: Faces) -> Self {
-        let (generation, collection) = SYSTEM.with(|s| {
+        let (generation, (collection, source_cache)) = SYSTEM.with(|s| {
             let s = s.borrow();
-            (s.0, s.1.clone().unwrap_or_else(bundled))
+            (s.0, s.1.clone().unwrap_or_else(only_bundled))
         });
         Self {
             fonts: FontContext {
                 collection,
-                source_cache: SourceCache::default(),
+                source_cache,
             },
             layouts: LayoutContext::new(),
             faces,
@@ -144,12 +186,13 @@ impl Fonts {
             let s = s.borrow();
             (s.0 != self.generation).then(|| (s.0, s.1.clone()))
         });
-        let Some((generation, collection)) = newer else {
+        let Some((generation, system)) = newer else {
             return false;
         };
+        let (collection, source_cache) = system.unwrap_or_else(only_bundled);
         self.fonts = FontContext {
-            collection: collection.unwrap_or_else(bundled),
-            source_cache: SourceCache::default(),
+            collection,
+            source_cache,
         };
         self.generation = generation;
         true
@@ -347,6 +390,22 @@ mod tests {
             .sum()
     }
 
+    /// The font of each run of `text`.
+    fn run_fonts(text: &str) -> Vec<parley::FontData> {
+        let theme = Theme::default();
+        let mut fonts = Fonts::new(theme.faces);
+        let mut text = TextBox::new(text, theme.text.body);
+        let layout = text.layout(&mut fonts, None, 1.0);
+        layout
+            .lines()
+            .flat_map(|line| line.items().collect::<Vec<_>>())
+            .filter_map(|item| match item {
+                PositionedLayoutItem::GlyphRun(run) => Some(run.run().font().clone()),
+                PositionedLayoutItem::InlineBox(_) => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn symbols_come_from_the_bundled_fonts() {
         assert_eq!(missing("1ᵉʳ → ← ✓ ★ ≤ ∞ Ω Ж"), 0);
@@ -355,8 +414,16 @@ mod tests {
     #[test]
     fn other_scripts_and_emoji_come_from_the_system() {
         fn send<T: Send>(_: &T) {}
+        let started = std::time::Instant::now();
         let mut system = SystemFonts::load();
+        eprintln!(
+            "{} families, {} files mapped, in {:?}",
+            system.families(),
+            system.files(),
+            started.elapsed()
+        );
         send(&system);
+        let mapped = system.mapped.clone();
         let text = "Réunion 🐼 こんにちは";
         assert!(missing(text) > 0, "the bundled fonts alone lack them");
         let bundled = Fonts::new(Theme::default().faces);
@@ -380,5 +447,14 @@ mod tests {
             return;
         }
         assert_eq!(missing(text), 0);
+        // Each run's file was mapped on the worker, or is a bundled face
+        // in memory: laying the text out opened no file (#285).
+        for font in run_fonts(text) {
+            let bundled = FONTS.contains(&font.data.data());
+            assert!(
+                bundled || mapped.binary_search(&font.data.id()).is_ok(),
+                "a font file opened by the layout"
+            );
+        }
     }
 }
