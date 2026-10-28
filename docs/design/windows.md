@@ -1,6 +1,6 @@
 # Windows and desktops — specification (slice 1, draft for review)
 
-Status: draft, 2026-10-28, to be approved before any code. Slice 1 of the
+Status: approved 2026-10-28, after the prototype on the design canvas. Slice 1 of the
 [vision](../vision.md)'s order. The bar is slice 2 and has its own
 [spec](bar.md); this slice leaves its space reserved (196 px on the right
 when the output's default form is full, 56 px otherwise) so that nothing
@@ -43,7 +43,8 @@ open on), agents' badges on windows (slice 3).
   to the application (no click is swallowed).
 - A new window takes the focus when the user started it (an activation
   token from the user's last key or click). Otherwise it does not steal
-  the focus: it opens behind the focused window.
+  the focus: it opens behind the focused window, and its rim pulses once
+  in the accent (600 ms) so it is noticed.
 - Focus moves with Alt+Tab (section 11) and `Super+arrows` with `Ctrl`
   (to the window on that side).
 - The focused window's rim changes in 120 ms.
@@ -80,7 +81,9 @@ A window with no header of its own still needs a mouse handle. Proposal:
 a **grip**, a pill 44×4 px centred 4 px inside the top edge, that appears
 in 120 ms when the pointer is in the window's top 12 px, and disappears
 300 ms after it leaves. Dragging it moves the window; double-clicking it
-maximises or restores. Open question 1 offers a thin title bar instead.
+maximises or restores. Chosen over a thin title bar after trying both in
+the prototype. The top resize band is the window's first 4 px; the grip
+sits just below it.
 
 ## 8. Resizing
 
@@ -103,7 +106,6 @@ While dragging a window:
 | Left or right edge of the work area | that half | half width, full height |
 | Top edge | the whole work area | maximised |
 | A corner (within 48 px of it) | that quarter | quarter |
-| On a screen wider than 21:9 (3440×1440), left or right third of the top edge | that third | a third |
 
 - The preview is a rounded rectangle (radius 8) filled with the accent at
   12 % and a 1 px accent rim. It appears in 120 ms after the pointer has
@@ -214,12 +216,9 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 7. goes fullscreen in Firefox (F11) and back;
 8. and finds nothing stutters, freezes or lags.
 
-## 18. Open questions
+## 18. Decisions taken with the maintainer
 
-1. **Server-side decorated windows**: the grip (section 7), or a thin title
-   bar (24 px: title, and close/maximise/minimise on hover)?
-2. Thirds on ultrawide screens (section 9): wanted, or halves only?
-3. Should a new window that did not take the focus get a short pulse of its
-   rim, so it is noticed?
-4. The number of desktops: 4 everywhere by default, or 4 on the laptop and
-   1 on a secondary screen that stays on a chat app?
+1. Windows without a header get the grip, not a title bar.
+2. Snapping is by halves and quarters only, ultrawide screens included.
+3. A new window that did not take the focus pulses its rim once.
+4. Four desktops on every screen by default.
