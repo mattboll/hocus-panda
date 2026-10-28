@@ -24,7 +24,7 @@ use smithay::{
 use crate::{
     State,
     grabs::{BTN_LEFT, BTN_RIGHT},
-    model::{self, Edges, Mode, WindowId},
+    model::{self, Edges, Mode, Seam, WindowId},
     shortcuts::Action,
 };
 
@@ -32,6 +32,11 @@ use crate::{
 /// how far around the grip a press still takes it.
 const GRIP_BAND: i32 = 12;
 const GRIP_SLOP: f64 = 8.0;
+/// The handle of a snapped pair's seam shows with the pointer this close
+/// to the seam's centre line: the gap and a little of each window (§8).
+const SEAM_REACH: f64 = 12.0;
+/// How far around the handle's pill a press still takes it.
+const HANDLE_SLOP: f64 = 4.0;
 /// Two presses on a grip this close together maximise or restore.
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
@@ -225,14 +230,20 @@ impl State {
         };
         let mut under = self.surface_under(location);
         if !pointer.is_grabbed() {
-            let frame = self.frame_under(location);
+            let seam = self.seam_near(location);
+            self.hover_seam(seam);
+            let handle = seam.filter(|s| on_handle(s, location));
+            let frame = seam
+                .and_then(|s| s.edge_at(location.x, location.y))
+                .or_else(|| self.frame_under(location));
             let grip = self.grip_hover(location);
             self.hover_grip(grip);
             let on_grip = self.grip_hit(location).is_some();
-            let cursor = match frame {
-                Some((_, edges)) => Some(edges.cursor()),
-                None if on_grip => Some(CursorIcon::Grab),
-                None => None,
+            let cursor = match (handle, frame) {
+                (Some(seam), _) => Some(seam.edges.cursor()),
+                (None, Some((_, edges))) => Some(edges.cursor()),
+                (None, None) if on_grip => Some(CursorIcon::Grab),
+                (None, None) => None,
             };
             if cursor.is_some() {
                 under = None;
@@ -295,6 +306,23 @@ impl State {
         None
     }
 
+    /// The seam of a snapped pair near `at` that nothing covers: its handle
+    /// shows (§8).
+    fn seam_near(&self, at: Point<f64, Logical>) -> Option<Seam> {
+        use smithay::wayland::shell::wlr_layer::Layer;
+        if self
+            .layer_surface_under(at, &[Layer::Overlay, Layer::Top])
+            .is_some()
+        {
+            return None;
+        }
+        let under = self.window_under(at);
+        self.seams()
+            .into_iter()
+            .filter(|s| s.near(at.x, at.y, SEAM_REACH))
+            .find(|s| under.is_none_or(|w| w == s.first || w == s.second))
+    }
+
     /// The window with no header whose top band the pointer is in: its
     /// grip shows (§7).
     fn grip_hover(&self, at: Point<f64, Logical>) -> Option<WindowId> {
@@ -336,9 +364,21 @@ impl State {
                 self.kept_buttons.insert(button);
                 return;
             }
+            let seam = self.seam_near(at);
             if self.layer_click(at) {
                 // A bar or an overlay: the click is its own.
-            } else if let Some((id, edges)) = self.frame_under(at) {
+            } else if let Some(seam) = seam.filter(|s| on_handle(s, at)) {
+                // The handle: the boundary moves, both windows follow.
+                if button == BTN_LEFT {
+                    self.start_pair_resize(seam.grab, seam.edges, button, serial);
+                } else {
+                    self.kept_buttons.insert(button);
+                }
+                return;
+            } else if let Some((id, edges)) = seam
+                .and_then(|s| s.edge_at(at.x, at.y))
+                .or_else(|| self.frame_under(at))
+            {
                 self.focus(Some(id));
                 if button == BTN_LEFT {
                     self.start_resize(id, edges, button, None, serial);
@@ -497,6 +537,17 @@ impl State {
         }
         pointer.frame(self);
     }
+}
+
+/// Whether `at` is on the handle of `seam`, or close enough around it.
+fn on_handle(seam: &Seam, at: Point<f64, Logical>) -> bool {
+    use crate::decoration::{HANDLE_LENGTH, HANDLE_THICKNESS};
+    seam.on_handle(
+        at.x,
+        at.y,
+        HANDLE_LENGTH + 2.0 * HANDLE_SLOP,
+        HANDLE_THICKNESS + 2.0 * HANDLE_SLOP,
+    )
 }
 
 /// A touchpad gesture's step, as libinput gives it.

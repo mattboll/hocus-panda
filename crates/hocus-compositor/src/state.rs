@@ -132,6 +132,10 @@ pub struct State {
     pub preview: Option<Preview>,
     pub preview_out: Option<(Rect, Tween)>,
     pub preview_ids: [Id; 9],
+    /// The handle shown on the seam of a snapped pair near the pointer,
+    /// fading like a grip (§8).
+    pub seam_handle: Option<(model::Seam, crate::windows::Grip)>,
+    pub seam_handle_id: Id,
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
     pub wobble: Option<(WindowId, Jelly)>,
@@ -257,6 +261,8 @@ impl State {
             preview: None,
             preview_out: None,
             preview_ids: std::array::from_fn(|_| Id::new()),
+            seam_handle: None,
+            seam_handle_id: Id::new(),
             moving: None,
             wobble: None,
             frame_cursor: None,

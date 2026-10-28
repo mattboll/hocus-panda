@@ -94,8 +94,26 @@ sits just below it.
   `nwse-resize`, `nesw-resize`).
 - `Super`+right-drag resizes from the nearest corner.
 - Live resize, respecting the application's minimum and maximum sizes.
-- Snapped and maximised windows resize too; a snapped pair resizes
-  together along their shared edge.
+- Snapped and maximised windows resize too. A maximised window resized
+  floats.
+- A **snapped pair** (two snapped windows side by side, or one above the
+  other, facing each other across the gap):
+  - Dragging their shared edge resizes **only the window grabbed**, like
+    any edge: in the gap, the window whose edge is nearer. Once its size
+    changes it leaves its zone and floats; the other stays snapped where
+    it is.
+  - A **handle** on the seam moves the boundary and **both windows
+    follow**. It is the grip's pill (section 7) along the seam: 4×44 px
+    upright between windows side by side, 44×4 px between windows one
+    above the other, centred in the 8 px gap at the middle of the span
+    the two windows share. It shows when the pointer is within 12 px of
+    the seam's centre line (the gap and a little of each window) and
+    fades in and out as the grip does (120 ms in; it stays 300 ms after
+    the pointer leaves, then fades in 120 ms). A press within 4 px around
+    the pill takes it (a 12×52 px target), with `ew-resize` or
+    `ns-resize`. Where a half faces two quarters, its handles move the
+    half's whole edge and both quarters follow.
+  - With reduced motion and high contrast, the handle is as the grip.
 
 ## 9. Snapping
 
@@ -251,7 +269,8 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 2. moves them with the header, `Super`+drag and the grip: they wobble, stay
    opaque, settle;
 3. snaps halves, quarters and maximise by dragging and with the keys, and
-   resizes a snapped pair together;
+   resizes one window of a snapped pair by its shared edge, and both with
+   the handle on their seam;
 4. resizes from every edge and corner, with the right cursors;
 5. switches desktops with keys and the touchpad, sends windows to other
    desktops;
@@ -266,3 +285,5 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 2. Snapping is by halves and quarters only, ultrawide screens included.
 3. A new window that did not take the focus pulses its rim once.
 4. Four desktops on every screen by default.
+5. A snapped pair's shared edge resizes the window grabbed alone; a handle
+   on their seam resizes both (#335).

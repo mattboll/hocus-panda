@@ -36,6 +36,10 @@ pub const RIM: [u8; 4] = [0xFF, 0xFF, 0xFF, 46];
 pub const GRIP_SIZE: (f64, f64) = (44.0, 4.0);
 pub const GRIP_INSET: f64 = 4.0;
 const GRIP_COLOUR: [u8; 4] = [0xEE, 0xF1, 0xF6, 191];
+/// The handle on the seam of a snapped pair (§8): the grip's pill, along
+/// the seam, at its middle.
+pub const HANDLE_LENGTH: f64 = GRIP_SIZE.0;
+pub const HANDLE_THICKNESS: f64 = GRIP_SIZE.1;
 /// The snap preview: the accent at 12 % with a 1 px accent rim.
 const PREVIEW_FILL: [u8; 4] = [0x6C, 0xC2, 0x87, 31];
 
@@ -324,6 +328,8 @@ enum Piece {
     /// A rim of this colour and width (thousandths of a logical pixel).
     Rim([u8; 4], u32),
     Grip,
+    /// The grip's pill upright, for a seam that runs down.
+    Handle,
     Preview,
 }
 
@@ -352,7 +358,8 @@ impl Textures {
         let key = (piece, (scale * 1000.0).round() as u32);
         let draw = || match piece {
             Piece::Rim(rgba, width) => rim_texture(rgba, f64::from(width) / 1000.0, scale),
-            Piece::Grip => grip_texture(scale),
+            Piece::Grip => pill_texture(GRIP_SIZE, scale),
+            Piece::Handle => pill_texture((GRIP_SIZE.1, GRIP_SIZE.0), scale),
             Piece::Preview => preview_texture(scale),
         };
         self.pieces
@@ -580,17 +587,17 @@ fn rim_texture(rgba: [u8; 4], width: f64, scale: f64) -> (MemoryRenderBuffer, i3
     (buffer(&pixels, side, side), corner)
 }
 
-/// The grip's pill, drawn whole.
-fn grip_texture(scale: f64) -> (MemoryRenderBuffer, i32) {
-    let w = (GRIP_SIZE.0 * scale).round().max(1.0);
-    let h = (GRIP_SIZE.1 * scale).round().max(1.0);
+/// The grip's pill, drawn whole, `size` logical pixels.
+fn pill_texture(size: (f64, f64), scale: f64) -> (MemoryRenderBuffer, i32) {
+    let w = (size.0 * scale).round().max(1.0);
+    let h = (size.1 * scale).round().max(1.0);
     let (nw, nh) = (w as usize, h as usize);
     let pixels: Vec<u8> = (0..nw * nh)
         .flat_map(|i| {
             let (x, y) = ((i % nw) as f64 + 0.5, (i / nw) as f64 + 0.5);
             pixel(
                 GRIP_COLOUR,
-                rounded_rect_coverage(x, y, (w, h), 0.0, h / 2.0),
+                rounded_rect_coverage(x, y, (w, h), 0.0, w.min(h) / 2.0),
             )
         })
         .collect();
@@ -702,6 +709,49 @@ where
     .map_err(|err| tracing::warn!(?err, "could not draw a grip"))
     .ok()
     .map(|e| Keyed::new(e, ids.grip.clone()))
+}
+
+/// The handle of a seam centred on `centre` (logical, output-local),
+/// upright when the seam runs down, `alpha` shown.
+pub fn handle_element<R>(
+    renderer: &mut R,
+    textures: &Textures,
+    id: &Id,
+    centre: Point<f64, Logical>,
+    vertical: bool,
+    scale: f64,
+    alpha: f32,
+) -> Option<FramePiece<R>>
+where
+    R: Renderer + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    if alpha <= 0.0 {
+        return None;
+    }
+    let (piece, size) = if vertical {
+        (Piece::Handle, (HANDLE_THICKNESS, HANDLE_LENGTH))
+    } else {
+        (Piece::Grip, (HANDLE_LENGTH, HANDLE_THICKNESS))
+    };
+    let (texture, _) = textures.get(piece, scale);
+    let at = Point::<f64, Logical>::from((centre.x - size.0 / 2.0, centre.y - size.1 / 2.0))
+        .to_physical(scale)
+        .to_i32_round::<i32>()
+        .to_f64();
+    let size = Size::<f64, Logical>::from(size).to_i32_round();
+    MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        at,
+        &texture,
+        (alpha < 1.0).then_some(alpha),
+        None,
+        Some(size),
+        Kind::Unspecified,
+    )
+    .map_err(|err| tracing::warn!(?err, "could not draw a seam's handle"))
+    .ok()
+    .map(|e| Keyed::new(e, id.clone()))
 }
 
 /// The preview of where a dragged window snaps, at `rect` (logical,

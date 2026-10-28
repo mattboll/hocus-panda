@@ -95,6 +95,27 @@ impl Grip {
         }
     }
 
+    /// What it becomes when the pointer comes (`wanted`) or goes, if it
+    /// changes.
+    pub fn towards(self, wanted: bool, now: Duration) -> Option<Self> {
+        match (self, wanted) {
+            (Self::Hidden | Self::Leaving(_), true) => {
+                // Back before it faded: shown at once.
+                let alpha = self.alpha(now);
+                Some(Self::Showing(
+                    now.saturating_sub(motion::GRIP_IN.mul_f64(f64::from(alpha))),
+                ))
+            }
+            (Self::Showing(_), false) => Some(Self::Leaving(now)),
+            _ => None,
+        }
+    }
+
+    /// Faded out entirely.
+    fn gone(self, now: Duration) -> bool {
+        matches!(self, Self::Leaving(since) if now >= since + motion::GRIP_STAYS + motion::GRIP_IN)
+    }
+
     /// Changing now, and if not, when it next will.
     fn moving(self, now: Duration) -> (bool, Option<Duration>) {
         match self {
@@ -1001,10 +1022,18 @@ impl State {
             if let Some(at) = grip_next {
                 wake(at);
             }
-            if let Grip::Leaving(since) = managed.grip
-                && now >= since + motion::GRIP_STAYS + motion::GRIP_IN
-            {
+            if managed.grip.gone(now) {
                 managed.grip = Grip::Hidden;
+            }
+        }
+        if let Some((_, handle)) = self.seam_handle {
+            let (handle_moving, handle_next) = handle.moving(now);
+            moving |= handle_moving;
+            if let Some(at) = handle_next {
+                wake(at);
+            }
+            if handle.gone(now) {
+                self.seam_handle = None;
             }
         }
         self.leaving.retain(|l| !l.tween.done(now));
@@ -1092,24 +1121,65 @@ impl State {
         let now = self.now();
         let mut changed = false;
         for (id, managed) in &mut self.windows {
-            let wanted = over == Some(*id);
-            let next = match (managed.grip, wanted) {
-                (Grip::Hidden | Grip::Leaving(_), true) => {
-                    // Back before it faded: shown at once.
-                    let alpha = managed.grip.alpha(now);
-                    Some(Grip::Showing(
-                        now.saturating_sub(motion::GRIP_IN.mul_f64(f64::from(alpha))),
-                    ))
-                }
-                (Grip::Showing(_), false) => Some(Grip::Leaving(now)),
-                _ => None,
-            };
-            if let Some(grip) = next {
+            if let Some(grip) = managed.grip.towards(over == Some(*id), now) {
                 managed.grip = grip;
                 changed = true;
             }
         }
         if changed {
+            self.redraw = true;
+        }
+    }
+
+    /// The seams of snapped pairs (§8): snapped windows, not maximised,
+    /// side by side or one above the other on the same output.
+    pub fn seams(&self) -> Vec<model::Seam> {
+        let snapped: Vec<(WindowId, Rect, Option<Output>)> = self
+            .model
+            .stack()
+            .iter()
+            .copied()
+            .filter(|id| !self.model.is_minimized(*id))
+            .filter(|id| matches!(self.model.mode(*id), Mode::Snapped(z) if z != Zone::Maximized))
+            .filter_map(|id| Some((id, self.rect_of(id)?, self.output_of(id))))
+            .collect();
+        let mut seams = Vec::new();
+        for (i, (a, ra, oa)) in snapped.iter().enumerate() {
+            for (b, rb, ob) in &snapped[i + 1..] {
+                if oa == ob
+                    && let Some(seam) = model::seam((*a, *ra), (*b, *rb))
+                {
+                    seams.push(seam);
+                }
+            }
+        }
+        seams
+    }
+
+    /// The seam between `first` and `second` as they are now, if they
+    /// still face each other.
+    pub fn live_seam(&self, first: WindowId, second: WindowId) -> Option<model::Seam> {
+        self.seams()
+            .into_iter()
+            .find(|s| s.first == first && s.second == second)
+    }
+
+    /// The handle of the seam the pointer is near shows; another one goes.
+    pub fn hover_seam(&mut self, near: Option<model::Seam>) {
+        let now = self.now();
+        let current = self
+            .seam_handle
+            .filter(|(s, _)| self.live_seam(s.first, s.second).is_some());
+        let next = match (current, near) {
+            (Some((s, handle)), Some(n)) if (s.first, s.second) == (n.first, n.second) => {
+                Some((n, handle.towards(true, now).unwrap_or(handle)))
+            }
+            (_, Some(n)) => Some((n, Grip::Showing(now))),
+            (Some((s, handle)), None) => Some((s, handle.towards(false, now).unwrap_or(handle))),
+            (None, None) => None,
+        };
+        if next != self.seam_handle {
+            self.seam_handle = next;
             self.redraw = true;
         }
     }
