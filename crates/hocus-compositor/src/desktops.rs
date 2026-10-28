@@ -384,15 +384,15 @@ impl crate::State {
         if self.reduced_motion() {
             let alpha = match travel {
                 // Carried along: it stays.
-                Some((from, _)) if from == desktop as f64 => 1.0,
+                Some((from, to, _)) if from == to => 1.0,
                 // Sent away: it fades.
-                Some((_, tween)) => 1.0 - tween.linear(now) as f32,
+                Some((_, _, tween)) => 1.0 - tween.linear(now) as f32,
                 None => strip.alpha(desktop, now),
             };
             return (alpha > 0.0).then_some((0.0, alpha));
         }
         let at = match travel {
-            Some((from, tween)) => motion::lerp(from, desktop as f64, tween.at(now)),
+            Some((from, to, tween)) => motion::lerp(from, to, tween.at(now)),
             None => desktop as f64,
         };
         let offset = at - strip.position(now);
@@ -471,10 +471,14 @@ impl crate::State {
                 let now = self.now();
                 if let Some(managed) = self.windows.get_mut(&id) {
                     // Drawn where the strip is as it slides: it stays put.
-                    managed.travel = strip.tween().or(Some((
-                        to as f64,
-                        Tween::new(now, motion::FADE_REDUCED, Bezier::LINEAR),
-                    )));
+                    managed.travel = match strip.tween() {
+                        Some((from, tween)) => Some((from, to as f64, tween)),
+                        None => Some((
+                            to as f64,
+                            to as f64,
+                            Tween::new(now, motion::FADE_REDUCED, Bezier::LINEAR),
+                        )),
+                    };
                 }
                 continue;
             }
@@ -556,7 +560,15 @@ impl crate::State {
             } else {
                 motion::DESKTOP_SLIDE
             };
-            managed.travel = Some((from as f64, Tween::new(now, duration, Bezier::STRIP)));
+            // Out of the screen toward its desktop's side: a screen's
+            // width, however far its desktop is, easing in as windows
+            // leave (closing, minimising), so that it is seen going.
+            let toward = if to > from { 1.0 } else { -1.0 };
+            managed.travel = Some((
+                from as f64,
+                from as f64 + toward,
+                Tween::new(now, duration, Bezier::EASE_IN),
+            ));
         }
         // The dots show where it went.
         let mut strip = strip;

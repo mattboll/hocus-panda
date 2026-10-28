@@ -59,9 +59,9 @@ pub struct Managed {
     /// Where it is while it does not show (minimised, or on a desktop out
     /// of sight), global: where it comes back.
     pub away: Option<Rect>,
-    /// Going to another desktop: drawn as if on this place of the strip
-    /// (in desktops), moving to its desktop's (§12).
-    pub travel: Option<(f64, Tween)>,
+    /// Going to another desktop: drawn as if on the strip from one place
+    /// to another (in desktops), along the motion (§12).
+    pub travel: Option<(f64, f64, Tween)>,
 }
 
 /// A resize under way, or ending.
@@ -1043,7 +1043,7 @@ impl State {
                     moving = true;
                 }
             }
-            if let Some((_, t)) = managed.travel {
+            if let Some((_, _, t)) = managed.travel {
                 if t.done(now) {
                     managed.travel = None;
                 } else {
