@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use common::{
     BTN_LEFT, KEY_1, KEY_2, KEY_3, KEY_ESC, KEY_H, KEY_LEFT, KEY_LEFTALT, KEY_LEFTCTRL,
-    KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_TAB, WAIT, chord, compositor, open, wait,
+    KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_TAB, Shows, WAIT, WINDOW_COLOUR, chord, compositor,
+    open, open_showing, wait,
 };
 use hocus_compositor::{Headless, model::WindowId};
 
@@ -248,5 +249,61 @@ fn escape_cancels_alt_tab_and_a_click_picks_a_window() -> anyhow::Result<()> {
     assert!(hp.switcher().is_none());
     hp.key(KEY_LEFTALT, false);
     assert_eq!(focused(&hp).as_deref(), Some("test.a"));
+    Ok(())
+}
+
+/// The pixel at (`x`, `y`) of a screenshot, ARGB.
+fn pixel((width, _, bytes): &(i32, i32, Vec<u8>), x: f64, y: f64) -> Option<u32> {
+    let at = usize::try_from((y as i32) * width + x as i32).ok()? * 4;
+    Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+}
+
+#[test]
+fn a_thumbnail_shows_the_window_without_its_client_side_shadow() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let plain = open(&mut hp, "test.plain", (400, 300))?;
+    let shadowed = Shows::Shadowed {
+        app_id: "test.shadowed",
+        size: (400, 300),
+        margin: 40,
+    };
+    let (rect, _client) = open_showing(&mut hp, "test.shadowed", shadowed)?;
+    assert_eq!((rect.width, rect.height), (400, 300), "its geometry");
+    alt_tab(&mut hp, 1);
+    let shown = hp.dispatch_until(WAIT, |hp| hp.switcher().is_some_and(|s| s.2))?;
+    assert!(shown, "the panel never showed");
+    // Once it has appeared.
+    wait(&mut hp, Duration::from_millis(300))?;
+    let thumb = |at| {
+        hp.switcher_thumb(at)
+            .ok_or_else(|| anyhow::anyhow!("no thumbnail {at}"))
+    };
+    let (with_shadow, without) = (thumb(0)?, thumb(1)?);
+    assert_eq!(
+        (with_shadow.2, with_shadow.3),
+        (without.2, without.3),
+        "the same size as the same window without a shadow ({plain:?})"
+    );
+    let shot = hp.screenshot(0)?;
+    for (x, y, w, h) in [with_shadow, without] {
+        // Inside its rounded corners and along its edges, the window fills
+        // its thumbnail: no shadow around a smaller picture.
+        let inset = 8.0;
+        for (px, py) in [
+            (x + inset, y + inset),
+            (x + w - inset, y + inset),
+            (x + inset, y + h - inset),
+            (x + w - inset, y + h - inset),
+            (x + w / 2.0, y + 2.0),
+            (x + 2.0, y + h / 2.0),
+        ] {
+            assert_eq!(
+                pixel(&shot, px, py),
+                Some(WINDOW_COLOUR),
+                "at ({px}, {py}) in the thumbnail at ({x}, {y}) {w}×{h}"
+            );
+        }
+    }
+    hp.key(KEY_LEFTALT, false);
     Ok(())
 }

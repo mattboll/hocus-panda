@@ -38,6 +38,10 @@ use wayland_client::{
 };
 
 pub const WAIT: Duration = Duration::from_secs(10);
+/// What test windows are filled with, ARGB.
+pub const WINDOW_COLOUR: u32 = 0xff3a_7bd5;
+/// A client-side shadow: black at 25 %, premultiplied.
+pub const SHADOW_COLOUR: u32 = 0x4000_0000;
 pub const BTN_LEFT: u32 = 0x110;
 pub const KEY_LEFTMETA: u32 = 125;
 pub const KEY_LEFTSHIFT: u32 = 42;
@@ -83,6 +87,14 @@ pub enum Shows {
     /// A layer surface along the output's top edge, `height` high, which
     /// reserves its height.
     Bar { height: u32 },
+    /// An xdg toplevel of this size drawn with a translucent shadow
+    /// `margin` wide around it, outside its window geometry, as
+    /// client-side decorated applications draw theirs.
+    Shadowed {
+        app_id: &'static str,
+        size: (u32, u32),
+        margin: u32,
+    },
 }
 
 /// What the test asks of a client.
@@ -157,6 +169,7 @@ fn run_client(
         layer: None,
         popup: None,
         popup_on_press: false,
+        margin: 0,
         seat: None,
         events: events.clone(),
         compositor,
@@ -176,6 +189,20 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.popup_on_press = popup;
+        }
+        Some(Shows::Shadowed {
+            app_id,
+            size,
+            margin,
+        }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestClient, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.margin = margin;
+            client.window = Some(window);
         }
         Some(Shows::Bar { height }) => {
             let shell = LayerShell::bind(&globals, &qh).context("no layer shell")?;
@@ -226,6 +253,8 @@ struct Client {
     layer: Option<LayerSurface>,
     popup: Option<Popup>,
     popup_on_press: bool,
+    /// The shadow around the window, outside its geometry.
+    margin: u32,
     seat: Option<wl_seat::WlSeat>,
     events: mpsc::Sender<Event>,
     compositor: CompositorState,
@@ -235,15 +264,26 @@ struct Client {
 impl Client {
     /// Fills `surface` with a solid colour, `size` large.
     fn draw(&mut self, surface: &wl_surface::WlSurface, size: (u32, u32)) {
-        let (w, h) = (size.0.max(1) as i32, size.1.max(1) as i32);
+        self.draw_framed(surface, size, 0);
+    }
+
+    /// A solid colour `size` large, within a translucent shadow `margin`
+    /// wide.
+    fn draw_framed(&mut self, surface: &wl_surface::WlSurface, size: (u32, u32), margin: u32) {
+        let m = margin as i32;
+        let (iw, ih) = (size.0.max(1) as i32, size.1.max(1) as i32);
+        let (w, h) = (iw + 2 * m, ih + 2 * m);
         let Ok((buffer, canvas)) = self
             .pool
             .create_buffer(w, h, w * 4, wl_shm::Format::Argb8888)
         else {
             return;
         };
-        for pixel in canvas.as_chunks_mut::<4>().0 {
-            pixel.copy_from_slice(&0xff3a_7bd5_u32.to_le_bytes());
+        for (i, pixel) in canvas.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (i as i32 % w, i as i32 / w);
+            let inside = x >= m && y >= m && x < m + iw && y < m + ih;
+            let colour: u32 = if inside { WINDOW_COLOUR } else { SHADOW_COLOUR };
+            pixel.copy_from_slice(&colour.to_le_bytes());
         }
         surface.damage_buffer(0, 0, w, h);
         if buffer.attach_to(surface).is_ok() {
@@ -286,7 +326,13 @@ impl WindowHandler for Client {
             self.size = (w.get(), h.get());
         }
         let surface = window.wl_surface().clone();
-        self.draw(&surface, self.size);
+        let m = self.margin as i32;
+        if m > 0 {
+            window
+                .xdg_surface()
+                .set_window_geometry(m, m, self.size.0 as i32, self.size.1 as i32);
+        }
+        self.draw_framed(&surface, self.size, self.margin);
     }
 }
 
@@ -461,15 +507,26 @@ pub fn open_with(
     size: (u32, u32),
     popup: bool,
 ) -> anyhow::Result<(Rect, ClientHandle)> {
-    let before = hp.windows().len();
-    let handle = client(
-        hp.socket(),
-        Some(Shows::Window {
+    open_showing(
+        hp,
+        app_id,
+        Shows::Window {
             app_id,
             size,
             popup,
-        }),
-    )?;
+        },
+    )
+}
+
+/// Starts a client showing `shows`, a window with `app_id`, and waits until
+/// the compositor has mapped it.
+pub fn open_showing(
+    hp: &mut Headless,
+    app_id: &'static str,
+    shows: Shows,
+) -> anyhow::Result<(Rect, ClientHandle)> {
+    let before = hp.windows().len();
+    let handle = client(hp.socket(), Some(shows))?;
     let mapped = hp.dispatch_until(WAIT, |hp| hp.windows().len() > before)?;
     anyhow::ensure!(mapped, "{app_id} was never mapped");
     let rect = rect_of(hp, app_id).context("no such window")?;

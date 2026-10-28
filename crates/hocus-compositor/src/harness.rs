@@ -83,6 +83,16 @@ impl Headless {
         self.app.backend.headless().map_or(0, |h| h.frames())
     }
 
+    /// What output `index` (in the order given) showed last: its size in
+    /// pixels, and its rows of ARGB8888 pixels (B, G, R, A in memory).
+    pub fn screenshot(&mut self, index: usize) -> anyhow::Result<(i32, i32, Vec<u8>)> {
+        self.app
+            .backend
+            .headless_mut()
+            .context("not headless")?
+            .screenshot(index)
+    }
+
     /// One turn of the loop, waiting at most `timeout` for something.
     pub fn dispatch(&mut self, timeout: Duration) -> anyhow::Result<()> {
         self.event_loop
@@ -253,6 +263,22 @@ impl Headless {
         let (_, items) = state.switcher_layout(switcher)?;
         let (x, y) = items.get(at)?.item.centre();
         Some((x + f64::from(origin.x), y + f64::from(origin.y)))
+    }
+
+    /// Where Alt+Tab's thumbnail `at` is, global (x, y, width, height),
+    /// once its panel shows.
+    pub fn switcher_thumb(&self, at: usize) -> Option<(f64, f64, f64, f64)> {
+        let state = &self.app.state;
+        let switcher = state.switcher.as_ref()?;
+        let origin = state.space.output_geometry(&switcher.output)?.loc;
+        let (_, items) = state.switcher_layout(switcher)?;
+        let thumb = items.get(at)?.thumb;
+        Some((
+            thumb.x + f64::from(origin.x),
+            thumb.y + f64::from(origin.y),
+            thumb.w,
+            thumb.h,
+        ))
     }
 
     /// A touchpad's swipe with `fingers`, its moves `moves` milliseconds
