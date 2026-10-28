@@ -14,10 +14,7 @@ use std::{
 use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, Texture,
-        element::{
-            Id, Kind,
-            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-        },
+        element::{Id, memory::MemoryRenderBuffer},
     },
     output::Output,
     reexports::calloop::{
@@ -31,7 +28,8 @@ use smithay::{
 use crate::{
     App, State,
     decoration::{
-        ACCENT, BoxStyle, FrameIds, Keyed, ShadowStyle, box_elements, buffer, shadow_elements,
+        ACCENT, BoxStyle, FrameIds, Keyed, Placed, ShadowStyle, box_elements, buffer,
+        shadow_elements,
     },
     desktops::Strip,
     model::WindowId,
@@ -67,6 +65,7 @@ const PANEL_SHADOW: ShadowStyle = ShadowStyle {
     dy: 30.0,
     blur: 80.0,
     alpha: 0.55,
+    radius: PANEL.radius as f64 / 1000.0,
 };
 /// A title, and the number of another desktop after it.
 const TITLE: [u8; 4] = [0xEE, 0xF1, 0xF6, 0xFF];
@@ -474,17 +473,11 @@ impl State {
                 .to_physical(scale)
                 .to_i32_round::<i32>()
                 .to_f64();
-                match MemoryRenderBufferRenderElement::from_buffer(
-                    renderer,
-                    at,
-                    &texture,
-                    Some(alpha * dim),
-                    // All of it: drawn at the screen's scale, its pixels
-                    // are not logical ones.
-                    Some(Rectangle::from_size((f64::from(w), f64::from(h)).into())),
-                    Some(size.to_i32_round()),
-                    Kind::Unspecified,
-                ) {
+                // All of it, pixel for pixel: drawn at the screen's
+                // scale, its pixels are not logical ones.
+                let all = Rectangle::from_size((f64::from(w), f64::from(h)).into());
+                let dst = Rectangle::new(at.to_i32_round(), (w, h).into());
+                match Placed::new(renderer, &texture, all, dst, alpha * dim) {
                     Ok(e) => out.push(OutputElements::Frame(Keyed::new(
                         e,
                         self.overlay.title_id(id),

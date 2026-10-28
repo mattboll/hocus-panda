@@ -254,6 +254,20 @@ fn escape_cancels_alt_tab_and_a_click_picks_a_window() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Runs the compositor until Alt+Tab's panel has appeared and nothing
+/// more is drawn: a loaded machine draws its motion late.
+fn appeared(hp: &mut Headless) -> anyhow::Result<()> {
+    wait(hp, Duration::from_millis(150))?;
+    for _ in 0..40 {
+        let frames = hp.frames();
+        wait(hp, Duration::from_millis(150))?;
+        if hp.frames() == frames {
+            return Ok(());
+        }
+    }
+    anyhow::bail!("the panel never came to rest")
+}
+
 /// The pixel at (`x`, `y`) of a screenshot, ARGB.
 fn pixel((width, _, bytes): &(i32, i32, Vec<u8>), x: f64, y: f64) -> Option<u32> {
     let at = usize::try_from((y as i32) * width + x as i32).ok()? * 4;
@@ -274,8 +288,7 @@ fn a_thumbnail_shows_the_window_without_its_client_side_shadow() -> anyhow::Resu
     alt_tab(&mut hp, 1);
     let shown = hp.dispatch_until(WAIT, |hp| hp.switcher().is_some_and(|s| s.2))?;
     assert!(shown, "the panel never showed");
-    // Once it has appeared.
-    wait(&mut hp, Duration::from_millis(300))?;
+    appeared(&mut hp)?;
     let thumb = |at| {
         hp.switcher_thumb(at)
             .ok_or_else(|| anyhow::anyhow!("no thumbnail {at}"))
@@ -387,8 +400,7 @@ fn title_ink(scale: f64) -> anyhow::Result<(usize, i32, [i32; 4], [i32; 4])> {
         hp.switcher().is_some_and(|s| s.2) && hp.has_titles_font()
     })?;
     anyhow::ensure!(shown, "the panel or its font never came");
-    // Once it has appeared.
-    wait(&mut hp, Duration::from_millis(300))?;
+    appeared(&mut hp)?;
     let [panel, label] = hp
         .switcher_label(0)
         .ok_or_else(|| anyhow::anyhow!("no first item"))?;
@@ -446,6 +458,68 @@ fn alt_tab_titles_keep_their_size_on_a_scaled_screen() -> anyhow::Result<()> {
             ink[0] >= panel[0] && ink[1] >= panel[1] && ink[2] <= panel[2] && ink[3] <= panel[3],
             "the title {ink:?} spills out of the panel {panel:?} at scale {scale}"
         );
+    }
+    Ok(())
+}
+
+/// The pixels along Alt+Tab's panel at `scale`, with nothing behind it
+/// (its windows minimised): a row in its top padding and a column in its
+/// left one, physical, away from its rounded corners.
+fn panel_lines(scale: f64) -> anyhow::Result<(Vec<u32>, Vec<u32>)> {
+    // Odd sizes, so that the panel's edges fall between pixels.
+    let mut screen = OutputSpec::new(1919, 1201);
+    screen.scale = scale;
+    let mut hp = Headless::start(HeadlessConfig {
+        outputs: vec![screen],
+        renderer: RendererChoice::Pixman,
+    })?;
+    open(&mut hp, "test.a", (400, 300))?;
+    open(&mut hp, "test.b", (400, 300))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_H]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_H]);
+    anyhow::ensure!(hp.minimized() == 2, "not both minimised");
+    alt_tab(&mut hp, 1);
+    let shown = hp.dispatch_until(WAIT, |hp| hp.switcher().is_some_and(|s| s.2))?;
+    anyhow::ensure!(shown, "the panel never showed");
+    appeared(&mut hp)?;
+    let [(x, y, w, h), _] = hp
+        .switcher_label(0)
+        .ok_or_else(|| anyhow::anyhow!("no first item"))?;
+    let shot = hp.screenshot(0)?;
+    // Clear of the rim where it curves at the corners (radius 18).
+    let corner = 8.0;
+    let (x0, x1) = ((x + corner) * scale, (x + w - corner) * scale);
+    let (y0, y1) = ((y + corner) * scale, (y + h - corner) * scale);
+    let row_y = (y + 6.0) * scale;
+    let column_x = (x + 6.0) * scale;
+    let row = (x0 as i32..x1 as i32)
+        .filter_map(|px| pixel(&shot, f64::from(px), row_y))
+        .collect();
+    let column = (y0 as i32..y1 as i32)
+        .filter_map(|py| pixel(&shot, column_x, f64::from(py)))
+        .collect();
+    hp.key(KEY_LEFTALT, false);
+    Ok((row, column))
+}
+
+#[test]
+fn alt_tabs_panel_shows_no_seam_at_fractional_scales() -> anyhow::Result<()> {
+    for scale in [1.25, 1.5, 1.75] {
+        let (row, column) = panel_lines(scale)?;
+        for (name, line) in [("row", row), ("column", column)] {
+            anyhow::ensure!(line.len() > 100, "{name} too short at {scale}");
+            let odd: Vec<(usize, u32)> = line
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, p)| *p != line[0])
+                .collect();
+            assert!(
+                odd.is_empty(),
+                "a seam across the panel's {name} at scale {scale}: {:#x} then {odd:x?}",
+                line[0]
+            );
+        }
     }
     Ok(())
 }

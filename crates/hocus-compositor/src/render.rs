@@ -41,7 +41,7 @@ use crate::{
     State,
     cursor::CursorElement,
     decoration::{
-        self, FramePiece, Keyed, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element,
+        self, FramePiece, Keyed, Outside, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element,
         handle_element, preview_elements, rim_elements, shadow_elements,
     },
     model::{Mode, WindowId},
@@ -225,10 +225,16 @@ impl State {
         } else {
             0
         };
+        // A thumbnail shows its window's geometry and nothing around it.
+        let outside = if look.corner.is_some() {
+            Outside::Cropped
+        } else {
+            Outside::Shown
+        };
         let wrap = |e: WaylandSurfaceRenderElement<R>, radius: i32| {
             let scaled = RescaleRenderElement::from_element(e, actual_loc, k);
             let moved = RelocateRenderElement::from_element(scaled, offset, Relocate::Relative);
-            OutputElements::Window(Rounded::new(moved, clip, radius))
+            OutputElements::Window(Rounded::new(moved, clip, radius, outside))
         };
         let sc = Scale::from(scale);
         if let Some(toplevel) = window.toplevel() {
@@ -539,7 +545,9 @@ impl State {
                     .picture
                     .stretched(renderer, local, scale, alpha)
                     .into_iter()
-                    .map(|e| OutputElements::Picture(Rounded::new(e, clip, radius))),
+                    .map(|e| {
+                        OutputElements::Picture(Rounded::new(e, clip, radius, Outside::Shown))
+                    }),
             );
         }
         elements.append(&mut windows);

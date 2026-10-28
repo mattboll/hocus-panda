@@ -44,12 +44,14 @@ pub const HANDLE_THICKNESS: f64 = GRIP_SIZE.1;
 const PREVIEW_FILL: [u8; 4] = [0x6C, 0xC2, 0x87, 31];
 
 /// A shadow: offset down, blur (CSS's: twice the deviation), darkest
-/// alpha.
+/// alpha, and the corner radius of what casts it, which it is not drawn
+/// under.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadowStyle {
     pub dy: f64,
     pub blur: f64,
     pub alpha: f32,
+    pub radius: f64,
 }
 
 impl ShadowStyle {
@@ -57,17 +59,20 @@ impl ShadowStyle {
         dy: 12.0,
         blur: 36.0,
         alpha: 0.35,
+        radius: RADIUS,
     };
     pub const FOCUSED: Self = Self {
         dy: 12.0,
         blur: 36.0,
         alpha: 0.45,
+        radius: RADIUS,
     };
     /// Deeper while the window moves (§6); the offset is the prototype's.
     pub const MOVING: Self = Self {
         dy: 18.0,
         blur: 48.0,
         alpha: 0.5,
+        radius: RADIUS,
     };
 }
 
@@ -112,14 +117,26 @@ pub struct Rounded<E> {
     /// space as the element's geometry.
     clip: Rectangle<i32, Physical>,
     radius: i32,
+    outside: Outside,
+}
+
+/// What of a window's element outside its rectangle shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outside {
+    /// On the desktop: a client's own shadow, around its geometry.
+    Shown,
+    /// In a thumbnail: nothing, not even the pixel a scaled surface's
+    /// rounding adds past its edge.
+    Cropped,
 }
 
 impl<E> Rounded<E> {
-    pub fn new(inner: E, clip: Rectangle<i32, Physical>, radius: i32) -> Self {
+    pub fn new(inner: E, clip: Rectangle<i32, Physical>, radius: i32, outside: Outside) -> Self {
         Self {
             inner,
             clip,
             radius,
+            outside,
         }
     }
 }
@@ -173,10 +190,15 @@ impl<E: Element> Element for Rounded<E> {
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         let cutouts = self.local_cutouts(scale);
-        if cutouts.is_empty() {
-            return self.inner.opaque_regions(scale);
+        let mut opaque: Vec<_> = self.inner.opaque_regions(scale).iter().copied().collect();
+        if self.outside == Outside::Cropped {
+            let mut clip = self.clip;
+            clip.loc -= self.inner.geometry(scale).loc;
+            opaque = opaque.iter().filter_map(|r| r.intersection(clip)).collect();
         }
-        let opaque: Vec<_> = self.inner.opaque_regions(scale).iter().copied().collect();
+        if cutouts.is_empty() {
+            return opaque.into_iter().collect();
+        }
         Rectangle::subtract_rects_many(opaque, cutouts)
             .into_iter()
             .collect()
@@ -208,7 +230,20 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
                 r
             })
             .collect();
+        let mut clip = self.clip;
+        clip.loc -= dst.loc;
+        let cropped: Vec<_>;
+        let damage = match self.outside {
+            Outside::Shown => damage,
+            Outside::Cropped => {
+                cropped = damage.iter().filter_map(|d| d.intersection(clip)).collect();
+                &cropped
+            }
+        };
         if cutouts.is_empty() {
+            if damage.is_empty() {
+                return Ok(());
+            }
             return self.inner.draw(frame, src, dst, damage, opaque_regions);
         }
         let damage = Rectangle::subtract_rects_many(damage.iter().copied(), cutouts);
@@ -710,7 +745,112 @@ pub(crate) fn buffer(pixels: &[u8], w: i32, h: i32) -> MemoryRenderBuffer {
 }
 
 /// A frame piece: a texture's part drawn on the output.
-pub type FramePiece<R> = Keyed<MemoryRenderBufferRenderElement<R>>;
+pub type FramePiece<R> = Keyed<Placed<R>>;
+
+/// A part of a texture drawn on exactly the output's pixels `dst`: the
+/// pieces of a box or a rim meet edge to edge at any scale, where a size
+/// in whole logical pixels would make neighbours overlap or part by a
+/// pixel at a fractional one.
+#[derive(Debug)]
+pub struct Placed<R: Renderer> {
+    inner: MemoryRenderBufferRenderElement<R>,
+    src: Rectangle<f64, BufferCoords>,
+    dst: Rectangle<i32, Physical>,
+}
+
+impl<R: Renderer> Placed<R> {
+    /// `src` of `texture` (in its pixels) on `dst`.
+    pub fn new(
+        renderer: &mut R,
+        texture: &MemoryRenderBuffer,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        alpha: f32,
+    ) -> Result<Self, R::Error>
+    where
+        R: ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let inner = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            dst.loc.to_f64(),
+            texture,
+            (alpha < 1.0).then_some(alpha),
+            None,
+            None,
+            Kind::Unspecified,
+        )?;
+        Ok(Self { inner, src, dst })
+    }
+}
+
+impl<R: Renderer> Element for Placed<R> {
+    fn id(&self) -> &Id {
+        self.inner.id()
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        self.inner.current_commit()
+    }
+
+    fn location(&self, _scale: Scale<f64>) -> Point<i32, Physical> {
+        self.dst.loc
+    }
+
+    fn src(&self) -> Rectangle<f64, BufferCoords> {
+        self.src
+    }
+
+    fn transform(&self) -> Transform {
+        self.inner.transform()
+    }
+
+    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.dst
+    }
+
+    fn damage_since(
+        &self,
+        _scale: Scale<f64>,
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
+        if commit == Some(self.current_commit()) {
+            DamageSet::default()
+        } else {
+            DamageSet::from_slice(&[Rectangle::from_size(self.dst.size)])
+        }
+    }
+
+    fn alpha(&self) -> f32 {
+        self.inner.alpha()
+    }
+
+    fn kind(&self) -> Kind {
+        self.inner.kind()
+    }
+}
+
+impl<R> RenderElement<R> for Placed<R>
+where
+    R: Renderer + ImportMem,
+    R::TextureId: 'static,
+{
+    fn draw(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
+    ) -> Result<(), R::Error> {
+        self.inner.draw(frame, src, dst, damage, opaque_regions)
+    }
+
+    fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
+        // A part of a texture, stretched: not a plane's buffer.
+        None
+    }
+}
 
 /// A window's rim at `rect` (logical, output-local), `alpha` opaque, its
 /// width in logical pixels.
@@ -771,20 +911,13 @@ where
     .to_physical(scale)
     .to_i32_round::<i32>()
     .to_f64();
-    let all = Rectangle::from_size(pill_pixels(GRIP_SIZE, scale).into());
-    let size = Size::<f64, Logical>::from(GRIP_SIZE).to_i32_round();
-    MemoryRenderBufferRenderElement::from_buffer(
-        renderer,
-        at,
-        &texture,
-        (alpha < 1.0).then_some(alpha),
-        Some(all),
-        Some(size),
-        Kind::Unspecified,
-    )
-    .map_err(|err| tracing::warn!(?err, "could not draw a grip"))
-    .ok()
-    .map(|e| Keyed::new(e, ids.grip.clone()))
+    let (w, h) = pill_pixels(GRIP_SIZE, scale);
+    let all = Rectangle::from_size((w, h).into());
+    let dst = Rectangle::new(at.to_i32_round(), (w as i32, h as i32).into());
+    Placed::new(renderer, &texture, all, dst, alpha)
+        .map_err(|err| tracing::warn!(?err, "could not draw a grip"))
+        .ok()
+        .map(|e| Keyed::new(e, ids.grip.clone()))
 }
 
 /// The handle of a seam centred on `centre` (logical, output-local),
@@ -815,20 +948,13 @@ where
         .to_physical(scale)
         .to_i32_round::<i32>()
         .to_f64();
-    let all = Rectangle::from_size(pill_pixels(size, scale).into());
-    let size = Size::<f64, Logical>::from(size).to_i32_round();
-    MemoryRenderBufferRenderElement::from_buffer(
-        renderer,
-        at,
-        &texture,
-        (alpha < 1.0).then_some(alpha),
-        Some(all),
-        Some(size),
-        Kind::Unspecified,
-    )
-    .map_err(|err| tracing::warn!(?err, "could not draw a seam's handle"))
-    .ok()
-    .map(|e| Keyed::new(e, id.clone()))
+    let (w, h) = pill_pixels(size, scale);
+    let all = Rectangle::from_size((w, h).into());
+    let dst = Rectangle::new(at.to_i32_round(), (w as i32, h as i32).into());
+    Placed::new(renderer, &texture, all, dst, alpha)
+        .map_err(|err| tracing::warn!(?err, "could not draw a seam's handle"))
+        .ok()
+        .map(|e| Keyed::new(e, id.clone()))
 }
 
 /// The preview of where a dragged window snaps, at `rect` (logical,
@@ -873,12 +999,18 @@ where
     R: Renderer + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
-    let window: Rectangle<i32, Physical> = rect.to_physical_precise_round(scale);
+    // Its edges on the output's pixels, as the box's (see `slices`).
+    let window: Rectangle<i32, Physical> = Rectangle::from_extremities(
+        rect.loc.to_physical(scale).to_i32_round(),
+        (rect.loc + rect.size.to_point())
+            .to_physical(scale)
+            .to_i32_round(),
+    );
     let alpha = alpha * style.alpha;
     if alpha <= 0.0 || window.size.w <= 0 || window.size.h <= 0 {
         return Vec::new();
     }
-    let radius = (RADIUS * scale).round() as i32;
+    let radius = (style.radius * scale).round() as i32;
     let shadow = textures.shadow(style.blur, scale, window.size);
     let offset = Point::<i32, Physical>::from((0, (style.dy * scale).round() as i32));
     let thirds = |start: i32, len: i32, span: Span| {
@@ -1121,9 +1253,27 @@ where
     }
 }
 
+/// Where the three pieces of a nine-slice go along one axis, physical
+/// (start, length): `corner` pixels, the rest, and `corner` again, from
+/// `inset` pixels outside `start` (logical) to as far outside its end.
+/// The edges are rounded, not the sizes, so that the pieces meet exactly.
+fn slices(start: f64, len: f64, scale: f64, inset: i32, corner: i32) -> [(i32, i32); 3] {
+    let first = (start * scale).round() as i32 - inset;
+    let last = ((start + len) * scale).round() as i32 + inset;
+    let mid = (last - first - 2 * corner).max(0);
+    [
+        (first, corner),
+        (first + corner, mid),
+        (first + corner + mid, corner),
+    ]
+}
+
 /// The pieces of a `2 × corner + 1` square texture around `rect`: corners
 /// as they are, edges stretched; the middle only when `middle`.
 /// `inset` is how far the texture's window edge is from its sides, logical.
+/// The pieces' edges are placed on the output's pixels, so that
+/// neighbours meet exactly: each corner is `corner` pixels, the middle
+/// what is left.
 #[allow(clippy::too_many_arguments)]
 fn nine_slice<R>(
     renderer: &mut R,
@@ -1134,51 +1284,32 @@ fn nine_slice<R>(
     scale: f64,
     alpha: f32,
     middle: bool,
-) -> Vec<MemoryRenderBufferRenderElement<R>>
+) -> Vec<Placed<R>>
 where
     R: Renderer + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
-    let c = f64::from(corner);
-    let cl = c / scale;
-    // The whole decorated area, logical, its edges on whole pixels.
-    let outer = Rectangle::<f64, Logical>::new(
-        rect.loc - Point::from((inset, inset)),
-        rect.size + Size::from((2.0 * inset, 2.0 * inset)),
-    );
-    let mid_w = (outer.size.w - 2.0 * cl).max(0.0);
-    let mid_h = (outer.size.h - 2.0 * cl).max(0.0);
-    let xs = [
-        (0.0, cl, 0.0, c),
-        (cl, mid_w, c, 1.0),
-        (cl + mid_w, cl, c + 1.0, c),
-    ];
-    let ys = [
-        (0.0, cl, 0.0, c),
-        (cl, mid_h, c, 1.0),
-        (cl + mid_h, cl, c + 1.0, c),
-    ];
+    let inset = (inset * scale).round() as i32;
+    let cf = f64::from(corner);
+    let thirds = |start: f64, len: f64| {
+        let [a, b, c] = slices(start, len, scale, inset, corner);
+        [
+            (a.0, a.1, 0.0, cf),
+            (b.0, b.1, cf, 1.0),
+            (c.0, c.1, cf + 1.0, cf),
+        ]
+    };
+    let xs = thirds(rect.loc.x, rect.size.w);
+    let ys = thirds(rect.loc.y, rect.size.h);
     let mut pieces = Vec::with_capacity(9);
     for (j, &(y, h, sy, sh)) in ys.iter().enumerate() {
         for (i, &(x, w, sx, sw)) in xs.iter().enumerate() {
-            if (i == 1 && j == 1 && !middle) || w <= 0.0 || h <= 0.0 {
+            if (i == 1 && j == 1 && !middle) || w <= 0 || h <= 0 {
                 continue;
             }
-            let at = Point::<f64, Logical>::from((outer.loc.x + x, outer.loc.y + y))
-                .to_physical(scale)
-                .to_i32_round::<i32>()
-                .to_f64();
-            let size = Size::<f64, Logical>::from((w, h)).to_i32_round();
-            let src = Rectangle::<f64, Logical>::new((sx, sy).into(), (sw, sh).into());
-            match MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                at,
-                texture,
-                (alpha < 1.0).then_some(alpha),
-                Some(src),
-                Some(size),
-                Kind::Unspecified,
-            ) {
+            let src = Rectangle::<f64, BufferCoords>::new((sx, sy).into(), (sw, sh).into());
+            let dst = Rectangle::<i32, Physical>::new((x, y).into(), (w, h).into());
+            match Placed::new(renderer, texture, src, dst, alpha) {
                 Ok(element) => pieces.push(element),
                 Err(err) => tracing::warn!(?err, "could not draw a window's frame"),
             }
@@ -1234,6 +1365,24 @@ mod tests {
             .map(|p| i16::from(p[1]) - i16::from(p[0]))
             .collect();
         assert!(steps.iter().all(|s| (0..=6).contains(s)), "{steps:?}");
+    }
+
+    #[test]
+    fn nine_slices_meet_on_whole_pixels_at_any_scale() {
+        for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
+            for start in [0.0, 100.0, 101.0, 381.5, 509.3] {
+                for len in [40.0, 481.2, 518.0, 599.0] {
+                    let inset = 3;
+                    let corner = (18.0_f64 * scale).ceil() as i32;
+                    let [a, b, c] = slices(start, len, scale, inset, corner);
+                    assert_eq!(a.0 + a.1, b.0, "{scale} {start} {len}");
+                    assert_eq!(b.0 + b.1, c.0, "{scale} {start} {len}");
+                    assert_eq!((a.1, c.1), (corner, corner));
+                    assert_eq!(a.0, (start * scale).round() as i32 - inset);
+                    assert_eq!(c.0 + c.1, ((start + len) * scale).round() as i32 + inset);
+                }
+            }
+        }
     }
 
     #[test]
