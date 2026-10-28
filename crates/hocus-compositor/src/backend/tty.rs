@@ -212,6 +212,7 @@ fn open_primary(
         let gles: &mut GlesRenderer = renderer.as_mut();
         state.shm_state.update_formats(gles.shm_formats());
         dmabuf_global(state, gles.dmabuf_formats(), Some(render_node.dev_id()));
+        state.blur = true;
         gles.egl_context().dmabuf_render_formats().clone()
     };
     let allocator = GbmAllocator::new(

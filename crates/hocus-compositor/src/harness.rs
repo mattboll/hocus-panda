@@ -65,6 +65,15 @@ impl Headless {
     }
 
     pub fn start_with(headless: HeadlessConfig, config: Config) -> anyhow::Result<Self> {
+        Self::start_with_shell(headless, config, None)
+    }
+
+    /// With `shell`'s program started as the shell (none by default).
+    pub fn start_with_shell(
+        headless: HeadlessConfig,
+        config: Config,
+        shell: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<Self> {
         let started = crate::start(Options {
             backend: BackendKind::Headless(headless),
             runtime_dir: None,
@@ -72,6 +81,7 @@ impl Headless {
             xwayland: false,
             session: false,
             config,
+            shell,
         })?;
         Ok(Self {
             event_loop: started.event_loop,
@@ -194,6 +204,28 @@ impl Headless {
     /// Whether the keyboard is on a surface that is no window: a menu.
     pub fn keyboard_on_popup(&self) -> bool {
         self.app.state.popup_focus().is_some()
+    }
+
+    /// The bars: their screen, their form, and their width as drawn now.
+    pub fn bars(&self) -> Vec<(String, hocus_link::Form, f64)> {
+        let state = &self.app.state;
+        let now = state.now();
+        state
+            .panel
+            .bars
+            .iter()
+            .map(|(name, bar)| (name.clone(), bar.form, bar.width_at(now)))
+            .collect()
+    }
+
+    /// Commits of the bars' surfaces so far.
+    pub fn bar_commits(&self) -> u64 {
+        self.app.state.panel.commits
+    }
+
+    /// Whether the shell is connected.
+    pub fn shell_connected(&self) -> bool {
+        self.app.state.shell_linked()
     }
 
     /// The work area of the first output.

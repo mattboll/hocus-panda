@@ -161,6 +161,7 @@ fn gles_outputs(
     state.shm_state.update_formats(renderer.shm_formats());
     let device = render_node_of(renderer.egl_context().display());
     dmabuf_global(state, renderer.dmabuf_formats(), device);
+    state.blur = true;
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 

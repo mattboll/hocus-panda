@@ -93,6 +93,9 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             continue;
         };
         drop(map);
+        if layer.namespace() == hocus_link::NAMESPACE {
+            state.panel.commits += 1;
+        }
         let before = state.work_area(&output);
         layer_map_for_output(&output).arrange();
         if state.work_area(&output) != before {

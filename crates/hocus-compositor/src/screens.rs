@@ -85,6 +85,8 @@ impl State {
             })
             .collect();
         self.space.unmap_output(output);
+        // Its bar goes to a screen still there, before its windows do.
+        self.panel_refresh();
         if let Some(strip) = self.strips.get_mut(&name) {
             strip.still();
         }

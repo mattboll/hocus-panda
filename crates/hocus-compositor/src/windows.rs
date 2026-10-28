@@ -712,7 +712,7 @@ impl State {
     fn bar_place(&self, id: WindowId) -> Option<Rectangle<f64, Logical>> {
         let output = self.output_of(id)?;
         let geometry = self.space.output_geometry(&output)?;
-        let bar = f64::from(model::bar_width(geometry.size.w));
+        let bar = f64::from(self.panel.width(&output.name()).unwrap_or(0));
         let x = f64::from(geometry.loc.x + geometry.size.w) - f64::from(model::GAP) - bar / 2.0;
         let y = f64::from(geometry.loc.y) + f64::from(geometry.size.h) / 2.0;
         Some(Rectangle::new(
@@ -1207,6 +1207,7 @@ impl State {
         for strip in self.strips.values_mut() {
             moving |= strip.tick(now);
         }
+        moving |= self.panel.tick(now);
         moving |= self.tick_switcher(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();

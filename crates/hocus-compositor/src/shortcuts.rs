@@ -42,6 +42,8 @@ pub enum Action {
     SendToDesktop(usize),
     /// And goes there with it.
     TakeToDesktop(usize),
+    /// The bar's other form, on the screen under the pointer.
+    ToggleBar,
 }
 
 /// Modifiers and a key, as `Super+Shift+E`. The key is the one of the
@@ -209,6 +211,7 @@ shortcuts! {
     take_to_desktop_7: ["Super+Ctrl+Shift+7"] => Action::TakeToDesktop(6),
     take_to_desktop_8: ["Super+Ctrl+Shift+8"] => Action::TakeToDesktop(7),
     take_to_desktop_9: ["Super+Ctrl+Shift+9"] => Action::TakeToDesktop(8),
+    toggle_bar: ["Super+B"] => Action::ToggleBar,
 }
 
 impl Shortcuts {
@@ -310,6 +313,11 @@ impl State {
             Action::Desktop(to) => self.switch_desktop_to(to),
             Action::SendToDesktop(to) => self.send_to_desktop(to, false),
             Action::TakeToDesktop(to) => self.send_to_desktop(to, true),
+            Action::ToggleBar => {
+                if let Some(output) = self.output_under_pointer() {
+                    self.toggle_bar(&output.name());
+                }
+            }
         }
     }
 
