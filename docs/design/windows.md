@@ -185,14 +185,26 @@ string turns one off. The package ships every setting with its default
 |---|---|---|
 | `terminal` | `Super+Return` | Opens a terminal: `[programs] terminal`, or the first of kitty, foot, alacritty, xterm found in `PATH` |
 | `log-out` | `Super+Shift+E` | Ends the session at once; the display manager comes back |
+| `close` | `Super+Q` | Asks the focused window to close (§10) |
+| `minimize` | `Super+H` | Minimises the focused window (§10) |
+| `unminimize` | `Super+Shift+H` | Brings back the window minimised last, until Alt+Tab (§11) lists them |
+| `snap-left`, `snap-right` | `Super+←`, `Super+→` | Left or right half; again, the other side (§9) |
+| `maximize` | `Super+↑` | Maximises (§9) |
+| `restore` | `Super+↓` | Restores; on a floating window, minimises (§9) |
+| `quarter-up`, `quarter-down`, `quarter-left`, `quarter-right` | `Super+Shift+arrows` | The quarter on that side, keeping the window's other side (§9) |
+| `focus-left`, `focus-right`, `focus-up`, `focus-down` | `Super+Ctrl+arrows` | Focuses the window on that side (§4) |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
 `[outputs.NAME] scale` per screen by connector name (`eDP-1`; the
 journal names each screen as it lights), the density's scale otherwise.
 
-Not configurable yet: `Super`+drag moves a window; `Ctrl+Alt+F1…F12`
-switch virtual terminals. The other sections' shortcuts join the table as
+`[appearance]` holds `reduced-motion` (windows fade instead of moving,
+and do not wobble) and `high-contrast` (the focused rim 2 px wide), both
+off by default.
+
+Not configurable yet: `Super`+drag moves a window, `Super`+right-drag
+resizes it; `Ctrl+Alt+F1…F12` switch virtual terminals. The other sections' shortcuts join the table as
 they are built.
 
 ## 14. Session
