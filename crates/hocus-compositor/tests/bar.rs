@@ -303,11 +303,171 @@ fn the_shell_draws_the_bar_as_wide_as_its_form_and_rests() -> anyhow::Result<()>
     hp.button(BTN_LEFT, false);
     wait(&mut hp, Duration::from_millis(500))?;
     assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));
-    // At rest, the shell draws nothing (no clock yet), nor the compositor.
-    let (commits, frames) = (hp.bar_commits(), hp.frames());
-    wait(&mut hp, Duration::from_secs(2))?;
+    // At rest, the shell draws only its clock, once a second, and the
+    // compositor only the clock's place.
+    let clock = Rect::new(1920 - 8 - 1 - 54, 8 + 12, 54, 32);
+    let placed = hp.dispatch_until(WAIT, |hp| {
+        hp.clock_surfaces() == vec![("HEADLESS-1".to_owned(), clock)]
+    })?;
+    assert!(placed, "{:?}", hp.clock_surfaces());
+    wait(&mut hp, Duration::from_millis(500))?;
+    let (commits, clocks, frames) = (hp.bar_commits(), hp.clock_commits(), hp.frames());
+    hp.take_damage(0);
+    wait(&mut hp, Duration::from_secs(3))?;
     assert_eq!(hp.bar_commits(), commits);
-    assert_eq!(hp.frames(), frames);
+    let ticks = hp.clock_commits() - clocks;
+    assert!((2..=4).contains(&ticks), "{ticks} clock commits in 3 s");
+    assert!((2..=4).contains(&(hp.frames() - frames)));
+    assert_eq!(hp.take_damage(0), Some(clock));
     assert!(rect_of(&hp, "beside").is_some());
+    Ok(())
+}
+
+/// The shell, started through a script that sets its clock to `at` (a
+/// wall-clock time of today): the system's clock is never touched.
+fn shell_at(shell: &std::path::Path, at: &str, dir: &std::path::Path) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join("shell");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nexec env HOCUS_CLOCK_AT={at} {} \"$@\"\n",
+            shell.display()
+        ),
+    )?;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+    Ok(script)
+}
+
+#[test]
+fn the_clock_shows_in_its_place_in_both_forms() -> anyhow::Result<()> {
+    let Some(shell) = shell_program() else {
+        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
+        return Ok(());
+    };
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            outputs: vec!["1920x1080".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        reduced(),
+        Some(shell),
+    )?;
+    // Inside the bar's rim, 12 px below its top.
+    let full = Rect::new(1920 - 8 - 1 - 194, 8 + 12, 194, 62);
+    let placed = hp.dispatch_until(Duration::from_secs(20), |hp| {
+        hp.clock_surfaces() == vec![("HEADLESS-1".to_owned(), full)] && hp.clock_commits() > 0
+    })?;
+    assert!(placed, "{:?}", hp.clock_surfaces());
+    // Text in the full clock's place: light pixels on the dark bar.
+    wait(&mut hp, Duration::from_millis(300))?;
+    let light = |hp: &mut Headless, r: Rect| -> anyhow::Result<usize> {
+        let (w, _, pixels) = hp.screenshot(0)?;
+        let mut n = 0;
+        for y in r.y..r.y + r.height {
+            for x in r.x..r.x + r.width {
+                let i = ((y * w + x) * 4) as usize;
+                if pixels[i..i + 3].iter().all(|c| *c > 0xC0) {
+                    n += 1;
+                }
+            }
+        }
+        Ok(n)
+    };
+    assert!(light(&mut hp, full)? > 200, "no time drawn");
+    // The mini form's clock, in its narrower place.
+    hp.pointer_move(1000.0, 500.0);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    let mini = Rect::new(1920 - 8 - 1 - 54, 8 + 12, 54, 32);
+    let placed = hp.dispatch_until(WAIT, |hp| {
+        hp.clock_surfaces() == vec![("HEADLESS-1".to_owned(), mini)]
+    })?;
+    assert!(placed, "{:?}", hp.clock_surfaces());
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert!(light(&mut hp, mini)? > 40, "no time drawn");
+    Ok(())
+}
+
+/// Clock commits and when, for `time`, after `start`.
+fn clock_commits_for(hp: &mut Headless, time: Duration) -> anyhow::Result<Vec<Duration>> {
+    let start = std::time::Instant::now();
+    let mut seen = hp.clock_commits();
+    let mut at = Vec::new();
+    while start.elapsed() < time {
+        hp.dispatch(Duration::from_millis(2))?;
+        let now = hp.clock_commits();
+        for _ in seen..now {
+            at.push(start.elapsed());
+        }
+        seen = now;
+    }
+    Ok(at)
+}
+
+/// The commits that come closer together than a second's ticks: the
+/// motion's frames, and how long they last.
+fn motion_of(commits: &[Duration]) -> (usize, Duration) {
+    let close: Vec<Duration> = commits
+        .windows(2)
+        .filter(|p| p[1] - p[0] < Duration::from_millis(100))
+        .map(|p| p[1])
+        .collect();
+    let span = match (close.first(), close.last()) {
+        (Some(a), Some(b)) => *b - *a,
+        _ => Duration::ZERO,
+    };
+    (close.len(), span)
+}
+
+/// On a GPU (the shell draws with wgpu): a minute change moves once, for
+/// about 520 ms, then the clock rests; with reduced motion it does not
+/// move. Skipped without a render node.
+#[test]
+fn a_minute_change_moves_once_then_rests() -> anyhow::Result<()> {
+    let Some(shell) = shell_program() else {
+        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
+        return Ok(());
+    };
+    // The first render node: on a machine with two GPUs, as often as not
+    // the integrated one, which this keeps the other asleep.
+    let node = PathBuf::from("/dev/dri/renderD128");
+    if !node.exists() {
+        eprintln!("no render node: the shell would draw on the CPU, without motion");
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    for (config, moves) in [(Config::default(), true), (reduced(), false)] {
+        // The minute changes about two seconds after the shell starts.
+        let script = shell_at(&shell, "09:59:58", dir.path())?;
+        let mut hp = Headless::start_with_shell(
+            HeadlessConfig {
+                outputs: vec!["1920x1080".parse()?],
+                renderer: RendererChoice::Gles,
+                render_node: Some(node.clone()),
+            },
+            config,
+            Some(script),
+        )?;
+        let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| hp.clock_commits() > 0)?;
+        assert!(drawn, "no clock");
+        if hp.shell_on_cpu() {
+            eprintln!("the shell draws on the CPU here: no motion to see");
+            return Ok(());
+        }
+        let commits = clock_commits_for(&mut hp, Duration::from_secs(5))?;
+        let (frames, span) = motion_of(&commits);
+        if moves {
+            assert!(frames >= 10, "{frames} frames of motion: {commits:?}");
+            assert!(
+                (Duration::from_millis(400)..Duration::from_millis(650)).contains(&span),
+                "{span:?}"
+            );
+        } else {
+            assert_eq!(frames, 0, "{commits:?}");
+        }
+        // Then once a second.
+        assert!(commits.len() - frames <= 7, "{commits:?}");
+    }
     Ok(())
 }

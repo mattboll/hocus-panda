@@ -73,6 +73,8 @@ const DATE_LINE: f32 = 1.366;
 /// Mini form: hours over minutes, 15 px, line height 1.1.
 const MINI: f32 = 15.0;
 const MINI_LINE: f32 = 1.1;
+/// The blur's copies, in half deviations.
+const BLUR_STEPS: [f32; 9] = [-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0];
 /// A cell's height, in ems.
 const CELL_HEIGHT: f32 = 1.05;
 /// The colon's cell, in the width of a `0`.
@@ -452,14 +454,23 @@ impl Draw<'_> {
         }
         let x = cell.x + cell.width / 2.0;
         let y = cell.y + pose.dy * glyph.line;
-        // A vertical blur, as copies spread over it: each as opaque as
-        // makes them together as opaque as the glyph.
-        let copies: &[f32] = if pose.blur < 0.25 {
-            &[0.0]
+        // A vertical blur (CSS's `blur()`, a standard deviation), as copies
+        // spread over two deviations each way and weighed as a Gaussian:
+        // where they all cover, they are together as opaque as the glyph.
+        let opacity = pose.alpha.min(1.0);
+        let copies: Vec<(f32, f32)> = if pose.blur < 0.25 {
+            vec![(0.0, opacity)]
         } else {
-            &[-1.0, -0.5, 0.0, 0.5, 1.0]
+            let weights = BLUR_STEPS.map(|k| (-k * k / 8.0).exp());
+            let total: f32 = weights.iter().sum();
+            // Opaque copies would each cover in full: no fading edge.
+            let opacity = opacity.min(0.97);
+            BLUR_STEPS
+                .iter()
+                .zip(weights)
+                .map(|(k, w)| (k * pose.blur / 2.0, 1.0 - (1.0 - opacity).powf(w / total)))
+                .collect()
         };
-        let alpha = 1.0 - (1.0 - pose.alpha.min(1.0)).powf(1.0 / copies.len() as f32);
         self.frame.with_clip(clip, |f| {
             if pose.fold != 1.0 {
                 let pivot = match pose.pivot {
@@ -470,10 +481,10 @@ impl Draw<'_> {
                 f.scale_nonuniform(Vector::new(1.0, pose.fold));
                 f.translate(Vector::new(0.0, -pivot));
             }
-            for spread in copies {
+            for (dy, alpha) in copies {
                 f.fill_text(canvas::Text {
                     content: ch.to_string(),
-                    position: Point::new(x, y + spread * pose.blur),
+                    position: Point::new(x, y + dy),
                     max_width: f32::INFINITY,
                     color: faded(glyph.colour, alpha),
                     size: Pixels(glyph.size),
