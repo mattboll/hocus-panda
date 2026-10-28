@@ -125,6 +125,9 @@ pub struct State {
     pub spawned_at: Option<Duration>,
     /// Windows not mapped yet that asked for the focus with a valid token.
     pub activate_on_map: Vec<WlSurface>,
+    /// Windows not mapped yet that asked to open maximised or fullscreen
+    /// (§10): they show so from their first frame.
+    pub opens_as: Vec<(WlSurface, model::Mode)>,
     /// What draws windows' frames, and their pictures as they leave.
     pub textures: Textures,
     pub grabber: Grabber,
@@ -270,6 +273,7 @@ impl State {
             activation_tokens: HashMap::new(),
             spawned_at: None,
             activate_on_map: Vec::new(),
+            opens_as: Vec::new(),
             textures: Textures::default(),
             grabber: Grabber::default(),
             pictures: HashMap::new(),

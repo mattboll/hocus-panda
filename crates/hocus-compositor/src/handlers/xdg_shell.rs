@@ -132,25 +132,24 @@ impl XdgShellHandler for State {
                     self.configure(id, rect);
                 }
             }
-            // Not mapped yet: it opens as it is, and is told so.
-            None => {
-                if surface.is_initial_configure_sent() {
-                    surface.send_configure();
-                }
-            }
+            // Not mapped yet: it opens maximised.
+            None => self.open_as(&surface, Some(Mode::Snapped(Zone::Maximized))),
         }
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        if let Some(id) = self
+        match self
             .window_for(surface.wl_surface())
             .and_then(|w| self.id_of(&w))
         {
-            if self.model.mode(id) == Mode::Snapped(Zone::Maximized) {
-                self.restore(id);
-            } else if let Some(rect) = self.target_rect(id) {
-                self.configure(id, rect);
+            Some(id) => {
+                if self.model.mode(id) == Mode::Snapped(Zone::Maximized) {
+                    self.restore(id);
+                } else if let Some(rect) = self.target_rect(id) {
+                    self.configure(id, rect);
+                }
             }
+            None => self.open_as_unless(&surface, Mode::Snapped(Zone::Maximized)),
         }
     }
 
@@ -164,20 +163,18 @@ impl XdgShellHandler for State {
             .and_then(|w| self.id_of(&w))
         {
             Some(id) => self.set_fullscreen(id, true),
-            None => {
-                if surface.is_initial_configure_sent() {
-                    surface.send_configure();
-                }
-            }
+            // Not mapped yet (`foot --fullscreen`): it opens fullscreen.
+            None => self.open_as(&surface, Some(Mode::Fullscreen)),
         }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        if let Some(id) = self
+        match self
             .window_for(surface.wl_surface())
             .and_then(|w| self.id_of(&w))
         {
-            self.set_fullscreen(id, false);
+            Some(id) => self.set_fullscreen(id, false),
+            None => self.open_as_unless(&surface, Mode::Fullscreen),
         }
     }
 
@@ -308,6 +305,62 @@ fn has_buffer(surface: &WlSurface) -> bool {
 }
 
 impl State {
+    /// A window not mapped yet asked to open maximised or fullscreen
+    /// (`Some`), or as it is (`None`): its first configure (or the next,
+    /// once that one went) says so with the size it will have, so that its
+    /// first frame already fits, and it is placed so when it maps.
+    fn open_as(&mut self, surface: &ToplevelSurface, mode: Option<Mode>) {
+        use xdg_toplevel::State as S;
+        let wl_surface = surface.wl_surface();
+        self.opens_as
+            .retain(|(s, _)| s.is_alive() && s != wl_surface);
+        let output = self.output_under_pointer();
+        let size = match mode {
+            Some(Mode::Fullscreen) => output
+                .as_ref()
+                .and_then(|o| self.space.output_geometry(o))
+                .map(|g| g.size),
+            Some(Mode::Snapped(zone)) => output
+                .as_ref()
+                .and_then(|o| self.work_area(o))
+                .map(|area| zone.rect(area))
+                .map(|r| (r.width, r.height).into()),
+            Some(Mode::Floating) | None => None,
+        };
+        if let Some(mode) = mode {
+            self.opens_as.push((wl_surface.clone(), mode));
+        }
+        surface.with_pending_state(|s| {
+            s.size = size;
+            let fullscreen = mode == Some(Mode::Fullscreen);
+            let maximized = mode == Some(Mode::Snapped(Zone::Maximized));
+            for (state, on) in [(S::Fullscreen, fullscreen), (S::Maximized, maximized)] {
+                if on {
+                    s.states.set(state);
+                } else {
+                    s.states.unset(state);
+                }
+            }
+        });
+        // A request after the first configure is answered with another.
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        }
+    }
+
+    /// A window not mapped yet no longer asks to open as `mode`.
+    fn open_as_unless(&mut self, surface: &ToplevelSurface, mode: Mode) {
+        let asked = self
+            .opens_as
+            .iter()
+            .any(|(s, m)| s == surface.wl_surface() && *m == mode);
+        if asked {
+            self.open_as(surface, None);
+        } else if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        }
+    }
+
     /// Keeps a popup inside the output its window is on.
     fn unconstrain_popup(&self, popup: &PopupSurface) {
         let kind = PopupKind::Xdg(popup.clone());

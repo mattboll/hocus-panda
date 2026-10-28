@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use common::{
     BTN_LEFT, Command, Event, KEY_DOWN, KEY_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP,
-    WAIT, chord, compositor, open, open_with, rect_of, wait, wait_for_rect,
+    Shows, WAIT, chord, compositor, open, open_showing, open_with, rect_of, wait, wait_for_rect,
 };
 use hocus_compositor::model::{GAP, Mode, Rect, WindowId, Zone};
 use smithay::input::pointer::CursorIcon;
@@ -309,6 +309,48 @@ fn fullscreen_covers_the_output_and_comes_back() -> anyhow::Result<()> {
     client.commands.send(Command::Fullscreen(false))?;
     wait_for_rect(&mut hp, "test.full", start)?;
     assert_eq!(hp.mode(id), Mode::Floating);
+    Ok(())
+}
+
+#[test]
+fn a_window_asking_for_fullscreen_before_its_first_frame_opens_fullscreen() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let shows = Shows::Asking {
+        app_id: "test.asks",
+        size: (400, 300),
+        fullscreen: true,
+    };
+    let (rect, client) = open_showing(&mut hp, "test.asks", shows)?;
+    // Its first frame already covers the screen.
+    assert_eq!(rect, Rect::new(0, 0, 1920, 1080));
+    let id = hp.windows()[0].id;
+    assert_eq!(hp.mode(id), Mode::Fullscreen);
+    // Back, it floats in the middle of the work area.
+    client.commands.send(Command::Fullscreen(false))?;
+    let (w, h) = (AREA.width * 2 / 3, AREA.height * 2 / 3);
+    let floating = Rect::new(
+        AREA.x + (AREA.width - w) / 2,
+        AREA.y + (AREA.height - h) / 2,
+        w,
+        h,
+    );
+    wait_for_rect(&mut hp, "test.asks", floating)?;
+    assert_eq!(hp.mode(id), Mode::Floating);
+    Ok(())
+}
+
+#[test]
+fn a_window_asking_to_be_maximised_before_its_first_frame_opens_maximised() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let shows = Shows::Asking {
+        app_id: "test.asks",
+        size: (400, 300),
+        fullscreen: false,
+    };
+    let (rect, _client) = open_showing(&mut hp, "test.asks", shows)?;
+    assert_eq!(rect, AREA);
+    let id = hp.windows()[0].id;
+    assert_eq!(hp.mode(id), Mode::Snapped(Zone::Maximized));
     Ok(())
 }
 
