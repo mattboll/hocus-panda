@@ -1091,7 +1091,14 @@ impl State {
     /// frame while something moves, and for a wake-up when something will
     /// start moving after a pause.
     pub fn tick(&mut self) {
-        let now = self.now();
+        // As of the last frame drawn: a motion that ended since then still
+        // gets a frame at its end, not left a step short (a panel at 97 %).
+        // A frame long gone (nothing drawn: a paused session) is not waited
+        // for.
+        let now = match (self.now(), self.drawn_at.get()) {
+            (now, Some(drawn)) if drawn <= now && now - drawn < Duration::from_secs(1) => drawn,
+            (now, _) => now,
+        };
         let mut moving = false;
         let mut next: Option<Duration> = None;
         let mut wake = |at: Duration| next = Some(next.map_or(at, |n: Duration| n.min(at)));

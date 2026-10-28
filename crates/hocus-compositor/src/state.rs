@@ -155,6 +155,9 @@ pub struct State {
     pub popup_grab: Option<PopupGrab>,
     /// A frame is asked for at this time, after a pause.
     pub wake: Option<Duration>,
+    /// When the last frame was drawn: motions are judged as of then (see
+    /// `tick`). Set while drawing, which borrows the state shared.
+    pub drawn_at: std::cell::Cell<Option<Duration>>,
     /// What the pointer shows, as the client under it sets it.
     pub cursor: CursorImageStatus,
     pub cursor_images: CursorImages,
@@ -291,6 +294,7 @@ impl State {
             kept_buttons: HashSet::new(),
             popup_grab: None,
             wake: None,
+            drawn_at: std::cell::Cell::new(None),
             cursor: CursorImageStatus::default_named(),
             cursor_images: CursorImages::default(),
             redraw: true,

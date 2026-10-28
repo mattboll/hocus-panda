@@ -394,6 +394,7 @@ impl State {
     {
         self.grabber.ready(renderer);
         let now = self.now();
+        self.drawn_at.set(Some(now));
         let mut elements: Vec<OutputElement<R>> = Vec::new();
         let Some(area) = self.space.output_geometry(output) else {
             return elements;
