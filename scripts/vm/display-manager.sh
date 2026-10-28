@@ -31,6 +31,8 @@ sudo systemctl stop getty@tty1'
 echo "GDM restarted"
 sleep 10
 
+# The keys are a US keyboard's: with another layout in the VM's
+# /etc/default/keyboard, GDM reads the password differently.
 # The user, then the chooser (the gear, after the password field), its
 # second entry (GNOME comes first), back to the password.
 "$vm" keys ret
