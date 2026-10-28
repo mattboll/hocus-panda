@@ -493,6 +493,145 @@ pub fn follow(partner: Rect, follow: Edges, moved: Rect) -> Rect {
     out
 }
 
+/// Where two snapped windows face each other across the gap (§8): its
+/// handle moves the boundary and both follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Seam {
+    /// The window on the left, or above.
+    pub first: WindowId,
+    pub second: WindowId,
+    /// Side by side: the seam runs down; otherwise across.
+    pub vertical: bool,
+    /// Where the gap starts across the seam: the first window's right or
+    /// bottom edge.
+    pub across: i32,
+    /// The span both windows share along the seam.
+    pub from: i32,
+    pub to: i32,
+    /// The window a drag of the handle resizes, and from which edge: the
+    /// one whose side spans the seam's whole length, so that every
+    /// neighbour along it follows.
+    pub grab: WindowId,
+    pub edges: Edges,
+}
+
+impl Seam {
+    /// The middle of the gap across, and of the shared span along.
+    pub fn centre(&self) -> (f64, f64) {
+        let across = f64::from(self.across) + f64::from(GAP) / 2.0;
+        let along = f64::from(self.from + self.to) / 2.0;
+        if self.vertical {
+            (across, along)
+        } else {
+            (along, across)
+        }
+    }
+
+    /// The point (`x`, `y`) as (across, along) the seam: from its centre
+    /// line, and from where its span starts.
+    fn local(&self, x: f64, y: f64) -> (f64, f64) {
+        let (cx, cy) = self.centre();
+        if self.vertical {
+            (x - cx, y - f64::from(self.from))
+        } else {
+            (y - cy, x - f64::from(self.from))
+        }
+    }
+
+    /// Whether (`x`, `y`) is within `reach` of the seam's centre line,
+    /// along its span.
+    pub fn near(&self, x: f64, y: f64, reach: f64) -> bool {
+        let (across, along) = self.local(x, y);
+        across.abs() <= reach && along >= 0.0 && along < f64::from(self.to - self.from)
+    }
+
+    /// Whether (`x`, `y`) is on a box `length` long and `thickness` thick
+    /// at the seam's centre.
+    pub fn on_handle(&self, x: f64, y: f64, length: f64, thickness: f64) -> bool {
+        let (across, along) = self.local(x, y);
+        let middle = f64::from(self.to - self.from) / 2.0;
+        across.abs() <= thickness / 2.0 && (along - middle).abs() <= length / 2.0
+    }
+
+    /// In the gap, away from the span's ends (a corner's reach there): the
+    /// window whose edge is nearer, and that edge.
+    pub fn edge_at(&self, x: f64, y: f64) -> Option<(WindowId, Edges)> {
+        let (across, along) = self.local(x, y);
+        let corner = f64::from(CORNER);
+        let outside = across.abs() > f64::from(GAP) / 2.0
+            || along < corner
+            || along >= f64::from(self.to - self.from) - corner;
+        if outside {
+            None
+        } else if across < 0.0 {
+            Some((self.first, self.first_edges()))
+        } else {
+            Some((self.second, self.second_edges()))
+        }
+    }
+
+    /// The first window's edge on the seam: right or bottom.
+    fn first_edges(&self) -> Edges {
+        Edges {
+            right: self.vertical,
+            bottom: !self.vertical,
+            ..Edges::default()
+        }
+    }
+
+    /// The second window's: left or top.
+    fn second_edges(&self) -> Edges {
+        Edges {
+            left: self.vertical,
+            top: !self.vertical,
+            ..Edges::default()
+        }
+    }
+}
+
+/// Where `a` and `b` meet across the gap, if they do.
+pub fn seam((a, ra): (WindowId, Rect), (b, rb): (WindowId, Rect)) -> Option<Seam> {
+    let make = |(first, rf): (WindowId, Rect), (second, rs): (WindowId, Rect), vertical: bool| {
+        let (from, to, across, first_longer) = if vertical {
+            let span = (rf.y.max(rs.y), rf.bottom().min(rs.bottom()));
+            (span.0, span.1, rf.right(), rf.height >= rs.height)
+        } else {
+            let span = (rf.x.max(rs.x), rf.right().min(rs.right()));
+            (span.0, span.1, rf.bottom(), rf.width >= rs.width)
+        };
+        if from >= to {
+            return None;
+        }
+        let mut seam = Seam {
+            first,
+            second,
+            vertical,
+            across,
+            from,
+            to,
+            grab: first,
+            edges: Edges::default(),
+        };
+        (seam.grab, seam.edges) = if first_longer {
+            (first, seam.first_edges())
+        } else {
+            (second, seam.second_edges())
+        };
+        Some(seam)
+    };
+    if ra.right() + GAP == rb.x {
+        make((a, ra), (b, rb), true)
+    } else if rb.right() + GAP == ra.x {
+        make((b, rb), (a, ra), true)
+    } else if ra.bottom() + GAP == rb.y {
+        make((a, ra), (b, rb), false)
+    } else if rb.bottom() + GAP == ra.y {
+        make((b, rb), (a, ra), false)
+    } else {
+        None
+    }
+}
+
 /// What the desktop keeps of a window.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Placement {
@@ -865,6 +1004,37 @@ mod tests {
             ..Edges::default()
         };
         assert!(partners(left, west, &others).is_empty());
+    }
+
+    #[test]
+    fn a_seam_is_where_two_windows_face_across_the_gap() {
+        let area = Rect::new(8, 8, 1700, 1064);
+        let (l, tr, br) = (WindowId(1), WindowId(2), WindowId(3));
+        let left = (l, Zone::Left.rect(area));
+        let top_right = (tr, Zone::TopRight.rect(area));
+        let bottom_right = (br, Zone::BottomRight.rect(area));
+        // Given either way, the left one comes first; the half spans the
+        // whole seam, so a drag of its handle resizes the half and both
+        // quarters follow.
+        let s = seam(top_right, left).expect("a seam");
+        assert_eq!((s.first, s.second, s.vertical), (l, tr, true));
+        assert_eq!((s.grab, s.edges.right), (l, true));
+        assert_eq!((s.from, s.to), (top_right.1.y, top_right.1.bottom()));
+        assert_eq!(s.centre().0, f64::from(left.1.right() + GAP / 2));
+        // The quarters, one above the other: a seam across.
+        let s = seam(bottom_right, top_right).expect("a seam");
+        assert_eq!((s.first, s.vertical, s.edges.bottom), (tr, false, true));
+        // Apart: none.
+        assert!(seam(left, (WindowId(4), Rect::new(1000, 100, 200, 200))).is_none());
+        // In the gap, the nearer window's edge; at the span's ends, none.
+        let s = seam(left, (tr, Zone::Right.rect(area))).expect("a seam");
+        let x = f64::from(s.across);
+        assert_eq!(s.edge_at(x + 1.0, 500.0).map(|(id, _)| id), Some(l));
+        assert_eq!(s.edge_at(x + 7.0, 500.0).map(|(id, _)| id), Some(tr));
+        assert!(s.edge_at(x + 1.0, f64::from(s.from + 2)).is_none());
+        let (cx, cy) = s.centre();
+        assert!(s.on_handle(cx + 5.0, cy + 25.0, 52.0, 12.0));
+        assert!(!s.on_handle(cx, cy + 40.0, 52.0, 12.0));
     }
 
     #[test]

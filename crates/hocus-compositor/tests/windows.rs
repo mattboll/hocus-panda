@@ -1,6 +1,6 @@
 //! Windows on screen, headless (docs/design/windows.md §4–§10): snapping by
-//! the keys and by dragging, resizing from the frame, a snapped pair
-//! resizing together, fullscreen and back, minimising, menus that grab
+//! the keys and by dragging, resizing from the frame, a snapped pair's
+//! shared edge resizing one and its handle both, fullscreen and back, minimising, menus that grab
 //! the keyboard, and no frame drawn once nothing moves.
 
 mod common;
@@ -11,7 +11,8 @@ use common::{
     BTN_LEFT, Command, Event, KEY_DOWN, KEY_H, KEY_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT,
     KEY_UP, WAIT, chord, compositor, open, open_with, rect_of, wait, wait_for_rect,
 };
-use hocus_compositor::model::{GAP, Mode, Rect, Zone};
+use hocus_compositor::model::{GAP, Mode, Rect, WindowId, Zone};
+use smithay::input::pointer::CursorIcon;
 
 /// The work area of the headless 1920×1080 output: 8 px in, and the full
 /// bar's place kept on the right.
@@ -113,22 +114,76 @@ fn the_frame_resizes_from_a_corner_and_an_edge() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn a_snapped_pair_resizes_together() -> anyhow::Result<()> {
-    let mut hp = compositor()?;
-    open(&mut hp, "test.left", (400, 300))?;
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(AREA))?;
-    open(&mut hp, "test.right", (400, 300))?;
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
-    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(AREA))?;
-    // The left one's right edge, in the gap between them.
+/// Two windows snapped left and right.
+fn snapped_pair(hp: &mut hocus_compositor::Headless) -> anyhow::Result<(WindowId, WindowId)> {
+    open(hp, "test.left", (400, 300))?;
+    chord(hp, &[KEY_LEFTMETA, KEY_LEFT]);
+    wait_for_rect(hp, "test.left", Zone::Left.rect(AREA))?;
+    open(hp, "test.right", (400, 300))?;
+    chord(hp, &[KEY_LEFTMETA, KEY_RIGHT]);
+    wait_for_rect(hp, "test.right", Zone::Right.rect(AREA))?;
+    let id = |app: &str| {
+        hp.windows()
+            .into_iter()
+            .find(|w| w.app_id.as_deref() == Some(app))
+            .map(|w| w.id)
+    };
+    Ok((
+        id("test.left").expect("left"),
+        id("test.right").expect("right"),
+    ))
+}
+
+/// The middle of the gap between the left and right halves.
+fn seam_centre() -> (f64, f64) {
     let left = Zone::Left.rect(AREA);
-    let (x, y) = (f64::from(left.right() + 2), 500.0);
+    (
+        f64::from(left.right() + GAP / 2),
+        f64::from(left.y) + f64::from(left.height) / 2.0,
+    )
+}
+
+#[test]
+fn the_shared_edge_resizes_only_the_window_grabbed_which_floats() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let (left_id, right_id) = snapped_pair(&mut hp)?;
+    // In the gap, nearer the left window, away from the handle: its edge.
+    let (cx, _) = seam_centre();
+    let (x, y) = (cx - 3.0, 300.0);
     hp.pointer_move(x, y);
+    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x + 100.0, y);
     hp.button(BTN_LEFT, false);
+    let left = Zone::Left.rect(AREA);
+    wait_for_rect(
+        &mut hp,
+        "test.left",
+        Rect::new(left.x, left.y, left.width + 100, left.height),
+    )?;
+    assert_eq!(hp.mode(left_id), Mode::Floating, "it left its zone");
+    assert_eq!(rect_of(&hp, "test.right"), Some(Zone::Right.rect(AREA)));
+    assert_eq!(
+        hp.mode(right_id),
+        Mode::Snapped(Zone::Right),
+        "the other stays"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_seams_handle_resizes_both_windows() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let (left_id, right_id) = snapped_pair(&mut hp)?;
+    // A few pixels off the pill still take it.
+    let (x, y) = seam_centre();
+    let (x, y) = (x + 5.0, y + 20.0);
+    hp.pointer_move(x, y);
+    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    hp.button(BTN_LEFT, true);
+    hp.pointer_move(x + 100.0, y);
+    hp.button(BTN_LEFT, false);
+    let left = Zone::Left.rect(AREA);
     let wider = Rect::new(left.x, left.y, left.width + 100, left.height);
     wait_for_rect(&mut hp, "test.left", wider)?;
     let right = Zone::Right.rect(AREA);
@@ -142,6 +197,40 @@ fn a_snapped_pair_resizes_together() -> anyhow::Result<()> {
             right.height,
         ),
     )?;
+    assert_eq!(hp.mode(left_id), Mode::Snapped(Zone::Left));
+    assert_eq!(hp.mode(right_id), Mode::Snapped(Zone::Right));
+    Ok(())
+}
+
+#[test]
+fn the_handle_shows_near_a_snapped_pairs_seam_only_and_then_rests() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    // One snapped window alone: no seam, no handle, its own edge.
+    open(&mut hp, "test.left", (400, 300))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
+    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(AREA))?;
+    let (x, y) = seam_centre();
+    hp.pointer_move(x, y);
+    assert!(hp.state().seam_handle.is_none(), "no pair, no handle");
+    // With its pair: near the seam, anywhere along it, the handle shows.
+    open(&mut hp, "test.right", (400, 300))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
+    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(AREA))?;
+    hp.pointer_move(x + 10.0, 200.0);
+    let (seam, _) = hp.state().seam_handle.expect("the handle shows");
+    assert!(seam.vertical);
+    assert_eq!(
+        hp.state().frame_cursor,
+        None,
+        "over the window: the client's"
+    );
+    // Away: it fades, and nothing more is drawn once it has.
+    hp.pointer_move(300.0, 300.0);
+    wait(&mut hp, Duration::from_millis(700))?;
+    assert!(hp.state().seam_handle.is_none(), "faded");
+    let frames = hp.frames();
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.frames(), frames, "no frame at rest");
     Ok(())
 }
 

@@ -41,7 +41,7 @@ use crate::{
     State,
     cursor::CursorElement,
     decoration::{
-        self, FramePiece, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element,
+        self, FramePiece, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element, handle_element,
         preview_elements, rim_elements, shadow_elements,
     },
     model::{Mode, WindowId},
@@ -447,6 +447,29 @@ impl State {
                     .into_iter()
                     .map(OutputElements::Frame),
             );
+        }
+        // The handle of a snapped pair's seam, where the pair is now.
+        let handle = self.seam_handle.and_then(|(seam, handle)| {
+            let live = self.live_seam(seam.first, seam.second)?;
+            Some((live, handle.alpha(now)))
+        });
+        if let Some((seam, alpha)) = handle {
+            let (x, y) = seam.centre();
+            if area.to_f64().contains((x, y)) {
+                let centre = Point::from((x, y)) - origin;
+                elements.extend(
+                    handle_element(
+                        renderer,
+                        &self.textures,
+                        &self.seam_handle_id,
+                        centre,
+                        seam.vertical,
+                        scale,
+                        alpha,
+                    )
+                    .map(OutputElements::Frame),
+                );
+            }
         }
         // Windows leaving, from their last frame.
         for leaving in self.leaving.iter().rev() {

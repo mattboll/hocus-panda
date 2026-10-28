@@ -301,6 +301,9 @@ pub struct ResizeGrab {
     /// Snapped neighbours that follow, with their edges that do and their
     /// geometry at the start.
     partners: Vec<(WindowId, Edges, Rect)>,
+    /// A snapped window resized alone from an edge it shares with a
+    /// neighbour leaves its zone once its size changes (§8).
+    floats: bool,
     last: Rect,
 }
 
@@ -325,6 +328,10 @@ impl PointerGrab<State> for ResizeGrab {
             return;
         }
         self.last = rect;
+        if self.floats {
+            self.floats = false;
+            state.model.unsnap(self.id);
+        }
         state.configure(self.id, rect);
         for (id, follow, initial) in &self.partners {
             state.configure(*id, model::follow(*initial, *follow, rect));
@@ -459,7 +466,8 @@ impl State {
         self.redraw = true;
     }
 
-    /// Starts resizing window `id` from `edges`.
+    /// Starts resizing window `id` from `edges`, alone: snapped, from an
+    /// edge it shares with a neighbour, it floats (§8).
     pub fn start_resize(
         &mut self,
         id: WindowId,
@@ -467,6 +475,24 @@ impl State {
         button: u32,
         start_data: Option<GrabStartData<State>>,
         serial: Serial,
+    ) {
+        self.resize(id, edges, button, start_data, serial, false);
+    }
+
+    /// Starts resizing snapped window `id` from `edges` with the snapped
+    /// neighbours across them following: the handle of a seam (§8).
+    pub fn start_pair_resize(&mut self, id: WindowId, edges: Edges, button: u32, serial: Serial) {
+        self.resize(id, edges, button, None, serial, true);
+    }
+
+    fn resize(
+        &mut self,
+        id: WindowId,
+        edges: Edges,
+        button: u32,
+        start_data: Option<GrabStartData<State>>,
+        serial: Serial,
+        together: bool,
     ) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -481,7 +507,8 @@ impl State {
         if mode == Mode::Fullscreen || !edges.any() {
             return;
         }
-        // A snapped neighbour across a moved edge follows it (§8).
+        // A snapped neighbour across a moved edge follows it when the
+        // handle moves it; from the edge, the window leaves the pair (§8).
         let mut partners = Vec::new();
         if let Mode::Snapped(zone) = mode {
             if zone == Zone::Maximized {
@@ -505,6 +532,12 @@ impl State {
                     }
                 }
             }
+        }
+        let floats = !together && !partners.is_empty();
+        if floats {
+            partners.clear();
+            // The handle goes with the pair.
+            self.seam_handle = None;
         }
         let (min, max) = crate::windows::size_limits(&window);
         let min = (min.0.max(MIN_SIZE.0), min.1.max(MIN_SIZE.1));
@@ -541,6 +574,7 @@ impl State {
             min,
             max,
             partners,
+            floats,
             last: initial,
         };
         self.frame_cursor = Some(edges.cursor());
