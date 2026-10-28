@@ -30,6 +30,16 @@ pub enum Action {
     Snap(Snap),
     /// Focuses the window on that side.
     FocusToward(i32, i32),
+    /// Alt+Tab, or Alt+Shift+Tab (§11).
+    SwitchWindows { backward: bool },
+    /// The desktop on that side, of the screen under the pointer (§12).
+    DesktopBy(i32),
+    /// That desktop (from 0).
+    Desktop(usize),
+    /// Sends the focused window to that desktop.
+    SendToDesktop(usize),
+    /// And goes there with it.
+    TakeToDesktop(usize),
 }
 
 /// Modifiers and a key, as `Super+Shift+E`. The key is the one of the
@@ -115,100 +125,114 @@ impl FromStr for Chord {
     }
 }
 
-/// The `[shortcuts]` section: every shortcut of the desktop, in one place.
-/// An empty string turns one off.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
-pub struct Shortcuts {
-    #[serde(deserialize_with = "chord")]
-    pub terminal: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub log_out: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub close: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub minimize: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub unminimize: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub snap_left: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub snap_right: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub maximize: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub restore: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub quarter_up: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub quarter_down: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub quarter_left: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub quarter_right: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub focus_left: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub focus_right: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub focus_up: Option<Chord>,
-    #[serde(deserialize_with = "chord")]
-    pub focus_down: Option<Chord>,
+/// The `[shortcuts]` section: every shortcut of the desktop, in one place,
+/// with its default and its action. An empty string turns one off.
+macro_rules! shortcuts {
+    ($($field:ident: $default:expr => $action:expr,)*) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+        #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+        pub struct Shortcuts {
+            $(
+                #[serde(deserialize_with = "chord")]
+                pub $field: Option<Chord>,
+            )*
+        }
+
+        impl Default for Shortcuts {
+            fn default() -> Self {
+                let chord = |text: &str| text.parse().ok();
+                Self {
+                    $($field: chord($default),)*
+                }
+            }
+        }
+
+        impl Shortcuts {
+            /// Every shortcut and its action, in the file's order.
+            pub fn all(&self) -> Vec<(Option<Chord>, Action)> {
+                vec![$((self.$field, $action),)*]
+            }
+        }
+    };
 }
 
-impl Default for Shortcuts {
-    fn default() -> Self {
-        let chord = |text: &str| text.parse().ok();
-        Self {
-            terminal: chord("Super+Return"),
-            log_out: chord("Super+Shift+E"),
-            close: chord("Super+Q"),
-            minimize: chord("Super+H"),
-            unminimize: chord("Super+Shift+H"),
-            snap_left: chord("Super+Left"),
-            snap_right: chord("Super+Right"),
-            maximize: chord("Super+Up"),
-            restore: chord("Super+Down"),
-            quarter_up: chord("Super+Shift+Up"),
-            quarter_down: chord("Super+Shift+Down"),
-            quarter_left: chord("Super+Shift+Left"),
-            quarter_right: chord("Super+Shift+Right"),
-            focus_left: chord("Super+Ctrl+Left"),
-            focus_right: chord("Super+Ctrl+Right"),
-            focus_up: chord("Super+Ctrl+Up"),
-            focus_down: chord("Super+Ctrl+Down"),
-        }
-    }
+shortcuts! {
+    terminal: "Super+Return" => Action::Terminal,
+    log_out: "Super+Shift+E" => Action::LogOut,
+    close: "Super+Q" => Action::Close,
+    minimize: "Super+H" => Action::Minimize,
+    unminimize: "Super+Shift+H" => Action::Unminimize,
+    snap_left: "Super+Left" => Action::Snap(Snap::Half(Side::Start)),
+    snap_right: "Super+Right" => Action::Snap(Snap::Half(Side::End)),
+    maximize: "Super+Up" => Action::Snap(Snap::Maximize),
+    restore: "Super+Down" => Action::Snap(Snap::Restore),
+    quarter_up: "Super+Shift+Up" => Action::Snap(Snap::QuarterTop),
+    quarter_down: "Super+Shift+Down" => Action::Snap(Snap::QuarterBottom),
+    quarter_left: "Super+Shift+Left" => Action::Snap(Snap::QuarterLeft),
+    quarter_right: "Super+Shift+Right" => Action::Snap(Snap::QuarterRight),
+    focus_left: "" => Action::FocusToward(-1, 0),
+    focus_right: "" => Action::FocusToward(1, 0),
+    focus_up: "" => Action::FocusToward(0, -1),
+    focus_down: "" => Action::FocusToward(0, 1),
+    switch_windows: "Alt+Tab" => Action::SwitchWindows { backward: false },
+    switch_windows_backward: "Alt+Shift+Tab" => Action::SwitchWindows { backward: true },
+    desktop_left: "Super+Ctrl+Left" => Action::DesktopBy(-1),
+    desktop_right: "Super+Ctrl+Right" => Action::DesktopBy(1),
+    desktop_1: "Super+1" => Action::Desktop(0),
+    desktop_2: "Super+2" => Action::Desktop(1),
+    desktop_3: "Super+3" => Action::Desktop(2),
+    desktop_4: "Super+4" => Action::Desktop(3),
+    desktop_5: "Super+5" => Action::Desktop(4),
+    desktop_6: "Super+6" => Action::Desktop(5),
+    desktop_7: "Super+7" => Action::Desktop(6),
+    desktop_8: "Super+8" => Action::Desktop(7),
+    desktop_9: "Super+9" => Action::Desktop(8),
+    send_to_desktop_1: "Super+Shift+1" => Action::SendToDesktop(0),
+    send_to_desktop_2: "Super+Shift+2" => Action::SendToDesktop(1),
+    send_to_desktop_3: "Super+Shift+3" => Action::SendToDesktop(2),
+    send_to_desktop_4: "Super+Shift+4" => Action::SendToDesktop(3),
+    send_to_desktop_5: "Super+Shift+5" => Action::SendToDesktop(4),
+    send_to_desktop_6: "Super+Shift+6" => Action::SendToDesktop(5),
+    send_to_desktop_7: "Super+Shift+7" => Action::SendToDesktop(6),
+    send_to_desktop_8: "Super+Shift+8" => Action::SendToDesktop(7),
+    send_to_desktop_9: "Super+Shift+9" => Action::SendToDesktop(8),
+    take_to_desktop_1: "Super+Ctrl+Shift+1" => Action::TakeToDesktop(0),
+    take_to_desktop_2: "Super+Ctrl+Shift+2" => Action::TakeToDesktop(1),
+    take_to_desktop_3: "Super+Ctrl+Shift+3" => Action::TakeToDesktop(2),
+    take_to_desktop_4: "Super+Ctrl+Shift+4" => Action::TakeToDesktop(3),
+    take_to_desktop_5: "Super+Ctrl+Shift+5" => Action::TakeToDesktop(4),
+    take_to_desktop_6: "Super+Ctrl+Shift+6" => Action::TakeToDesktop(5),
+    take_to_desktop_7: "Super+Ctrl+Shift+7" => Action::TakeToDesktop(6),
+    take_to_desktop_8: "Super+Ctrl+Shift+8" => Action::TakeToDesktop(7),
+    take_to_desktop_9: "Super+Ctrl+Shift+9" => Action::TakeToDesktop(8),
 }
 
 impl Shortcuts {
-    /// The action of what is pressed, if it is a shortcut.
+    /// The action of what is pressed, if it is a shortcut. Nested,
+    /// Alt+Tab takes `Super` too, as every other shortcut: the host keeps
+    /// its own Alt+Tab.
     pub fn action(&self, mods: &ModifiersState, key: Keysym, nested: bool) -> Option<Action> {
-        [
-            (self.terminal, Action::Terminal),
-            (self.log_out, Action::LogOut),
-            (self.close, Action::Close),
-            (self.minimize, Action::Minimize),
-            (self.unminimize, Action::Unminimize),
-            (self.snap_left, Action::Snap(Snap::Half(Side::Start))),
-            (self.snap_right, Action::Snap(Snap::Half(Side::End))),
-            (self.maximize, Action::Snap(Snap::Maximize)),
-            (self.restore, Action::Snap(Snap::Restore)),
-            (self.quarter_up, Action::Snap(Snap::QuarterTop)),
-            (self.quarter_down, Action::Snap(Snap::QuarterBottom)),
-            (self.quarter_left, Action::Snap(Snap::QuarterLeft)),
-            (self.quarter_right, Action::Snap(Snap::QuarterRight)),
-            (self.focus_left, Action::FocusToward(-1, 0)),
-            (self.focus_right, Action::FocusToward(1, 0)),
-            (self.focus_up, Action::FocusToward(0, -1)),
-            (self.focus_down, Action::FocusToward(0, 1)),
-        ]
-        .into_iter()
-        .find_map(|(chord, action)| {
-            chord
-                .filter(|c| c.matches(mods, key, nested))
-                .map(|_| action)
+        self.all().into_iter().find_map(|(chord, action)| {
+            let mut chord = chord?;
+            if nested && matches!(action, Action::SwitchWindows { .. }) && chord.alt {
+                chord.logo = true;
+            }
+            chord.matches(mods, key, nested).then_some(action)
         })
+    }
+
+    /// The chord that opened the switcher, as it is held (nested, with
+    /// `Super`).
+    pub fn switcher_chord(&self, backward: bool, nested: bool) -> Option<Chord> {
+        let mut chord = if backward {
+            self.switch_windows_backward
+        } else {
+            self.switch_windows
+        }?;
+        if nested && chord.alt {
+            chord.logo = true;
+        }
+        Some(chord)
     }
 }
 
@@ -249,6 +273,20 @@ impl State {
             Action::Unminimize => self.unminimize_last(),
             Action::Snap(snap) => self.keyboard_snap(snap),
             Action::FocusToward(dx, dy) => self.focus_toward(dx, dy),
+            Action::SwitchWindows { backward } => {
+                if let Some(chord) = self.config.shortcuts.switcher_chord(backward, self.nested) {
+                    let hold = crate::switcher::Hold {
+                        alt: chord.alt,
+                        logo: chord.logo,
+                        ctrl: chord.ctrl,
+                    };
+                    self.open_switcher(backward, hold, chord.key);
+                }
+            }
+            Action::DesktopBy(delta) => self.switch_desktop_by(delta),
+            Action::Desktop(to) => self.switch_desktop_to(to),
+            Action::SendToDesktop(to) => self.send_to_desktop(to, false),
+            Action::TakeToDesktop(to) => self.send_to_desktop(to, true),
         }
     }
 
@@ -332,6 +370,36 @@ mod tests {
         assert_eq!(
             action(mods(false, false, false, false), Keysym::Return),
             None
+        );
+        // Super+Ctrl+arrows switch desktops; focusing by side has no
+        // default (the maintainer's decision on #323).
+        assert_eq!(
+            action(mods(true, false, true, false), Keysym::Right),
+            Some(Action::DesktopBy(1))
+        );
+        assert_eq!(shortcuts.focus_left, None);
+        assert_eq!(
+            action(mods(true, true, false, false), Keysym::_3),
+            Some(Action::SendToDesktop(2))
+        );
+        assert_eq!(
+            action(mods(true, true, true, false), Keysym::_2),
+            Some(Action::TakeToDesktop(1))
+        );
+        assert_eq!(
+            action(mods(false, false, false, true), Keysym::Tab),
+            Some(Action::SwitchWindows { backward: false })
+        );
+        assert_eq!(
+            action(mods(false, true, false, true), Keysym::Tab),
+            Some(Action::SwitchWindows { backward: true })
+        );
+        // Nested, Alt+Tab is the host's: Alt+Super+Tab is the desktop's.
+        let nested = |m, k| shortcuts.action(&m, k, true);
+        assert_eq!(nested(mods(false, false, false, true), Keysym::Tab), None);
+        assert_eq!(
+            nested(mods(true, false, false, true), Keysym::Tab),
+            Some(Action::SwitchWindows { backward: false })
         );
     }
 }

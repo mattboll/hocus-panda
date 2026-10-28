@@ -18,6 +18,8 @@ impl Bezier {
     /// CSS's `ease-out`, to arrive.
     pub const EASE_OUT: Self = Self(0.0, 0.0, 0.58, 1.0);
     pub const LINEAR: Self = Self(0.0, 0.0, 1.0, 1.0);
+    /// The desktops' strip: fast away, landing softly (§12).
+    pub const STRIP: Self = Self(0.22, 0.9, 0.3, 1.0);
 
     fn axis(p1: f64, p2: f64, t: f64) -> f64 {
         let u = 1.0 - t;
@@ -117,6 +119,17 @@ pub const PREVIEW: Duration = Duration::from_millis(120);
 /// The pointer stays this long in a zone before its preview shows.
 pub const PREVIEW_DELAY: Duration = Duration::from_millis(80);
 
+/// The desktops' strip slides in this time (§12).
+pub const DESKTOP_SLIDE: Duration = Duration::from_millis(320);
+/// Alt+Tab (§11): held this long, its panel shows; it appears and
+/// vanishes in these times, scaling from this much; its selection's ring
+/// moves in this time.
+pub const SWITCHER_DELAY: Duration = Duration::from_millis(100);
+pub const SWITCHER_IN: Duration = Duration::from_millis(150);
+pub const SWITCHER_OUT: Duration = Duration::from_millis(100);
+pub const SWITCHER_RING: Duration = Duration::from_millis(120);
+pub const SWITCHER_SCALE: f64 = 0.96;
+
 /// Where an opening window starts, and where a closing one goes.
 pub const OPEN_SCALE: f64 = 0.94;
 pub const CLOSE_SCALE: f64 = 0.97;
@@ -132,6 +145,7 @@ mod tests {
             Bezier::EASE_IN,
             Bezier::EASE_OUT,
             Bezier::LINEAR,
+            Bezier::STRIP,
         ] {
             assert_eq!(curve.at(0.0), 0.0);
             assert_eq!(curve.at(1.0), 1.0);

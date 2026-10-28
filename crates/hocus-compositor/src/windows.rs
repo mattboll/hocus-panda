@@ -56,8 +56,12 @@ pub struct Managed {
     pub grip: Grip,
     /// Where it was before it went fullscreen.
     pub before_fullscreen: Mode,
-    /// Where it was when minimised (global).
-    pub minimized_at: Option<Rect>,
+    /// Where it is while it does not show (minimised, or on a desktop out
+    /// of sight), global: where it comes back.
+    pub away: Option<Rect>,
+    /// Going to another desktop: drawn as if on this place of the strip
+    /// (in desktops), moving to its desktop's (§12).
+    pub travel: Option<(f64, Tween)>,
 }
 
 /// A resize under way, or ending.
@@ -147,7 +151,8 @@ impl Managed {
             resizing: None,
             grip: Grip::Hidden,
             before_fullscreen: Mode::Floating,
-            minimized_at: None,
+            away: None,
+            travel: None,
         }
     }
 
@@ -303,10 +308,16 @@ impl State {
         self.space.element_geometry(&managed.window).map(rect_of)
     }
 
+    /// Where the window is, shown or not: where it comes back to when it
+    /// does not show.
+    pub fn home_rect(&self, id: WindowId) -> Option<Rect> {
+        self.rect_of(id).or_else(|| self.windows.get(&id)?.away)
+    }
+
     /// Where the window is going: its place, and the size asked of it.
     pub fn target_rect(&self, id: WindowId) -> Option<Rect> {
         let managed = self.windows.get(&id)?;
-        let mut rect = self.rect_of(id)?;
+        let mut rect = self.home_rect(id)?;
         if let Some(size) = managed.requested {
             rect.width = size.w;
             rect.height = size.h;
@@ -316,9 +327,7 @@ impl State {
 
     /// The output a window is on: the one under its centre, or the first.
     pub fn output_of(&self, id: WindowId) -> Option<Output> {
-        let rect = self
-            .rect_of(id)
-            .or_else(|| self.windows.get(&id)?.minimized_at)?;
+        let rect = self.home_rect(id)?;
         let (cx, cy) = rect.centre();
         self.space
             .outputs()
@@ -382,7 +391,12 @@ impl State {
             let _ = x11.set_maximized(mode == Mode::Snapped(Zone::Maximized));
             let _ = x11.set_fullscreen(mode == Mode::Fullscreen);
         }
-        if !resizing {
+        if !self.model.is_shown(id) {
+            // Out of sight: it comes back there.
+            if let Some(managed) = self.windows.get_mut(&id) {
+                managed.away = Some(rect);
+            }
+        } else if !resizing {
             self.space.map_element(window, (rect.x, rect.y), false);
         }
         self.redraw = true;
@@ -423,6 +437,9 @@ impl State {
         } else {
             self.model.add_below_focus()
         };
+        // On the desktop its screen shows.
+        let desktop = self.strip(&output).current();
+        self.model.set_desktop(id, desktop);
         let now = self.now();
         let mut managed = Managed::new(window.clone());
         let duration = if self.reduced_motion() {
@@ -534,6 +551,8 @@ impl State {
             self.model.remember_size(&app, (rect.width, rect.height));
         }
         self.end_popup_grab_of(id);
+        self.switcher_forget(id);
+        self.overlay.forget(id);
         self.windows.remove(&id);
         self.pictures.remove(&id);
         self.space.unmap_elem(window);
@@ -582,6 +601,9 @@ impl State {
     /// Its picture leaves: closing (shrinking a little and fading), or
     /// minimised (toward the bar's place).
     fn leave(&mut self, id: WindowId, minimizing: bool) {
+        if !self.model.is_shown(id) {
+            return;
+        }
         let now = self.now();
         let Some(picture) = self.picture_of(id) else {
             return;
@@ -814,7 +836,7 @@ impl State {
         let Some(managed) = self.windows.get_mut(&id) else {
             return;
         };
-        managed.minimized_at = Some(rect);
+        managed.away = Some(rect);
         managed.settle = None;
         let window = managed.window.clone();
         if let Some(toplevel) = window.toplevel() {
@@ -839,18 +861,22 @@ impl State {
         self.redraw = true;
     }
 
-    /// A minimised window comes back where it was, focused.
+    /// A minimised window comes back where it was, focused; on a desktop
+    /// out of sight, it waits there.
     pub fn unminimize(&mut self, id: WindowId) {
         if !self.model.is_minimized(id) {
             return;
         }
         self.model.unminimize(id);
+        if !self.model.is_shown(id) {
+            return;
+        }
         let now = self.now();
         let reduced = self.reduced_motion();
         let Some(managed) = self.windows.get_mut(&id) else {
             return;
         };
-        let rect = managed.minimized_at.take().unwrap_or_default();
+        let rect = managed.away.take().unwrap_or_default();
         let window = managed.window.clone();
         managed.opening = Some(Tween::new(
             now,
@@ -1017,6 +1043,13 @@ impl State {
                     moving = true;
                 }
             }
+            if let Some((_, t)) = managed.travel {
+                if t.done(now) {
+                    managed.travel = None;
+                } else {
+                    moving = true;
+                }
+            }
             let (grip_moving, grip_next) = managed.grip.moving(now);
             moving |= grip_moving;
             if let Some(at) = grip_next {
@@ -1036,6 +1069,10 @@ impl State {
                 self.seam_handle = None;
             }
         }
+        for strip in self.strips.values_mut() {
+            moving |= strip.tick(now);
+        }
+        moving |= self.tick_switcher(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();
         if let Some(preview) = &self.preview {
@@ -1189,8 +1226,7 @@ impl State {
     /// rim pulses once.
     pub fn activate(&mut self, id: WindowId, allowed: bool) {
         if allowed {
-            self.unminimize(id);
-            self.focus(Some(id));
+            self.bring(id);
         } else if self.model.focused() != Some(id) {
             let now = self.now();
             if let Some(managed) = self.windows.get_mut(&id) {

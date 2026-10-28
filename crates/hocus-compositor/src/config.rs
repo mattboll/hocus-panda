@@ -22,6 +22,7 @@ pub struct Config {
     pub shortcuts: Shortcuts,
     pub programs: Programs,
     pub appearance: Appearance,
+    pub desktops: Desktops,
     /// The system's keyboard (`/etc/default/keyboard`), used when
     /// `[keyboard] layouts` is empty. Not part of the file: the program
     /// reads it once at start.
@@ -37,6 +38,34 @@ pub struct Appearance {
     pub reduced_motion: bool,
     /// The focused window's rim is 2 px wide instead of 1.
     pub high_contrast: bool,
+}
+
+/// Virtual desktops, `[desktops]` (docs/design/windows.md §12).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Desktops {
+    /// Desktops on each screen, from 1 to 9.
+    #[serde(deserialize_with = "desktop_count")]
+    pub count: usize,
+}
+
+impl Default for Desktops {
+    fn default() -> Self {
+        Self {
+            count: crate::desktops::DEFAULT_COUNT,
+        }
+    }
+}
+
+fn desktop_count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
+    let count = usize::deserialize(deserializer)?;
+    if (1..=crate::desktops::MAX_COUNT).contains(&count) {
+        Ok(count)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "{count} desktops: from 1 to 9"
+        )))
+    }
 }
 
 /// One screen's settings, `[outputs.eDP-1]`.
@@ -338,6 +367,18 @@ mod tests {
         // A shortcut that does not read refuses the file, as any mistake.
         assert!(toml::from_str::<Config>("[shortcuts]\nterminal = \"Hyper+T\"\n").is_err());
         assert!(toml::from_str::<Config>("[shortcuts]\nlaunch = \"Super+D\"\n").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn desktops_are_from_1_to_9() -> anyhow::Result<()> {
+        assert_eq!(Config::default().desktops.count, 4);
+        let six: Config = toml::from_str("[desktops]\ncount = 6\n")?;
+        assert_eq!(six.desktops.count, 6);
+        for bad in ["count = 0", "count = 10", "count = -1", "number = 3"] {
+            let text = format!("[desktops]\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
         Ok(())
     }
 

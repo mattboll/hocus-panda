@@ -57,12 +57,15 @@ use crate::{
     App, Config,
     cursor::CursorImages,
     decoration::Textures,
+    desktops::Strip,
     model::{self, Model, Rect, WindowId},
     motion::Tween,
+    overlay::Overlay,
     popups::PopupGrab,
     programs::Programs,
     shortcuts::Ending,
     snapshot::{Grabber, Snapshot},
+    switcher::Switcher,
     windows::{Leaving, Managed, Preview, rect_of},
     wobble::Jelly,
 };
@@ -154,6 +157,15 @@ pub struct State {
     pub cursor_images: CursorImages,
     /// Something changed on screen since the last frame.
     pub redraw: bool,
+    /// Each screen's desktops, by output name (§12).
+    pub strips: HashMap<String, Strip>,
+    /// The screen whose strip follows three fingers on the touchpad.
+    pub swiping: Option<Output>,
+    /// Alt+Tab, while it is held, and its panel vanishing (§11).
+    pub switcher: Option<Switcher>,
+    pub switcher_out: Option<(Switcher, Tween)>,
+    /// What draws the switcher, the desktops' dots and their text.
+    pub overlay: Overlay,
 
     /// The X11 window manager once XWayland is ready, and its display.
     pub xwm: Option<X11Wm>,
@@ -214,6 +226,7 @@ impl State {
             .context("could not set up the keyboard")?;
         }
         seat.add_pointer();
+        crate::overlay::load_font(&loop_handle);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
 
         Ok(Self {
@@ -273,6 +286,11 @@ impl State {
             cursor: CursorImageStatus::default_named(),
             cursor_images: CursorImages::default(),
             redraw: true,
+            strips: HashMap::new(),
+            swiping: None,
+            switcher: None,
+            switcher_out: None,
+            overlay: Overlay::new(),
             xwm: None,
             xdisplay: None,
             programs: Programs::default(),

@@ -195,6 +195,83 @@ impl Headless {
         self.app.state.key(Keycode::new(code + 8), state, time);
     }
 
+    /// Every window, shown or not, bottom first: its id, app id, desktop
+    /// (from 0), and whether it shows.
+    pub fn all_windows(&self) -> Vec<(WindowId, Option<String>, usize, bool)> {
+        let state = &self.app.state;
+        state
+            .model
+            .stack()
+            .iter()
+            .filter_map(|id| {
+                let window = &state.windows.get(id)?.window;
+                Some((
+                    *id,
+                    crate::windows::app_id(window),
+                    state.model.desktop(*id),
+                    state.model.is_shown(*id),
+                ))
+            })
+            .collect()
+    }
+
+    /// The desktop the first output shows (from 0), and where its strip is.
+    pub fn desktop(&self) -> (usize, f64) {
+        let state = &self.app.state;
+        let Some(output) = state.space.outputs().next() else {
+            return (0, 0.0);
+        };
+        let strip = state.strip(output);
+        (strip.current(), strip.position(state.now()))
+    }
+
+    /// Alt+Tab while held: its windows in order, the selected one, and
+    /// whether its panel shows.
+    pub fn switcher(&self) -> Option<(Vec<WindowId>, usize, bool)> {
+        let state = &self.app.state;
+        let switcher = state.switcher.as_ref()?;
+        Some((
+            switcher.items.iter().map(|i| i.0).collect(),
+            switcher.selected,
+            switcher.shown(state.now()),
+        ))
+    }
+
+    /// The centre of Alt+Tab's item `at`, global, once its panel shows.
+    pub fn switcher_item(&self, at: usize) -> Option<(f64, f64)> {
+        let state = &self.app.state;
+        let switcher = state.switcher.as_ref()?;
+        let origin = state.space.output_geometry(&switcher.output)?.loc;
+        let (_, items) = state.switcher_layout(switcher)?;
+        let (x, y) = items.get(at)?.item.centre();
+        Some((x + f64::from(origin.x), y + f64::from(origin.y)))
+    }
+
+    /// A touchpad's swipe with `fingers`, its moves `moves` milliseconds
+    /// apart, then lifted.
+    pub fn swipe(&mut self, fingers: u32, moves: &[(f64, f64)], every: u32) {
+        use crate::input::Gesture;
+        self.time += 10;
+        let time = self.time;
+        self.app
+            .state
+            .gesture(Gesture::SwipeBegin { time, fingers });
+        for &(dx, dy) in moves {
+            self.time += every;
+            let time = self.time;
+            self.app.state.gesture(Gesture::SwipeUpdate {
+                time,
+                delta: (dx, dy).into(),
+            });
+        }
+        self.time += every;
+        let time = self.time;
+        self.app.state.gesture(Gesture::SwipeEnd {
+            time,
+            cancelled: false,
+        });
+    }
+
     /// Why the compositor was asked to end, if it was.
     pub fn ending(&self) -> Option<crate::Ending> {
         self.app.state.ending

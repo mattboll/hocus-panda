@@ -26,6 +26,7 @@ use crate::{
     grabs::{BTN_LEFT, BTN_RIGHT},
     model::{self, Edges, Mode, Seam, WindowId},
     shortcuts::Action,
+    switcher::{SwitchKey, is_modifier, switch_key},
 };
 
 /// The top band of a window with no header where its grip shows (§7), and
@@ -48,6 +49,19 @@ enum Kept {
     Shortcut(Action),
     /// The release of a key whose press was kept.
     Release,
+    /// A key while Alt+Tab is held.
+    Switch(SwitchKey),
+}
+
+/// The digit of a key of the keyboard's top row, whatever the layout puts
+/// there: `Super+1` is the same key on every layout.
+fn digit_key(code: smithay::input::keyboard::Keycode) -> Option<Keysym> {
+    // XKB's keycodes are evdev's plus 8: KEY_1 is 2, KEY_0 is 11.
+    match code.raw() {
+        raw @ 10..=18 => Some(Keysym::new(Keysym::_1.raw() + raw - 10)),
+        19 => Some(Keysym::_0),
+        _ => None,
+    }
 }
 
 impl State {
@@ -116,6 +130,29 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let kept =
             keyboard.input::<Kept, _>(self, code, state, serial, time, |this, mods, keysym| {
+                if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key) {
+                    // Alt+Tab held: its keys are its own, the modifiers
+                    // go on to the application.
+                    let sym = keysym.modified_sym();
+                    if is_modifier(sym) {
+                        return FilterResult::Forward;
+                    }
+                    if state != KeyState::Pressed {
+                        return if this.kept_keys.remove(&code) {
+                            FilterResult::Intercept(Kept::Release)
+                        } else {
+                            FilterResult::Forward
+                        };
+                    }
+                    let key = keysym.raw_latin_sym_or_raw_current_sym().unwrap_or(sym);
+                    this.kept_keys.insert(code);
+                    return FilterResult::Intercept(Kept::Switch(switch_key(
+                        switcher_key,
+                        key,
+                        sym,
+                        mods.shift,
+                    )));
+                }
                 if state != KeyState::Pressed {
                     return if this.kept_keys.remove(&code) {
                         FilterResult::Intercept(Kept::Release)
@@ -133,9 +170,13 @@ impl State {
                 // The key of the layout's first level, Latin when the keyboard
                 // has a Latin layout: a shortcut stays on its key whatever the
                 // active layout.
+                let shortcuts = &this.config.shortcuts;
                 let action = keysym
                     .raw_latin_sym_or_raw_current_sym()
-                    .and_then(|key| this.config.shortcuts.action(mods, key, this.nested));
+                    .and_then(|key| shortcuts.action(mods, key, this.nested))
+                    .or_else(|| {
+                        digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
+                    });
                 if let Some(action) = action {
                     this.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Shortcut(action));
@@ -145,7 +186,13 @@ impl State {
         match kept {
             Some(Kept::Vt(vt)) => self.switch_vt(vt),
             Some(Kept::Shortcut(action)) => self.run_action(action),
+            Some(Kept::Switch(key)) => self.switcher_key(key),
             Some(Kept::Release) | None => {}
+        }
+        // Alt let go: Alt+Tab goes to its selection.
+        if self.switcher.is_some() {
+            let mods = keyboard.modifier_state();
+            self.switcher_modifiers(&mods);
         }
     }
 
@@ -359,6 +406,11 @@ impl State {
         if state == ButtonState::Released && self.kept_buttons.remove(&button) {
             return;
         }
+        // Alt+Tab's panel takes the click.
+        if state == ButtonState::Pressed && self.switcher_click(at.x, at.y) {
+            self.kept_buttons.insert(button);
+            return;
+        }
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
             if self.dismiss_popups_at(at) {
                 self.kept_buttons.insert(button);
@@ -461,12 +513,27 @@ impl State {
         }
     }
 
-    /// A touchpad gesture, for the client under the pointer. The desktop's
-    /// own (three fingers to switch desktops) come with task 2.5.
-    fn gesture(&mut self, gesture: Gesture) {
+    /// A touchpad gesture: three fingers across move the desktops (§12);
+    /// the others go to the client under the pointer.
+    pub(crate) fn gesture(&mut self, gesture: Gesture) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        match gesture {
+            Gesture::SwipeBegin { fingers: 3, .. } if !pointer.is_grabbed() => {
+                self.desktop_swipe_begin();
+                return;
+            }
+            Gesture::SwipeUpdate { time, delta } if self.swiping.is_some() => {
+                self.desktop_swipe_update(delta.x, delta.y, time);
+                return;
+            }
+            Gesture::SwipeEnd { cancelled, .. } if self.swiping.is_some() => {
+                self.desktop_swipe_end(cancelled);
+                return;
+            }
+            _ => {}
+        }
         let serial = SERIAL_COUNTER.next_serial();
         match gesture {
             Gesture::SwipeBegin { time, fingers } => pointer.gesture_swipe_begin(
@@ -551,7 +618,8 @@ fn on_handle(seam: &Seam, at: Point<f64, Logical>) -> bool {
 }
 
 /// A touchpad gesture's step, as libinput gives it.
-enum Gesture {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Gesture {
     SwipeBegin {
         time: u32,
         fingers: u32,

@@ -41,8 +41,8 @@ use crate::{
     State,
     cursor::CursorElement,
     decoration::{
-        self, FramePiece, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element, handle_element,
-        preview_elements, rim_elements, shadow_elements,
+        self, FramePiece, Keyed, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element,
+        handle_element, preview_elements, rim_elements, shadow_elements,
     },
     model::{Mode, WindowId},
     motion::lerp,
@@ -69,6 +69,8 @@ render_elements! {
     Picture = Rounded<TextureRenderElement<<R as RendererSuper>::TextureId>>,
     /// A window wobbling.
     Bent = BentElement,
+    /// A window's live thumbnail in Alt+Tab's panel.
+    Thumbnail = Keyed<WindowSurface<R>>,
 }
 
 /// What an output shows, element by element.
@@ -104,6 +106,26 @@ pub(crate) struct Look {
     decorated: bool,
     shadow: ShadowStyle,
     own_shadow: bool,
+    /// Its corners' radius as drawn, when not the window's own scaled.
+    corner: Option<f64>,
+}
+
+impl Look {
+    /// A window drawn small at `visual` (global), its corners `corner`
+    /// round, without its frame.
+    pub(crate) fn thumbnail(visual: Rectangle<f64, Logical>, alpha: f32, corner: f64) -> Self {
+        Self {
+            visual,
+            alpha,
+            focus: 0.0,
+            pulse: 0.0,
+            grip: 0.0,
+            decorated: true,
+            shadow: ShadowStyle::UNFOCUSED,
+            own_shadow: true,
+            corner: Some(corner),
+        }
+    }
 }
 
 impl State {
@@ -151,12 +173,14 @@ impl State {
             decorated,
             shadow,
             own_shadow,
+            corner: None,
         })
     }
 
     /// The window's surfaces drawn into `look.visual`, output-local from
-    /// `origin` (global), front first: popups first.
-    fn window_parts<R>(
+    /// `origin` (global), front first: popups first. A window out of sight
+    /// is drawn from where it comes back.
+    pub(crate) fn window_parts<R>(
         &self,
         renderer: &mut R,
         id: WindowId,
@@ -172,9 +196,10 @@ impl State {
             return;
         };
         let window = &managed.window;
-        let Some(loc) = self.space.element_location(window) else {
+        let Some(home) = self.home_rect(id) else {
             return;
         };
+        let loc = Point::<i32, Logical>::from((home.x, home.y));
         let geometry = window.geometry();
         let actual = Rectangle::new(loc, geometry.size).to_f64();
         let visual = look.visual;
@@ -193,7 +218,9 @@ impl State {
             (visual.loc - origin).to_physical_precise_round(scale),
             visual.size.to_physical_precise_round(scale),
         );
-        let radius = if look.decorated {
+        let radius = if let Some(corner) = look.corner {
+            (corner * scale).round() as i32
+        } else if look.decorated {
             (decoration::RADIUS * scale * k.x.min(k.y)).round() as i32
         } else {
             0
@@ -394,9 +421,11 @@ impl State {
                 out.extend(surfaces.into_iter().map(OutputElements::Surface));
             }
         };
+        // The desktops' dots and Alt+Tab, over everything.
+        self.overlay_elements(renderer, output, now, &mut elements);
         layers(renderer, Layer::Overlay, &mut elements);
-        // The windows on this output, front first; a fullscreen one on top
-        // goes over the bars.
+        // The windows on this output, front first, where their desktop is
+        // on the strip; a fullscreen one on top goes over the bars.
         let looks: Vec<(WindowId, Look)> = self
             .model
             .stack()
@@ -404,7 +433,13 @@ impl State {
             .rev()
             .copied()
             .filter(|id| !self.model.is_minimized(*id))
-            .filter_map(|id| Some((id, self.look(id, now)?)))
+            .filter_map(|id| {
+                let (offset, alpha) = self.strip_offset(id, now)?;
+                let mut look = self.look(id, now)?;
+                look.visual.loc.x += offset;
+                look.alpha *= alpha;
+                Some((id, look))
+            })
             .filter(|(_, look)| {
                 let reach = 2.0 * ShadowStyle::MOVING.blur;
                 let around = Rectangle::new(
