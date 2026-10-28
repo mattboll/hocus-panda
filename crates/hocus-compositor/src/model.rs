@@ -653,8 +653,6 @@ pub struct Model {
     focused: Option<WindowId>,
     next: u64,
     placements: BTreeMap<WindowId, Placement>,
-    /// Minimised windows, the most recent last.
-    minimized: Vec<WindowId>,
     /// Every window, the most recently focused first: Alt+Tab's order
     /// (§11).
     recent: Vec<WindowId>,
@@ -695,7 +693,6 @@ impl Model {
     pub fn remove(&mut self, id: WindowId) {
         self.stack.retain(|w| *w != id);
         self.placements.remove(&id);
-        self.minimized.retain(|w| *w != id);
         self.recent.retain(|w| *w != id);
         if self.focused == Some(id) {
             self.focused = self.top_shown();
@@ -824,8 +821,6 @@ impl Model {
             return;
         };
         p.minimized = true;
-        self.minimized.retain(|w| *w != id);
-        self.minimized.push(id);
         if self.focused == Some(id) {
             self.focused = self.top_shown();
         }
@@ -836,12 +831,6 @@ impl Model {
         if let Some(p) = self.placements.get_mut(&id) {
             p.minimized = false;
         }
-        self.minimized.retain(|w| *w != id);
-    }
-
-    /// The window minimised last.
-    pub fn last_minimized(&self) -> Option<WindowId> {
-        self.minimized.last().copied()
     }
 
     /// Remembers an application's size.
@@ -1130,7 +1119,7 @@ mod tests {
     }
 
     #[test]
-    fn minimised_windows_leave_the_focus_and_come_back_last_first() {
+    fn minimised_windows_leave_the_focus() {
         let mut model = Model::default();
         let a = model.add();
         let b = model.add();
@@ -1139,9 +1128,8 @@ mod tests {
         assert_eq!(model.focused(), Some(a));
         model.minimize(a);
         assert_eq!(model.focused(), None);
-        assert_eq!(model.last_minimized(), Some(a));
         model.unminimize(a);
-        assert_eq!(model.last_minimized(), Some(b));
+        assert!(!model.is_minimized(a) && model.is_minimized(b));
     }
 
     #[test]

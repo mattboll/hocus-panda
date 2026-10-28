@@ -38,10 +38,8 @@
 # log-out = "Super+Shift+E"
 # Asks the focused window to close (the application may ask first).
 # close = "Super+Q"
-# Minimises the focused window, and brings back the one minimised last
-# (Alt+Tab lists every minimised window too).
+# Minimises the focused window; Alt+Tab brings it back.
 # minimize = "Super+H"
-# unminimize = "Super+Shift+H"
 # The left or right half; again, the other side.
 # snap-left = "Super+Left"
 # snap-right = "Super+Right"

@@ -24,8 +24,6 @@ pub enum Action {
     Close,
     /// Minimises the focused window.
     Minimize,
-    /// Brings back the window minimised last.
-    Unminimize,
     /// The keys of windows.md §9 on the focused window.
     Snap(Snap),
     /// Focuses the window on that side.
@@ -161,7 +159,6 @@ shortcuts! {
     log_out: "Super+Shift+E" => Action::LogOut,
     close: "Super+Q" => Action::Close,
     minimize: "Super+H" => Action::Minimize,
-    unminimize: "Super+Shift+H" => Action::Unminimize,
     snap_left: "Super+Left" => Action::Snap(Snap::Half(Side::Start)),
     snap_right: "Super+Right" => Action::Snap(Snap::Half(Side::End)),
     maximize: "Super+Up" => Action::Snap(Snap::Maximize),
@@ -270,7 +267,6 @@ impl State {
                     self.minimize(id);
                 }
             }
-            Action::Unminimize => self.unminimize_last(),
             Action::Snap(snap) => self.keyboard_snap(snap),
             Action::FocusToward(dx, dy) => self.focus_toward(dx, dy),
             Action::SwitchWindows { backward } => {

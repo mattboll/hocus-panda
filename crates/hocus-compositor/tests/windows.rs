@@ -8,8 +8,8 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, Command, Event, KEY_DOWN, KEY_H, KEY_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT,
-    KEY_UP, WAIT, chord, compositor, open, open_with, rect_of, wait, wait_for_rect,
+    BTN_LEFT, Command, Event, KEY_DOWN, KEY_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP,
+    WAIT, chord, compositor, open, open_with, rect_of, wait, wait_for_rect,
 };
 use hocus_compositor::model::{GAP, Mode, Rect, WindowId, Zone};
 use smithay::input::pointer::CursorIcon;
@@ -40,12 +40,6 @@ fn the_keys_snap_to_halves_quarters_maximise_restore_and_minimise() -> anyhow::R
     chord(&mut hp, &[KEY_LEFTMETA, KEY_DOWN]);
     assert_eq!(hp.minimized(), 1);
     assert!(rect_of(&hp, "test.keys").is_none(), "not shown");
-    // Super+Shift+H brings it back, focused.
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_H]);
-    assert_eq!(hp.minimized(), 0);
-    let window = &hp.windows()[0];
-    assert_eq!(window.rect, floating);
-    assert!(window.focused && window.keyboard);
     Ok(())
 }
 
