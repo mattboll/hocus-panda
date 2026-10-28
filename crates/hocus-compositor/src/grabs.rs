@@ -142,6 +142,7 @@ enum Hold {
     Snapped {
         along: f64,
         down: f64,
+        height: i32,
     },
 }
 
@@ -172,7 +173,12 @@ impl PointerGrab<State> for MoveGrab {
         };
         let pointer = event.location;
         let delta = pointer - self.from;
-        if let Hold::Snapped { along, down } = self.hold {
+        if let Hold::Snapped {
+            along,
+            down,
+            height,
+        } = self.hold
+        {
             if delta.x.hypot(delta.y) < TEAR_OFF {
                 return;
             }
@@ -185,7 +191,7 @@ impl PointerGrab<State> for MoveGrab {
             let (x, y) = model::torn_off(
                 (restore.width, restore.height),
                 along,
-                down,
+                (down, height),
                 pointer.x,
                 pointer.y,
             );
@@ -420,6 +426,7 @@ impl State {
             Mode::Snapped(_) => Hold::Snapped {
                 along: (at.x - f64::from(rect.x)) / f64::from(rect.width.max(1)),
                 down: at.y - f64::from(rect.y),
+                height: rect.height,
             },
             Mode::Floating | Mode::Fullscreen => Hold::Free,
         };

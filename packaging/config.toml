@@ -36,12 +36,39 @@
 # terminal = "Super+Return"
 # Logs out: the session ends and the display manager comes back.
 # log-out = "Super+Shift+E"
+# Asks the focused window to close (the application may ask first).
+# close = "Super+Q"
+# Minimises the focused window, and brings back the one minimised last.
+# minimize = "Super+H"
+# unminimize = "Super+Shift+H"
+# The left or right half; again, the other side.
+# snap-left = "Super+Left"
+# snap-right = "Super+Right"
+# Maximises; restores, and on a window already floating, minimises.
+# maximize = "Super+Up"
+# restore = "Super+Down"
+# The quarter on that side, keeping the window's other side.
+# quarter-up = "Super+Shift+Up"
+# quarter-down = "Super+Shift+Down"
+# quarter-left = "Super+Shift+Left"
+# quarter-right = "Super+Shift+Right"
+# Focuses the window on that side.
+# focus-left = "Super+Ctrl+Left"
+# focus-right = "Super+Ctrl+Right"
+# focus-up = "Super+Ctrl+Up"
+# focus-down = "Super+Ctrl+Down"
 #
-# Fixed for now: Super and a drag moves a window; Ctrl+Alt+F1 to F12
-# switch to another virtual terminal.
+# Fixed for now: Super and a drag moves a window, Super and a right-drag
+# resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
 
 # [programs]
 # The terminal's command, run through sh -c, for example "foot" or
 # "kitty --single-instance". Empty: the first of kitty, foot, alacritty
 # and xterm found in PATH.
 # terminal = ""
+
+# [appearance]
+# Windows fade instead of moving, and do not wobble.
+# reduced-motion = false
+# The focused window's rim is 2 px wide instead of 1.
+# high-contrast = false

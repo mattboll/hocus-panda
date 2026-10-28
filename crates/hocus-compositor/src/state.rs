@@ -120,6 +120,8 @@ pub struct State {
     /// The user started a program through the desktop then: its window
     /// takes the focus.
     pub spawned_at: Option<Duration>,
+    /// Windows not mapped yet that asked for the focus with a valid token.
+    pub activate_on_map: Vec<WlSurface>,
     /// What draws windows' frames, and their pictures as they leave.
     pub textures: Textures,
     pub grabber: Grabber,
@@ -247,6 +249,7 @@ impl State {
             unmapped: Vec::new(),
             activation_tokens: HashMap::new(),
             spawned_at: None,
+            activate_on_map: Vec::new(),
             textures: Textures::default(),
             grabber: Grabber::default(),
             pictures: HashMap::new(),

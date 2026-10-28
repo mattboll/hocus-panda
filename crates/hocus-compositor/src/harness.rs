@@ -138,6 +138,26 @@ impl Headless {
             .collect()
     }
 
+    /// How many windows are minimised.
+    pub fn minimized(&self) -> usize {
+        let state = &self.app.state;
+        state
+            .windows
+            .keys()
+            .filter(|id| state.model.is_minimized(**id))
+            .count()
+    }
+
+    /// The window `id`'s placement: floating, snapped or fullscreen.
+    pub fn mode(&self, id: WindowId) -> crate::model::Mode {
+        self.app.state.model.mode(id)
+    }
+
+    /// Whether the keyboard is on a surface that is no window: a menu.
+    pub fn keyboard_on_popup(&self) -> bool {
+        self.app.state.popup_focus().is_some()
+    }
+
     /// The work area of the first output.
     pub fn work_area(&self) -> Option<Rect> {
         let state = &self.app.state;

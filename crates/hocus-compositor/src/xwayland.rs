@@ -9,7 +9,7 @@ use smithay::{
     xwayland::{X11Wm, XWayland, XWaylandEvent},
 };
 
-use crate::{App, State, programs::Env};
+use crate::{App, State};
 
 /// Spawns XWayland on the next free display. Without the `Xwayland`
 /// program, X11 applications just do not start.
@@ -27,7 +27,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
         Ok(spawned) => spawned,
         Err(err) => {
             tracing::warn!(%err, "XWayland not started: X11 applications will not run");
-            state.programs.ready(&Env::of(state));
+            state.programs_ready();
             return;
         }
     };
@@ -49,11 +49,10 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
             },
             XWaylandEvent::Error => tracing::warn!("XWayland stopped while starting"),
         }
-        let env = Env::of(&app.state);
-        app.state.programs.ready(&env);
+        app.state.programs_ready();
     });
     if let Err(err) = inserted {
         tracing::warn!(err = %err.error, "could not watch XWayland");
-        state.programs.ready(&Env::of(state));
+        state.programs_ready();
     }
 }
