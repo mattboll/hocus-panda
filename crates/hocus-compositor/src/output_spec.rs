@@ -145,11 +145,15 @@ impl FromStr for OutputSpec {
     }
 }
 
-/// Pixels per inch for each unit of a screen's default scale. Scale 1 is
-/// drawn for about 96 dpi, but the screens of 92 to 110 dpi most desks have
-/// (a 24-inch 1920x1080, a 27-inch 2560x1440) read well at 1; a scale is
-/// taken once a screen is clearly denser than those.
-const DPI_PER_SCALE: f64 = 112.0;
+/// The density above which a screen takes scale 2 by itself, in dpi.
+/// Scale 1 is drawn for about 96 dpi; a screen up to twice that reads
+/// well at 1, and a fractional scale chosen for it would blur the
+/// applications that cannot draw at one (X11 ones). Fractions are a
+/// choice the configuration makes, never the automatic one.
+const SCALE_2_ABOVE_DPI: f64 = 192.0;
+/// The smallest logical size, long side by short side, a screen keeps at
+/// scale 2: a smaller one would not hold a usual application at 2.
+const SMALLEST_LOGICAL_AT_2: (i32, i32) = (1280, 800);
 /// The smallest diagonal believed, in millimetres (about 8 inches): below
 /// it, a TV or projector gave its aspect ratio or a placeholder, not its
 /// size.
@@ -165,7 +169,7 @@ const SHAPE_TOLERANCE: f64 = 1.15;
 /// per inch along its diagonal; `None` when it gave no size, or one that
 /// cannot be its own: under 8 inches across, denser than any screen, or of
 /// another shape than its pixels (projectors, some TVs).
-fn density(pixels: (i32, i32), millimetres: (i32, i32)) -> Option<f64> {
+pub fn density(pixels: (i32, i32), millimetres: (i32, i32)) -> Option<f64> {
     let (w, h) = (f64::from(pixels.0), f64::from(pixels.1));
     let (w_mm, h_mm) = (f64::from(millimetres.0), f64::from(millimetres.1));
     if w <= 0.0 || h <= 0.0 || w_mm <= 0.0 || h_mm <= 0.0 {
@@ -186,13 +190,18 @@ fn density(pixels: (i32, i32), millimetres: (i32, i32)) -> Option<f64> {
     (dpi <= DENSEST).then_some(dpi)
 }
 
-/// The scale a screen takes when nothing sets one: a unit per 112 dpi of
-/// its density, to the nearest quarter, from 1 to 3; 1 when its size is
-/// unknown or not believed.
+/// The scale a screen takes when nothing sets one: 2 when it is denser
+/// than 192 dpi and still at least 1280x800 logical at 2, else 1; 1 when
+/// its size is unknown or not believed.
 pub fn default_scale(pixels: (i32, i32), millimetres: (i32, i32)) -> f64 {
-    density(pixels, millimetres).map_or(1.0, |dpi| {
-        ((dpi / DPI_PER_SCALE * 4.0).round() / 4.0).clamp(1.0, 3.0)
-    })
+    let large_enough_at_2 = {
+        let (long, short) = (pixels.0.max(pixels.1), pixels.0.min(pixels.1));
+        long / 2 >= SMALLEST_LOGICAL_AT_2.0 && short / 2 >= SMALLEST_LOGICAL_AT_2.1
+    };
+    match density(pixels, millimetres) {
+        Some(dpi) if dpi > SCALE_2_ABOVE_DPI && large_enough_at_2 => 2.0,
+        _ => 1.0,
+    }
 }
 
 #[cfg(test)]
@@ -253,23 +262,34 @@ mod tests {
     }
 
     #[test]
-    fn a_screens_default_scale_follows_its_density() {
+    fn a_screens_default_scale_is_1_or_2_by_its_density() {
         let cases = [
-            // A 16-inch laptop, about 192 dpi.
-            ((2560, 1600), (340, 210), 1.75),
-            // A 24-inch 1920x1080, about 92 dpi.
-            ((1920, 1080), (530, 300), 1.0),
+            // A 16-inch 2560x1600, about 192 dpi: not denser than 192.
+            ((2560, 1600), (340, 210), 1.0),
+            // A 15.6-inch 4K, about 287 dpi, 1920x1080 at 2.
+            ((3840, 2160), (340, 190), 2.0),
+            // A 15.6-inch 1920x1080, about 143 dpi.
+            ((1920, 1080), (340, 190), 1.0),
+            // A 34-inch 3440x1440, about 109 dpi.
+            ((3440, 1440), (800, 335), 1.0),
+            // A 13.4-inch 2560x1600, about 225 dpi, 1280x800 at 2.
+            ((2560, 1600), (290, 180), 2.0),
+            // The same turned a quarter.
+            ((1600, 2560), (180, 290), 2.0),
             // 27-inch screens: 2560x1440 (109 dpi), 4K (163), 5K (218).
             ((2560, 1440), (597, 336), 1.0),
-            ((3840, 2160), (597, 336), 1.5),
+            ((3840, 2160), (597, 336), 1.0),
             ((5120, 2880), (597, 336), 2.0),
-            // A 14-inch 2880x1800, about 243 dpi.
-            ((2880, 1800), (301, 188), 2.25),
-            // A 9-inch panel of about 500 dpi: no more than 3.
-            ((3840, 2400), (196, 123), 3.0),
-            // No size, or a projector's aspect ratio for one.
+            // Dense but small: 1280x720 at 2.
+            ((2560, 1440), (300, 170), 1.0),
+            // No size, a projector's aspect ratio for one, a size of
+            // another shape, or one denser than any screen.
             ((1920, 1080), (0, 0), 1.0),
+            ((2560, 1600), (0, 0), 1.0),
             ((1920, 1080), (16, 9), 1.0),
+            ((3840, 2160), (340, 340), 1.0),
+            ((3840, 2400), (60, 37), 1.0),
+            ((3840, 2400), (130, 81), 1.0),
         ];
         for (pixels, mm, want) in cases {
             assert_eq!(default_scale(pixels, mm), want, "{pixels:?} on {mm:?} mm");

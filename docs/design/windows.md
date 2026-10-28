@@ -368,7 +368,12 @@ string turns one off. The package ships every setting with its default
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
 `[outputs.NAME] scale` per screen by connector name (`eDP-1`; the
-journal names each screen as it lights), the density's scale otherwise.
+journal names each screen as it lights, with its density), from 0.5 to
+4. Otherwise a screen takes 1, or 2 when it is denser than 192 dpi and
+stays at least 1280×800 logical at 2; never a fraction by itself, which
+would blur the applications that cannot draw at one (X11 ones). A screen
+without a believable size (none, a projector's, an impossible density)
+takes 1.
 
 `[appearance]` holds `reduced-motion` (windows fade instead of moving,
 and do not wobble; desktops cross-fade) and `high-contrast` (the focused

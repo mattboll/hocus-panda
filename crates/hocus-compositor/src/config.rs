@@ -95,7 +95,8 @@ fn desktop_count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D:
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OutputSettings {
-    /// From 0.5 to 4. None: the scale of its density.
+    /// From 0.5 to 4. None: 1 or 2 by its density
+    /// (`output_spec::default_scale`).
     #[serde(deserialize_with = "scale")]
     pub scale: Option<f64>,
 }
@@ -116,13 +117,30 @@ fn scale<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::E
 pub enum ScaleFrom {
     /// `[outputs.NAME] scale`.
     Config,
-    /// Its density, `output_spec::default_scale`.
-    Density,
+    /// 1 or 2 by its density, `output_spec::default_scale`; the density in
+    /// whole dpi, rounded down, when its size is believed.
+    Automatic { dpi: Option<u32> },
+}
+
+impl ScaleFrom {
+    /// In words, after the scale in the journal, for a user looking for the
+    /// name to put in the configuration.
+    pub fn describe(self, name: &str) -> String {
+        match self {
+            Self::Config => format!("(from [outputs.{name}] in config.toml)"),
+            Self::Automatic { dpi } => {
+                let density = dpi.map_or_else(|| "size unknown".to_owned(), |d| format!("{d} dpi"));
+                format!(
+                    "(automatic: {density}) — [outputs.{name}] scale = ... in config.toml sets it"
+                )
+            }
+        }
+    }
 }
 
 impl Config {
     /// The scale of the screen on connector `name`: the configured one, or
-    /// the one of its density.
+    /// 1 or 2 by its density.
     pub fn output_scale(
         &self,
         name: &str,
@@ -133,7 +151,11 @@ impl Config {
             Some(scale) => (scale, ScaleFrom::Config),
             None => (
                 crate::output_spec::default_scale(pixels, millimetres),
-                ScaleFrom::Density,
+                ScaleFrom::Automatic {
+                    dpi: crate::output_spec::density(pixels, millimetres)
+                        // Down: a screen shown at 191 dpi or less never takes 2 by itself.
+                        .map(|dpi| dpi.floor() as u32),
+                },
             ),
         }
     }
@@ -408,7 +430,7 @@ mod tests {
     #[test]
     fn a_screens_scale_is_the_configured_one_or_its_densitys() -> anyhow::Result<()> {
         let config: Config = toml::from_str("[outputs.eDP-1]\nscale = 1\n")?;
-        // 2560×1600 on 340×210 mm: 1.75 by its density.
+        // 2560×1600 on 340×210 mm: 191.9 dpi, 1 by itself.
         let panel = ((2560, 1600), (340, 210));
         assert_eq!(
             config.output_scale("eDP-1", panel.0, panel.1),
@@ -416,7 +438,27 @@ mod tests {
         );
         assert_eq!(
             config.output_scale("DP-2", panel.0, panel.1),
-            (1.75, ScaleFrom::Density)
+            (1.0, ScaleFrom::Automatic { dpi: Some(191) })
+        );
+        assert_eq!(
+            config.output_scale("DP-2", (3840, 2160), (340, 190)),
+            (2.0, ScaleFrom::Automatic { dpi: Some(287) })
+        );
+        assert_eq!(
+            config.output_scale("HDMI-A-1", (1920, 1080), (0, 0)),
+            (1.0, ScaleFrom::Automatic { dpi: None })
+        );
+        assert_eq!(
+            ScaleFrom::Automatic { dpi: Some(191) }.describe("eDP-1"),
+            "(automatic: 191 dpi) — [outputs.eDP-1] scale = ... in config.toml sets it"
+        );
+        assert_eq!(
+            ScaleFrom::Automatic { dpi: None }.describe("HDMI-A-1"),
+            "(automatic: size unknown) — [outputs.HDMI-A-1] scale = ... in config.toml sets it"
+        );
+        assert_eq!(
+            ScaleFrom::Config.describe("eDP-1"),
+            "(from [outputs.eDP-1] in config.toml)"
         );
         let fractional: Config = toml::from_str("[outputs.\"DP-2\"]\nscale = 1.25\n")?;
         assert_eq!(fractional.outputs["DP-2"].scale, Some(1.25));
