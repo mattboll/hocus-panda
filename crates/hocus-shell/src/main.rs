@@ -2,31 +2,38 @@
 //! wlr-layer-shell client of the compositor, which starts it and restarts
 //! it when it ends.
 //!
-//! So far the bar is its empty column (§2, §3, §13): a glass tint and a rim
-//! against the right edge of each output the compositor names, in its full
-//! or its mini form. The compositor blurs what is behind it; the shell
-//! draws the tint over that blur, or an opaque background when there is no
-//! blur. The line between the two is `hocus-link`.
+//! So far the bar is its column (§2, §3, §13) and its clock (§4 group 1,
+//! §5): a glass tint and a rim against the right edge of each output the
+//! compositor names, in its full or its mini form, and the time at its top.
+//! The compositor blurs what is behind it; the shell draws the tint over
+//! that blur, or an opaque background when there is no blur. The line
+//! between the two is `hocus-link`.
 //!
 //! Each bar's surface is the bar itself, 8 px from the screen's edges: as
 //! wide as its form, and as the full form while a switch is under way, so
 //! that the bar has room to move. The compositor takes the clicks on the
-//! bar's edge, which switch the form.
+//! bar's edge, which switch the form. The clock has a small surface of its
+//! own over the bar's top ([`clock`]): it draws every second, and iced
+//! presents a surface whole, so that only its region is drawn again.
 
+mod clock;
 mod renderer;
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     process::ExitCode,
     time::{Duration, Instant},
 };
 
-use hocus_link::{EDGE, Form, NAMESPACE, RADIUS, ToCompositor, ToShell};
+use hocus_link::{
+    CLOCK_NAMESPACE, ClockLook, EDGE, Form, NAMESPACE, RADIUS, ToCompositor, ToShell,
+};
 use iced::{
-    Background, Border, Color, Element, Length, Subscription, Task, Theme,
+    Background, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme,
     futures::{SinkExt, StreamExt, channel::mpsc},
     gradient,
-    widget::{Space, container, row, space},
+    widget::{Space, canvas, container, row, space},
     window,
 };
 use iced_layershell::{
@@ -75,7 +82,7 @@ fn main() -> ExitCode {
         );
     }
     let started = iced_layershell::daemon(
-        move || Shell::new(link.clone(), software),
+        move || Shell::new(link.clone(), software, clock_shift()),
         || NAMESPACE.to_owned(),
         Shell::update,
         Shell::view,
@@ -85,6 +92,7 @@ fn main() -> ExitCode {
     .subscription(Shell::subscription)
     .settings(Settings {
         antialiasing: true,
+        fonts: clock::FONTS.iter().map(|f| Cow::Borrowed(*f)).collect(),
         layer_settings: LayerShellSettings {
             start_mode: StartMode::Background,
             ..LayerShellSettings::default()
@@ -113,6 +121,15 @@ fn theme(_: &Shell, _: window::Id) -> Option<Theme> {
     Some(Theme::Dark)
 }
 
+/// `HOCUS_CLOCK_AT`: the time the clock reads as the shell starts, for
+/// recordings and tests (bar.md, as built); the system's clock is never
+/// touched.
+fn clock_shift() -> Option<String> {
+    let at = std::env::var("HOCUS_CLOCK_AT").ok()?;
+    tracing::info!(at, "the clock reads a time of its own");
+    Some(at)
+}
+
 /// How bars look, as the compositor says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Look {
@@ -131,6 +148,11 @@ struct Bar {
     switch: Option<(f64, Instant)>,
     /// Its surface's width, as last asked for.
     surface: u32,
+    /// Its surface's height, once known.
+    height: f32,
+    /// Its clock's surface, and its size as last asked for.
+    clock: window::Id,
+    clock_surface: (u32, u32),
 }
 
 impl Bar {
@@ -141,6 +163,15 @@ impl Bar {
                 hocus_link::width_at(from, self.form, at.saturating_duration_since(since)) as f32
             }
             None => self.form.width() as f32,
+        }
+    }
+
+    /// The clock's surface's size: its form's, the full one's while the
+    /// form switches.
+    fn clock_size(&self) -> (u32, u32) {
+        match (self.switch, self.form) {
+            (Some(_), _) | (None, Form::Full) => clock::FULL_SURFACE,
+            (None, Form::Mini) => clock::MINI_SURFACE,
         }
     }
 
@@ -172,6 +203,9 @@ struct Shell {
     look: Look,
     bars: HashMap<window::Id, Bar>,
     now: Instant,
+    clock: clock::Style,
+    wall: clock::time::Wall,
+    lang: clock::time::Lang,
 }
 
 #[to_layer_message(multi)]
@@ -181,10 +215,23 @@ enum Message {
     FromCompositor(String),
     Unlinked,
     Frame,
+    /// The system's time zone changed.
+    Zone(jiff::tz::TimeZone),
+    Resized(window::Id, Size),
 }
 
 impl Shell {
-    fn new(socket: Option<String>, software: bool) -> (Self, Task<Message>) {
+    fn new(socket: Option<String>, software: bool, at: Option<String>) -> (Self, Task<Message>) {
+        let zone = clock::time::system_zone();
+        let shift = at
+            .and_then(|at| {
+                let shift = clock::time::Wall::shift_to(&at, &zone);
+                if shift.is_none() {
+                    tracing::warn!(at, "HOCUS_CLOCK_AT: a date and time, or a time, expected");
+                }
+                shift
+            })
+            .unwrap_or_default();
         let mut shell = Self {
             socket: socket.clone(),
             to_compositor: None,
@@ -195,6 +242,9 @@ impl Shell {
             },
             bars: HashMap::new(),
             now: Instant::now(),
+            clock: clock_style(&ClockLook::default()),
+            wall: clock::time::Wall { zone, shift },
+            lang: clock::time::Lang::from_env(),
         };
         // Alone: one full bar where the compositor puts it.
         let task = if socket.is_none() {
@@ -215,6 +265,8 @@ impl Shell {
         if self.bars.values().any(|b| b.switch.is_some()) {
             subscriptions.push(window::frames().map(|_| Message::Frame));
         }
+        subscriptions.push(Subscription::run(zone_changes));
+        subscriptions.push(window::resize_events().map(|(id, size)| Message::Resized(id, size)));
         Subscription::batch(subscriptions)
     }
 
@@ -253,6 +305,17 @@ impl Shell {
                     .collect();
                 Task::batch(ended.into_iter().map(|id| self.fit(id)))
             }
+            Message::Zone(zone) => {
+                tracing::info!(zone = zone.iana_name(), "the time zone changed");
+                self.wall.zone = zone;
+                Task::none()
+            }
+            Message::Resized(id, size) => {
+                if let Some(bar) = self.bars.get_mut(&id) {
+                    bar.height = size.height;
+                }
+                Task::none()
+            }
             _ => Task::none(),
         }
     }
@@ -284,27 +347,39 @@ impl Shell {
                     .filter(|(_, b)| b.output == output)
                     .map(|(id, _)| *id)
                     .collect();
-                Task::batch(gone.into_iter().map(|id| {
-                    self.bars.remove(&id);
-                    Task::done(Message::RemoveWindow(id))
+                Task::batch(gone.into_iter().filter_map(|id| {
+                    let bar = self.bars.remove(&id)?;
+                    Some(Task::batch([
+                        Task::done(Message::RemoveWindow(bar.clock)),
+                        Task::done(Message::RemoveWindow(id)),
+                    ]))
                 }))
+            }
+            ToShell::Clock(look) => {
+                self.clock = clock_style(&look);
+                Task::none()
             }
         }
     }
 
     /// A bar's surface on `output`: against its right edge, its height
-    /// less the margins.
+    /// less the margins; and its clock's, over its top, opened after it so
+    /// that it is in front.
     fn open_bar(&mut self, option: OutputOption, output: String, form: Form) -> Task<Message> {
         tracing::info!(output, form = form.name(), "a bar");
-        let bar = Bar {
+        let mut bar = Bar {
             output,
             form,
             switch: None,
             surface: 0,
+            height: 0.0,
+            clock: window::Id::unique(),
+            clock_surface: (0, 0),
         };
-        let width = bar.surface_width();
+        bar.surface = bar.surface_width();
+        bar.clock_surface = bar.clock_size();
         let settings = NewLayerShellSettings {
-            size: Some((width, 0)),
+            size: Some((bar.surface, 0)),
             layer: Layer::Top,
             anchor: Anchor::Right | Anchor::Top | Anchor::Bottom,
             // The compositor keeps the bar's space itself, shell or not.
@@ -312,19 +387,27 @@ impl Shell {
             // Top, right, bottom, left.
             margin: Some((EDGE, EDGE, EDGE, 0)),
             keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option,
+            output_option: option.clone(),
             events_transparent: false,
             namespace: Some(NAMESPACE.to_owned()),
         };
         let (id, open) = Message::layershell_open(settings);
-        self.bars.insert(
-            id,
-            Bar {
-                surface: width,
-                ..bar
-            },
-        );
-        open
+        // Inside the rim; pointer events go through to the bar.
+        let clock = NewLayerShellSettings {
+            size: Some(bar.clock_surface),
+            layer: Layer::Top,
+            anchor: Anchor::Right | Anchor::Top,
+            exclusive_zone: Some(0),
+            margin: Some((EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0)),
+            keyboard_interactivity: KeyboardInteractivity::None,
+            output_option: option,
+            events_transparent: true,
+            namespace: Some(CLOCK_NAMESPACE.to_owned()),
+        };
+        let (clock_id, open_clock) = Message::layershell_open(clock);
+        bar.clock = clock_id;
+        self.bars.insert(id, bar);
+        open.chain(open_clock)
     }
 
     /// `form` for bar `id`, switching from where it is since `start`; at
@@ -352,25 +435,78 @@ impl Shell {
         self.fit(id)
     }
 
-    /// Bar `id`'s surface to the width it needs now, if it changed.
+    /// Bar `id`'s surface and its clock's to the sizes they need now, if
+    /// they changed.
     fn fit(&mut self, id: window::Id) -> Task<Message> {
         let Some(bar) = self.bars.get_mut(&id) else {
             return Task::none();
         };
+        let mut tasks = Vec::new();
         let width = bar.surface_width();
-        if bar.surface == width {
-            return Task::none();
+        if bar.surface != width {
+            bar.surface = width;
+            tasks.push(Task::done(Message::SizeChange {
+                id,
+                size: (width, 0),
+            }));
         }
-        bar.surface = width;
-        Task::done(Message::SizeChange {
-            id,
-            size: (width, 0),
-        })
+        let size = bar.clock_size();
+        if bar.clock_surface != size {
+            bar.clock_surface = size;
+            tasks.push(Task::done(Message::SizeChange {
+                id: bar.clock,
+                size,
+            }));
+        }
+        Task::batch(tasks)
+    }
+
+    /// The clock of the bar whose clock's surface is `id`.
+    fn clock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self.bars.values().find(|b| b.clock == id)?;
+        let at = self.now + AHEAD;
+        // The contents cross-fade over 120 ms, 60 ms into a switch (§3).
+        let forms = match bar.switch {
+            Some((_, since)) => {
+                let t = at.saturating_duration_since(since).as_secs_f32();
+                let new = ((t - 0.060) / 0.120).clamp(0.0, 1.0);
+                vec![(bar.form.other(), 1.0 - new), (bar.form, new)]
+            }
+            None => vec![(bar.form, 1.0)],
+        };
+        let (width, height) = bar.clock_surface;
+        let backdrop = (!self.look.glass).then(|| {
+            // The bar's gradient where the clock is, which changes by less
+            // than a level over the clock's height.
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = clock::SURFACE_TOP as f32 + height as f32 / 2.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = clock::Clock {
+            style: self.clock,
+            motion: self.look.motion,
+            wall: self.wall.clone(),
+            lang: self.lang,
+            forms: forms.into_iter().filter(|(_, a)| *a > 0.0).collect(),
+            bar_width: bar.width(at),
+            surface_width: width as f32,
+            backdrop,
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
     }
 
     fn view(&self, id: window::Id) -> Element<'_, Message> {
         let Some(bar) = self.bars.get(&id) else {
-            return Space::new().into();
+            return self.clock_view(id).unwrap_or_else(|| Space::new().into());
         };
         let width = bar.width(self.now + AHEAD);
         let (top, bottom) = if self.look.glass {
@@ -400,6 +536,73 @@ impl Shell {
             .height(Length::Fill)
             .into()
     }
+}
+
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
+}
+
+/// The clock's style for `look`: its family when it is installed, else
+/// the bundled Martian Mono.
+fn clock_style(look: &ClockLook) -> clock::Style {
+    let [r, g, b] = look.color;
+    clock::Style {
+        font: clock_font(&look.font),
+        color: Color::from_rgb8(r, g, b),
+        transition: look.transition,
+        seconds: look.seconds,
+    }
+}
+
+fn clock_font(family: &str) -> Font {
+    let default = Font::with_name(ClockLook::DEFAULT_FONT);
+    if family == ClockLook::DEFAULT_FONT {
+        return default;
+    }
+    let found = iced::advanced::graphics::text::font_system()
+        .write()
+        .ok()
+        .and_then(|mut system| {
+            system.raw().db().faces().find_map(|face| {
+                face.families
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(family))
+                    .map(|(name, _)| name.clone())
+            })
+        });
+    match found {
+        // iced names families with `&'static str`: one leaked name per
+        // family configured, which the compositor sends once a session.
+        Some(name) => Font::with_name(Box::leak(name.into_boxed_str())),
+        None => {
+            tracing::warn!(family, "the clock's font is not installed: Martian Mono");
+            default
+        }
+    }
+}
+
+/// The time zone, as it changes: a thread waits on the system's file.
+fn zone_changes() -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(4, async |output| {
+        let mut out = output.clone();
+        let started = std::thread::Builder::new()
+            .name("time zone".to_owned())
+            .spawn(move || {
+                clock::time::watch_zone(|zone| {
+                    !matches!(out.try_send(Message::Zone(zone)), Err(e) if e.is_disconnected())
+                });
+            });
+        if let Err(err) = started {
+            tracing::warn!(%err, "cannot watch the time zone");
+        }
+        drop(output);
+        std::future::pending::<()>().await;
+    })
 }
 
 /// The `Instant` of a time on `CLOCK_MONOTONIC` (microseconds), which is

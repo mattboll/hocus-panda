@@ -423,6 +423,16 @@ impl State {
         let layers = |renderer: &mut R, which: Layer, out: &mut Vec<OutputElement<R>>| {
             let map = layer_map_for_output(output);
             let on: Vec<_> = map.layers_on(which).rev().cloned().collect();
+            let bar = map
+                .layers()
+                .find(|l| l.namespace() == hocus_link::NAMESPACE)
+                .and_then(|l| map.layer_geometry(l))
+                .map(|g| {
+                    Rectangle::new(
+                        g.loc.to_physical_precise_round(scale),
+                        g.size.to_physical_precise_round(scale),
+                    )
+                });
             for layer in on {
                 let Some(geometry) = map.layer_geometry(&layer) else {
                     continue;
@@ -431,9 +441,18 @@ impl State {
                 let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                     AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, 1.0);
                 // The CPU renderer's buffers have no alpha: what the bar
-                // leaves out at its corners would show black.
-                if self.shell.software && layer.namespace() == hocus_link::NAMESPACE {
-                    let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
+                // leaves out at its corners would show black. The clock's
+                // surface is opaque too, and cut to the bar: the two change
+                // size in their own commits when the form switches.
+                let cut = match layer.namespace() {
+                    hocus_link::NAMESPACE => Some(Rectangle::new(
+                        loc,
+                        geometry.size.to_physical_precise_round(scale),
+                    )),
+                    hocus_link::CLOCK_NAMESPACE => bar,
+                    _ => None,
+                };
+                if let Some(clip) = cut.filter(|_| self.shell.software) {
                     let radius = (hocus_link::RADIUS * scale).round() as i32;
                     out.extend(surfaces.into_iter().map(|e| {
                         OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))

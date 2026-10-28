@@ -31,6 +31,22 @@
 # panel-form in its [outputs.NAME] section.
 # form = "auto"
 
+# [panel.clock]
+# The clock at the top of the bar. Its font: the bundled "Martian Mono",
+# or any installed family by name ("JetBrains Mono"); a family that is not
+# installed falls back to Martian Mono. Every digit sits in a cell as wide
+# as a "0", so that nothing shifts as the time changes.
+# font = "Martian Mono"
+# The colour of the hours and minutes, #RRGGBB.
+# color = "#EEF1F6"
+# What the digits do when the minute changes: "odometer" (the old digit
+# leaves upward, the new one comes from below), "roll" (the new one rises
+# into place), "flip" (a split-flap), "neon" (it flickers on) or "none".
+# Nothing moves with reduced motion, or when the bar draws on the CPU.
+# transition = "odometer"
+# The seconds beside the minutes, in the full form.
+# seconds = true
+
 # Screens, by connector name. Without a scale, a screen takes 1, or 2
 # when it is denser than 192 dpi and stays at least 1280x800 at 2 (a
 # 15.6-inch 4K panel); never a fraction by itself. The journal names

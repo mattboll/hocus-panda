@@ -223,9 +223,31 @@ impl Headless {
         self.app.state.panel.commits
     }
 
+    /// Commits of the clocks' surfaces so far.
+    pub fn clock_commits(&self) -> u64 {
+        self.app.state.panel.clock_commits
+    }
+
+    /// What output `index` (in the order given) drew over since the last
+    /// call, as one rectangle of its pixels; `None`: nothing.
+    pub fn take_damage(&mut self, index: usize) -> Option<Rect> {
+        let d = self.app.backend.headless_mut()?.take_damage(index)?;
+        Some(Rect::new(d.loc.x, d.loc.y, d.size.w, d.size.h))
+    }
+
+    /// The clocks' surfaces as the shell placed them: their screen, and
+    /// where they are (global).
+    pub fn clock_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::CLOCK_NAMESPACE)
+    }
+
     /// The bars' surfaces as the shell placed them: their screen, and
     /// where they are (global).
     pub fn bar_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::NAMESPACE)
+    }
+
+    fn layer_rects(&self, namespace: &str) -> Vec<(String, Rect)> {
         let state = &self.app.state;
         let mut surfaces = Vec::new();
         for output in state.space.outputs() {
@@ -234,7 +256,7 @@ impl Headless {
             };
             let map = smithay::desktop::layer_map_for_output(output);
             for layer in map.layers() {
-                if layer.namespace() != hocus_link::NAMESPACE {
+                if layer.namespace() != namespace {
                     continue;
                 }
                 if let Some(g) = map.layer_geometry(layer) {

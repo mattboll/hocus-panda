@@ -93,8 +93,10 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             continue;
         };
         drop(map);
-        if layer.namespace() == hocus_link::NAMESPACE {
-            state.panel.commits += 1;
+        match layer.namespace() {
+            hocus_link::NAMESPACE => state.panel.commits += 1,
+            hocus_link::CLOCK_NAMESPACE => state.panel.clock_commits += 1,
+            _ => {}
         }
         let before = state.work_area(&output);
         layer_map_for_output(&output).arrange();

@@ -56,6 +56,73 @@ pub struct Panel {
     /// The bar's form on every screen; `[outputs.NAME] panel-form` sets one
     /// screen's.
     pub form: FormChoice,
+    pub clock: Clock,
+}
+
+/// The bar's clock, `[panel.clock]` (bar.md §4 group 1, §5): sent to the
+/// shell as it connects.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Clock {
+    /// The family of the hours and minutes: the bundled Martian Mono, or
+    /// any installed family by name (the shell falls back to Martian Mono
+    /// when it is not installed).
+    #[serde(deserialize_with = "font_family")]
+    pub font: String,
+    /// `#RRGGBB` or `#RGB`.
+    #[serde(deserialize_with = "color")]
+    pub color: [u8; 3],
+    /// On a minute change.
+    #[serde(deserialize_with = "transition")]
+    pub transition: hocus_link::Transition,
+    /// The seconds beside the minutes, in the full form.
+    pub seconds: bool,
+}
+
+impl Default for Clock {
+    fn default() -> Self {
+        let look = hocus_link::ClockLook::default();
+        Self {
+            font: look.font,
+            color: look.color,
+            transition: look.transition,
+            seconds: look.seconds,
+        }
+    }
+}
+
+impl Clock {
+    pub fn look(&self) -> hocus_link::ClockLook {
+        hocus_link::ClockLook {
+            font: self.font.clone(),
+            color: self.color,
+            transition: self.transition,
+            seconds: self.seconds,
+        }
+    }
+}
+
+fn font_family<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let family = String::deserialize(deserializer)?;
+    // One line to the shell: no line breaks; spaces are kept.
+    let family = family.split_whitespace().collect::<Vec<_>>().join(" ");
+    if family.is_empty() {
+        Ok(hocus_link::ClockLook::DEFAULT_FONT.to_owned())
+    } else {
+        Ok(family)
+    }
+}
+
+fn color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[u8; 3], D::Error> {
+    hocus_link::parse_color(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+}
+
+fn transition<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<hocus_link::Transition, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(serde::de::Error::custom)
 }
 
 /// Which screens have a bar.
@@ -614,6 +681,43 @@ mod tests {
         config.keyboard.layouts.clear();
         config.system_keyboard = None;
         assert_eq!(config.xkb_names().layout, "");
+    }
+
+    #[test]
+    fn the_clock_takes_a_font_a_colour_a_transition_and_its_seconds() -> anyhow::Result<()> {
+        let clock = Config::default().panel.clock;
+        assert_eq!(
+            (clock.font.as_str(), clock.color, clock.seconds),
+            ("Martian Mono", [0xEE, 0xF1, 0xF6], true)
+        );
+        assert_eq!(clock.transition, hocus_link::Transition::Odometer);
+        let config: Config = toml::from_str(
+            "[panel.clock]\nfont = \"  JetBrains   Mono \"\ncolor = \"#3dffa2\"\n\
+             transition = \"flip\"\nseconds = false\n",
+        )?;
+        let clock = config.panel.clock;
+        assert_eq!(clock.font, "JetBrains Mono");
+        assert_eq!(clock.color, [0x3D, 0xFF, 0xA2]);
+        assert_eq!(clock.transition, hocus_link::Transition::Flip);
+        assert!(!clock.seconds);
+        // What the shell is told reads back the same.
+        let line = hocus_link::ToShell::Clock(clock.look()).to_string();
+        assert_eq!(
+            line.parse::<hocus_link::ToShell>(),
+            Ok(hocus_link::ToShell::Clock(clock.look()))
+        );
+        let empty: Config = toml::from_str("[panel.clock]\nfont = \"\"\n")?;
+        assert_eq!(empty.panel.clock.font, "Martian Mono");
+        for bad in [
+            "color = \"white\"",
+            "transition = \"spin\"",
+            "seconds = \"yes\"",
+            "size = 40",
+        ] {
+            let text = format!("[panel.clock]\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
+        Ok(())
     }
 
     /// The commented file the package ships lists every setting with its
