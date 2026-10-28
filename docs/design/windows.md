@@ -45,8 +45,11 @@ open on), agents' badges on windows (slice 3).
   token from the user's last key or click). Otherwise it does not steal
   the focus: it opens behind the focused window, and its rim pulses once
   in the accent (600 ms) so it is noticed.
-- Focus moves with Alt+Tab (section 11) and `Super+arrows` with `Ctrl`
-  (to the window on that side).
+- Focus moves with Alt+Tab (section 11) and the pointer. Focusing the
+  window on a side is an action of `[shortcuts]` (`focus-left`,
+  `focus-right`, `focus-up`, `focus-down`) with no default key:
+  `Super+Ctrl+←/→` switch desktops (section 12; the maintainer's decision
+  on #323).
 - The focused window's rim changes in 120 ms.
 
 ## 5. Opening and closing
@@ -170,6 +173,17 @@ Keyboard:
   (and to its desktop); `Esc` cancels; a click on a thumbnail switches.
 - The panel appears in 150 ms (fade and 96 % → 100 % scale) and vanishes
   in 100 ms. The selection's ring moves in 120 ms.
+- As built: a thumbnail fits in 220 × 150 px, its aspect kept, centred in
+  its item (236 px wide with its 8 px padding), the items 14 px apart on
+  one line, their titles lined up; the panel has 16 px of padding, an
+  18 px radius, a dark fill at 86 % with a 1 px white rim at 12 % and a
+  deep shadow, and shrinks as a whole when the windows do not fit the
+  screen. The selection is the accent at 18 % with a 2 px accent ring.
+  Titles are the application's, ellipsed; another desktop's number
+  follows in grey (`Firefox · 2`). Other desktops' and minimised windows
+  show at 60 %. `←`/`→` move the selection too, `Return` switches.
+- Nested, `Alt+Tab` is `Alt+Super+Tab`, so that the host keeps its own.
+- Reduced motion: the panel fades without scaling, the ring jumps.
 
 ## 12. Virtual desktops
 
@@ -177,6 +191,7 @@ Keyboard:
   (first build's decision, kept). 4 desktops by default (1 to 9).
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
   swipe on a touchpad (following the fingers), and later the bar's tiles.
+  Keys and swipes act on the screen under the pointer.
 - **Animation**: the desktops sit side by side, in their order, like one
   strip. Switching slides the strip: the outgoing desktop's windows move
   out on one side while the incoming one's move in from the other, in
@@ -184,9 +199,28 @@ Keyboard:
   windows never disappear, they travel. Going from 1 to 3 slides past 2.
   A swipe follows the fingers, then completes or springs back on release.
   (Changed after the maintainer compared it with their current desktop.)
+- As built: 24 px between desktops on the strip; a desktop's width of
+  strip per 360 units of finger travel (libinput's, a few millimetres
+  each); released past a quarter of a desktop, or on a flick (1.2
+  desktops a second), the swipe goes on to the next desktop, otherwise it
+  springs back, in the same 320 ms and curve; past the first and the last
+  desktop the strip barely follows. Three fingers going down, and four,
+  are left to applications.
+- **Which desktop shows**: while the strip moves (keys, swipe, a window
+  sent), dots at the top centre of the screen show the desktops: 8 px
+  high, 6 px apart, 18 px from the top, the current one 22 px wide in the
+  accent, the others 8 px in white at 35 %; the wide dot follows the
+  strip as it slides. They fade in and out in 300 ms around the motion
+  (the prototype's). The bar's tiles will show it at all times.
+- Reduced motion: the desktops cross-fade in 120 ms instead of sliding; a
+  swipe does not follow the fingers, the release decides.
 - `Super+Shift+1…4` sends the focused window to that desktop, without
-  switching; with `Ctrl` too, it follows it.
-- Empty desktops stay; their order is fixed (1 to 4).
+  switching: it travels along the strip toward its desktop's side in
+  320 ms (it fades with reduced motion), and the dots show. With `Ctrl`
+  too, it follows it: the window stays in place as the strip slides
+  under it. A window being dragged while desktops switch goes along.
+- Empty desktops stay; their order is fixed (1 to 4). `[desktops] count`
+  sets how many, from 1 to 9, on every screen.
 
 ## 13. Shortcuts
 
@@ -205,12 +239,17 @@ string turns one off. The package ships every setting with its default
 | `log-out` | `Super+Shift+E` | Ends the session at once; the display manager comes back |
 | `close` | `Super+Q` | Asks the focused window to close (§10) |
 | `minimize` | `Super+H` | Minimises the focused window (§10) |
-| `unminimize` | `Super+Shift+H` | Brings back the window minimised last, until Alt+Tab (§11) lists them |
+| `unminimize` | `Super+Shift+H` | Brings back the window minimised last; Alt+Tab (§11) lists every minimised window too |
 | `snap-left`, `snap-right` | `Super+←`, `Super+→` | Left or right half; again, the other side (§9) |
 | `maximize` | `Super+↑` | Maximises (§9) |
 | `restore` | `Super+↓` | Restores; on a floating window, minimises (§9) |
 | `quarter-up`, `quarter-down`, `quarter-left`, `quarter-right` | `Super+Shift+arrows` | The quarter on that side, keeping the window's other side (§9) |
-| `focus-left`, `focus-right`, `focus-up`, `focus-down` | `Super+Ctrl+arrows` | Focuses the window on that side (§4) |
+| `focus-left`, `focus-right`, `focus-up`, `focus-down` | none | Focuses the window on that side (§4) |
+| `switch-windows`, `switch-windows-backward` | `Alt+Tab`, `Alt+Shift+Tab` | The windows, most recently used first, while `Alt` is held (§11); nested, with `Super` too |
+| `desktop-left`, `desktop-right` | `Super+Ctrl+←`, `Super+Ctrl+→` | The desktop on that side (§12) |
+| `desktop-1` … `desktop-9` | `Super+1` … `Super+9` | That desktop (§12); the top row's keys, whatever the layout |
+| `send-to-desktop-1` … `send-to-desktop-9` | `Super+Shift+1` … | Sends the focused window there, staying here (§12) |
+| `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
@@ -218,8 +257,9 @@ without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
 journal names each screen as it lights), the density's scale otherwise.
 
 `[appearance]` holds `reduced-motion` (windows fade instead of moving,
-and do not wobble) and `high-contrast` (the focused rim 2 px wide), both
-off by default.
+and do not wobble; desktops cross-fade) and `high-contrast` (the focused
+rim 2 px wide), both off by default. `[desktops] count` is the number of
+desktops on each screen (4).
 
 Not configurable yet: `Super`+drag moves a window, `Super`+right-drag
 resizes it; `Ctrl+Alt+F1…F12` switch virtual terminals. The other sections' shortcuts join the table as
