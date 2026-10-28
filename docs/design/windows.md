@@ -68,7 +68,9 @@ open on), agents' badges on windows (slice 3).
 - While a window moves, it **wobbles**: a soft spring mesh (4×4 control
   points) where the grabbed point follows the pointer exactly and the far
   side lags, then settles in about 400 ms after the pointer stops.
-  Stiffness and damping are tuned once on the user's machine and fixed.
+  Stiffness and damping are tuned once on the user's machine and fixed,
+  with the user's current desktop's wobble as the reference to match or
+  beat (the prototype's was found a little less pleasant).
 - The shadow deepens while moving (blur 48 px, 50 %). No transparency.
 - With reduced motion: no wobble; the window moves rigidly.
 
@@ -82,8 +84,10 @@ maximises or restores. Open question 1 offers a thin title bar instead.
 
 ## 8. Resizing
 
-- Resize zones: an 8 px band outside each edge, 16×16 px squares at the
-  corners, with the matching resize cursors (`ew-resize`, `ns-resize`,
+- Resize zones on all four edges and all four corners (the prototype's
+  first version had only the bottom and right ones, and that was felt at
+  once): an 8 px band outside each edge, 16×16 px squares at the corners,
+  with the matching resize cursors (`ew-resize`, `ns-resize`,
   `nwse-resize`, `nesw-resize`).
 - `Super`+right-drag resizes from the nearest corner.
 - Live resize, respecting the application's minimum and maximum sizes.
