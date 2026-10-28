@@ -291,6 +291,29 @@ impl Headless {
         ))
     }
 
+    /// Where Alt+Tab's panel and item `at`'s title line are, global
+    /// (x, y, width, height), once its panel shows.
+    pub fn switcher_label(&self, at: usize) -> Option<[(f64, f64, f64, f64); 2]> {
+        let state = &self.app.state;
+        let switcher = state.switcher.as_ref()?;
+        let origin = state.space.output_geometry(&switcher.output)?.loc;
+        let (panel, items) = state.switcher_layout(switcher)?;
+        let global = |a: crate::switcher::Area| {
+            (
+                a.x + f64::from(origin.x),
+                a.y + f64::from(origin.y),
+                a.w,
+                a.h,
+            )
+        };
+        Some([global(panel), global(items.get(at)?.label)])
+    }
+
+    /// Whether the titles' font, read on a thread of its own, has come.
+    pub fn has_titles_font(&self) -> bool {
+        self.app.state.overlay.has_font()
+    }
+
     /// A touchpad's swipe with `fingers`, its moves `moves` milliseconds
     /// apart, then lifted.
     pub fn swipe(&mut self, fingers: u32, moves: &[(f64, f64)], every: u32) {

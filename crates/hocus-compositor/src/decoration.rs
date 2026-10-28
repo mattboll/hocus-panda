@@ -601,8 +601,7 @@ fn rim_texture(rgba: [u8; 4], width: f64, scale: f64) -> (MemoryRenderBuffer, i3
 
 /// The grip's pill, drawn whole, `size` logical pixels.
 fn pill_texture(size: (f64, f64), scale: f64) -> (MemoryRenderBuffer, i32) {
-    let w = (size.0 * scale).round().max(1.0);
-    let h = (size.1 * scale).round().max(1.0);
+    let (w, h) = pill_pixels(size, scale);
     let (nw, nh) = (w as usize, h as usize);
     let pixels: Vec<u8> = (0..nw * nh)
         .flat_map(|i| {
@@ -614,6 +613,15 @@ fn pill_texture(size: (f64, f64), scale: f64) -> (MemoryRenderBuffer, i32) {
         })
         .collect();
     (buffer(&pixels, nw as i32, nh as i32), 0)
+}
+
+/// A pill `size` logical pixels large drawn at `scale`: its texture's
+/// pixels, the part of it an element shows.
+fn pill_pixels(size: (f64, f64), scale: f64) -> (f64, f64) {
+    (
+        (size.0 * scale).round().max(1.0),
+        (size.1 * scale).round().max(1.0),
+    )
 }
 
 /// A square holding the preview's rounded box: its fill and its rim,
@@ -763,13 +771,14 @@ where
     .to_physical(scale)
     .to_i32_round::<i32>()
     .to_f64();
+    let all = Rectangle::from_size(pill_pixels(GRIP_SIZE, scale).into());
     let size = Size::<f64, Logical>::from(GRIP_SIZE).to_i32_round();
     MemoryRenderBufferRenderElement::from_buffer(
         renderer,
         at,
         &texture,
         (alpha < 1.0).then_some(alpha),
-        None,
+        Some(all),
         Some(size),
         Kind::Unspecified,
     )
@@ -806,13 +815,14 @@ where
         .to_physical(scale)
         .to_i32_round::<i32>()
         .to_f64();
+    let all = Rectangle::from_size(pill_pixels(size, scale).into());
     let size = Size::<f64, Logical>::from(size).to_i32_round();
     MemoryRenderBufferRenderElement::from_buffer(
         renderer,
         at,
         &texture,
         (alpha < 1.0).then_some(alpha),
-        None,
+        Some(all),
         Some(size),
         Kind::Unspecified,
     )

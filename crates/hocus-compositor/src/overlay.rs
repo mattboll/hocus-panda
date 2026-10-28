@@ -123,6 +123,10 @@ impl Overlay {
         }
     }
 
+    pub fn has_font(&self) -> bool {
+        self.font.is_some()
+    }
+
     /// A window went: its ids go.
     pub fn forget(&self, id: WindowId) {
         self.thumbs.borrow_mut().retain(|(w, _), _| *w != id);
@@ -475,7 +479,9 @@ impl State {
                     at,
                     &texture,
                     Some(alpha * dim),
-                    None,
+                    // All of it: drawn at the screen's scale, its pixels
+                    // are not logical ones.
+                    Some(Rectangle::from_size((f64::from(w), f64::from(h)).into())),
                     Some(size.to_i32_round()),
                     Kind::Unspecified,
                 ) {

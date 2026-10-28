@@ -12,7 +12,9 @@ use common::{
     KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_TAB, KEY_UP, Shows, WAIT, WINDOW_COLOUR, chord,
     compositor, open, open_showing, wait,
 };
-use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::WindowId};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, OutputSpec, RendererChoice, model::WindowId,
+};
 
 /// A window's desktop (from 0) and whether it shows, by app id.
 fn where_is(hp: &Headless, app_id: &str) -> Option<(usize, bool)> {
@@ -362,5 +364,88 @@ fn holding_tab_steps_through_the_windows_at_the_keyboards_repeat() -> anyhow::Re
     hp.key(KEY_DOWN, false);
     hp.key(KEY_LEFTMETA, false);
     assert_eq!(hp.minimized(), 0);
+    Ok(())
+}
+
+/// What Alt+Tab draws of its first item's title on a 1280×800 screen
+/// (logical) at `scale`: how many strokes of ink stand apart along the
+/// line, its height and its box (physical pixels, x0, y0, x1, y1), and
+/// the panel's box, physical too.
+fn title_ink(scale: f64) -> anyhow::Result<(usize, i32, [i32; 4], [i32; 4])> {
+    let size = |logical: f64| (logical * scale).round() as i32;
+    let mut screen = OutputSpec::new(size(1280.0), size(800.0));
+    screen.scale = scale;
+    let mut hp = Headless::start(HeadlessConfig {
+        outputs: vec![screen],
+        renderer: RendererChoice::Pixman,
+    })?;
+    // A title of upright strokes apart: easy to count.
+    open(&mut hp, "test.other", (400, 300))?;
+    open(&mut hp, "I I I I I I I I", (400, 300))?;
+    alt_tab(&mut hp, 1);
+    let shown = hp.dispatch_until(WAIT, |hp| {
+        hp.switcher().is_some_and(|s| s.2) && hp.has_titles_font()
+    })?;
+    anyhow::ensure!(shown, "the panel or its font never came");
+    // Once it has appeared.
+    wait(&mut hp, Duration::from_millis(300))?;
+    let [panel, label] = hp
+        .switcher_label(0)
+        .ok_or_else(|| anyhow::anyhow!("no first item"))?;
+    let shot = hp.screenshot(0)?;
+    let physical = |(x, y, w, h): (f64, f64, f64, f64)| {
+        [
+            (x * scale).floor() as i32,
+            (y * scale).floor() as i32,
+            ((x + w) * scale).ceil() as i32,
+            ((y + h) * scale).ceil() as i32,
+        ]
+    };
+    let (panel, label) = (physical(panel), physical(label));
+    // From the gap above the title's line (8 px, §11) to the screen's
+    // bottom: the title and whatever would spill past it.
+    let ink = |x: i32, y: i32| {
+        pixel(&shot, f64::from(x), f64::from(y)).is_some_and(|argb| {
+            let [b, g, r, _] = argb.to_le_bytes();
+            r.min(g).min(b) > 0x90
+        })
+    };
+    let top = label[1] - size(8.0);
+    let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    let mut strokes = 0;
+    let mut in_stroke = false;
+    for x in label[0]..label[2] {
+        let mut column = false;
+        for y in top..shot.1 {
+            if ink(x, y) {
+                column = true;
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+        strokes += usize::from(column && !in_stroke);
+        in_stroke = column;
+    }
+    hp.key(KEY_LEFTALT, false);
+    anyhow::ensure!(strokes > 0, "no title drawn at scale {scale}");
+    Ok((strokes, y1 - y0, [x0, y0, x1, y1], panel))
+}
+
+#[test]
+fn alt_tab_titles_keep_their_size_on_a_scaled_screen() -> anyhow::Result<()> {
+    let (strokes, height, _, _) = title_ink(1.0)?;
+    assert_eq!(strokes, 8, "the eight strokes at scale 1");
+    for scale in [1.5, 2.0] {
+        let (n, h, ink, panel) = title_ink(scale)?;
+        assert_eq!(n, strokes, "the whole title at scale {scale}");
+        let ratio = f64::from(h) / f64::from(height);
+        assert!(
+            (ratio - scale).abs() <= 0.25,
+            "{h} px high at scale {scale}, {height} at 1"
+        );
+        assert!(
+            ink[0] >= panel[0] && ink[1] >= panel[1] && ink[2] <= panel[2] && ink[3] <= panel[3],
+            "the title {ink:?} spills out of the panel {panel:?} at scale {scale}"
+        );
+    }
     Ok(())
 }
