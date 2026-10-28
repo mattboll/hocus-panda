@@ -86,9 +86,10 @@ fn a_window_sent_away_stays_there_and_one_taken_goes_along() -> anyhow::Result<(
     assert_eq!(focused(&hp).as_deref(), Some("test.stays"));
     // There, it is where it was.
     chord(&mut hp, &[KEY_LEFTMETA, KEY_3]);
-    let rect = hp.windows().into_iter().find_map(|w| {
-        (w.app_id.as_deref() == Some("test.sent")).then_some(w.rect)
-    });
+    let rect = hp
+        .windows()
+        .into_iter()
+        .find_map(|w| (w.app_id.as_deref() == Some("test.sent")).then_some(w.rect));
     assert_eq!(rect, Some(sent));
     // Super+Ctrl+Shift+1: taken to the first desktop, going with it.
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_1]);
@@ -160,7 +161,9 @@ fn a_quick_alt_tab_goes_back_to_the_previous_window_unseen() -> anyhow::Result<(
     open(&mut hp, "test.first", (400, 300))?;
     open(&mut hp, "test.second", (400, 300))?;
     alt_tab(&mut hp, 1);
-    let (items, selected, shown) = hp.switcher().ok_or_else(|| anyhow::anyhow!("no switcher"))?;
+    let (items, selected, shown) = hp
+        .switcher()
+        .ok_or_else(|| anyhow::anyhow!("no switcher"))?;
     assert_eq!(items.len(), 2);
     assert_eq!(selected, 1);
     assert!(!shown, "shown before 100 ms");
