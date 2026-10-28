@@ -65,6 +65,9 @@ pub struct Managed {
     /// The output it last snapped on: while snapped, its zone is that
     /// output's, whatever is under its centre (§9).
     pub snapped_on: Option<Output>,
+    /// Its screen went: where it was there, to go back when it comes
+    /// back (§12).
+    pub came_from: Option<crate::screens::CameFrom>,
 }
 
 /// A resize under way, or ending.
@@ -157,6 +160,7 @@ impl Managed {
             away: None,
             travel: None,
             snapped_on: None,
+            came_from: None,
         }
     }
 

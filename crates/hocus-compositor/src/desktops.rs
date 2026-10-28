@@ -180,6 +180,14 @@ impl Strip {
         now.saturating_sub(DOTS_FADE.mul_f64(f64::from(shown)))
     }
 
+    /// Its screen went: it stops on the desktop it was going to, which it
+    /// shows if the screen comes back.
+    pub fn still(&mut self) {
+        self.motion = Motion::Still;
+        self.dots = None;
+        self.ended = None;
+    }
+
     /// The fingers came down: the strip follows them from where it is.
     pub fn swipe_begin(&mut self, now: Duration, reduced: bool) {
         let start = self.position(now);
