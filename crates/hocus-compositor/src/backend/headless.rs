@@ -1,12 +1,13 @@
 //! The headless backend: no screen, outputs are offscreen buffers, drawn
 //! with GLES on a GPU's render node or with pixman. Tests run on it.
 
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::Context;
 use smithay::{
     backend::{
         allocator::Fourcc,
+        drm::DrmNode,
         egl::{EGLContext, EGLDevice, EGLDisplay},
         renderer::{
             Bind, ExportMem, ImportAll, ImportDma, ImportMem, ImportMemWl, Offscreen, Renderer,
@@ -57,6 +58,10 @@ pub struct HeadlessConfig {
     /// One 1920×1080 output when empty.
     pub outputs: Vec<OutputSpec>,
     pub renderer: RendererChoice,
+    /// The GPU GLES draws on, by its render node; the first GPU with one
+    /// when unset. A machine with two GPUs lists the one it does not
+    /// display on first as often as not.
+    pub render_node: Option<PathBuf>,
 }
 
 pub struct HeadlessBackend {
@@ -114,8 +119,12 @@ pub fn init(
     };
     let canvas = match config.renderer {
         RendererChoice::Pixman => Canvas::Pixman(pixman_outputs(&specs, state)?),
-        RendererChoice::Gles => Canvas::Gles(Box::new(gles_outputs(&specs, state)?)),
-        RendererChoice::Auto => match gles_outputs(&specs, state) {
+        RendererChoice::Gles => Canvas::Gles(Box::new(gles_outputs(
+            &specs,
+            config.render_node.as_deref(),
+            state,
+        )?)),
+        RendererChoice::Auto => match gles_outputs(&specs, config.render_node.as_deref(), state) {
             Ok(gles) => Canvas::Gles(Box::new(gles)),
             Err(err) => {
                 tracing::info!("no GLES renderer ({err:#}); drawing with pixman");
@@ -145,24 +154,38 @@ fn pixman_outputs(
 /// to pixman, which is faster on a CPU and the same everywhere.
 fn gles_outputs(
     specs: &[OutputSpec],
+    render_node: Option<&std::path::Path>,
     state: &mut State,
 ) -> anyhow::Result<Outputs<GlesRenderer, GlesTexture>> {
-    let renderer = gles_renderer()?;
+    let renderer = gles_renderer(render_node)?;
     state.shm_state.update_formats(renderer.shm_formats());
     let device = render_node_of(renderer.egl_context().display());
     dmabuf_global(state, renderer.dmabuf_formats(), device);
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 
-/// A GLES renderer on the first GPU with a render node.
-fn gles_renderer() -> anyhow::Result<GlesRenderer> {
+/// A GLES renderer on the GPU of `render_node`, or on the first GPU with a
+/// render node.
+fn gles_renderer(render_node: Option<&std::path::Path>) -> anyhow::Result<GlesRenderer> {
     anyhow::ensure!(egl_available(), "libEGL.so.1 is not installed");
+    let wanted = render_node
+        .map(|path| {
+            DrmNode::from_path(path)
+                .with_context(|| format!("{} is not a DRM device", path.display()))
+                .map(|node| node.dev_id())
+        })
+        .transpose()?;
     let device = EGLDevice::enumerate()
         .context("could not list EGL devices")?
         .find(|device| {
-            !device.is_software() && device.try_get_render_node().ok().flatten().is_some()
+            let node = device.try_get_render_node().ok().flatten();
+            !device.is_software()
+                && node.is_some_and(|node| wanted.is_none_or(|wanted| node.dev_id() == wanted))
         })
-        .context("no EGL device with a render node")?;
+        .with_context(|| match render_node {
+            Some(path) => format!("no EGL device on {}", path.display()),
+            None => "no EGL device with a render node".to_owned(),
+        })?;
     // SAFETY: nothing else in the process creates EGL displays, so smithay's
     // tracking of them is accurate.
     #[allow(unsafe_code)]
