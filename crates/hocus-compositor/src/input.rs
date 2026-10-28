@@ -1,7 +1,7 @@
 //! Input from the backends, routed to clients or kept by the compositor:
-//! keys (with the virtual terminal switch), the pointer (click to focus,
-//! `Super`+drag to move), scrolling and touchpad gestures, which go to the
-//! client under the pointer (pointer-gestures).
+//! keys (the virtual terminal switch, the shortcuts), the pointer (click to
+//! focus, `Super`+drag to move), scrolling and touchpad gestures, which go
+//! to the client under the pointer (pointer-gestures).
 
 use smithay::{
     backend::input::{
@@ -21,12 +21,16 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{State, grabs::BTN_LEFT};
+use crate::{State, grabs::BTN_LEFT, shortcuts::Action};
 
 /// What a key did, when the compositor kept it.
 enum Kept {
     /// Ctrl+Alt+F1…F12: another virtual terminal.
     Vt(i32),
+    /// One of the `[shortcuts]`.
+    Shortcut(Action),
+    /// The release of a key whose press was kept.
+    Release,
 }
 
 impl State {
@@ -93,20 +97,37 @@ impl State {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let kept = keyboard.input::<Kept, _>(self, code, state, serial, time, |_, _, keysym| {
-            if state != KeyState::Pressed {
-                return FilterResult::Forward;
-            }
-            let sym = keysym.modified_sym().raw();
-            if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym) {
-                let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
-                return FilterResult::Intercept(Kept::Vt(vt));
-            }
-            FilterResult::Forward
-        });
+        let kept =
+            keyboard.input::<Kept, _>(self, code, state, serial, time, |this, mods, keysym| {
+                if state != KeyState::Pressed {
+                    return if this.kept_keys.remove(&code) {
+                        FilterResult::Intercept(Kept::Release)
+                    } else {
+                        FilterResult::Forward
+                    };
+                }
+                let sym = keysym.modified_sym().raw();
+                if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym)
+                {
+                    let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
+                    return FilterResult::Intercept(Kept::Vt(vt));
+                }
+                // The key of the layout's first level, Latin when the keyboard
+                // has a Latin layout: a shortcut stays on its key whatever the
+                // active layout.
+                let action = keysym
+                    .raw_latin_sym_or_raw_current_sym()
+                    .and_then(|key| this.config.shortcuts.action(mods, key, this.nested));
+                if let Some(action) = action {
+                    this.kept_keys.insert(code);
+                    return FilterResult::Intercept(Kept::Shortcut(action));
+                }
+                FilterResult::Forward
+            });
         match kept {
             Some(Kept::Vt(vt)) => self.switch_vt(vt),
-            None => {}
+            Some(Kept::Shortcut(action)) => self.run_action(action),
+            Some(Kept::Release) | None => {}
         }
     }
 

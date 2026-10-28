@@ -1,15 +1,30 @@
 //! The configuration file, `$XDG_CONFIG_HOME/hocuspanda/config.toml`. Only
-//! what this slice uses is read so far: the keyboard. It is read once, as
-//! the compositor starts; sections other slices will read are let through.
+//! what this slice uses is read so far: the keyboard, the shortcuts and the
+//! programs they start. It is read once, as the compositor starts; sections
+//! other slices will read are let through. `packaging/config.toml` lists
+//! every setting with its default.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::shortcuts::Shortcuts;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub keyboard: Keyboard,
+    pub shortcuts: Shortcuts,
+    pub programs: Programs,
+}
+
+/// The programs the desktop starts.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Programs {
+    /// The terminal's command, run through `sh -c`. Empty: the first of
+    /// [`crate::programs::TERMINALS`] found in `PATH`.
+    pub terminal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -133,6 +148,37 @@ mod tests {
         assert_eq!(config.keyboard.options, "caps:escape");
         assert_eq!(config.keyboard.repeat_delay, 200);
         assert!(toml::from_str::<Config>("[keyboard]\nlayout = \"fr\"\n").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn shortcuts_and_the_terminal_read() -> anyhow::Result<()> {
+        let config: Config = toml::from_str(
+            "[shortcuts]\nterminal = \"Ctrl+Alt+T\"\nlog-out = \"\"\n\
+             [programs]\nterminal = \"foot -e htop\"\n",
+        )?;
+        assert_eq!(config.shortcuts.terminal, Some("Ctrl+Alt+T".parse()?));
+        assert_eq!(config.shortcuts.log_out, None);
+        assert_eq!(config.programs.terminal, "foot -e htop");
+        // A shortcut that does not read refuses the file, as any mistake.
+        assert!(toml::from_str::<Config>("[shortcuts]\nterminal = \"Hyper+T\"\n").is_err());
+        assert!(toml::from_str::<Config>("[shortcuts]\nlaunch = \"Super+D\"\n").is_err());
+        Ok(())
+    }
+
+    /// The commented file the package ships lists every setting with its
+    /// default: uncommented, it reads as no file at all.
+    #[test]
+    fn the_shipped_example_is_the_defaults() -> anyhow::Result<()> {
+        let example = include_str!("../../../packaging/config.toml");
+        let uncommented: String = example
+            .lines()
+            .filter_map(|l| l.strip_prefix("# ").filter(|l| !l.starts_with(' ')))
+            .filter(|l| l.starts_with('[') || l.contains(" = "))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert!(uncommented.contains("[shortcuts]"), "{uncommented}");
+        assert_eq!(toml::from_str::<Config>(&uncommented)?, Config::default());
         Ok(())
     }
 }

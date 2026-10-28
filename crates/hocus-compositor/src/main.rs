@@ -1,6 +1,6 @@
 //! The Hocuspanda desktop's compositor.
 
-use std::{path::PathBuf, process::ExitCode};
+use std::{io::IsTerminal, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, ValueEnum};
 use hocus_compositor::{BackendKind, Config, HeadlessConfig, Options, OutputSpec, RendererChoice};
@@ -42,6 +42,13 @@ struct Args {
     /// Configuration file. Default: $XDG_CONFIG_HOME/hocuspanda/config.toml.
     #[arg(long, value_name = "FILE")]
     config: Option<PathBuf>,
+
+    /// Run as the user's session, as a display manager starts it
+    /// (hocuspanda-session): on the virtual terminal unless --backend says
+    /// otherwise, and once ready, the user's systemd and D-Bus are told
+    /// WAYLAND_DISPLAY and DISPLAY, for the programs they start.
+    #[arg(long)]
+    session: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -68,13 +75,15 @@ fn main() -> ExitCode {
     let args = Args::parse();
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        // A session's stderr goes to the journal, which shows no colours.
+        .with_ansi(std::io::stderr().is_terminal())
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
     let backend = args.backend.unwrap_or_else(|| {
         let graphical = ["WAYLAND_DISPLAY", "DISPLAY"]
             .iter()
             .any(|v| std::env::var_os(v).is_some_and(|v| !v.is_empty()));
-        if graphical {
+        if graphical && !args.session {
             BackendArg::Winit
         } else {
             BackendArg::Tty
@@ -101,6 +110,7 @@ fn main() -> ExitCode {
         runtime_dir: args.runtime_dir,
         spawn: args.spawn,
         xwayland: !args.no_xwayland,
+        session: args.session,
         config,
     };
     match hocus_compositor::run(options) {

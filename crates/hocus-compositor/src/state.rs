@@ -3,7 +3,7 @@
 //! them.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
 };
 
@@ -11,7 +11,11 @@ use anyhow::Context;
 use smithay::{
     backend::session::{Session, libseat::LibSeatSession},
     desktop::{PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
-    input::{Seat, SeatState, keyboard::XkbConfig, pointer::CursorImageStatus},
+    input::{
+        Seat, SeatState,
+        keyboard::{Keycode, XkbConfig},
+        pointer::CursorImageStatus,
+    },
     output::Output,
     reexports::{
         calloop::{LoopHandle, LoopSignal},
@@ -52,6 +56,7 @@ use crate::{
     focus::KeyboardFocus,
     model::{self, Model, Rect, WindowId},
     programs::Programs,
+    shortcuts::Ending,
 };
 
 /// Everything the compositor knows, owned by the event loop.
@@ -115,6 +120,11 @@ pub struct State {
     pub programs: Programs,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
+    /// Keys whose press was a shortcut: their release is kept from the
+    /// clients too.
+    pub kept_keys: HashSet<Keycode>,
+    /// Set once the compositor is asked to end, and why.
+    pub ending: Option<Ending>,
 }
 
 impl State {
@@ -195,6 +205,8 @@ impl State {
             xdisplay: None,
             programs: Programs::default(),
             session: None,
+            kept_keys: HashSet::new(),
+            ending: None,
         })
     }
 

@@ -18,6 +18,8 @@ pub mod model;
 mod output_spec;
 mod programs;
 mod render;
+mod session;
+mod shortcuts;
 mod socket;
 mod state;
 mod xwayland;
@@ -31,6 +33,7 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use config::Config;
 pub use harness::{Headless, WindowInfo};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
+pub use shortcuts::{Action, Chord, Ending, Shortcuts};
 pub use state::State;
 
 use backend::Backend;
@@ -60,6 +63,9 @@ pub struct Options {
     pub spawn: Vec<String>,
     /// Runs X11 applications through XWayland.
     pub xwayland: bool,
+    /// The user's session, started by a display manager: once ready, the
+    /// user's service manager and D-Bus are told where its displays are.
+    pub session: bool,
     pub config: Config,
 }
 
@@ -133,7 +139,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
-    state.programs.wait(options.spawn);
+    state.programs.wait(options.spawn, options.session);
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
     } else {
@@ -171,10 +177,11 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         .run(None, &mut app, App::after_dispatch)
         .context("the event loop failed")?;
     remove_sockets(&app.state);
+    let ending = app.state.ending;
     drop(app);
     drop(event_loop);
     drop(runtime_dir);
-    tracing::info!("compositor stopped");
+    tracing::info!(?ending, "compositor stopped");
     Ok(())
 }
 
@@ -209,7 +216,7 @@ fn stop_on_signals(
         .handle()
         .insert_source(signals, |event, _, app| {
             tracing::info!(signal = ?event.signal(), "stopping");
-            app.state.loop_signal.stop();
+            app.state.end(shortcuts::Ending::Signalled);
         })
         .map_err(|err| err.error)
         .context("could not watch signals")?;
