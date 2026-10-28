@@ -459,8 +459,34 @@ impl State {
         let fullscreen_on_top = looks
             .first()
             .is_some_and(|(id, _)| self.model.mode(*id) == Mode::Fullscreen);
+        // The handle of a pair's seam, where the pair is now: right above
+        // the front one of the two, so that a window over the seam covers
+        // it (§8).
+        let mut handle = self.seam_handle.and_then(|(seam, handle)| {
+            let live = self.live_seam(seam.first, seam.second)?;
+            let (x, y) = live.centre();
+            area.to_f64()
+                .contains((x, y))
+                .then(|| (live, handle.alpha(now)))
+        });
         let mut windows = Vec::new();
         for (id, look) in &looks {
+            if let Some((seam, alpha)) = handle.take_if(|(s, _)| *id == s.first || *id == s.second)
+            {
+                let (x, y) = seam.centre();
+                windows.extend(
+                    handle_element(
+                        renderer,
+                        &self.textures,
+                        &self.seam_handle_id,
+                        Point::from((x, y)) - origin,
+                        seam.vertical,
+                        scale,
+                        alpha,
+                    )
+                    .map(OutputElements::Frame),
+                );
+            }
             match self.bent_window(renderer, *id, look, origin, scale) {
                 Some(bent) => windows.push(OutputElements::Bent(bent)),
                 None => self.framed_window(renderer, *id, look, origin, scale, &mut windows),
@@ -489,29 +515,6 @@ impl State {
                     .into_iter()
                     .map(OutputElements::Frame),
             );
-        }
-        // The handle of a snapped pair's seam, where the pair is now.
-        let handle = self.seam_handle.and_then(|(seam, handle)| {
-            let live = self.live_seam(seam.first, seam.second)?;
-            Some((live, handle.alpha(now)))
-        });
-        if let Some((seam, alpha)) = handle {
-            let (x, y) = seam.centre();
-            if area.to_f64().contains((x, y)) {
-                let centre = Point::from((x, y)) - origin;
-                elements.extend(
-                    handle_element(
-                        renderer,
-                        &self.textures,
-                        &self.seam_handle_id,
-                        centre,
-                        seam.vertical,
-                        scale,
-                        alpha,
-                    )
-                    .map(OutputElements::Frame),
-                );
-            }
         }
         // Windows leaving, from their last frame.
         for leaving in self.leaving.iter().rev() {

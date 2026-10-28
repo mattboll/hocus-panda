@@ -152,12 +152,15 @@ sits just below it.
     is the grip's pill (section 7) along the seam: 4×44 px upright
     between windows side by side, 44×4 px between windows one above the
     other, centred in the 8 px gap at the middle of the span the two
-    windows share. It shows when the pointer is within 12 px of
-    the seam's centre line (the gap and a little of each window) and
-    fades in and out as the grip does (120 ms in; it stays 300 ms after
+    windows share. It shows when the pointer is within 12 px of the
+    seam's centre line (the gap and a little of each window) where the
+    seam itself shows, and fades in and out as the grip does (120 ms in; it stays 300 ms after
     the pointer leaves, then fades in 120 ms). A press within 4 px around
     the pill takes it (a 12×52 px target), with `ew-resize` or
-    `ns-resize`. Where more than two windows line up along a seam (a
+    `ns-resize`. It sits in the stacking order right above the front one
+    of the two windows: a window in front of both that covers the seam
+    covers the handle too, and takes the presses there; a window behind
+    them, seen through the gap, does not. Where more than two windows line up along a seam (a
     half facing two quarters), each pair has its handle at the middle of
     what the two share, and it moves the whole edge of the window whose
     side spans the seam: every window facing that edge follows.
@@ -447,3 +450,6 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 10. Any two windows at the gap form a pair with a handle on their seam,
     floating ones brought together by hand as snapped ones: the handle
     resizes both and leaves each floating or snapped as it was (#356).
+11. The seam's handle is drawn right above the front one of its two
+    windows, not above all windows: a window over the seam hides it and
+    takes the presses there (#354).
