@@ -8,12 +8,13 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, KEY_1, KEY_2, KEY_3, KEY_DOWN, KEY_ESC, KEY_H, KEY_LEFT, KEY_LEFTALT, KEY_LEFTCTRL,
-    KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_TAB, KEY_UP, Shows, WAIT, WINDOW_COLOUR, chord,
-    compositor, open, open_showing, wait,
+    BTN_LEFT, Command, KEY_1, KEY_2, KEY_3, KEY_DOWN, KEY_ESC, KEY_H, KEY_LEFT, KEY_LEFTALT,
+    KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_TAB, KEY_UP, Shows, WAIT,
+    WINDOW_COLOUR, chord, compositor, open, open_showing, open_with, wait, wait_for_rect,
 };
 use hocus_compositor::{
-    Config, Headless, HeadlessConfig, OutputSpec, RendererChoice, model::WindowId,
+    Config, Headless, HeadlessConfig, OutputSpec, RendererChoice,
+    model::{Rect, WindowId},
 };
 
 /// A window's desktop (from 0) and whether it shows, by app id.
@@ -520,6 +521,44 @@ fn alt_tabs_panel_shows_no_seam_at_fractional_scales() -> anyhow::Result<()> {
                 line[0]
             );
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn alt_tab_thumbnails_share_one_height_across_screens() -> anyhow::Result<()> {
+    // A 16:10 screen and an ultrawide one, as the windows of #341 were.
+    let mut hp = Headless::start(HeadlessConfig {
+        outputs: vec![OutputSpec::new(2560, 1600), OutputSpec::new(3440, 1440)],
+        renderer: RendererChoice::Pixman,
+    })?;
+    hp.pointer_move(2560.0 + 1720.0, 720.0);
+    open(&mut hp, "test.left", (400, 300))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
+    open(&mut hp, "test.right", (400, 300))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
+    hp.pointer_move(1280.0, 800.0);
+    let (_, client) = open_with(&mut hp, "test.full", (400, 300), false)?;
+    client.commands.send(Command::Fullscreen(true))?;
+    wait_for_rect(&mut hp, "test.full", Rect::new(0, 0, 2560, 1600))?;
+    // From either screen, the same.
+    for (x, y) in [(1280.0, 800.0), (2560.0 + 1720.0, 720.0)] {
+        hp.pointer_move(x, y);
+        alt_tab(&mut hp, 1);
+        let shown = hp.dispatch_until(WAIT, |hp| hp.switcher().is_some_and(|s| s.2))?;
+        assert!(shown, "the panel never showed");
+        let thumbs: Vec<(f64, f64, f64, f64)> = (0..3)
+            .map(|at| hp.switcher_thumb(at))
+            .collect::<Option<_>>()
+            .ok_or_else(|| anyhow::anyhow!("missing thumbnails"))?;
+        for t in &thumbs {
+            assert_eq!(t.3, 150.0, "every thumbnail as high: {thumbs:?}");
+            assert_eq!(t.1, thumbs[0].1, "and lined up: {thumbs:?}");
+        }
+        // The fullscreen 16:10 window: wider, not shorter.
+        assert!(thumbs.iter().any(|t| t.2 == 240.0), "{thumbs:?}");
+        hp.key(KEY_LEFTALT, false);
+        wait(&mut hp, Duration::from_millis(200))?;
     }
     Ok(())
 }

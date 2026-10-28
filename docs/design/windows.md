@@ -205,7 +205,7 @@ Keyboard:
 ## 11. Alt+Tab
 
 - `Alt+Tab` held: after 100 ms, a panel appears centred on the output
-  under the pointer, with a live thumbnail per window (up to 220 px wide,
+  under the pointer, with a live thumbnail per window (150 px high,
   aspect kept), the window's title below; no application icon, the
   thumbnail already shows the window. A quick
   `Alt+Tab` (released before 100 ms) switches to the previous window
@@ -221,8 +221,12 @@ Keyboard:
   send no repeats of their own. No other shortcut repeats when held.
 - The panel appears in 150 ms (fade and 96 % → 100 % scale) and vanishes
   in 100 ms. The selection's ring moves in 120 ms.
-- As built: a thumbnail fits in 220 × 150 px, its aspect kept, centred in
-  its item (236 px wide with its 8 px padding); it shows the window as
+- As built: every thumbnail is 150 px high, its width following the
+  window's aspect, so that no window looks smaller than the others (a
+  wide one gets a wider thumbnail, not a shorter one; #341); a window
+  wider than 2:1 gets one 300 px wide and a little shorter. It is
+  centred in its item, which is at least 160 px wide inside its 8 px
+  padding, for the title; it shows the window as
   its application sets it (its xdg geometry), without the shadow a
   client-side decorated application draws around it. The items are 14 px apart on
   one line, their titles lined up; the panel has 16 px of padding, an
