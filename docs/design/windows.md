@@ -119,8 +119,18 @@ sits just below it.
   once): an 8 px band outside each edge, 16×16 px squares at the corners,
   with the matching resize cursors (`ew-resize`, `ns-resize`,
   `nwse-resize`, `nesw-resize`).
+- Cursors come from the system's cursor theme, as applications' do
+  (`[appearance] cursor-theme` and `cursor-size`, else `XCURSOR_THEME`
+  and `XCURSOR_SIZE`, else the `default` theme and what it inherits),
+  each screen showing the image nearest its scale, pixel for pixel; the
+  programs the desktop starts are given the same theme and size. Without
+  a theme, or for a shape the theme lacks, the compositor draws its own
+  plain ones.
 - `Super`+right-drag resizes from the nearest corner.
-- Live resize, respecting the application's minimum and maximum sizes.
+- Live resize, respecting the application's minimum and maximum sizes,
+  and the size it takes: a floating terminal sized by whole cells may
+  take a little less than asked, and keeps it once the resize is over,
+  its far edges where they were.
 - The edge or edges being dragged stick as a moving window's do (section
   6, magnetic edges): within 12 px of another window's edge, at the gap
   or in line, or of the work area's, flush. Dragging on frees them. The
@@ -130,23 +140,37 @@ sits just below it.
   (an outer one, or one with no snapped window across it), leaves its
   zone once its size changes. Only a seam's handle (below) resizes
   snapped windows and keeps them snapped.
-- A **snapped pair** (two snapped windows side by side, or one above the
-  other, facing each other across the gap):
+- A **pair**: two windows shown on the same screen and desktop, side by
+  side or one above the other, whose facing edges are exactly the 8 px
+  gap apart and overlap along the seam between them, whether snapped
+  (halves, quarters) or floating (brought together by hand, held there
+  by the magnet), or one of each. Maximised and fullscreen windows pair
+  with none; windows 9 px apart do not pair.
   - Dragging their shared edge resizes **only the window grabbed**, like
-    any edge: in the gap, the window whose edge is nearer. Once its size
-    changes it leaves its zone and floats; the other stays snapped where
-    it is.
+    any edge: in the gap, the window whose edge is nearer. A snapped one
+    leaves its zone and floats once its size changes; the other stays
+    where it is.
   - A **handle** on the seam moves the boundary and **both windows
-    follow**. It is the grip's pill (section 7) along the seam: 4×44 px
-    upright between windows side by side, 44×4 px between windows one
-    above the other, centred in the 8 px gap at the middle of the span
-    the two windows share. It shows when the pointer is within 12 px of
-    the seam's centre line (the gap and a little of each window) and
-    fades in and out as the grip does (120 ms in; it stays 300 ms after
-    the pointer leaves, then fades in 120 ms). A press within 4 px around
-    the pill takes it (a 12×52 px target), with `ew-resize` or
-    `ns-resize`. Where a half faces two quarters, its handles move the
-    half's whole edge and both quarters follow.
+    follow**; snapped ones stay snapped, floating ones stay floating. The
+    windows that follow keep the gap to the one dragged wherever its
+    client's size puts its edge (a terminal's, by whole cells), so the two
+    stay a pair; their far edges may move by what is left of a cell. It is
+    the grip's pill (section 7) along the seam: 4×44 px upright between
+    windows side by side, 44×4 px between windows one above the other,
+    centred in the 8 px gap at the middle of the span the two windows
+    share. It shows when the pointer is within 12 px of the seam's centre
+    line (the gap and a little of each window) where the seam itself
+    shows, and fades in and out as the grip does (120 ms in; it stays 300
+    ms after the pointer leaves, then fades in 120 ms). A press within 4
+    px around the pill takes it (a 12×52 px target), with `ew-resize` or
+    `ns-resize`. It sits in the stacking order right above the front one
+    of the two windows: a window in front of both that covers the seam
+    covers the handle too, and takes the presses there; a window behind
+    them, seen through the gap, does not. Where more than two windows line
+    up along a seam (a half facing two quarters), each pair has its handle
+    at the middle of what the two share, and it moves the whole edge of
+    the window whose side spans the seam: every window facing that edge
+    follows.
   - With reduced motion and high contrast, the handle is as the grip.
 
 ## 9. Snapping
@@ -430,3 +454,9 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 9. A half or a quarter resized from any edge leaves its zone and floats,
    as a maximised window does; only a seam's handle resizes snapped
    windows and keeps them snapped (#352).
+10. Any two windows at the gap form a pair with a handle on their seam,
+    floating ones brought together by hand as snapped ones: the handle
+    resizes both and leaves each floating or snapped as it was (#356).
+11. The seam's handle is drawn right above the front one of its two
+    windows, not above all windows: a window over the seam hides it and
+    takes the presses there (#354).

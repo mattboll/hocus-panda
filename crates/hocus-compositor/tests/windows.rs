@@ -416,3 +416,38 @@ fn super_and_right_drag_resizes_from_the_nearest_corner() -> anyhow::Result<()> 
     )?;
     Ok(())
 }
+
+#[test]
+fn a_terminal_resized_by_its_left_edge_keeps_its_cells_and_stays_where_it_is_moved()
+-> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let shows = Shows::Cells {
+        app_id: "test.cells",
+        size: (400, 300),
+        cell: 10,
+    };
+    let (start, _client) = open_showing(&mut hp, "test.cells", shows)?;
+    // 33 px wider asked, 30 taken: its right edge stays.
+    let (x, y) = (f64::from(start.x - 3), f64::from(start.y + 100));
+    hp.pointer_move(x, y);
+    hp.button(BTN_LEFT, true);
+    hp.pointer_move(x - 33.0, y);
+    hp.button(BTN_LEFT, false);
+    let wider = Rect::new(start.x - 30, start.y, 430, 300);
+    wait_for_rect(&mut hp, "test.cells", wider)?;
+    // Moved, it stays there when it draws again (another window takes
+    // the focus).
+    let (cx, cy) = wider.centre();
+    hp.pointer_move(cx, cy);
+    hp.key(KEY_LEFTMETA, true);
+    hp.button(BTN_LEFT, true);
+    hp.pointer_move(cx + 100.0, cy + 50.0);
+    hp.button(BTN_LEFT, false);
+    hp.key(KEY_LEFTMETA, false);
+    let moved = Rect::new(wider.x + 100, wider.y + 50, 430, 300);
+    wait_for_rect(&mut hp, "test.cells", moved)?;
+    open(&mut hp, "test.other", (200, 150))?;
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(rect_of(&hp, "test.cells"), Some(moved));
+    Ok(())
+}

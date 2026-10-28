@@ -471,10 +471,11 @@ pub fn keyboard_snap(snap: Snap, mode: Mode, rect: Rect, area: Rect) -> SnapResu
     }
 }
 
-/// Snapped windows on the other side of the edges a resize moves: they
+/// The windows on the other side of the edges a seam's handle moves: they
 /// move their facing edge with it. `rect` is the window resized, `others`
-/// the other snapped windows of its output; the result says, for each
-/// that shares a moved edge, which of its edges follows.
+/// the other windows of its output that can pair; the result says, for
+/// each that faces a moved edge across the gap, which of its edges
+/// follows.
 pub fn partners(rect: Rect, edges: Edges, others: &[(WindowId, Rect)]) -> Vec<(WindowId, Edges)> {
     let overlaps = |a0: i32, a1: i32, b0: i32, b1: i32| a0 < b1 && b0 < a1;
     others
@@ -513,8 +514,8 @@ pub fn follow(partner: Rect, follow: Edges, moved: Rect) -> Rect {
     out
 }
 
-/// Where two snapped windows face each other across the gap (§8): its
-/// handle moves the boundary and both follow.
+/// Where two windows, snapped or floating, face each other across the gap
+/// (§8): its handle moves the boundary and both follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Seam {
     /// The window on the left, or above.

@@ -28,6 +28,10 @@ pub struct Config {
     /// reads it once at start.
     #[serde(skip)]
     pub system_keyboard: Option<SystemKeyboard>,
+    /// What the environment says about cursors. Not part of the file: the
+    /// program reads it once at start; empty, no theme is looked for.
+    #[serde(skip)]
+    pub cursor_env: crate::cursor::CursorEnv,
 }
 
 /// How the desktop looks and moves, `[appearance]`.
@@ -38,6 +42,25 @@ pub struct Appearance {
     pub reduced_motion: bool,
     /// The focused window's rim is 2 px wide instead of 1.
     pub high_contrast: bool,
+    /// The Xcursor theme; else `XCURSOR_THEME`'s, else `default`.
+    pub cursor_theme: Option<String>,
+    /// The cursor's size in logical pixels; else `XCURSOR_SIZE`'s, else 24.
+    #[serde(deserialize_with = "cursor_size")]
+    pub cursor_size: Option<u32>,
+}
+
+fn cursor_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
+    let size = u32::deserialize(deserializer)?;
+    let sizes = crate::cursor::theme::SIZES;
+    if sizes.contains(&size) {
+        Ok(Some(size))
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "cursor size {size}: from {} to {}",
+            sizes.start(),
+            sizes.end()
+        )))
+    }
 }
 
 /// Virtual desktops, `[desktops]` (docs/design/windows.md §12).
@@ -399,6 +422,23 @@ mod tests {
         assert_eq!(fractional.outputs["DP-2"].scale, Some(1.25));
         for bad in ["scale = 0", "scale = 5", "scale = \"1\"", "scael = 1"] {
             let text = format!("[outputs.eDP-1]\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_cursors_theme_and_size_are_read_and_bounded() -> anyhow::Result<()> {
+        let config: Config =
+            toml::from_str("[appearance]\ncursor-theme = \"Adwaita\"\ncursor-size = 32\n")?;
+        assert_eq!(config.appearance.cursor_theme.as_deref(), Some("Adwaita"));
+        assert_eq!(config.appearance.cursor_size, Some(32));
+        for bad in [
+            "cursor-size = 4",
+            "cursor-size = 300",
+            "cursor-size = \"32\"",
+        ] {
+            let text = format!("[appearance]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
         }
         Ok(())

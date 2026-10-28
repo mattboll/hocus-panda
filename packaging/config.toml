@@ -114,3 +114,11 @@
 # reduced-motion = false
 # The focused window's rim is 2 px wide instead of 1.
 # high-contrast = false
+# The cursor theme (an Xcursor theme's directory name, in ~/.local/share/icons,
+# ~/.icons, /usr/share/icons…) and the cursor's size in logical pixels, from
+# 8 to 256. By default, XCURSOR_THEME's and XCURSOR_SIZE's, else the theme
+# named "default" (usually the distribution's, such as Adwaita) at 24.
+# Programs the desktop starts are given the same, so that theirs match.
+# For example:
+#   cursor-theme = "Adwaita"
+#   cursor-size = 32
