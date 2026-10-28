@@ -153,6 +153,16 @@ impl Headless {
         self.app.state.model.mode(id)
     }
 
+    /// How far the jelly of the window moving bends at most, logical
+    /// pixels: none when nothing wobbles.
+    pub fn bend(&self) -> Option<f64> {
+        self.app
+            .state
+            .wobble
+            .as_ref()
+            .map(|(_, jelly)| jelly.largest())
+    }
+
     /// Whether the keyboard is on a surface that is no window: a menu.
     pub fn keyboard_on_popup(&self) -> bool {
         self.app.state.popup_focus().is_some()
