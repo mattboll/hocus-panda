@@ -316,8 +316,8 @@ pub struct ResizeGrab {
     /// Snapped neighbours that follow, with their edges that do and their
     /// geometry at the start.
     partners: Vec<(WindowId, Edges, Rect)>,
-    /// A snapped window resized alone from an edge it shares with a
-    /// neighbour leaves its zone once its size changes (§8).
+    /// A snapped window resized alone, from any of its edges, leaves its
+    /// zone once its size changes (§8).
     floats: bool,
     last: Rect,
 }
@@ -494,8 +494,8 @@ impl State {
         self.redraw = true;
     }
 
-    /// Starts resizing window `id` from `edges`, alone: snapped, from an
-    /// edge it shares with a neighbour, it floats (§8).
+    /// Starts resizing window `id` from `edges`, alone: snapped, it floats
+    /// once its size changes (§8).
     pub fn start_resize(
         &mut self,
         id: WindowId,
@@ -536,12 +536,18 @@ impl State {
             return;
         }
         // A snapped neighbour across a moved edge follows it when the
-        // handle moves it; from the edge, the window leaves the pair (§8).
+        // seam's handle moves it; from any edge, a snapped window resized
+        // alone leaves its zone and floats (§8).
         let mut partners = Vec::new();
+        let mut floats = false;
         if let Mode::Snapped(zone) = mode {
             if zone == Zone::Maximized {
                 // Resized, it floats.
                 self.model.unsnap(id);
+            } else if !together {
+                floats = true;
+                // The handle goes with the pair.
+                self.seam_handle = None;
             } else if let Some(output) = self.output_of(id) {
                 let others: Vec<(WindowId, Rect)> = self
                     .windows
@@ -560,12 +566,6 @@ impl State {
                     }
                 }
             }
-        }
-        let floats = !together && !partners.is_empty();
-        if floats {
-            partners.clear();
-            // The handle goes with the pair.
-            self.seam_handle = None;
         }
         let (min, max) = crate::windows::size_limits(&window);
         let min = (min.0.max(MIN_SIZE.0), min.1.max(MIN_SIZE.1));

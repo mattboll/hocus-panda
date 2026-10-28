@@ -166,6 +166,76 @@ fn the_shared_edge_resizes_only_the_window_grabbed_which_floats() -> anyhow::Res
 }
 
 #[test]
+fn a_half_alone_resized_by_its_edge_floats() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    // Its inner edge, with no window across it: no seam there.
+    open(&mut hp, "test.half", (400, 300))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
+    let left = Zone::Left.rect(AREA);
+    wait_for_rect(&mut hp, "test.half", left)?;
+    let id = hp.windows()[0].id;
+    let (x, y) = (f64::from(left.right() + 3), 300.0);
+    hp.pointer_move(x, y);
+    hp.button(BTN_LEFT, true);
+    hp.pointer_move(x - 100.0, y);
+    hp.button(BTN_LEFT, false);
+    wait_for_rect(
+        &mut hp,
+        "test.half",
+        Rect::new(left.x, left.y, left.width - 100, left.height),
+    )?;
+    assert_eq!(hp.mode(id), Mode::Floating, "it left its zone");
+    Ok(())
+}
+
+#[test]
+fn a_snapped_window_resized_by_an_outer_edge_floats_and_its_pair_stays() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let (left_id, right_id) = snapped_pair(&mut hp)?;
+    // The left half's bottom edge.
+    let left = Zone::Left.rect(AREA);
+    let (x, y) = (300.0, f64::from(left.bottom() + 3));
+    hp.pointer_move(x, y);
+    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::NsResize));
+    hp.button(BTN_LEFT, true);
+    hp.pointer_move(x, y - 100.0);
+    hp.button(BTN_LEFT, false);
+    wait_for_rect(
+        &mut hp,
+        "test.left",
+        Rect::new(left.x, left.y, left.width, left.height - 100),
+    )?;
+    assert_eq!(hp.mode(left_id), Mode::Floating, "it left its zone");
+    assert_eq!(rect_of(&hp, "test.right"), Some(Zone::Right.rect(AREA)));
+    assert_eq!(hp.mode(right_id), Mode::Snapped(Zone::Right));
+
+    // A quarter, by its outer corner.
+    hp.pointer_move(1300.0, 500.0);
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_UP]);
+    let quarter = Zone::TopRight.rect(AREA);
+    wait_for_rect(&mut hp, "test.right", quarter)?;
+    let (x, y) = (f64::from(quarter.right() + 3), f64::from(quarter.y - 3));
+    hp.pointer_move(x, y);
+    hp.button(BTN_LEFT, true);
+    hp.pointer_move(x - 50.0, y + 40.0);
+    hp.button(BTN_LEFT, false);
+    wait_for_rect(
+        &mut hp,
+        "test.right",
+        Rect::new(
+            quarter.x,
+            quarter.y + 40,
+            quarter.width - 50,
+            quarter.height - 40,
+        ),
+    )?;
+    assert_eq!(hp.mode(right_id), Mode::Floating, "it left its zone");
+    Ok(())
+}
+
+#[test]
 fn the_seams_handle_resizes_both_windows() -> anyhow::Result<()> {
     let mut hp = compositor()?;
     let (left_id, right_id) = snapped_pair(&mut hp)?;
