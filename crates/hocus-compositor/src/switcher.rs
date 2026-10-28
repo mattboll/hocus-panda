@@ -20,9 +20,14 @@ use crate::{
     motion::{self, Bezier, Tween},
 };
 
-/// A thumbnail fits in this box, its aspect kept (the prototype's 220 px
-/// wide, at most 150 high).
-pub const THUMB: (f64, f64) = (220.0, 150.0);
+/// Every thumbnail is this high, its width following its window's
+/// aspect, so that none looks smaller than the others (#341): a wide
+/// window's is wider, not shorter. Only a window wider than 2:1 gets a
+/// shorter one, at the widest.
+pub const THUMB_HEIGHT: f64 = 150.0;
+pub const THUMB_MAX_WIDTH: f64 = 300.0;
+/// An item is at least this wide inside its padding, for its title.
+pub const LABEL_MIN_WIDTH: f64 = 160.0;
 /// Around each thumbnail and its title, inside the selection's box.
 pub const ITEM_PAD: f64 = 8.0;
 /// Between a thumbnail and its title, and the title's line.
@@ -94,18 +99,16 @@ pub fn layout(sizes: &[(f64, f64)], screen: (f64, f64)) -> (Area, Vec<ItemPlace>
         .iter()
         .map(|&(w, h)| {
             let (w, h) = (w.max(1.0), h.max(1.0));
-            if w * THUMB.1 >= h * THUMB.0 {
-                (THUMB.0, h * THUMB.0 / w)
-            } else {
-                (w * THUMB.1 / h, THUMB.1)
-            }
+            let tw = (THUMB_HEIGHT * w / h).min(THUMB_MAX_WIDTH);
+            (tw, tw * h / w)
         })
         .collect();
     let n = thumbs.len() as f64;
-    let item_w = THUMB.0 + 2.0 * ITEM_PAD;
+    let item_w = |tw: f64| tw.max(LABEL_MIN_WIDTH) + 2.0 * ITEM_PAD;
     let tallest = thumbs.iter().map(|t| t.1).fold(0.0, f64::max);
     let item_h = |th: f64| th + 2.0 * ITEM_PAD + LABEL_GAP + LABEL_HEIGHT;
-    let width = 2.0 * PANEL_PAD + n * item_w + (n - 1.0).max(0.0) * ITEM_GAP;
+    let items_w: f64 = thumbs.iter().map(|t| item_w(t.0)).sum();
+    let width = 2.0 * PANEL_PAD + items_w + (n - 1.0).max(0.0) * ITEM_GAP;
     let height = 2.0 * PANEL_PAD + item_h(tallest);
     let k = ((screen.0 - 2.0 * MARGIN) / width)
         .min((screen.1 - 2.0 * MARGIN) / height)
@@ -117,28 +120,29 @@ pub fn layout(sizes: &[(f64, f64)], screen: (f64, f64)) -> (Area, Vec<ItemPlace>
         h: height * k,
     };
     let bottom = PANEL_PAD + item_h(tallest);
+    let mut x = PANEL_PAD;
     let items = thumbs
         .iter()
-        .enumerate()
-        .map(|(i, &(tw, th))| {
-            let x = PANEL_PAD + i as f64 * (item_w + ITEM_GAP);
+        .map(|&(tw, th)| {
+            let w = item_w(tw);
             // The items stand on one line: their titles line up.
             let item = Area {
                 x,
                 y: bottom - item_h(th),
-                w: item_w,
+                w,
                 h: item_h(th),
             };
+            x += w + ITEM_GAP;
             let thumb = Area {
-                x: x + (item_w - tw) / 2.0,
+                x: item.x + (w - tw) / 2.0,
                 y: item.y + ITEM_PAD,
                 w: tw,
                 h: th,
             };
             let label = Area {
-                x: x + ITEM_PAD,
+                x: item.x + ITEM_PAD,
                 y: thumb.y + th + LABEL_GAP,
-                w: THUMB.0,
+                w: w - 2.0 * ITEM_PAD,
                 h: LABEL_HEIGHT,
             };
             let place = |a: Area| Area {
@@ -518,17 +522,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn thumbnails_keep_their_aspect_in_220_by_150_and_titles_line_up() {
-        let (panel, items) = layout(&[(1600.0, 1000.0), (800.0, 1200.0)], (1920.0, 1080.0));
-        assert_eq!(items.len(), 2);
-        let (a, b) = (items[0].thumb, items[1].thumb);
-        assert_eq!((a.w, a.h), (220.0, 137.5));
-        assert_eq!((b.w, b.h), (100.0, 150.0));
-        assert_eq!(items[0].label.y, items[1].label.y);
-        // 16 + 236 + 14 + 236 + 16 wide, centred.
-        assert_eq!(panel.w, 518.0);
-        assert_eq!(panel.x, (1920.0 - 518.0) / 2.0);
-        assert_eq!(items[1].item.x - items[0].item.x, 236.0 + ITEM_GAP);
+    fn thumbnails_share_one_height_and_titles_line_up() {
+        // A fullscreen 16:10 window, a terminal in a half of an ultrawide
+        // screen, a narrow window, and a maximised ultrawide one.
+        let sizes = [
+            (2560.0, 1600.0),
+            (1606.0, 1424.0),
+            (600.0, 1200.0),
+            (3220.0, 1424.0),
+        ];
+        let (panel, items) = layout(&sizes, (3440.0, 1440.0));
+        let thumbs: Vec<(f64, f64)> = items.iter().map(|i| (i.thumb.w, i.thumb.h)).collect();
+        assert_eq!(thumbs[0], (240.0, 150.0));
+        assert_eq!(thumbs[1].1, 150.0);
+        assert!((thumbs[1].0 - 169.17).abs() < 0.01, "{:?}", thumbs[1]);
+        assert_eq!(thumbs[2], (75.0, 150.0));
+        // Wider than 2:1: at the widest, a little shorter.
+        assert_eq!(thumbs[3].0, THUMB_MAX_WIDTH);
+        assert!((thumbs[3].1 - 132.67).abs() < 0.01, "{:?}", thumbs[3]);
+        assert!(items.iter().all(|i| i.label.y == items[0].label.y));
+        // The narrow one's item keeps room for its title.
+        assert_eq!(items[2].item.w, LABEL_MIN_WIDTH + 2.0 * ITEM_PAD);
+        assert_eq!(items[2].label.w, LABEL_MIN_WIDTH);
+        assert_eq!(items[0].item.w, 256.0);
+        assert_eq!(items[1].item.x, items[0].item.x + 256.0 + ITEM_GAP);
+        // 16 + the items and their gaps + 16 wide, centred.
+        let items_w: f64 = items.iter().map(|i| i.item.w).sum();
+        assert!((panel.w - (32.0 + items_w + 3.0 * ITEM_GAP)).abs() < 1e-9);
+        assert_eq!(panel.x, (3440.0 - panel.w) / 2.0);
         // The tallest item fills the panel's height less its padding.
         assert_eq!(panel.h, 2.0 * PANEL_PAD + 150.0 + 40.0);
     }
