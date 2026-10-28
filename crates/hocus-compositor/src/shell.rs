@@ -215,7 +215,7 @@ impl State {
                     let line: Vec<u8> = pending.drain(..=end).collect();
                     let line = String::from_utf8_lossy(&line);
                     match line.trim().parse::<ToCompositor>() {
-                        Ok(message) => app.state.from_shell(message),
+                        Ok(message) => app.state.shell_says(message),
                         Err(err) => {
                             tracing::warn!(%err, "a line from the shell that does not read")
                         }
@@ -261,7 +261,7 @@ impl State {
         }
     }
 
-    fn from_shell(&mut self, message: ToCompositor) {
+    fn shell_says(&mut self, message: ToCompositor) {
         match message {
             ToCompositor::Toggle { output } => self.toggle_bar(&output),
             ToCompositor::Software => {

@@ -63,7 +63,10 @@ const RIM: Color = rgba(255, 255, 255, 0.10);
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn,hocuspanda_shell=info".into()),
+        )
         .init();
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose();
@@ -129,8 +132,6 @@ struct Bar {
     form: Form,
     /// The form switch under way: from that width, since then.
     switch: Option<(f64, Instant)>,
-    /// The surface's height, logical pixels.
-    height: f32,
 }
 
 impl Bar {
@@ -171,8 +172,7 @@ enum Message {
     FromCompositor(String),
     Unlinked,
     Frame,
-    Opened(window::Id, iced::Size),
-    Resized(window::Id, iced::Size),
+    Opened(window::Id),
     Moved(window::Id, Point),
     Pressed(window::Id),
 }
@@ -202,8 +202,7 @@ impl Shell {
 
     fn subscription(&self) -> Subscription<Message> {
         let events = event::listen_with(|event, _, id| match event {
-            Event::Window(window::Event::Opened { size, .. }) => Some(Message::Opened(id, size)),
-            Event::Window(window::Event::Resized(size)) => Some(Message::Resized(id, size)),
+            Event::Window(window::Event::Opened { .. }) => Some(Message::Opened(id)),
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 Some(Message::Moved(id, position))
             }
@@ -235,7 +234,7 @@ impl Shell {
                 Task::none()
             }
             Message::FromCompositor(line) => match line.parse::<ToShell>() {
-                Ok(message) => self.from_compositor(message),
+                Ok(message) => self.compositor_says(message),
                 Err(err) => {
                     tracing::warn!(%err, "a line from the compositor that does not read");
                     Task::none()
@@ -255,12 +254,7 @@ impl Shell {
                 }
                 Task::none()
             }
-            Message::Opened(id, size) | Message::Resized(id, size) => {
-                if let Some(bar) = self.bars.get_mut(&id) {
-                    bar.height = size.height;
-                }
-                self.input_region(id)
-            }
+            Message::Opened(id) => self.input_region(id),
             Message::Moved(id, p) => {
                 self.pointer.insert(id, p);
                 Task::none()
@@ -271,6 +265,7 @@ impl Shell {
                 };
                 // The strip at the screen's edge and the bar's first pixels
                 // (§3): the screen's edge stops the pointer there.
+                tracing::debug!(x = p.x, y = p.y, "pressed");
                 if p.x >= (SURFACE_WIDTH - EDGE - EDGE_INSIDE) as f32 {
                     let toggle = ToCompositor::Toggle {
                         output: bar.output.clone(),
@@ -292,7 +287,7 @@ impl Shell {
         }
     }
 
-    fn from_compositor(&mut self, message: ToShell) -> Task<Message> {
+    fn compositor_says(&mut self, message: ToShell) -> Task<Message> {
         match message {
             ToShell::Look { glass, motion } => {
                 self.look = Look {
@@ -350,7 +345,6 @@ impl Shell {
                 output,
                 form,
                 switch: None,
-                height: 0.0,
             },
         );
         open
@@ -388,11 +382,11 @@ impl Shell {
             return Task::none();
         };
         let width = bar.form.width();
-        let height = bar.height.ceil() as i32;
         Task::done(Message::SetInputRegion {
             id,
             callback: iced_layershell::actions::ActionCallback::new(move |region| {
-                region.add(SURFACE_WIDTH - EDGE - width, 0, width + EDGE, height);
+                // As tall as any screen: the surface cuts it.
+                region.add(SURFACE_WIDTH - EDGE - width, 0, width + EDGE, 1 << 20);
             }),
         })
     }
@@ -452,6 +446,8 @@ fn instant_of(monotonic_us: u64) -> Instant {
 
 /// The line to the compositor: what it says comes as messages; what the
 /// shell says goes through the sender handed over first.
+// `Subscription::run_with` hands its data back as given: a `&String`.
+#[allow(clippy::ptr_arg)]
 fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
     let socket = socket.clone();
     iced::stream::channel(16, async move |mut output| {

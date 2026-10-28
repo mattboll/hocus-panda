@@ -38,6 +38,10 @@ pub struct Config {
     /// of the file; `None` remembers nothing (tests).
     #[serde(skip)]
     pub state_dir: Option<PathBuf>,
+    /// A flat background instead of the default gradient, for tests that
+    /// look through translucent pixels. Not part of the file.
+    #[serde(skip)]
+    pub plain_background: bool,
 }
 
 /// The bar, `[panel]` (docs/design/bar.md §2, §3).

@@ -6,12 +6,14 @@
 //! backend, together in [`App`]); nothing else holds a reference to it.
 //! Work that could block (starting programs) runs on threads of its own.
 
+mod backdrop;
 mod backend;
 mod config;
 mod cursor;
 mod decoration;
 pub mod desktops;
 mod focus;
+mod glass;
 mod grabs;
 mod handlers;
 mod harness;
@@ -43,12 +45,17 @@ use anyhow::Context;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 pub use backend::headless::{HeadlessConfig, RendererChoice};
-pub use config::{Appearance, Config, Desktops, OutputSettings, ScaleFrom, SystemKeyboard};
+pub use config::{
+    Appearance, Config, Desktops, FormChoice, OutputSettings, PanelScreens, ScaleFrom,
+    SystemKeyboard,
+};
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
 #[doc(hidden)]
 pub use cursor::theme::{TestImage, encode as encode_xcursor};
 pub use harness::{Headless, Placed, WindowInfo};
+/// The bar's forms.
+pub use hocus_link::Form as BarForm;
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use shortcuts::{Action, Chord, Ending, Shortcuts};
 pub use state::State;

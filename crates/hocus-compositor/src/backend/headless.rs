@@ -210,7 +210,13 @@ fn egl_available() -> bool {
 
 impl<R, T> Outputs<R, T>
 where
-    R: Renderer + ImportAll + ImportMem + Offscreen<T> + Bind<T> + crate::wobble::Bend,
+    R: Renderer
+        + ImportAll
+        + ImportMem
+        + Offscreen<T>
+        + Bind<T>
+        + crate::wobble::Bend
+        + crate::glass::Glass,
     R::TextureId: Send + Clone + Texture + 'static,
     R::Error: Send + Sync + 'static,
 {

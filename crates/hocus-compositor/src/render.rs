@@ -11,6 +11,7 @@ use smithay::{
         ImportAll, ImportMem, Renderer, RendererSuper, Texture,
         element::{
             AsRenderElements, Kind, RenderElementStates, default_primary_scanout_output_compare,
+            memory::MemoryRenderBufferRenderElement,
             render_elements,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             texture::TextureRenderElement,
@@ -71,6 +72,8 @@ render_elements! {
     Bent = BentElement,
     /// A window's live thumbnail in Alt+Tab's panel.
     Thumbnail = Keyed<WindowSurface<R>>,
+    /// The desktop's background.
+    Backdrop = MemoryRenderBufferRenderElement<R>,
 }
 
 /// What an output shows, element by element.
@@ -395,7 +398,7 @@ impl State {
         cursor: bool,
     ) -> Vec<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem + Bend,
+        R: Renderer + ImportAll + ImportMem + Bend + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         self.grabber.ready(renderer);
@@ -496,6 +499,9 @@ impl State {
             elements.append(&mut windows);
         }
         layers(renderer, Layer::Top, &mut elements);
+        // The bar's glass goes right under the layers above the windows,
+        // over everything after them.
+        let glass_at = elements.len();
         // Where a dragged window would snap, above the windows.
         let preview = self
             .preview
@@ -556,7 +562,143 @@ impl State {
         elements.append(&mut windows);
         layers(renderer, Layer::Bottom, &mut elements);
         layers(renderer, Layer::Background, &mut elements);
+        if let Some(backdrop) = self.backdrop_element(renderer, output) {
+            elements.push(backdrop);
+        }
+        if let Some(glass) = self.glass_element(renderer, output, now, &elements[glass_at..]) {
+            elements.insert(glass_at, glass);
+        }
         elements
+    }
+
+    /// The desktop's background on `output`, stretched over it.
+    fn backdrop_element<R>(&self, renderer: &mut R, output: &Output) -> Option<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        if self.config.plain_background {
+            return None;
+        }
+        let mode = output.current_mode()?;
+        let size = output.current_transform().transform_size(mode.size);
+        let logical = self.space.output_geometry(output)?.size;
+        let buffer = self
+            .backdrops
+            .borrow_mut()
+            .entry((size.w, size.h))
+            .or_insert_with(|| crate::backdrop::picture((size.w, size.h)))
+            .clone();
+        // Its whole picture, stretched over the screen.
+        let picture = Rectangle::<f64, Logical>::from_size(
+            (
+                f64::from((size.w / crate::backdrop::SHRINK).max(1)),
+                f64::from((size.h / crate::backdrop::SHRINK).max(1)),
+            )
+                .into(),
+        );
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            (0.0, 0.0),
+            &buffer,
+            None,
+            Some(picture),
+            Some(logical),
+            Kind::Unspecified,
+        ) {
+            Ok(element) => Some(OutputElements::Backdrop(element)),
+            Err(err) => {
+                tracing::warn!(output = output.name(), %err, "could not draw the background");
+                None
+            }
+        }
+    }
+
+    /// The glass under the bar on `output` at `now`: what is `behind` it,
+    /// blurred, cut to the bar's rounded corners. None without a bar
+    /// drawn there, or without glass.
+    fn glass_element<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        now: Duration,
+        behind: &[OutputElement<R>],
+    ) -> Option<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        if !self.glass_on() {
+            return None;
+        }
+        // Only under a bar the shell shows: no glass without its tint.
+        let shown = layer_map_for_output(output)
+            .layers()
+            .any(|l| l.namespace() == hocus_link::NAMESPACE);
+        if !shown {
+            return None;
+        }
+        let bar = self.bar_rect(output, now)?;
+        let size = self.space.output_geometry(output)?.size;
+        let scale = output.current_scale().fractional_scale();
+        // The full bar's place and the blur's reach around it, whatever the
+        // form: a switch does not draw it again.
+        let edge = f64::from(hocus_link::EDGE);
+        let full = f64::from(hocus_link::Form::Full.width());
+        let reach = crate::glass::REACH;
+        let screen = Rectangle::<f64, Logical>::from_size(size.to_f64());
+        let around = Rectangle::<f64, Logical>::new(
+            (f64::from(size.w) - edge - full - reach, edge - reach).into(),
+            (
+                full + 2.0 * reach,
+                f64::from(size.h) - 2.0 * edge + 2.0 * reach,
+            )
+                .into(),
+        )
+        .intersection(screen)?;
+        let region: Rectangle<i32, Physical> = around.to_physical_precise_round(scale);
+        let blurred = renderer.frost(
+            &mut self.panes.borrow_mut(),
+            &output.name(),
+            region,
+            scale,
+            behind,
+        )?;
+        let pane: Rectangle<i32, Physical> = bar.to_physical_precise_round(scale);
+        let inside = pane.intersection(blurred.region)?;
+        // The bar's part of the region, in the blur's pixels.
+        let (kx, ky) = (
+            f64::from(blurred.size.w) / f64::from(blurred.region.size.w),
+            f64::from(blurred.size.h) / f64::from(blurred.region.size.h),
+        );
+        let src = Rectangle::<f64, Logical>::new(
+            (
+                f64::from(inside.loc.x - blurred.region.loc.x) * kx,
+                f64::from(inside.loc.y - blurred.region.loc.y) * ky,
+            )
+                .into(),
+            (f64::from(inside.size.w) * kx, f64::from(inside.size.h) * ky).into(),
+        );
+        let element = TextureRenderElement::from_static_texture(
+            blurred.id,
+            renderer.context_id(),
+            inside.loc.to_f64(),
+            blurred.texture,
+            1,
+            smithay::utils::Transform::Normal,
+            None,
+            Some(src),
+            Some(inside.size.to_f64().to_logical(scale).to_i32_round()),
+            None,
+            Kind::Unspecified,
+        );
+        let radius = (hocus_link::RADIUS * scale).round() as i32;
+        Some(OutputElements::Picture(Rounded::new(
+            element,
+            pane,
+            radius,
+            Outside::Cropped,
+        )))
     }
 
     /// Tells the clients shown on `output` that a frame went out, so that

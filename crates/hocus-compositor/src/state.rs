@@ -189,6 +189,12 @@ pub struct State {
     pub gpu: Option<crate::backend::DevId>,
     /// The renderer can blur what is behind the bars (GLES).
     pub blur: bool,
+    /// The glass behind each bar, as last blurred.
+    pub panes: std::cell::RefCell<crate::glass::Panes>,
+    /// The desktop's background, by screen size in pixels.
+    pub backdrops: std::cell::RefCell<
+        HashMap<(i32, i32), smithay::backend::renderer::element::memory::MemoryRenderBuffer>,
+    >,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
     /// Keys whose press was a shortcut: their release is kept from the
@@ -330,6 +336,8 @@ impl State {
             shell: crate::shell::Shell::default(),
             gpu: None,
             blur: false,
+            panes: std::cell::RefCell::default(),
+            backdrops: std::cell::RefCell::default(),
             session: None,
             kept_keys: HashSet::new(),
             ending: None,
