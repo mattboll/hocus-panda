@@ -1163,9 +1163,8 @@ impl State {
     }
 }
 
-/// A toplevel's size and states: tiled on every side, so that its client
-/// draws no shadow nor corners of its own (the desktop draws them, §3);
-/// maximised, fullscreen and resizing as it is.
+/// A toplevel's size and states: tiled when snapped, maximised,
+/// fullscreen and resizing as it is.
 pub fn set_states(
     toplevel: &ToplevelSurface,
     size: Option<Size<i32, Logical>>,
@@ -1177,8 +1176,16 @@ pub fn set_states(
         if let Some(size) = size {
             s.size = Some(size);
         }
-        for tiled in [S::TiledLeft, S::TiledRight, S::TiledTop, S::TiledBottom] {
-            s.states.set(tiled);
+        // Snapped: tiled, so that its client draws no shadow nor rounded
+        // corners of its own. Floating, it may size itself (a client
+        // takes no size of its own while tiled).
+        let tiled = matches!(mode, Mode::Snapped(_));
+        for side in [S::TiledLeft, S::TiledRight, S::TiledTop, S::TiledBottom] {
+            if tiled {
+                s.states.set(side);
+            } else {
+                s.states.unset(side);
+            }
         }
         let toggle = |states: &mut smithay::wayland::shell::xdg::ToplevelStateSet, st, on: bool| {
             if on {

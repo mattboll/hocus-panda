@@ -103,6 +103,7 @@ pub(crate) struct Look {
     grip: f32,
     decorated: bool,
     shadow: ShadowStyle,
+    own_shadow: bool,
 }
 
 impl State {
@@ -123,6 +124,10 @@ impl State {
         }
         let focus = managed.focus_look(now);
         let decorated = self.model.mode(id) != Mode::Fullscreen;
+        // A client drawing its own shadow (a floating GTK window) keeps it:
+        // the desktop's would double it.
+        let (bbox, geometry) = (managed.window.bbox(), managed.window.geometry());
+        let own_shadow = bbox.loc.x < geometry.loc.x - 2 || bbox.size.w > geometry.size.w + 4;
         let shadow = if self.moving == Some(id) {
             ShadowStyle::MOVING
         } else {
@@ -145,6 +150,7 @@ impl State {
             grip,
             decorated,
             shadow,
+            own_shadow,
         })
     }
 
@@ -290,7 +296,7 @@ impl State {
             }
         }
         self.window_parts(renderer, id, look, origin, scale, out);
-        if look.decorated {
+        if look.decorated && !look.own_shadow {
             out.extend(
                 shadow_elements(
                     renderer,
