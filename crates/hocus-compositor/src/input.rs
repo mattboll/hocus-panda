@@ -198,8 +198,11 @@ impl State {
             },
         );
         pointer.frame(self);
-        // The cursor is drawn by the compositor on screens of its own.
-        self.redraw = true;
+        // The compositor draws the cursor on screens of its own; nested,
+        // the host does.
+        if !self.nested {
+            self.redraw = true;
+        }
     }
 
     /// A pointer button by its evdev code. A press focuses the window
