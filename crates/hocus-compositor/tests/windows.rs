@@ -200,3 +200,24 @@ fn nothing_is_drawn_once_the_motions_end() -> anyhow::Result<()> {
     assert_eq!(hp.frames(), frames, "no frame at rest");
     Ok(())
 }
+
+#[test]
+fn super_and_right_drag_resizes_from_the_nearest_corner() -> anyhow::Result<()> {
+    const BTN_RIGHT: u32 = 0x111;
+    let mut hp = compositor()?;
+    let start = open(&mut hp, "test.corner", (400, 300))?;
+    // Nearer the top-left corner: it moves, the bottom-right one stays.
+    let (x, y) = (f64::from(start.x + 50), f64::from(start.y + 40));
+    hp.pointer_move(x, y);
+    hp.key(KEY_LEFTMETA, true);
+    hp.button(BTN_RIGHT, true);
+    hp.pointer_move(x - 40.0, y - 30.0);
+    hp.button(BTN_RIGHT, false);
+    hp.key(KEY_LEFTMETA, false);
+    wait_for_rect(
+        &mut hp,
+        "test.corner",
+        Rect::new(start.x - 40, start.y - 30, 440, 330),
+    )?;
+    Ok(())
+}
