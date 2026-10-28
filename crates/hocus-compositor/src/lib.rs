@@ -170,9 +170,33 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     event_loop
         .run(None, &mut app, App::after_dispatch)
         .context("the event loop failed")?;
+    remove_sockets(&app.state);
+    drop(app);
+    drop(event_loop);
     drop(runtime_dir);
     tracing::info!("compositor stopped");
     Ok(())
+}
+
+/// Removes the Wayland socket and XWayland's display, which their owners
+/// would on drop: smithay's X11 window manager keeps a handle to the loop
+/// in one of the loop's own sources, so that the loop and what it holds
+/// are never dropped once XWayland ran.
+fn remove_sockets(state: &State) {
+    let mut lock = state.socket_path.clone().into_os_string();
+    lock.push(".lock");
+    let mut files = vec![state.socket_path.clone(), PathBuf::from(lock)];
+    if let Some(n) = state.xdisplay {
+        files.push(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));
+        files.push(PathBuf::from(format!("/tmp/.X{n}-lock")));
+    }
+    for file in files {
+        if let Err(err) = std::fs::remove_file(&file)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(file = %file.display(), %err, "could not remove");
+        }
+    }
 }
 
 /// SIGTERM and SIGINT end the compositor as its window closing does, so

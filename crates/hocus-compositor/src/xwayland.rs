@@ -31,13 +31,15 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
             return;
         }
     };
-    let wm_handle = handle.clone();
+    // The window manager takes the loop's handle from the state: one held
+    // by this source would keep the loop, and the sockets it owns, from
+    // ever being dropped.
     let inserted = handle.insert_source(xwayland, move |event, _, app| {
         match event {
             XWaylandEvent::Ready {
                 x11_socket,
                 display_number,
-            } => match X11Wm::start_wm(wm_handle.clone(), x11_socket, client.clone()) {
+            } => match X11Wm::start_wm(app.state.loop_handle.clone(), x11_socket, client.clone()) {
                 Ok(wm) => {
                     tracing::info!(display = display_number, "XWayland ready");
                     app.state.xwm = Some(wm);
