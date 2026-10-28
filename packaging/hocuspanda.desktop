@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Hocuspanda
+Comment=The desktop for developers who work with AI agents
+Comment[fr]=Le bureau des développeurs qui travaillent avec des agents IA
+# The session itself on the virtual terminal the display manager gives it;
+# hocuspanda-session ends when the compositor does, whatever the reason.
+Exec=hocuspanda-session
+TryExec=hocuspanda-session
+DesktopNames=Hocuspanda
