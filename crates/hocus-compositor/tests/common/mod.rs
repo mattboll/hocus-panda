@@ -46,6 +46,13 @@ pub const KEY_LEFT: u32 = 105;
 pub const KEY_RIGHT: u32 = 106;
 pub const KEY_DOWN: u32 = 108;
 pub const KEY_H: u32 = 35;
+pub const KEY_1: u32 = 2;
+pub const KEY_2: u32 = 3;
+pub const KEY_3: u32 = 4;
+pub const KEY_ESC: u32 = 1;
+pub const KEY_TAB: u32 = 15;
+pub const KEY_LEFTCTRL: u32 = 29;
+pub const KEY_LEFTALT: u32 = 56;
 
 pub fn compositor() -> anyhow::Result<Headless> {
     Headless::start(HeadlessConfig {
