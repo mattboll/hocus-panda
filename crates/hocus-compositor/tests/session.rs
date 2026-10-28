@@ -93,8 +93,8 @@ fn shortcuts_follow_the_configuration() -> anyhow::Result<()> {
     let marker = dir.path().join("terminal");
     let mut config = Config::default();
     config.programs.terminal = terminal_writing(&marker);
-    config.shortcuts.terminal = Some("Ctrl+Alt+T".parse()?);
-    config.shortcuts.log_out = None;
+    config.shortcuts.terminal = vec!["Ctrl+Alt+T".parse()?];
+    config.shortcuts.log_out = Vec::new();
     let mut hp = compositor(config)?;
 
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_E]);

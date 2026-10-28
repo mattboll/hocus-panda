@@ -223,8 +223,8 @@ Keyboard:
 - **Minimise** (`Super+H` or `Super+↓` twice): the window shrinks toward
   the bar's area in 220 ms and fades. It comes back with Alt+Tab or the
   desktop's list.
-- **Close**: `Super+Q`, or the application's own button. Closing never
-  kills the application: it asks it to close.
+- **Close**: `Super+Q` or `Alt+F4`, or the application's own button.
+  Closing never kills the application: it asks it to close.
 
 ## 11. Alt+Tab
 
@@ -339,20 +339,25 @@ Keyboard:
 
 ## 13. Shortcuts
 
-All use `Super`, as in the user's current desktop. They are listed in one
-place in the configuration and can be changed. In nested mode (the
-desktop running in a window of another session) the modifier is
-`Alt+Super`, so the host's shortcuts don't take them.
+Most use `Super`, as in the user's current desktop; `Alt+Tab` and
+`Alt+F4` are there for the habit. They are listed in one place in the
+configuration and can be changed. In nested mode (the desktop running in
+a window of another session) the modifier is `Alt+Super`, so the host's
+shortcuts don't take them; `Alt+Tab` takes `Super` too. Other shortcuts
+without `Super`, as `Alt+F4`, stay as they are: the host sees them first
+and keeps its own (`Alt+F4` closes the desktop's window there), and only
+those it lets through reach the desktop.
 
-The configuration's `[shortcuts]` section holds them, by action; an empty
-string turns one off. The package ships every setting with its default
+The configuration's `[shortcuts]` section holds them, by action: one
+shortcut, or a list of them (`close = ["Super+Q", "Alt+F4"]`); an empty
+string or list turns an action's off. The package ships every setting with its default
 (`/usr/share/doc/hocuspanda/config.toml`, from `packaging/config.toml`).
 
 | Action (`[shortcuts]`) | Default | What it does |
 |---|---|---|
 | `terminal` | `Super+Return` | Opens a terminal: `[programs] terminal`, or the first of kitty, foot, alacritty, xterm found in `PATH` |
 | `log-out` | `Super+Shift+E` | Ends the session at once; the display manager comes back |
-| `close` | `Super+Q` | Asks the focused window to close (§10) |
+| `close` | `Super+Q`, `Alt+F4` | Asks the focused window to close (§10) |
 | `minimize` | `Super+H` | Minimises the focused window (§10) |
 | `snap-left`, `snap-right` | `Super+←`, `Super+→` | Left or right half; again, the other side (§9) |
 | `maximize` | `Super+↑` | Maximises (§9) |

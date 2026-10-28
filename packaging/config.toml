@@ -30,15 +30,17 @@
 
 # [shortcuts]
 # Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and
-# an XKB key name (Return, E, F1, space...). An empty string turns one
-# off. In a window of another session, Super is Alt+Super.
+# an XKB key name (Return, E, F1, space...). One shortcut, or a list of
+# them, as ["Super+Q", "Alt+F4"]. An empty string or list turns an
+# action's off. In a window of another session, Super is Alt+Super, and
+# the other session sees Alt+F4 first.
 #
 # Opens a terminal.
 # terminal = "Super+Return"
 # Logs out: the session ends and the display manager comes back.
 # log-out = "Super+Shift+E"
 # Asks the focused window to close (the application may ask first).
-# close = "Super+Q"
+# close = ["Super+Q", "Alt+F4"]
 # Minimises the focused window; Alt+Tab brings it back.
 # minimize = "Super+H"
 # The left or right half; again, the other side.

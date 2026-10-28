@@ -57,6 +57,8 @@ pub const KEY_ESC: u32 = 1;
 pub const KEY_TAB: u32 = 15;
 pub const KEY_LEFTCTRL: u32 = 29;
 pub const KEY_LEFTALT: u32 = 56;
+pub const KEY_Q: u32 = 16;
+pub const KEY_F4: u32 = 62;
 
 pub fn compositor() -> anyhow::Result<Headless> {
     Headless::start(HeadlessConfig {
@@ -125,6 +127,8 @@ pub enum Event {
     Globals(Vec<String>),
     PopupShown,
     PopupDone,
+    /// The compositor asked its window to close; it stays.
+    CloseRequested,
 }
 
 /// A client running on its thread.
@@ -359,7 +363,9 @@ impl Client {
 }
 
 impl WindowHandler for Client {
-    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {}
+    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
+        let _ = self.events.send(Event::CloseRequested);
+    }
 
     fn configure(
         &mut self,
