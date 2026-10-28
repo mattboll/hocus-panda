@@ -138,7 +138,7 @@ pub struct State {
     pub preview: Option<Preview>,
     pub preview_out: Option<(Rect, Tween)>,
     pub preview_ids: [Id; 9],
-    /// The handle shown on the seam of a snapped pair near the pointer,
+    /// The handle shown on the seam of a pair near the pointer,
     /// fading like a grip (§8).
     pub seam_handle: Option<(model::Seam, crate::windows::Grip)>,
     pub seam_handle_id: Id,

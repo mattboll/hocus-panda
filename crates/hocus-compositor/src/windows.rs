@@ -1253,21 +1253,31 @@ impl State {
         }
     }
 
-    /// The seams of snapped pairs (§8): snapped windows, not maximised,
-    /// side by side or one above the other on the same output.
-    pub fn seams(&self) -> Vec<model::Seam> {
-        let snapped: Vec<(WindowId, Rect, Option<Output>)> = self
-            .model
+    /// The windows that can pair across a seam (§8), back to front: those
+    /// shown, floating or snapped but not maximised, with their geometry
+    /// and output.
+    pub fn pairable(&self) -> Vec<(WindowId, Rect, Option<Output>)> {
+        self.model
             .stack()
             .iter()
             .copied()
-            .filter(|id| !self.model.is_minimized(*id))
-            .filter(|id| matches!(self.model.mode(*id), Mode::Snapped(z) if z != Zone::Maximized))
+            .filter(|id| self.model.is_shown(*id))
+            .filter(|id| match self.model.mode(*id) {
+                Mode::Floating => true,
+                Mode::Snapped(zone) => zone != Zone::Maximized,
+                Mode::Fullscreen => false,
+            })
             .filter_map(|id| Some((id, self.rect_of(id)?, self.output_of(id))))
-            .collect();
+            .collect()
+    }
+
+    /// The seams of pairs (§8): two windows, snapped or floating, facing
+    /// each other across the gap on the same output.
+    pub fn seams(&self) -> Vec<model::Seam> {
+        let pairable = self.pairable();
         let mut seams = Vec::new();
-        for (i, (a, ra, oa)) in snapped.iter().enumerate() {
-            for (b, rb, ob) in &snapped[i + 1..] {
+        for (i, (a, ra, oa)) in pairable.iter().enumerate() {
+            for (b, rb, ob) in &pairable[i + 1..] {
                 if oa == ob
                     && let Some(seam) = model::seam((*a, *ra), (*b, *rb))
                 {
