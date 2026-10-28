@@ -57,7 +57,7 @@ use crate::{
         flip::{self, Flip, Health},
         scale,
     },
-    output_spec::default_scale,
+    config::ScaleFrom,
     render::{BACKGROUND, OutputElement},
 };
 
@@ -488,9 +488,12 @@ impl TtyBackend {
             .map(|g| g.loc.x + g.size.w)
             .max()
             .unwrap_or(0);
-        // At the scale of its density until a setting gives one: lit at 1
-        // first, its clients would draw twice.
-        let output_scale = default_scale((mode.size.w, mode.size.h), size_mm);
+        // Its scale before it lights: lit at 1 first, its clients would
+        // draw twice.
+        let (output_scale, scale_from) =
+            state
+                .config
+                .output_scale(&name, (mode.size.w, mode.size.h), size_mm);
         output.change_current_state(
             Some(mode),
             Some(Transform::Normal),
@@ -520,12 +523,19 @@ impl TtyBackend {
             .with_context(|| format!("could not drive {name}"))?;
 
         add_output(state, &output, (x, 0));
+        // In words, for a user looking for the name to put in the
+        // configuration.
+        let from = match scale_from {
+            ScaleFrom::Config => format!("from [outputs.{name}] in config.toml"),
+            ScaleFrom::Density => {
+                format!("from its density; [outputs.{name}] scale = ... in config.toml sets it")
+            }
+        };
         tracing::info!(
-            output = name,
-            mode = %format!("{}x{}@{:.2}", mode.size.w, mode.size.h, f64::from(mode.refresh) / 1000.0),
-            size_mm = %format!("{width_mm}x{height_mm}"),
-            scale = output_scale,
-            "screen lit"
+            "output {name} {}x{}@{:.2} {width_mm}x{height_mm} mm scale {output_scale} ({from})",
+            mode.size.w,
+            mode.size.h,
+            f64::from(mode.refresh) / 1000.0,
         );
         Ok(Screen {
             connector: info.handle(),

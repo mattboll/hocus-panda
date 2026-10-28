@@ -6,13 +6,26 @@
 
 # [keyboard]
 # XKB layouts, each with its variant in brackets, the first active at
-# start, for example ["fr", "fr(bepo)", "us"]. Empty: XKB's defaults.
+# start, for example ["fr", "fr(bepo)", "us"]. Empty: the system's
+# (/etc/default/keyboard, from dpkg-reconfigure keyboard-configuration),
+# or else XKB's defaults (us). Options set here win over the system's.
 # layouts = []
 # XKB options, for example "grp:alt_shift_toggle,caps:escape".
 # options = ""
 # Milliseconds before a held key repeats, and repeats per second.
 # repeat_delay = 200
 # repeat_rate = 25
+
+# Screens, by connector name. Without a scale, a screen takes the scale
+# of its density (a 2560x1600 panel of 34 cm takes 1.75). The journal
+# names each screen as it lights: "output eDP-1 2560x1600@60.00 ... scale".
+# A scale from 0.5 to 4, for example:
+#
+#   [outputs.eDP-1]
+#   scale = 1
+#
+#   [outputs.DP-2]
+#   scale = 1.25
 
 # [shortcuts]
 # Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and
