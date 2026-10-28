@@ -82,12 +82,19 @@ enum Canvas {
 /// A renderer and the buffers it draws the outputs into.
 struct Outputs<R, T> {
     renderer: R,
+    format: Fourcc,
+    /// In their names' order.
     outputs: Vec<OutputBuffer<T>>,
+    /// Outputs unplugged, by name, with where they were: a test plugs
+    /// them back.
+    unplugged: Vec<(String, OutputSpec, (i32, i32))>,
 }
 
 struct OutputBuffer<T> {
     output: Output,
-    _global: GlobalId,
+    spec: OutputSpec,
+    position: (i32, i32),
+    global: GlobalId,
     target: T,
     damage_tracker: OutputDamageTracker,
     /// Frames that drew something.
@@ -184,62 +191,123 @@ where
     R::Error: Send + Sync + 'static,
 {
     fn new(
-        mut renderer: R,
+        renderer: R,
         format: Fourcc,
         specs: &[OutputSpec],
         state: &mut State,
     ) -> anyhow::Result<Self> {
-        let mut outputs = Vec::with_capacity(specs.len());
+        let mut outputs = Self {
+            renderer,
+            format,
+            outputs: Vec::with_capacity(specs.len()),
+            unplugged: Vec::new(),
+        };
         for (i, (spec, position)) in specs.iter().zip(output_spec::layout(specs)).enumerate() {
-            let target = renderer
-                .create_buffer(format, (spec.width, spec.height).into())
-                .with_context(|| {
-                    format!("could not create a {}x{} buffer", spec.width, spec.height)
-                })?;
-            let name = format!("HEADLESS-{}", i + 1);
-            let output = Output::new(
-                name.clone(),
-                PhysicalProperties {
-                    size: spec.physical_size.unwrap_or((0, 0)).into(),
-                    subpixel: Subpixel::Unknown,
-                    make: "Hocuspanda".into(),
-                    model: "Headless".into(),
-                },
-            );
-            let global = output.create_global::<State>(&state.display_handle);
-            let mode = Mode {
-                size: (spec.width, spec.height).into(),
-                refresh: REFRESH_MHZ,
-            };
-            output.change_current_state(
-                Some(mode),
-                Some(Transform::Normal),
-                Some(scale(spec.scale)),
-                Some(position.into()),
-            );
-            output.set_preferred(mode);
-            add_output(state, &output, position);
-            tracing::info!(
-                output = name,
-                size = %format!("{}x{}", spec.width, spec.height),
-                scale = spec.scale,
-                ?position,
-                "output"
-            );
-            outputs.push(OutputBuffer {
-                damage_tracker: OutputDamageTracker::from_output(&output),
-                output,
-                _global: global,
-                target,
-                frames: 0,
-            });
+            outputs.add(format!("HEADLESS-{}", i + 1), *spec, position, state)?;
         }
-        Ok(Self { renderer, outputs })
+        Ok(outputs)
+    }
+
+    /// Makes output `name` and maps it in the space at `position`.
+    fn add(
+        &mut self,
+        name: String,
+        spec: OutputSpec,
+        position: (i32, i32),
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        let target = self
+            .renderer
+            .create_buffer(self.format, (spec.width, spec.height).into())
+            .with_context(|| format!("could not create a {}x{} buffer", spec.width, spec.height))?;
+        let output = Output::new(
+            name.clone(),
+            PhysicalProperties {
+                size: spec.physical_size.unwrap_or((0, 0)).into(),
+                subpixel: Subpixel::Unknown,
+                make: "Hocuspanda".into(),
+                model: "Headless".into(),
+            },
+        );
+        let global = output.create_global::<State>(&state.display_handle);
+        let mode = Mode {
+            size: (spec.width, spec.height).into(),
+            refresh: REFRESH_MHZ,
+        };
+        output.change_current_state(
+            Some(mode),
+            Some(Transform::Normal),
+            Some(scale(spec.scale)),
+            Some(position.into()),
+        );
+        output.set_preferred(mode);
+        add_output(state, &output, position);
+        tracing::info!(
+            output = name,
+            size = %format!("{}x{}", spec.width, spec.height),
+            scale = spec.scale,
+            ?position,
+            "output"
+        );
+        self.outputs.push(OutputBuffer {
+            damage_tracker: OutputDamageTracker::from_output(&output),
+            output,
+            spec,
+            position,
+            global,
+            target,
+            frames: 0,
+        });
+        self.outputs.sort_by_key(|o| o.output.name());
+        Ok(())
+    }
+
+    /// Output `name` goes, as a screen unplugged.
+    fn unplug(&mut self, name: &str, state: &mut State) -> anyhow::Result<()> {
+        let at = self
+            .outputs
+            .iter()
+            .position(|o| o.output.name() == name)
+            .with_context(|| format!("no output {name}"))?;
+        let gone = self.outputs.remove(at);
+        tracing::info!(output = name, "output unplugged");
+        state.output_gone(&gone.output);
+        state.display_handle.remove_global::<State>(gone.global);
+        self.unplugged
+            .push((name.to_string(), gone.spec, gone.position));
+        Ok(())
+    }
+
+    /// Output `name`, unplugged before, comes back where it was or at
+    /// `at`.
+    fn plug(
+        &mut self,
+        name: &str,
+        at: Option<(i32, i32)>,
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        let index = self
+            .unplugged
+            .iter()
+            .position(|(n, _, _)| n == name)
+            .with_context(|| format!("no output {name} unplugged"))?;
+        let (name, spec, position) = self.unplugged.remove(index);
+        self.add(name.clone(), spec, at.unwrap_or(position), state)?;
+        let output = self
+            .outputs
+            .iter()
+            .find(|o| o.output.name() == name)
+            .map(|o| o.output.clone())
+            .context("the output just made")?;
+        state.output_back(&output);
+        Ok(())
     }
 
     /// Draws every output where something changed, and tells the clients.
     fn render(&mut self, state: &mut State) {
-        let Self { renderer, outputs } = self;
+        let Self {
+            renderer, outputs, ..
+        } = self;
         for out in outputs {
             let elements = state.output_elements(renderer, &out.output, true);
             let mut framebuffer = match renderer.bind(&mut out.target) {
@@ -283,7 +351,9 @@ where
     /// What output `index` showed last: its size in pixels, and its rows of
     /// ARGB8888 pixels.
     fn pixels(&mut self, index: usize) -> anyhow::Result<(i32, i32, Vec<u8>)> {
-        let Self { renderer, outputs } = self;
+        let Self {
+            renderer, outputs, ..
+        } = self;
         let out = outputs.get_mut(index).context("no such output")?;
         let size = out
             .output
@@ -303,8 +373,9 @@ where
 }
 
 impl HeadlessBackend {
-    /// What output `index` (in the order given) showed last: its size in
-    /// pixels, and its rows of ARGB8888 pixels (little-endian: B, G, R, A).
+    /// What output `index` (in the order given, of those plugged) showed
+    /// last: its size in pixels, and its rows of ARGB8888 pixels
+    /// (little-endian: B, G, R, A).
     pub fn screenshot(&mut self, index: usize) -> anyhow::Result<(i32, i32, Vec<u8>)> {
         match &mut self.canvas {
             Canvas::Gles(c) => c.pixels(index),
@@ -332,6 +403,29 @@ impl HeadlessBackend {
         match &mut self.canvas {
             Canvas::Gles(c) => c.render(state),
             Canvas::Pixman(c) => c.render(state),
+        }
+    }
+
+    /// Output `name` goes, as a screen unplugged; its windows go to a
+    /// screen still there (docs/design/windows.md §12).
+    pub fn unplug(&mut self, name: &str, state: &mut State) -> anyhow::Result<()> {
+        match &mut self.canvas {
+            Canvas::Gles(c) => c.unplug(name, state),
+            Canvas::Pixman(c) => c.unplug(name, state),
+        }
+    }
+
+    /// Output `name`, unplugged before, comes back where it was (or at
+    /// `at`), and the windows that came from it go back.
+    pub fn plug(
+        &mut self,
+        name: &str,
+        at: Option<(i32, i32)>,
+        state: &mut State,
+    ) -> anyhow::Result<()> {
+        match &mut self.canvas {
+            Canvas::Gles(c) => c.plug(name, at, state),
+            Canvas::Pixman(c) => c.plug(name, at, state),
         }
     }
 

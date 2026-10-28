@@ -410,6 +410,8 @@ impl TtyBackend {
             };
             match self.light(crtc, info, state) {
                 Ok(screen) => {
+                    // The windows that came from it go back.
+                    state.output_back(&screen.output);
                     self.gpu.screens.insert(crtc, screen);
                 }
                 Err(err) => tracing::warn!("could not light a screen: {err:#}"),
@@ -432,9 +434,8 @@ impl TtyBackend {
                 tracing::debug!(%err, "could not clear the screen");
             }
         });
-        state.space.unmap_output(&screen.output);
-        // Its snapped and fullscreen windows go to a screen still there.
-        state.rearrange();
+        // Its windows go to a screen still there.
+        state.output_gone(&screen.output);
         state.display_handle.remove_global::<State>(screen.global);
         for token in [screen.health, screen.pace].into_iter().flatten() {
             state.loop_handle.remove(token);

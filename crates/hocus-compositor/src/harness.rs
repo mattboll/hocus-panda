@@ -18,6 +18,23 @@ use crate::{
     model::{Rect, WindowId},
 };
 
+/// Where a window is, shown or not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placed {
+    pub id: WindowId,
+    pub app_id: Option<String>,
+    /// Where it is, or comes back to when it does not show; global.
+    pub rect: Rect,
+    /// The output it is on.
+    pub output: Option<String>,
+    /// From 0, on its output.
+    pub desktop: usize,
+    pub mode: crate::model::Mode,
+    pub minimized: bool,
+    /// Not minimised, and its desktop is the one its output shows.
+    pub shown: bool,
+}
+
 /// A headless compositor in a private runtime directory.
 #[derive(Debug)]
 pub struct Headless {
@@ -83,8 +100,9 @@ impl Headless {
         self.app.backend.headless().map_or(0, |h| h.frames())
     }
 
-    /// What output `index` (in the order given) showed last: its size in
-    /// pixels, and its rows of ARGB8888 pixels (B, G, R, A in memory).
+    /// What output `index` (in the order given, of those plugged) showed
+    /// last: its size in pixels, and its rows of ARGB8888 pixels (B, G, R,
+    /// A in memory).
     pub fn screenshot(&mut self, index: usize) -> anyhow::Result<(i32, i32, Vec<u8>)> {
         self.app
             .backend
@@ -253,6 +271,14 @@ impl Headless {
         (strip.current(), strip.position(state.now()))
     }
 
+    /// The desktop the output under the pointer shows (from 0).
+    pub fn desktop_under_pointer(&self) -> usize {
+        let state = &self.app.state;
+        state
+            .output_under_pointer()
+            .map_or(0, |o| state.strip(&o).current())
+    }
+
     /// Alt+Tab while held: its windows in order, the selected one, and
     /// whether its panel shows.
     pub fn switcher(&self) -> Option<(Vec<WindowId>, usize, bool)> {
@@ -337,6 +363,92 @@ impl Headless {
             time,
             cancelled: false,
         });
+    }
+
+    /// Every window, shown or not, bottom first, and where it is.
+    pub fn placements(&self) -> Vec<Placed> {
+        let state = &self.app.state;
+        state
+            .model
+            .stack()
+            .iter()
+            .filter_map(|id| {
+                let window = &state.windows.get(id)?.window;
+                let placement = state.model.placement(*id);
+                Some(Placed {
+                    id: *id,
+                    app_id: crate::windows::app_id(window),
+                    rect: state.target_rect(*id)?,
+                    output: state.output_of(*id).map(|o| o.name()),
+                    desktop: placement.desktop,
+                    mode: placement.mode,
+                    minimized: placement.minimized,
+                    shown: state.model.is_shown(*id),
+                })
+            })
+            .collect()
+    }
+
+    /// The outputs' names and their geometry (global), left to right.
+    pub fn outputs(&self) -> Vec<(String, Rect)> {
+        let state = &self.app.state;
+        let mut outputs: Vec<(String, Rect)> = state
+            .space
+            .outputs()
+            .filter_map(|o| {
+                let g = state.space.output_geometry(o)?;
+                Some((o.name(), crate::windows::rect_of(g)))
+            })
+            .collect();
+        outputs.sort_by_key(|(_, g)| (g.x, g.y));
+        outputs
+    }
+
+    /// The work area of output `name`.
+    pub fn work_area_of(&self, name: &str) -> Option<Rect> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == name)?;
+        state.work_area(output)
+    }
+
+    /// Where the pointer is, global.
+    pub fn pointer(&self) -> (f64, f64) {
+        let at = self
+            .app
+            .state
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        (at.x, at.y)
+    }
+
+    /// Output `name` goes, as a screen unplugged.
+    pub fn unplug(&mut self, name: &str) -> anyhow::Result<()> {
+        let App { state, backend } = &mut self.app;
+        backend
+            .headless_mut()
+            .context("not headless")?
+            .unplug(name, state)
+    }
+
+    /// Output `name`, unplugged before, comes back where it was.
+    pub fn plug(&mut self, name: &str) -> anyhow::Result<()> {
+        let App { state, backend } = &mut self.app;
+        backend
+            .headless_mut()
+            .context("not headless")?
+            .plug(name, None, state)
+    }
+
+    /// Output `name`, unplugged before, comes back with its top-left
+    /// corner at (`x`, `y`).
+    pub fn plug_at(&mut self, name: &str, x: i32, y: i32) -> anyhow::Result<()> {
+        let App { state, backend } = &mut self.app;
+        backend
+            .headless_mut()
+            .context("not headless")?
+            .plug(name, Some((x, y)), state)
     }
 
     /// Why the compositor was asked to end, if it was.

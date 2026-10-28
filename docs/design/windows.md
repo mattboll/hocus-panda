@@ -178,7 +178,7 @@ Keyboard:
   screen), the window's for the keys. The window keeps to that screen as
   its work area changes, through fullscreen and back, and as its pair is
   resized; if that screen goes, it takes the same zone on a screen still
-  there.
+  there (§12, "A screen unplugged").
 
 ## 10. Maximise, fullscreen, minimise, close
 
@@ -264,6 +264,42 @@ Keyboard:
   under it. A window being dragged while desktops switch goes along.
 - Empty desktops stay; their order is fixed (1 to 4). `[desktops] count`
   sets how many, from 1 to 9, on every screen.
+
+### A screen unplugged
+
+- No window is ever lost. When a screen goes, every window on it, on any
+  of its desktops, floating, snapped, fullscreen or minimised, moves to
+  the screen still there nearest to it, onto the desktop of the same
+  number (the last one if that screen has fewer), in the same state:
+  - a floating window keeps its place across the screen: its centre at
+    the same share of the work area's width and height, its size kept
+    but no larger than the new work area, and wholly inside it; where it
+    goes back when restored is carried the same way;
+  - a snapped window takes the same zone, a fullscreen one covers the new
+    screen, a minimised one stays minimised.
+  The windows move at once, without motion: there is nothing to see them
+  leave from. Those whose desktop is not the one the new screen shows go
+  out of sight there, as on any other desktop.
+- What was going on ends: a drag or a resize under way, wherever it is
+  (without snapping where its preview was); Alt+Tab shown on that screen
+  (cancelled), a swipe of its desktops; a desktop sliding there stops on
+  the desktop it was going to. The pointer, if it was there,
+  goes to the middle of the new screen; the focus stays on its window if
+  that one still shows, otherwise it goes to the window on top that does.
+- When a screen of the same name comes back (the same connector), the
+  windows that came from it go back to it: on their desktop, at their
+  place (the same one on a screen of the same size, the same share of it
+  otherwise), in their state; the screen shows the desktop it showed.
+  A window no longer where it was put (the user moved or resized it,
+  changed it between floating, snapped and fullscreen, or sent it to
+  another desktop) stays where it is; minimising it or bringing it back
+  does not count. Each window remembers only the screen it left, its
+  desktop and its place there.
+- With every screen gone, the windows wait where they are; a screen
+  that comes then shows those on it where they were, and takes those on
+  none in the middle of its work area.
+- The real screens (tty) and the headless backend's outputs (in tests)
+  come and go; the nested window is one output that never goes.
 
 ## 13. Shortcuts
 
@@ -375,3 +411,7 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
    resized window's dragged edges, stick to other windows' at the 8 px
    gap or in line with them, and flush to the work area's; dragging on
    frees them (#343).
+8. A screen unplugged moves its windows to the nearest screen left, on
+   the same-numbered desktop, floating ones at the same place across it;
+   they go back when that screen returns unless the user placed them
+   meanwhile (#347).

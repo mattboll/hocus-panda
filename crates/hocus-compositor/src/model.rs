@@ -135,6 +135,26 @@ pub fn place(area: Rect, size: (i32, i32), same_app: &[(i32, i32)]) -> (i32, i32
     at
 }
 
+/// Where a floating window at `rect` in the work area `from` goes in
+/// another screen's work area `to` (§12): its centre at the same share
+/// across and down, its size no larger than `to`, and wholly inside it.
+pub fn carried(rect: Rect, from: Rect, to: Rect) -> Rect {
+    let width = rect.width.min(to.width).max(0);
+    let height = rect.height.min(to.height).max(0);
+    let (cx, cy) = rect.centre();
+    let along = |centre: f64, start: i32, room: i32, to_start: i32, to_room: i32, size: i32| {
+        let share = ((centre - f64::from(start)) / f64::from(room.max(1))).clamp(0.0, 1.0);
+        let at = f64::from(to_start) + share * f64::from(to_room) - f64::from(size) / 2.0;
+        (at.round() as i32).clamp(to_start, to_start + to_room - size)
+    };
+    Rect::new(
+        along(cx, from.x, from.width, to.x, to.width, width),
+        along(cy, from.y, from.height, to.y, to.height, height),
+        width,
+        height,
+    )
+}
+
 /// Where a window snaps: a half, a quarter, or the whole work area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Zone {
@@ -804,6 +824,13 @@ impl Model {
         }
     }
 
+    /// Where `id` goes back to floating: its screen changed (§12).
+    pub fn set_restore(&mut self, id: WindowId, restore: Option<Rect>) {
+        if let Some(p) = self.placements.get_mut(&id) {
+            p.restore = restore;
+        }
+    }
+
     /// Back to floating; where it was before, if known.
     pub fn unsnap(&mut self, id: WindowId) -> Option<Rect> {
         let p = self.placements.get_mut(&id)?;
@@ -880,6 +907,25 @@ mod tests {
             place(area, (800, 600), &[first, second]),
             (first.0 + 2 * CASCADE, first.1 + 2 * CASCADE)
         );
+    }
+
+    #[test]
+    fn a_window_carried_to_another_screen_keeps_its_place_and_fits() {
+        let big = Rect::new(1928, 8, 2340, 1424);
+        let small = Rect::new(8, 8, 1700, 1064);
+        // Centred: centred.
+        let centred = Rect::new(1928 + 870, 8 + 512, 600, 400);
+        assert_eq!(carried(centred, big, small), Rect::new(558, 340, 600, 400));
+        // In the bottom right quarter: there too, the same size.
+        let r = carried(Rect::new(3398, 820, 600, 400), big, small);
+        assert_eq!((r.width, r.height), (600, 400));
+        let (cx, cy) = r.centre();
+        assert!(cx > 8.0 + 1700.0 * 0.5 && cy > 8.0 + 1064.0 * 0.5, "{r:?}");
+        // Against the left edge: against it still.
+        assert_eq!(carried(Rect::new(1928, 100, 800, 300), big, small).x, 8);
+        // Partly off its screen, or larger than the new area: inside it.
+        let r = carried(Rect::new(4000, 1300, 2400, 600), big, small);
+        assert_eq!(r, Rect::new(8, 472, 1700, 600));
     }
 
     #[test]
