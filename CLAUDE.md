@@ -99,7 +99,12 @@ RUST_LOG=hocus_compositor=debug                       # more of what it does
 
 Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 `--config FILE`); so far it reads `[keyboard]` (`layouts = ["fr",
-"fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`). Headless tests
+"fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`), `[shortcuts]`
+(`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`) and
+`[programs]` (`terminal`). `packaging/config.toml` lists every setting
+with its default (a test checks it). `--session` is what display managers
+run (through `packaging/hocuspanda-session`): it tells the user's systemd
+and D-Bus where the session is, so never use it next to a live session. Headless tests
 start it in-process (`hocus_compositor::Headless`, see
 `crates/hocus-compositor/tests/`) with sctk clients on threads.
 
@@ -120,4 +125,17 @@ scripts/vm/debian.sh down
 HOCUS_VM_NAME=other HOCUS_VM_SSH_PORT=2532 HOCUS_VM_HTTP_PORT=2590 scripts/vm/debian.sh up
 # to try it by hand: its screen in a window, with its keyboard and mouse
 HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
+```
+
+The package, from a release build, and the session from GDM in the VM:
+
+```sh
+cargo build --release --locked -p hocus-compositor
+packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
+scripts/vm/debian.sh up
+scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex
+scripts/vm/debian.sh keys meta_l-ret             # Super+Return: a terminal
+scripts/vm/debian.sh keys meta_l-shift-e         # Super+Shift+E: back to GDM
+scripts/vm/debian.sh ssh 'journalctl --user -t hocuspanda -b'   # the session's log
+scripts/vm/debian.sh down
 ```

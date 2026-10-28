@@ -1,0 +1,34 @@
+# Hocuspanda's configuration: ~/.config/hocuspanda/config.toml (or
+# $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
+# with its default; uncomment what you change. It is read when the session
+# starts. A file that does not read is refused as a whole, and the
+# journal says why: journalctl --user -t hocuspanda -b
+
+# [keyboard]
+# XKB layouts, each with its variant in brackets, the first active at
+# start, for example ["fr", "fr(bepo)", "us"]. Empty: XKB's defaults.
+# layouts = []
+# XKB options, for example "grp:alt_shift_toggle,caps:escape".
+# options = ""
+# Milliseconds before a held key repeats, and repeats per second.
+# repeat_delay = 200
+# repeat_rate = 25
+
+# [shortcuts]
+# Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and
+# an XKB key name (Return, E, F1, space...). An empty string turns one
+# off. In a window of another session, Super is Alt+Super.
+#
+# Opens a terminal.
+# terminal = "Super+Return"
+# Logs out: the session ends and the display manager comes back.
+# log-out = "Super+Shift+E"
+#
+# Fixed for now: Super and a drag moves a window; Ctrl+Alt+F1 to F12
+# switch to another virtual terminal.
+
+# [programs]
+# The terminal's command, run through sh -c, for example "foot" or
+# "kitty --single-instance". Empty: the first of kitty, foot, alacritty
+# and xterm found in PATH.
+# terminal = ""

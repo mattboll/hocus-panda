@@ -177,6 +177,19 @@ place in the configuration and can be changed. In nested mode (the
 desktop running in a window of another session) the modifier is
 `Alt+Super`, so the host's shortcuts don't take them.
 
+The configuration's `[shortcuts]` section holds them, by action; an empty
+string turns one off. The package ships every setting with its default
+(`/usr/share/doc/hocuspanda/config.toml`, from `packaging/config.toml`).
+
+| Action (`[shortcuts]`) | Default | What it does |
+|---|---|---|
+| `terminal` | `Super+Return` | Opens a terminal: `[programs] terminal`, or the first of kitty, foot, alacritty, xterm found in `PATH` |
+| `log-out` | `Super+Shift+E` | Ends the session at once; the display manager comes back |
+
+Not configurable yet: `Super`+drag moves a window; `Ctrl+Alt+F1…F12`
+switch virtual terminals. The other sections' shortcuts join the table as
+they are built.
+
 ## 14. Session
 
 - A "Hocuspanda" session in the display manager (GDM, SDDM, greetd), from
@@ -184,6 +197,16 @@ desktop running in a window of another session) the modifier is
 - It starts the compositor, then the shell client (slice 2 onwards). If
   the compositor fails to start, the display manager comes back with an
   error in the journal; it never leaves a black screen.
+- How: the session entry runs `hocuspanda-session`, which goes once
+  through the user's login shell (so that their profile's `PATH` is the
+  session's), then runs `hocuspanda --session` and ends when it does,
+  however it ends. What the compositor says, and the status it ended
+  with, are in the journal: `journalctl --user -t hocuspanda -b`.
+- Once ready, the compositor gives `WAYLAND_DISPLAY`, `DISPLAY`,
+  `XDG_CURRENT_DESKTOP=Hocuspanda` and `XDG_SESSION_TYPE=wayland` to the
+  session bus's activation environment and to systemd's user manager, so
+  that portals and programs started by D-Bus show in the session; the
+  launcher takes them back from systemd when the session ends.
 
 ## 15. Performance
 

@@ -1,0 +1,43 @@
+#!/bin/sh
+# The Hocuspanda session, as display managers start it
+# (/usr/share/wayland-sessions/hocuspanda.desktop): the compositor on the
+# virtual terminal they give it. However it ends (logging out, a failure
+# to start, a crash), this script ends with it, and so does the session:
+# the display manager comes back, never a black screen. What the
+# compositor says goes to the journal:
+#
+#   journalctl --user -t hocuspanda -b
+set -u
+
+# Once through the user's login shell, so that what their profile sets
+# (PATH with ~/.local/bin, and so on) is the session's, as in a terminal's
+# login. A shell that is not a real one is passed over.
+if [ -z "${HOCUSPANDA_SESSION_LOGIN:-}" ] && [ -n "${SHELL:-}" ] && [ -x "$SHELL" ] &&
+    grep -qx "$SHELL" /etc/shells 2> /dev/null; then
+    export HOCUSPANDA_SESSION_LOGIN=1
+    # No quoting a shell might not know: the script's path is enough.
+    exec "$SHELL" -l -c "exec $0"
+fi
+unset HOCUSPANDA_SESSION_LOGIN
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Hocuspanda
+export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-hocuspanda}"
+
+if command -v systemd-cat > /dev/null 2>&1; then
+    systemd-cat --identifier=hocuspanda hocuspanda --session
+    status=$?
+    say() { echo "$1" | systemd-cat --identifier=hocuspanda --priority=err; }
+else
+    hocuspanda --session
+    status=$?
+    say() { echo "$1" >&2; }
+fi
+# Over 128: killed by a signal (128 + its number).
+[ "$status" -eq 0 ] || say "the session ended: hocuspanda exited with status $status"
+
+# Programs started later by systemd must not look for this session's
+# displays (hocuspanda --session gave them).
+systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE \
+    > /dev/null 2>&1
+exit "$status"
