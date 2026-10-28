@@ -38,7 +38,8 @@
 # log-out = "Super+Shift+E"
 # Asks the focused window to close (the application may ask first).
 # close = "Super+Q"
-# Minimises the focused window, and brings back the one minimised last.
+# Minimises the focused window, and brings back the one minimised last
+# (Alt+Tab lists every minimised window too).
 # minimize = "Super+H"
 # unminimize = "Super+Shift+H"
 # The left or right half; again, the other side.
@@ -52,11 +53,49 @@
 # quarter-down = "Super+Shift+Down"
 # quarter-left = "Super+Shift+Left"
 # quarter-right = "Super+Shift+Right"
-# Focuses the window on that side.
-# focus-left = "Super+Ctrl+Left"
-# focus-right = "Super+Ctrl+Right"
-# focus-up = "Super+Ctrl+Up"
-# focus-down = "Super+Ctrl+Down"
+# Focuses the window on that side; none by default (Alt+Tab and the
+# pointer do it), for example "Super+Alt+Left".
+# focus-left = ""
+# focus-right = ""
+# focus-up = ""
+# focus-down = ""
+# The windows, the most recently used first, while Alt is held; Tab and
+# Shift+Tab move, releasing Alt goes there (nested: Alt+Super+Tab).
+# switch-windows = "Alt+Tab"
+# switch-windows-backward = "Alt+Shift+Tab"
+# The desktop on the left or the right, of the screen under the pointer.
+# desktop-left = "Super+Ctrl+Left"
+# desktop-right = "Super+Ctrl+Right"
+# A desktop by its number (the keys of the top row, on any layout).
+# desktop-1 = "Super+1"
+# desktop-2 = "Super+2"
+# desktop-3 = "Super+3"
+# desktop-4 = "Super+4"
+# desktop-5 = "Super+5"
+# desktop-6 = "Super+6"
+# desktop-7 = "Super+7"
+# desktop-8 = "Super+8"
+# desktop-9 = "Super+9"
+# Sends the focused window to a desktop, staying here.
+# send-to-desktop-1 = "Super+Shift+1"
+# send-to-desktop-2 = "Super+Shift+2"
+# send-to-desktop-3 = "Super+Shift+3"
+# send-to-desktop-4 = "Super+Shift+4"
+# send-to-desktop-5 = "Super+Shift+5"
+# send-to-desktop-6 = "Super+Shift+6"
+# send-to-desktop-7 = "Super+Shift+7"
+# send-to-desktop-8 = "Super+Shift+8"
+# send-to-desktop-9 = "Super+Shift+9"
+# Takes the focused window to a desktop, going there with it.
+# take-to-desktop-1 = "Super+Ctrl+Shift+1"
+# take-to-desktop-2 = "Super+Ctrl+Shift+2"
+# take-to-desktop-3 = "Super+Ctrl+Shift+3"
+# take-to-desktop-4 = "Super+Ctrl+Shift+4"
+# take-to-desktop-5 = "Super+Ctrl+Shift+5"
+# take-to-desktop-6 = "Super+Ctrl+Shift+6"
+# take-to-desktop-7 = "Super+Ctrl+Shift+7"
+# take-to-desktop-8 = "Super+Ctrl+Shift+8"
+# take-to-desktop-9 = "Super+Ctrl+Shift+9"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
@@ -67,8 +106,13 @@
 # and xterm found in PATH.
 # terminal = ""
 
+# [desktops]
+# Desktops on each screen, from 1 to 9. Each screen switches its own.
+# count = 4
+
 # [appearance]
-# Windows fade instead of moving, and do not wobble.
+# Windows fade instead of moving, and do not wobble; desktops fade
+# instead of sliding.
 # reduced-motion = false
 # The focused window's rim is 2 px wide instead of 1.
 # high-contrast = false

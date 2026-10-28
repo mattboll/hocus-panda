@@ -640,6 +640,10 @@ pub struct Placement {
     /// fullscreen: where it goes back.
     pub restore: Option<Rect>,
     pub minimized: bool,
+    /// The desktop it is on, from 0, on its screen (§12).
+    pub desktop: usize,
+    /// Its desktop is not the one its screen shows.
+    pub hidden: bool,
 }
 
 /// The mapped windows, bottom first, the focus, and how each is placed.
@@ -651,6 +655,9 @@ pub struct Model {
     placements: BTreeMap<WindowId, Placement>,
     /// Minimised windows, the most recent last.
     minimized: Vec<WindowId>,
+    /// Every window, the most recently focused first: Alt+Tab's order
+    /// (§11).
+    recent: Vec<WindowId>,
     /// Each application's last size, by app id (§5).
     sizes: HashMap<String, (i32, i32)>,
 }
@@ -663,10 +670,12 @@ impl Model {
         let id = WindowId(self.next);
         self.stack.push(id);
         self.placements.insert(id, Placement::default());
+        self.recent.push(id);
         id
     }
 
-    /// A new window just under the focused one: it opens behind it.
+    /// A new window just under the focused one: it opens behind it, and
+    /// comes next to it in Alt+Tab's order.
     pub fn add_below_focus(&mut self) -> WindowId {
         let id = self.add();
         if let Some(focused) = self.focused
@@ -674,27 +683,79 @@ impl Model {
         {
             self.stack.pop();
             self.stack.insert(at, id);
+            if let Some(at) = self.recent.iter().position(|w| *w == focused) {
+                self.recent.pop();
+                self.recent.insert(at + 1, id);
+            }
         }
         id
     }
 
-    /// A window went; the focus goes to the one now on top, not minimised.
+    /// A window went; the focus goes to the one now on top that shows.
     pub fn remove(&mut self, id: WindowId) {
         self.stack.retain(|w| *w != id);
         self.placements.remove(&id);
         self.minimized.retain(|w| *w != id);
+        self.recent.retain(|w| *w != id);
         if self.focused == Some(id) {
             self.focused = self.top_shown();
         }
     }
 
-    /// The window on top that shows.
+    /// The window on top that shows: not minimised, on its screen's
+    /// desktop.
     pub fn top_shown(&self) -> Option<WindowId> {
         self.stack
             .iter()
             .rev()
-            .find(|w| !self.is_minimized(**w))
+            .find(|w| self.is_shown(**w))
             .copied()
+    }
+
+    /// Whether `id` shows: not minimised, and its desktop is the one its
+    /// screen shows.
+    pub fn is_shown(&self, id: WindowId) -> bool {
+        self.placements
+            .get(&id)
+            .is_some_and(|p| !p.minimized && !p.hidden)
+    }
+
+    pub fn desktop(&self, id: WindowId) -> usize {
+        self.placement(id).desktop
+    }
+
+    /// Puts `id` on `desktop` of its screen; whether it shows is the
+    /// caller's to say ([`Model::set_hidden`]).
+    pub fn set_desktop(&mut self, id: WindowId, desktop: usize) {
+        if let Some(p) = self.placements.get_mut(&id) {
+            p.desktop = desktop;
+        }
+    }
+
+    /// Whether `id`'s desktop is out of sight. A hidden window loses the
+    /// focus to the window on top that shows.
+    pub fn set_hidden(&mut self, id: WindowId, hidden: bool) {
+        if let Some(p) = self.placements.get_mut(&id) {
+            p.hidden = hidden;
+        }
+        if hidden && self.focused == Some(id) {
+            self.focused = self.top_shown();
+        }
+    }
+
+    /// Every window, the most recently focused first.
+    pub fn recent(&self) -> &[WindowId] {
+        &self.recent
+    }
+
+    /// Alt+Tab's list (§11): the windows of the current desktop
+    /// (`on_current`), minimised ones included, the most recently used
+    /// first; then the other desktops' windows in the same order.
+    pub fn switcher_order(&self, on_current: impl Fn(WindowId) -> bool) -> Vec<WindowId> {
+        let (mut here, elsewhere): (Vec<WindowId>, Vec<WindowId>) =
+            self.recent.iter().copied().partition(|w| on_current(*w));
+        here.extend(elsewhere);
+        here
     }
 
     /// Focuses and raises `id`; `None` takes the focus from every window.
@@ -704,6 +765,8 @@ impl Model {
                 return;
             }
             self.raise(id);
+            self.recent.retain(|w| *w != id);
+            self.recent.insert(0, id);
         }
         self.focused = id;
     }
@@ -1079,6 +1142,45 @@ mod tests {
         assert_eq!(model.last_minimized(), Some(a));
         model.unminimize(a);
         assert_eq!(model.last_minimized(), Some(b));
+    }
+
+    #[test]
+    fn alt_tab_lists_the_current_desktop_first_then_the_others_most_recent_first() {
+        let mut model = Model::default();
+        let a = model.add();
+        let b = model.add();
+        let c = model.add();
+        let d = model.add();
+        model.set_desktop(c, 1);
+        model.set_hidden(c, true);
+        model.focus(Some(a));
+        model.focus(Some(d));
+        model.focus(Some(b));
+        model.minimize(d);
+        // b was used last, then d (minimised now), a; c is on desktop 2.
+        let on_first = |w: WindowId| model.desktop(w) == 0;
+        assert_eq!(model.switcher_order(on_first), [b, d, a, c]);
+        assert_eq!(model.recent(), [b, d, a, c]);
+        // A window opened behind the focused one comes right after it.
+        let e = model.add_below_focus();
+        assert_eq!(model.recent()[..2], [b, e]);
+    }
+
+    #[test]
+    fn a_hidden_window_gives_the_focus_to_the_top_window_that_shows() {
+        let mut model = Model::default();
+        let a = model.add();
+        let b = model.add();
+        model.focus(Some(b));
+        model.set_desktop(b, 2);
+        model.set_hidden(b, true);
+        assert!(!model.is_shown(b));
+        assert_eq!(model.focused(), Some(a));
+        assert_eq!(model.top_shown(), Some(a));
+        model.set_hidden(a, true);
+        assert_eq!(model.focused(), None);
+        model.set_hidden(b, false);
+        assert_eq!(model.top_shown(), Some(b));
     }
 
     #[test]

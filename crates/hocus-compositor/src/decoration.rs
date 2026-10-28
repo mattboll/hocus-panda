@@ -331,6 +331,17 @@ enum Piece {
     /// The grip's pill upright, for a seam that runs down.
     Handle,
     Preview,
+    Box(BoxStyle),
+}
+
+/// A rounded box: its fill and a rim inside its edge, as RGBA; widths and
+/// the radius in thousandths of a logical pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BoxStyle {
+    pub fill: [u8; 4],
+    pub rim: [u8; 4],
+    pub rim_width: u32,
+    pub radius: u32,
 }
 
 /// How many shadows' textures are kept.
@@ -361,6 +372,7 @@ impl Textures {
             Piece::Grip => pill_texture(GRIP_SIZE, scale),
             Piece::Handle => pill_texture((GRIP_SIZE.1, GRIP_SIZE.0), scale),
             Piece::Preview => preview_texture(scale),
+            Piece::Box(style) => box_texture(style, scale),
         };
         self.pieces
             .borrow_mut()
@@ -630,7 +642,62 @@ fn preview_texture(scale: f64) -> (MemoryRenderBuffer, i32) {
     (buffer(&pixels, side, side), corner)
 }
 
-fn buffer(pixels: &[u8], w: i32, h: i32) -> MemoryRenderBuffer {
+/// A square holding a rounded box's corners: its fill, and its rim
+/// inside its edge. Its corners are exactly the radius, so that a box as
+/// small as twice its radius (a pill) keeps its shape.
+fn box_texture(style: BoxStyle, scale: f64) -> (MemoryRenderBuffer, i32) {
+    let r = f64::from(style.radius) / 1000.0 * scale;
+    let width = f64::from(style.rim_width) / 1000.0 * scale;
+    let corner = (r.ceil() as i32).max(1);
+    let side = 2 * corner + 1;
+    let n = side as usize;
+    let pixels: Vec<u8> = (0..n * n)
+        .flat_map(|i| {
+            let (x, y) = ((i % n) as f64 + 0.5, (i / n) as f64 + 0.5);
+            let outer = rounded_coverage(x, y, f64::from(side), 0.0, r);
+            let inner = if width > 0.0 {
+                rounded_coverage(x, y, f64::from(side), width, (r - width).max(0.0))
+            } else {
+                outer
+            };
+            let fill = pixel(style.fill, inner);
+            let rim = pixel(style.rim, (outer - inner).max(0.0));
+            let mut out = [0u8; 4];
+            for k in 0..4 {
+                out[k] = rim[k].saturating_add(fill[k]);
+            }
+            out
+        })
+        .collect();
+    (buffer(&pixels, side, side), corner)
+}
+
+/// A rounded box at `rect` (logical, output-local), `alpha` opaque.
+pub fn box_elements<R>(
+    renderer: &mut R,
+    textures: &Textures,
+    ids: &[Id; 9],
+    style: BoxStyle,
+    rect: Rectangle<f64, Logical>,
+    scale: f64,
+    alpha: f32,
+) -> Vec<FramePiece<R>>
+where
+    R: Renderer + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    if alpha <= 0.0 || rect.size.w <= 0.0 || rect.size.h <= 0.0 {
+        return Vec::new();
+    }
+    let (texture, corner) = textures.get(Piece::Box(style), scale);
+    nine_slice(renderer, &texture, corner, 0.0, rect, scale, alpha, true)
+        .into_iter()
+        .zip(ids.iter())
+        .map(|(e, id)| Keyed::new(e, id.clone()))
+        .collect()
+}
+
+pub(crate) fn buffer(pixels: &[u8], w: i32, h: i32) -> MemoryRenderBuffer {
     MemoryRenderBuffer::from_slice(pixels, Fourcc::Argb8888, (w, h), 1, Transform::Normal, None)
 }
 
