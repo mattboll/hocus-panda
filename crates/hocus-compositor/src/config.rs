@@ -21,11 +21,22 @@ pub struct Config {
     pub outputs: BTreeMap<String, OutputSettings>,
     pub shortcuts: Shortcuts,
     pub programs: Programs,
+    pub appearance: Appearance,
     /// The system's keyboard (`/etc/default/keyboard`), used when
     /// `[keyboard] layouts` is empty. Not part of the file: the program
     /// reads it once at start.
     #[serde(skip)]
     pub system_keyboard: Option<SystemKeyboard>,
+}
+
+/// How the desktop looks and moves, `[appearance]`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Appearance {
+    /// Windows fade instead of moving, and do not wobble.
+    pub reduced_motion: bool,
+    /// The focused window's rim is 2 px wide instead of 1.
+    pub high_contrast: bool,
 }
 
 /// One screen's settings, `[outputs.eDP-1]`.

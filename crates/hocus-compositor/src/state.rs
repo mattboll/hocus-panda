@@ -5,16 +5,20 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
+    time::Duration,
 };
 
 use anyhow::Context;
 use smithay::{
-    backend::session::{Session, libseat::LibSeatSession},
+    backend::{
+        renderer::element::Id,
+        session::{Session, libseat::LibSeatSession},
+    },
     desktop::{PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
     input::{
         Seat, SeatState,
         keyboard::{Keycode, XkbConfig},
-        pointer::CursorImageStatus,
+        pointer::{CursorIcon, CursorImageStatus},
     },
     output::Output,
     reexports::{
@@ -25,7 +29,7 @@ use smithay::{
             protocol::wl_surface::WlSurface,
         },
     },
-    utils::{Clock, Logical, Monotonic, Point, Rectangle, SERIAL_COUNTER},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         cursor_shape::CursorShapeManagerState,
@@ -52,10 +56,15 @@ use smithay::{
 use crate::{
     App, Config,
     cursor::CursorImages,
-    focus::KeyboardFocus,
+    decoration::Textures,
     model::{self, Model, Rect, WindowId},
+    motion::Tween,
+    popups::PopupGrab,
     programs::Programs,
     shortcuts::Ending,
+    snapshot::{Grabber, Snapshot},
+    windows::{Leaving, Managed, Preview, rect_of},
+    wobble::Jelly,
 };
 
 /// Everything the compositor knows, owned by the event loop.
@@ -100,13 +109,40 @@ pub struct State {
     pub popups: PopupManager,
     /// The windows, apart from smithay.
     pub model: Model,
-    /// The mapped windows, by their id in the model.
-    pub windows: BTreeMap<WindowId, Window>,
+    /// The mapped windows (and the minimised ones), by their id in the
+    /// model, with their motions.
+    pub windows: BTreeMap<WindowId, Managed>,
     /// Toplevels whose first buffer has not come: mapped once it does.
     pub unmapped: Vec<Window>,
-    /// Activation tokens handed out, and when; what they let a window do
-    /// is task 2.4's.
-    pub activation_tokens: HashMap<String, std::time::Duration>,
+    /// Activation tokens handed out, when, and whether they may focus a
+    /// window (made from the user's input, or by the desktop).
+    pub activation_tokens: HashMap<String, (Duration, bool)>,
+    /// The user started a program through the desktop then: its window
+    /// takes the focus.
+    pub spawned_at: Option<Duration>,
+    /// What draws windows' frames, and their pictures as they leave.
+    pub textures: Textures,
+    pub grabber: Grabber,
+    /// Windows' pictures taken as their surfaces went.
+    pub pictures: HashMap<WindowId, Snapshot>,
+    pub leaving: Vec<Leaving>,
+    /// Where a dragged window would snap, and the one fading out.
+    pub preview: Option<Preview>,
+    pub preview_out: Option<(Rect, Tween)>,
+    pub preview_ids: [Id; 9],
+    /// The window moving, and the one wobbling.
+    pub moving: Option<WindowId>,
+    pub wobble: Option<(WindowId, Jelly)>,
+    /// The cursor over a window's frame or grip, or during a grab: it
+    /// wins over the client's.
+    pub frame_cursor: Option<CursorIcon>,
+    /// The last press on a grip, for a double click.
+    pub last_grip_press: Option<(WindowId, Duration)>,
+    /// Buttons whose press the desktop kept: their release too.
+    pub kept_buttons: HashSet<u32>,
+    pub popup_grab: Option<PopupGrab>,
+    /// A frame is asked for at this time, after a pause.
+    pub wake: Option<Duration>,
     /// What the pointer shows, as the client under it sets it.
     pub cursor: CursorImageStatus,
     pub cursor_images: CursorImages,
@@ -210,6 +246,21 @@ impl State {
             windows: BTreeMap::new(),
             unmapped: Vec::new(),
             activation_tokens: HashMap::new(),
+            spawned_at: None,
+            textures: Textures::default(),
+            grabber: Grabber::default(),
+            pictures: HashMap::new(),
+            leaving: Vec::new(),
+            preview: None,
+            preview_out: None,
+            preview_ids: std::array::from_fn(|_| Id::new()),
+            moving: None,
+            wobble: None,
+            frame_cursor: None,
+            last_grip_press: None,
+            kept_buttons: HashSet::new(),
+            popup_grab: None,
+            wake: None,
             cursor: CursorImageStatus::default_named(),
             cursor_images: CursorImages::default(),
             redraw: true,
@@ -250,21 +301,18 @@ impl State {
     }
 
     /// Where the desktop places windows on `output`: what layer surfaces
-    /// leave of it, 8 px in.
+    /// leave of it less the bar's space, 8 px in.
     pub fn work_area(&self, output: &Output) -> Option<Rect> {
         let zone = self.non_exclusive_zone(output)?;
-        Some(model::work_area(Rect::new(
-            zone.loc.x,
-            zone.loc.y,
-            zone.size.w,
-            zone.size.h,
-        )))
+        let geometry = self.space.output_geometry(output)?;
+        Some(model::work_area(rect_of(zone), rect_of(geometry)))
     }
 
     /// The window of `surface`, mapped or waiting for its first buffer.
     pub fn window_for(&self, surface: &WlSurface) -> Option<Window> {
         self.windows
             .values()
+            .map(|m| &m.window)
             .chain(self.unmapped.iter())
             .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
@@ -274,98 +322,8 @@ impl State {
     pub fn id_of(&self, window: &Window) -> Option<WindowId> {
         self.windows
             .iter()
-            .find(|(_, w)| *w == window)
+            .find(|(_, m)| m.window == *window)
             .map(|(id, _)| *id)
-    }
-
-    /// Maps `window` at the centre of the work area of the output under the
-    /// pointer, and gives it the focus.
-    pub fn map_window(&mut self, window: Window) {
-        let Some(output) = self.output_under_pointer() else {
-            tracing::warn!("a window with no output to show on");
-            self.unmapped.push(window);
-            return;
-        };
-        let Some(area) = self.work_area(&output) else {
-            self.unmapped.push(window);
-            return;
-        };
-        let size = window.geometry().size;
-        let (x, y) = model::centred(area, (size.w, size.h));
-        let id = self.model.add();
-        self.windows.insert(id, window.clone());
-        self.space.map_element(window.clone(), (x, y), false);
-        if let Some(x11) = window.x11_surface() {
-            let geometry = Rectangle::new((x, y).into(), size);
-            if let Err(err) = x11.configure(geometry) {
-                tracing::warn!(%err, "could not place an X11 window");
-            }
-        }
-        tracing::debug!(window = id.0, x, y, w = size.w, h = size.h, "window mapped");
-        // Every new window takes the focus for now: which ones may is the
-        // activation policy of task 2.4.
-        self.focus(Some(id));
-        self.redraw = true;
-    }
-
-    /// A window went, or its client hid it.
-    pub fn unmap_window(&mut self, window: &Window) {
-        self.unmapped.retain(|w| w != window);
-        let Some(id) = self.id_of(window) else {
-            return;
-        };
-        self.windows.remove(&id);
-        self.space.unmap_elem(window);
-        let had_focus = self.model.focused() == Some(id);
-        self.model.remove(id);
-        if had_focus {
-            let next = self.model.focused();
-            self.focus(next);
-        }
-        self.redraw = true;
-    }
-
-    /// Focuses and raises a window (none: no window has the keyboard), and
-    /// tells every window whether it is the active one.
-    pub fn focus(&mut self, id: Option<WindowId>) {
-        self.model.focus(id);
-        let focused = self.model.focused();
-        for (wid, window) in &self.windows {
-            let active = Some(*wid) == focused;
-            if window.set_activated(active)
-                && let Some(toplevel) = window.toplevel()
-                && toplevel.is_initial_configure_sent()
-            {
-                toplevel.send_pending_configure();
-            }
-            if let Some(x11) = window.x11_surface()
-                && let Err(err) = x11.set_activated(active)
-            {
-                tracing::debug!(%err, "could not tell an X11 window it is active");
-            }
-        }
-        let target = focused.and_then(|id| self.windows.get(&id)).cloned();
-        if let Some(window) = &target {
-            self.space.raise_element(window, true);
-            if let (Some(x11), Some(xwm)) = (window.x11_surface(), self.xwm.as_mut())
-                && let Err(err) = xwm.raise_window(x11)
-            {
-                tracing::debug!(%err, "could not raise an X11 window");
-            }
-        }
-        let focus = target.and_then(|w| match w.x11_surface() {
-            Some(x11) => Some(KeyboardFocus::X11(x11.clone())),
-            None => w
-                .toplevel()
-                .map(|t| KeyboardFocus::Wayland(t.wl_surface().clone())),
-        });
-        // A lock screen or a launcher holding the keyboard keeps it.
-        if !self.keyboard_held_by_layer()
-            && let Some(keyboard) = self.seat.get_keyboard()
-        {
-            keyboard.set_focus(self, focus, SERIAL_COUNTER.next_serial());
-        }
-        self.redraw = true;
     }
 
     /// The surface under `pos`, and where its origin is: layer surfaces of

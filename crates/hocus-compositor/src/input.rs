@@ -12,7 +12,7 @@ use smithay::{
     input::{
         keyboard::{FilterResult, Keysym, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             RelativeMotionEvent,
@@ -21,7 +21,19 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{State, grabs::BTN_LEFT, shortcuts::Action};
+use crate::{
+    State,
+    grabs::{BTN_LEFT, BTN_RIGHT},
+    model::{self, Edges, Mode, WindowId},
+    shortcuts::Action,
+};
+
+/// The top band of a window with no header where its grip shows (§7), and
+/// how far around the grip a press still takes it.
+const GRIP_BAND: i32 = 12;
+const GRIP_SLOP: f64 = 8.0;
+/// Two presses on a grip this close together maximise or restore.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// What a key did, when the compositor kept it.
 enum Kept {
@@ -203,12 +215,32 @@ impl State {
             .unwrap_or(to)
     }
 
-    /// Moves the pointer to `location` in the global logical space.
+    /// Moves the pointer to `location` in the global logical space. Over
+    /// a window's frame or its grip, no client sees it: the cursor shows
+    /// what a press there does.
     pub fn pointer_motion(&mut self, location: Point<f64, Logical>, time: u32) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let under = self.surface_under(location);
+        let mut under = self.surface_under(location);
+        if !pointer.is_grabbed() {
+            let frame = self.frame_under(location);
+            let grip = self.grip_hover(location);
+            self.hover_grip(grip);
+            let on_grip = self.grip_hit(location).is_some();
+            let cursor = match frame {
+                Some((_, edges)) => Some(edges.cursor()),
+                None if on_grip => Some(CursorIcon::Grab),
+                None => None,
+            };
+            if cursor.is_some() {
+                under = None;
+            }
+            if cursor != self.frame_cursor {
+                self.frame_cursor = cursor;
+                self.redraw = true;
+            }
+        }
         pointer.motion(
             self,
             under,
@@ -226,27 +258,127 @@ impl State {
         }
     }
 
+    /// The window whose frame is under `at`, and the edges a press there
+    /// resizes: the band outside a window, or the first pixels of the top
+    /// of one with no header of its own; the window in front wins.
+    pub fn frame_under(&self, at: Point<f64, Logical>) -> Option<(WindowId, Edges)> {
+        use smithay::wayland::shell::wlr_layer::Layer;
+        if self
+            .layer_surface_under(at, &[Layer::Overlay, Layer::Top])
+            .is_some()
+        {
+            return None;
+        }
+        let in_front = self.window_under(at);
+        for id in self.model.stack().iter().rev().copied() {
+            if self.model.is_minimized(id) || self.model.mode(id) == Mode::Fullscreen {
+                continue;
+            }
+            let Some(rect) = self.rect_of(id) else {
+                continue;
+            };
+            let top_inside = if self.has_own_header(id) {
+                0
+            } else {
+                model::TOP_INSIDE
+            };
+            let hit = model::frame_hit(rect, at.x, at.y, top_inside);
+            if hit.is_some() || rect.contains(at.x, at.y) {
+                return hit.map(|edges| (id, edges));
+            }
+            // A client's popup or its shadow over the band is its own.
+            if in_front == Some(id) {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// The window with no header whose top band the pointer is in: its
+    /// grip shows (§7).
+    fn grip_hover(&self, at: Point<f64, Logical>) -> Option<WindowId> {
+        let id = self.window_under(at)?;
+        if self.has_own_header(id) || self.model.mode(id) == Mode::Fullscreen {
+            return None;
+        }
+        let rect = self.rect_of(id)?;
+        (at.y < f64::from(rect.y + GRIP_BAND) && rect.contains(at.x, at.y)).then_some(id)
+    }
+
+    /// The window whose grip is under the pointer: a press there moves it.
+    pub fn grip_hit(&self, at: Point<f64, Logical>) -> Option<WindowId> {
+        let id = self.grip_hover(at)?;
+        let rect = self.rect_of(id)?;
+        let (cx, _) = rect.centre();
+        let half = crate::decoration::GRIP_SIZE.0 / 2.0 + GRIP_SLOP;
+        let top = f64::from(rect.y + model::TOP_INSIDE);
+        ((at.x - cx).abs() <= half && at.y >= top && at.y < f64::from(rect.y + GRIP_BAND))
+            .then_some(id)
+    }
+
     /// A pointer button by its evdev code. A press focuses the window
-    /// under the pointer and goes to it; with the move modifier, the
-    /// left button moves the window instead, and the client sees nothing.
+    /// under the pointer and goes to it; with the move modifier, the left
+    /// button moves the window and the right one resizes it, and the client
+    /// sees nothing. A press on a window's frame resizes it, on its grip
+    /// moves it; a press away from an open menu closes it.
     pub fn pointer_button(&mut self, button: u32, state: ButtonState, time: u32) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
         let at = pointer.current_location();
+        if state == ButtonState::Released && self.kept_buttons.remove(&button) {
+            return;
+        }
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
+            if self.dismiss_popups_at(at) {
+                self.kept_buttons.insert(button);
+                return;
+            }
             if self.layer_click(at) {
                 // A bar or an overlay: the click is its own.
+            } else if let Some((id, edges)) = self.frame_under(at) {
+                self.focus(Some(id));
+                if button == BTN_LEFT {
+                    self.start_resize(id, edges, button, None, serial);
+                } else {
+                    self.kept_buttons.insert(button);
+                }
+                return;
+            } else if let Some(id) = self.grip_hit(at) {
+                self.focus(Some(id));
+                if button == BTN_LEFT {
+                    let now = self.now();
+                    let double = self
+                        .last_grip_press
+                        .take()
+                        .is_some_and(|(w, t)| w == id && now.saturating_sub(t) < DOUBLE_CLICK);
+                    if double {
+                        self.toggle_maximized(id);
+                        self.kept_buttons.insert(button);
+                    } else {
+                        self.last_grip_press = Some((id, now));
+                        self.start_move(id, button, None, serial);
+                    }
+                } else {
+                    self.kept_buttons.insert(button);
+                }
+                return;
             } else if let Some(id) = self.window_under(at) {
                 self.focus(Some(id));
                 let modifiers = self.seat.get_keyboard().map(|k| k.modifier_state());
-                if button == BTN_LEFT
-                    && modifiers.is_some_and(|m| self.move_modifier(&m))
-                    && let Some(window) = self.windows.get(&id).cloned()
-                {
-                    self.start_move(&window, button, None, serial);
-                    return;
+                if modifiers.is_some_and(|m| self.move_modifier(&m)) {
+                    if button == BTN_LEFT {
+                        self.start_move(id, button, None, serial);
+                        return;
+                    }
+                    if button == BTN_RIGHT
+                        && let Some(rect) = self.rect_of(id)
+                    {
+                        let edges = Edges::nearest_corner(rect, at.x, at.y);
+                        self.start_resize(id, edges, button, None, serial);
+                        return;
+                    }
                 }
             }
         }

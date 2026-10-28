@@ -7,11 +7,10 @@ use std::{path::Path, time::Duration};
 use anyhow::Context;
 use smithay::{
     backend::input::{ButtonState, KeyState},
-    desktop::Window,
     input::keyboard::Keycode,
     reexports::calloop::EventLoop,
     utils::{IsAlive, Point},
-    wayland::{compositor::with_states, seat::WaylandFocus, shell::xdg::XdgToplevelSurfaceData},
+    wayland::seat::WaylandFocus,
 };
 
 use crate::{
@@ -118,12 +117,12 @@ impl Headless {
             .stack()
             .iter()
             .filter_map(|id| {
-                let window = state.windows.get(id)?;
+                let window = &state.windows.get(id)?.window;
                 let geometry = state.space.element_geometry(window)?;
                 let surface = window.wl_surface().map(|s| s.into_owned());
                 Some(WindowInfo {
                     id: *id,
-                    app_id: app_id(window),
+                    app_id: crate::windows::app_id(window),
                     rect: Rect::new(
                         geometry.loc.x,
                         geometry.loc.y,
@@ -185,18 +184,4 @@ impl Headless {
     pub fn has_dmabuf(&self) -> bool {
         self.app.state.dmabuf_global.is_some()
     }
-}
-
-/// A window's application id: xdg-shell's, or X11's class.
-fn app_id(window: &Window) -> Option<String> {
-    if let Some(x11) = window.x11_surface() {
-        return Some(x11.class());
-    }
-    let toplevel = window.toplevel()?;
-    with_states(toplevel.wl_surface(), |states| {
-        states
-            .data_map
-            .get::<XdgToplevelSurfaceData>()
-            .and_then(|d| d.lock().ok().and_then(|d| d.app_id.clone()))
-    })
 }

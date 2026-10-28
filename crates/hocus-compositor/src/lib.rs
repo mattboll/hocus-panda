@@ -9,19 +9,25 @@
 mod backend;
 mod config;
 mod cursor;
+mod decoration;
 mod focus;
 mod grabs;
 mod handlers;
 mod harness;
 mod input;
 pub mod model;
+pub mod motion;
 mod output_spec;
+mod popups;
 mod programs;
 mod render;
 mod session;
 mod shortcuts;
+mod snapshot;
 mod socket;
 mod state;
+mod windows;
+mod wobble;
 mod xwayland;
 
 use std::path::{Path, PathBuf};
@@ -30,7 +36,7 @@ use anyhow::Context;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 pub use backend::headless::{HeadlessConfig, RendererChoice};
-pub use config::{Config, OutputSettings, ScaleFrom, SystemKeyboard};
+pub use config::{Appearance, Config, OutputSettings, ScaleFrom, SystemKeyboard};
 pub use harness::{Headless, WindowInfo};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use shortcuts::{Action, Chord, Ending, Shortcuts};
@@ -228,6 +234,8 @@ impl App {
     /// clients were told.
     fn after_dispatch(&mut self) {
         let Self { state, backend } = self;
+        // Motions under way ask for the next frame.
+        state.tick();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();
