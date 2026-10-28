@@ -33,8 +33,8 @@ struct Args {
 
     /// Headless output, WIDTHxHEIGHT[@SCALE][+X+Y][:WIDTHxHEIGHTmm]
     /// (repeatable). Without a position, it goes to the right of the
-    /// previous one; with a size in millimetres and no scale, it takes the
-    /// scale of its density, as a screen does.
+    /// previous one; with a size in millimetres and no scale, it takes 1
+    /// or 2 by its density, as a screen does.
     #[arg(long = "output", value_name = "SPEC")]
     outputs: Vec<OutputSpec>,
 

@@ -16,10 +16,11 @@
 # repeat_delay = 200
 # repeat_rate = 25
 
-# Screens, by connector name. Without a scale, a screen takes the scale
-# of its density (a 2560x1600 panel of 34 cm takes 1.75). The journal
-# names each screen as it lights: "output eDP-1 2560x1600@60.00 ... scale".
-# A scale from 0.5 to 4, for example:
+# Screens, by connector name. Without a scale, a screen takes 1, or 2
+# when it is denser than 192 dpi and stays at least 1280x800 at 2 (a
+# 15.6-inch 4K panel); never a fraction by itself. The journal names
+# each screen as it lights: "output eDP-1 2560x1600@60.00 ... scale 1
+# (automatic: 191 dpi)". A scale from 0.5 to 4, for example:
 #
 #   [outputs.eDP-1]
 #   scale = 1

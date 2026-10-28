@@ -57,7 +57,6 @@ use crate::{
         flip::{self, Flip, Health},
         scale,
     },
-    config::ScaleFrom,
     render::{BACKGROUND, OutputElement},
 };
 
@@ -526,19 +525,12 @@ impl TtyBackend {
             .with_context(|| format!("could not drive {name}"))?;
 
         add_output(state, &output, (x, 0));
-        // In words, for a user looking for the name to put in the
-        // configuration.
-        let from = match scale_from {
-            ScaleFrom::Config => format!("from [outputs.{name}] in config.toml"),
-            ScaleFrom::Density => {
-                format!("from its density; [outputs.{name}] scale = ... in config.toml sets it")
-            }
-        };
         tracing::info!(
-            "output {name} {}x{}@{:.2} {width_mm}x{height_mm} mm scale {output_scale} ({from})",
+            "output {name} {}x{}@{:.2} {width_mm}x{height_mm} mm scale {output_scale} {}",
             mode.size.w,
             mode.size.h,
             f64::from(mode.refresh) / 1000.0,
+            scale_from.describe(&name),
         );
         Ok(Screen {
             connector: info.handle(),
