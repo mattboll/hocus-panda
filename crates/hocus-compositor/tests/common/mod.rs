@@ -84,6 +84,13 @@ pub enum Shows {
         size: (u32, u32),
         popup: bool,
     },
+    /// An xdg toplevel of this size that asks to be fullscreen, or
+    /// maximised, before its first commit, as `foot --fullscreen` does.
+    Asking {
+        app_id: &'static str,
+        size: (u32, u32),
+        fullscreen: bool,
+    },
     /// A layer surface along the output's top edge, `height` high, which
     /// reserves its height.
     Bar { height: u32 },
@@ -202,6 +209,24 @@ fn run_client(
             window.commit();
             client.size = size;
             client.margin = margin;
+            client.window = Some(window);
+        }
+        Some(Shows::Asking {
+            app_id,
+            size,
+            fullscreen,
+        }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            if fullscreen {
+                window.set_fullscreen(None);
+            } else {
+                window.set_maximized();
+            }
+            window.commit();
+            client.size = size;
             client.window = Some(window);
         }
         Some(Shows::Bar { height }) => {

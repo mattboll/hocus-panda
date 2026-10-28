@@ -433,6 +433,7 @@ impl State {
             return;
         };
         let app = app_id(&window).unwrap_or_default();
+        let opens_as = self.opens_as(&window);
         let mut size = window.geometry().size;
         // An application's last size, when it did not choose one larger.
         if let Some((w, h)) = self.model.remembered_size(&app)
@@ -440,6 +441,10 @@ impl State {
             && (w, h) != (size.w, size.h)
         {
             size = (w.min(area.width), h.min(area.height)).into();
+        } else if opens_as.is_some() {
+            // Its first frame fills the screen: where it floats once
+            // restored is the desktop's choice.
+            size = (area.width * 2 / 3, area.height * 2 / 3).into();
         }
         let same_app: Vec<(i32, i32)> = self
             .windows
@@ -469,14 +474,30 @@ impl State {
         if !takes_focus {
             managed.pulse = Some(Tween::new(now, motion::PULSE, Bezier::LINEAR));
         }
-        self.windows.insert(id, managed);
-        self.space.map_element(window.clone(), (x, y), false);
-        let geometry = window.geometry().size;
         let rect = Rect::new(x, y, size.w, size.h);
-        if window.x11_surface().is_some() || (size.w, size.h) != (geometry.w, geometry.h) {
-            self.configure(id, rect);
-        } else if let Some(toplevel) = window.toplevel() {
-            set_states(toplevel, None, Mode::Floating, false);
+        let geometry = window.geometry().size;
+        match opens_as.and_then(|mode| Some((mode, self.opening_rect(&output, mode)?))) {
+            // Maximised or fullscreen from its first frame, floating at
+            // `rect` once restored.
+            Some((mode, opening)) => {
+                if let Mode::Snapped(_) = mode {
+                    managed.snapped_on = Some(output.clone());
+                }
+                self.windows.insert(id, managed);
+                self.model.set_mode(id, mode, rect);
+                self.space
+                    .map_element(window.clone(), (opening.x, opening.y), false);
+                self.configure(id, opening);
+            }
+            None => {
+                self.windows.insert(id, managed);
+                self.space.map_element(window.clone(), (x, y), false);
+                if window.x11_surface().is_some() || (size.w, size.h) != (geometry.w, geometry.h) {
+                    self.configure(id, rect);
+                } else if let Some(toplevel) = window.toplevel() {
+                    set_states(toplevel, None, Mode::Floating, false);
+                }
+            }
         }
         tracing::debug!(
             window = id.0,
@@ -495,6 +516,33 @@ impl State {
             self.sync_activated();
         }
         self.redraw = true;
+    }
+
+    /// What a window about to map asked to open as, before its first
+    /// frame: maximised or fullscreen (§10), or `None` for as it is.
+    fn opens_as(&mut self, window: &Window) -> Option<Mode> {
+        if let Some(x11) = window.x11_surface() {
+            return if x11.is_fullscreen() {
+                Some(Mode::Fullscreen)
+            } else if x11.is_maximized() {
+                Some(Mode::Snapped(Zone::Maximized))
+            } else {
+                None
+            };
+        }
+        self.opens_as.retain(|(s, _)| s.is_alive());
+        let surface = window.wl_surface()?;
+        let at = self.opens_as.iter().position(|(s, _)| *s == *surface)?;
+        Some(self.opens_as.remove(at).1)
+    }
+
+    /// Where a window opening as `mode` on `output` goes.
+    fn opening_rect(&self, output: &Output, mode: Mode) -> Option<Rect> {
+        match mode {
+            Mode::Fullscreen => self.space.output_geometry(output).map(rect_of),
+            Mode::Snapped(zone) => self.work_area(output).map(|area| zone.rect(area)),
+            Mode::Floating => None,
+        }
     }
 
     /// Whether a new window takes the focus (§4): it does when the user

@@ -191,6 +191,11 @@ Keyboard:
   output, the bar's space included. When the bar has something to say
   (slice 2's halo), a 4 px line in the halo's colour shows on the
   output's right edge.
+- A window that asks to be maximised or fullscreen before its first
+  frame (`foot --fullscreen`, an application reopening as it was) opens
+  so, its first frame already that size. Restored, it floats centred at
+  its application's last size, or two thirds of the work area each way
+  (#351).
 - **Minimise** (`Super+H` or `Super+↓` twice): the window shrinks toward
   the bar's area in 220 ms and fades. It comes back with Alt+Tab or the
   desktop's list.
