@@ -1,32 +1,113 @@
-//! The Hocuspanda compositor. Slice 1 (docs/design/windows.md) builds it
-//! up from here: this is the workspace's first crate, so that formatting,
-//! lints, tests and licences are checked from the start.
+//! The Hocuspanda desktop's compositor.
 
-use std::process::ExitCode;
+use std::{path::PathBuf, process::ExitCode};
+
+use clap::{Parser, ValueEnum};
+use hocus_compositor::{BackendKind, Config, HeadlessConfig, Options, OutputSpec, RendererChoice};
+use tracing_subscriber::EnvFilter;
+
+/// The Hocuspanda desktop's compositor.
+#[derive(Debug, Parser)]
+#[command(version)]
+struct Args {
+    /// Where to draw. Default: in a window when started from a graphical
+    /// session, as the session itself on a virtual terminal otherwise.
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
+
+    /// Directory of the Wayland socket. Default: $XDG_RUNTIME_DIR, or a
+    /// fresh private directory for the headless backend.
+    #[arg(long, value_name = "DIR")]
+    runtime_dir: Option<PathBuf>,
+
+    /// Command to start once the compositor is ready (repeatable).
+    #[arg(long, value_name = "COMMAND")]
+    spawn: Vec<String>,
+
+    /// Headless output, WIDTHxHEIGHT[@SCALE][+X+Y][:WIDTHxHEIGHTmm]
+    /// (repeatable). Without a position, it goes to the right of the
+    /// previous one; with a size in millimetres and no scale, it takes the
+    /// scale of its density, as a screen does.
+    #[arg(long = "output", value_name = "SPEC")]
+    outputs: Vec<OutputSpec>,
+
+    /// Headless renderer.
+    #[arg(long, value_enum, default_value_t = RendererArg::Auto)]
+    renderer: RendererArg,
+
+    /// Do not start XWayland: X11 applications will not run.
+    #[arg(long)]
+    no_xwayland: bool,
+
+    /// Configuration file. Default: $XDG_CONFIG_HOME/hocuspanda/config.toml.
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum BackendArg {
+    /// The session itself, on a virtual terminal: the screens, keyboards
+    /// and mice of the seat.
+    Tty,
+    /// In a window of the current session.
+    Winit,
+    /// Without a screen, into offscreen buffers.
+    Headless,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum RendererArg {
+    /// GLES on a render node when there is one, pixman otherwise.
+    Auto,
+    Gles,
+    /// Software rendering.
+    Pixman,
+}
 
 fn main() -> ExitCode {
-    match std::env::args().nth(1).as_deref() {
-        Some("--version") => {
-            println!("{}", version());
-            ExitCode::SUCCESS
+    let args = Args::parse();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .init();
+    let backend = args.backend.unwrap_or_else(|| {
+        let graphical = ["WAYLAND_DISPLAY", "DISPLAY"]
+            .iter()
+            .any(|v| std::env::var_os(v).is_some_and(|v| !v.is_empty()));
+        if graphical {
+            BackendArg::Winit
+        } else {
+            BackendArg::Tty
         }
-        _ => {
-            eprintln!("{}: not runnable yet (slice 1 is being built)", version());
+    });
+    let config = args
+        .config
+        .or_else(Config::default_path)
+        .map(|path| Config::load(&path))
+        .unwrap_or_default();
+    let options = Options {
+        backend: match backend {
+            BackendArg::Tty => BackendKind::Tty,
+            BackendArg::Winit => BackendKind::Winit,
+            BackendArg::Headless => BackendKind::Headless(HeadlessConfig {
+                outputs: args.outputs,
+                renderer: match args.renderer {
+                    RendererArg::Auto => RendererChoice::Auto,
+                    RendererArg::Gles => RendererChoice::Gles,
+                    RendererArg::Pixman => RendererChoice::Pixman,
+                },
+            }),
+        },
+        runtime_dir: args.runtime_dir,
+        spawn: args.spawn,
+        xwayland: !args.no_xwayland,
+        config,
+    };
+    match hocus_compositor::run(options) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            tracing::error!("{err:#}");
             ExitCode::FAILURE
         }
-    }
-}
-
-fn version() -> String {
-    format!("hocuspanda {}", env!("CARGO_PKG_VERSION"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_version_names_the_program() {
-        assert!(version().starts_with("hocuspanda 0.2"));
     }
 }

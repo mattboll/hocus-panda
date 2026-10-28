@@ -25,3 +25,11 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# smithay checks some of what clients send with `debug_assert!`, such as a
+# `wl_region.add` of negative height that foot sends: in a debug build, any
+# client could end the session (first build, #260). Built without them,
+# debug builds and tests take what a release takes.
+[profile.dev.package.smithay]
+opt-level = 3
+debug-assertions = false
