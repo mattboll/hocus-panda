@@ -11,7 +11,7 @@ What the package of Hocuspanda holds, and how it is built.
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
 | [`config.toml`](config.toml) | `/usr/share/doc/hocuspanda` | Every setting with its default, to copy to `~/.config/hocuspanda/` |
-| `LICENSE` | `/usr/share/doc/hocuspanda/copyright` | MIT |
+| `LICENSE` | `/usr/share/doc/hocuspanda/copyright` | MIT, and the SIL Open Font License of the fonts the shell carries in its binary (Martian Mono, Manrope: `crates/hocus-shell/fonts`) |
 
 The binary keeps its symbols, for backtraces.
 

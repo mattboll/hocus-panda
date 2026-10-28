@@ -35,6 +35,17 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
     printf 'License: Expat\n'
     # The licence's text, indented, with its blank lines as " .".
     sed -e '1,/^Copyright/d' -e 's/^$/./' -e 's/^/ /' "$top/LICENSE" | sed '1{/^ \.$/d}'
+    # The fonts the shell carries in its binary, under the SIL Open Font
+    # License: each one's copyright line, then the licence once.
+    fonts="$top/crates/hocus-shell/fonts"
+    for family in MartianMono Manrope; do
+        printf '\nFiles: crates/hocus-shell/fonts/%s-*\n' "$family"
+        printf 'Copyright: %s\n' "$(sed -n '1s/^Copyright //p' "$fonts/$family-OFL.txt")"
+        printf 'License: OFL-1.1\n'
+    done
+    printf '\nLicense: OFL-1.1\n'
+    sed -n -e 's/\r$//' -e '/^-----/,$p' "$fonts/MartianMono-OFL.txt" \
+        | sed -e 's/^$/./' -e 's/^/ /'
 } > "$root/usr/share/doc/hocuspanda/copyright"
 
 # dpkg-shlibdeps runs in a source tree that names the package. EGL is

@@ -4,7 +4,8 @@ Status: draft, 2026-10-27, to be approved before any code. It describes
 what the prototype on the design canvas shows, in numbers. Where it and
 the prototype disagree, this document wins once approved. Sections 2 and
 3 (the empty column, its glass and its two forms) are built since
-2026-10-28 (3.1, issue #358): see [as built](#as-built).
+2026-10-28 (3.1, issue #358), and the clock of section 4 group 1 and of
+section 5 (3.2, issue #359): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -87,7 +88,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 
 | # | Group | Contents | Size |
 |---|---|---|---|
-| 1 | Clock | `HH:MM` in Unbounded 400, 38 px; seconds in Unbounded 300, 15 px, grey; date in Manrope 13 px | 60 px |
+| 1 | Clock | `HH:MM` in Martian Mono 400, 34 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 15 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 13 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 60 px |
 | 2 | Next meeting | Card: 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`. Hidden when nothing remains today | 44 px |
 | 3 | Agents | Header `AGENTS` and total. Three tiles: working, waiting, resting, each with its panda (48 px) and its count. Below, up to 3 lines: agents waiting (oldest first), then stuck ones | 80 px + 18 px a line |
 | 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
@@ -98,6 +99,30 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 9 | Connections | 2×2 tiles of 34 px: Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (short name, one click cycles) | 73 px |
 | 10 | Levels | Volume, brightness and battery as 6 px gauges with a gradient and a value; then the battery's time left and the power profile | 74 px |
 | 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
+
+### 4.1 The clock (approved 2026-10-28, issues #359 and #332)
+
+- **Cells.** Each character sits in a cell as wide as the font's `0` (the
+  colon 0.55 of it) and 1.05 em high, centred in it, so that nothing
+  shifts as digits change; the row (`HH:MM` and the seconds) is centred in
+  the bar.
+- **The odometer.** On a minute change, each changed digit moves inside
+  its cell, which clips it: the old one leaves upward (105 % of its line)
+  fading and blurring to 3 px in 360 ms,
+  `cubic-bezier(0.4, 0, 0.8, 0.4)`; the new one comes from 105 % below,
+  blurred 3 px, to 8 % above at 70 % of 520 ms, then home, each stretch
+  `cubic-bezier(0.2, 0.9, 0.25, 1.08)`. The seconds change without motion.
+  With reduced motion, or a shell on the CPU: no motion.
+- **Settings**, `[panel.clock]`, for users who like other things: `font`
+  (the bundled Martian Mono, or any installed family; one not installed
+  falls back to Martian Mono), `color` (`#EEF1F6`), `transition`
+  (`odometer`, or `roll`: the new digit rises 60 % and fades in, 340 ms;
+  `flip`: the old folds away about its bottom in 220 ms, the new unfolds
+  from its top with a slight overshoot in 480 ms; `neon`: it flickers on
+  in 700 ms; `none`), `seconds` (`true`).
+- **Time.** The wall clock in the system's time zone (summer time, a zone
+  changed, a clock set or a resume show within a second); the next look
+  is on the monotonic clock, just past the next wall-clock second.
 
 When the output is too short (1366×768 gives 752 px of bar), groups give
 way in this order: Today, then To do, then the agent lines beyond the
@@ -114,7 +139,8 @@ Clicks:
 ## 5. Mini form
 
 Width 56 px, padding 12 px top, 10 px bottom, items centred, 14 px apart:
-clock on two lines (Unbounded 400, 17 px), next meeting mark (30×4 px,
+clock on two lines, hours over minutes, no seconds (Martian Mono 400,
+15 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
 blue, glowing when under 10 min), waiting tile (44 px, panda 40 px, count
 badge), working count, spacer, secretary (46 px), battery value, layout,
 notifications count.
@@ -251,7 +277,7 @@ polled from the loop.
 | `accent` | `#6CC287` (the pandas' green) |
 | `state.wait` / `state.meeting` / `state.stuck` | `#F5B44A` / `#8FB3FF` / `#F2945B` |
 | `gauge.sound` / `gauge.light` / `gauge.battery` | `#5B8DEF→#8FB3FF` / `#E8B44E→#FFE08A` / `#3FA66B→#7EE0A0` |
-| fonts | Unbounded (clock, counts), Manrope (text) |
+| fonts | Martian Mono (clock), Unbounded (counts), Manrope (text) |
 
 The light and neon themes give their own values for the same tokens.
 
@@ -260,7 +286,8 @@ The light and neon themes give their own values for the same tokens.
 1. The secretary's pencil drawing (section 7, B).
 2. Whether the peek's 8 s before it retracts is right (the prototype keeps
    it until the agent is handled).
-3. The colour and animation of the clock when the minute changes (later).
+3. ~~The colour and animation of the clock when the minute changes.~~
+   Decided on the 3.2 mockup: white, the odometer (§4.1).
 4. What the bar shows when no agent tool is running at all (hide the
    agents group, or show "aucun agent").
 
@@ -326,7 +353,8 @@ are later slices'.
   have no alpha on Wayland (softbuffer presents `Xrgb8888`), so the
   compositor cuts that surface to the bar's rounded corners itself; with
   no transparent strip left, no patched softbuffer is needed.
-- **At rest** neither the shell nor the compositor draws: no clock yet.
+- **At rest** neither the shell nor the compositor draws: no clock yet
+  (since 3.2, the clock draws once a second, alone: see below).
 - **The background.** Until wallpapers, the compositor draws the mockup's
   night-blue gradient and its glows under everything, so that the glass
   has something to show.
@@ -335,3 +363,53 @@ are later slices'.
   nothing to fade yet), hover feedback on the edge strip (the mockup's
   green tint is the mockup's own aid), and the blur's corners, which are
   cut to whole pixels under the shell's antialiased rim.
+
+### 3.2, the clock (2026-10-28)
+
+What the approved mockup of 3.2 shows (§4 group 1, §4.1, §5); the
+mockup's control panel is not part of the product.
+
+- **Its own surface.** iced presents a surface whole (wgpu has no partial
+  present, and softbuffer's present damages the whole buffer), so a clock
+  drawn in the bar's surface would draw the whole bar each second. The
+  clock has a layer surface of its own (`hocus-bar-clock`), over the bar's
+  top, inside its rim: 12 px below the bar's top, 194 × 62 px in the full
+  form and 54 × 32 px in the mini, the full size while the form switches.
+  Pointer events go through it to the bar. Opened after the bar's, it is
+  in front of it. On glass it is transparent; without glass it fills
+  itself with the bar's opaque colour at its height, and with a shell on
+  the CPU the compositor cuts it to the bar, as the two change size in
+  their own commits.
+- **It wakes itself.** The clock is a canvas that, each time it is drawn,
+  asks iced to draw it again just past the next wall-clock second (on the
+  monotonic clock), or at the next frame while its digits move. iced then
+  draws only that surface: no message goes through the shell, which would
+  draw every surface. **At rest** the shell commits the clock's surface
+  once a second and nothing else, and the compositor draws only its
+  rectangle (194 × 62 or 54 × 32 px), measured headless on an Intel GPU
+  and with pixman. Without seconds it still draws once a second, so that
+  a clock set or a resume shows within a second: iced wakes a widget only
+  by drawing it.
+- **Time.** The time is read afresh at each look, in the system's zone,
+  read by the shell from `TZ` or `/etc/localtime` (jiff); a thread
+  watches `/etc/localtime` with inotify and hands a changed zone over.
+  A minute change starts one motion, whatever the jump (a resume, a clock
+  set back): never one per minute missed. The date's language follows
+  `LC_ALL`, `LC_TIME`, then `LANG`: French or English.
+- **The motions** follow the mockup's keyframes, each stretch eased as CSS
+  eases it. The blur is drawn as nine copies spread vertically and
+  weighed as a Gaussian; the flip's turn as a vertical squash about its
+  pivot, without perspective.
+- **Fonts.** Martian Mono 1.1.0 (Regular and Light, its standard width)
+  and Manrope Regular, SIL Open Font License 1.1, are in the shell's
+  binary; their licences are in `crates/hocus-shell/fonts` and the
+  package's copyright file. A family named in `[panel.clock] font` is
+  looked for among the installed fonts.
+- **Cross-fade.** While the form switches, the old form's clock fades out
+  and the new one's in, over 120 ms from 60 ms (§3), each centred in the
+  bar as wide as it is at that frame and cut to it.
+- **For recordings and tests**, `HOCUS_CLOCK_AT` (`09:59:57`, or a date
+  and time) makes the shell's clock read that time as it starts; the
+  system's clock is never touched.
+- **Not built:** the clock's keyboard access and name for screen readers
+  (§11).

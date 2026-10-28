@@ -6,8 +6,8 @@
 //! in the session's runtime directory, which only it listens on. Each
 //! message is one line of text, words separated by spaces. The compositor
 //! decides where bars are and in which form, reserves their space and
-//! takes the clicks on their edge; the shell draws them, and says when it
-//! draws on the CPU. Neither side waits
+//! takes the clicks on their edge, and passes on the clock's settings; the
+//! shell draws them, and says when it draws on the CPU. Neither side waits
 //! for the other: a message is a fact, never a question.
 //!
 //! The form switch is one motion, which both sides compute from the same
