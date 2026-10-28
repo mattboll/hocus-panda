@@ -22,6 +22,10 @@ pub const SOCKET_ENV: &str = "HOCUS_SHELL_SOCKET";
 
 /// The bar's layer surface's namespace.
 pub const NAMESPACE: &str = "hocus-bar";
+/// The namespace of the clock's own layer surface, over the bar's top: the
+/// clock draws every second, and a surface of its own is what keeps that
+/// to its region (bar.md §12), since iced presents a surface whole.
+pub const CLOCK_NAMESPACE: &str = "hocus-bar-clock";
 
 /// The bar's distance from the output's top, right and bottom edges, and
 /// the windows' from the bar (logical pixels).
@@ -101,6 +105,108 @@ pub enum ToShell {
     },
     /// No bar on `output` any more.
     NoBar { output: String },
+    /// How the clock looks. The font's name comes last: it may hold
+    /// spaces.
+    Clock(ClockLook),
+}
+
+/// What the clock does when the minute changes (`[panel.clock]
+/// transition`), from the 3.2 mockup's keyframes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Transition {
+    /// Each changed digit leaves upward with a little blur; the new one
+    /// comes from below with a slight overshoot.
+    #[default]
+    Odometer,
+    /// The new digits rise into place and fade in.
+    Roll,
+    /// The old digits fold away, the new ones fold down like a split-flap.
+    Flip,
+    /// The new digits flicker on like a neon tube.
+    Neon,
+    /// They change at once.
+    None,
+}
+
+impl Transition {
+    pub const ALL: [Self; 5] = [
+        Self::Odometer,
+        Self::Roll,
+        Self::Flip,
+        Self::Neon,
+        Self::None,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Odometer => "odometer",
+            Self::Roll => "roll",
+            Self::Flip => "flip",
+            Self::Neon => "neon",
+            Self::None => "none",
+        }
+    }
+}
+
+impl FromStr for Transition {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|t| t.name() == s)
+            .ok_or_else(|| {
+                BadLine(format!(
+                    "no transition {s:?}: odometer, roll, flip, neon or none"
+                ))
+            })
+    }
+}
+
+/// How the clock looks (`[panel.clock]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClockLook {
+    /// The font family of the hours and minutes (and of the seconds, in
+    /// its light weight).
+    pub font: String,
+    /// The colour of the hours and minutes, as red, green, blue.
+    pub color: [u8; 3],
+    pub transition: Transition,
+    /// The seconds show beside the minutes, in the full form.
+    pub seconds: bool,
+}
+
+impl ClockLook {
+    /// The bundled font, the mockup's.
+    pub const DEFAULT_FONT: &str = "Martian Mono";
+    /// `text` (bar.md §13).
+    pub const DEFAULT_COLOR: [u8; 3] = [0xEE, 0xF1, 0xF6];
+}
+
+impl Default for ClockLook {
+    fn default() -> Self {
+        Self {
+            font: Self::DEFAULT_FONT.to_owned(),
+            color: Self::DEFAULT_COLOR,
+            transition: Transition::default(),
+            seconds: true,
+        }
+    }
+}
+
+/// A colour written `#RRGGBB` (or `#RGB`), as red, green, blue.
+pub fn parse_color(text: &str) -> Result<[u8; 3], BadLine> {
+    let bad = || BadLine(format!("colour {text:?}: #RRGGBB or #RGB"));
+    let hex = text.strip_prefix('#').ok_or_else(bad)?;
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(bad());
+    }
+    let digit = |i: usize, len: usize| u8::from_str_radix(&hex[i * len..(i + 1) * len], 16);
+    match hex.len() {
+        6 => Ok([digit(0, 2), digit(1, 2), digit(2, 2)].map(|d| d.unwrap_or(0))),
+        3 => Ok([digit(0, 1), digit(1, 1), digit(2, 1)].map(|d| d.unwrap_or(0) * 17)),
+        _ => Err(bad()),
+    }
 }
 
 /// What the shell tells the compositor.
@@ -149,6 +255,16 @@ impl fmt::Display for ToShell {
                 since,
             } => write!(f, "bar {output} {} {since}", form.name()),
             Self::NoBar { output } => write!(f, "nobar {output}"),
+            Self::Clock(look) => {
+                let [r, g, b] = look.color;
+                write!(
+                    f,
+                    "clock {} {} #{r:02X}{g:02X}{b:02X} {}",
+                    if look.seconds { "seconds" } else { "noseconds" },
+                    look.transition.name(),
+                    look.font
+                )
+            }
         }
     }
 }
@@ -173,6 +289,21 @@ impl FromStr for ToShell {
             Some("nobar") => Ok(Self::NoBar {
                 output: word(&mut words, "output")?.to_owned(),
             }),
+            Some("clock") => {
+                let seconds = flag(words.next(), "seconds", "noseconds")?;
+                let transition = word(&mut words, "transition")?.parse()?;
+                let color = parse_color(word(&mut words, "colour")?)?;
+                let font = words.collect::<Vec<_>>().join(" ");
+                if font.is_empty() {
+                    return Err(BadLine("no font".to_owned()));
+                }
+                Ok(Self::Clock(ClockLook {
+                    font,
+                    color,
+                    transition,
+                    seconds,
+                }))
+            }
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
     }
@@ -253,6 +384,13 @@ mod tests {
             ToShell::NoBar {
                 output: "DP-2".into(),
             },
+            ToShell::Clock(ClockLook::default()),
+            ToShell::Clock(ClockLook {
+                font: "JetBrains Mono".into(),
+                color: [0x3D, 0xFF, 0xA2],
+                transition: Transition::Flip,
+                seconds: false,
+            }),
         ];
         for message in to_shell {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
@@ -261,8 +399,30 @@ mod tests {
             ToCompositor::Software.to_string().parse::<ToCompositor>(),
             Ok(ToCompositor::Software)
         );
-        for bad in ["", "bar eDP-1", "bar eDP-1 wide 0", "look glass", "hello"] {
+        for bad in [
+            "",
+            "bar eDP-1",
+            "bar eDP-1 wide 0",
+            "look glass",
+            "hello",
+            "clock seconds odometer #EEF1F6",
+            "clock seconds spin #EEF1F6 Martian Mono",
+            "clock seconds odometer white Martian Mono",
+        ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn colours_read_in_both_lengths() {
+        assert_eq!(parse_color("#EEF1F6"), Ok([0xEE, 0xF1, 0xF6]));
+        assert_eq!(parse_color("#3dffa2"), Ok([0x3D, 0xFF, 0xA2]));
+        assert_eq!(parse_color("#fff"), Ok([255, 255, 255]));
+        for bad in ["EEF1F6", "#EEF1F", "#GGGGGG", "#", "#+1+2+3"] {
+            assert!(parse_color(bad).is_err(), "{bad}");
+        }
+        for t in Transition::ALL {
+            assert_eq!(t.name().parse::<Transition>(), Ok(t));
         }
     }
 

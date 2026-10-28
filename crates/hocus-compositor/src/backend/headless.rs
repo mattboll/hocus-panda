@@ -26,7 +26,7 @@ use smithay::{
         pixman,
         wayland_server::backend::GlobalId,
     },
-    utils::{Rectangle, Transform},
+    utils::{Physical, Rectangle, Transform},
 };
 
 use crate::{
@@ -104,6 +104,9 @@ struct OutputBuffer<T> {
     damage_tracker: OutputDamageTracker,
     /// Frames that drew something.
     frames: u64,
+    /// What those frames drew over, together, since a test last asked
+    /// (pixels of the output).
+    damaged: Option<Rectangle<i32, Physical>>,
 }
 
 /// Creates the renderer and the outputs, and maps them in the space.
@@ -287,6 +290,7 @@ where
             global,
             target,
             frames: 0,
+            damaged: None,
         });
         self.outputs.sort_by_key(|o| o.output.name());
         Ok(())
@@ -363,6 +367,11 @@ where
                 }
             };
             let drawn = result.damage.is_some_and(|d| !d.is_empty());
+            if let Some(damage) = result.damage {
+                for rect in damage {
+                    out.damaged = Some(out.damaged.map_or(*rect, |d| d.merge(*rect)));
+                }
+            }
             let states = result.states;
             if drawn {
                 out.frames += 1;
@@ -417,6 +426,15 @@ impl HeadlessBackend {
         match self.canvas {
             Canvas::Gles(_) => "gles",
             Canvas::Pixman(_) => "pixman",
+        }
+    }
+
+    /// What output `index` drew over since the last call, as one
+    /// rectangle of its pixels; `None`: nothing.
+    pub fn take_damage(&mut self, index: usize) -> Option<Rectangle<i32, Physical>> {
+        match &mut self.canvas {
+            Canvas::Gles(c) => c.outputs.get_mut(index)?.damaged.take(),
+            Canvas::Pixman(c) => c.outputs.get_mut(index)?.damaged.take(),
         }
     }
 

@@ -175,8 +175,8 @@ impl State {
         }
     }
 
-    /// The shell connected (again): it is told how bars look and where
-    /// they are.
+    /// The shell connected (again): it is told how bars and their clock
+    /// look, and where bars are.
     fn shell_connected(&mut self, stream: UnixStream) {
         self.shell_gone();
         if let Err(err) = stream.set_nonblocking(true) {
@@ -234,6 +234,7 @@ impl State {
         tracing::info!("the shell is connected");
         self.shell.link = Some(Link { writer, token });
         self.tell_shell(self.bar_look());
+        self.tell_shell(ToShell::Clock(self.config.panel.clock.look()));
         let bars: Vec<ToShell> = self
             .panel
             .bars

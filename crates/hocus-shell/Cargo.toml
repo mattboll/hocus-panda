@@ -25,13 +25,18 @@ iced = { version = "0.14", default-features = false, features = [
     "wayland",
     # Blend in gamma space as browsers do: the mockups are CSS.
     "web-colors",
+    # The clock draws its glyphs in cells, and measures its font.
+    "canvas",
+    "advanced",
 ] }
 # Without its default theme detection (mundy, over the session's D-Bus).
 # Pinned: its winit-core prerelease dependencies broke it once (spike).
 iced_layershell = { version = "=0.19.1", default-features = false }
+# The clock's time zone and its rules, read from the system's database.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 # CLOCK_MONOTONIC, the compositor's clock, to start a form switch when it
-# does.
-rustix = { version = "1.1.6", features = ["time"] }
+# does; inotify, to see the time zone change.
+rustix = { version = "1.1.6", features = ["time", "fs"] }
 tokio = { version = "1.54.1", features = ["net", "io-util", "rt"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
