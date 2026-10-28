@@ -756,12 +756,11 @@ impl State {
                 .map_or(Mode::Floating, |m| m.before_fullscreen);
             match before {
                 Mode::Snapped(zone) => {
-                    let restore = self.model.placement(id).restore;
+                    // Back in its zone; where it floated before is kept.
                     self.model.set_mode(id, Mode::Snapped(zone), current);
                     if let Some(area) = self.area_of(id) {
                         self.configure(id, zone.rect(area));
                     }
-                    let _ = restore;
                 }
                 Mode::Floating | Mode::Fullscreen => {
                     let rect = self.model.unsnap(id).unwrap_or(current);
