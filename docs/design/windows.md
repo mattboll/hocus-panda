@@ -215,8 +215,9 @@ Keyboard:
 - Reduced motion: the desktops cross-fade in 120 ms instead of sliding; a
   swipe does not follow the fingers, the release decides.
 - `Super+Shift+1…4` sends the focused window to that desktop, without
-  switching: it travels along the strip toward its desktop's side in
-  320 ms (it fades with reduced motion), and the dots show. With `Ctrl`
+  switching: it leaves the screen toward its desktop's side, a screen's
+  width in 320 ms easing in, as leaving windows do (it fades with reduced
+  motion), and the dots show. With `Ctrl`
   too, it follows it: the window stays in place as the strip slides
   under it. A window being dragged while desktops switch goes along.
 - Empty desktops stay; their order is fixed (1 to 4). `[desktops] count`
