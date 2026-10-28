@@ -67,4 +67,13 @@ Read, in this order: [docs/vision.md](docs/vision.md),
 
 ## Commands
 
-To be filled as the workspace grows.
+```sh
+cargo build                                   # build everything
+cargo nextest run --workspace                 # tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --check
+cargo deny check                              # licences and advisories
+```
+
+CI runs the same on every pull request to `v2`. Update this section as
+commands land.
