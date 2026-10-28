@@ -1,9 +1,15 @@
 //! The Hocuspanda desktop's compositor.
 
-use std::{io::IsTerminal, path::PathBuf, process::ExitCode};
+use std::{
+    io::IsTerminal,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use clap::{Parser, ValueEnum};
-use hocus_compositor::{BackendKind, Config, HeadlessConfig, Options, OutputSpec, RendererChoice};
+use hocus_compositor::{
+    BackendKind, Config, HeadlessConfig, Options, OutputSpec, RendererChoice, SystemKeyboard,
+};
 use tracing_subscriber::EnvFilter;
 
 /// The Hocuspanda desktop's compositor.
@@ -89,11 +95,16 @@ fn main() -> ExitCode {
             BackendArg::Tty
         }
     });
-    let config = args
+    let mut config = args
         .config
         .or_else(Config::default_path)
         .map(|path| Config::load(&path))
         .unwrap_or_default();
+    // Once, before the loop: the keyboard the system was set up with,
+    // unless the configuration names its own.
+    if config.keyboard.layouts.is_empty() {
+        config.system_keyboard = SystemKeyboard::read(Path::new(SystemKeyboard::PATH));
+    }
     let options = Options {
         backend: match backend {
             BackendArg::Tty => BackendKind::Tty,

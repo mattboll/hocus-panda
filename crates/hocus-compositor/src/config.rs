@@ -1,21 +1,184 @@
 //! The configuration file, `$XDG_CONFIG_HOME/hocuspanda/config.toml`. Only
-//! what this slice uses is read so far: the keyboard, the shortcuts and the
-//! programs they start. It is read once, as the compositor starts; sections
+//! what this slice uses is read so far: the keyboard, the screens' scales,
+//! the shortcuts and the programs they start. It is read once, as the compositor starts; sections
 //! other slices will read are let through. `packaging/config.toml` lists
 //! every setting with its default.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::shortcuts::Shortcuts;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub keyboard: Keyboard,
+    /// Settings per screen, by connector name (`eDP-1`, `DP-2`).
+    pub outputs: BTreeMap<String, OutputSettings>,
     pub shortcuts: Shortcuts,
     pub programs: Programs,
+    /// The system's keyboard (`/etc/default/keyboard`), used when
+    /// `[keyboard] layouts` is empty. Not part of the file: the program
+    /// reads it once at start.
+    #[serde(skip)]
+    pub system_keyboard: Option<SystemKeyboard>,
+}
+
+/// One screen's settings, `[outputs.eDP-1]`.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutputSettings {
+    /// From 0.5 to 4. None: the scale of its density.
+    #[serde(deserialize_with = "scale")]
+    pub scale: Option<f64>,
+}
+
+fn scale<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::Error> {
+    let scale = f64::deserialize(deserializer)?;
+    if (0.5..=4.0).contains(&scale) {
+        Ok(Some(scale))
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "scale {scale}: from 0.5 to 4"
+        )))
+    }
+}
+
+/// Where a screen's scale came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScaleFrom {
+    /// `[outputs.NAME] scale`.
+    Config,
+    /// Its density, `output_spec::default_scale`.
+    Density,
+}
+
+impl Config {
+    /// The scale of the screen on connector `name`: the configured one, or
+    /// the one of its density.
+    pub fn output_scale(
+        &self,
+        name: &str,
+        pixels: (i32, i32),
+        millimetres: (i32, i32),
+    ) -> (f64, ScaleFrom) {
+        match self.outputs.get(name).and_then(|o| o.scale) {
+            Some(scale) => (scale, ScaleFrom::Config),
+            None => (
+                crate::output_spec::default_scale(pixels, millimetres),
+                ScaleFrom::Density,
+            ),
+        }
+    }
+}
+
+/// What XKB is given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XkbNames {
+    pub model: String,
+    pub layout: String,
+    pub variant: String,
+    pub options: String,
+    /// Where the layouts came from: `config.toml`, the system, or XKB's
+    /// defaults (all empty).
+    pub from: &'static str,
+}
+
+impl Config {
+    /// The keyboard: `[keyboard]`'s layouts when it names some, else the
+    /// system's; `[keyboard] options` win over the system's when set.
+    pub fn xkb_names(&self) -> XkbNames {
+        let keyboard = &self.keyboard;
+        if !keyboard.layouts.is_empty() {
+            let (layout, variant) = xkb_lists(&keyboard.layouts);
+            return XkbNames {
+                model: String::new(),
+                layout,
+                variant,
+                options: keyboard.options.clone(),
+                from: "config.toml",
+            };
+        }
+        let system = self.system_keyboard.clone().unwrap_or_default();
+        XkbNames {
+            from: if system.layout.is_empty() {
+                "XKB's defaults"
+            } else {
+                SystemKeyboard::PATH
+            },
+            model: system.model,
+            layout: system.layout,
+            variant: system.variant,
+            options: if keyboard.options.is_empty() {
+                system.options
+            } else {
+                keyboard.options.clone()
+            },
+        }
+    }
+}
+
+/// The system's keyboard, as Debian's `/etc/default/keyboard` gives it:
+/// XKB names, the layouts, variants and options comma-separated.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SystemKeyboard {
+    pub model: String,
+    pub layout: String,
+    pub variant: String,
+    pub options: String,
+}
+
+impl SystemKeyboard {
+    pub const PATH: &str = "/etc/default/keyboard";
+
+    /// `/etc/default/keyboard`, read once as the program starts; `None`
+    /// when it is missing, does not read, or names no layout (XKB's
+    /// defaults then).
+    pub fn read(path: &Path) -> Option<Self> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => {
+                let keyboard = Self::parse(&text);
+                if keyboard.is_none() {
+                    tracing::info!(file = %path.display(), "no XKBLAYOUT; XKB's defaults");
+                }
+                keyboard
+            }
+            Err(err) => {
+                tracing::info!(file = %path.display(), %err, "system keyboard not read; XKB's defaults");
+                None
+            }
+        }
+    }
+
+    /// `KEY="value"` lines (or `KEY=value`, or `'value'`); comments and
+    /// other keys are passed over. `None` without a layout.
+    pub fn parse(text: &str) -> Option<Self> {
+        let mut keyboard = Self::default();
+        for line in text.lines() {
+            let Some((key, value)) = line.trim().split_once('=') else {
+                continue;
+            };
+            let value = value.trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+                .unwrap_or(value)
+                .to_owned();
+            match key.trim() {
+                "XKBMODEL" => keyboard.model = value,
+                "XKBLAYOUT" => keyboard.layout = value,
+                "XKBVARIANT" => keyboard.variant = value,
+                "XKBOPTIONS" => keyboard.options = value,
+                _ => {}
+            }
+        }
+        (!keyboard.layout.is_empty()).then_some(keyboard)
+    }
 }
 
 /// The programs the desktop starts.
@@ -31,7 +194,8 @@ pub struct Programs {
 #[serde(default, deny_unknown_fields)]
 pub struct Keyboard {
     /// XKB layouts, each with its variant in brackets, the first active at
-    /// start: `["fr", "fr(bepo)", "us"]`. Empty: XKB's defaults (and the
+    /// start: `["fr", "fr(bepo)", "us"]`. Empty: the system's
+    /// (`/etc/default/keyboard`), or else XKB's defaults (and the
     /// `XKB_DEFAULT_*` variables).
     pub layouts: Vec<String>,
     /// XKB options, e.g. `"grp:alt_shift_toggle,caps:escape"`.
@@ -164,6 +328,88 @@ mod tests {
         assert!(toml::from_str::<Config>("[shortcuts]\nterminal = \"Hyper+T\"\n").is_err());
         assert!(toml::from_str::<Config>("[shortcuts]\nlaunch = \"Super+D\"\n").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn a_screens_scale_is_the_configured_one_or_its_densitys() -> anyhow::Result<()> {
+        let config: Config = toml::from_str("[outputs.eDP-1]\nscale = 1\n")?;
+        // 2560×1600 on 340×210 mm: 1.75 by its density.
+        let panel = ((2560, 1600), (340, 210));
+        assert_eq!(
+            config.output_scale("eDP-1", panel.0, panel.1),
+            (1.0, ScaleFrom::Config)
+        );
+        assert_eq!(
+            config.output_scale("DP-2", panel.0, panel.1),
+            (1.75, ScaleFrom::Density)
+        );
+        let fractional: Config = toml::from_str("[outputs.\"DP-2\"]\nscale = 1.25\n")?;
+        assert_eq!(fractional.outputs["DP-2"].scale, Some(1.25));
+        for bad in ["scale = 0", "scale = 5", "scale = \"1\"", "scael = 1"] {
+            let text = format!("[outputs.eDP-1]\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_system_keyboard_reads_as_debian_writes_it() {
+        let debian = "# KEYBOARD CONFIGURATION FILE\n\n# Consult the keyboard(5) manual page.\n\n\
+                      XKBMODEL=\"pc105\"\nXKBLAYOUT=\"fr,us\"\nXKBVARIANT=\"bepo,\"\n\
+                      XKBOPTIONS=\"grp:alt_shift_toggle,caps:escape\"\n\nBACKSPACE=\"guess\"\n";
+        assert_eq!(
+            SystemKeyboard::parse(debian),
+            Some(SystemKeyboard {
+                model: "pc105".into(),
+                layout: "fr,us".into(),
+                variant: "bepo,".into(),
+                options: "grp:alt_shift_toggle,caps:escape".into(),
+            })
+        );
+        // Unquoted or single-quoted values; no layout is no keyboard.
+        let plain = SystemKeyboard::parse("XKBLAYOUT=de\nXKBVARIANT='nodeadkeys'\n");
+        assert_eq!(plain.as_ref().map(|k| k.layout.as_str()), Some("de"));
+        assert_eq!(plain.map(|k| k.variant), Some("nodeadkeys".into()));
+        assert_eq!(
+            SystemKeyboard::parse("XKBMODEL=\"pc105\"\nXKBLAYOUT=\"\"\n"),
+            None
+        );
+        assert_eq!(
+            SystemKeyboard::read(Path::new("/nonexistent/keyboard")),
+            None
+        );
+    }
+
+    #[test]
+    fn the_configs_layouts_win_over_the_systems() {
+        let system = SystemKeyboard::parse(
+            "XKBLAYOUT=\"fr\"\nXKBVARIANT=\"bepo\"\nXKBOPTIONS=\"caps:escape\"\n",
+        );
+        let mut config = Config {
+            system_keyboard: system,
+            ..Config::default()
+        };
+        let names = config.xkb_names();
+        assert_eq!(
+            (names.layout.as_str(), names.variant.as_str()),
+            ("fr", "bepo")
+        );
+        assert_eq!(
+            (names.options.as_str(), names.from),
+            ("caps:escape", "/etc/default/keyboard")
+        );
+        config.keyboard.options = "compose:ralt".into();
+        assert_eq!(config.xkb_names().options, "compose:ralt");
+        config.keyboard.layouts = vec!["us(intl)".into()];
+        let names = config.xkb_names();
+        assert_eq!(
+            (names.layout.as_str(), names.variant.as_str()),
+            ("us", "intl")
+        );
+        assert_eq!(names.from, "config.toml");
+        config.keyboard.layouts.clear();
+        config.system_keyboard = None;
+        assert_eq!(config.xkb_names().layout, "");
     }
 
     /// The commented file the package ships lists every setting with its

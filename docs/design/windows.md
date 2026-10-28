@@ -186,6 +186,11 @@ string turns one off. The package ships every setting with its default
 | `terminal` | `Super+Return` | Opens a terminal: `[programs] terminal`, or the first of kitty, foot, alacritty, xterm found in `PATH` |
 | `log-out` | `Super+Shift+E` | Ends the session at once; the display manager comes back |
 
+Other settings of this slice in the same file: `[keyboard]` (layouts;
+without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
+`[outputs.NAME] scale` per screen by connector name (`eDP-1`; the
+journal names each screen as it lights), the density's scale otherwise.
+
 Not configurable yet: `Super`+drag moves a window; `Ctrl+Alt+F1…F12`
 switch virtual terminals. The other sections' shortcuts join the table as
 they are built.

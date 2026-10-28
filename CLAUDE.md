@@ -99,7 +99,9 @@ RUST_LOG=hocus_compositor=debug                       # more of what it does
 
 Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 `--config FILE`); so far it reads `[keyboard]` (`layouts = ["fr",
-"fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`), `[shortcuts]`
+"fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`; without layouts,
+the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
+the real screen; nested and headless take `--output`), `[shortcuts]`
 (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`) and
 `[programs]` (`terminal`). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers

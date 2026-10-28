@@ -51,7 +51,6 @@ use smithay::{
 
 use crate::{
     App, Config,
-    config::xkb_lists,
     cursor::CursorImages,
     focus::KeyboardFocus,
     model::{self, Model, Rect, WindowId},
@@ -140,18 +139,31 @@ impl State {
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(dh, "seat0");
         let keyboard = &config.keyboard;
-        let (layout, variant) = xkb_lists(&keyboard.layouts);
+        let names = config.xkb_names();
+        tracing::info!(
+            model = names.model,
+            layout = names.layout,
+            variant = names.variant,
+            options = names.options,
+            from = names.from,
+            "keyboard"
+        );
         let xkb = XkbConfig {
-            layout: &layout,
-            variant: &variant,
-            options: (!keyboard.options.is_empty()).then(|| keyboard.options.clone()),
+            model: &names.model,
+            layout: &names.layout,
+            variant: &names.variant,
+            options: (!names.options.is_empty()).then(|| names.options.clone()),
             ..XkbConfig::default()
         };
         let added = seat.add_keyboard(xkb, keyboard.repeat_delay, keyboard.repeat_rate);
         if let Err(err) = added {
             // A layout XKB does not know: its defaults, rather than no
             // keyboard at all.
-            tracing::warn!(?err, layouts = ?keyboard.layouts, "keyboard layouts refused; XKB's defaults");
+            tracing::warn!(
+                ?err,
+                layout = names.layout,
+                "keyboard layouts refused; XKB's defaults"
+            );
             seat.add_keyboard(
                 XkbConfig::default(),
                 keyboard.repeat_delay,
