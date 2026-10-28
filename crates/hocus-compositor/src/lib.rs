@@ -16,6 +16,7 @@ mod grabs;
 mod handlers;
 mod harness;
 mod input;
+mod magnet;
 pub mod model;
 pub mod motion;
 mod output_spec;

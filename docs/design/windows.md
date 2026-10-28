@@ -78,6 +78,30 @@ open on), agents' badges on windows (slice 3).
 - The shadow deepens while moving (blur 48 px, 50 %). No transparency.
 - With reduced motion: no wobble; the window moves rigidly.
 
+### Magnetic edges
+
+While a window moves, each of its edges **sticks** to a nearby edge when
+it comes within **12 px** of it:
+
+- an edge of another window shown on the same screen and desktop (not
+  minimised, not maximised or fullscreen), at the **8 px gap** snapped
+  windows keep: a window's left edge sticks 8 px right of the other's
+  right edge, its top 8 px below the other's bottom, and so on;
+- an edge of another such window on the same side, in line with it: left
+  to left, top to top;
+- an edge of the work area, flush with it, as snapped windows are.
+
+The nearest wins, across and down on their own: a window can stick to one
+window's side and line up with another's top. A window pulls only where
+the two overlap the other way, or come within the gap and the 12 px of
+it, so a window far above does not pull sideways. The magnet applies to
+where the pointer would put the window, nothing accumulates: dragging on
+past the 12 px frees it, with no modifier. Where the pointer is in a snap
+zone (section 9), snapping keeps priority and nothing sticks. The wobble
+follows the pointer's motion, not the magnet's jumps: a window catching
+or coming free jumps rigidly, and one held still by the magnet does not
+bend. Reduced motion changes nothing here.
+
 ## 7. Server-side decorated windows: the grip
 
 A window with no header of its own still needs a mouse handle. Proposal:
@@ -97,6 +121,10 @@ sits just below it.
   `nwse-resize`, `nesw-resize`).
 - `Super`+right-drag resizes from the nearest corner.
 - Live resize, respecting the application's minimum and maximum sizes.
+- The edge or edges being dragged stick as a moving window's do (section
+  6, magnetic edges): within 12 px of another window's edge, at the gap
+  or in line, or of the work area's, flush. Dragging on frees them. The
+  windows that follow a seam's handle do not pull.
 - Snapped and maximised windows resize too. A maximised window resized
   floats.
 - A **snapped pair** (two snapped windows side by side, or one above the
@@ -330,3 +358,7 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
    on their seam resizes both (#335).
 6. Minimised windows come back through Alt+Tab only, with no shortcut of
    their own; Alt+Tab shows no application icon (#338).
+7. Magnetic edges, 12 px, at the gap: a moved window's edges, and a
+   resized window's dragged edges, stick to other windows' at the 8 px
+   gap or in line with them, and flush to the work area's; dragging on
+   frees them (#343).

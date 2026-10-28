@@ -1,6 +1,7 @@
 //! Moving and resizing windows with the pointer (docs/design/windows.md
 //! §6–§9): a client's header, `Super`+drag (`Alt+Super` nested) or the
-//! grip moves a window, wobbling, and snaps it where the preview shows;
+//! grip moves a window, wobbling, its edges sticking to others' (see
+//! `magnet`), and snaps it where the preview shows;
 //! the band around a window, a client's own resize request or
 //! `Super`+right-drag resizes it, a snapped neighbour following.
 //!
@@ -22,6 +23,7 @@ use smithay::{
 
 use crate::{
     State,
+    magnet::{self, Pull},
     model::{self, Edges, MIN_SIZE, Mode, Rect, WindowId, Zone},
     windows::Resizing,
     wobble::Jelly,
@@ -158,6 +160,8 @@ pub struct MoveGrab {
     rigid: bool,
     /// Where it floated when the drag began.
     floating: Option<Rect>,
+    /// How far the magnet pulled it at the last motion (§6).
+    pull: Pull,
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -207,6 +211,10 @@ impl PointerGrab<State> for MoveGrab {
             return;
         }
         let location = (self.initial.to_f64() + delta).to_i32_round();
+        let size = window.geometry().size;
+        let at = Rect::new(location.x, location.y, size.w, size.h);
+        let pull = state.move_pull(self.id, at, pointer);
+        let location = location + Point::from(pull.offset());
         let before = state.space.element_location(&window);
         state.space.map_element(window.clone(), location, true);
         if let Some(x11) = window.x11_surface() {
@@ -219,10 +227,10 @@ impl PointerGrab<State> for MoveGrab {
         // The jelly lags behind the move.
         if let Some(before) = before {
             let moved = location - before;
+            let moved = magnet::unpulled((moved.x, moved.y), self.pull, pull);
             let now = state.now();
             let wobbles = !self.rigid && !state.reduced_motion();
             if wobbles && state.wobble.as_ref().is_none_or(|(w, _)| *w != self.id) {
-                let size = window.geometry().size;
                 let held = self.from - self.initial.to_f64();
                 state.wobble = Some((
                     self.id,
@@ -236,9 +244,10 @@ impl PointerGrab<State> for MoveGrab {
             if let Some((w, jelly)) = &mut state.wobble
                 && *w == self.id
             {
-                jelly.moved(f64::from(moved.x), f64::from(moved.y), now);
+                jelly.moved(f64::from(moved.0), f64::from(moved.1), now);
             }
         }
+        self.pull = pull;
         // At an edge of the work area, where it would snap.
         let zone = state
             .space
@@ -321,6 +330,18 @@ impl PointerGrab<State> for ResizeGrab {
             self.initial,
             self.edges,
             (delta.x, delta.y),
+            self.min,
+            self.max,
+        );
+        // The edges dragged stick to others' (§8).
+        let follow: Vec<WindowId> = self.partners.iter().map(|(id, _, _)| *id).collect();
+        let (px, py) = state
+            .resize_pull(self.id, rect, self.edges, &follow)
+            .offset();
+        let rect = model::resized(
+            self.initial,
+            self.edges,
+            (delta.x + px, delta.y + py),
             self.min,
             self.max,
         );
@@ -459,6 +480,7 @@ impl State {
             hold,
             rigid: false,
             floating: (hold == Hold::Free).then_some(rect),
+            pull: Pull::default(),
         };
         self.moving = Some(id);
         self.frame_cursor = Some(CursorIcon::Grabbing);
