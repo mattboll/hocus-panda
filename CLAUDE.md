@@ -103,15 +103,25 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 `--config FILE`); so far it reads `[keyboard]` (`layouts = ["fr",
 "fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`; without layouts,
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
-the real screen; nested and headless take `--output`), `[shortcuts]`
-(`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`, and the
-windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`)
-and `[appearance]` (`reduced-motion`, `high-contrast`). `packaging/config.toml` lists every setting
+the real screen; nested and headless take `--output`; `panel-form`),
+`[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
+`toggle-bar = "Super+B"`, and the windows' keys of
+docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
+(`screens`, `output`, `form`) and `[appearance]` (`reduced-motion`,
+`high-contrast`, `reduce-transparency`). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd
 and D-Bus where the session is, so never use it next to a live session. Headless tests
 start it in-process (`hocus_compositor::Headless`, see
 `crates/hocus-compositor/tests/`) with sctk clients on threads.
+
+The shell (`crates/hocus-shell`, binary `hocuspanda-shell`, iced) draws the
+bar; the compositor starts it from beside its own binary (or `--shell
+PATH`), restarts it when it ends, and talks to it over a private socket
+(`crates/hocus-link`). `--no-shell` keeps it off (the bar's space is kept
+all the same); the in-process harness starts none unless asked
+(`Headless::start_with_shell`). The bar's base: docs/design/bar.md, "As
+built".
 
 The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 (QEMU with KVM; the base image is cached in
@@ -135,7 +145,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor
+cargo build --release --locked -p hocus-compositor -p hocus-shell
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex

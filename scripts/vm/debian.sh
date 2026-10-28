@@ -5,7 +5,7 @@
 # VM has its own user, buses and services.
 #
 #   scripts/vm/debian.sh up            boot it (downloads the image once)
-#   scripts/vm/debian.sh copy          copy target/debug's hocuspanda into it
+#   scripts/vm/debian.sh copy          copy target/debug's hocuspanda and its shell into it
 #   scripts/vm/debian.sh install DEB   install a .deb (packaging/deb/build.sh)
 #   scripts/vm/debian.sh ssh [cmd…]    a shell, or a command, as the test user
 #   scripts/vm/debian.sh screen FILE   save what the VM's screen shows (PNG)
@@ -157,7 +157,8 @@ copy() {
     ssh_vm mkdir -p bin
     scp -q -i "$WORK/key" -P "$SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        "${CARGO_TARGET_DIR:-target}/debug/hocuspanda" alex@127.0.0.1:bin/
+        "${CARGO_TARGET_DIR:-target}/debug/hocuspanda" \
+        "${CARGO_TARGET_DIR:-target}/debug/hocuspanda-shell" alex@127.0.0.1:bin/
     scp -q -i "$WORK/key" -P "$SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         scripts/vm/in-vm.sh alex@127.0.0.1:hocus-vm

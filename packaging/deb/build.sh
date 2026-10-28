@@ -3,10 +3,10 @@
 # library dependencies are the ones dpkg-shlibdeps finds on this system, so
 # the package installs on this release and later ones.
 #
-#   cargo build --release --locked -p hocus-compositor
+#   cargo build --release --locked -p hocus-compositor -p hocus-shell
 #   packaging/deb/build.sh [OUTDIR]     (default: CARGO_TARGET_DIR/packages)
 #
-# Needs dpkg-dev; the binary is read from CARGO_TARGET_DIR/release. Prints
+# Needs dpkg-dev; the binaries are read from CARGO_TARGET_DIR/release. Prints
 # the package's path.
 set -eu
 umask 022
@@ -42,12 +42,14 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
 mkdir -p "$root/DEBIAN"
 printf 'Source: hocuspanda\n\nPackage: hocuspanda\nArchitecture: any\n' \
     > "$work/src/debian/control"
-(cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda) > "$work/shlibs"
+(cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda \
+    debian/hocuspanda/usr/bin/hocuspanda-shell) > "$work/shlibs"
 depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 
-# Recommends: Mesa's drivers, X11 applications, a session bus shared with
-# systemd (what the session tells it reaches D-Bus-activated programs), and
-# a terminal for Super+Return.
+# Recommends: Mesa's drivers (the shell draws with Vulkan, or on the CPU
+# without it), X11 applications, a session bus shared with systemd (what
+# the session tells it reaches D-Bus-activated programs), and a terminal
+# for Super+Return.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
 Version: $version-$revision
@@ -55,7 +57,8 @@ Architecture: $arch
 Maintainer: Matthieu Bollot <m.bollot@code-troopers.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$root" | cut -f 1)
 Depends: $depends, libegl1
-Recommends: libegl-mesa0, libgl1-mesa-dri, xwayland, dbus-user-session,
+Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
+ dbus-user-session,
  kitty | foot | alacritty | xterm
 Section: x11
 Priority: optional
@@ -65,8 +68,9 @@ Description: Wayland desktop for developers who work with AI agents
  virtual desktops, and the state of the user's AI agents at a glance.
  Display managers offer it as the "Hocuspanda" session.
  .
- This early version holds the compositor and its session; Super+Return
- opens a terminal and Super+Shift+E logs out.
+ This early version holds the compositor, its session and the base of its
+ bar; Super+Return opens a terminal, Super+B switches the bar's form and
+ Super+Shift+E logs out.
 CONTROL
 
 mkdir -p "$out"
