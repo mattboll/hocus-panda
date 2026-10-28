@@ -102,6 +102,14 @@ pub enum Shows {
         size: (u32, u32),
         margin: u32,
     },
+    /// An xdg toplevel of this size that, floating, takes the sizes asked
+    /// rounded down to whole `cell`s, as a terminal does (foot's
+    /// `resize-by-cells`); tiled, maximised or fullscreen, the sizes asked.
+    Cells {
+        app_id: &'static str,
+        size: (u32, u32),
+        cell: u32,
+    },
 }
 
 /// What the test asks of a client.
@@ -177,6 +185,7 @@ fn run_client(
         popup: None,
         popup_on_press: false,
         margin: 0,
+        cell: 0,
         seat: None,
         events: events.clone(),
         compositor,
@@ -209,6 +218,16 @@ fn run_client(
             window.commit();
             client.size = size;
             client.margin = margin;
+            client.window = Some(window);
+        }
+        Some(Shows::Cells { app_id, size, cell }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.cell = cell;
             client.window = Some(window);
         }
         Some(Shows::Asking {
@@ -280,6 +299,8 @@ struct Client {
     popup_on_press: bool,
     /// The shadow around the window, outside its geometry.
     margin: u32,
+    /// Floating, its sizes are whole multiples of this.
+    cell: u32,
     seat: Option<wl_seat::WlSeat>,
     events: mpsc::Sender<Event>,
     compositor: CompositorState,
@@ -349,6 +370,16 @@ impl WindowHandler for Client {
     ) {
         if let (Some(w), Some(h)) = configure.new_size {
             self.size = (w.get(), h.get());
+            let floating = !(configure.is_maximized()
+                || configure.is_fullscreen()
+                || configure.is_tiled_left()
+                || configure.is_tiled_right()
+                || configure.is_tiled_top()
+                || configure.is_tiled_bottom());
+            if self.cell > 0 && floating {
+                let c = self.cell;
+                self.size = ((self.size.0 / c).max(1) * c, (self.size.1 / c).max(1) * c);
+            }
         }
         let surface = window.wl_surface().clone();
         let m = self.margin as i32;

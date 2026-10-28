@@ -127,7 +127,10 @@ sits just below it.
   a theme, or for a shape the theme lacks, the compositor draws its own
   plain ones.
 - `Super`+right-drag resizes from the nearest corner.
-- Live resize, respecting the application's minimum and maximum sizes.
+- Live resize, respecting the application's minimum and maximum sizes,
+  and the size it takes: a floating terminal sized by whole cells may
+  take a little less than asked, and keeps it once the resize is over,
+  its far edges where they were.
 - The edge or edges being dragged stick as a moving window's do (section
   6, magnetic edges): within 12 px of another window's edge, at the gap
   or in line, or of the work area's, flush. Dragging on frees them. The
@@ -148,22 +151,26 @@ sits just below it.
     leaves its zone and floats once its size changes; the other stays
     where it is.
   - A **handle** on the seam moves the boundary and **both windows
-    follow**; snapped ones stay snapped, floating ones stay floating. It
-    is the grip's pill (section 7) along the seam: 4×44 px upright
-    between windows side by side, 44×4 px between windows one above the
-    other, centred in the 8 px gap at the middle of the span the two
-    windows share. It shows when the pointer is within 12 px of the
-    seam's centre line (the gap and a little of each window) where the
-    seam itself shows, and fades in and out as the grip does (120 ms in; it stays 300 ms after
-    the pointer leaves, then fades in 120 ms). A press within 4 px around
-    the pill takes it (a 12×52 px target), with `ew-resize` or
+    follow**; snapped ones stay snapped, floating ones stay floating. The
+    windows that follow keep the gap to the one dragged wherever its
+    client's size puts its edge (a terminal's, by whole cells), so the two
+    stay a pair; their far edges may move by what is left of a cell. It is
+    the grip's pill (section 7) along the seam: 4×44 px upright between
+    windows side by side, 44×4 px between windows one above the other,
+    centred in the 8 px gap at the middle of the span the two windows
+    share. It shows when the pointer is within 12 px of the seam's centre
+    line (the gap and a little of each window) where the seam itself
+    shows, and fades in and out as the grip does (120 ms in; it stays 300
+    ms after the pointer leaves, then fades in 120 ms). A press within 4
+    px around the pill takes it (a 12×52 px target), with `ew-resize` or
     `ns-resize`. It sits in the stacking order right above the front one
     of the two windows: a window in front of both that covers the seam
     covers the handle too, and takes the presses there; a window behind
-    them, seen through the gap, does not. Where more than two windows line up along a seam (a
-    half facing two quarters), each pair has its handle at the middle of
-    what the two share, and it moves the whole edge of the window whose
-    side spans the seam: every window facing that edge follows.
+    them, seen through the gap, does not. Where more than two windows line
+    up along a seam (a half facing two quarters), each pair has its handle
+    at the middle of what the two share, and it moves the whole edge of
+    the window whose side spans the seam: every window facing that edge
+    follows.
   - With reduced motion and high contrast, the handle is as the grip.
 
 ## 9. Snapping

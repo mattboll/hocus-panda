@@ -8,8 +8,8 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, KEY_LEFT, KEY_LEFTMETA, KEY_RIGHT, WINDOW_COLOUR, chord, compositor, open, rect_of,
-    wait, wait_for_rect,
+    BTN_LEFT, KEY_LEFT, KEY_LEFTMETA, KEY_RIGHT, Shows, WINDOW_COLOUR, chord, compositor, open,
+    open_showing, rect_of, wait, wait_for_rect,
 };
 use hocus_compositor::{
     Headless,
@@ -95,6 +95,41 @@ fn two_floating_windows_stuck_at_the_gap_form_a_pair_whose_handle_resizes_both()
         Rect::new(wider.x, wider.y, wider.width - 30, wider.height),
     )?;
     assert_eq!(rect_of(&hp, "test.right"), Some(narrower));
+    Ok(())
+}
+
+#[test]
+fn terminals_sized_by_whole_cells_stay_a_pair_after_its_handle() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let cells = |app_id| Shows::Cells {
+        app_id,
+        size: (400, 300),
+        cell: 10,
+    };
+    let (a, _left) = open_showing(&mut hp, "test.left", cells("test.left"))?;
+    let (b, _right) = open_showing(&mut hp, "test.right", cells("test.right"))?;
+    drag_to(&mut hp, b, 1100, 450);
+    let b = Rect::new(1100, 450, 400, 300);
+    wait_for_rect(&mut hp, "test.right", b)?;
+    drag_to(&mut hp, a, b.x - GAP - a.width, 300);
+    let a = Rect::new(b.x - GAP - a.width, 300, 400, 300);
+    wait_for_rect(&mut hp, "test.left", a)?;
+    // 33 px asked, 30 taken by the left one; the right one keeps the gap
+    // to it, its far edge where its whole cells put it.
+    let centre = (
+        f64::from(a.right() + GAP / 2),
+        f64::from(b.y + a.bottom()) / 2.0,
+    );
+    drag_by(&mut hp, centre, 33.0);
+    let wider = Rect::new(a.x, a.y, 430, 300);
+    wait_for_rect(&mut hp, "test.left", wider)?;
+    let narrower = Rect::new(wider.right() + GAP, b.y, 360, 300);
+    wait_for_rect(&mut hp, "test.right", narrower)?;
+    // Still a pair: its handle shows again.
+    hp.pointer_move(300.0, 900.0);
+    wait(&mut hp, Duration::from_millis(700))?;
+    hp.pointer_move(f64::from(wider.right() + GAP / 2), centre.1);
+    assert!(hp.state().seam_handle.is_some(), "still a pair");
     Ok(())
 }
 
