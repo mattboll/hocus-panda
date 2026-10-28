@@ -159,9 +159,13 @@ Keyboard:
   (first build's decision, kept). 4 desktops by default (1 to 9).
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
   swipe on a touchpad (following the fingers), and later the bar's tiles.
-- **Animation**: the outgoing desktop recedes (scale 96 %, dims 25 %)
-  while the incoming one slides in from the side, in 280 ms (spring). A
-  swipe follows the fingers, then completes or springs back on release.
+- **Animation**: the desktops sit side by side, in their order, like one
+  strip. Switching slides the strip: the outgoing desktop's windows move
+  out on one side while the incoming one's move in from the other, in
+  320 ms (`cubic-bezier(0.22, 0.9, 0.3, 1)`), with no fade or dimming: the
+  windows never disappear, they travel. Going from 1 to 3 slides past 2.
+  A swipe follows the fingers, then completes or springs back on release.
+  (Changed after the maintainer compared it with their current desktop.)
 - `Super+Shift+1…4` sends the focused window to that desktop, without
   switching; with `Ctrl` too, it follows it.
 - Empty desktops stay; their order is fixed (1 to 4).
