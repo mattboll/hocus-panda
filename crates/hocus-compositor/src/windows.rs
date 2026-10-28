@@ -899,13 +899,6 @@ impl State {
         self.focus(Some(id));
     }
 
-    /// The window minimised last comes back.
-    pub fn unminimize_last(&mut self) {
-        if let Some(id) = self.model.last_minimized() {
-            self.unminimize(id);
-        }
-    }
-
     /// Asks the focused window to close: the application decides.
     pub fn close_focused(&mut self) {
         let Some(managed) = self.model.focused().and_then(|id| self.windows.get(&id)) else {

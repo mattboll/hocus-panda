@@ -163,7 +163,8 @@ Keyboard:
 
 - `Alt+Tab` held: after 100 ms, a panel appears centred on the output
   under the pointer, with a live thumbnail per window (up to 220 px wide,
-  aspect kept), the application's icon and title below. A quick
+  aspect kept), the window's title below; no application icon, the
+  thumbnail already shows the window. A quick
   `Alt+Tab` (released before 100 ms) switches to the previous window
   without showing anything.
 - Order: most recently used first, on the current desktop; then a
@@ -240,7 +241,6 @@ string turns one off. The package ships every setting with its default
 | `log-out` | `Super+Shift+E` | Ends the session at once; the display manager comes back |
 | `close` | `Super+Q` | Asks the focused window to close (§10) |
 | `minimize` | `Super+H` | Minimises the focused window (§10) |
-| `unminimize` | `Super+Shift+H` | Brings back the window minimised last; Alt+Tab (§11) lists every minimised window too |
 | `snap-left`, `snap-right` | `Super+←`, `Super+→` | Left or right half; again, the other side (§9) |
 | `maximize` | `Super+↑` | Maximises (§9) |
 | `restore` | `Super+↓` | Restores; on a floating window, minimises (§9) |
@@ -328,3 +328,5 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 4. Four desktops on every screen by default.
 5. A snapped pair's shared edge resizes the window grabbed alone; a handle
    on their seam resizes both (#335).
+6. Minimised windows come back through Alt+Tab only, with no shortcut of
+   their own; Alt+Tab shows no application icon (#338).
