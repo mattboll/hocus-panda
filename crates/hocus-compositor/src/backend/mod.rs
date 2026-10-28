@@ -101,6 +101,8 @@ pub fn dmabuf_global(state: &mut State, formats: FormatSet, main_device: Option<
         None => state.dmabuf_state.create_global::<State>(&display, formats),
     };
     state.dmabuf_global = Some(global);
+    // The shell draws on the same GPU.
+    state.gpu = main_device;
 }
 
 /// The device number of an EGL display's render node, which dmabuf
@@ -117,5 +119,6 @@ pub type DevId = smithay::reexports::rustix::fs::Dev;
 /// Maps `output` in the space at `position`; its global is the caller's.
 pub fn add_output(state: &mut State, output: &Output, position: (i32, i32)) {
     state.space.map_output(output, position);
+    state.panel_refresh();
     state.redraw = true;
 }

@@ -55,6 +55,15 @@ struct Args {
     #[arg(long, value_name = "FILE")]
     config: Option<PathBuf>,
 
+    /// Do not start the shell (the bar); its space is kept all the same.
+    #[arg(long)]
+    no_shell: bool,
+
+    /// The shell's program. Default: hocuspanda-shell next to this
+    /// program, else in PATH.
+    #[arg(long, value_name = "PATH")]
+    shell: Option<PathBuf>,
+
     /// Run as the user's session, as a display manager starts it
     /// (hocuspanda-session): on the virtual terminal unless --backend says
     /// otherwise, and once ready, the user's systemd and D-Bus are told
@@ -62,6 +71,9 @@ struct Args {
     #[arg(long)]
     session: bool,
 }
+
+/// The shell's program.
+const SHELL: &str = "hocuspanda-shell";
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum BackendArg {
@@ -112,6 +124,16 @@ fn main() -> ExitCode {
         config.system_keyboard = SystemKeyboard::read(Path::new(SystemKeyboard::PATH));
     }
     config.cursor_env = CursorEnv::from_process();
+    config.state_dir = Config::default_state_dir();
+    let shell = (!args.no_shell).then(|| {
+        args.shell.unwrap_or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| Some(exe.parent()?.join(SHELL)))
+                .filter(|path| path.exists())
+                .unwrap_or_else(|| PathBuf::from(SHELL))
+        })
+    });
     let options = Options {
         backend: match backend {
             BackendArg::Tty => BackendKind::Tty,
@@ -131,6 +153,7 @@ fn main() -> ExitCode {
         xwayland: !args.no_xwayland,
         session: args.session,
         config,
+        shell,
     };
     match hocus_compositor::run(options) {
         Ok(()) => ExitCode::SUCCESS,

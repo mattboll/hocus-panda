@@ -23,6 +23,7 @@ pub struct Config {
     pub programs: Programs,
     pub appearance: Appearance,
     pub desktops: Desktops,
+    pub panel: Panel,
     /// The system's keyboard (`/etc/default/keyboard`), used when
     /// `[keyboard] layouts` is empty. Not part of the file: the program
     /// reads it once at start.
@@ -32,6 +33,47 @@ pub struct Config {
     /// program reads it once at start; empty, no theme is looked for.
     #[serde(skip)]
     pub cursor_env: crate::cursor::CursorEnv,
+    /// Where the desktop keeps what it remembers between sessions (the
+    /// bar's form on each screen): `$XDG_STATE_HOME/hocuspanda`. Not part
+    /// of the file; `None` remembers nothing (tests).
+    #[serde(skip)]
+    pub state_dir: Option<PathBuf>,
+}
+
+/// The bar, `[panel]` (docs/design/bar.md §2, §3).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Panel {
+    /// The screens with a bar.
+    pub screens: PanelScreens,
+    /// The primary screen, by connector name. Empty: the built-in panel
+    /// (eDP, LVDS, DSI) when it is connected, else the first screen.
+    pub output: String,
+    /// The bar's form on every screen; `[outputs.NAME] panel-form` sets one
+    /// screen's.
+    pub form: FormChoice,
+}
+
+/// Which screens have a bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PanelScreens {
+    /// The primary screen only.
+    #[default]
+    Primary,
+    All,
+}
+
+/// The bar's form on a screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormChoice {
+    /// Full on a screen wide enough (bar.md §3), or as last chosen with a
+    /// click or `Super+B`.
+    #[default]
+    Auto,
+    Full,
+    Mini,
 }
 
 /// How the desktop looks and moves, `[appearance]`.
@@ -47,6 +89,8 @@ pub struct Appearance {
     /// The cursor's size in logical pixels; else `XCURSOR_SIZE`'s, else 24.
     #[serde(deserialize_with = "cursor_size")]
     pub cursor_size: Option<u32>,
+    /// The bar is opaque instead of glass over what is behind it.
+    pub reduce_transparency: bool,
 }
 
 fn cursor_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
@@ -93,12 +137,14 @@ fn desktop_count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D:
 
 /// One screen's settings, `[outputs.eDP-1]`.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct OutputSettings {
     /// From 0.5 to 4. None: 1 or 2 by its density
     /// (`output_spec::default_scale`).
     #[serde(deserialize_with = "scale")]
     pub scale: Option<f64>,
+    /// The bar's form on this screen, over `[panel] form`.
+    pub panel_form: FormChoice,
 }
 
 fn scale<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::Error> {
@@ -323,6 +369,23 @@ impl Config {
         }
     }
 
+    /// `$XDG_STATE_HOME/hocuspanda`, or under `~/.local/state`.
+    pub fn default_state_dir() -> Option<PathBuf> {
+        let base = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/state")))?;
+        Some(base.join("hocuspanda"))
+    }
+
+    /// The form asked for the screen `name`: its own, else `[panel]`'s.
+    pub fn form_choice(&self, name: &str) -> FormChoice {
+        match self.outputs.get(name).map(|o| o.panel_form) {
+            Some(choice @ (FormChoice::Full | FormChoice::Mini)) => choice,
+            _ => self.panel.form,
+        }
+    }
+
     /// `$XDG_CONFIG_HOME/hocuspanda/config.toml`, or under `~/.config`.
     pub fn default_path() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_CONFIG_HOME")
@@ -391,7 +454,7 @@ mod tests {
     fn the_keyboard_section_reads_and_other_sections_wait_their_slice() -> anyhow::Result<()> {
         let config: Config = toml::from_str(
             "[keyboard]\nlayouts = [\"fr\", \"fr(bepo)\"]\noptions = \"caps:escape\"\n\
-             [bar]\nform = \"full\"\n",
+             [secretary]\nbriefing = true\n",
         )?;
         assert_eq!(config.keyboard.layouts, ["fr", "fr(bepo)"]);
         assert_eq!(config.keyboard.options, "caps:escape");

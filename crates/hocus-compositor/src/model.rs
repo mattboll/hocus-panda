@@ -10,13 +10,6 @@ use std::collections::{BTreeMap, HashMap};
 /// Space around windows the desktop places, and between the work area and
 /// the output's edges or a bar's reserved space (docs/design/windows.md §2).
 pub const GAP: i32 = 8;
-/// The bar's width in its two forms, and how far it keeps from the
-/// output's edge (docs/design/bar.md §2, §3): its space is kept from this
-/// slice on, so that nothing moves when it comes.
-pub const BAR_FULL: i32 = 196;
-pub const BAR_MINI: i32 = 56;
-/// An output at least this wide without the bar has the full bar.
-pub const BAR_FULL_FROM: i32 = 1600;
 /// The pointer this close to a vertical or top edge of the work area
 /// snaps to a half or maximises.
 pub const SNAP_EDGE: i32 = 24;
@@ -91,22 +84,15 @@ impl Rect {
     }
 }
 
-/// The bar's width on an output `width` logical pixels wide.
-pub fn bar_width(width: i32) -> i32 {
-    if width - BAR_FULL >= BAR_FULL_FROM {
-        BAR_FULL
-    } else {
-        BAR_MINI
-    }
-}
-
 /// Where the desktop places windows on an output: what layer surfaces
-/// leave of it (`non_exclusive`, global) less the bar's space on the
-/// output's right, and the gap.
-pub fn work_area(non_exclusive: Rect, output: Rect) -> Rect {
-    let bar_left = output.right() - GAP - bar_width(output.width);
+/// leave of it (`non_exclusive`, global) less the space of its bar, `bar`
+/// pixels wide, on the output's right, and the gap.
+pub fn work_area(non_exclusive: Rect, output: Rect, bar: Option<i32>) -> Rect {
     let mut zone = non_exclusive;
-    zone.width = zone.width.min(bar_left - zone.x).max(0);
+    if let Some(bar) = bar {
+        let bar_left = output.right() - GAP - bar;
+        zone.width = zone.width.min(bar_left - zone.x).max(0);
+    }
     zone.inset(GAP)
 }
 
@@ -881,17 +867,22 @@ mod tests {
 
     #[test]
     fn the_work_area_keeps_a_gap_and_the_bars_space() {
-        // 1920 wide: the full bar, 196 px and 8 px from the edge.
+        // The full bar, 196 px and 8 px from the edge.
         assert_eq!(
-            work_area(OUTPUT, OUTPUT),
+            work_area(OUTPUT, OUTPUT, Some(196)),
             Rect::new(8, 8, 1920 - 8 - 196 - 8 - 8, 1064)
         );
         // A 40 px bar along the top (a layer's exclusive zone).
         let zone = Rect::new(0, 40, 1920, 1040);
-        assert_eq!(work_area(zone, OUTPUT), Rect::new(8, 48, 1700, 1024));
-        // 1366 wide: the mini bar.
+        assert_eq!(
+            work_area(zone, OUTPUT, Some(196)),
+            Rect::new(8, 48, 1700, 1024)
+        );
+        // The mini bar.
         let small = Rect::new(0, 0, 1366, 768);
-        assert_eq!(work_area(small, small).right(), 1366 - 8 - 56 - 8);
+        assert_eq!(work_area(small, small, Some(56)).right(), 1366 - 8 - 56 - 8);
+        // No bar on that screen: only the gap.
+        assert_eq!(work_area(OUTPUT, OUTPUT, None), OUTPUT.inset(8));
         assert_eq!(Rect::new(0, 0, 10, 10).inset(8), Rect::new(8, 8, 0, 0));
     }
 

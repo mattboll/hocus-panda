@@ -21,11 +21,13 @@ pub mod model;
 pub mod motion;
 mod output_spec;
 mod overlay;
+mod panel;
 mod popups;
 mod programs;
 mod render;
 mod screens;
 mod session;
+mod shell;
 mod shortcuts;
 mod snapshot;
 mod socket;
@@ -82,6 +84,9 @@ pub struct Options {
     /// user's service manager and D-Bus are told where its displays are.
     pub session: bool,
     pub config: Config,
+    /// The shell's program, started once the compositor is ready and again
+    /// whenever it ends; `None`: no shell (the bar's space is still kept).
+    pub shell: Option<PathBuf>,
 }
 
 /// What the event loop owns: the compositor's state and its backend.
@@ -153,6 +158,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
         nested,
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
+    state.shell.program = options.shell;
+    shell::listen(&event_loop.handle(), &mut state)?;
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
     if options.xwayland {
@@ -207,6 +214,7 @@ fn remove_sockets(state: &State) {
     let mut lock = state.socket_path.clone().into_os_string();
     lock.push(".lock");
     let mut files = vec![state.socket_path.clone(), PathBuf::from(lock)];
+    files.extend(state.shell.socket.clone());
     if let Some(n) = state.xdisplay {
         files.push(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));
         files.push(PathBuf::from(format!("/tmp/.X{n}-lock")));

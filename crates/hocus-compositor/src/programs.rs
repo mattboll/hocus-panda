@@ -126,6 +126,7 @@ impl crate::State {
         let env = Env::of(self);
         let mut programs = std::mem::take(&mut self.programs);
         programs.ready(&env, || self.activation_token());
+        self.start_shell();
     }
 }
 

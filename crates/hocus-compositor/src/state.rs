@@ -180,6 +180,15 @@ pub struct State {
     pub xwm: Option<X11Wm>,
     pub xdisplay: Option<u32>,
     pub programs: Programs,
+    /// The bars' places and forms (docs/design/bar.md §2, §3).
+    pub panel: crate::panel::Panel,
+    /// The shell drawing them.
+    pub shell: crate::shell::Shell,
+    /// The render node of the GPU the compositor draws with, which the
+    /// shell draws with too; `None` without one.
+    pub gpu: Option<crate::backend::DevId>,
+    /// The renderer can blur what is behind the bars (GLES).
+    pub blur: bool,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
     /// Keys whose press was a shortcut: their release is kept from the
@@ -247,6 +256,7 @@ impl State {
             config.cursor_env.search.clone(),
         );
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
+        let panel = crate::panel::Panel::load(config.state_dir.as_deref());
 
         Ok(Self {
             display_handle: dh.clone(),
@@ -316,6 +326,10 @@ impl State {
             xwm: None,
             xdisplay: None,
             programs: Programs::default(),
+            panel,
+            shell: crate::shell::Shell::default(),
+            gpu: None,
+            blur: false,
             session: None,
             kept_keys: HashSet::new(),
             ending: None,
@@ -350,11 +364,12 @@ impl State {
     }
 
     /// Where the desktop places windows on `output`: what layer surfaces
-    /// leave of it less the bar's space, 8 px in.
+    /// leave of it less the bar's space when it has a bar, 8 px in.
     pub fn work_area(&self, output: &Output) -> Option<Rect> {
         let zone = self.non_exclusive_zone(output)?;
         let geometry = self.space.output_geometry(output)?;
-        Some(model::work_area(rect_of(zone), rect_of(geometry)))
+        let bar = self.panel.width(&output.name());
+        Some(model::work_area(rect_of(zone), rect_of(geometry), bar))
     }
 
     /// The window of `surface`, mapped or waiting for its first buffer.

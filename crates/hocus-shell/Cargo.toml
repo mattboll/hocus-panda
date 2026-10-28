@@ -1,0 +1,39 @@
+[package]
+name = "hocus-shell"
+description = "The Hocuspanda shell: the bar, drawn with iced as a layer-shell client of the compositor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hocuspanda-shell"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+hocus-link = { path = "../hocus-link" }
+# No x11, no winit-side theme detection: the shell only talks Wayland
+# through iced_layershell (tech-choices, spike #315).
+iced = { version = "0.14", default-features = false, features = [
+    "wgpu",
+    "tiny-skia",
+    "crisp",
+    "tokio",
+    "wayland",
+    # Blend in gamma space as browsers do: the mockups are CSS.
+    "web-colors",
+] }
+# Without its default theme detection (mundy, over the session's D-Bus).
+# Pinned: its winit-core prerelease dependencies broke it once (spike).
+iced_layershell = { version = "=0.19.1", default-features = false }
+# CLOCK_MONOTONIC, the compositor's clock, to start a form switch when it
+# does.
+rustix = { version = "1.1.6", features = ["time"] }
+tokio = { version = "1.54.1", features = ["net", "io-util", "rt"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
+wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
