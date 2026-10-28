@@ -428,7 +428,8 @@ impl State {
     /// under the pointer and goes to it; with the move modifier, the left
     /// button moves the window and the right one resizes it, and the client
     /// sees nothing. A press on a window's frame resizes it, on its grip
-    /// moves it; a press away from an open menu closes it.
+    /// moves it; a press away from an open menu closes it; a left press on
+    /// a bar's edge switches its form.
     pub fn pointer_button(&mut self, button: u32, state: ButtonState, time: u32) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -445,6 +446,14 @@ impl State {
         }
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
             if self.dismiss_popups_at(at) {
+                self.kept_buttons.insert(button);
+                return;
+            }
+            if button == BTN_LEFT
+                && let Some(output) = self.bar_edge_at(at)
+            {
+                // The bar's edge switches its form; no client sees the press.
+                self.toggle_bar(&output);
                 self.kept_buttons.insert(button);
                 return;
             }

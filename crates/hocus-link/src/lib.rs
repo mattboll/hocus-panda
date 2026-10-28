@@ -5,8 +5,9 @@
 //! The compositor starts the shell with [`SOCKET_ENV`] naming a Unix socket
 //! in the session's runtime directory, which only it listens on. Each
 //! message is one line of text, words separated by spaces. The compositor
-//! decides where bars are and in which form, and reserves their space; the
-//! shell draws them and reports clicks on their edge. Neither side waits
+//! decides where bars are and in which form, reserves their space and
+//! takes the clicks on their edge; the shell draws them, and says when it
+//! draws on the CPU. Neither side waits
 //! for the other: a message is a fact, never a question.
 //!
 //! The form switch is one motion, which both sides compute from the same
@@ -27,9 +28,6 @@ pub const NAMESPACE: &str = "hocus-bar";
 pub const EDGE: i32 = 8;
 /// The bar's corner radius.
 pub const RADIUS: f64 = 14.0;
-/// Of the bar itself, the part next to the screen's edge that switches the
-/// form with the 8 px strip beside it.
-pub const EDGE_INSIDE: i32 = 6;
 /// An output at least this wide without the bar has the full form.
 pub const FULL_FROM: i32 = 1600;
 /// The form switch's duration; its curve is [`ease`].
@@ -88,11 +86,6 @@ impl FromStr for Form {
     }
 }
 
-/// The surface's width: room for the full bar and the strip at the
-/// screen's edge, whatever the form, so that it is never resized while the
-/// form switches.
-pub const SURFACE_WIDTH: i32 = 196 + 2 * EDGE;
-
 /// What the compositor tells the shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToShell {
@@ -113,8 +106,6 @@ pub enum ToShell {
 /// What the shell tells the compositor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToCompositor {
-    /// A click on the edge of the bar on `output`: the other form.
-    Toggle { output: String },
     /// The shell draws on the CPU: its bars are opaque, nothing to blur.
     Software,
 }
@@ -190,7 +181,6 @@ impl FromStr for ToShell {
 impl fmt::Display for ToCompositor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Toggle { output } => write!(f, "toggle {output}"),
             Self::Software => f.write_str("software"),
         }
     }
@@ -202,9 +192,6 @@ impl FromStr for ToCompositor {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         let mut words = line.split_whitespace();
         match words.next() {
-            Some("toggle") => Ok(Self::Toggle {
-                output: word(&mut words, "output")?.to_owned(),
-            }),
             Some("software") => Ok(Self::Software),
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
@@ -270,14 +257,10 @@ mod tests {
         for message in to_shell {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
         }
-        for message in [
-            ToCompositor::Toggle {
-                output: "HEADLESS-1".into(),
-            },
-            ToCompositor::Software,
-        ] {
-            assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
-        }
+        assert_eq!(
+            ToCompositor::Software.to_string().parse::<ToCompositor>(),
+            Ok(ToCompositor::Software)
+        );
         for bad in ["", "bar eDP-1", "bar eDP-1 wide 0", "look glass", "hello"] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }

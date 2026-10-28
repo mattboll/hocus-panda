@@ -70,12 +70,16 @@ The user's choice overrides the default and is remembered per output
 - A click on the bar's outer edge zone toggles the form: the 8 px strip
   between the bar and the screen edge plus the bar's first 6 px. The
   screen edge stops the pointer, so the target needs no aiming (Fitts).
+  The compositor takes that click itself and no client sees it: it knows
+  where the pointer is even when it reached the edge in one fast move,
+  with no motion over the bar before the press.
 - `Super+B` toggles the form on the output under the pointer.
 - The bar's width animates over **240 ms**,
   `cubic-bezier(0.2, 0.9, 0.25, 1.08)` (a slight overshoot). Windows that
   touch the bar's side resize in the same frames. The contents cross-fade
   in 120 ms, starting at 60 ms.
-- With reduced motion: no animation; the form changes on the next frame.
+- With reduced motion, or a shell drawing on the CPU: no animation; the
+  form changes on the next frame, the windows with it.
 
 ## 4. Full form, top to bottom
 
@@ -272,12 +276,14 @@ are later slices'.
 - **Who does what.** The compositor decides where the bars are and in
   which form, and keeps their space whether the shell runs or not, so that
   nothing moves while the shell restarts. The shell (`hocuspanda-shell`,
-  iced 0.14 and iced_layershell) draws one layer surface per bar: 212 px
-  wide (the full bar and its margins) whatever the form, so it is never
-  resized while it switches, anchored right, top and bottom, with an
-  exclusive zone of 0. Its input region is the bar and the 8 px strip at
-  the screen's edge. They talk over a private socket (crate `hocus-link`,
-  which documents the lines). The compositor starts the shell once ready,
+  iced 0.14 and iced_layershell) draws one layer surface per bar, anchored
+  right, top and bottom with 8 px layer-shell margins and an exclusive
+  zone of 0: the bar itself, nothing transparent around it. It is as wide
+  as the form, and as the full form while a switch is under way, so that
+  the bar has room to move. The compositor handles the click on the edge
+  zone (§3) in its own pointer code, before any client: the strip at the
+  screen's edge belongs to no surface. They talk over a private socket
+  (crate `hocus-link`, which documents the lines). The compositor starts the shell once ready,
   and again when it ends, after 0.5 s doubling up to 30 s while it keeps
   ending within 30 s.
 - **The space kept** is the bar's final width as soon as a switch starts:
@@ -314,9 +320,12 @@ are later slices'.
   Mesa's EGL vendor, and `vk_wsi_force_bgra8_unorm_first=true`, Mesa's
   option that lists `Bgra8Unorm` first: iced then takes an 8-bit-alpha
   surface without a patch to `iced_wgpu`. When wgpu's adapter is a CPU, or
-  the compositor has no GPU, the shell draws with tiny-skia, through a copy
-  of softbuffer that presents transparent buffers (`vendor/softbuffer`),
-  with the opaque look and no motion.
+  the compositor has no GPU, the shell draws with tiny-skia, with the
+  opaque look and no motion: the form changes at once, and the compositor
+  moves the space kept and the windows at once too. tiny-skia's buffers
+  have no alpha on Wayland (softbuffer presents `Xrgb8888`), so the
+  compositor cuts that surface to the bar's rounded corners itself; with
+  no transparent strip left, no patched softbuffer is needed.
 - **At rest** neither the shell nor the compositor draws: no clock yet.
 - **The background.** Until wallpapers, the compositor draws the mockup's
   night-blue gradient and its glows under everything, so that the glass

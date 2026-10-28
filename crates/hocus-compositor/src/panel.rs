@@ -19,7 +19,13 @@
 //!   the shell compute the bar's width from the same start on the same
 //!   clock; the windows that touch the bar's side settle along the same
 //!   motion, in the same frames as the glass behind the bar. Nothing is
-//!   sent per frame. With reduced motion, the form changes at once.
+//!   sent per frame. With reduced motion, or a shell drawing on the CPU
+//!   (which does not animate), the form changes at once.
+//! - **The edge click:** a left press in the strip between a bar and its
+//!   screen's right edge, or on the bar's first pixels from that edge,
+//!   switches the form. The compositor takes it itself (`bar_edge_at`): it
+//!   knows where the pointer is even when it entered the bar pushed against
+//!   the screen's edge, with no motion after.
 
 use std::{
     collections::BTreeMap,
@@ -31,7 +37,7 @@ use hocus_link::{Form, ToShell};
 use serde::{Deserialize, Serialize};
 use smithay::{
     output::Output,
-    utils::{Logical, Rectangle},
+    utils::{Logical, Point, Rectangle},
 };
 
 use crate::{
@@ -44,6 +50,10 @@ use crate::{
 /// The connector names of built-in panels, which are primary when no
 /// screen is named.
 const BUILT_IN: [&str; 3] = ["eDP", "LVDS", "DSI"];
+
+/// Of the bar itself, the part next to the screen's edge where a press
+/// switches the form, with the strip between the bar and that edge.
+const EDGE_INSIDE: i32 = 6;
 
 /// What the desktop remembers of the bar between sessions.
 const STATE_FILE: &str = "panel.toml";
@@ -233,11 +243,30 @@ impl State {
         }
     }
 
+    /// The screen whose bar's edge is under `at` (global): the strip
+    /// between the bar and the screen's right edge, and the bar's first
+    /// pixels from it, over the screen's whole height.
+    pub fn bar_edge_at(&self, at: Point<f64, Logical>) -> Option<String> {
+        let zone = f64::from(hocus_link::EDGE + EDGE_INSIDE);
+        self.space
+            .outputs()
+            .filter(|o| self.panel.bars.contains_key(&o.name()))
+            .find(|o| {
+                self.space.output_geometry(o).is_some_and(|g| {
+                    let g = g.to_f64();
+                    g.contains(at) && at.x >= g.loc.x + g.size.w - zone
+                })
+            })
+            .map(Output::name)
+    }
+
     /// The bar on screen `name` takes its other form (a click on its edge,
     /// `Super+B`); the windows beside it follow.
     pub fn toggle_bar(&mut self, name: &str) {
         let now = self.now();
-        let reduced = self.reduced_motion();
+        // A shell on the CPU draws the new form at once: the bar's space
+        // and the windows do not move along a motion it does not show.
+        let reduced = self.reduced_motion() || self.shell.software;
         let Some(output) = self.space.outputs().find(|o| o.name() == name).cloned() else {
             return;
         };
