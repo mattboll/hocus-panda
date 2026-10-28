@@ -39,9 +39,7 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // What a window may take, so that one that chooses its own size
-        // fits the work area it opens in; tiled, so that it draws no
-        // shadow nor rounded corners of its own: the desktop's frame
-        // shows from its first frame.
+        // fits the work area it opens in.
         let bounds = self.output_under_pointer().and_then(|o| self.work_area(&o));
         surface.with_pending_state(|p| {
             if let Some(area) = bounds {
