@@ -1,10 +1,14 @@
 //! The desktop's own keyboard shortcuts (docs/design/windows.md §13): the
 //! chords the `[shortcuts]` section binds to actions, and what each action
 //! does. Nested, `Super` is `Alt+Super`, so that the host keeps its own.
+//! An action may have several shortcuts.
 
 use std::{fmt, str::FromStr};
 
-use serde::{Deserialize, Deserializer};
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, SeqAccess, Visitor},
+};
 use smithay::input::keyboard::{Keysym, ModifiersState, xkb};
 
 use crate::{
@@ -124,121 +128,144 @@ impl FromStr for Chord {
 }
 
 /// The `[shortcuts]` section: every shortcut of the desktop, in one place,
-/// with its default and its action. An empty string turns one off.
+/// with its defaults and its action. A shortcut, or a list of them; an
+/// empty string or list turns an action's off.
 macro_rules! shortcuts {
-    ($($field:ident: $default:expr => $action:expr,)*) => {
+    ($($field:ident: [$($default:literal),*] => $action:expr,)*) => {
         #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
         #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
         pub struct Shortcuts {
             $(
-                #[serde(deserialize_with = "chord")]
-                pub $field: Option<Chord>,
+                #[serde(deserialize_with = "chords")]
+                pub $field: Vec<Chord>,
             )*
         }
 
         impl Default for Shortcuts {
             fn default() -> Self {
-                let chord = |text: &str| text.parse().ok();
+                let chords = |texts: &[&str]| texts.iter().filter_map(|t| t.parse().ok()).collect();
                 Self {
-                    $($field: chord($default),)*
+                    $($field: chords(&[$($default),*]),)*
                 }
             }
         }
 
         impl Shortcuts {
             /// Every shortcut and its action, in the file's order.
-            pub fn all(&self) -> Vec<(Option<Chord>, Action)> {
-                vec![$((self.$field, $action),)*]
+            pub fn all(&self) -> Vec<(Chord, Action)> {
+                let mut all = Vec::new();
+                $(all.extend(self.$field.iter().map(|chord| (*chord, $action)));)*
+                all
             }
         }
     };
 }
 
 shortcuts! {
-    terminal: "Super+Return" => Action::Terminal,
-    log_out: "Super+Shift+E" => Action::LogOut,
-    close: "Super+Q" => Action::Close,
-    minimize: "Super+H" => Action::Minimize,
-    snap_left: "Super+Left" => Action::Snap(Snap::Half(Side::Start)),
-    snap_right: "Super+Right" => Action::Snap(Snap::Half(Side::End)),
-    maximize: "Super+Up" => Action::Snap(Snap::Maximize),
-    restore: "Super+Down" => Action::Snap(Snap::Restore),
-    quarter_up: "Super+Shift+Up" => Action::Snap(Snap::QuarterTop),
-    quarter_down: "Super+Shift+Down" => Action::Snap(Snap::QuarterBottom),
-    quarter_left: "Super+Shift+Left" => Action::Snap(Snap::QuarterLeft),
-    quarter_right: "Super+Shift+Right" => Action::Snap(Snap::QuarterRight),
-    focus_left: "" => Action::FocusToward(-1, 0),
-    focus_right: "" => Action::FocusToward(1, 0),
-    focus_up: "" => Action::FocusToward(0, -1),
-    focus_down: "" => Action::FocusToward(0, 1),
-    switch_windows: "Alt+Tab" => Action::SwitchWindows { backward: false },
-    switch_windows_backward: "Alt+Shift+Tab" => Action::SwitchWindows { backward: true },
-    desktop_left: "Super+Ctrl+Left" => Action::DesktopBy(-1),
-    desktop_right: "Super+Ctrl+Right" => Action::DesktopBy(1),
-    desktop_1: "Super+1" => Action::Desktop(0),
-    desktop_2: "Super+2" => Action::Desktop(1),
-    desktop_3: "Super+3" => Action::Desktop(2),
-    desktop_4: "Super+4" => Action::Desktop(3),
-    desktop_5: "Super+5" => Action::Desktop(4),
-    desktop_6: "Super+6" => Action::Desktop(5),
-    desktop_7: "Super+7" => Action::Desktop(6),
-    desktop_8: "Super+8" => Action::Desktop(7),
-    desktop_9: "Super+9" => Action::Desktop(8),
-    send_to_desktop_1: "Super+Shift+1" => Action::SendToDesktop(0),
-    send_to_desktop_2: "Super+Shift+2" => Action::SendToDesktop(1),
-    send_to_desktop_3: "Super+Shift+3" => Action::SendToDesktop(2),
-    send_to_desktop_4: "Super+Shift+4" => Action::SendToDesktop(3),
-    send_to_desktop_5: "Super+Shift+5" => Action::SendToDesktop(4),
-    send_to_desktop_6: "Super+Shift+6" => Action::SendToDesktop(5),
-    send_to_desktop_7: "Super+Shift+7" => Action::SendToDesktop(6),
-    send_to_desktop_8: "Super+Shift+8" => Action::SendToDesktop(7),
-    send_to_desktop_9: "Super+Shift+9" => Action::SendToDesktop(8),
-    take_to_desktop_1: "Super+Ctrl+Shift+1" => Action::TakeToDesktop(0),
-    take_to_desktop_2: "Super+Ctrl+Shift+2" => Action::TakeToDesktop(1),
-    take_to_desktop_3: "Super+Ctrl+Shift+3" => Action::TakeToDesktop(2),
-    take_to_desktop_4: "Super+Ctrl+Shift+4" => Action::TakeToDesktop(3),
-    take_to_desktop_5: "Super+Ctrl+Shift+5" => Action::TakeToDesktop(4),
-    take_to_desktop_6: "Super+Ctrl+Shift+6" => Action::TakeToDesktop(5),
-    take_to_desktop_7: "Super+Ctrl+Shift+7" => Action::TakeToDesktop(6),
-    take_to_desktop_8: "Super+Ctrl+Shift+8" => Action::TakeToDesktop(7),
-    take_to_desktop_9: "Super+Ctrl+Shift+9" => Action::TakeToDesktop(8),
+    terminal: ["Super+Return"] => Action::Terminal,
+    log_out: ["Super+Shift+E"] => Action::LogOut,
+    close: ["Super+Q", "Alt+F4"] => Action::Close,
+    minimize: ["Super+H"] => Action::Minimize,
+    snap_left: ["Super+Left"] => Action::Snap(Snap::Half(Side::Start)),
+    snap_right: ["Super+Right"] => Action::Snap(Snap::Half(Side::End)),
+    maximize: ["Super+Up"] => Action::Snap(Snap::Maximize),
+    restore: ["Super+Down"] => Action::Snap(Snap::Restore),
+    quarter_up: ["Super+Shift+Up"] => Action::Snap(Snap::QuarterTop),
+    quarter_down: ["Super+Shift+Down"] => Action::Snap(Snap::QuarterBottom),
+    quarter_left: ["Super+Shift+Left"] => Action::Snap(Snap::QuarterLeft),
+    quarter_right: ["Super+Shift+Right"] => Action::Snap(Snap::QuarterRight),
+    focus_left: [] => Action::FocusToward(-1, 0),
+    focus_right: [] => Action::FocusToward(1, 0),
+    focus_up: [] => Action::FocusToward(0, -1),
+    focus_down: [] => Action::FocusToward(0, 1),
+    switch_windows: ["Alt+Tab"] => Action::SwitchWindows { backward: false },
+    switch_windows_backward: ["Alt+Shift+Tab"] => Action::SwitchWindows { backward: true },
+    desktop_left: ["Super+Ctrl+Left"] => Action::DesktopBy(-1),
+    desktop_right: ["Super+Ctrl+Right"] => Action::DesktopBy(1),
+    desktop_1: ["Super+1"] => Action::Desktop(0),
+    desktop_2: ["Super+2"] => Action::Desktop(1),
+    desktop_3: ["Super+3"] => Action::Desktop(2),
+    desktop_4: ["Super+4"] => Action::Desktop(3),
+    desktop_5: ["Super+5"] => Action::Desktop(4),
+    desktop_6: ["Super+6"] => Action::Desktop(5),
+    desktop_7: ["Super+7"] => Action::Desktop(6),
+    desktop_8: ["Super+8"] => Action::Desktop(7),
+    desktop_9: ["Super+9"] => Action::Desktop(8),
+    send_to_desktop_1: ["Super+Shift+1"] => Action::SendToDesktop(0),
+    send_to_desktop_2: ["Super+Shift+2"] => Action::SendToDesktop(1),
+    send_to_desktop_3: ["Super+Shift+3"] => Action::SendToDesktop(2),
+    send_to_desktop_4: ["Super+Shift+4"] => Action::SendToDesktop(3),
+    send_to_desktop_5: ["Super+Shift+5"] => Action::SendToDesktop(4),
+    send_to_desktop_6: ["Super+Shift+6"] => Action::SendToDesktop(5),
+    send_to_desktop_7: ["Super+Shift+7"] => Action::SendToDesktop(6),
+    send_to_desktop_8: ["Super+Shift+8"] => Action::SendToDesktop(7),
+    send_to_desktop_9: ["Super+Shift+9"] => Action::SendToDesktop(8),
+    take_to_desktop_1: ["Super+Ctrl+Shift+1"] => Action::TakeToDesktop(0),
+    take_to_desktop_2: ["Super+Ctrl+Shift+2"] => Action::TakeToDesktop(1),
+    take_to_desktop_3: ["Super+Ctrl+Shift+3"] => Action::TakeToDesktop(2),
+    take_to_desktop_4: ["Super+Ctrl+Shift+4"] => Action::TakeToDesktop(3),
+    take_to_desktop_5: ["Super+Ctrl+Shift+5"] => Action::TakeToDesktop(4),
+    take_to_desktop_6: ["Super+Ctrl+Shift+6"] => Action::TakeToDesktop(5),
+    take_to_desktop_7: ["Super+Ctrl+Shift+7"] => Action::TakeToDesktop(6),
+    take_to_desktop_8: ["Super+Ctrl+Shift+8"] => Action::TakeToDesktop(7),
+    take_to_desktop_9: ["Super+Ctrl+Shift+9"] => Action::TakeToDesktop(8),
 }
 
 impl Shortcuts {
-    /// The action of what is pressed, if it is a shortcut. Nested,
-    /// Alt+Tab takes `Super` too, as every other shortcut: the host keeps
-    /// its own Alt+Tab.
-    pub fn action(&self, mods: &ModifiersState, key: Keysym, nested: bool) -> Option<Action> {
-        self.all().into_iter().find_map(|(chord, action)| {
-            let mut chord = chord?;
+    /// The action of what is pressed, if it is a shortcut, and its chord as
+    /// it is held. Nested, a chord with `Super` takes `Alt` too, and
+    /// Alt+Tab takes `Super`: the host keeps its own Alt+Tab. Other chords
+    /// without `Super` (Alt+F4) stay as they are: the host sees them
+    /// first, and those it keeps never reach the desktop.
+    pub fn action(
+        &self,
+        mods: &ModifiersState,
+        key: Keysym,
+        nested: bool,
+    ) -> Option<(Action, Chord)> {
+        self.all().into_iter().find_map(|(mut chord, action)| {
             if nested && matches!(action, Action::SwitchWindows { .. }) && chord.alt {
                 chord.logo = true;
             }
-            chord.matches(mods, key, nested).then_some(action)
+            chord.matches(mods, key, nested).then_some((action, chord))
         })
-    }
-
-    /// The chord that opened the switcher, as it is held (nested, with
-    /// `Super`).
-    pub fn switcher_chord(&self, backward: bool, nested: bool) -> Option<Chord> {
-        let mut chord = if backward {
-            self.switch_windows_backward
-        } else {
-            self.switch_windows
-        }?;
-        if nested && chord.alt {
-            chord.logo = true;
-        }
-        Some(chord)
     }
 }
 
-fn chord<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Chord>, D::Error> {
-    let text = String::deserialize(deserializer)?;
+/// One shortcut, `"Super+Q"`, or several, `["Super+Q", "Alt+F4"]`; an
+/// empty string or list for none.
+fn chords<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Chord>, D::Error> {
+    struct Chords;
+
+    impl<'de> Visitor<'de> for Chords {
+        type Value = Vec<Chord>;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a shortcut, as \"Super+Q\", or a list of them")
+        }
+
+        fn visit_str<E: de::Error>(self, text: &str) -> Result<Self::Value, E> {
+            chord(text).map(|chord| chord.into_iter().collect())
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut chords = Vec::new();
+            while let Some(text) = seq.next_element::<String>()? {
+                chords.extend(chord(&text)?);
+            }
+            Ok(chords)
+        }
+    }
+
+    deserializer.deserialize_any(Chords)
+}
+
+/// A shortcut; `None` for an empty string.
+fn chord<E: de::Error>(text: &str) -> Result<Option<Chord>, E> {
     if text.trim().is_empty() {
         return Ok(None);
     }
-    text.parse().map(Some).map_err(serde::de::Error::custom)
+    text.parse().map(Some).map_err(E::custom)
 }
 
 /// Why the compositor is ending.
@@ -251,7 +278,9 @@ pub enum Ending {
 }
 
 impl State {
-    pub fn run_action(&mut self, action: Action) {
+    /// Runs `action`, from its shortcut `chord` as it is held (as
+    /// [`Shortcuts::action`] gives it).
+    pub fn run_action(&mut self, action: Action, chord: Chord) {
         tracing::info!(?action, "shortcut");
         match action {
             Action::Terminal => {
@@ -270,14 +299,12 @@ impl State {
             Action::Snap(snap) => self.keyboard_snap(snap),
             Action::FocusToward(dx, dy) => self.focus_toward(dx, dy),
             Action::SwitchWindows { backward } => {
-                if let Some(chord) = self.config.shortcuts.switcher_chord(backward, self.nested) {
-                    let hold = crate::switcher::Hold {
-                        alt: chord.alt,
-                        logo: chord.logo,
-                        ctrl: chord.ctrl,
-                    };
-                    self.open_switcher(backward, hold, chord.key);
-                }
+                let hold = crate::switcher::Hold {
+                    alt: chord.alt,
+                    logo: chord.logo,
+                    ctrl: chord.ctrl,
+                };
+                self.open_switcher(backward, hold, chord.key);
             }
             Action::DesktopBy(delta) => self.switch_desktop_by(delta),
             Action::Desktop(to) => self.switch_desktop_to(to),
@@ -353,7 +380,7 @@ mod tests {
     #[test]
     fn the_default_shortcuts() {
         let shortcuts = Shortcuts::default();
-        let action = |m, k| shortcuts.action(&m, k, false);
+        let action = |m, k| shortcuts.action(&m, k, false).map(|(a, _)| a);
         assert_eq!(
             action(mods(true, false, false, false), Keysym::Return),
             Some(Action::Terminal)
@@ -373,7 +400,7 @@ mod tests {
             action(mods(true, false, true, false), Keysym::Right),
             Some(Action::DesktopBy(1))
         );
-        assert_eq!(shortcuts.focus_left, None);
+        assert_eq!(shortcuts.focus_left, []);
         assert_eq!(
             action(mods(true, true, false, false), Keysym::_3),
             Some(Action::SendToDesktop(2))
@@ -390,12 +417,62 @@ mod tests {
             action(mods(false, true, false, true), Keysym::Tab),
             Some(Action::SwitchWindows { backward: true })
         );
-        // Nested, Alt+Tab is the host's: Alt+Super+Tab is the desktop's.
+        // Close has two: Super+Q and Alt+F4.
+        assert_eq!(
+            action(mods(true, false, false, false), Keysym::q),
+            Some(Action::Close)
+        );
+        assert_eq!(
+            action(mods(false, false, false, true), Keysym::F4),
+            Some(Action::Close)
+        );
+        assert_eq!(action(mods(false, false, false, false), Keysym::F4), None);
+        // Nested, Alt+Tab is the host's: Alt+Super+Tab is the desktop's,
+        // and the switcher is held as it was pressed.
         let nested = |m, k| shortcuts.action(&m, k, true);
         assert_eq!(nested(mods(false, false, false, true), Keysym::Tab), None);
+        let switch = nested(mods(true, false, false, true), Keysym::Tab);
         assert_eq!(
-            nested(mods(true, false, false, true), Keysym::Tab),
-            Some(Action::SwitchWindows { backward: false })
+            switch.map(|(a, held)| (a, held.alt && held.logo)),
+            Some((Action::SwitchWindows { backward: false }, true))
         );
+        // Super+Q is Alt+Super+Q; Alt+F4, without Super, stays as it is:
+        // the host sees it first.
+        assert_eq!(
+            nested(mods(true, false, false, true), Keysym::q).map(|(a, _)| a),
+            Some(Action::Close)
+        );
+        assert_eq!(nested(mods(true, false, false, false), Keysym::q), None);
+        assert_eq!(
+            nested(mods(false, false, false, true), Keysym::F4).map(|(a, _)| a),
+            Some(Action::Close)
+        );
+    }
+
+    #[test]
+    fn a_shortcut_or_a_list_of_them() -> anyhow::Result<()> {
+        let read = |text: &str| toml::from_str::<Shortcuts>(text);
+        let both = read("close = [\"Super+Q\", \"Alt+F4\"]\n")?;
+        assert_eq!(both.close, ["Super+Q".parse()?, "Alt+F4".parse()?]);
+        assert_eq!(read("close = \"Ctrl+W\"\n")?.close, ["Ctrl+W".parse()?]);
+        assert_eq!(read("close = \"\"\n")?.close, []);
+        assert_eq!(read("close = []\n")?.close, []);
+        // Super+Q off, Alt+F4 kept.
+        let one = read("close = [\"Alt+F4\"]\n")?;
+        let close = |m, k| one.action(&m, k, false).map(|(a, _)| a);
+        assert_eq!(close(mods(true, false, false, false), Keysym::q), None);
+        assert_eq!(
+            close(mods(false, false, false, true), Keysym::F4),
+            Some(Action::Close)
+        );
+        for bad in [
+            "close = [\"Super+Q\", \"Hyper+Q\"]",
+            "close = 4",
+            "close = [4]",
+            "closes = \"Alt+F4\"",
+        ] {
+            assert!(read(bad).is_err(), "{bad}");
+        }
+        Ok(())
     }
 }

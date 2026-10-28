@@ -8,10 +8,14 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, Command, Event, KEY_DOWN, KEY_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP,
-    Shows, WAIT, chord, compositor, open, open_showing, open_with, rect_of, wait, wait_for_rect,
+    BTN_LEFT, ClientHandle, Command, Event, KEY_DOWN, KEY_F4, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA,
+    KEY_LEFTSHIFT, KEY_Q, KEY_RIGHT, KEY_UP, Shows, WAIT, chord, compositor, open, open_showing,
+    open_with, rect_of, wait, wait_for_rect,
 };
-use hocus_compositor::model::{GAP, Mode, Rect, WindowId, Zone};
+use hocus_compositor::{
+    Headless,
+    model::{GAP, Mode, Rect, WindowId, Zone},
+};
 use smithay::input::pointer::CursorIcon;
 
 /// The work area of the headless 1920×1080 output: 8 px in, and the full
@@ -351,6 +355,50 @@ fn a_window_asking_to_be_maximised_before_its_first_frame_opens_maximised() -> a
     assert_eq!(rect, AREA);
     let id = hp.windows()[0].id;
     assert_eq!(hp.mode(id), Mode::Snapped(Zone::Maximized));
+    Ok(())
+}
+
+/// Presses `keys`, and tells whether `client`'s window was asked to close
+/// within `time`.
+fn close_asked(
+    hp: &mut Headless,
+    client: &ClientHandle,
+    keys: &[u32],
+    time: Duration,
+) -> anyhow::Result<bool> {
+    chord(hp, keys);
+    let mut asked = false;
+    hp.dispatch_until(time, |_| {
+        asked |= client.events.try_recv().ok() == Some(Event::CloseRequested);
+        asked
+    })?;
+    Ok(asked)
+}
+
+#[test]
+fn super_q_and_alt_f4_ask_the_focused_window_to_close() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let (_, client) = open_with(&mut hp, "test.close", (400, 300), false)?;
+    assert!(hp.windows()[0].focused);
+    let quiet = Duration::from_millis(300);
+    assert!(
+        !close_asked(&mut hp, &client, &[KEY_F4], quiet)?,
+        "F4 alone"
+    );
+    assert!(
+        !close_asked(&mut hp, &client, &[KEY_LEFTMETA, KEY_F4], quiet)?,
+        "Super+F4"
+    );
+    assert!(
+        close_asked(&mut hp, &client, &[KEY_LEFTALT, KEY_F4], WAIT)?,
+        "Alt+F4 did not ask"
+    );
+    // The application keeps its window, as one asking to save would.
+    assert_eq!(hp.windows().len(), 1);
+    assert!(
+        close_asked(&mut hp, &client, &[KEY_LEFTMETA, KEY_Q], WAIT)?,
+        "Super+Q did not ask"
+    );
     Ok(())
 }
 

@@ -25,7 +25,7 @@ use crate::{
     State,
     grabs::{BTN_LEFT, BTN_RIGHT},
     model::{self, Edges, Mode, Seam, WindowId},
-    shortcuts::Action,
+    shortcuts::{Action, Chord},
     switcher::{SwitchKey, is_modifier, switch_key},
 };
 
@@ -45,8 +45,8 @@ const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 enum Kept {
     /// Ctrl+Alt+F1…F12: another virtual terminal.
     Vt(i32),
-    /// One of the `[shortcuts]`.
-    Shortcut(Action),
+    /// One of the `[shortcuts]`, and its chord as held.
+    Shortcut(Action, Chord),
     /// The release of a key whose press was kept.
     Release,
     /// A key while Alt+Tab is held.
@@ -177,9 +177,9 @@ impl State {
                     .or_else(|| {
                         digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
                     });
-                if let Some(action) = action {
+                if let Some((action, chord)) = action {
                     this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Shortcut(action));
+                    return FilterResult::Intercept(Kept::Shortcut(action, chord));
                 }
                 FilterResult::Forward
             });
@@ -188,8 +188,8 @@ impl State {
         }
         match kept {
             Some(Kept::Vt(vt)) => self.switch_vt(vt),
-            Some(Kept::Shortcut(action)) => {
-                self.run_action(action);
+            Some(Kept::Shortcut(action, chord)) => {
+                self.run_action(action, chord);
                 // Alt+Tab held: Tab held steps on (§11).
                 if let Action::SwitchWindows { backward } = action {
                     let key = if backward {

@@ -406,8 +406,11 @@ mod tests {
             "[shortcuts]\nterminal = \"Ctrl+Alt+T\"\nlog-out = \"\"\n\
              [programs]\nterminal = \"foot -e htop\"\n",
         )?;
-        assert_eq!(config.shortcuts.terminal, Some("Ctrl+Alt+T".parse()?));
-        assert_eq!(config.shortcuts.log_out, None);
+        assert_eq!(config.shortcuts.terminal, ["Ctrl+Alt+T".parse()?]);
+        assert_eq!(config.shortcuts.log_out, []);
+        // Several for one action.
+        let two: Config = toml::from_str("[shortcuts]\nclose = [\"Super+Q\", \"Ctrl+Q\"]\n")?;
+        assert_eq!(two.shortcuts.close, ["Super+Q".parse()?, "Ctrl+Q".parse()?]);
         assert_eq!(config.programs.terminal, "foot -e htop");
         // A shortcut that does not read refuses the file, as any mistake.
         assert!(toml::from_str::<Config>("[shortcuts]\nterminal = \"Hyper+T\"\n").is_err());
