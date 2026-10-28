@@ -1177,6 +1177,9 @@ impl State {
                 moving = true;
             }
         }
+        if let Some(at) = self.cursor_next_frame(now) {
+            wake(at);
+        }
         if moving {
             self.redraw = true;
         } else if let Some(at) = next {

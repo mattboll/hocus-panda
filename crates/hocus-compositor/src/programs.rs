@@ -24,6 +24,8 @@ pub struct Env {
     /// An activation token the program's first window may take the focus
     /// with (`XDG_ACTIVATION_TOKEN`, `DESKTOP_STARTUP_ID`).
     pub activation: Option<String>,
+    /// The cursor's theme and size, for the program's to match.
+    pub cursor: crate::cursor::Choice,
 }
 
 impl Env {
@@ -33,6 +35,7 @@ impl Env {
             socket: state.socket_path.clone(),
             xdisplay: state.xdisplay,
             activation: None,
+            cursor: state.cursor_images.choice().clone(),
         }
     }
 
@@ -63,6 +66,8 @@ impl Env {
             .env("WAYLAND_DISPLAY", self.wayland_display())
             .env("XDG_SESSION_TYPE", "wayland")
             .env("XDG_CURRENT_DESKTOP", "Hocuspanda")
+            .env("XCURSOR_THEME", &self.cursor.theme)
+            .env("XCURSOR_SIZE", self.cursor.size.to_string())
             .env_remove("WAYLAND_SOCKET")
             .env_remove("DISPLAY");
         if let Some(display) = self.display() {
@@ -231,6 +236,7 @@ mod tests {
             socket: PathBuf::from(socket),
             xdisplay: Some(1),
             activation: None,
+            cursor: crate::cursor::Choice::of(None, None, &crate::CursorEnv::default()),
         };
         assert_eq!(env("/run/user/1000/hocus-0").wayland_display(), "hocus-0");
         assert_eq!(env("/tmp/hp/hocus-0").wayland_display(), "/tmp/hp/hocus-0");
