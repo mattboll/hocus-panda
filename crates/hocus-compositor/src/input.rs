@@ -374,8 +374,8 @@ impl State {
         None
     }
 
-    /// The seam of a snapped pair near `at` that nothing covers: its handle
-    /// shows (§8).
+    /// The seam of a pair near `at`, where it shows: its handle shows
+    /// (§8).
     fn seam_near(&self, at: Point<f64, Logical>) -> Option<Seam> {
         use smithay::wayland::shell::wlr_layer::Layer;
         if self
@@ -388,7 +388,18 @@ impl State {
         self.seams()
             .into_iter()
             .filter(|s| s.near(at.x, at.y, SEAM_REACH))
-            .find(|s| under.is_none_or(|w| w == s.first || w == s.second))
+            .find(|s| under.is_none_or(|w| !self.covers(w, s)))
+    }
+
+    /// Whether window `id` is over `seam`: in front of both its windows.
+    /// One behind them, showing through the gap, is not.
+    fn covers(&self, id: WindowId, seam: &Seam) -> bool {
+        let stack = self.model.stack();
+        let place = |w: WindowId| stack.iter().position(|s| *s == w);
+        match (place(id), place(seam.first).max(place(seam.second))) {
+            (Some(at), Some(pair)) => at > pair,
+            _ => false,
+        }
     }
 
     /// The window with no header whose top band the pointer is in: its

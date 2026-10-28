@@ -1,13 +1,19 @@
 //! A seam's handle, headless (docs/design/windows.md §8): two windows
 //! brought together by hand form a pair whose handle resizes both, floating
-//! or snapped; windows not at the gap form none.
+//! or snapped; windows not at the gap form none; and the handle shows and
+//! takes presses only where the seam itself shows.
 
 mod common;
 
-use common::{BTN_LEFT, KEY_LEFTMETA, compositor, open, rect_of, wait_for_rect};
+use std::time::Duration;
+
+use common::{
+    BTN_LEFT, KEY_LEFT, KEY_LEFTMETA, KEY_RIGHT, WINDOW_COLOUR, chord, compositor, open, rect_of,
+    wait, wait_for_rect,
+};
 use hocus_compositor::{
     Headless,
-    model::{GAP, Mode, Rect, WindowId},
+    model::{GAP, Mode, Rect, WindowId, Zone},
 };
 use smithay::input::pointer::CursorIcon;
 
@@ -40,6 +46,12 @@ fn id_of(hp: &Headless, app: &str) -> WindowId {
         .find(|w| w.app_id.as_deref() == Some(app))
         .map(|w| w.id)
         .expect("no such window")
+}
+
+/// The pixel at (`x`, `y`) of a screenshot, ARGB.
+fn pixel((width, _, bytes): &(i32, i32, Vec<u8>), x: f64, y: f64) -> Option<u32> {
+    let at = usize::try_from((y as i32) * width + x as i32).ok()? * 4;
+    Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
 }
 
 #[test]
@@ -106,5 +118,76 @@ fn windows_nine_pixels_apart_form_no_pair() -> anyhow::Result<()> {
     wait_for_rect(&mut hp, "test.right", Rect::new(right, 450, 400, 300))?;
     hp.pointer_move(f64::from(a.right()) + 4.5, 550.0);
     assert!(hp.state().seam_handle.is_none(), "no pair, no handle");
+    Ok(())
+}
+
+/// Two windows snapped left and right.
+fn snapped_pair(hp: &mut Headless) -> anyhow::Result<()> {
+    open(hp, "test.left", (400, 300))?;
+    chord(hp, &[KEY_LEFTMETA, KEY_LEFT]);
+    wait_for_rect(hp, "test.left", Zone::Left.rect(AREA))?;
+    open(hp, "test.right", (400, 300))?;
+    chord(hp, &[KEY_LEFTMETA, KEY_RIGHT]);
+    wait_for_rect(hp, "test.right", Zone::Right.rect(AREA))?;
+    Ok(())
+}
+
+/// The middle of the gap between the left and right halves.
+fn seam_centre() -> (f64, f64) {
+    let left = Zone::Left.rect(AREA);
+    (
+        f64::from(left.right() + GAP / 2),
+        f64::from(left.y) + f64::from(left.height) / 2.0,
+    )
+}
+
+#[test]
+fn a_floating_window_over_the_seam_hides_its_handle_and_takes_the_press() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    snapped_pair(&mut hp)?;
+    // Opened in the middle, over the seam's.
+    let over = open(&mut hp, "test.over", (400, 300))?;
+    let (x, y) = seam_centre();
+    assert!(over.contains(x, y), "{over:?} covers the handle's place");
+    // Near the seam above it: the handle shows, under the window.
+    hp.pointer_move(x, f64::from(over.y - 100));
+    assert!(hp.state().seam_handle.is_some(), "the handle shows");
+    wait(&mut hp, Duration::from_millis(200))?;
+    let shot = hp.screenshot(0)?;
+    assert_eq!(
+        pixel(&shot, x, y),
+        Some(WINDOW_COLOUR),
+        "the window, not the handle"
+    );
+    // A press there is the window's.
+    hp.pointer_move(x, y);
+    assert_eq!(hp.state().frame_cursor, None, "the client's cursor");
+    drag_by(&mut hp, (x, y), 60.0);
+    wait(&mut hp, Duration::from_millis(100))?;
+    assert_eq!(rect_of(&hp, "test.left"), Some(Zone::Left.rect(AREA)));
+    assert_eq!(rect_of(&hp, "test.right"), Some(Zone::Right.rect(AREA)));
+    assert_eq!(rect_of(&hp, "test.over"), Some(over));
+    Ok(())
+}
+
+#[test]
+fn a_window_behind_the_pair_leaves_its_handle() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    // In the middle, then the pair over it: it shows through the gap.
+    let behind = open(&mut hp, "test.behind", (400, 300))?;
+    snapped_pair(&mut hp)?;
+    let (x, y) = seam_centre();
+    assert!(behind.contains(x, y));
+    hp.pointer_move(x, y);
+    assert!(hp.state().seam_handle.is_some(), "the handle shows");
+    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    drag_by(&mut hp, (x, y), 100.0);
+    let left = Zone::Left.rect(AREA);
+    wait_for_rect(
+        &mut hp,
+        "test.left",
+        Rect::new(left.x, left.y, left.width + 100, left.height),
+    )?;
+    assert_eq!(rect_of(&hp, "test.behind"), Some(behind));
     Ok(())
 }
