@@ -37,7 +37,7 @@ fi
 [ "$status" -eq 0 ] || say "the session ended: hocuspanda exited with status $status"
 
 # Programs started later by systemd must not look for this session's
-# displays (hocuspanda --session gave them).
-systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE \
+# displays (hocuspanda --session gave them), nor take its cursor theme.
+systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XCURSOR_THEME XCURSOR_SIZE \
     > /dev/null 2>&1
 exit "$status"

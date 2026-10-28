@@ -42,6 +42,10 @@ use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use config::{Appearance, Config, Desktops, OutputSettings, ScaleFrom, SystemKeyboard};
+pub use cursor::CursorEnv;
+/// An Xcursor file, for tests' cursor themes.
+#[doc(hidden)]
+pub use cursor::theme::{TestImage, encode as encode_xcursor};
 pub use harness::{Headless, Placed, WindowInfo};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use shortcuts::{Action, Chord, Ending, Shortcuts};

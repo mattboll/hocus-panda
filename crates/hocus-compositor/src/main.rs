@@ -8,7 +8,8 @@ use std::{
 
 use clap::{Parser, ValueEnum};
 use hocus_compositor::{
-    BackendKind, Config, HeadlessConfig, Options, OutputSpec, RendererChoice, SystemKeyboard,
+    BackendKind, Config, CursorEnv, HeadlessConfig, Options, OutputSpec, RendererChoice,
+    SystemKeyboard,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -105,6 +106,7 @@ fn main() -> ExitCode {
     if config.keyboard.layouts.is_empty() {
         config.system_keyboard = SystemKeyboard::read(Path::new(SystemKeyboard::PATH));
     }
+    config.cursor_env = CursorEnv::from_process();
     let options = Options {
         backend: match backend {
             BackendArg::Tty => BackendKind::Tty,

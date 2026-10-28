@@ -119,6 +119,13 @@ sits just below it.
   once): an 8 px band outside each edge, 16×16 px squares at the corners,
   with the matching resize cursors (`ew-resize`, `ns-resize`,
   `nwse-resize`, `nesw-resize`).
+- Cursors come from the system's cursor theme, as applications' do
+  (`[appearance] cursor-theme` and `cursor-size`, else `XCURSOR_THEME`
+  and `XCURSOR_SIZE`, else the `default` theme and what it inherits),
+  each screen showing the image nearest its scale, pixel for pixel; the
+  programs the desktop starts are given the same theme and size. Without
+  a theme, or for a shape the theme lacks, the compositor draws its own
+  plain ones.
 - `Super`+right-drag resizes from the nearest corner.
 - Live resize, respecting the application's minimum and maximum sizes.
 - The edge or edges being dragged stick as a moving window's do (section

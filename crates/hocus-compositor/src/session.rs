@@ -9,11 +9,13 @@ use std::process::Output;
 use crate::programs::{Env, on_a_thread};
 
 /// The variables the session gives the user's services.
-pub const VARIABLES: [&str; 4] = [
+pub const VARIABLES: [&str; 6] = [
     "WAYLAND_DISPLAY",
     "DISPLAY",
     "XDG_CURRENT_DESKTOP",
     "XDG_SESSION_TYPE",
+    "XCURSOR_THEME",
+    "XCURSOR_SIZE",
 ];
 
 /// Tells the session bus's activation environment and systemd's user

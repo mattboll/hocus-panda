@@ -14,10 +14,15 @@ use crate::{App, State};
 /// Spawns XWayland on the next free display. Without the `Xwayland`
 /// program, X11 applications just do not start.
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
+    let choice = state.cursor_images.choice().clone();
     let spawned = XWayland::spawn(
         &state.display_handle,
         None,
-        std::iter::empty::<(String, String)>(),
+        // Its clients' cursors match the compositor's.
+        [
+            ("XCURSOR_THEME", choice.theme.clone()),
+            ("XCURSOR_SIZE", choice.size.to_string()),
+        ],
         true,
         Stdio::null(),
         Stdio::null(),
