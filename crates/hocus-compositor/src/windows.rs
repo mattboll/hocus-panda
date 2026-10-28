@@ -62,6 +62,9 @@ pub struct Managed {
     /// Going to another desktop: drawn as if on the strip from one place
     /// to another (in desktops), along the motion (§12).
     pub travel: Option<(f64, f64, Tween)>,
+    /// The output it last snapped on: while snapped, its zone is that
+    /// output's, whatever is under its centre (§9).
+    pub snapped_on: Option<Output>,
 }
 
 /// A resize under way, or ending.
@@ -153,6 +156,7 @@ impl Managed {
             before_fullscreen: Mode::Floating,
             away: None,
             travel: None,
+            snapped_on: None,
         }
     }
 
@@ -183,9 +187,11 @@ pub struct Leaving {
 }
 
 /// Where a dragged window would snap, and since when the pointer is there.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Preview {
     pub zone: Zone,
+    /// The output under the pointer, whose work area the zone is of.
+    pub output: Output,
     /// Global.
     pub rect: Rect,
     pub entered: Duration,
@@ -325,8 +331,16 @@ impl State {
         Some(rect)
     }
 
-    /// The output a window is on: the one under its centre, or the first.
+    /// The output a window is on: a snapped window's, the one it snapped
+    /// on while that one is there; otherwise the one under its centre, or
+    /// the first.
     pub fn output_of(&self, id: WindowId) -> Option<Output> {
+        if matches!(self.model.mode(id), Mode::Snapped(_))
+            && let Some(on) = self.windows.get(&id).and_then(|m| m.snapped_on.as_ref())
+            && self.space.outputs().any(|o| o == on)
+        {
+            return Some(on.clone());
+        }
         let rect = self.home_rect(id)?;
         let (cx, cy) = rect.centre();
         self.space
@@ -731,15 +745,29 @@ impl State {
     /// Snaps `id` to `zone` of its output's work area, from where it is
     /// drawn now.
     pub fn snap(&mut self, id: WindowId, zone: Zone) {
-        self.snap_from(id, zone, None);
+        self.snap_from(id, zone, None, None);
     }
 
-    /// Snaps `id`; `floating`: where it goes back to when restored, if not
-    /// where it is (a drag: where the drag began).
-    pub fn snap_from(&mut self, id: WindowId, zone: Zone, floating: Option<Rect>) {
-        let (Some(area), Some(current)) = (self.area_of(id), self.rect_of(id)) else {
+    /// Snaps `id` to `zone` of `output`'s work area (a drag: the one under
+    /// the pointer), else of its own output's; `floating`: where it goes
+    /// back to when restored, if not where it is (a drag: where the drag
+    /// began). It keeps to that output until it floats again.
+    pub fn snap_from(
+        &mut self,
+        id: WindowId,
+        zone: Zone,
+        floating: Option<Rect>,
+        output: Option<Output>,
+    ) {
+        let Some(output) = output.or_else(|| self.output_of(id)) else {
             return;
         };
+        let (Some(area), Some(current)) = (self.work_area(&output), self.rect_of(id)) else {
+            return;
+        };
+        if let Some(managed) = self.windows.get_mut(&id) {
+            managed.snapped_on = Some(output);
+        }
         let current = floating.unwrap_or(current);
         self.start_settle(id);
         let mode = self.model.mode(id);
@@ -1116,10 +1144,11 @@ impl State {
     }
 
     /// Shows where a dragged window would snap, or nothing.
-    pub fn set_preview(&mut self, zone: Option<(Zone, Rect)>) {
+    pub fn set_preview(&mut self, zone: Option<(Zone, Rect, Output)>) {
         let now = self.now();
-        let same = match (&self.preview, zone) {
-            (Some(p), Some((z, _))) => p.zone == z,
+        let same = match (&self.preview, &zone) {
+            // The same zone of another screen is another place.
+            (Some(p), Some((z, _, o))) => p.zone == *z && p.output == *o,
             (None, None) => true,
             _ => false,
         };
@@ -1137,8 +1166,9 @@ impl State {
                 Tween::new(start, motion::PREVIEW, Bezier::EASE_IN),
             ));
         }
-        self.preview = zone.map(|(zone, rect)| Preview {
+        self.preview = zone.map(|(zone, rect, output)| Preview {
             zone,
+            output,
             rect,
             entered: now,
         });
@@ -1229,8 +1259,10 @@ impl State {
         }
     }
 
-    /// The outputs' work areas changed (a layer's exclusive zone, a mode):
-    /// snapped windows follow.
+    /// The outputs' work areas changed (a layer's exclusive zone, a mode,
+    /// a screen gone): snapped windows follow, on their output; those of a
+    /// screen gone take the same zone on the one now under them, or the
+    /// first.
     pub fn rearrange(&mut self) {
         let ids: Vec<WindowId> = self.windows.keys().copied().collect();
         for id in ids {
@@ -1239,7 +1271,11 @@ impl State {
             }
             match self.model.mode(id) {
                 Mode::Snapped(zone) => {
-                    if let Some(area) = self.area_of(id) {
+                    let output = self.output_of(id);
+                    if let Some(managed) = self.windows.get_mut(&id) {
+                        managed.snapped_on = output.clone();
+                    }
+                    if let Some(area) = output.and_then(|o| self.work_area(&o)) {
                         let rect = zone.rect(area);
                         if self.target_rect(id) != Some(rect) {
                             self.configure(id, rect);

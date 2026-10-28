@@ -6,7 +6,7 @@
 use std::{os::unix::net::UnixStream, path::Path, sync::mpsc, time::Duration};
 
 use anyhow::Context;
-use hocus_compositor::{Headless, HeadlessConfig, RendererChoice, model::Rect};
+use hocus_compositor::{Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_layer, delegate_output, delegate_pointer, delegate_registry,
@@ -59,6 +59,14 @@ pub fn compositor() -> anyhow::Result<Headless> {
         // The same pixels on every machine, and no GPU needed.
         renderer: RendererChoice::Pixman,
         ..HeadlessConfig::default()
+    })
+}
+
+/// Two screens side by side: 1920×1080, then 2560×1440 on its right.
+pub fn two_screens() -> anyhow::Result<Headless> {
+    Headless::start(HeadlessConfig {
+        outputs: vec![OutputSpec::new(1920, 1080), OutputSpec::new(2560, 1440)],
+        renderer: RendererChoice::Pixman,
     })
 }
 
