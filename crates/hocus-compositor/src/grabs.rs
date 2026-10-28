@@ -245,9 +245,9 @@ impl PointerGrab<State> for MoveGrab {
             .output_under(pointer)
             .next()
             .cloned()
-            .and_then(|o| state.work_area(&o))
-            .and_then(|area| Some((Zone::at(area, pointer.x, pointer.y)?, area)))
-            .map(|(zone, area)| (zone, zone.rect(area)));
+            .and_then(|o| Some((state.work_area(&o)?, o)))
+            .and_then(|(area, o)| Some((Zone::at(area, pointer.x, pointer.y)?, area, o)))
+            .map(|(zone, area, o)| (zone, zone.rect(area), o));
         state.set_preview(zone);
         state.redraw = true;
     }
@@ -274,16 +274,22 @@ impl PointerGrab<State> for MoveGrab {
         state.moving = None;
         state.frame_cursor = None;
         let now = state.now();
-        let zone = state.preview.filter(|p| p.shown(now)).map(|p| p.zone);
+        let zone = state
+            .preview
+            .as_ref()
+            .filter(|p| p.shown(now))
+            .map(|p| (p.zone, p.output.clone()));
         state.set_preview(None);
         if let Some((w, jelly)) = &mut state.wobble
             && *w == self.id
         {
             jelly.release();
         }
-        if let Some(zone) = zone {
-            // Restored, it goes back where the drag began.
-            state.snap_from(self.id, zone, self.floating);
+        if let Some((zone, output)) = zone {
+            // On the screen of the preview, under the pointer, wherever
+            // most of the window is; restored, it goes back where the drag
+            // began.
+            state.snap_from(self.id, zone, self.floating, Some(output));
         }
         state.redraw = true;
     }

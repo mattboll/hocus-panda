@@ -165,6 +165,14 @@ impl Headless {
         state.work_area(output)
     }
 
+    /// The work areas of the outputs, in the order they were made.
+    pub fn work_areas(&self) -> Vec<Rect> {
+        let state = &self.app.state;
+        let mut outputs: Vec<_> = state.space.outputs().cloned().collect();
+        outputs.sort_by_key(|o| state.space.output_geometry(o).map(|g| (g.loc.x, g.loc.y)));
+        outputs.iter().filter_map(|o| state.work_area(o)).collect()
+    }
+
     pub fn pointer_move(&mut self, x: f64, y: f64) {
         self.time += 10;
         let time = self.time;

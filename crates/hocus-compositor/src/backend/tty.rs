@@ -433,6 +433,8 @@ impl TtyBackend {
             }
         });
         state.space.unmap_output(&screen.output);
+        // Its snapped and fullscreen windows go to a screen still there.
+        state.rearrange();
         state.display_handle.remove_global::<State>(screen.global);
         for token in [screen.health, screen.pace].into_iter().flatten() {
             state.loop_handle.remove(token);

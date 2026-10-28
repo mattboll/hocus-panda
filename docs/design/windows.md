@@ -145,6 +145,13 @@ Keyboard:
 | `Super+↓` | restore; again: minimise |
 | `Super+Shift+←/→/↑/↓` | quarters, by the corner the arrows point to |
 
+- A snap is of the screen it is made on: the one under the pointer for a
+  drag (the preview's, even with most of the window still on another
+  screen), the window's for the keys. The window keeps to that screen as
+  its work area changes, through fullscreen and back, and as its pair is
+  resized; if that screen goes, it takes the same zone on a screen still
+  there.
+
 ## 10. Maximise, fullscreen, minimise, close
 
 - **Maximise** fills the work area (8 px gaps, bar's space kept). Animated
