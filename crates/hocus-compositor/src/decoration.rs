@@ -36,7 +36,7 @@ pub const RIM: [u8; 4] = [0xFF, 0xFF, 0xFF, 46];
 pub const GRIP_SIZE: (f64, f64) = (44.0, 4.0);
 pub const GRIP_INSET: f64 = 4.0;
 const GRIP_COLOUR: [u8; 4] = [0xEE, 0xF1, 0xF6, 191];
-/// The handle on the seam of a snapped pair (§8): the grip's pill, along
+/// The handle on the seam of a pair (§8): the grip's pill, along
 /// the seam, at its middle.
 pub const HANDLE_LENGTH: f64 = GRIP_SIZE.0;
 pub const HANDLE_THICKNESS: f64 = GRIP_SIZE.1;

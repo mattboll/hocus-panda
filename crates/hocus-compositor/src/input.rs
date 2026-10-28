@@ -33,7 +33,7 @@ use crate::{
 /// how far around the grip a press still takes it.
 const GRIP_BAND: i32 = 12;
 const GRIP_SLOP: f64 = 8.0;
-/// The handle of a snapped pair's seam shows with the pointer this close
+/// The handle of a pair's seam shows with the pointer this close
 /// to the seam's centre line: the gap and a little of each window (§8).
 const SEAM_REACH: f64 = 12.0;
 /// How far around the handle's pill a press still takes it.

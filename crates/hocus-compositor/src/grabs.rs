@@ -313,8 +313,8 @@ pub struct ResizeGrab {
     initial: Rect,
     min: (i32, i32),
     max: (i32, i32),
-    /// Snapped neighbours that follow, with their edges that do and their
-    /// geometry at the start.
+    /// The windows across the seam that follow, with their edges that do
+    /// and their geometry at the start.
     partners: Vec<(WindowId, Edges, Rect)>,
     /// A snapped window resized alone, from any of its edges, leaves its
     /// zone once its size changes (§8).
@@ -507,8 +507,8 @@ impl State {
         self.resize(id, edges, button, start_data, serial, false);
     }
 
-    /// Starts resizing snapped window `id` from `edges` with the snapped
-    /// neighbours across them following: the handle of a seam (§8).
+    /// Starts resizing window `id` from `edges` with the windows across
+    /// them following, snapped or floating: the handle of a seam (§8).
     pub fn start_pair_resize(&mut self, id: WindowId, edges: Edges, button: u32, serial: Serial) {
         self.resize(id, edges, button, None, serial, true);
     }
@@ -535,37 +535,31 @@ impl State {
         if mode == Mode::Fullscreen || !edges.any() {
             return;
         }
-        // A snapped neighbour across a moved edge follows it when the
-        // seam's handle moves it; from any edge, a snapped window resized
-        // alone leaves its zone and floats (§8).
+        // The windows across a moved edge follow it when the seam's handle
+        // moves it, snapped or floating, and stay so; a snapped window
+        // resized alone, from any edge, leaves its zone and floats (§8).
         let mut partners = Vec::new();
         let mut floats = false;
-        if let Mode::Snapped(zone) = mode {
-            if zone == Zone::Maximized {
-                // Resized, it floats.
-                self.model.unsnap(id);
-            } else if !together {
-                floats = true;
-                // The handle goes with the pair.
-                self.seam_handle = None;
-            } else if let Some(output) = self.output_of(id) {
-                let others: Vec<(WindowId, Rect)> = self
-                    .windows
-                    .keys()
-                    .copied()
-                    .filter(|o| *o != id && !self.model.is_minimized(*o))
-                    .filter(
-                        |o| matches!(self.model.mode(*o), Mode::Snapped(z) if z != Zone::Maximized),
-                    )
-                    .filter(|o| self.output_of(*o).as_ref() == Some(&output))
-                    .filter_map(|o| Some((o, self.rect_of(o)?)))
-                    .collect();
-                for (pid, follow) in model::partners(initial, edges, &others) {
-                    if let Some((_, r)) = others.iter().find(|(o, _)| *o == pid) {
-                        partners.push((pid, follow, *r));
-                    }
+        if mode == Mode::Snapped(Zone::Maximized) {
+            // Resized, it floats.
+            self.model.unsnap(id);
+        } else if together {
+            let output = self.output_of(id);
+            let others: Vec<(WindowId, Rect)> = self
+                .pairable()
+                .into_iter()
+                .filter(|(o, _, on)| *o != id && *on == output)
+                .map(|(o, r, _)| (o, r))
+                .collect();
+            for (pid, follow) in model::partners(initial, edges, &others) {
+                if let Some((_, r)) = others.iter().find(|(o, _)| *o == pid) {
+                    partners.push((pid, follow, *r));
                 }
             }
+        } else {
+            floats = matches!(mode, Mode::Snapped(_));
+            // The handle goes with the pair.
+            self.seam_handle = None;
         }
         let (min, max) = crate::windows::size_limits(&window);
         let min = (min.0.max(MIN_SIZE.0), min.1.max(MIN_SIZE.1));
