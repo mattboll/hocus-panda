@@ -71,6 +71,7 @@ pub fn two_screens() -> anyhow::Result<Headless> {
     Headless::start(HeadlessConfig {
         outputs: vec![OutputSpec::new(1920, 1080), OutputSpec::new(2560, 1440)],
         renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
     })
 }
 

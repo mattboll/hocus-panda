@@ -94,6 +94,8 @@ env -i HOME="$(mktemp -d)" PATH=/usr/bin:/bin DISPLAY=:87 LIBGL_ALWAYS_SOFTWARE=
 # headless: offscreen outputs, a private runtime directory by default
 target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 1920x1080 \
     --renderer pixman --no-xwayland --spawn foot
+# headless on a GPU: GLES on that render node (default: the first GPU)
+target/debug/hocuspanda --backend headless --renderer gles --render-node /dev/dri/renderD128
 RUST_LOG=hocus_compositor=debug                       # more of what it does
 ```
 

@@ -392,6 +392,7 @@ fn title_ink(scale: f64) -> anyhow::Result<(usize, i32, [i32; 4], [i32; 4])> {
     let mut hp = Headless::start(HeadlessConfig {
         outputs: vec![screen],
         renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
     })?;
     // A title of upright strokes apart: easy to count.
     open(&mut hp, "test.other", (400, 300))?;
@@ -473,6 +474,7 @@ fn panel_lines(scale: f64) -> anyhow::Result<(Vec<u32>, Vec<u32>)> {
     let mut hp = Headless::start(HeadlessConfig {
         outputs: vec![screen],
         renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
     })?;
     open(&mut hp, "test.a", (400, 300))?;
     open(&mut hp, "test.b", (400, 300))?;
@@ -531,6 +533,7 @@ fn alt_tab_thumbnails_share_one_height_across_screens() -> anyhow::Result<()> {
     let mut hp = Headless::start(HeadlessConfig {
         outputs: vec![OutputSpec::new(2560, 1600), OutputSpec::new(3440, 1440)],
         renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
     })?;
     hp.pointer_move(2560.0 + 1720.0, 720.0);
     open(&mut hp, "test.left", (400, 300))?;

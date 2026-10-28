@@ -13,7 +13,7 @@ Status: report, 2026-10-28. It answers the seven points of the spike in
 | 1 | Full form, partly | **Go, with fixes** | Close to the board once three traps are avoided. At rest it draws once a second, but it damages the whole surface, not the clock's region |
 | 2 | Popover and cone | **Go** | Never closed on the way; closes 301–302 ms after the pointer left. Esc closes. The keyboard goes back to the window, not the bar: that is the compositor's job |
 | 3 | Text field | **Go for caret, selection and placeholder; IME not tested** | The first build's compositor cannot do IME for a layer surface. The client side is there |
-| 4 | Halo, wave, form switch | **API go; smoothness not proven** | 600 ms and 240 ms with the exact curves, 29 and 14 frames. Every run fell back to software Vulkan, so GPU timings are still missing |
+| 4 | Halo, wave, form switch | **API go; smooth on a GPU** | 600 ms and 240 ms with the exact curves. The spike ran on software Vulkan; measured on a GPU since (3.0), no frame over budget at 0.7–0.9 ms of CPU per frame |
 | 5 | Restart | **Go** | Back on screen in 289–331 ms, windows kept. The windows jump while the bar is down: that is compositor work |
 | 6 | Accessibility | **No-go as is; cost known** | iced 0.14 has no AccessKit. Adding our own tree is about a week for the bar and popovers |
 | 7 | Blur behind the bar | **Not built (as asked); 5–8 days** | Compositor work whichever toolkit we pick; one client-side snag in iced_layershell |
@@ -334,9 +334,93 @@ Not implemented, as asked. This is from reading the first build and the protocol
 
 The egui fallback is not needed for points 2 and 3, which passed. It would only be worth measuring if point 4 fails on the GPU, or if accessibility is required in v1 and a week of our own AccessKit work is judged too much.
 
+## Measured on a GPU (3.0)
+
+Done on 2026-10-28 for issue #357, after the report above: the same `bar-spike`, now a client of v2's compositor, which offers linux-dmabuf. The bar's frames then go to a real GPU.
+
+**Verdict:** on a GPU, the bar keeps the headless output's pace through the wave and the form switch. No frame was over budget, and the client spends 0.7–0.9 ms of CPU per frame, about 25 ms per wave. That is about 50 times less than lavapipe's 1.5 s. The 2 cores of point 4 were lavapipe's. Three things need handling in the bar's slice: which GPU wgpu wakes, its 10-bit surface format, and tiny-skia's transparency.
+
+### How
+
+- **Compositor:** v2's `hocuspanda --backend headless --renderer gles --render-node /dev/dri/renderD128 --output 1920x1080 --no-xwayland`.
+  - It draws with GLES on an Intel laptop GPU, with Mesa. It offers linux-dmabuf v4, whose feedback names that GPU as the main device.
+  - `--render-node` is new in this change. The machine also has an NVIDIA GPU, and the headless backend used to take the first GPU EGL lists, which was the NVIDIA one.
+  - It ran in a fresh `/tmp/hp-XXXX` runtime dir with a fresh HOME, XDG_CONFIG_HOME and XDG_CACHE_HOME, and no session bus (`env -i`).
+- **Client:** `bar-spike` from the spike's branch, release build. The copy used had two knobs added:
+  - `BAR_AUTO=wave|form` with `BAR_AUTO_MS` starts the animation on a timer, since v2 has no control socket to send the bar keys. The waves ran back to back every 600 ms, and the form switched every 300 ms.
+  - `BAR_LOG=1` prints wgpu's and iced's logs, which name the adapter.
+- **Measures:**
+  - CPU is the bar's `utime + stime` from `/proc/<pid>/stat`, over 6 s of waves (10), 3 s of switches (10), or 30 s at rest, plus the per-thread split. Memory is `VmRSS` and `Threads`.
+  - Frames are the bar's draws in its trace (`BAR_TRACE=1`), counted in each animation's 600 or 240 ms. A frame is over budget when it comes more than 25 ms (1.5 refresh periods) after the previous one.
+  - Start is the bar's first draw after `main()`, five starts against a running compositor.
+  - Screenshots come from the headless output (`Headless::screenshot`), taken by a throwaway program on the compositor's harness.
+- **The output's pace:** the headless backend draws a frame one period (16.7 ms) after something changed, here the bar's commit, not on a fixed clock. That makes frames 17.5–18 ms apart, at most 34 per 600 ms and 13–14 per 240 ms. That pace is the ceiling here, not 36 and 14.4.
+
+### Numbers
+
+Each wgpu row names the adapter wgpu picked, as its log shows. lavapipe was forced with `VK_DRIVER_FILES=…/lvp_icd.json` and no EGL vendor.
+
+| Renderer (adapter) | Start | Rest, 30 s | Memory | Wave (600 ms) | Form switch (240 ms) |
+|---|---|---|---|---|---|
+| wgpu, Vulkan, Intel iGPU (`WGPU_POWER_PREF=low`) | 145–217 ms; **2.2 s** when the NVIDIA GPU sleeps | 50 ms (0.17 %) | 225 MB, 34 threads | 33–34 frames, 0 of 327 over budget, max 18.7 ms; **24 ms** CPU per wave, 0.7 ms per frame | 14 frames, 0 of 143 over, max 19.1 ms; 15 ms CPU per switch |
+| the same, only Intel's Vulkan driver loaded | **59 ms** | 40 ms (0.13 %) | **118–125 MB**, 34 threads | 33–35 frames, 0 of 329 over, max 18.8 ms; 27 ms per wave | 14 frames, 0 of 143 over; 14 ms per switch |
+| wgpu, Vulkan, NVIDIA dGPU (iced's default) | 264–344 ms awake; 2.25 s asleep | 160 ms (0.53 %) | 333 MB, 35 threads | 27–33 frames, 0 of 288 over, max 23 ms; 22 ms per wave | 13–14 frames, 0 of 139 over; 16 ms per switch |
+| wgpu, lavapipe (software Vulkan) | 44–64 ms | 1.34 s (4.5 %) | 144 MB, 71 threads | 24–25 frames, **91 of 231 over**; **1.5 s** per wave (2.5 cores, 22 llvmpipe threads) | 11–12 frames, 8 of 111 over; 0.41 s per switch |
+| tiny-skia (CPU) | 12–16 ms | 0.53–0.74 s (1.8–2.5 %) | 17 MB, 24 threads | 14–20 frames, **176 of 176 over**, 31 ms apart; 0.28 s per wave (47 % of a core), 15 ms per frame | 9–11 frames, 46 of 100 over; 94 ms per switch |
+
+The compositor itself took 90–200 ms of CPU for each run of 10 waves.
+
+**Against the spike's lavapipe numbers:**
+
+- **lavapipe:** the spike measured 12.5 s of CPU for 10 waves, 300 MB with 117 threads, and a ~230 ms start. Here it is 15 s, 144 MB with 71 threads, and 44–64 ms. The cost of the animation is the same, but the process is lighter.
+- **Startup:** with only lavapipe's driver loaded, the bar starts in 44–64 ms. Most of the spike's 230 ms was the Vulkan loader opening every installed driver (finding 2).
+- **GPU:** 10 waves cost 0.24–0.27 s of the bar's CPU, against 12.5–15 s on lavapipe.
+
+### What it found
+
+1. **iced picks the discrete GPU.**
+   - iced 0.14 asks wgpu for `PowerPreference::HighPerformance` unless `WGPU_POWER_PREF` says otherwise. On a laptop with two GPUs, the bar then draws on the NVIDIA one, while the compositor composites on the Intel one.
+   - On the NVIDIA GPU, frames are drawn on one GPU and composited on the other. The memory is 333 MB, and the NVIDIA GPU never goes back to sleep while the bar runs (its runtime power state stayed `active`).
+   - With `WGPU_POWER_PREF=low` the bar uses the Intel GPU, and the NVIDIA one suspends again about 20 s after the bar starts.
+2. **wgpu wakes every GPU at start.**
+   - Creating a Vulkan instance loads every installed driver, and the NVIDIA one wakes its GPU from runtime suspend. That holds even when the Intel GPU is then picked.
+   - The bar's first draw then comes after 2.2 s instead of 0.15–0.2 s, and the unused driver adds about 100 MB to the process.
+   - Loading only the compositor's GPU's driver gives a first draw in 59 ms and 118 MB. The variables are `VK_DRIVER_FILES` or `VK_LOADER_DRIVERS_SELECT` for Vulkan, and `__EGL_VENDOR_LIBRARY_FILENAMES` for wgpu's GL backend.
+3. **A 10-bit surface with 2-bit alpha.**
+   - With `web-colors`, iced takes the first non-sRGB format the surface offers. With Mesa on the Intel GPU, that is `Rgb10a2Unorm`: dmabufs in `ABGR2101010`, as `WAYLAND_DEBUG` shows (`create_immed(…, 808665665, …)`).
+   - Its alpha has four levels, so translucent parts are blended with an alpha rounded to thirds. Over the flat dark desktop, the error is 1–5 levels against the same bar in `Rgba8Unorm` (the NVIDIA-only setup): 1 px inside the glowing edge, (45,41,40) against (41,36,35). Over bright windows it would show more.
+   - The format is not a setting in iced 0.14. Preferring an 8-bit-alpha format (`Rgba8Unorm`/`Bgra8Unorm`) is a few lines in `iced_wgpu`'s compositor, as a patch or upstream.
+4. **tiny-skia is still opaque, and its glow is off.**
+   - softbuffer 0.4.8, which presents tiny-skia's pixels on Wayland, creates its `wl_shm` buffers as `Xrgb8888`, a constant in `src/backends/wayland/buffer.rs`. tiny-skia already writes premultiplied alpha into that byte.
+   - A copy of softbuffer with `Argb8888` in its place (two lines, used through `[patch.crates-io]`) makes the glow's room transparent: 40 px left of the bar, (14,15,18), the desktop, instead of black.
+   - What that fix then shows: iced_tiny_skia draws the bar's outer shadow far stronger than iced_wgpu does, (230,169,70) against (65,52,30) 1 px outside the bar. Its shadow code is not the wgpu shader's; not investigated further.
+   - Fixing the alpha alone is not enough. tiny-skia also cannot hold the output's pace through the wave: 31 ms between frames, 47 % of a core.
+
+![The halo at rest, left to right: wgpu in Rgba8Unorm, wgpu in Rgb10a2Unorm, tiny-skia as shipped (Xrgb8888), tiny-skia with softbuffer patched to Argb8888](spike-iced/gpu-renderers.png)
+
+### In the VM
+
+The VM is the Debian testing VM of `scripts/vm/debian.sh`: 4 vCPUs, and a virtio GPU without 3D, so everything is drawn in software. `mesa-vulkan-drivers` was installed in it. The compositor ran headless (`--renderer auto`), drawing GLES on llvmpipe, and wgpu picked lavapipe by itself.
+
+| Renderer | Start | Rest, 30 s | Memory | Wave (600 ms) | Form switch (240 ms) |
+|---|---|---|---|---|---|
+| wgpu on lavapipe | 67–125 ms | 0.53 s (1.8 %) | 169 MB, 26 threads | 20–21 frames, all 199 over budget; 0.74 s per wave (1.2 of the 4 cores) | 11 frames, 8 of 110 over; 0.19 s per switch |
+| tiny-skia | 4–6 ms | 0.62 s (2.1 %) | 17.6 MB, 6 threads | 19–20 frames, all 185 over; 0.27 s per wave (45 % of a core) | 10–11 frames, 44 of 102 over; 92 ms per switch |
+
+The compositor's own llvmpipe drawing took a further 0.25–0.58 s per run. That is the fallback's cost: neither software path holds the wave's pace. tiny-skia costs a third of lavapipe's CPU and a tenth of its memory for the same frames.
+
+### What it means for the bar
+
+See [tech-choices](tech-choices.md#the-bars-renderer-30) for the decision; in short:
+
+- wgpu on the compositor's GPU;
+- the shell loads only that GPU's driver and asks for low power;
+- an 8-bit-alpha surface format;
+- in software, tiny-skia with its alpha fixed and the wave not played.
+
 ## Not tested
 
-- GPU rendering, frame budgets at the refresh rate, and memory on a GPU. The compositor offers no dmabuf, and building anvil was refused by the permission system.
+- ~~GPU rendering, frame budgets at the refresh rate, and memory on a GPU.~~ Measured since: see "Measured on a GPU (3.0)". Still not measured: a real screen's vblank (the tty backend), and a 2× output.
 - An input method, end to end.
 - A screen reader. There is no tree to read; Orca and accerciser are not installed, and I did not ask to install them.
 - Blur: estimated only.

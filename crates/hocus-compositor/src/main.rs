@@ -42,6 +42,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = RendererArg::Auto)]
     renderer: RendererArg,
 
+    /// The GPU the headless renderer draws on, by its render node
+    /// (/dev/dri/renderD*). Default: the first GPU that has one.
+    #[arg(long, value_name = "PATH")]
+    render_node: Option<PathBuf>,
+
     /// Do not start XWayland: X11 applications will not run.
     #[arg(long)]
     no_xwayland: bool,
@@ -118,6 +123,7 @@ fn main() -> ExitCode {
                     RendererArg::Gles => RendererChoice::Gles,
                     RendererArg::Pixman => RendererChoice::Pixman,
                 },
+                render_node: args.render_node,
             }),
         },
         runtime_dir: args.runtime_dir,
