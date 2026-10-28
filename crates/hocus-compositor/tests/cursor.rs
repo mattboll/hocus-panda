@@ -52,6 +52,7 @@ fn compositor(scale: f64, theme: Option<&tempfile::TempDir>) -> anyhow::Result<H
         HeadlessConfig {
             outputs: vec![OutputSpec::new(1920, 1080).scale(scale)],
             renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
         },
         config,
     )
