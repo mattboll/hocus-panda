@@ -183,10 +183,31 @@ impl State {
                 }
                 FilterResult::Forward
             });
+        if state == KeyState::Released && self.switcher_repeat.is_some_and(|(c, _)| c == code) {
+            self.stop_switcher_repeat();
+        }
         match kept {
             Some(Kept::Vt(vt)) => self.switch_vt(vt),
-            Some(Kept::Shortcut(action)) => self.run_action(action),
-            Some(Kept::Switch(key)) => self.switcher_key(key),
+            Some(Kept::Shortcut(action)) => {
+                self.run_action(action);
+                // Alt+Tab held: Tab held steps on (§11).
+                if let Action::SwitchWindows { backward } = action {
+                    let key = if backward {
+                        SwitchKey::Previous
+                    } else {
+                        SwitchKey::Next
+                    };
+                    self.repeat_switcher_key(code, key);
+                }
+            }
+            Some(Kept::Switch(key)) => {
+                // Another key stops the one held, as in an application.
+                self.stop_switcher_repeat();
+                self.switcher_key(key);
+                if matches!(key, SwitchKey::Next | SwitchKey::Previous) {
+                    self.repeat_switcher_key(code, key);
+                }
+            }
             Some(Kept::Release) | None => {}
         }
         // Alt let go: Alt+Tab goes to its selection.
