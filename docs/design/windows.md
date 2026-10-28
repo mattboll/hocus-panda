@@ -125,8 +125,11 @@ sits just below it.
   6, magnetic edges): within 12 px of another window's edge, at the gap
   or in line, or of the work area's, flush. Dragging on frees them. The
   windows that follow a seam's handle do not pull.
-- Snapped and maximised windows resize too. A maximised window resized
-  floats.
+- Snapped and maximised windows resize too, and resized alone they
+  float: a maximised window, or a half or a quarter by any of its edges
+  (an outer one, or one with no snapped window across it), leaves its
+  zone once its size changes. Only a seam's handle (below) resizes
+  snapped windows and keeps them snapped.
 - A **snapped pair** (two snapped windows side by side, or one above the
   other, facing each other across the gap):
   - Dragging their shared edge resizes **only the window grabbed**, like
@@ -415,3 +418,6 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
    the same-numbered desktop, floating ones at the same place across it;
    they go back when that screen returns unless the user placed them
    meanwhile (#347).
+9. A half or a quarter resized from any edge leaves its zone and floats,
+   as a maximised window does; only a seam's handle resizes snapped
+   windows and keeps them snapped (#352).
