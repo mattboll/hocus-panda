@@ -122,6 +122,67 @@ fn with_reduced_motion_the_form_changes_at_once() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A left press and its release at (`x`, `y`); whether the press went on to
+/// a client.
+fn click(hp: &mut Headless, x: f64, y: f64) -> bool {
+    hp.pointer_move(x, y);
+    hp.button(BTN_LEFT, true);
+    let forwarded = hp.pointer_grabbed();
+    hp.button(BTN_LEFT, false);
+    forwarded
+}
+
+#[test]
+fn a_press_on_the_bars_edge_switches_its_form_and_no_client_sees_it() -> anyhow::Result<()> {
+    let mut hp = start(&["1920x1080"], reduced())?;
+    assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Full));
+    // Pushed against the screen's edge, straight from the middle of the
+    // screen: no motion inside the bar before the press.
+    hp.pointer_move(900.0, 500.0);
+    let forwarded = click(&mut hp, 1919.0, 500.0);
+    assert!(!forwarded, "the press reached a client");
+    assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));
+    assert_eq!(hp.work_area().map(|a| a.right()), Some(1920 - 8 - 56 - 8));
+    // The bar's outer edge is 8 px from the screen's: 4 px inside it.
+    assert!(!click(&mut hp, f64::from(1920 - 8 - 4), 500.0));
+    assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Full));
+    // In the strip, above the bar's top.
+    assert!(!click(&mut hp, 1915.0, 2.0));
+    assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));
+    // 10 px inside: the bar's own, not its edge.
+    click(&mut hp, f64::from(1920 - 8 - 10), 500.0);
+    assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));
+    Ok(())
+}
+
+#[test]
+fn with_a_shell_on_the_cpu_the_space_and_the_windows_switch_at_once() -> anyhow::Result<()> {
+    use std::io::Write;
+    let mut hp = start(&["1920x1080"], Config::default())?;
+    open(&mut hp, "beside", (600, 400))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
+    wait(&mut hp, Duration::from_millis(300))?;
+    // A shell that says it draws on the CPU.
+    let mut socket = hp.socket().as_os_str().to_owned();
+    socket.push(".shell");
+    let mut shell = std::os::unix::net::UnixStream::connect(socket)?;
+    shell.write_all(b"software\n")?;
+    let told = hp.dispatch_until(WAIT, Headless::shell_on_cpu)?;
+    assert!(told, "the compositor did not read the shell's line");
+    click(&mut hp, 1919.0, 500.0);
+    assert_eq!(hp.bars()[0].1, BarForm::Mini);
+    assert_eq!(hp.bars()[0].2, 56.0, "the bar is at its new width");
+    let area = Rect::new(8, 8, 1920 - 8 - 56 - 8 - 8, 1064);
+    assert_eq!(hp.work_area(), Some(area));
+    let half = (area.width - 8) / 2;
+    assert_eq!(
+        hp.drawn_rect("beside"),
+        Some(Rect::new(8 + half + 8, 8, half, 1064)),
+        "the window is drawn where it goes"
+    );
+    Ok(())
+}
+
 #[test]
 fn the_bar_leaves_with_its_screen_and_comes_back_with_it() -> anyhow::Result<()> {
     let mut hp = start(&["2560x1600@1", "1366x768"], Config::default())?;
@@ -189,7 +250,7 @@ fn shell_program() -> Option<PathBuf> {
 }
 
 #[test]
-fn the_shell_draws_the_bar_switches_on_a_click_at_the_edge_and_rests() -> anyhow::Result<()> {
+fn the_shell_draws_the_bar_as_wide_as_its_form_and_rests() -> anyhow::Result<()> {
     let Some(shell) = shell_program() else {
         eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
         return Ok(());
@@ -207,25 +268,38 @@ fn the_shell_draws_the_bar_switches_on_a_click_at_the_edge_and_rests() -> anyhow
         hp.shell_connected() && hp.bar_commits() > 0
     })?;
     assert!(drawn, "the shell drew no bar");
+    // Its surface is the bar, 8 px from the screen's edges: nothing
+    // transparent around it.
+    let surface = |width| {
+        vec![(
+            "HEADLESS-1".to_owned(),
+            Rect::new(1920 - 8 - width, 8, width, 1064),
+        )]
+    };
+    let placed = hp.dispatch_until(WAIT, |hp| hp.bar_surfaces() == surface(196))?;
+    assert!(placed, "{:?}", hp.bar_surfaces());
     // A window beside the bar.
     open(&mut hp, "beside", (600, 400))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
     wait(&mut hp, Duration::from_millis(300))?;
-    // Into the bar, then against the screen's edge, and a click.
-    hp.pointer_move(1800.0, 500.0);
+    // Against the screen's edge, and a click: the compositor's, not the
+    // shell's.
     hp.pointer_move(1919.0, 500.0);
-    wait(&mut hp, Duration::from_millis(100))?;
     hp.button(BTN_LEFT, true);
+    assert!(!hp.pointer_grabbed(), "the press reached the shell");
     hp.button(BTN_LEFT, false);
-    let switched = hp.dispatch_until(WAIT, |hp| bar(hp).map(|b| b.1) == Some(BarForm::Mini))?;
-    assert!(switched, "{:?}", hp.bars());
+    assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));
     let area = Rect::new(8, 8, 1920 - 8 - 56 - 8 - 8, 1064);
     assert_eq!(hp.work_area(), Some(area));
     let half = (area.width - 8) / 2;
     common::wait_for_rect(&mut hp, "beside", Rect::new(8 + half + 8, 8, half, 1064))?;
-    // A click in the bar, off its edge, does nothing.
+    let narrowed = hp.dispatch_until(WAIT, |hp| hp.bar_surfaces() == surface(56))?;
+    assert!(narrowed, "{:?}", hp.bar_surfaces());
+    // A click in the bar, off its edge, goes to the shell and switches
+    // nothing.
     hp.pointer_move(1880.0, 500.0);
     hp.button(BTN_LEFT, true);
+    assert!(hp.pointer_grabbed());
     hp.button(BTN_LEFT, false);
     wait(&mut hp, Duration::from_millis(500))?;
     assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));

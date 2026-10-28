@@ -263,7 +263,6 @@ impl State {
 
     fn shell_says(&mut self, message: ToCompositor) {
         match message {
-            ToCompositor::Toggle { output } => self.toggle_bar(&output),
             ToCompositor::Software => {
                 tracing::info!("the shell draws on the CPU: no glass behind its bars");
                 self.shell.software = true;

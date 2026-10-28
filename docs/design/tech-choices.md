@@ -178,11 +178,13 @@ things the bar's slice must do:
    - In that mode the bar plays no wave and shows the glow without its
      fade, as reduced motion does: tiny-skia does not hold the pace either
      (31 ms between frames). It costs 17 MB and starts in 5–15 ms.
-4. **Fix tiny-skia's transparency before relying on it.** (Done in 3.1:
-   `vendor/softbuffer`, through `[patch.crates-io]`.)
+4. **Fix tiny-skia's transparency before relying on it.** (Done in 3.1
+   with a patched copy of softbuffer, then dropped in 3.1b: the bar's
+   surface no longer has a transparent strip, and the compositor cuts its
+   corners. An outer glow drawn on the CPU would need it again.)
    - softbuffer 0.4.8 presents `Xrgb8888` buffers on Wayland, so everything
      transparent turns black. Presenting `Argb8888` is a two-line change,
-     carried as a patched softbuffer until upstream offers it.
+     to carry as a patched softbuffer until upstream offers it.
    - With it, tiny-skia's outer shadow shows much stronger than wgpu's. The
      glow then needs drawing in our own canvas (the inner glow already is),
      or a fix in `iced_tiny_skia`.

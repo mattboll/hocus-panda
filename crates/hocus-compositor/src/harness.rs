@@ -223,6 +223,52 @@ impl Headless {
         self.app.state.panel.commits
     }
 
+    /// The bars' surfaces as the shell placed them: their screen, and
+    /// where they are (global).
+    pub fn bar_surfaces(&self) -> Vec<(String, Rect)> {
+        let state = &self.app.state;
+        let mut surfaces = Vec::new();
+        for output in state.space.outputs() {
+            let Some(origin) = state.space.output_geometry(output).map(|g| g.loc) else {
+                continue;
+            };
+            let map = smithay::desktop::layer_map_for_output(output);
+            for layer in map.layers() {
+                if layer.namespace() != hocus_link::NAMESPACE {
+                    continue;
+                }
+                if let Some(g) = map.layer_geometry(layer) {
+                    let rect =
+                        Rect::new(origin.x + g.loc.x, origin.y + g.loc.y, g.size.w, g.size.h);
+                    surfaces.push((output.name(), rect));
+                }
+            }
+        }
+        surfaces
+    }
+
+    /// Where `app_id`'s window is drawn now: on its way, or where it is.
+    pub fn drawn_rect(&self, app_id: &str) -> Option<Rect> {
+        let state = &self.app.state;
+        let id = self
+            .placements()
+            .into_iter()
+            .find(|p| p.app_id.as_deref() == Some(app_id))?
+            .id;
+        let r = state.visual_rect(id, state.now())?;
+        Some(Rect::new(
+            r.loc.x.round() as i32,
+            r.loc.y.round() as i32,
+            r.size.w.round() as i32,
+            r.size.h.round() as i32,
+        ))
+    }
+
+    /// Whether the shell said it draws on the CPU.
+    pub fn shell_on_cpu(&self) -> bool {
+        self.app.state.shell.software
+    }
+
     /// Whether the shell is connected.
     pub fn shell_connected(&self) -> bool {
         self.app.state.shell_linked()
@@ -453,6 +499,16 @@ impl Headless {
             .map(|p| p.current_location())
             .unwrap_or_default();
         (at.x, at.y)
+    }
+
+    /// Whether a press went on to a client: the seat holds the pointer in
+    /// a click grab from a press it forwards until its release.
+    pub fn pointer_grabbed(&self) -> bool {
+        self.app
+            .state
+            .seat
+            .get_pointer()
+            .is_some_and(|p| p.is_grabbed())
     }
 
     /// Output `name` goes, as a screen unplugged.

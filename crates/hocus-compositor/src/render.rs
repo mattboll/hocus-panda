@@ -63,6 +63,8 @@ render_elements! {
     Cursor = CursorElement<R>,
     /// Layer surfaces.
     Surface = WaylandSurfaceRenderElement<R>,
+    /// The bar's surface drawn on the CPU, cut to its rounded corners.
+    Bar = Rounded<WaylandSurfaceRenderElement<R>>,
     Window = WindowSurface<R>,
     Frame = FramePiece<R>,
     Shadow = ShadowPiece<R>,
@@ -428,7 +430,17 @@ impl State {
                 let loc = geometry.loc.to_physical_precise_round(scale);
                 let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                     AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, 1.0);
-                out.extend(surfaces.into_iter().map(OutputElements::Surface));
+                // The CPU renderer's buffers have no alpha: what the bar
+                // leaves out at its corners would show black.
+                if self.shell.software && layer.namespace() == hocus_link::NAMESPACE {
+                    let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
+                    let radius = (hocus_link::RADIUS * scale).round() as i32;
+                    out.extend(surfaces.into_iter().map(|e| {
+                        OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))
+                    }));
+                } else {
+                    out.extend(surfaces.into_iter().map(OutputElements::Surface));
+                }
             }
         };
         // The desktops' dots and Alt+Tab, over everything.

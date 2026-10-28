@@ -1,8 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-# Patched copies of dependencies, built as dependencies only.
-exclude = ["vendor"]
 
 [workspace.package]
 version = "0.2.0"
@@ -35,7 +33,3 @@ opt-level = 3
 [profile.dev.package.smithay]
 opt-level = 3
 debug-assertions = false
-
-# The shell's CPU renderer presents transparent buffers (vendor/softbuffer/PATCHED.md).
-[patch.crates-io]
-softbuffer = { path = "vendor/softbuffer" }

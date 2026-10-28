@@ -8,10 +8,10 @@
 //! draws the tint over that blur, or an opaque background when there is no
 //! blur. The line between the two is `hocus-link`.
 //!
-//! The surface is as wide as the full bar and its margins whatever the
-//! form, so that it is never resized while the form switches; its input
-//! region is the bar and the strip at the screen's edge, where a click
-//! switches the form.
+//! Each bar's surface is the bar itself, 8 px from the screen's edges: as
+//! wide as its form, and as the full form while a switch is under way, so
+//! that the bar has room to move. The compositor takes the clicks on the
+//! bar's edge, which switch the form.
 
 mod renderer;
 
@@ -21,14 +21,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{
-    EDGE, EDGE_INSIDE, Form, NAMESPACE, RADIUS, SURFACE_WIDTH, ToCompositor, ToShell,
-};
+use hocus_link::{EDGE, Form, NAMESPACE, RADIUS, ToCompositor, ToShell};
 use iced::{
-    Background, Border, Color, Element, Event, Length, Padding, Point, Subscription, Task, Theme,
-    event,
+    Background, Border, Color, Element, Length, Subscription, Task, Theme,
     futures::{SinkExt, StreamExt, channel::mpsc},
-    gradient, mouse,
+    gradient,
     widget::{Space, container, row, space},
     window,
 };
@@ -132,6 +129,8 @@ struct Bar {
     form: Form,
     /// The form switch under way: from that width, since then.
     switch: Option<(f64, Instant)>,
+    /// Its surface's width, as last asked for.
+    surface: u32,
 }
 
 impl Bar {
@@ -150,6 +149,17 @@ impl Bar {
             now.saturating_duration_since(since) < hocus_link::SWITCH + AHEAD
         })
     }
+
+    /// The width its surface needs: the full form's while it switches,
+    /// whichever way, else its form's.
+    fn surface_width(&self) -> u32 {
+        let form = if self.switch.is_some() {
+            Form::Full
+        } else {
+            self.form
+        };
+        form.width().unsigned_abs()
+    }
 }
 
 #[derive(Debug)]
@@ -161,7 +171,6 @@ struct Shell {
     software: bool,
     look: Look,
     bars: HashMap<window::Id, Bar>,
-    pointer: HashMap<window::Id, Point>,
     now: Instant,
 }
 
@@ -172,9 +181,6 @@ enum Message {
     FromCompositor(String),
     Unlinked,
     Frame,
-    Opened(window::Id),
-    Moved(window::Id, Point),
-    Pressed(window::Id),
 }
 
 impl Shell {
@@ -188,7 +194,6 @@ impl Shell {
                 motion: !software,
             },
             bars: HashMap::new(),
-            pointer: HashMap::new(),
             now: Instant::now(),
         };
         // Alone: one full bar where the compositor puts it.
@@ -201,23 +206,13 @@ impl Shell {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let events = event::listen_with(|event, _, id| match event {
-            Event::Window(window::Event::Opened { .. }) => Some(Message::Opened(id)),
-            Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                Some(Message::Moved(id, position))
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                Some(Message::Pressed(id))
-            }
-            _ => None,
-        });
-        let mut subscriptions = vec![events];
+        let mut subscriptions = Vec::new();
         if let Some(socket) = &self.socket {
             subscriptions.push(Subscription::run_with(socket.clone(), link));
         }
-        // Frames only while a bar moves: at rest, nothing is drawn.
-        let now = Instant::now();
-        if self.bars.values().any(|b| b.moving(now)) {
+        // Frames only while a bar moves, and one past its switch's end,
+        // which narrows its surface: at rest, nothing is drawn.
+        if self.bars.values().any(|b| b.switch.is_some()) {
             subscriptions.push(window::frames().map(|_| Message::Frame));
         }
         Subscription::batch(subscriptions)
@@ -247,41 +242,16 @@ impl Shell {
             Message::Frame => {
                 // Past the switch's end: back to its form for good.
                 let now = self.now;
-                for bar in self.bars.values_mut() {
-                    if bar.switch.is_some() && !bar.moving(now) {
+                let ended: Vec<window::Id> = self
+                    .bars
+                    .iter_mut()
+                    .filter(|(_, bar)| bar.switch.is_some() && !bar.moving(now))
+                    .map(|(id, bar)| {
                         bar.switch = None;
-                    }
-                }
-                Task::none()
-            }
-            Message::Opened(id) => self.input_region(id),
-            Message::Moved(id, p) => {
-                self.pointer.insert(id, p);
-                Task::none()
-            }
-            Message::Pressed(id) => {
-                let (Some(bar), Some(p)) = (self.bars.get(&id), self.pointer.get(&id)) else {
-                    return Task::none();
-                };
-                // The strip at the screen's edge and the bar's first pixels
-                // (§3): the screen's edge stops the pointer there.
-                tracing::debug!(x = p.x, y = p.y, "pressed");
-                if p.x >= (SURFACE_WIDTH - EDGE - EDGE_INSIDE) as f32 {
-                    let toggle = ToCompositor::Toggle {
-                        output: bar.output.clone(),
-                    };
-                    match &self.to_compositor {
-                        Some(sender) => {
-                            let _ = sender.unbounded_send(toggle.to_string());
-                        }
-                        // Alone: the shell switches by itself.
-                        None => {
-                            let form = bar.form.other();
-                            return self.set_form(id, form, Some(self.now));
-                        }
-                    }
-                }
-                Task::none()
+                        *id
+                    })
+                    .collect();
+                Task::batch(ended.into_iter().map(|id| self.fit(id)))
             }
             _ => Task::none(),
         }
@@ -316,23 +286,31 @@ impl Shell {
                     .collect();
                 Task::batch(gone.into_iter().map(|id| {
                     self.bars.remove(&id);
-                    self.pointer.remove(&id);
                     Task::done(Message::RemoveWindow(id))
                 }))
             }
         }
     }
 
-    /// A bar's surface on `output`: against its right edge, full height.
+    /// A bar's surface on `output`: against its right edge, its height
+    /// less the margins.
     fn open_bar(&mut self, option: OutputOption, output: String, form: Form) -> Task<Message> {
         tracing::info!(output, form = form.name(), "a bar");
+        let bar = Bar {
+            output,
+            form,
+            switch: None,
+            surface: 0,
+        };
+        let width = bar.surface_width();
         let settings = NewLayerShellSettings {
-            size: Some((SURFACE_WIDTH as u32, 0)),
+            size: Some((width, 0)),
             layer: Layer::Top,
             anchor: Anchor::Right | Anchor::Top | Anchor::Bottom,
             // The compositor keeps the bar's space itself, shell or not.
             exclusive_zone: Some(0),
-            margin: Some((0, 0, 0, 0)),
+            // Top, right, bottom, left.
+            margin: Some((EDGE, EDGE, EDGE, 0)),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option,
             events_transparent: false,
@@ -342,9 +320,8 @@ impl Shell {
         self.bars.insert(
             id,
             Bar {
-                output,
-                form,
-                switch: None,
+                surface: width,
+                ..bar
             },
         );
         open
@@ -372,22 +349,22 @@ impl Shell {
             _ => None,
         };
         bar.form = form;
-        self.input_region(id)
+        self.fit(id)
     }
 
-    /// The bar's input region: the bar and the strip at the screen's edge,
-    /// as the form will be; the rest of the surface lets clicks through.
-    fn input_region(&self, id: window::Id) -> Task<Message> {
-        let Some(bar) = self.bars.get(&id) else {
+    /// Bar `id`'s surface to the width it needs now, if it changed.
+    fn fit(&mut self, id: window::Id) -> Task<Message> {
+        let Some(bar) = self.bars.get_mut(&id) else {
             return Task::none();
         };
-        let width = bar.form.width();
-        Task::done(Message::SetInputRegion {
+        let width = bar.surface_width();
+        if bar.surface == width {
+            return Task::none();
+        }
+        bar.surface = width;
+        Task::done(Message::SizeChange {
             id,
-            callback: iced_layershell::actions::ActionCallback::new(move |region| {
-                // As tall as any screen: the surface cuts it.
-                region.add(SURFACE_WIDTH - EDGE - width, 0, width + EDGE, 1 << 20);
-            }),
+            size: (width, 0),
         })
     }
 
@@ -418,14 +395,7 @@ impl Shell {
                 },
                 ..container::Style::default()
             });
-        let edge = EDGE as f32;
         container(row![space::horizontal(), column])
-            .padding(Padding {
-                top: edge,
-                right: edge,
-                bottom: edge,
-                left: 0.0,
-            })
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
