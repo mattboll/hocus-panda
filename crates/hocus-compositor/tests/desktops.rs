@@ -471,11 +471,20 @@ fn panel_lines(scale: f64) -> anyhow::Result<(Vec<u32>, Vec<u32>)> {
     // Odd sizes, so that the panel's edges fall between pixels.
     let mut screen = OutputSpec::new(1919, 1201);
     screen.scale = scale;
-    let mut hp = Headless::start(HeadlessConfig {
-        outputs: vec![screen],
-        renderer: RendererChoice::Pixman,
-        ..HeadlessConfig::default()
-    })?;
+    // Seen through the panel, the default background's gradient would
+    // vary on its own.
+    let config = hocus_compositor::Config {
+        plain_background: true,
+        ..hocus_compositor::Config::default()
+    };
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![screen],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+    )?;
     open(&mut hp, "test.a", (400, 300))?;
     open(&mut hp, "test.b", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_H]);
