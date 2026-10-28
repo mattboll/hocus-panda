@@ -54,6 +54,7 @@ impl Headless {
             runtime_dir: None,
             spawn: Vec::new(),
             xwayland: false,
+            session: false,
             config,
         })?;
         Ok(Self {
@@ -173,6 +174,11 @@ impl Headless {
         let time = self.time;
         // XKB keycodes are evdev's plus 8.
         self.app.state.key(Keycode::new(code + 8), state, time);
+    }
+
+    /// Why the compositor was asked to end, if it was.
+    pub fn ending(&self) -> Option<crate::Ending> {
+        self.app.state.ending
     }
 
     /// Whether the backend made the linux-dmabuf global.
