@@ -16,6 +16,21 @@
 # repeat_delay = 200
 # repeat_rate = 25
 
+# [panel]
+# The bar: on the primary screen only ("primary"), or on every screen
+# ("all").
+# screens = "primary"
+# The primary screen, by connector name. Empty: the built-in panel (eDP,
+# LVDS, DSI) when it is connected, else the first screen. When it is
+# unplugged, the bar goes to a screen still there, and comes back with it.
+# output = ""
+# The bar's form: "full" (196 px), "mini" (56 px), or "auto": full on a
+# screen at least 1796 px wide (logical), mini otherwise, or as last chosen
+# there with a click on the bar's outer edge or Super+B (remembered in
+# ~/.local/state/hocuspanda/panel.toml). A screen may have its own, as
+# panel-form in its [outputs.NAME] section.
+# form = "auto"
+
 # Screens, by connector name. Without a scale, a screen takes 1, or 2
 # when it is denser than 192 dpi and stays at least 1280x800 at 2 (a
 # 15.6-inch 4K panel); never a fraction by itself. The journal names
@@ -27,6 +42,7 @@
 #
 #   [outputs.DP-2]
 #   scale = 1.25
+#   panel-form = "mini"
 
 # [shortcuts]
 # Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and
@@ -97,6 +113,8 @@
 # take-to-desktop-7 = "Super+Ctrl+Shift+7"
 # take-to-desktop-8 = "Super+Ctrl+Shift+8"
 # take-to-desktop-9 = "Super+Ctrl+Shift+9"
+# The bar's other form, on the screen under the pointer.
+# toggle-bar = "Super+B"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
@@ -113,10 +131,12 @@
 
 # [appearance]
 # Windows fade instead of moving, and do not wobble; desktops fade
-# instead of sliding.
+# instead of sliding; the bar changes its form at once.
 # reduced-motion = false
 # The focused window's rim is 2 px wide instead of 1.
 # high-contrast = false
+# The bar is opaque instead of glass over what is behind it.
+# reduce-transparency = false
 # The cursor theme (an Xcursor theme's directory name, in ~/.local/share/icons,
 # ~/.icons, /usr/share/icons…) and the cursor's size in logical pixels, from
 # 8 to 256. By default, XCURSOR_THEME's and XCURSOR_SIZE's, else the theme

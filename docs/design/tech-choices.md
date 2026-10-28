@@ -161,7 +161,9 @@ things the bar's slice must do:
      (`VK_LOADER_DRIVERS_SELECT` or `VK_DRIVER_FILES`, and the EGL vendor for
      wgpu's GL backend).
    - Measured: first draw in 59 ms, 118 MB.
-2. **An 8-bit-alpha surface.**
+2. **An 8-bit-alpha surface.** (Done in 3.1 without a patch: the
+   compositor starts the shell with Mesa's `vk_wsi_force_bgra8_unorm_first`,
+   and iced takes `Bgra8Unorm`.)
    - With `web-colors`, iced takes the first non-sRGB format, which is
      `Rgb10a2Unorm` (2-bit alpha) on Mesa.
    - A small patch to `iced_wgpu`'s format choice makes it prefer
@@ -176,7 +178,8 @@ things the bar's slice must do:
    - In that mode the bar plays no wave and shows the glow without its
      fade, as reduced motion does: tiny-skia does not hold the pace either
      (31 ms between frames). It costs 17 MB and starts in 5–15 ms.
-4. **Fix tiny-skia's transparency before relying on it.**
+4. **Fix tiny-skia's transparency before relying on it.** (Done in 3.1:
+   `vendor/softbuffer`, through `[patch.crates-io]`.)
    - softbuffer 0.4.8 presents `Xrgb8888` buffers on Wayland, so everything
      transparent turns black. Presenting `Argb8888` is a two-line change,
      carried as a patched softbuffer until upstream offers it.

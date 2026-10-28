@@ -2,7 +2,9 @@
 
 Status: draft, 2026-10-27, to be approved before any code. It describes
 what the prototype on the design canvas shows, in numbers. Where it and
-the prototype disagree, this document wins once approved.
+the prototype disagree, this document wins once approved. Sections 2 and
+3 (the empty column, its glass and its two forms) are built since
+2026-10-28 (3.1, issue #358): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -36,6 +38,10 @@ agents' tool (herdr): it signals and takes the user there.
 - One bar per output where the panel shows (setting `[panel] screens =
   "primary" | "all"`, default `primary`). Every visible bar shows the same
   halo.
+- The primary screen: the one `[panel] output` names when it is
+  connected, else the built-in panel (eDP, LVDS, DSI) when it is connected,
+  else the first screen. When that screen is unplugged, the bar goes to a
+  screen still there, and comes back with it.
 
 ## 3. Two forms
 
@@ -253,3 +259,70 @@ The light and neon themes give their own values for the same tokens.
 3. The colour and animation of the clock when the minute changes (later).
 4. What the bar shows when no agent tool is running at all (hide the
    agents group, or show "aucun agent").
+
+## As built
+
+### 3.1, the empty column (2026-10-28)
+
+What the approved mockup of 3.1 shows: the column of §2 with its glass
+(§13) and its rim, nothing inside, its two forms and the switch (§3),
+reduced transparency (§11) and reduced motion. The mockup's dashed slots
+are later slices'.
+
+- **Who does what.** The compositor decides where the bars are and in
+  which form, and keeps their space whether the shell runs or not, so that
+  nothing moves while the shell restarts. The shell (`hocuspanda-shell`,
+  iced 0.14 and iced_layershell) draws one layer surface per bar: 212 px
+  wide (the full bar and its margins) whatever the form, so it is never
+  resized while it switches, anchored right, top and bottom, with an
+  exclusive zone of 0. Its input region is the bar and the 8 px strip at
+  the screen's edge. They talk over a private socket (crate `hocus-link`,
+  which documents the lines). The compositor starts the shell once ready,
+  and again when it ends, after 0.5 s doubling up to 30 s while it keeps
+  ending within 30 s.
+- **The space kept** is the bar's final width as soon as a switch starts:
+  the work area is the screen less 8 px around, less the bar and 8 px on
+  the right. Windows snapped against it take their new zone at once and
+  are drawn moving to it along the bar's motion; a floating window whose
+  right edge touches the work area's keeps touching it.
+- **The switch in step.** The compositor and the shell compute the bar's
+  width from the same start on the same clock (`CLOCK_MONOTONIC`, sent
+  once with the new form) and the same curve: the compositor moves the
+  windows and the glass in its frames, the shell draws the bar in its own,
+  about one refresh ahead (what it draws shows a frame later). Nothing is
+  sent per frame, and the loop does no work per frame beyond drawing. A
+  switch reversed midway starts from where the bar is.
+- **The form** on a screen: `[outputs.NAME] panel-form`, else `[panel]
+  form`; on `auto` (the default), the form last chosen there with a click
+  or `Super+B`, else full from 1600 px left beside the full bar. A click's
+  or `Super+B`'s choice is remembered in
+  `$XDG_STATE_HOME/hocuspanda/panel.toml` when the screen's form is `auto`,
+  never in `config.toml`; with `full` or `mini` set there, a switch lasts
+  the session.
+- **The glass.** On GLES the compositor draws what is behind the bar (the
+  windows, the lower layers, the background) into a texture of its own
+  through a damage tracker, over the full bar's place and the blur's reach
+  (52 px, twice blur(26px)'s deviation) around it, and blurs it again only
+  when that changed: the first build's dual Kawase blur, its last pass
+  saturating by 1.35. It draws it under the shell's surface, cut to the bar's
+  rounded rectangle as the bar is at that frame. The shell draws `bar.bg`
+  (70 % to 78 %) and `bar.border` over it. With pixman, `[appearance]
+  reduce-transparency`, or a shell on the CPU, there is no blur and the
+  shell draws the opaque `#161B2A → #0E111C`.
+- **The renderer** (3.0): the shell is started with `WGPU_POWER_PREF=low`,
+  `VK_LOADER_DRIVERS_SELECT` naming the compositor's GPU's Vulkan driver,
+  Mesa's EGL vendor, and `vk_wsi_force_bgra8_unorm_first=true`, Mesa's
+  option that lists `Bgra8Unorm` first: iced then takes an 8-bit-alpha
+  surface without a patch to `iced_wgpu`. When wgpu's adapter is a CPU, or
+  the compositor has no GPU, the shell draws with tiny-skia, through a copy
+  of softbuffer that presents transparent buffers (`vendor/softbuffer`),
+  with the opaque look and no motion.
+- **At rest** neither the shell nor the compositor draws: no clock yet.
+- **The background.** Until wallpapers, the compositor draws the mockup's
+  night-blue gradient and its glows under everything, so that the glass
+  has something to show.
+- **Not built yet:** the glass's opaque fallback behind a maximised window
+  (§11), the bar's keyboard access (§11), the contents' cross-fade (§3,
+  nothing to fade yet), hover feedback on the edge strip (the mockup's
+  green tint is the mockup's own aid), and the blur's corners, which are
+  cut to whole pixels under the shell's antialiased rim.

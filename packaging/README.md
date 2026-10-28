@@ -7,6 +7,7 @@ What the package of Hocuspanda holds, and how it is built.
 | File | Where | Why |
 |---|---|---|
 | `hocuspanda` | `/usr/bin` | The compositor |
+| `hocuspanda-shell` | `/usr/bin` | The shell (the bar), which the compositor starts and restarts |
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
 | [`config.toml`](config.toml) | `/usr/share/doc/hocuspanda` | Every setting with its default, to copy to `~/.config/hocuspanda/` |
