@@ -58,6 +58,9 @@ const REST_SPEED: f64 = 6.0;
 const MESH_STEP: f64 = 16.0;
 const MESH_MAX: usize = 48;
 
+/// A picture kept by the renderer: its size and its texture.
+pub(crate) type Kept = (Size<i32, BufferCoords>, Rc<dyn Any>);
+
 /// A window bending.
 #[derive(Debug)]
 pub struct Jelly {
@@ -78,7 +81,7 @@ pub struct Jelly {
     last: Duration,
     /// The picture of the window, kept from frame to frame while its size
     /// stays: the renderer's texture, its size.
-    pub(crate) picture: RefCell<Option<(Size<i32, BufferCoords>, Rc<dyn Any>)>>,
+    pub(crate) picture: RefCell<Option<Kept>>,
     pub(crate) id: Id,
     commits: RefCell<CommitCounter>,
 }

@@ -149,8 +149,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
     } else {
-        let env = programs::Env::of(&state);
-        state.programs.ready(&env);
+        state.programs_ready();
     }
     tracing::info!(
         socket = %state.socket_path.display(),

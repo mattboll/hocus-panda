@@ -47,6 +47,7 @@ impl SeatHandler for State {
     /// The clipboard and the primary selection follow the keyboard: only
     /// the client with it may read them.
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocus>) {
+        tracing::debug!(?focused, "keyboard focus");
         let client = focused
             .and_then(|f| f.wl_surface())
             .and_then(|s| self.display_handle.get_client(s.id()).ok());

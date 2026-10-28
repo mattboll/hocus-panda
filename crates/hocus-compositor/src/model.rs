@@ -365,11 +365,25 @@ pub fn resized(
 
 /// Where a window dragged out of a zone goes: its size before it snapped,
 /// under the pointer at (`x`, `y`) at the same place across it (`along`,
-/// from 0 at its left to 1 at its right), and as far down as it was held.
-pub fn torn_off(restore: (i32, i32), along: f64, held_down: f64, x: f64, y: f64) -> (i32, i32) {
+/// from 0 at its left to 1 at its right), and as far down as it was held
+/// (`held_down` of its `height` then): a header stays under the pointer,
+/// and a point further down than the smaller window reaches keeps its
+/// share of the height.
+pub fn torn_off(
+    restore: (i32, i32),
+    along: f64,
+    (held_down, height): (f64, i32),
+    x: f64,
+    y: f64,
+) -> (i32, i32) {
     let left = x - along.clamp(0.0, 1.0) * f64::from(restore.0);
-    let top = y - held_down.clamp(0.0, f64::from(restore.1));
-    (left.round() as i32, top.round() as i32)
+    let restored = f64::from(restore.1);
+    let down = if held_down < restored {
+        held_down.max(0.0)
+    } else {
+        held_down / f64::from(height.max(1)) * restored
+    };
+    (left.round() as i32, (y - down).round() as i32)
 }
 
 /// What the keyboard asks of the focused window (§9).
@@ -778,7 +792,15 @@ mod tests {
     #[test]
     fn a_window_torn_off_a_zone_keeps_the_place_it_was_held_at() {
         // Held at a quarter of its width, 10 px down; 800 wide before.
-        assert_eq!(torn_off((800, 600), 0.25, 10.0, 1000.0, 300.0), (800, 290));
+        assert_eq!(
+            torn_off((800, 600), 0.25, (10.0, 1000), 1000.0, 300.0),
+            (800, 290)
+        );
+        // Held further down than it will reach: the same share of it.
+        assert_eq!(
+            torn_off((800, 600), 0.5, (900.0, 1000), 1000.0, 1000.0),
+            (600, 460)
+        );
     }
 
     #[test]

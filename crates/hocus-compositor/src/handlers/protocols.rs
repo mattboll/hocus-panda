@@ -59,8 +59,13 @@ impl XdgActivationHandler for State {
         self.activation_state.remove_token(&token);
         let window = self.window_for(&surface).and_then(|w| self.id_of(&w));
         tracing::debug!(allowed, ?window, "activation asked");
-        if let Some(id) = window {
-            self.activate(id, allowed);
+        match window {
+            Some(id) => self.activate(id, allowed),
+            // Asked before its first frame: it opens focused.
+            None if allowed && self.window_for(&surface).is_some() => {
+                self.activate_on_map.push(surface);
+            }
+            None => {}
         }
     }
 }

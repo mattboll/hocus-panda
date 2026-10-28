@@ -449,10 +449,25 @@ impl State {
     /// opens behind, and its activation token, if it shows one, brings it
     /// forward.
     fn takes_focus(&mut self, window: &Window) -> bool {
+        self.activate_on_map.retain(|s| s.is_alive());
+        if let Some(surface) = window.wl_surface()
+            && let Some(at) = self.activate_on_map.iter().position(|s| *s == *surface)
+        {
+            self.activate_on_map.remove(at);
+            return true;
+        }
+        let now = self.now();
+        // An X11 program the desktop started names its token.
+        if let Some(token) = window.x11_surface().and_then(|x| x.startup_id())
+            && let Some((made, valid)) = self.activation_tokens.remove(&token)
+            && valid
+            && now.saturating_sub(made) < SPAWN_FOCUS
+        {
+            return true;
+        }
         let Some(focused) = self.model.focused().and_then(|id| self.windows.get(&id)) else {
             return true;
         };
-        let now = self.now();
         if self
             .spawned_at
             .take()
@@ -705,6 +720,7 @@ impl State {
     /// Fullscreen over its whole output, or back.
     pub fn set_fullscreen(&mut self, id: WindowId, fullscreen: bool) {
         let mode = self.model.mode(id);
+        tracing::debug!(window = id.0, fullscreen, ?mode, "fullscreen");
         if fullscreen == (mode == Mode::Fullscreen) {
             // Still tell it: a client waits for a configure.
             if let Some(rect) = self.target_rect(id) {

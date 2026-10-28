@@ -101,15 +101,26 @@ impl Programs {
 
     /// The compositor is ready: the session is announced, and the commands
     /// waiting start.
-    pub fn ready(&mut self, env: &Env) {
+    pub fn ready(&mut self, env: &Env, mut token: impl FnMut() -> String) {
         if let Self::Waiting { commands, announce } = std::mem::take(self) {
             if announce {
                 crate::session::announce(env.clone());
             }
             for command in commands {
-                spawn(command, env.clone());
+                // Started with the session: its window may take the focus.
+                spawn(command, env.clone().with_activation(token()));
             }
         }
+    }
+}
+
+impl crate::State {
+    /// The compositor (and XWayland, when it runs) is ready: the programs
+    /// waiting start.
+    pub fn programs_ready(&mut self) {
+        let env = Env::of(self);
+        let mut programs = std::mem::take(&mut self.programs);
+        programs.ready(&env, || self.activation_token());
     }
 }
 
