@@ -21,6 +21,9 @@ pub struct Env {
     pub runtime_dir: PathBuf,
     pub socket: PathBuf,
     pub xdisplay: Option<u32>,
+    /// An activation token the program's first window may take the focus
+    /// with (`XDG_ACTIVATION_TOKEN`, `DESKTOP_STARTUP_ID`).
+    pub activation: Option<String>,
 }
 
 impl Env {
@@ -29,7 +32,13 @@ impl Env {
             runtime_dir: state.runtime_dir.clone(),
             socket: state.socket_path.clone(),
             xdisplay: state.xdisplay,
+            activation: None,
         }
+    }
+
+    pub fn with_activation(mut self, token: String) -> Self {
+        self.activation = Some(token);
+        self
     }
 
     /// `WAYLAND_DISPLAY`: the socket's name when it is in the runtime
@@ -58,6 +67,16 @@ impl Env {
             .env_remove("DISPLAY");
         if let Some(display) = self.display() {
             cmd.env("DISPLAY", display);
+        }
+        match &self.activation {
+            Some(token) => {
+                cmd.env("XDG_ACTIVATION_TOKEN", token)
+                    .env("DESKTOP_STARTUP_ID", token);
+            }
+            None => {
+                cmd.env_remove("XDG_ACTIVATION_TOKEN")
+                    .env_remove("DESKTOP_STARTUP_ID");
+            }
         }
         cmd
     }
@@ -200,6 +219,7 @@ mod tests {
             runtime_dir: PathBuf::from("/run/user/1000"),
             socket: PathBuf::from(socket),
             xdisplay: Some(1),
+            activation: None,
         };
         assert_eq!(env("/run/user/1000/hocus-0").wayland_display(), "hocus-0");
         assert_eq!(env("/tmp/hp/hocus-0").wayland_display(), "/tmp/hp/hocus-0");

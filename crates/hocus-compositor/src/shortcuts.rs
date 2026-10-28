@@ -7,7 +7,11 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Deserializer};
 use smithay::input::keyboard::{Keysym, ModifiersState, xkb};
 
-use crate::{State, programs};
+use crate::{
+    State,
+    model::{Side, Snap},
+    programs,
+};
 
 /// What a shortcut does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,6 +20,16 @@ pub enum Action {
     Terminal,
     /// Ends the session: the display manager comes back.
     LogOut,
+    /// Asks the focused window to close.
+    Close,
+    /// Minimises the focused window.
+    Minimize,
+    /// Brings back the window minimised last.
+    Unminimize,
+    /// The keys of windows.md §9 on the focused window.
+    Snap(Snap),
+    /// Focuses the window on that side.
+    FocusToward(i32, i32),
 }
 
 /// Modifiers and a key, as `Super+Shift+E`. The key is the one of the
@@ -110,6 +124,36 @@ pub struct Shortcuts {
     pub terminal: Option<Chord>,
     #[serde(deserialize_with = "chord")]
     pub log_out: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub close: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub minimize: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub unminimize: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub snap_left: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub snap_right: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub maximize: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub restore: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub quarter_up: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub quarter_down: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub quarter_left: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub quarter_right: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub focus_left: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub focus_right: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub focus_up: Option<Chord>,
+    #[serde(deserialize_with = "chord")]
+    pub focus_down: Option<Chord>,
 }
 
 impl Default for Shortcuts {
@@ -118,6 +162,21 @@ impl Default for Shortcuts {
         Self {
             terminal: chord("Super+Return"),
             log_out: chord("Super+Shift+E"),
+            close: chord("Super+Q"),
+            minimize: chord("Super+H"),
+            unminimize: chord("Super+Shift+H"),
+            snap_left: chord("Super+Left"),
+            snap_right: chord("Super+Right"),
+            maximize: chord("Super+Up"),
+            restore: chord("Super+Down"),
+            quarter_up: chord("Super+Shift+Up"),
+            quarter_down: chord("Super+Shift+Down"),
+            quarter_left: chord("Super+Shift+Left"),
+            quarter_right: chord("Super+Shift+Right"),
+            focus_left: chord("Super+Ctrl+Left"),
+            focus_right: chord("Super+Ctrl+Right"),
+            focus_up: chord("Super+Ctrl+Up"),
+            focus_down: chord("Super+Ctrl+Down"),
         }
     }
 }
@@ -128,6 +187,21 @@ impl Shortcuts {
         [
             (self.terminal, Action::Terminal),
             (self.log_out, Action::LogOut),
+            (self.close, Action::Close),
+            (self.minimize, Action::Minimize),
+            (self.unminimize, Action::Unminimize),
+            (self.snap_left, Action::Snap(Snap::Half(Side::Start))),
+            (self.snap_right, Action::Snap(Snap::Half(Side::End))),
+            (self.maximize, Action::Snap(Snap::Maximize)),
+            (self.restore, Action::Snap(Snap::Restore)),
+            (self.quarter_up, Action::Snap(Snap::QuarterTop)),
+            (self.quarter_down, Action::Snap(Snap::QuarterBottom)),
+            (self.quarter_left, Action::Snap(Snap::QuarterLeft)),
+            (self.quarter_right, Action::Snap(Snap::QuarterRight)),
+            (self.focus_left, Action::FocusToward(-1, 0)),
+            (self.focus_right, Action::FocusToward(1, 0)),
+            (self.focus_up, Action::FocusToward(0, -1)),
+            (self.focus_down, Action::FocusToward(0, 1)),
         ]
         .into_iter()
         .find_map(|(chord, action)| {
@@ -159,11 +233,22 @@ impl State {
     pub fn run_action(&mut self, action: Action) {
         tracing::info!(?action, "shortcut");
         match action {
-            Action::Terminal => programs::spawn_terminal(
-                self.config.programs.terminal.clone(),
-                programs::Env::of(self),
-            ),
+            Action::Terminal => {
+                // The window it opens takes the focus (§4).
+                self.spawned_at = Some(self.now());
+                let env = programs::Env::of(self).with_activation(self.activation_token());
+                programs::spawn_terminal(self.config.programs.terminal.clone(), env);
+            }
             Action::LogOut => self.end(Ending::LoggedOut),
+            Action::Close => self.close_focused(),
+            Action::Minimize => {
+                if let Some(id) = self.model.focused() {
+                    self.minimize(id);
+                }
+            }
+            Action::Unminimize => self.unminimize_last(),
+            Action::Snap(snap) => self.keyboard_snap(snap),
+            Action::FocusToward(dx, dy) => self.focus_toward(dx, dy),
         }
     }
 

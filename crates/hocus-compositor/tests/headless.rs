@@ -281,10 +281,11 @@ fn open(hp: &mut Headless, app_id: &'static str, size: (u32, u32)) -> anyhow::Re
 #[test]
 fn a_new_window_opens_at_the_centre_of_the_work_area() -> anyhow::Result<()> {
     let mut hp = compositor()?;
-    // 1920×1080, nothing reserved: 8 px in on every side.
-    assert_eq!(hp.work_area(), Some(Rect::new(8, 8, 1904, 1064)));
+    // 1920×1080: 8 px in on every side, and the full bar's place (196 px,
+    // 8 px from the edge) kept on the right.
+    assert_eq!(hp.work_area(), Some(Rect::new(8, 8, 1700, 1064)));
     let rect = open(&mut hp, "test.centre", (400, 300))?;
-    assert_eq!(rect, Rect::new(8 + 752, 8 + 382, 400, 300));
+    assert_eq!(rect, Rect::new(8 + 650, 8 + 382, 400, 300));
     // A new window has the focus, and its surface the keyboard.
     let window = &hp.windows()[0];
     assert!(window.focused && window.keyboard, "{window:?}");
@@ -357,12 +358,12 @@ fn a_bars_exclusive_zone_comes_off_the_work_area() -> anyhow::Result<()> {
     let mut hp = compositor()?;
     let _bar = client(hp.socket(), Some(Shows::Bar { height: 40 }))?;
     let shrunk = hp.dispatch_until(WAIT, |hp| {
-        hp.work_area() == Some(Rect::new(8, 48, 1904, 1024))
+        hp.work_area() == Some(Rect::new(8, 48, 1700, 1024))
     })?;
     assert!(shrunk, "work area: {:?}", hp.work_area());
     // New windows open at the centre of what is left.
     let rect = open(&mut hp, "test.under-bar", (400, 300))?;
-    assert_eq!(rect, Rect::new(8 + 752, 48 + 362, 400, 300));
+    assert_eq!(rect, Rect::new(8 + 650, 48 + 362, 400, 300));
     Ok(())
 }
 

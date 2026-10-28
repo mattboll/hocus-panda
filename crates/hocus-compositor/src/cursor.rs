@@ -95,7 +95,7 @@ impl Shape {
             C::EResize | C::WResize | C::EwResize | C::ColResize => Self::Horizontal,
             C::NeResize | C::SwResize | C::NeswResize => Self::Rising,
             C::NwResize | C::SeResize | C::NwseResize => Self::Falling,
-            C::Move | C::AllScroll => Self::Move,
+            C::Move | C::AllScroll | C::Grab | C::Grabbing => Self::Move,
             _ => Self::Arrow,
         }
     }
@@ -257,6 +257,9 @@ pub enum Shown<'a> {
 impl State {
     /// What the pointer shows: what the client under it set.
     pub fn shown_cursor(&self) -> Shown<'_> {
+        if let Some(icon) = self.frame_cursor {
+            return Shown::Named(icon);
+        }
         match &self.cursor {
             CursorImageStatus::Hidden => Shown::Hidden,
             CursorImageStatus::Surface(surface) => Shown::Surface(surface),

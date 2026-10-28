@@ -10,13 +10,15 @@ use smithay::{
     input::{Seat, pointer::GrabStartData},
     reexports::{
         wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             Resource,
-            protocol::{wl_seat, wl_surface::WlSurface},
+            protocol::{wl_output, wl_seat, wl_surface::WlSurface},
         },
     },
     utils::Serial,
     wayland::{
+        compositor::add_destruction_hook,
         seat::WaylandFocus,
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -25,7 +27,10 @@ use smithay::{
     },
 };
 
-use crate::State;
+use crate::{
+    State,
+    model::{Edges, Mode, Zone},
+};
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -34,10 +39,23 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // What a window may take, so that one that chooses its own size
-        // fits the work area it opens in.
-        if let Some(area) = self.output_under_pointer().and_then(|o| self.work_area(&o)) {
-            surface.with_pending_state(|p| p.bounds = Some((area.width, area.height).into()));
-        }
+        // fits the work area it opens in; tiled, so that it draws no
+        // shadow nor rounded corners of its own: the desktop's frame
+        // shows from its first frame.
+        let bounds = self.output_under_pointer().and_then(|o| self.work_area(&o));
+        surface.with_pending_state(|p| {
+            if let Some(area) = bounds {
+                p.bounds = Some((area.width, area.height).into());
+            }
+        });
+        crate::windows::set_states(&surface, None, Mode::Floating, false);
+        // Its picture as its surface goes, for the closing motion: a
+        // client that quits may take its surface before its toplevel, and
+        // this hook, added before the renderer's, runs before it drops the
+        // textures.
+        add_destruction_hook(surface.wl_surface(), |state: &mut State, surface| {
+            state.surface_going(surface);
+        });
         self.unmapped.push(Window::new_wayland_window(surface));
     }
 
@@ -77,15 +95,128 @@ impl XdgShellHandler for State {
         let Some(start_data) = check_grab(&seat, wl_surface, serial) else {
             return;
         };
-        if let Some(window) = self.window_for(wl_surface) {
+        if let Some(id) = self.window_for(wl_surface).and_then(|w| self.id_of(&w)) {
             let button = start_data.button;
-            self.start_move(&window, button, Some(start_data), serial);
+            self.start_move(id, button, Some(start_data), serial);
         }
     }
 
-    /// Popup grabs (menus closing on a click elsewhere, keys going to the
-    /// menu) come with the shell's popovers: the menu shows meanwhile.
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {}
+    /// A drag on a client-side border.
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+            return;
+        };
+        let wl_surface = surface.wl_surface();
+        let Some(start_data) = check_grab(&seat, wl_surface, serial) else {
+            return;
+        };
+        if let Some(id) = self.window_for(wl_surface).and_then(|w| self.id_of(&w)) {
+            let button = start_data.button;
+            self.start_resize(id, Edges::from_xdg(edges), button, Some(start_data), serial);
+        }
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        match self
+            .window_for(surface.wl_surface())
+            .and_then(|w| self.id_of(&w))
+        {
+            Some(id) => {
+                if self.model.mode(id) != Mode::Snapped(Zone::Maximized) {
+                    self.snap(id, Zone::Maximized);
+                } else if let Some(rect) = self.target_rect(id) {
+                    self.configure(id, rect);
+                }
+            }
+            // Not mapped yet: it opens as it is, and is told so.
+            None => {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+            }
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self
+            .window_for(surface.wl_surface())
+            .and_then(|w| self.id_of(&w))
+        {
+            if self.model.mode(id) == Mode::Snapped(Zone::Maximized) {
+                self.restore(id);
+            } else if let Some(rect) = self.target_rect(id) {
+                self.configure(id, rect);
+            }
+        }
+    }
+
+    fn fullscreen_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _output: Option<wl_output::WlOutput>,
+    ) {
+        match self
+            .window_for(surface.wl_surface())
+            .and_then(|w| self.id_of(&w))
+        {
+            Some(id) => self.set_fullscreen(id, true),
+            None => {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+            }
+        }
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self
+            .window_for(surface.wl_surface())
+            .and_then(|w| self.id_of(&w))
+        {
+            self.set_fullscreen(id, false);
+        }
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self
+            .window_for(surface.wl_surface())
+            .and_then(|w| self.id_of(&w))
+        {
+            self.minimize(id);
+        }
+    }
+
+    /// A menu takes the keyboard, and closes on a press elsewhere.
+    fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+            return;
+        };
+        let kind = PopupKind::Xdg(surface.clone());
+        let Ok(root) = find_popup_root_surface(&kind) else {
+            return;
+        };
+        // Only for a press or a key the client just had.
+        let recent = seat.get_pointer().is_some_and(|p| p.has_grab(serial))
+            || seat
+                .get_keyboard()
+                .and_then(|k| k.last_enter())
+                .is_some_and(|last| serial.is_no_older_than(&last));
+        let window = self.window_for(&root).and_then(|w| self.id_of(&w));
+        match window {
+            Some(id) if recent => self.grab_popup(id, surface),
+            _ => surface.send_popup_done(),
+        }
+    }
+
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        self.popup_gone(&surface);
+    }
 }
 delegate_xdg_shell!(State);
 
@@ -162,6 +293,9 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
         state.unmap_window(&window);
         state.unmapped.push(window);
         return;
+    }
+    if let Some(id) = state.window_for(surface).and_then(|w| state.id_of(&w)) {
+        state.window_committed(id);
     }
     if let Some(PopupKind::Xdg(popup)) = state.popups.find_popup(surface)
         && !popup.is_initial_configure_sent()

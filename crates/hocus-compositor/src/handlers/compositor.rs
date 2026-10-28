@@ -10,8 +10,8 @@ use smithay::{
     wayland::{
         buffer::BufferHandler,
         compositor::{
-            CompositorClientState, CompositorHandler, CompositorState, get_parent,
-            is_sync_subsurface,
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            SurfaceAttributes, get_parent, is_sync_subsurface, with_states,
         },
         dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         shm::{ShmHandler, ShmState},
@@ -39,6 +39,21 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        // A window taking its buffer away: its picture first, for its
+        // closing motion, while its textures are there.
+        let removed = with_states(surface, |states| {
+            matches!(
+                states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .buffer,
+                Some(BufferAssignment::Removed)
+            )
+        });
+        if removed {
+            self.surface_going(surface);
+        }
         on_commit_buffer_handler::<Self>(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();

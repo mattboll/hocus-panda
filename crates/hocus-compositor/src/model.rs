@@ -1,12 +1,39 @@
 //! The windows as the desktop knows them, apart from smithay: their ids,
-//! their stacking order, which one has the focus, and where a new one goes.
+//! their stacking order, which one has the focus, how each is placed
+//! (floating, snapped to a half or a quarter, maximised, fullscreen,
+//! minimised), and the geometry of placing, snapping and resizing.
 //! Plain data and decisions, tested without a compositor; `State` carries
-//! them out on smithay's windows. Slice 1's behaviours (desktops, snapping,
-//! motion) build on this.
+//! them out on smithay's windows (docs/design/windows.md §2, §5, §8–§10).
+
+use std::collections::{BTreeMap, HashMap};
 
 /// Space around windows the desktop places, and between the work area and
 /// the output's edges or a bar's reserved space (docs/design/windows.md §2).
 pub const GAP: i32 = 8;
+/// The bar's width in its two forms, and how far it keeps from the
+/// output's edge (docs/design/bar.md §2, §3): its space is kept from this
+/// slice on, so that nothing moves when it comes.
+pub const BAR_FULL: i32 = 196;
+pub const BAR_MINI: i32 = 56;
+/// An output at least this wide without the bar has the full bar.
+pub const BAR_FULL_FROM: i32 = 1600;
+/// The pointer this close to a vertical or top edge of the work area
+/// snaps to a half or maximises.
+pub const SNAP_EDGE: i32 = 24;
+/// And this close to a corner, to a quarter.
+pub const SNAP_CORNER: i32 = 48;
+/// The resize band outside each edge, and how far a corner reaches along
+/// it (§8).
+pub const FRAME: i32 = 8;
+pub const CORNER: i32 = 16;
+/// The top of a window with no header of its own resizes over its first
+/// pixels (§7).
+pub const TOP_INSIDE: i32 = 4;
+/// Where a window of the same application already is, the next opens this
+/// much down and right (§5).
+pub const CASCADE: i32 = 32;
+/// Windows are never resized below this, whatever their client says.
+pub const MIN_SIZE: (i32, i32) = (120, 80);
 
 /// A window, for as long as it is mapped. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -40,12 +67,47 @@ impl Rect {
             height: (self.height - 2 * by).max(0),
         }
     }
+
+    pub const fn right(self) -> i32 {
+        self.x + self.width
+    }
+
+    pub const fn bottom(self) -> i32 {
+        self.y + self.height
+    }
+
+    pub fn contains(self, x: f64, y: f64) -> bool {
+        x >= f64::from(self.x)
+            && y >= f64::from(self.y)
+            && x < f64::from(self.right())
+            && y < f64::from(self.bottom())
+    }
+
+    pub fn centre(self) -> (f64, f64) {
+        (
+            f64::from(self.x) + f64::from(self.width) / 2.0,
+            f64::from(self.y) + f64::from(self.height) / 2.0,
+        )
+    }
 }
 
-/// What layer surfaces leave of an output (its non-exclusive zone, in the
-/// global space) less the gap: where the desktop places windows.
-pub fn work_area(non_exclusive: Rect) -> Rect {
-    non_exclusive.inset(GAP)
+/// The bar's width on an output `width` logical pixels wide.
+pub fn bar_width(width: i32) -> i32 {
+    if width - BAR_FULL >= BAR_FULL_FROM {
+        BAR_FULL
+    } else {
+        BAR_MINI
+    }
+}
+
+/// Where the desktop places windows on an output: what layer surfaces
+/// leave of it (`non_exclusive`, global) less the bar's space on the
+/// output's right, and the gap.
+pub fn work_area(non_exclusive: Rect, output: Rect) -> Rect {
+    let bar_left = output.right() - GAP - bar_width(output.width);
+    let mut zone = non_exclusive;
+    zone.width = zone.width.min(bar_left - zone.x).max(0);
+    zone.inset(GAP)
 }
 
 /// Where a window of `size` goes to sit at the centre of `area`: its
@@ -59,12 +121,385 @@ pub fn centred(area: Rect, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
-/// The mapped windows, bottom first, and the focus.
+/// Where a new window of `size` opens: at the centre of `area`, and down
+/// and right of a window of the same application already there
+/// (`same_app`: their top-left corners), as long as it stays in the area.
+pub fn place(area: Rect, size: (i32, i32), same_app: &[(i32, i32)]) -> (i32, i32) {
+    let mut at = centred(area, size);
+    while same_app.contains(&at)
+        && at.0 + CASCADE + size.0 <= area.right()
+        && at.1 + CASCADE + size.1 <= area.bottom()
+    {
+        at = (at.0 + CASCADE, at.1 + CASCADE);
+    }
+    at
+}
+
+/// Where a window snaps: a half, a quarter, or the whole work area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Zone {
+    Left,
+    Right,
+    Maximized,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+/// Which sides of the work area a zone touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Start,
+    End,
+    Both,
+}
+
+impl Zone {
+    /// The zone's rectangle in `area`: halves and quarters keep the gap
+    /// between them.
+    pub fn rect(self, area: Rect) -> Rect {
+        let left_w = (area.width - GAP) / 2;
+        let top_h = (area.height - GAP) / 2;
+        let (x, w) = match self.horizontal() {
+            Side::Start => (area.x, left_w),
+            Side::End => (area.x + left_w + GAP, area.width - left_w - GAP),
+            Side::Both => (area.x, area.width),
+        };
+        let (y, h) = match self.vertical() {
+            Side::Start => (area.y, top_h),
+            Side::End => (area.y + top_h + GAP, area.height - top_h - GAP),
+            Side::Both => (area.y, area.height),
+        };
+        Rect::new(x, y, w.max(0), h.max(0))
+    }
+
+    pub fn horizontal(self) -> Side {
+        match self {
+            Self::Left | Self::TopLeft | Self::BottomLeft => Side::Start,
+            Self::Right | Self::TopRight | Self::BottomRight => Side::End,
+            Self::Maximized => Side::Both,
+        }
+    }
+
+    pub fn vertical(self) -> Side {
+        match self {
+            Self::TopLeft | Self::TopRight => Side::Start,
+            Self::BottomLeft | Self::BottomRight => Side::End,
+            Self::Left | Self::Right | Self::Maximized => Side::Both,
+        }
+    }
+
+    fn from_sides(horizontal: Side, vertical: Side) -> Self {
+        match (horizontal, vertical) {
+            (Side::Start, Side::Both) => Self::Left,
+            (Side::End, Side::Both) => Self::Right,
+            (Side::Start, Side::Start) => Self::TopLeft,
+            (Side::End, Side::Start) => Self::TopRight,
+            (Side::Start, Side::End) => Self::BottomLeft,
+            (Side::End, Side::End) => Self::BottomRight,
+            (Side::Both, _) => Self::Maximized,
+        }
+    }
+
+    /// The zone the pointer at (`x`, `y`) is in while dragging a window:
+    /// a corner (within [`SNAP_CORNER`] of it), the left or right edge (a
+    /// half) or the top edge (maximised), from the work area's edges; the
+    /// pointer may be past them, up to the output's edge.
+    pub fn at(area: Rect, x: f64, y: f64) -> Option<Self> {
+        let near = |d: f64, within: i32| d < f64::from(within);
+        let left = x - f64::from(area.x);
+        let right = f64::from(area.right()) - x;
+        let top = y - f64::from(area.y);
+        let bottom = f64::from(area.bottom()) - y;
+        let at_left = near(left, SNAP_EDGE);
+        let at_right = near(right, SNAP_EDGE);
+        let at_top = near(top, SNAP_EDGE);
+        let at_bottom = near(bottom, SNAP_EDGE);
+        let corner_x = near(left, SNAP_CORNER) || near(right, SNAP_CORNER);
+        let corner_y = near(top, SNAP_CORNER) || near(bottom, SNAP_CORNER);
+        let side_x = if left < right { Side::Start } else { Side::End };
+        let side_y = if top < bottom { Side::Start } else { Side::End };
+        // A corner: at an edge, and within reach of the other one.
+        if (at_left || at_right) && corner_y || (at_top || at_bottom) && corner_x {
+            return Some(Self::from_sides(side_x, side_y));
+        }
+        if at_left || at_right {
+            return Some(Self::from_sides(side_x, Side::Both));
+        }
+        at_top.then_some(Self::Maximized)
+    }
+}
+
+/// How a window is placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// Where the user put it.
+    #[default]
+    Floating,
+    /// In a zone of the work area, maximised included.
+    Snapped(Zone),
+    /// Over its whole output, the bar's space included.
+    Fullscreen,
+}
+
+/// Which edges a resize moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Edges {
+    pub left: bool,
+    pub right: bool,
+    pub top: bool,
+    pub bottom: bool,
+}
+
+impl Edges {
+    pub const fn any(self) -> bool {
+        self.left || self.right || self.top || self.bottom
+    }
+
+    /// Its CSS and cursor-shape name: `ew-resize`, `ns-resize`,
+    /// `nwse-resize` or `nesw-resize` (§8).
+    pub fn cursor_name(self) -> &'static str {
+        match (self.left || self.right, self.top || self.bottom) {
+            (true, false) => "ew-resize",
+            (false, true) => "ns-resize",
+            (true, true) if self.left == self.top => "nwse-resize",
+            (true, true) => "nesw-resize",
+            (false, false) => "default",
+        }
+    }
+
+    /// The edges of the corner of `rect` nearest to (`x`, `y`): what
+    /// `Super`+right-drag resizes.
+    pub fn nearest_corner(rect: Rect, x: f64, y: f64) -> Self {
+        let (cx, cy) = rect.centre();
+        Self {
+            left: x < cx,
+            right: x >= cx,
+            top: y < cy,
+            bottom: y >= cy,
+        }
+    }
+}
+
+/// Where the pointer at (`x`, `y`) is on the frame of a window at `rect`:
+/// the edges it resizes, in the band outside each edge (corners reach
+/// [`CORNER`] along them), and over the first `top_inside` pixels of its
+/// top. `None` inside the window or away from it.
+pub fn frame_hit(rect: Rect, x: f64, y: f64, top_inside: i32) -> Option<Edges> {
+    let outer = Rect::new(
+        rect.x - FRAME,
+        rect.y - FRAME,
+        rect.width + 2 * FRAME,
+        rect.height + 2 * FRAME,
+    );
+    if !outer.contains(x, y) {
+        return None;
+    }
+    let inside = rect.contains(x, y);
+    let top_band = inside && y < f64::from(rect.y + top_inside);
+    if inside && !top_band {
+        return None;
+    }
+    let (left, top) = (f64::from(rect.x), f64::from(rect.y));
+    let (right, bottom) = (f64::from(rect.right()), f64::from(rect.bottom()));
+    let corner = f64::from(CORNER);
+    let near_left = x < left + corner;
+    let near_right = x >= right - corner;
+    let near_top = y < top + corner;
+    let near_bottom = y >= bottom - corner;
+    let out_left = x < left;
+    let out_right = x >= right;
+    let out_top = y < top || top_band;
+    let out_bottom = y >= bottom;
+    Some(Edges {
+        left: out_left || ((out_top || out_bottom) && near_left),
+        right: out_right || ((out_top || out_bottom) && near_right),
+        top: out_top || ((out_left || out_right) && near_top),
+        bottom: out_bottom || ((out_left || out_right) && near_bottom),
+    })
+}
+
+/// `rect` resized by moving its `edges` by (`dx`, `dy`), between `min` and
+/// `max` (0: no maximum); the other edges stay where they are.
+pub fn resized(
+    rect: Rect,
+    edges: Edges,
+    (dx, dy): (i32, i32),
+    min: (i32, i32),
+    max: (i32, i32),
+) -> Rect {
+    let clamp = |v: i32, lo: i32, hi: i32| {
+        let lo = lo.max(1);
+        if hi > 0 {
+            v.clamp(lo, hi.max(lo))
+        } else {
+            v.max(lo)
+        }
+    };
+    let mut out = rect;
+    if edges.left || edges.right {
+        let w = if edges.left {
+            rect.width - dx
+        } else {
+            rect.width + dx
+        };
+        out.width = clamp(w, min.0, max.0);
+        if edges.left {
+            out.x = rect.right() - out.width;
+        }
+    }
+    if edges.top || edges.bottom {
+        let h = if edges.top {
+            rect.height - dy
+        } else {
+            rect.height + dy
+        };
+        out.height = clamp(h, min.1, max.1);
+        if edges.top {
+            out.y = rect.bottom() - out.height;
+        }
+    }
+    out
+}
+
+/// Where a window dragged out of a zone goes: its size before it snapped,
+/// under the pointer at (`x`, `y`) at the same place across it (`along`,
+/// from 0 at its left to 1 at its right), and as far down as it was held.
+pub fn torn_off(restore: (i32, i32), along: f64, held_down: f64, x: f64, y: f64) -> (i32, i32) {
+    let left = x - along.clamp(0.0, 1.0) * f64::from(restore.0);
+    let top = y - held_down.clamp(0.0, f64::from(restore.1));
+    (left.round() as i32, top.round() as i32)
+}
+
+/// What the keyboard asks of the focused window (§9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Snap {
+    /// `Super+←` / `Super+→`.
+    Half(Side),
+    /// `Super+↑`.
+    Maximize,
+    /// `Super+↓`: restore; when it is floating already, minimise.
+    Restore,
+    /// `Super+Shift+arrows`: to the quarter on that side, keeping the
+    /// other way's side.
+    QuarterTop,
+    QuarterBottom,
+    QuarterLeft,
+    QuarterRight,
+}
+
+/// What a keyboard snap does to a window in `mode` whose geometry is
+/// `rect`, in `area`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapResult {
+    To(Zone),
+    Restore,
+    Minimize,
+}
+
+pub fn keyboard_snap(snap: Snap, mode: Mode, rect: Rect, area: Rect) -> SnapResult {
+    let (cx, cy) = rect.centre();
+    let (ax, ay) = area.centre();
+    let current = match mode {
+        Mode::Snapped(zone) => Some(zone),
+        Mode::Floating | Mode::Fullscreen => None,
+    };
+    // The side the window is on each way: its zone's, or its centre's.
+    let horizontal = current.map(Zone::horizontal).filter(|s| *s != Side::Both);
+    let horizontal = horizontal.unwrap_or(if cx < ax { Side::Start } else { Side::End });
+    let vertical = current.map(Zone::vertical).filter(|s| *s != Side::Both);
+    let vertical = vertical.unwrap_or(if cy < ay { Side::Start } else { Side::End });
+    match snap {
+        Snap::Half(side) => {
+            let half = Zone::from_sides(side, Side::Both);
+            if current == Some(half) {
+                // Again: to the other side.
+                let other = if side == Side::Start {
+                    Side::End
+                } else {
+                    Side::Start
+                };
+                SnapResult::To(Zone::from_sides(other, Side::Both))
+            } else {
+                SnapResult::To(half)
+            }
+        }
+        Snap::Maximize => SnapResult::To(Zone::Maximized),
+        Snap::Restore => match mode {
+            Mode::Floating => SnapResult::Minimize,
+            Mode::Snapped(_) | Mode::Fullscreen => SnapResult::Restore,
+        },
+        Snap::QuarterTop => SnapResult::To(Zone::from_sides(horizontal, Side::Start)),
+        Snap::QuarterBottom => SnapResult::To(Zone::from_sides(horizontal, Side::End)),
+        Snap::QuarterLeft => SnapResult::To(Zone::from_sides(Side::Start, vertical)),
+        Snap::QuarterRight => SnapResult::To(Zone::from_sides(Side::End, vertical)),
+    }
+}
+
+/// Snapped windows on the other side of the edges a resize moves: they
+/// move their facing edge with it. `rect` is the window resized, `others`
+/// the other snapped windows of its output; the result says, for each
+/// that shares a moved edge, which of its edges follows.
+pub fn partners(rect: Rect, edges: Edges, others: &[(WindowId, Rect)]) -> Vec<(WindowId, Edges)> {
+    let overlaps = |a0: i32, a1: i32, b0: i32, b1: i32| a0 < b1 && b0 < a1;
+    others
+        .iter()
+        .filter_map(|&(id, o)| {
+            let across = overlaps(rect.y, rect.bottom(), o.y, o.bottom());
+            let down = overlaps(rect.x, rect.right(), o.x, o.right());
+            let follow = Edges {
+                left: edges.right && across && o.x == rect.right() + GAP,
+                right: edges.left && across && o.right() + GAP == rect.x,
+                top: edges.bottom && down && o.y == rect.bottom() + GAP,
+                bottom: edges.top && down && o.bottom() + GAP == rect.y,
+            };
+            follow.any().then_some((id, follow))
+        })
+        .collect()
+}
+
+/// A partner's new geometry once the window it faces is at `moved`.
+pub fn follow(partner: Rect, follow: Edges, moved: Rect) -> Rect {
+    let mut out = partner;
+    if follow.left {
+        out.x = moved.right() + GAP;
+        out.width = (partner.right() - out.x).max(1);
+    }
+    if follow.right {
+        out.width = (moved.x - GAP - partner.x).max(1);
+    }
+    if follow.top {
+        out.y = moved.bottom() + GAP;
+        out.height = (partner.bottom() - out.y).max(1);
+    }
+    if follow.bottom {
+        out.height = (moved.y - GAP - partner.y).max(1);
+    }
+    out
+}
+
+/// What the desktop keeps of a window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Placement {
+    pub mode: Mode,
+    /// Where it was floating before it snapped, maximised or went
+    /// fullscreen: where it goes back.
+    pub restore: Option<Rect>,
+    pub minimized: bool,
+}
+
+/// The mapped windows, bottom first, the focus, and how each is placed.
 #[derive(Debug, Default)]
 pub struct Model {
     stack: Vec<WindowId>,
     focused: Option<WindowId>,
     next: u64,
+    placements: BTreeMap<WindowId, Placement>,
+    /// Minimised windows, the most recent last.
+    minimized: Vec<WindowId>,
+    /// Each application's last size, by app id (§5).
+    sizes: HashMap<String, (i32, i32)>,
 }
 
 impl Model {
@@ -74,15 +509,39 @@ impl Model {
         self.next += 1;
         let id = WindowId(self.next);
         self.stack.push(id);
+        self.placements.insert(id, Placement::default());
         id
     }
 
-    /// A window went; the focus goes to the one now on top.
+    /// A new window just under the focused one: it opens behind it.
+    pub fn add_below_focus(&mut self) -> WindowId {
+        let id = self.add();
+        if let Some(focused) = self.focused
+            && let Some(at) = self.stack.iter().position(|w| *w == focused)
+        {
+            self.stack.pop();
+            self.stack.insert(at, id);
+        }
+        id
+    }
+
+    /// A window went; the focus goes to the one now on top, not minimised.
     pub fn remove(&mut self, id: WindowId) {
         self.stack.retain(|w| *w != id);
+        self.placements.remove(&id);
+        self.minimized.retain(|w| *w != id);
         if self.focused == Some(id) {
-            self.focused = self.stack.last().copied();
+            self.focused = self.top_shown();
         }
+    }
+
+    /// The window on top that shows.
+    pub fn top_shown(&self) -> Option<WindowId> {
+        self.stack
+            .iter()
+            .rev()
+            .find(|w| !self.is_minimized(**w))
+            .copied()
     }
 
     /// Focuses and raises `id`; `None` takes the focus from every window.
@@ -91,10 +550,17 @@ impl Model {
             if !self.stack.contains(&id) {
                 return;
             }
+            self.raise(id);
+        }
+        self.focused = id;
+    }
+
+    /// Puts `id` on top without focusing it.
+    pub fn raise(&mut self, id: WindowId) {
+        if self.stack.contains(&id) {
             self.stack.retain(|w| *w != id);
             self.stack.push(id);
         }
-        self.focused = id;
     }
 
     pub fn focused(&self) -> Option<WindowId> {
@@ -105,26 +571,278 @@ impl Model {
     pub fn stack(&self) -> &[WindowId] {
         &self.stack
     }
+
+    pub fn placement(&self, id: WindowId) -> Placement {
+        self.placements.get(&id).copied().unwrap_or_default()
+    }
+
+    pub fn mode(&self, id: WindowId) -> Mode {
+        self.placement(id).mode
+    }
+
+    /// `id` goes to `mode`. Leaving floating, its floating geometry
+    /// `current` is kept to come back to.
+    pub fn set_mode(&mut self, id: WindowId, mode: Mode, current: Rect) {
+        if let Some(p) = self.placements.get_mut(&id) {
+            if p.mode == Mode::Floating && mode != Mode::Floating {
+                p.restore = Some(current);
+            }
+            p.mode = mode;
+        }
+    }
+
+    /// Back to floating; where it was before, if known.
+    pub fn unsnap(&mut self, id: WindowId) -> Option<Rect> {
+        let p = self.placements.get_mut(&id)?;
+        p.mode = Mode::Floating;
+        p.restore.take()
+    }
+
+    pub fn is_minimized(&self, id: WindowId) -> bool {
+        self.placements.get(&id).is_some_and(|p| p.minimized)
+    }
+
+    /// Minimises `id`: the focus goes to the window on top that shows.
+    pub fn minimize(&mut self, id: WindowId) {
+        let Some(p) = self.placements.get_mut(&id) else {
+            return;
+        };
+        p.minimized = true;
+        self.minimized.retain(|w| *w != id);
+        self.minimized.push(id);
+        if self.focused == Some(id) {
+            self.focused = self.top_shown();
+        }
+    }
+
+    /// Brings `id` back (not focused: the caller focuses it).
+    pub fn unminimize(&mut self, id: WindowId) {
+        if let Some(p) = self.placements.get_mut(&id) {
+            p.minimized = false;
+        }
+        self.minimized.retain(|w| *w != id);
+    }
+
+    /// The window minimised last.
+    pub fn last_minimized(&self) -> Option<WindowId> {
+        self.minimized.last().copied()
+    }
+
+    /// Remembers an application's size.
+    pub fn remember_size(&mut self, app_id: &str, size: (i32, i32)) {
+        if !app_id.is_empty() && size.0 > 0 && size.1 > 0 {
+            self.sizes.insert(app_id.to_string(), size);
+        }
+    }
+
+    pub fn remembered_size(&self, app_id: &str) -> Option<(i32, i32)> {
+        self.sizes.get(app_id).copied()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const OUTPUT: Rect = Rect::new(0, 0, 1920, 1080);
+
     #[test]
-    fn the_work_area_keeps_a_gap_inside_what_layers_leave() {
-        // A 1920×1080 output with a 40 px bar along its top.
+    fn the_work_area_keeps_a_gap_and_the_bars_space() {
+        // 1920 wide: the full bar, 196 px and 8 px from the edge.
+        assert_eq!(
+            work_area(OUTPUT, OUTPUT),
+            Rect::new(8, 8, 1920 - 8 - 196 - 8 - 8, 1064)
+        );
+        // A 40 px bar along the top (a layer's exclusive zone).
         let zone = Rect::new(0, 40, 1920, 1040);
-        assert_eq!(work_area(zone), Rect::new(8, 48, 1904, 1024));
+        assert_eq!(work_area(zone, OUTPUT), Rect::new(8, 48, 1700, 1024));
+        // 1366 wide: the mini bar.
+        let small = Rect::new(0, 0, 1366, 768);
+        assert_eq!(work_area(small, small).right(), 1366 - 8 - 56 - 8);
         assert_eq!(Rect::new(0, 0, 10, 10).inset(8), Rect::new(8, 8, 0, 0));
     }
 
     #[test]
-    fn a_new_window_sits_at_the_centre_of_the_work_area() {
+    fn a_new_window_sits_at_the_centre_and_cascades_from_its_own() {
         let area = Rect::new(8, 48, 1904, 1024);
         assert_eq!(centred(area, (800, 600)), (8 + 552, 48 + 212));
         // Too large: its top-left corner stays in the area.
         assert_eq!(centred(area, (3000, 2000)), (8, 48));
+        let first = place(area, (800, 600), &[]);
+        let second = place(area, (800, 600), &[first]);
+        assert_eq!(second, (first.0 + CASCADE, first.1 + CASCADE));
+        assert_eq!(
+            place(area, (800, 600), &[first, second]),
+            (first.0 + 2 * CASCADE, first.1 + 2 * CASCADE)
+        );
+    }
+
+    #[test]
+    fn halves_and_quarters_keep_the_gap_between_them() {
+        let area = Rect::new(8, 8, 1700, 1064);
+        let left = Zone::Left.rect(area);
+        let right = Zone::Right.rect(area);
+        assert_eq!(left, Rect::new(8, 8, 846, 1064));
+        assert_eq!(right.x, left.right() + GAP);
+        assert_eq!(right.right(), area.right());
+        let tl = Zone::TopLeft.rect(area);
+        let bl = Zone::BottomLeft.rect(area);
+        assert_eq!(bl.y, tl.bottom() + GAP);
+        assert_eq!(bl.bottom(), area.bottom());
+        assert_eq!(Zone::Maximized.rect(area), area);
+    }
+
+    #[test]
+    fn the_pointer_at_an_edge_or_a_corner_picks_a_zone() {
+        let area = Rect::new(8, 8, 1700, 1064);
+        let at = |x: f64, y: f64| Zone::at(area, x, y);
+        assert_eq!(at(0.0, 500.0), Some(Zone::Left));
+        assert_eq!(at(1705.0, 500.0), Some(Zone::Right));
+        assert_eq!(at(800.0, 0.0), Some(Zone::Maximized));
+        assert_eq!(at(800.0, 500.0), None);
+        // Within 48 px of a corner, along an edge.
+        assert_eq!(at(0.0, 40.0), Some(Zone::TopLeft));
+        assert_eq!(at(40.0, 0.0), Some(Zone::TopLeft));
+        assert_eq!(at(1700.0, 1060.0), Some(Zone::BottomRight));
+        assert_eq!(at(0.0, 1050.0), Some(Zone::BottomLeft));
+        assert_eq!(at(1690.0, 2.0), Some(Zone::TopRight));
+        // Along the bottom edge, away from the corners: nothing.
+        assert_eq!(at(800.0, 1070.0), None);
+    }
+
+    #[test]
+    fn the_frame_resizes_from_every_edge_and_corner() {
+        let rect = Rect::new(100, 100, 400, 300);
+        let hit = |x: f64, y: f64| frame_hit(rect, x, y, 0).map(Edges::cursor_name);
+        assert_eq!(hit(95.0, 250.0), Some("ew-resize"));
+        assert_eq!(hit(505.0, 250.0), Some("ew-resize"));
+        assert_eq!(hit(300.0, 95.0), Some("ns-resize"));
+        assert_eq!(hit(300.0, 405.0), Some("ns-resize"));
+        assert_eq!(hit(95.0, 95.0), Some("nwse-resize"));
+        assert_eq!(hit(505.0, 405.0), Some("nwse-resize"));
+        assert_eq!(hit(505.0, 95.0), Some("nesw-resize"));
+        assert_eq!(hit(95.0, 405.0), Some("nesw-resize"));
+        // A corner reaches 16 px along its edges.
+        assert_eq!(hit(110.0, 95.0), Some("nwse-resize"));
+        assert_eq!(hit(95.0, 112.0), Some("nwse-resize"));
+        // Inside, and away: nothing.
+        assert_eq!(hit(101.0, 101.0), None);
+        assert_eq!(hit(300.0, 250.0), None);
+        assert_eq!(hit(80.0, 250.0), None);
+        // A window with no header: its first 4 px resize its top.
+        let top = |x: f64, y: f64| frame_hit(rect, x, y, TOP_INSIDE);
+        assert_eq!(
+            top(300.0, 102.0),
+            Some(Edges {
+                top: true,
+                ..Edges::default()
+            })
+        );
+        assert_eq!(top(300.0, 105.0), None);
+    }
+
+    #[test]
+    fn resizing_keeps_the_far_edges_and_the_limits() {
+        let rect = Rect::new(100, 100, 400, 300);
+        let nw = Edges {
+            left: true,
+            top: true,
+            ..Edges::default()
+        };
+        let out = resized(rect, nw, (-50, 20), (0, 0), (0, 0));
+        assert_eq!(out, Rect::new(50, 120, 450, 280));
+        assert_eq!(out.right(), rect.right());
+        // Never below the minimum, the far edge still in place.
+        let out = resized(rect, nw, (390, 0), (200, 100), (0, 0));
+        assert_eq!(out, Rect::new(300, 100, 200, 300));
+        // Nor above the maximum.
+        let se = Edges {
+            right: true,
+            bottom: true,
+            ..Edges::default()
+        };
+        assert_eq!(
+            resized(rect, se, (500, 500), (0, 0), (600, 0)),
+            Rect::new(100, 100, 600, 800)
+        );
+        assert_eq!(
+            Edges::nearest_corner(rect, 480.0, 120.0),
+            Edges {
+                right: true,
+                top: true,
+                ..Edges::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_window_torn_off_a_zone_keeps_the_place_it_was_held_at() {
+        // Held at a quarter of its width, 10 px down; 800 wide before.
+        assert_eq!(torn_off((800, 600), 0.25, 10.0, 1000.0, 300.0), (800, 290));
+    }
+
+    #[test]
+    fn the_keys_snap_to_halves_quarters_and_back() {
+        let area = Rect::new(8, 8, 1700, 1064);
+        let floating = Rect::new(100, 100, 400, 300);
+        let snap = |s, mode| keyboard_snap(s, mode, floating, area);
+        assert_eq!(
+            snap(Snap::Half(Side::Start), Mode::Floating),
+            SnapResult::To(Zone::Left)
+        );
+        // Again: to the other side.
+        assert_eq!(
+            snap(Snap::Half(Side::Start), Mode::Snapped(Zone::Left)),
+            SnapResult::To(Zone::Right)
+        );
+        assert_eq!(
+            snap(Snap::Maximize, Mode::Floating),
+            SnapResult::To(Zone::Maximized)
+        );
+        assert_eq!(
+            snap(Snap::Restore, Mode::Snapped(Zone::Maximized)),
+            SnapResult::Restore
+        );
+        assert_eq!(snap(Snap::Restore, Mode::Floating), SnapResult::Minimize);
+        // Quarters keep the other way's side: a left half goes up to the
+        // top-left quarter, which goes right to the top-right one.
+        assert_eq!(
+            snap(Snap::QuarterTop, Mode::Snapped(Zone::Left)),
+            SnapResult::To(Zone::TopLeft)
+        );
+        assert_eq!(
+            snap(Snap::QuarterRight, Mode::Snapped(Zone::TopLeft)),
+            SnapResult::To(Zone::TopRight)
+        );
+        // A floating window in the top left of the area.
+        assert_eq!(
+            snap(Snap::QuarterBottom, Mode::Floating),
+            SnapResult::To(Zone::BottomLeft)
+        );
+    }
+
+    #[test]
+    fn a_snapped_pair_resizes_together() {
+        let area = Rect::new(8, 8, 1700, 1064);
+        let left = Zone::Left.rect(area);
+        let right = Zone::Right.rect(area);
+        let others = [(WindowId(2), right)];
+        let east = Edges {
+            right: true,
+            ..Edges::default()
+        };
+        let found = partners(left, east, &others);
+        assert_eq!(found.len(), 1);
+        let moved = resized(left, east, (100, 0), (0, 0), (0, 0));
+        let after = follow(right, found[0].1, moved);
+        assert_eq!(after.x, moved.right() + GAP);
+        assert_eq!(after.right(), right.right());
+        // Its other edges do not pull the neighbour.
+        let west = Edges {
+            left: true,
+            ..Edges::default()
+        };
+        assert!(partners(left, west, &others).is_empty());
     }
 
     #[test]
@@ -144,5 +862,41 @@ mod tests {
         model.focus(None);
         assert_eq!(model.focused(), None);
         assert_eq!(model.stack(), &[b]);
+    }
+
+    #[test]
+    fn a_window_that_does_not_take_the_focus_opens_behind() {
+        let mut model = Model::default();
+        let a = model.add();
+        model.focus(Some(a));
+        let b = model.add_below_focus();
+        assert_eq!(model.stack(), &[b, a]);
+        assert_eq!(model.focused(), Some(a));
+    }
+
+    #[test]
+    fn minimised_windows_leave_the_focus_and_come_back_last_first() {
+        let mut model = Model::default();
+        let a = model.add();
+        let b = model.add();
+        model.focus(Some(b));
+        model.minimize(b);
+        assert_eq!(model.focused(), Some(a));
+        model.minimize(a);
+        assert_eq!(model.focused(), None);
+        assert_eq!(model.last_minimized(), Some(a));
+        model.unminimize(a);
+        assert_eq!(model.last_minimized(), Some(b));
+    }
+
+    #[test]
+    fn leaving_floating_keeps_where_to_come_back() {
+        let mut model = Model::default();
+        let a = model.add();
+        let floating = Rect::new(10, 10, 300, 200);
+        model.set_mode(a, Mode::Snapped(Zone::Left), floating);
+        model.set_mode(a, Mode::Snapped(Zone::Maximized), Rect::default());
+        assert_eq!(model.unsnap(a), Some(floating));
+        assert_eq!(model.mode(a), Mode::Floating);
     }
 }

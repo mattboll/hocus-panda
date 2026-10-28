@@ -36,6 +36,7 @@ impl State {
     fn x11_window(&self, surface: &X11Surface) -> Option<Window> {
         self.windows
             .values()
+            .map(|m| &m.window)
             .chain(self.unmapped.iter())
             .find(|w| w.x11_surface() == Some(surface))
             .cloned()
@@ -52,6 +53,9 @@ impl State {
 
     /// Forgets an X11 window gone or hidden by its client.
     fn x11_gone(&mut self, surface: &X11Surface) {
+        if let Some(wl) = surface.wl_surface() {
+            self.surface_going(&wl);
+        }
         if let Some(window) = self.x11_window(surface) {
             self.unmap_window(&window);
         } else if let Some(overlay) = self.x11_overlay(surface) {
@@ -151,21 +155,50 @@ impl XwmHandler for State {
         }
     }
 
-    fn resize_request(
-        &mut self,
-        _xwm: XwmId,
-        _surface: X11Surface,
-        _button: u32,
-        _edge: ResizeEdge,
-    ) {
-        // Resizing is task 2.4's.
+    fn resize_request(&mut self, _xwm: XwmId, surface: X11Surface, button: u32, edge: ResizeEdge) {
+        if let Some(id) = self.x11_window(&surface).and_then(|w| self.id_of(&w)) {
+            // X11 buttons count from 1; evdev's left button is BTN_LEFT.
+            let button = BTN_LEFT + button.saturating_sub(1);
+            let edges = crate::model::Edges::from_x11(edge);
+            self.start_resize(id, edges, button, None, SERIAL_COUNTER.next_serial());
+        }
     }
 
     fn move_request(&mut self, _xwm: XwmId, surface: X11Surface, button: u32) {
-        if let Some(window) = self.x11_window(&surface) {
+        if let Some(id) = self.x11_window(&surface).and_then(|w| self.id_of(&w)) {
             // X11 buttons count from 1; evdev's left button is BTN_LEFT.
             let button = BTN_LEFT + button.saturating_sub(1);
-            self.start_move(&window, button, None, SERIAL_COUNTER.next_serial());
+            self.start_move(id, button, None, SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    fn maximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(id) = self.x11_window(&surface).and_then(|w| self.id_of(&w)) {
+            self.snap(id, crate::model::Zone::Maximized);
+        }
+    }
+
+    fn unmaximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(id) = self.x11_window(&surface).and_then(|w| self.id_of(&w)) {
+            self.restore(id);
+        }
+    }
+
+    fn fullscreen_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(id) = self.x11_window(&surface).and_then(|w| self.id_of(&w)) {
+            self.set_fullscreen(id, true);
+        }
+    }
+
+    fn unfullscreen_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(id) = self.x11_window(&surface).and_then(|w| self.id_of(&w)) {
+            self.set_fullscreen(id, false);
+        }
+    }
+
+    fn minimize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(id) = self.x11_window(&surface).and_then(|w| self.id_of(&w)) {
+            self.minimize(id);
         }
     }
 
@@ -283,6 +316,21 @@ impl XwmHandler for App {
     }
     fn resize_request(&mut self, xwm: XwmId, window: X11Surface, button: u32, edge: ResizeEdge) {
         self.state.resize_request(xwm, window, button, edge);
+    }
+    fn maximize_request(&mut self, xwm: XwmId, window: X11Surface) {
+        self.state.maximize_request(xwm, window);
+    }
+    fn unmaximize_request(&mut self, xwm: XwmId, window: X11Surface) {
+        self.state.unmaximize_request(xwm, window);
+    }
+    fn fullscreen_request(&mut self, xwm: XwmId, window: X11Surface) {
+        self.state.fullscreen_request(xwm, window);
+    }
+    fn unfullscreen_request(&mut self, xwm: XwmId, window: X11Surface) {
+        self.state.unfullscreen_request(xwm, window);
+    }
+    fn minimize_request(&mut self, xwm: XwmId, window: X11Surface) {
+        self.state.minimize_request(xwm, window);
     }
     fn move_request(&mut self, xwm: XwmId, window: X11Surface, button: u32) {
         self.state.move_request(xwm, window, button);
