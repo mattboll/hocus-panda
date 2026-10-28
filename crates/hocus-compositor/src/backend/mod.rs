@@ -64,6 +64,13 @@ impl Backend {
             _ => None,
         }
     }
+
+    pub fn headless_mut(&mut self) -> Option<&mut headless::HeadlessBackend> {
+        match self {
+            Self::Headless(headless) => Some(headless),
+            _ => None,
+        }
+    }
 }
 
 /// An output's scale as smithay takes it: whole when it is, and otherwise

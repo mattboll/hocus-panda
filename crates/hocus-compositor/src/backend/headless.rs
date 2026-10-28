@@ -9,7 +9,8 @@ use smithay::{
         allocator::Fourcc,
         egl::{EGLContext, EGLDevice, EGLDisplay},
         renderer::{
-            Bind, ImportAll, ImportDma, ImportMem, ImportMemWl, Offscreen, Renderer, Texture,
+            Bind, ExportMem, ImportAll, ImportDma, ImportMem, ImportMemWl, Offscreen, Renderer,
+            Texture,
             damage::OutputDamageTracker,
             gles::{GlesRenderer, GlesTexture},
             pixman::PixmanRenderer,
@@ -24,7 +25,7 @@ use smithay::{
         pixman,
         wayland_server::backend::GlobalId,
     },
-    utils::Transform,
+    utils::{Rectangle, Transform},
 };
 
 use crate::{
@@ -274,7 +275,43 @@ where
     }
 }
 
+impl<R, T> Outputs<R, T>
+where
+    R: ExportMem + Bind<T>,
+    R::Error: Send + Sync + 'static,
+{
+    /// What output `index` showed last: its size in pixels, and its rows of
+    /// ARGB8888 pixels.
+    fn pixels(&mut self, index: usize) -> anyhow::Result<(i32, i32, Vec<u8>)> {
+        let Self { renderer, outputs } = self;
+        let out = outputs.get_mut(index).context("no such output")?;
+        let size = out
+            .output
+            .current_mode()
+            .context("an output without a mode")?
+            .size;
+        let framebuffer = renderer.bind(&mut out.target).context("could not bind")?;
+        let region = Rectangle::from_size((size.w, size.h).into());
+        let mapping = renderer
+            .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
+            .context("could not read the pixels")?;
+        let bytes = renderer
+            .map_texture(&mapping)
+            .context("could not map the pixels")?;
+        Ok((size.w, size.h, bytes.to_vec()))
+    }
+}
+
 impl HeadlessBackend {
+    /// What output `index` (in the order given) showed last: its size in
+    /// pixels, and its rows of ARGB8888 pixels (little-endian: B, G, R, A).
+    pub fn screenshot(&mut self, index: usize) -> anyhow::Result<(i32, i32, Vec<u8>)> {
+        match &mut self.canvas {
+            Canvas::Gles(c) => c.pixels(index),
+            Canvas::Pixman(c) => c.pixels(index),
+        }
+    }
+
     pub fn renderer(&self) -> &'static str {
         match self.canvas {
             Canvas::Gles(_) => "gles",

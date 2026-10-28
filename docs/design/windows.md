@@ -210,7 +210,9 @@ Keyboard:
 - The panel appears in 150 ms (fade and 96 % → 100 % scale) and vanishes
   in 100 ms. The selection's ring moves in 120 ms.
 - As built: a thumbnail fits in 220 × 150 px, its aspect kept, centred in
-  its item (236 px wide with its 8 px padding), the items 14 px apart on
+  its item (236 px wide with its 8 px padding); it shows the window as
+  its application sets it (its xdg geometry), without the shadow a
+  client-side decorated application draws around it. The items are 14 px apart on
   one line, their titles lined up; the panel has 16 px of padding, an
   18 px radius, a dark fill at 86 % with a 1 px white rim at 12 % and a
   deep shadow, and shrinks as a whole when the windows do not fit the
