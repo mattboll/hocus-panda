@@ -78,6 +78,9 @@ pub struct Resizing {
     pub anchor: Rect,
     /// The pointer let go: once the client has the last size, it is over.
     pub ended: bool,
+    /// The window this one follows across a seam (§8): its moving edges
+    /// keep the gap to that one's, wherever the client's size puts them.
+    pub beside: Option<WindowId>,
 }
 
 /// The grip of a window with no header (§7).
@@ -1058,32 +1061,84 @@ impl State {
     }
 
     /// The window's client committed: a window resized from its top or
-    /// left keeps its far edges where they were.
+    /// left keeps its far edges where they were, and the windows that
+    /// follow it across a seam keep the gap to it.
     pub fn window_committed(&mut self, id: WindowId) {
-        let Some(managed) = self.windows.get_mut(&id) else {
+        self.place_resized(id);
+        let following: Vec<WindowId> = self
+            .windows
+            .iter()
+            .filter(|(_, m)| m.resizing.is_some_and(|r| r.beside == Some(id)))
+            .map(|(f, _)| *f)
+            .collect();
+        for f in following {
+            self.place_resized(f);
+        }
+    }
+
+    /// Where a window being resized goes now that its client has drawn
+    /// this size, and whether its resize is over: once the client has
+    /// taken the last size asked, the size it drew (a terminal's, by whole
+    /// cells, may be smaller) is the window's.
+    fn place_resized(&mut self, id: WindowId) {
+        let Some(managed) = self.windows.get(&id) else {
+            return;
+        };
+        let Some(resizing) = managed.resizing else {
             return;
         };
         let size = managed.window.geometry().size;
-        if let Some(resizing) = managed.resizing {
-            let anchor = resizing.anchor;
-            let x = if resizing.edges.left {
-                anchor.right() - size.w
-            } else {
-                anchor.x
-            };
-            let y = if resizing.edges.top {
-                anchor.bottom() - size.h
-            } else {
-                anchor.y
-            };
-            let done = resizing.ended && managed.requested == Some(size);
-            if done {
-                managed.resizing = None;
-            }
-            let window = managed.window.clone();
-            if self.space.element_location(&window) != Some((x, y).into()) {
-                self.space.map_element(window, (x, y), false);
-            }
+        let taken = match managed.window.toplevel() {
+            Some(toplevel) => toplevel.current_state().size == managed.requested,
+            None => managed.requested == Some(size),
+        };
+        let (edges, anchor) = (resizing.edges, resizing.anchor);
+        // Beside another, its moving edges keep the gap to that one's.
+        let beside = resizing
+            .beside
+            .and_then(|b| Some((self.rect_of(b)?, self.windows.get(&b)?.resizing.is_some())));
+        let (x, y) = match beside {
+            Some((other, _)) => (
+                if edges.left {
+                    other.right() + model::GAP
+                } else if edges.right {
+                    other.x - model::GAP - size.w
+                } else {
+                    anchor.x
+                },
+                if edges.top {
+                    other.bottom() + model::GAP
+                } else if edges.bottom {
+                    other.y - model::GAP - size.h
+                } else {
+                    anchor.y
+                },
+            ),
+            None => (
+                if edges.left {
+                    anchor.right() - size.w
+                } else {
+                    anchor.x
+                },
+                if edges.top {
+                    anchor.bottom() - size.h
+                } else {
+                    anchor.y
+                },
+            ),
+        };
+        // One that follows is done once the one it follows is.
+        let done = resizing.ended && taken && !beside.is_some_and(|(_, busy)| busy);
+        let Some(managed) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if done {
+            managed.resizing = None;
+            managed.requested = Some(size);
+        }
+        let window = managed.window.clone();
+        if self.space.element_location(&window) != Some((x, y).into()) {
+            self.space.map_element(window, (x, y), false);
         }
     }
 

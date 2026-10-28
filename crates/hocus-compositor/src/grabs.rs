@@ -568,6 +568,7 @@ impl State {
                 edges,
                 anchor: initial,
                 ended: false,
+                beside: None,
             });
             managed.settle = None;
         }
@@ -577,6 +578,7 @@ impl State {
                     edges: *follow,
                     anchor: *rect,
                     ended: false,
+                    beside: Some(id),
                 });
             }
         }
