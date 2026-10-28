@@ -22,7 +22,7 @@ use smithay::{
     },
     output::Output,
     reexports::{
-        calloop::{LoopHandle, LoopSignal},
+        calloop::{LoopHandle, LoopSignal, RegistrationToken},
         wayland_server::{
             DisplayHandle,
             backend::{ClientData, ClientId, DisconnectReason},
@@ -164,6 +164,9 @@ pub struct State {
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
     pub switcher: Option<Switcher>,
     pub switcher_out: Option<(Switcher, Tween)>,
+    /// The switcher's key held down, stepping at the keyboard's repeat
+    /// delay and rate: its keycode and its timer (§11).
+    pub switcher_repeat: Option<(Keycode, RegistrationToken)>,
     /// What draws the switcher, the desktops' dots and their text.
     pub overlay: Overlay,
 
@@ -273,6 +276,7 @@ impl State {
             leaving: Vec::new(),
             preview: None,
             preview_out: None,
+            switcher_repeat: None,
             preview_ids: std::array::from_fn(|_| Id::new()),
             seam_handle: None,
             seam_handle_id: Id::new(),

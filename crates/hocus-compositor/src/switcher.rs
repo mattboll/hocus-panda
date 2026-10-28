@@ -9,8 +9,9 @@
 use std::time::Duration;
 
 use smithay::{
-    input::keyboard::{Keysym, ModifiersState},
+    input::keyboard::{Keycode, Keysym, ModifiersState},
     output::Output,
+    reexports::calloop::timer::{TimeoutAction, Timer},
 };
 
 use crate::{
@@ -350,6 +351,44 @@ impl State {
         }
     }
 
+    /// The switcher's key `code`, pressed, steps on while it is held: after
+    /// the keyboard's repeat delay, then at its rate, as a held key repeats
+    /// in an application. Devices send no repeats of their own (libinput
+    /// does not, nor does the nested window's host), so the desktop times
+    /// them; only the switcher's stepping repeats, no shortcut does.
+    pub fn repeat_switcher_key(&mut self, code: Keycode, key: SwitchKey) {
+        self.stop_switcher_repeat();
+        let keyboard = &self.config.keyboard;
+        let Ok(rate) = u32::try_from(keyboard.repeat_rate) else {
+            return;
+        };
+        if rate == 0 || self.switcher.is_none() {
+            return;
+        }
+        let delay = Duration::from_millis(u64::try_from(keyboard.repeat_delay).unwrap_or(0));
+        let every = Duration::from_secs(1) / rate;
+        let timer = Timer::from_duration(delay);
+        let inserted = self.loop_handle.insert_source(timer, move |_, _, app| {
+            if app.state.switcher.is_none() {
+                app.state.switcher_repeat = None;
+                return TimeoutAction::Drop;
+            }
+            app.state.switcher_key(key);
+            TimeoutAction::ToDuration(every)
+        });
+        match inserted {
+            Ok(token) => self.switcher_repeat = Some((code, token)),
+            Err(err) => tracing::warn!(%err.error, "could not repeat the switcher's key"),
+        }
+    }
+
+    /// The switcher's key stops stepping on.
+    pub fn stop_switcher_repeat(&mut self) {
+        if let Some((_, token)) = self.switcher_repeat.take() {
+            self.loop_handle.remove(token);
+        }
+    }
+
     /// The modifiers changed: once the held ones are let go, the selected
     /// window comes forward.
     pub fn switcher_modifiers(&mut self, mods: &ModifiersState) {
@@ -361,6 +400,7 @@ impl State {
     /// Closes the switcher; with `go`, the selected window comes forward,
     /// on its desktop, back from minimised.
     pub fn end_switcher(&mut self, go: bool) {
+        self.stop_switcher_repeat();
         let Some(switcher) = self.switcher.take() else {
             return;
         };

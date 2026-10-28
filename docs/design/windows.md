@@ -207,6 +207,10 @@ Keyboard:
   number). Minimised windows are in the list.
 - `Tab` / `Shift+Tab` move the selection; releasing `Alt` switches to it
   (and to its desktop); `Esc` cancels; a click on a thumbnail switches.
+  Held, `Tab` (or `Shift+Tab`) steps on after the keyboard's repeat delay,
+  then at its rate (`[keyboard] repeat_delay`, `repeat_rate`), as a held
+  key repeats in an application; the desktop times it, since keyboards
+  send no repeats of their own. No other shortcut repeats when held.
 - The panel appears in 150 ms (fade and 96 % → 100 % scale) and vanishes
   in 100 ms. The selection's ring moves in 120 ms.
 - As built: a thumbnail fits in 220 × 150 px, its aspect kept, centred in

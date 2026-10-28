@@ -8,11 +8,11 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, KEY_1, KEY_2, KEY_3, KEY_ESC, KEY_H, KEY_LEFT, KEY_LEFTALT, KEY_LEFTCTRL,
-    KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_TAB, Shows, WAIT, WINDOW_COLOUR, chord, compositor,
-    open, open_showing, wait,
+    BTN_LEFT, KEY_1, KEY_2, KEY_3, KEY_DOWN, KEY_ESC, KEY_H, KEY_LEFT, KEY_LEFTALT, KEY_LEFTCTRL,
+    KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_TAB, KEY_UP, Shows, WAIT, WINDOW_COLOUR, chord,
+    compositor, open, open_showing, wait,
 };
-use hocus_compositor::{Headless, model::WindowId};
+use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::WindowId};
 
 /// A window's desktop (from 0) and whether it shows, by app id.
 fn where_is(hp: &Headless, app_id: &str) -> Option<(usize, bool)> {
@@ -305,5 +305,62 @@ fn a_thumbnail_shows_the_window_without_its_client_side_shadow() -> anyhow::Resu
         }
     }
     hp.key(KEY_LEFTALT, false);
+    Ok(())
+}
+
+#[test]
+fn holding_tab_steps_through_the_windows_at_the_keyboards_repeat() -> anyhow::Result<()> {
+    let mut config = Config::default();
+    config.keyboard.repeat_delay = 300;
+    config.keyboard.repeat_rate = 10;
+    let headless = HeadlessConfig {
+        renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
+    };
+    let mut hp = Headless::start_with(headless, config)?;
+    let apps = ["test.1", "test.2", "test.3", "test.4", "test.5"];
+    for app in apps {
+        open(&mut hp, app, (400, 300))?;
+    }
+    let selected = |hp: &Headless| hp.switcher().map(|s| s.1);
+    // Most recently used first.
+    let name = |at: usize| apps[apps.len() - 1 - at].to_string();
+    hp.key(KEY_LEFTALT, true);
+    hp.key(KEY_TAB, true);
+    assert_eq!(selected(&hp), Some(1));
+    // Held, Tab waits for the repeat delay...
+    wait(&mut hp, Duration::from_millis(200))?;
+    assert_eq!(selected(&hp), Some(1), "stepped before the delay");
+    // ...then steps on, a window at a time.
+    let stepped = hp.dispatch_until(WAIT, |hp| selected(hp) == Some(2))?;
+    assert!(stepped, "held, Tab did not step on: {:?}", selected(&hp));
+    let stepped = hp.dispatch_until(WAIT, |hp| selected(hp) == Some(3))?;
+    assert!(stepped, "held, Tab stepped only once: {:?}", selected(&hp));
+    // Let go, it stays; releasing Alt goes there.
+    hp.key(KEY_TAB, false);
+    let at = selected(&hp).ok_or_else(|| anyhow::anyhow!("closed"))?;
+    wait(&mut hp, Duration::from_millis(400))?;
+    assert_eq!(selected(&hp), Some(at), "stepped on once Tab was let go");
+    hp.key(KEY_LEFTALT, false);
+    assert!(hp.switcher().is_none());
+    assert_eq!(focused(&hp), Some(name(at)));
+    // Alt let go first, Tab still held: it switches, and nothing steps on.
+    hp.key(KEY_LEFTALT, true);
+    hp.key(KEY_TAB, true);
+    hp.key(KEY_LEFTALT, false);
+    let switched = focused(&hp);
+    wait(&mut hp, Duration::from_millis(600))?;
+    assert!(hp.switcher().is_none());
+    assert_eq!(focused(&hp), switched);
+    hp.key(KEY_TAB, false);
+    // A shortcut held does not repeat: Super+Down held on a maximised
+    // window restores it, and does not go on to minimise it.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
+    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_DOWN, true);
+    wait(&mut hp, Duration::from_millis(600))?;
+    hp.key(KEY_DOWN, false);
+    hp.key(KEY_LEFTMETA, false);
+    assert_eq!(hp.minimized(), 0);
     Ok(())
 }
