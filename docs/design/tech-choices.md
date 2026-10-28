@@ -1,7 +1,6 @@
 # Technical choices — v2 (draft for review)
 
-Status: proposal, 2026-10-27, to be approved, then checked by a short
-spike before any product code. It answers three questions: how the shell
+Status: approved 2026-10-27; spike done 2026-10-28 ([report](spike-iced.md)). It answers three questions: how the shell
 is drawn, where it runs, and what we keep from the first build.
 
 ## Why these questions
@@ -111,3 +110,29 @@ has layer-shell) in the VM and, if it holds, in the user's session.
 
 If iced fails points 2, 3 or 6 badly, the fallback is egui with our own
 styling, measured on the same points.
+
+## Outcome of the spike (2026-10-28)
+
+The [spike's report](spike-iced.md) has the measurements and screenshots.
+Decisions taken with the maintainer:
+
+- **iced is kept** for the shell, on three conditions: the animations'
+  smoothness is measured on a GPU before the bar's slice (the first
+  build's compositor offers no linux-dmabuf, and the maintainer's session
+  has no layer-shell, so every spike measurement ran in software);
+  iced_layershell is pinned and watched (a winit-core beta broke it once);
+  the accessibility work below is planned.
+- **Accessibility**: iced 0.14 has no AccessKit. Our own tree with
+  `accesskit_unix` (about 3 to 5 days for the bar and its popovers) is a
+  slice of its own, done before the v1 release.
+- **`cargo deny`**: `ttf-parser` (unmaintained, RUSTSEC-2026-0192), the core
+  of iced's text, is accepted with a note in `deny.toml`, reviewed on every
+  iced update.
+- Traps to keep in mind (each made the bar look clearly worse until fixed):
+  iced's `web-colors` feature is required to blend like the mockups;
+  images are pre-scaled per output scale; variable fonts are not matched,
+  static instances are.
+- The compositor's first slice must offer linux-dmabuf and wlr-layer-shell,
+  keep the bar's reserved space while the shell restarts (a maximised
+  window jumped in the spike), and give the keyboard back to the bar when
+  one of its popovers closes.
