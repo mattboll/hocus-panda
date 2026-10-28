@@ -1,7 +1,7 @@
 # 0003 — The shell is a client, drawn with iced
 
-Date: 2026-10-27 · Status: accepted, to be confirmed by the spike in
-[tech-choices](../design/tech-choices.md)
+Date: 2026-10-27 · Status: accepted, confirmed by the spike (2026-10-28,
+[report](../design/spike-iced.md))
 
 ## Context
 
