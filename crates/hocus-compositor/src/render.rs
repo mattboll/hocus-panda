@@ -23,8 +23,13 @@ use smithay::{
     input::pointer::CursorImageStatus,
     output::Output,
     reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::Monotonic,
-    wayland::presentation::Refresh,
+    wayland::{
+        compositor::{SurfaceData, send_surface_state},
+        fractional_scale::with_fractional_scale,
+        presentation::Refresh,
+    },
 };
 
 use crate::{State, cursor::CursorElement};
@@ -40,6 +45,25 @@ render_elements! {
 
 /// What an output shows, element by element.
 pub type OutputElement<R> = OutputElements<R, WaylandSurfaceRenderElement<R>>;
+
+/// Tells a surface the scale and transform of the output it shows most on:
+/// fractional-scale's, and wl_surface's preferred buffer scale for clients
+/// that only draw at whole scales.
+fn tell_scale(surface: &WlSurface, data: &SurfaceData, output: Option<&Output>) {
+    let Some(output) = output else {
+        return;
+    };
+    let scale = output.current_scale();
+    with_fractional_scale(data, |fractional| {
+        fractional.set_preferred_scale(scale.fractional_scale());
+    });
+    send_surface_state(
+        surface,
+        data,
+        scale.integer_scale(),
+        output.current_transform(),
+    );
+}
 
 impl State {
     /// What `output` shows, front first. `cursor`: whether the compositor
@@ -84,8 +108,8 @@ impl State {
             }
         };
         for window in self.space.elements() {
-            if let Some(states) = states {
-                window.with_surfaces(|surface, data| {
+            window.with_surfaces(|surface, data| {
+                if let Some(states) = states {
                     update_surface_primary_scanout_output(
                         surface,
                         output,
@@ -93,11 +117,13 @@ impl State {
                         states,
                         default_primary_scanout_output_compare,
                     );
-                });
-            }
+                }
+                tell_scale(surface, data, primary(surface, data).as_ref());
+            });
             window.send_frame(output, now, throttle, primary);
         }
         for layer in layer_map_for_output(output).layers() {
+            layer.with_surfaces(|surface, data| tell_scale(surface, data, Some(output)));
             layer.send_frame(output, now, throttle, |_, _| Some(output.clone()));
         }
         if let CursorImageStatus::Surface(cursor) = &self.cursor {

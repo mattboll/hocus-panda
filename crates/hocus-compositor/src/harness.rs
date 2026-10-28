@@ -175,7 +175,7 @@ impl Headless {
         self.app.state.key(Keycode::new(code + 8), state, time);
     }
 
-    /// Whether the compositor offers the global named `interface`.
+    /// Whether the backend made the linux-dmabuf global.
     pub fn has_dmabuf(&self) -> bool {
         self.app.state.dmabuf_global.is_some()
     }

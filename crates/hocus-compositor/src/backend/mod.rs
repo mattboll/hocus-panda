@@ -107,7 +107,7 @@ pub fn render_node_of(display: &EGLDisplay) -> Option<DevId> {
 /// `dev_t`, as smithay's DRM nodes give it.
 pub type DevId = smithay::reexports::rustix::fs::Dev;
 
-/// Makes `output` known to clients and maps it in the space at `position`.
+/// Maps `output` in the space at `position`; its global is the caller's.
 pub fn add_output(state: &mut State, output: &Output, position: (i32, i32)) {
     state.space.map_output(output, position);
     state.redraw = true;

@@ -77,3 +77,47 @@ cargo deny check                              # licences and advisories
 
 CI runs the same on every pull request to `v2`. Update this section as
 commands land.
+
+The compositor (`crates/hocus-compositor`, binary `hocuspanda`): nested in
+a window when started from a graphical session, the session itself on a
+virtual terminal otherwise; `--backend winit|tty|headless` forces one.
+Always with a fresh, short runtime directory next to a live session:
+
+```sh
+# nested; Alt+Super+drag moves a window (Super+drag on a real session)
+target/debug/hocuspanda --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
+# nested without touching the live session's screen: in an Xvfb display
+Xvfb :87 -screen 0 1600x1000x24 -nolisten tcp &
+env -i HOME="$(mktemp -d)" PATH=/usr/bin:/bin DISPLAY=:87 LIBGL_ALWAYS_SOFTWARE=1 \
+    XDG_RUNTIME_DIR="$(mktemp -d /tmp/hp-XXXX)" target/debug/hocuspanda \
+    --runtime-dir <that same directory> --spawn foot   # drive with xdotool
+# headless: offscreen outputs, a private runtime directory by default
+target/debug/hocuspanda --backend headless --output 2560x1600@2 --output 1920x1080 \
+    --renderer pixman --no-xwayland --spawn foot
+RUST_LOG=hocus_compositor=debug                       # more of what it does
+```
+
+Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
+`--config FILE`); so far it reads `[keyboard]` (`layouts = ["fr",
+"fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`). Headless tests
+start it in-process (`hocus_compositor::Headless`, see
+`crates/hocus-compositor/tests/`) with sctk clients on threads.
+
+The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
+(QEMU with KVM; the base image is cached in
+`$XDG_CACHE_HOME/hocuspanda-vm`):
+
+```sh
+scripts/vm/debian.sh up        # boot it, user alex / panda
+scripts/vm/debian.sh copy      # target/debug's hocuspanda into it
+scripts/vm/debian.sh ssh '~/hocus-vm session'    # the session on its tty1
+scripts/vm/debian.sh keys e c h o ret            # its keyboard (QEMU key names)
+scripts/vm/debian.sh mouse 60 40; scripts/vm/debian.sh click
+scripts/vm/debian.sh screen shot.png             # what its screen shows
+scripts/vm/debian.sh ssh '~/hocus-vm log'        # what the session said
+scripts/vm/debian.sh down
+# a second VM beside the maintainer's: its own name and ports
+HOCUS_VM_NAME=other HOCUS_VM_SSH_PORT=2532 HOCUS_VM_HTTP_PORT=2590 scripts/vm/debian.sh up
+# to try it by hand: its screen in a window, with its keyboard and mouse
+HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
+```
