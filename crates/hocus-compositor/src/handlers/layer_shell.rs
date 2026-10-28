@@ -85,15 +85,20 @@ delegate_layer_shell!(State);
 pub fn handle_commit(state: &mut State, surface: &WlSurface) {
     let outputs: Vec<Output> = state.space.outputs().cloned().collect();
     for output in outputs {
-        let mut map = layer_map_for_output(&output);
+        let map = layer_map_for_output(&output);
         let Some(layer) = map
             .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
             .cloned()
         else {
             continue;
         };
-        map.arrange();
         drop(map);
+        let before = state.work_area(&output);
+        layer_map_for_output(&output).arrange();
+        if state.work_area(&output) != before {
+            // Snapped, maximised and fullscreen windows follow.
+            state.rearrange();
+        }
         let configured = with_states(surface, |states| {
             states
                 .data_map

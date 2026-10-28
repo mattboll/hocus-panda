@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use smithay::{
-    desktop::{Window, layer_map_for_output},
+    desktop::Window,
     output::Output,
     reexports::{
         calloop::timer::{TimeoutAction, Timer},
@@ -688,9 +688,16 @@ impl State {
     /// Snaps `id` to `zone` of its output's work area, from where it is
     /// drawn now.
     pub fn snap(&mut self, id: WindowId, zone: Zone) {
+        self.snap_from(id, zone, None);
+    }
+
+    /// Snaps `id`; `floating`: where it goes back to when restored, if not
+    /// where it is (a drag: where the drag began).
+    pub fn snap_from(&mut self, id: WindowId, zone: Zone, floating: Option<Rect>) {
         let (Some(area), Some(current)) = (self.area_of(id), self.rect_of(id)) else {
             return;
         };
+        let current = floating.unwrap_or(current);
         self.start_settle(id);
         let mode = self.model.mode(id);
         let floating = match mode {
@@ -1152,9 +1159,6 @@ impl State {
                 }
                 Mode::Floating => {}
             }
-        }
-        for output in self.space.outputs().cloned().collect::<Vec<_>>() {
-            layer_map_for_output(&output).arrange();
         }
     }
 }

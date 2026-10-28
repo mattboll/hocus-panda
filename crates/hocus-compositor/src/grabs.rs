@@ -156,6 +156,8 @@ pub struct MoveGrab {
     hold: Hold,
     /// Torn off a zone: it keeps still, its new size not drawn yet.
     rigid: bool,
+    /// Where it floated when the drag began.
+    floating: Option<Rect>,
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -200,6 +202,8 @@ impl PointerGrab<State> for MoveGrab {
             self.from = pointer;
             self.hold = Hold::Free;
             self.rigid = true;
+            // Where it floated before it snapped stays where it goes back.
+            self.floating = Some(restore);
             return;
         }
         let location = (self.initial.to_f64() + delta).to_i32_round();
@@ -278,7 +282,8 @@ impl PointerGrab<State> for MoveGrab {
             jelly.release();
         }
         if let Some(zone) = zone {
-            state.snap(self.id, zone);
+            // Restored, it goes back where the drag began.
+            state.snap_from(self.id, zone, self.floating);
         }
         state.redraw = true;
     }
@@ -446,6 +451,7 @@ impl State {
             initial,
             hold,
             rigid: false,
+            floating: (hold == Hold::Free).then_some(rect),
         };
         self.moving = Some(id);
         self.frame_cursor = Some(CursorIcon::Grabbing);

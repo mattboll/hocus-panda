@@ -102,8 +102,9 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 "fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`; without layouts,
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
 the real screen; nested and headless take `--output`), `[shortcuts]`
-(`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`) and
-`[programs]` (`terminal`). `packaging/config.toml` lists every setting
+(`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`, and the
+windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`)
+and `[appearance]` (`reduced-motion`, `high-contrast`). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd
 and D-Bus where the session is, so never use it next to a live session. Headless tests

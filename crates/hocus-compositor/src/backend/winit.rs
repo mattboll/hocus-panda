@@ -113,6 +113,7 @@ fn on_event(app: &mut App, event: WinitEvent) {
             );
             // Bars and overlays follow the window's size.
             smithay::desktop::layer_map_for_output(&winit.output).arrange();
+            state.rearrange();
             state.redraw = true;
         }
         WinitEvent::Input(event) => state.process_input_event(event),
