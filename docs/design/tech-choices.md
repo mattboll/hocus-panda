@@ -1,6 +1,6 @@
 # Technical choices — v2 (draft for review)
 
-Status: approved 2026-10-27; spike done 2026-10-28 ([report](spike-iced.md)). It answers three questions: how the shell
+Status: approved 2026-10-27; spike done 2026-10-28 ([report](spike-iced.md)); the bar's renderer measured on a GPU 2026-10-28. It answers three questions: how the shell
 is drawn, where it runs, and what we keep from the first build.
 
 ## Why these questions
@@ -119,7 +119,8 @@ Decisions taken with the maintainer:
 - **iced is kept** for the shell, on three conditions: the animations'
   smoothness is measured on a GPU before the bar's slice (the first
   build's compositor offers no linux-dmabuf, and the maintainer's session
-  has no layer-shell, so every spike measurement ran in software);
+  has no layer-shell, so every spike measurement ran in software; done
+  since, see [the bar's renderer](#the-bars-renderer-30));
   iced_layershell is pinned and watched (a winit-core beta broke it once);
   the accessibility work below is planned.
 - **Accessibility**: iced 0.14 has no AccessKit. Our own tree with
@@ -136,3 +137,51 @@ Decisions taken with the maintainer:
   keep the bar's reserved space while the shell restarts (a maximised
   window jumped in the spike), and give the keyboard back to the bar when
   one of its popovers closes.
+
+## The bar's renderer (3.0)
+
+Measured on 2026-10-28 (issue #357) with the spike's bar against v2's
+compositor on an Intel laptop GPU; the numbers are in the
+[report](spike-iced.md#measured-on-a-gpu-30). On the GPU, the wave and the
+form switch keep the output's pace with no frame over budget, at 0.7–0.9 ms
+of the bar's CPU per frame and 0.13–0.17 % at rest. The 2 cores of the
+spike were lavapipe's, and lavapipe still costs that today.
+
+**Recommendation: wgpu, with tiny-skia as the software fallback**, and four
+things the bar's slice must do:
+
+1. **Draw on the compositor's GPU, and wake no other.**
+   - iced asks wgpu for the high-performance GPU, so on a laptop with two
+     GPUs the bar lands on the discrete one and keeps it awake.
+   - Creating a Vulkan instance loads every installed driver, which wakes a
+     sleeping discrete GPU (2.2 s before the first draw) and costs about
+     100 MB.
+   - The shell is started by the compositor, which knows its render node. It
+     starts the shell with `WGPU_POWER_PREF=low` and only that GPU's drivers
+     (`VK_LOADER_DRIVERS_SELECT` or `VK_DRIVER_FILES`, and the EGL vendor for
+     wgpu's GL backend).
+   - Measured: first draw in 59 ms, 118 MB.
+2. **An 8-bit-alpha surface.**
+   - With `web-colors`, iced takes the first non-sRGB format, which is
+     `Rgb10a2Unorm` (2-bit alpha) on Mesa.
+   - A small patch to `iced_wgpu`'s format choice makes it prefer
+     `Rgba8Unorm`/`Bgra8Unorm`. Offer it upstream, and carry it meanwhile.
+3. **Fall back to tiny-skia explicitly.**
+   - iced only falls back when wgpu fails, and with lavapipe installed wgpu
+     never fails: the bar would then spend 1.2–2.5 cores per wave and still
+     miss frames.
+   - The shell checks the adapter wgpu offers. When it is a CPU (lavapipe,
+     llvmpipe), or when there is no GPU, it starts with
+     `ICED_BACKEND=tiny-skia`.
+   - In that mode the bar plays no wave and shows the glow without its
+     fade, as reduced motion does: tiny-skia does not hold the pace either
+     (31 ms between frames). It costs 17 MB and starts in 5–15 ms.
+4. **Fix tiny-skia's transparency before relying on it.**
+   - softbuffer 0.4.8 presents `Xrgb8888` buffers on Wayland, so everything
+     transparent turns black. Presenting `Argb8888` is a two-line change,
+     carried as a patched softbuffer until upstream offers it.
+   - With it, tiny-skia's outer shadow shows much stronger than wgpu's. The
+     glow then needs drawing in our own canvas (the inner glow already is),
+     or a fix in `iced_tiny_skia`.
+   - Until then, the software mode draws the bar opaque with no outer
+     glow: the "reduce transparency" look the spec already defines.
