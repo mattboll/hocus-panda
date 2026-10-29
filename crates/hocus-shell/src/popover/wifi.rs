@@ -1032,7 +1032,8 @@ impl Panel {
         let (scroll, list) = (ui(|ui| ui.scroll), layout.list());
         let widths = self.button_widths(state);
         let all = ui(|ui| targets(layout, ui, &rows, &network));
-        all.into_iter().find(|t| {
+        // Last first: the eye is inside the field.
+        all.into_iter().rev().find(|t| {
             let Some(rect) = self.shape(*t, layout, scroll, widths) else {
                 return false;
             };
