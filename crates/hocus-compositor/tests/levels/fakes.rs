@@ -1,10 +1,12 @@
 //! The levels' services, faked privately, never the machine's: a D-Bus
 //! daemon of its own serving UPower, power-profiles-daemon and logind
 //! objects; a PipeWire of its own, in a short runtime directory of its own,
-//! with null sinks (two by default, or those asked for), and WirePlumber's
-//! part in choosing the default one (a sink chosen with `wpctl set-default`
-//! becomes the default); and a backlight directory. The shell is started
-//! through a script pointing it at them.
+//! with null sinks (two by default, or those asked for), null sources if
+//! asked for, applications' streams (`pw-cat` playing silence, linked to
+//! the default sink, as WirePlumber would), and WirePlumber's part in
+//! choosing the default sink and source (one chosen with `wpctl
+//! set-default` becomes the default); and a backlight directory. The shell
+//! is started through a script pointing it at them.
 #![allow(dead_code)]
 
 use std::{
@@ -132,8 +134,11 @@ pub struct Fakes {
     policy: Option<Child>,
     /// PipeWire's runtime directory: short, its socket's path has a limit.
     pw_runtime: tempfile::TempDir,
-    /// The null sinks, the first the default.
+    /// The null sinks, the first the default; the sources, the same.
     sinks: Vec<FakeSink>,
+    sources: Vec<FakeSink>,
+    /// The streams playing, by node name.
+    streams: Vec<(String, Child)>,
 }
 
 /// A null sink: its node's name, its description, and what it says it is
@@ -183,8 +188,15 @@ impl Fakes {
 
     /// The same with these sinks, the first the default at 62 %.
     pub fn start_with(sinks: &[FakeSink]) -> anyhow::Result<Self> {
+        Self::start_with_sources(sinks, &[])
+    }
+
+    /// The same with these sources too (microphones), the first the
+    /// default.
+    pub fn start_with_sources(sinks: &[FakeSink], sources: &[FakeSink]) -> anyhow::Result<Self> {
         let mut fakes = Self::empty()?;
         fakes.sinks = sinks.to_vec();
+        fakes.sources = sources.to_vec();
         fakes.backlight(700, 1000)?;
         fakes.start_bus()?;
         fakes.start_upower()?;
@@ -217,6 +229,8 @@ impl Fakes {
             policy: None,
             pw_runtime: tempfile::Builder::new().prefix("hp-").tempdir_in("/tmp")?,
             sinks: TWO_SINKS.to_vec(),
+            sources: Vec::new(),
+            streams: Vec::new(),
         })
     }
 
@@ -362,20 +376,34 @@ impl Fakes {
         let conf = self.dir.path().join("pw-config/pipewire/pipewire.conf.d");
         std::fs::create_dir_all(&conf)?;
         let first = self.sinks.first().map_or("hocus-test-sink", |s| s.name);
+        let source = self
+            .sources
+            .first()
+            .map(|s| {
+                format!(
+                    "{{ key = default.audio.source type = \"Spa:String:JSON\" value = {{ name = {} }} }}",
+                    s.name
+                )
+            })
+            .unwrap_or_default();
         let mut objects = format!(
             "context.objects = [\n\
              {{ factory = metadata args = {{ metadata.name = default metadata.values = [\n\
-               {{ key = default.audio.sink type = \"Spa:String:JSON\" value = {{ name = {first} }} }} ] }} }}\n"
+               {{ key = default.audio.sink type = \"Spa:String:JSON\" value = {{ name = {first} }} }} {source} ] }} }}\n"
         );
-        for sink in &self.sinks {
+        let classes = (self.sinks.iter().map(|s| (s, "Audio/Sink")))
+            .chain(self.sources.iter().map(|s| (s, "Audio/Source")));
+        for (sink, class) in classes {
             let form = sink
                 .form_factor
                 .map(|f| format!(" device.form-factor = {f}"))
                 .unwrap_or_default();
+            // Its ports made at once, as WirePlumber would: streams link
+            // to them.
             objects.push_str(&format!(
                 "{{ factory = adapter args = {{ factory.name = support.null-audio-sink node.name = {}\n\
-                   node.description = \"{}\"{form} media.class = Audio/Sink audio.position = [ FL FR ] \
-                   object.linger = true }} }}\n",
+                   node.description = \"{}\"{form} media.class = {class} audio.position = [ FL FR ] \
+                   object.linger = true adapter.auto-port-config = {{ mode = dsp position = preserve }} }} }}\n",
                 sink.name, sink.description
             ));
         }
@@ -404,10 +432,11 @@ impl Fakes {
         Ok(())
     }
 
-    /// WirePlumber's part: `wpctl set-default` writes the sink chosen
-    /// (`default.configured.audio.sink`), and WirePlumber makes it the
-    /// default (`default.audio.sink`). Here a `pw-metadata` follows the
-    /// first, and the second is set when it changes.
+    /// WirePlumber's part: `wpctl set-default` writes the sink or source
+    /// chosen (`default.configured.audio.sink`, `….source`), and
+    /// WirePlumber makes it the default (`default.audio.sink`, `….source`).
+    /// Here a `pw-metadata` follows the first, and the second is set when
+    /// it changes.
     fn start_policy(&mut self) -> anyhow::Result<()> {
         use std::io::BufRead;
         let mut monitor = self
@@ -427,9 +456,12 @@ impl Fakes {
                 let Ok(line) = line else {
                     return;
                 };
-                if !line.contains("key:'default.configured.audio.sink'") {
+                let Some(key) = ["sink", "source"]
+                    .into_iter()
+                    .find(|k| line.contains(&format!("key:'default.configured.audio.{k}'")))
+                else {
                     continue;
-                }
+                };
                 let Some(value) = line
                     .split("value:'")
                     .nth(1)
@@ -451,7 +483,7 @@ impl Fakes {
                     command
                 };
                 let _ = pw("pw-metadata")
-                    .args(["-n", "default", "0", "default.audio.sink", value])
+                    .args(["-n", "default", "0", &format!("default.audio.{key}"), value])
                     .arg("Spa:String:JSON")
                     .status();
                 // PipeWire 1.0's pw-dump writes a metadata change out with
@@ -463,11 +495,117 @@ impl Fakes {
         Ok(())
     }
 
-    pub fn stop_pipewire(&mut self) {
-        for mut child in [self.policy.take(), self.pipewire.take()]
-            .into_iter()
-            .flatten()
+    /// An application's stream playing silence: node `node` of
+    /// application `app` (and its icon's name), linked to the default
+    /// sink; once it runs, its node's id.
+    pub fn play(&mut self, node: &str, app: &str, icon: Option<&str>) -> anyhow::Result<u32> {
+        let icon = icon
+            .map(|i| format!(" application.icon-name = \"{i}\""))
+            .unwrap_or_default();
+        let props = format!(
+            "{{ node.name = {node} application.name = \"{app}\"{icon} \
+             adapter.auto-port-config = {{ mode = dsp }} }}"
+        );
+        let child = self
+            .pw("pw-cat")
+            .args(["--playback", "--raw", "-P", &props, "-"])
+            .stdin(std::fs::File::open("/dev/zero")?)
+            .stdout(Stdio::null())
+            .spawn()
+            .context("pw-cat")?;
+        self.streams.push((node.to_owned(), child));
+        wait_for(
+            || self.ports(node, "output").len() == 2,
+            "the stream's ports",
+        )?;
+        self.link(node, true)?;
+        let id = self.sink(node)?;
+        wait_for(
+            || self.state(id).as_deref() == Some("running"),
+            "the stream running",
+        )?;
+        Ok(id)
+    }
+
+    /// Stream `node` paused, unlinked from its sink (it goes idle), or
+    /// playing again.
+    pub fn pause(&self, node: &str, paused: bool) -> anyhow::Result<()> {
+        self.link(node, !paused)?;
+        let id = self.sink(node)?;
+        wait_for(
+            || (self.state(id).as_deref() == Some("running")) != paused,
+            "the stream's new state",
+        )
+    }
+
+    /// Stream `node` ends.
+    pub fn stop(&mut self, node: &str) {
+        if let Some(at) = self.streams.iter().position(|(n, _)| n == node) {
+            let (_, mut child) = self.streams.remove(at);
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// Links stream `node`'s ports to the first sink's (or unlinks them).
+    fn link(&self, node: &str, linked: bool) -> anyhow::Result<()> {
+        let sink = self.sinks.first().map_or("hocus-test-sink", |s| s.name);
+        for (out, sink_port) in self
+            .ports(node, "output")
+            .iter()
+            .zip(self.ports(sink, "playback").iter())
         {
+            let mut command = self.pw("pw-link");
+            if !linked {
+                command.arg("-d");
+            }
+            let status = command
+                .args([out, sink_port])
+                .stdout(Stdio::null())
+                .status()?;
+            anyhow::ensure!(status.success(), "pw-link {out} {sink_port}: {status}");
+        }
+        Ok(())
+    }
+
+    /// Node `node`'s ports whose names start with `prefix`, in order.
+    fn ports(&self, node: &str, prefix: &str) -> Vec<String> {
+        let Ok(out) = self.pw("pw-link").args(["-o", "-i"]).output() else {
+            return Vec::new();
+        };
+        let mut ports: Vec<String> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| {
+                l.strip_prefix(node)
+                    .and_then(|l| l.strip_prefix(':'))
+                    .is_some_and(|port| port.starts_with(prefix))
+            })
+            .map(str::to_owned)
+            .collect();
+        ports.sort();
+        ports.dedup();
+        ports
+    }
+
+    /// Node `id`'s state (`running`, `idle`…).
+    pub fn state(&self, id: u32) -> Option<String> {
+        let out = self.pw("pw-dump").arg(id.to_string()).output().ok()?;
+        let objects: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
+        objects
+            .iter()
+            .find(|o| o.get("id").and_then(serde_json::Value::as_u64) == Some(u64::from(id)))?
+            .pointer("/info/state")?
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    pub fn stop_pipewire(&mut self) {
+        let streams = self.streams.drain(..).map(|(_, child)| child);
+        for mut child in streams.chain(
+            [self.policy.take(), self.pipewire.take()]
+                .into_iter()
+                .flatten(),
+        ) {
             let _ = child.kill();
             let _ = child.wait();
         }

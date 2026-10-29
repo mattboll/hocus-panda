@@ -5,6 +5,9 @@
 //! the mini form, hovering the gauge opens it and leaving closes it; the
 //! wheel, the slider, the mute button and the outputs change the fake
 //! PipeWire; and nothing draws at rest, a change in it drawing it alone.
+//! 3.4b's (issue #380): the microphones, their mute, volume and choice;
+//! the applications playing, their volume and mute, a stream starting or
+//! ending while it is open.
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 //! The timings of hovering, on the controller's own clock, are the shell's
@@ -45,9 +48,9 @@ const OUTPUTS: [FakeSink; 3] = [
 /// and the sound's row's middle (three rows and a one-line status line).
 const LEVELS: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
 const ROW: (f64, f64) = (1800.0, (LEVELS.y + 57) as f64);
-/// The popover with three outputs: 280 × 261, 8 px left of the bar, its
-/// bottom on the bar's.
-const POPOVER: Rect = Rect::new(1920 - 8 - 196 - 8 - 280, 1080 - 8 - 261, 280, 261);
+/// The popover with three outputs, no microphone and no application
+/// playing: 280 × 332, 8 px left of the bar, its bottom on the bar's.
+const POPOVER: Rect = popover(332);
 /// Its mute button, its slider's ends (the knob's centre at 0 and 100 %),
 /// and its outputs' rows, in it.
 const MUTE: (i32, i32) = (31, 69);
@@ -55,7 +58,12 @@ const SLIDER: (i32, i32, i32) = (63, 213, 69);
 const OUTPUT_Y: [i32; 3] = [152, 190, 228];
 /// The mini bar's gauge, and its popover.
 const MINI_GAUGE: (f64, f64) = (1920.0 - 8.0 - 1.0 - 27.0, (1080 - 8 - 41 - 97 + 40) as f64);
-const MINI_POPOVER: Rect = Rect::new(1920 - 8 - 56 - 8 - 280, 1080 - 8 - 261, 280, 261);
+const MINI_POPOVER: Rect = Rect::new(1920 - 8 - 56 - 8 - 280, 1080 - 8 - 332, 280, 332);
+
+/// The full bar's popover, `height` tall.
+const fn popover(height: i32) -> Rect {
+    Rect::new(1920 - 8 - 196 - 8 - 280, 1080 - 8 - height, 280, height)
+}
 
 /// The fakes there, or why the test cannot run.
 fn ready() -> Option<std::path::PathBuf> {
@@ -540,7 +548,177 @@ fn with_one_output_it_is_shorter_and_on_a_taller_screen_still_at_the_bottom() ->
     // The bar's height is the screen's less 16 px: its row, 120 px lower.
     let mut hp = start_on(&fakes, &shell, 1200)?;
     click(&mut hp, (ROW.0, ROW.1 + 120.0));
-    let rect = Rect::new(POPOVER.x, 1200 - 8 - 185, 280, 185);
+    let rect = Rect::new(POPOVER.x, 1200 - 8 - 256, 280, 256);
     popover_is(&mut hp, Some(rect))?;
+    Ok(())
+}
+
+// --- 3.4b: the microphone and the applications ---------------------------------
+
+const MIC: &str = "hocus-test-mic";
+const HEADSET_MIC: &str = "hocus-test-headset-mic";
+
+/// The microphones: the laptop's (the default) and the headset's.
+const MICROPHONES: [FakeSink; 2] = [
+    FakeSink::new(MIC, "Micro du portable"),
+    FakeSink::new(HEADSET_MIC, "Micro du casque"),
+];
+
+/// In a popover with three outputs and microphones: their row's middle,
+/// and the list's rows'.
+const MIC_ROW: i32 = 310;
+const MIC_Y: [i32; 2] = [352, 390];
+/// In a popover with three outputs and no microphone: the applications'
+/// rows' tops; in one, the tile's middle and the slider's.
+const APP_TOP: [i32; 3] = [292, 344, 396];
+const TILE_AT: (i32, i32) = (31, 23);
+const APP_SLIDER_Y: i32 = 33;
+
+/// The default source's node name, as PipeWire's metadata says.
+fn default_source(fakes: &Fakes) -> Option<String> {
+    let out = std::process::Command::new("pw-metadata")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("PIPEWIRE_REMOTE", fakes.pw_socket())
+        .args(["-n", "default", "0", "default.audio.source"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    [MIC, HEADSET_MIC]
+        .into_iter()
+        .find(|name| text.contains(&format!("\"{name}\"")))
+        .map(str::to_owned)
+}
+
+#[test]
+fn the_microphone_its_mute_its_volume_and_which_one() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let fakes = Fakes::start_with_sources(&OUTPUTS, &MICROPHONES)?;
+    fakes.wpctl(&["set-volume", &fakes.sink(MIC)?.to_string(), "0.70"])?;
+    let mut hp = start(&fakes, &shell)?;
+    // Its section: its row, and the two to choose from.
+    let rect = popover(495);
+    click(&mut hp, ROW);
+    popover_is(&mut hp, Some(rect))?;
+    // Muted, then unmuted by its slider, as the master's.
+    click(&mut hp, at(rect, (31, MIC_ROW)));
+    volume(&mut hp, &fakes, MIC, (0.70, true))?;
+    // Once the shell has read it too.
+    wait(&mut hp, Duration::from_millis(300))?;
+    let (left, right, _) = SLIDER;
+    click(&mut hp, at(rect, ((left + right) / 2, MIC_ROW)));
+    volume(&mut hp, &fakes, MIC, (0.50, false))?;
+    // The keyboard: Tab to its slider (the mute button, the master's
+    // slider, the three outputs, its mute button, it), Right: 5 % up.
+    for _ in 0..7 {
+        press(&mut hp, KEY_TAB);
+    }
+    press(&mut hp, KEY_RIGHT);
+    volume(&mut hp, &fakes, MIC, (0.55, false))?;
+    // The headset's: the default now, its own volume kept.
+    click(&mut hp, at(rect, (140, MIC_Y[1])));
+    let chosen = hp.dispatch_until(WAIT, |_| {
+        default_source(&fakes).as_deref() == Some(HEADSET_MIC)
+    })?;
+    assert!(chosen, "default source: {:?}", default_source(&fakes));
+    volume(&mut hp, &fakes, MIC, (0.55, false))?;
+    // The master's sound untouched.
+    volume(&mut hp, &fakes, SPEAKERS, (0.62, false))?;
+    Ok(())
+}
+
+#[test]
+fn one_microphone_has_no_list_and_none_hides_its_section() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let fakes = Fakes::start_with_sources(&OUTPUTS, &MICROPHONES[..1])?;
+    let mut hp = start(&fakes, &shell)?;
+    click(&mut hp, ROW);
+    popover_is(&mut hp, Some(popover(415)))?;
+    Ok(())
+}
+
+#[test]
+fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going()
+-> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut fakes = Fakes::start_with(&OUTPUTS)?;
+    // Firefox with two tabs playing, music, and a player paused.
+    fakes.play("hocus-test-tab-1", "Firefox", None)?;
+    fakes.play("hocus-test-tab-2", "Firefox", None)?;
+    fakes.play("hocus-test-music", "Musique", None)?;
+    fakes.play("hocus-test-paused", "Lecteur", None)?;
+    fakes.pause("hocus-test-paused", true)?;
+    let mut hp = start(&fakes, &shell)?;
+    // Two rows: Firefox's (its two tabs), the music's; not the paused one.
+    let two = popover(405);
+    click(&mut hp, ROW);
+    popover_is(&mut hp, Some(two))?;
+
+    // At rest with streams playing, nothing draws.
+    let inside = at(two, (140, 20));
+    hp.pointer_move(inside.0 - 1.0, inside.1);
+    hp.pointer_move(inside.0, inside.1);
+    wait(&mut hp, Duration::from_millis(700))?;
+    let counts = (hp.bar_commits(), hp.levels_commits(), hp.popover_commits());
+    wait(&mut hp, Duration::from_secs(2))?;
+    assert_eq!(
+        (hp.bar_commits(), hp.levels_commits(), hp.popover_commits()),
+        counts,
+        "drawn at rest"
+    );
+
+    // Firefox's tile mutes both its streams; again, unmutes them.
+    let tile = |row: usize| at(two, (TILE_AT.0, APP_TOP[row] + TILE_AT.1));
+    click(&mut hp, tile(0));
+    for tab in ["hocus-test-tab-1", "hocus-test-tab-2"] {
+        volume(&mut hp, &fakes, tab, (1.0, true))?;
+    }
+    // Once the shell has read it too.
+    wait(&mut hp, Duration::from_millis(300))?;
+    click(&mut hp, tile(0));
+    for tab in ["hocus-test-tab-1", "hocus-test-tab-2"] {
+        volume(&mut hp, &fakes, tab, (1.0, false))?;
+    }
+    // The music's slider, dragged to the middle: its stream alone.
+    let (left, right, _) = SLIDER;
+    let y = f64::from(two.y + APP_TOP[1] + APP_SLIDER_Y);
+    let x = |px: i32| f64::from(two.x + px);
+    hp.pointer_move(x(right) - 1.0, y);
+    hp.pointer_move(x(right), y);
+    hp.button(BTN_LEFT, true);
+    for step in 1..=10 {
+        let share = f64::from(step) / 10.0;
+        hp.pointer_move(x(right) - (x(right) - x((left + right) / 2)) * share, y);
+        wait(&mut hp, Duration::from_millis(16))?;
+    }
+    hp.button(BTN_LEFT, false);
+    volume(&mut hp, &fakes, "hocus-test-music", (0.50, false))?;
+    volume(&mut hp, &fakes, "hocus-test-tab-1", (1.0, false))?;
+    volume(&mut hp, &fakes, SPEAKERS, (0.62, false))?;
+
+    // The paused player plays again: its row comes, the popover grows.
+    fakes.pause("hocus-test-paused", false)?;
+    popover_is(&mut hp, Some(popover(457)))?;
+    // A tab paused: Firefox keeps its row while the popover is open.
+    fakes.pause("hocus-test-tab-1", true)?;
+    fakes.pause("hocus-test-tab-2", true)?;
+    wait(&mut hp, Duration::from_millis(500))?;
+    assert_eq!(popovers(&hp), vec![popover(457)]);
+    // Its streams gone, its row goes.
+    fakes.stop("hocus-test-tab-1");
+    fakes.stop("hocus-test-tab-2");
+    popover_is(&mut hp, Some(two))?;
+    // Opened again: the playing ones only.
+    fakes.pause("hocus-test-music", true)?;
+    click(&mut hp, ROW);
+    popover_is(&mut hp, None)?;
+    click(&mut hp, ROW);
+    popover_is(&mut hp, Some(popover(353)))?;
     Ok(())
 }
