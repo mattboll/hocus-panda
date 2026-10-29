@@ -453,9 +453,9 @@ impl State {
                     AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, alpha);
                 // The CPU renderer's buffers have no alpha: what the bar
                 // leaves out at its corners would show black. The clock's,
-                // the levels' and the connections' surfaces are opaque too,
-                // and cut to the bar: they change size in their own commits
-                // when the form switches.
+                // the levels', the connections' and the desktops' surfaces
+                // are opaque too, and cut to the bar: they change size in
+                // their own commits when the form switches.
                 let cut = match layer.namespace() {
                     hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => Some(Rectangle::new(
                         loc,
@@ -463,7 +463,8 @@ impl State {
                     )),
                     hocus_link::CLOCK_NAMESPACE
                     | hocus_link::LEVELS_NAMESPACE
-                    | hocus_link::CONNECTIONS_NAMESPACE => bar,
+                    | hocus_link::CONNECTIONS_NAMESPACE
+                    | hocus_link::DESKTOPS_NAMESPACE => bar,
                     _ => None,
                 };
                 if let Some(clip) = cut.filter(|_| self.shell.software) {

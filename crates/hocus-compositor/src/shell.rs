@@ -51,6 +51,8 @@ pub struct Shell {
     pub software: bool,
     /// The active keyboard layout as last told; `None`: not told yet.
     pub layout: Option<u32>,
+    /// The bars' screens' desktops as last told.
+    pub desktops: crate::desktops::Told,
     /// Ends in a row that came quickly.
     quick_ends: u32,
     ended: Option<Sender<Duration>>,
@@ -178,7 +180,8 @@ impl State {
     }
 
     /// The shell connected (again): it is told how bars and their clock
-    /// look, where bars are, the other screens and the keyboard's layouts.
+    /// look, where bars are, the other screens, the keyboard's layouts and
+    /// the bars' screens' desktops.
     fn shell_connected(&mut self, stream: UnixStream) {
         self.shell_gone();
         if let Err(err) = stream.set_nonblocking(true) {
@@ -252,6 +255,7 @@ impl State {
         }
         self.tell_screens(true);
         self.tell_layouts();
+        self.tell_desktops();
         self.hand_kept_levels();
     }
 
@@ -278,6 +282,7 @@ impl State {
             ToCompositor::Wake(namespace) => self.wake_shell_surfaces(&namespace),
             ToCompositor::Closing(namespace) => self.popovers_closing(&namespace),
             ToCompositor::NextLayout => self.next_layout(),
+            ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
         }
     }
 

@@ -4,14 +4,26 @@
 //! three fingers on a touchpad moves the strip with them, then completes
 //! or springs back. Plain data and decisions on the frame clock, tested
 //! without a compositor; `State` shows and hides the windows.
+//!
+//! The bar's tiles show each screen's desktops with a sketch of their
+//! windows (docs/design/bar.md §4 group 8, 3.9): the shell is told them as
+//! it connects, then after any frame of the screen where they changed, so
+//! at most once a frame and never while nothing is drawn. A window dragged
+//! or resized is told where it lands, once the grab ends: following it
+//! would draw the tiles at every frame of every drag for a move of a pixel
+//! or two in them. The strip's slide changes nothing but the current
+//! desktop, told as the slide starts, so that the tiles' ring moves with
+//! it.
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
+use hocus_link::{DeskWindow, DesktopTo, Desktops, SHARE, ToShell};
 use smithay::output::Output;
 
 use crate::{
-    model::WindowId,
+    model::{Rect, WindowId},
     motion::{self, Bezier, Tween},
+    windows::rect_of,
 };
 
 /// Desktops on each screen by default, and at most.
@@ -349,7 +361,157 @@ impl Swipe {
     }
 }
 
+/// `rect`'s place and size on `screen` in [`SHARE`]s of it, cut to the
+/// screen; `None` when none of it is on it. Its edges are rounded, not its
+/// size, so that windows side by side stay side by side in the tile.
+pub fn share(rect: Rect, screen: Rect) -> Option<[u16; 4]> {
+    if screen.width <= 0 || screen.height <= 0 {
+        return None;
+    }
+    let along = |at: i32, from: i32, length: i32| {
+        let share = f64::from(at - from) * f64::from(SHARE) / f64::from(length);
+        share.round().clamp(0.0, f64::from(SHARE)) as u16
+    };
+    let (left, right) = (
+        along(rect.x, screen.x, screen.width),
+        along(rect.x + rect.width, screen.x, screen.width),
+    );
+    let (top, bottom) = (
+        along(rect.y, screen.y, screen.height),
+        along(rect.y + rect.height, screen.y, screen.height),
+    );
+    let inside = rect.x < screen.x + screen.width
+        && rect.x + rect.width > screen.x
+        && rect.y < screen.y + screen.height
+        && rect.y + rect.height > screen.y;
+    if !inside {
+        return None;
+    }
+    // A sliver still shows as one.
+    let left = left.min(SHARE - 1);
+    let top = top.min(SHARE - 1);
+    Some([
+        left,
+        top,
+        (right.max(left + 1)) - left,
+        (bottom.max(top + 1)) - top,
+    ])
+}
+
+/// What each bar's tiles were last told, by screen.
+#[derive(Debug, Default)]
+pub struct Told(HashMap<String, Desktops>);
+
+impl Told {
+    /// The screen's desktops are `now`: what to tell, if they changed since
+    /// they were told. Nothing while a window is dragged or resized
+    /// (`held`): where it lands is told once the grab ends.
+    pub fn offer(&mut self, now: Desktops, held: bool) -> Option<Desktops> {
+        if held || self.0.get(&now.output) == Some(&now) {
+            return None;
+        }
+        self.0.insert(now.output.clone(), now.clone());
+        Some(now)
+    }
+
+    /// Nothing told: a shell that connects is told everything.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// The screen has no bar any more.
+    pub fn forget(&mut self, output: &str) {
+        self.0.remove(output);
+    }
+}
+
 impl crate::State {
+    /// `output`'s desktops as its bar's tiles show them: the windows on it,
+    /// minimised ones aside, bottom first.
+    pub fn desktops_view(&self, output: &Output) -> Option<Desktops> {
+        let screen = rect_of(self.space.output_geometry(output)?);
+        let strip = self.strip(output);
+        let current = strip.current();
+        let focused = self.model.focused();
+        let windows = self
+            .windows_on(output)
+            .into_iter()
+            .filter(|id| !self.model.is_minimized(*id))
+            .filter_map(|id| {
+                let desktop = self.model.desktop(id);
+                Some(DeskWindow {
+                    desktop: u8::try_from(desktop).ok()?,
+                    rect: share(self.home_rect(id)?, screen)?,
+                    focused: focused == Some(id) && desktop == current,
+                })
+            })
+            .collect();
+        Some(Desktops {
+            output: output.name(),
+            count: u8::try_from(strip.count()).unwrap_or(u8::MAX),
+            current: u8::try_from(current).unwrap_or(u8::MAX),
+            windows,
+        })
+    }
+
+    /// A frame of `output` was drawn: its bar's tiles are told its desktops
+    /// if they changed (see the module's documentation).
+    pub fn desktops_drawn(&mut self, output: &Output) {
+        if !self.shell_linked() {
+            return;
+        }
+        if !self.panel.bars.contains_key(&output.name()) {
+            self.shell.desktops.forget(&output.name());
+            return;
+        }
+        let held = self.moving.is_some()
+            || self
+                .windows
+                .values()
+                .any(|m| m.resizing.is_some_and(|r| !r.ended));
+        if let Some(view) = self.desktops_view(output)
+            && let Some(told) = self.shell.desktops.offer(view, held)
+        {
+            self.tell_shell(ToShell::Desktops(told));
+        }
+    }
+
+    /// The shell connected: every bar's tiles are told their desktops.
+    pub fn tell_desktops(&mut self) {
+        self.shell.desktops.clear();
+        let outputs: Vec<Output> = self
+            .space
+            .outputs()
+            .filter(|o| self.panel.bars.contains_key(&o.name()))
+            .cloned()
+            .collect();
+        for output in outputs {
+            if let Some(view) = self.desktops_view(&output)
+                && let Some(told) = self.shell.desktops.offer(view, false)
+            {
+                self.tell_shell(ToShell::Desktops(told));
+            }
+        }
+    }
+
+    /// The shell asks for a desktop of `output` (a tile, the wheel): as the
+    /// shortcuts go there, sliding, and no further than the ends.
+    pub fn desktop_asked(&mut self, output: &str, to: DesktopTo) {
+        let Some(output) = self.space.outputs().find(|o| o.name() == output).cloned() else {
+            return;
+        };
+        match to {
+            DesktopTo::At(index) => {
+                let index = usize::from(index);
+                if index < self.strip(&output).count() {
+                    self.switch_desktop(&output, index, None);
+                }
+            }
+            DesktopTo::Next => self.switch_desktop_on(&output, 1),
+            DesktopTo::Previous => self.switch_desktop_on(&output, -1),
+        }
+    }
+
     /// `output`'s desktops, as they are or new.
     pub fn strip(&self, output: &Output) -> Strip {
         self.strips
@@ -511,18 +673,22 @@ impl crate::State {
     /// The desktop on that side of the current one, on the screen under
     /// the pointer.
     pub fn switch_desktop_by(&mut self, delta: i32) {
-        let Some(output) = self.output_under_pointer() else {
-            return;
-        };
-        let strip = self.strip(&output);
+        if let Some(output) = self.output_under_pointer() {
+            self.switch_desktop_on(&output, delta);
+        }
+    }
+
+    /// The desktop on that side of `output`'s current one.
+    fn switch_desktop_on(&mut self, output: &Output, delta: i32) {
+        let strip = self.strip(output);
         let to = strip.current() as i64 + i64::from(delta);
         if (0..strip.count() as i64).contains(&to) {
-            self.switch_desktop(&output, to as usize, None);
+            self.switch_desktop(output, to as usize, None);
         } else {
             // At the end of the strip: the dots say where it is.
             let mut strip = strip;
             strip.switch(strip.current(), self.now(), self.reduced_motion());
-            self.set_strip(&output, strip);
+            self.set_strip(output, strip);
         }
     }
 
@@ -767,6 +933,63 @@ mod tests {
         }
         assert_eq!(strip.swipe_end(false, ms(2000)), Some(0));
         assert_eq!(strip.current(), 3);
+    }
+
+    #[test]
+    fn a_tiles_sketch_is_the_windows_share_of_its_screen() {
+        // The second screen, 2560 × 1440 right of a 1920 px one.
+        let screen = Rect::new(1920, 0, 2560, 1440);
+        // A left half: its right edge where a right half's left edge is.
+        let left = share(Rect::new(1928, 8, 1280 - 8, 1424), screen);
+        let right = share(Rect::new(3200, 8, 1272, 1424), screen);
+        assert_eq!(left, Some([3, 6, 497, 988]));
+        let [x, ..] = right.expect("on the screen");
+        assert_eq!(x, 500);
+        // Fullscreen: the whole tile.
+        assert_eq!(share(screen, screen), Some([0, 0, SHARE, SHARE]));
+        // Half off the screen: what is on it; off it: nothing.
+        assert_eq!(
+            share(Rect::new(1920 - 640, 720, 1280, 720), screen),
+            Some([0, 500, 250, 500])
+        );
+        assert_eq!(share(Rect::new(0, 0, 1920, 1080), screen), None);
+        // A sliver still shows.
+        assert_eq!(
+            share(Rect::new(4479, 0, 1, 1), screen),
+            Some([999, 0, 1, 1])
+        );
+    }
+
+    #[test]
+    fn the_tiles_are_told_what_changed_and_where_a_drag_lands() {
+        let view = |current: u8, x: u16| Desktops {
+            output: "eDP-1".into(),
+            count: 4,
+            current,
+            windows: vec![DeskWindow {
+                desktop: 0,
+                rect: [x, 0, 500, 500],
+                focused: true,
+            }],
+        };
+        let mut told = Told::default();
+        assert_eq!(told.offer(view(0, 0), false), Some(view(0, 0)));
+        // The same again (a frame of something else): nothing.
+        assert_eq!(told.offer(view(0, 0), false), None);
+        // Dragged: nothing on the way, where it lands at the end.
+        assert_eq!(told.offer(view(0, 100), true), None);
+        assert_eq!(told.offer(view(0, 200), true), None);
+        assert_eq!(told.offer(view(0, 300), false), Some(view(0, 300)));
+        // Back where it was told while held: nothing to say.
+        assert_eq!(told.offer(view(0, 300), true), None);
+        assert_eq!(told.offer(view(0, 300), false), None);
+        // A desktop switch.
+        assert_eq!(told.offer(view(2, 300), false), Some(view(2, 300)));
+        // A shell connecting again is told everything.
+        told.clear();
+        assert_eq!(told.offer(view(2, 300), false), Some(view(2, 300)));
+        told.forget("eDP-1");
+        assert!(told.offer(view(2, 300), false).is_some());
     }
 
     #[test]

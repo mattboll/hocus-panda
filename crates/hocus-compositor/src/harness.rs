@@ -238,6 +238,11 @@ impl Headless {
         self.app.state.panel.connections_commits
     }
 
+    /// Commits of the desktops' surfaces so far.
+    pub fn desktops_commits(&self) -> u64 {
+        self.app.state.panel.desktops_commits
+    }
+
     /// Commits of the popovers' surfaces so far.
     pub fn popover_commits(&self) -> u64 {
         self.app.state.panel.popover_commits
@@ -296,6 +301,12 @@ impl Headless {
     /// and where they are (global).
     pub fn connections_surfaces(&self) -> Vec<(String, Rect)> {
         self.layer_rects(hocus_link::CONNECTIONS_NAMESPACE)
+    }
+
+    /// The desktops' surfaces as the shell placed them: their screen, and
+    /// where they are (global).
+    pub fn desktops_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::DESKTOPS_NAMESPACE)
     }
 
     /// The bars' surfaces as the shell placed them: their screen, and

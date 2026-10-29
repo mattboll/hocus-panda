@@ -627,6 +627,7 @@ impl TtyBackend {
             }
         }
         state.send_frames(&screen.output, Some(&states));
+        state.desktops_drawn(&screen.output);
         if empty {
             pace(screen, crtc, state);
         }
