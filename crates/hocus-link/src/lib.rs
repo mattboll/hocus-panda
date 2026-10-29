@@ -9,10 +9,11 @@
 //! form, reserves their space and takes the clicks on their edge, passes on
 //! the clock's settings, the level keys (volume, brightness) pressed, the
 //! presses outside the shell's surfaces while a popover shows, the
-//! names of the screens besides the built-in one, and the keyboard's
-//! layouts and which one is active; the shell draws the bars and their
-//! popovers, keeps the levels, and says when it draws on the CPU, when a
-//! popover closes, and when the user asks for the next layout. Neither
+//! names of the screens besides the built-in one, the keyboard's layouts
+//! and which one is active, and the bars' screens' desktops with a sketch
+//! of their windows; the shell draws the bars and their popovers, keeps
+//! the levels, and says when it draws on the CPU, when a popover closes,
+//! and when the user asks for the next layout or another desktop. Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
 //!
@@ -40,6 +41,10 @@ pub const LEVELS_NAMESPACE: &str = "hocus-bar-levels";
 /// the levels: a change of connection draws only that region, and a change
 /// of level does not draw it.
 pub const CONNECTIONS_NAMESPACE: &str = "hocus-bar-connections";
+/// The namespace of the desktops' surface (their tiles, or their dots in
+/// the mini form), above the connections: a desktop's change draws only
+/// that region, and nothing else's draws it.
+pub const DESKTOPS_NAMESPACE: &str = "hocus-bar-desktops";
 /// The namespace of a popover's layer surface, beside the bar (bar.md §9):
 /// one at a time. The compositor blurs behind it as behind the bar, draws
 /// its shadow, and moves it in and out ([`POPOVER_OPEN`], [`POPOVER_CLOSE`]).
@@ -161,6 +166,48 @@ pub enum ToShell {
     /// the shell connects and whenever it changes (the bar's row, an XKB
     /// group-switch option). Written `layout N`.
     Layout(u32),
+    /// A bar's screen's desktops: sent as the shell connects, and when they
+    /// change, at most once a frame (bar.md, 3.9).
+    Desktops(Desktops),
+}
+
+/// A screen's desktops as its bar's tiles show them. Written `desktops`,
+/// the screen's name, the count, the current one (from 0), then for each
+/// window, bottom first, its desktop (from 0), its place and size in
+/// [`SHARE`]s of the screen, and 1 if it is the focused window of the
+/// current desktop (else 0), commas between: `desktops eDP-1 4 0
+/// 0,20,30,600,940,1`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Desktops {
+    pub output: String,
+    pub count: u8,
+    pub current: u8,
+    pub windows: Vec<DeskWindow>,
+}
+
+/// A window as its desktop's tile sketches it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeskWindow {
+    pub desktop: u8,
+    /// Left, top, width, height, in [`SHARE`]s of the screen, inside it.
+    pub rect: [u16; 4],
+    /// The focused window, on the current desktop: drawn brighter.
+    pub focused: bool,
+}
+
+/// A whole screen, in the units of [`DeskWindow::rect`]: a thousandth of it
+/// is a fraction of a pixel in a tile, and moves smaller than that send
+/// nothing.
+pub const SHARE: u16 = 1000;
+
+/// The desktop the shell asks for: one by its index (from 0), or the next
+/// or the previous one, which the compositor takes no further than the
+/// last or the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopTo {
+    At(u8),
+    Next,
+    Previous,
 }
 
 /// A keyboard layout as the compositor's keymap has it.
@@ -339,6 +386,11 @@ pub enum ToCompositor {
     /// compositor switches the seat's keyboard to it, then says which is
     /// active ([`ToShell::Layout`]).
     NextLayout,
+    /// The user asks for a desktop of `output` (a tile clicked, the wheel
+    /// over them): the compositor switches as its shortcuts do. Written
+    /// `desktop OUTPUT N`, `desktop OUTPUT next` or `desktop OUTPUT
+    /// previous`.
+    Desktop { output: String, to: DesktopTo },
 }
 
 /// A screen's name as a [`ToShell::Screens`] line carries it: on one
@@ -412,6 +464,23 @@ impl fmt::Display for ToShell {
                 Ok(())
             }
             Self::Layout(index) => write!(f, "layout {index}"),
+            Self::Desktops(desktops) => {
+                write!(
+                    f,
+                    "desktops {} {} {}",
+                    desktops.output, desktops.count, desktops.current
+                )?;
+                for w in &desktops.windows {
+                    let [x, y, width, height] = w.rect;
+                    write!(
+                        f,
+                        " {},{x},{y},{width},{height},{}",
+                        w.desktop,
+                        u8::from(w.focused)
+                    )?;
+                }
+                Ok(())
+            }
             Self::Clock(look) => {
                 let [r, g, b] = look.color;
                 write!(
@@ -482,6 +551,39 @@ impl FromStr for ToShell {
                     .parse()
                     .map_err(|e| BadLine(format!("layout: {e}")))?,
             )),
+            Some("desktops") => {
+                let output = word(&mut words, "output")?.to_owned();
+                let number = |w: &str, what: &str| {
+                    w.parse::<u8>().map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                let count = number(word(&mut words, "count")?, "count")?;
+                let current = number(word(&mut words, "current")?, "current")?;
+                let windows = words
+                    .map(|w| {
+                        let fields: Vec<&str> = w.split(',').collect();
+                        let [desktop, x, y, width, height, focused] = fields[..] else {
+                            return Err(BadLine(format!("a window {w:?}")));
+                        };
+                        let share = |v: &str| {
+                            v.parse::<u16>()
+                                .ok()
+                                .filter(|v| *v <= SHARE)
+                                .ok_or_else(|| BadLine(format!("a share {v:?}")))
+                        };
+                        Ok(DeskWindow {
+                            desktop: number(desktop, "desktop")?,
+                            rect: [share(x)?, share(y)?, share(width)?, share(height)?],
+                            focused: flag(Some(focused), "1", "0")?,
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
+                Ok(Self::Desktops(Desktops {
+                    output,
+                    count,
+                    current,
+                    windows,
+                }))
+            }
             Some("clock") => {
                 let seconds = flag(words.next(), "seconds", "noseconds")?;
                 let transition = word(&mut words, "transition")?.parse()?;
@@ -509,6 +611,11 @@ impl fmt::Display for ToCompositor {
             Self::Wake(namespace) => write!(f, "wake {namespace}"),
             Self::Closing(namespace) => write!(f, "closing {namespace}"),
             Self::NextLayout => f.write_str("next-layout"),
+            Self::Desktop { output, to } => match to {
+                DesktopTo::At(index) => write!(f, "desktop {output} {index}"),
+                DesktopTo::Next => write!(f, "desktop {output} next"),
+                DesktopTo::Previous => write!(f, "desktop {output} previous"),
+            },
         }
     }
 }
@@ -523,6 +630,19 @@ impl FromStr for ToCompositor {
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
+            Some("desktop") => {
+                let output = word(&mut words, "output")?.to_owned();
+                let to = match word(&mut words, "desktop")? {
+                    "next" => DesktopTo::Next,
+                    "previous" => DesktopTo::Previous,
+                    index => DesktopTo::At(
+                        index
+                            .parse()
+                            .map_err(|e| BadLine(format!("desktop: {e}")))?,
+                    ),
+                };
+                Ok(Self::Desktop { output, to })
+            }
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
     }
@@ -615,12 +735,38 @@ mod tests {
             ToShell::Layout(0),
             ToShell::Layout(2),
         ];
+        let desktops = [
+            ToShell::Desktops(Desktops {
+                output: "eDP-1".into(),
+                count: 4,
+                current: 0,
+                windows: Vec::new(),
+            }),
+            ToShell::Desktops(Desktops {
+                output: "HDMI-A-1".into(),
+                count: 9,
+                current: 8,
+                windows: vec![
+                    DeskWindow {
+                        desktop: 0,
+                        rect: [0, 0, SHARE, SHARE],
+                        focused: false,
+                    },
+                    DeskWindow {
+                        desktop: 8,
+                        rect: [20, 30, 600, 940],
+                        focused: true,
+                    },
+                ],
+            }),
+        ];
         for message in to_shell
             .into_iter()
             .chain(keys)
             .chain([ToShell::Outside])
             .chain(screens)
             .chain(layouts)
+            .chain(desktops)
         {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
         }
@@ -630,11 +776,25 @@ mod tests {
             ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned()),
             ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()),
             ToCompositor::NextLayout,
+            ToCompositor::Desktop {
+                output: "eDP-1".into(),
+                to: DesktopTo::At(3),
+            },
+            ToCompositor::Desktop {
+                output: "eDP-1".into(),
+                to: DesktopTo::Next,
+            },
+            ToCompositor::Desktop {
+                output: "eDP-1".into(),
+                to: DesktopTo::Previous,
+            },
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
         assert!("wake".parse::<ToCompositor>().is_err());
         assert!("closing".parse::<ToCompositor>().is_err());
+        assert!("desktop eDP-1".parse::<ToCompositor>().is_err());
+        assert!("desktop eDP-1 last".parse::<ToCompositor>().is_err());
         for bad in [
             "",
             "bar eDP-1",
@@ -650,6 +810,10 @@ mod tests {
             "layout first",
             "layouts\tfr",
             "layoutsfr\tFrench",
+            "desktops eDP-1 4",
+            "desktops eDP-1 4 0 0,1,2,3,4",
+            "desktops eDP-1 4 0 0,1,2,3,1001,0",
+            "desktops eDP-1 4 0 0,1,2,3,4,yes",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }
