@@ -131,6 +131,14 @@
 # take-to-desktop-9 = "Super+Ctrl+Shift+9"
 # The bar's other form, on the screen under the pointer.
 # toggle-bar = "Super+B"
+# The keyboard's sound and brightness keys: 5 % a press, stepping on while
+# held; up stops at 100 %, brightness down at 5 %, so that the screen never
+# goes black. A volume key unmutes. Only the bar's gauges show it.
+# volume-up = "XF86AudioRaiseVolume"
+# volume-down = "XF86AudioLowerVolume"
+# mute = "XF86AudioMute"
+# brightness-up = "XF86MonBrightnessUp"
+# brightness-down = "XF86MonBrightnessDown"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.

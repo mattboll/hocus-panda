@@ -248,6 +248,7 @@ impl State {
         for bar in bars {
             self.tell_shell(bar);
         }
+        self.hand_kept_levels();
     }
 
     /// The shell's connection ended.
@@ -269,6 +270,18 @@ impl State {
                 self.shell.software = true;
                 self.redraw = true;
                 self.tell_shell(self.bar_look());
+            }
+            ToCompositor::Wake(namespace) => self.wake_shell_surfaces(&namespace),
+        }
+    }
+
+    /// A configure, as they are, to the shell's layer surfaces of
+    /// `namespace`: iced then draws them alone ([`ToCompositor::Wake`]).
+    fn wake_shell_surfaces(&mut self, namespace: &str) {
+        for output in self.space.outputs() {
+            let map = smithay::desktop::layer_map_for_output(output);
+            for layer in map.layers().filter(|l| l.namespace() == namespace) {
+                layer.layer_surface().send_configure();
             }
         }
     }
