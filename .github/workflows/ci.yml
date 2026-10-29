@@ -33,13 +33,15 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build dependencies
         # What smithay and the session need from slice 1 on: installed now
-        # so that adding them to the code changes nothing here.
+        # so that adding them to the code changes nothing here. D-Bus and
+        # PipeWire: the bar's levels are tested against private ones.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
             clang mold pkg-config fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
-            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev
+            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
+            dbus pipewire pipewire-bin wireplumber
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
