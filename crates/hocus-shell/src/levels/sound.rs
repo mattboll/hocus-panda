@@ -166,7 +166,7 @@ fn publish_mixer(mixer: Mixer) {
         changed
     };
     if changed {
-        crate::popover::changed();
+        crate::popover::changed(crate::popover::Item::Sound);
     }
 }
 

@@ -2,11 +2,12 @@
 //! wlr-layer-shell client of the compositor, which starts it and restarts
 //! it when it ends.
 //!
-//! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5)
-//! and its levels (§4 group 10, §5): a glass tint and a rim against the
-//! right edge of each output the compositor names, in its full or its mini
-//! form, the time at its top, and the sound, the brightness and the battery
-//! near its bottom ([`levels`]).
+//! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5),
+//! its connections (§4 group 9, §5) and its levels (§4 group 10, §5): a
+//! glass tint and a rim against the right edge of each output the
+//! compositor names, in its full or its mini form, the time at its top, the
+//! Wi-Fi ([`network`]) above the sound, the brightness and the battery near
+//! its bottom ([`levels`]).
 //! The compositor blurs what is behind it; the shell draws the tint over
 //! that blur, or an opaque background when there is no blur. The line
 //! between the two is `hocus-link`.
@@ -17,11 +18,12 @@
 //! bar's edge, which switch the form. The clock has a small surface of its
 //! own over the bar's top ([`clock`]): it draws every second, and iced
 //! presents a surface whole, so that only its region is drawn again. The
-//! levels have theirs, for the same reason, and so has a popover beside
-//! the bar ([`popover`]), opened from an item.
+//! levels have theirs, for the same reason, the connections theirs, and so
+//! has a popover beside the bar ([`popover`]), opened from an item.
 
 mod clock;
 mod levels;
+mod network;
 mod popover;
 mod renderer;
 
@@ -33,8 +35,8 @@ use std::{
 };
 
 use hocus_link::{
-    CLOCK_NAMESPACE, ClockLook, EDGE, Form, LEVELS_NAMESPACE, NAMESPACE, RADIUS, ToCompositor,
-    ToShell,
+    CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, ClockLook, EDGE, Form, LEVELS_NAMESPACE, NAMESPACE,
+    RADIUS, ToCompositor, ToShell,
 };
 use iced::{
     Background, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme,
@@ -85,6 +87,7 @@ fn main() -> ExitCode {
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose();
     levels::start();
+    network::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -168,6 +171,8 @@ struct Bar {
     /// Its levels' surface, and its size as last asked for.
     levels: window::Id,
     levels_surface: (u32, u32),
+    /// Its connections' surface (placed by [`network::draw`]).
+    connections: window::Id,
 }
 
 impl Bar {
@@ -405,7 +410,9 @@ impl Shell {
                         bar: bar.output.clone(),
                     });
                     popover::with(|c| c.forget(&bar.output));
+                    network::draw::forget(&bar.output);
                     Some(Task::batch([
+                        Task::done(Message::RemoveWindow(bar.connections)),
                         Task::done(Message::RemoveWindow(bar.levels)),
                         Task::done(Message::RemoveWindow(bar.clock)),
                         Task::done(Message::RemoveWindow(id)),
@@ -444,6 +451,7 @@ impl Shell {
             clock_surface: (0, 0),
             levels: window::Id::unique(),
             levels_surface: (0, 0),
+            connections: window::Id::unique(),
         };
         bar.surface = bar.surface_width();
         bar.clock_surface = bar.clock_size();
@@ -484,18 +492,40 @@ impl Shell {
             exclusive_zone: Some(0),
             margin: Some((0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0)),
             keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option,
+            output_option: option.clone(),
             events_transparent: false,
             namespace: Some(LEVELS_NAMESPACE.to_owned()),
         };
         let (levels_id, open_levels) = Message::layershell_open(levels);
         bar.levels = levels_id;
+        // Above the levels, following their group's top; its row opens
+        // the Wi-Fi's popover.
+        let connections_id = window::Id::unique();
+        let (size, margin) = network::draw::opened(&bar.output, connections_id, form);
+        let connections = NewLayerShellSettings {
+            size: Some(size),
+            layer: Layer::Top,
+            anchor: Anchor::Right | Anchor::Bottom,
+            exclusive_zone: Some(0),
+            margin: Some(margin),
+            keyboard_interactivity: KeyboardInteractivity::None,
+            output_option: option.clone(),
+            events_transparent: false,
+            namespace: Some(CONNECTIONS_NAMESPACE.to_owned()),
+        };
+        let open_connections = Task::done(Message::NewLayerShell {
+            settings: connections,
+            id: connections_id,
+        });
+        bar.connections = connections_id;
         self.bars.insert(id, bar);
         BARS.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(id);
         self.place_popovers(id);
-        open.chain(open_clock).chain(open_levels)
+        open.chain(open_clock)
+            .chain(open_levels)
+            .chain(open_connections)
     }
 
     /// Where bar `id` is, for the popovers.
@@ -503,7 +533,7 @@ impl Shell {
         let Some(bar) = self.bars.get(&id) else {
             return;
         };
-        popover::with(|c| c.place(&bar.output, bar.form, id, bar.levels));
+        popover::with(|c| c.place(&bar.output, bar.form, id, (bar.levels, bar.connections)));
     }
 
     /// `form` for bar `id`, switching from where it is since `start`; at
@@ -565,6 +595,12 @@ impl Shell {
                 id: bar.levels,
                 size,
             }));
+        }
+        if let Some((id, size, margin)) =
+            network::draw::form(&bar.output, bar.form, bar.switch.is_some())
+        {
+            tasks.push(Task::done(Message::SizeChange { id, size }));
+            tasks.push(Task::done(Message::MarginChange { id, margin }));
         }
         Task::batch(tasks)
     }
@@ -634,22 +670,58 @@ impl Shell {
         )
     }
 
-    /// The popover whose surface is `id`.
-    fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let item = popover::with(|c| c.item_of(id))?;
-        let panel = match item {
-            popover::Item::Sound => popover::sound::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            },
+    /// The connections of the bar whose connections' surface is `id`.
+    fn connections_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self.bars.values().find(|b| b.connections == id)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = bar_height - levels::draw::BOTTOM as f32 - 160.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = network::draw::Connections {
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            words: self.words,
+            backdrop,
+            bar: bar.output.clone(),
         };
         Some(
-            canvas(panel)
+            canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
         )
+    }
+
+    /// The popover whose surface is `id`.
+    fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let item = popover::with(|c| c.item_of(id))?;
+        let panel: Element<'_, Message> = match item {
+            popover::Item::Sound => canvas(popover::sound::Panel {
+                id,
+                words: self.words,
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            popover::Item::Wifi => canvas(popover::wifi::Panel {
+                id,
+                words: self.words,
+                glass: self.look.glass,
+                motion: self.look.motion,
+                software: self.software,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        };
+        Some(panel)
     }
 
     fn view(&self, id: window::Id) -> Element<'_, Message> {
@@ -657,6 +729,7 @@ impl Shell {
             return self
                 .clock_view(id)
                 .or_else(|| self.levels_view(id))
+                .or_else(|| self.connections_view(id))
                 .or_else(|| self.popover_view(id))
                 .unwrap_or_else(|| Space::new().into());
         };
@@ -788,12 +861,17 @@ fn zone_changes() -> impl iced::futures::Stream<Item = Message> {
     })
 }
 
-/// A shell alone: a change of level is a message (every surface is drawn).
+/// A shell alone: a change of level or of network is a message (every
+/// surface is drawn).
 fn levels_alone() -> impl iced::futures::Stream<Item = Message> {
     iced::stream::channel(4, async |output| {
         let mut out = output.clone();
         levels::on_change(
             move || !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected()),
+        );
+        let mut out = output.clone();
+        network::on_change(
+            move |_| !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected()),
         );
         drop(output);
         std::future::pending::<()>().await;
@@ -834,6 +912,17 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
         let waker = sender.clone();
         levels::on_change(move || {
             let wake = ToCompositor::Wake(LEVELS_NAMESPACE.to_owned());
+            waker.unbounded_send(wake.to_string()).is_ok()
+        });
+        // A change of network wakes the connections' surface when the row
+        // changes, and the Wi-Fi's popover when it shows.
+        let waker = sender.clone();
+        network::on_change(move |change| {
+            popover::changed(popover::Item::Wifi);
+            if !change.row {
+                return true;
+            }
+            let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
             waker.unbounded_send(wake.to_string()).is_ok()
         });
         let _ = output.send(Message::Linked(sender)).await;

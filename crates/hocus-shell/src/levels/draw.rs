@@ -47,7 +47,7 @@ pub const MINI_SURFACE: (u32, u32) = (54, 97);
 /// The full group's bottom above the surface's: the footer's place.
 const FULL_RAISE: f32 = 20.0;
 /// From the bar's inside edges to the group's: 12 px padding less the rim.
-const SIDE: f32 = 11.0;
+pub(crate) const SIDE: f32 = 11.0;
 
 pub(crate) const MANROPE: Font = Font::with_name("Manrope");
 pub(crate) const MANROPE_BOLD: Font = Font {
@@ -76,13 +76,13 @@ const MINI_BOLT: f32 = MINI_VALUE / 11.0;
 /// group's sides), around the gauge in the mini (44 × 64), as the 3.4
 /// mockup's buttons; lit under the pointer, more while its popover is
 /// open; the keyboard's ring 3 px wide, 2 px out, in the accent.
-const ITEM_HEIGHT: f32 = 30.0;
-const ITEM_OUT: f32 = 6.0;
-const ITEM_RADIUS: f32 = 8.0;
+pub(crate) const ITEM_HEIGHT: f32 = 30.0;
+pub(crate) const ITEM_OUT: f32 = 6.0;
+pub(crate) const ITEM_RADIUS: f32 = 8.0;
 const MINI_ITEM: Size = Size::new(44.0, 64.0);
-const MINI_ITEM_RADIUS: f32 = 10.0;
+pub(crate) const MINI_ITEM_RADIUS: f32 = 10.0;
 pub(crate) const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
+pub(crate) const OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
 pub(crate) const ACCENT: Color = rgb(0x6CC287);
 pub(crate) const RING: f32 = 3.0;
 pub(crate) const RING_OUT: f32 = 2.0;
@@ -216,8 +216,13 @@ impl<Message> canvas::Program<Message> for Levels {
         let now = match event {
             iced::Event::Window(window::Event::RedrawRequested(now)) => *now,
             iced::Event::Mouse(event) => return self.mouse(state, event, bounds, cursor),
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                return popover::key(key, modifiers.shift())
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                text,
+                ..
+            }) => {
+                return popover::key(key, *modifiers, text.as_deref())
                     .then(|| canvas::Action::request_redraw().and_capture());
             }
             _ => return None,
@@ -251,6 +256,9 @@ impl<Message> canvas::Program<Message> for Levels {
                 (status, lines)
             });
         }
+        // The connections sit above the group: they follow its top.
+        let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
+        crate::network::draw::levels_moved(&self.bar, group_tops(&levels, lines));
         if state.zero.is_none()
             && let Ok(mut system) = iced::advanced::graphics::text::font_system().write()
         {
@@ -541,6 +549,27 @@ fn full_rows(levels: &Snapshot, status: usize, bottom: f32) -> [Option<f32>; 3] 
         }
     }
     middles
+}
+
+/// How far above the surface's bottom the group's top is, in the full
+/// form and in the mini: its first row's item (30 px) in the full form, the
+/// gauge (or the battery's percentage) in the mini; nothing shown, the
+/// group's bottom.
+pub fn group_tops(levels: &Snapshot, status: usize) -> (f32, f32) {
+    let height = FULL_SURFACE.1 as f32;
+    let rows = full_rows(levels, status, height);
+    let full = match rows.iter().flatten().copied().reduce(f32::min) {
+        Some(middle) => height - (middle - ITEM_HEIGHT / 2.0),
+        None if status > 0 => FULL_RAISE + status as f32 * STATUS * LINE,
+        None => FULL_RAISE,
+    };
+    let height = MINI_SURFACE.1 as f32;
+    let mini = match (levels.sound, levels.battery) {
+        (Some(_), _) => height - (mini_gauge_bottom(levels, height) - MINI_GAUGE),
+        (None, Some(_)) => MINI_VALUE * LINE,
+        (None, None) => 0.0,
+    };
+    (full, mini)
 }
 
 /// The mini form's sound gauge's bottom: over the battery's percentage;

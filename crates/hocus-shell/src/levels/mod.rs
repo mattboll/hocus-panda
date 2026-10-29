@@ -146,17 +146,17 @@ pub fn ask(ask: sound::Ask) {
 
 /// A service that is away is tried again after this, doubled each time it
 /// is still away, up to [`RETRY_LAST`].
-const RETRY_FIRST: Duration = Duration::from_secs(2);
+pub(crate) const RETRY_FIRST: Duration = Duration::from_secs(2);
 const RETRY_LAST: Duration = Duration::from_secs(60);
 
 /// The next wait before trying a missing service again.
-fn next_retry(wait: Duration) -> Duration {
+pub(crate) fn next_retry(wait: Duration) -> Duration {
     (wait * 2).min(RETRY_LAST)
 }
 
 /// Whether a service is there, to say once when it goes and comes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Presence {
+pub(crate) enum Presence {
     Unknown,
     There,
     Away,
@@ -164,7 +164,7 @@ enum Presence {
 
 impl Presence {
     /// Logs what changed: `what` is there, or away (`why`).
-    fn now(&mut self, there: bool, what: &str, why: impl std::fmt::Display) {
+    pub(crate) fn now(&mut self, there: bool, what: &str, why: impl std::fmt::Display) {
         let next = if there { Self::There } else { Self::Away };
         match (*self, next) {
             (Self::Away, Self::There) => tracing::info!("{what}: back"),

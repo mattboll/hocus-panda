@@ -52,6 +52,8 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy"] }
 udev = "0.9.3"
 serde_json = "1.0.154"
+# What zbus calls take, for a call helper of the network's.
+serde = "1.0.229"
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 
