@@ -607,6 +607,18 @@ impl Headless {
         (at.x, at.y)
     }
 
+    /// The namespace of the layer surface that takes the pointer where it
+    /// is (its input region counts), if one does.
+    pub fn pointer_layer(&self) -> Option<String> {
+        use smithay::wayland::shell::wlr_layer::Layer;
+        let (x, y) = self.pointer();
+        let (_, _, layer) = self
+            .app
+            .state
+            .layer_surface_under((x, y).into(), &[Layer::Overlay, Layer::Top])?;
+        Some(layer.namespace().to_owned())
+    }
+
     /// Whether a press went on to a client: the seat holds the pointer in
     /// a click grab from a press it forwards until its release.
     pub fn pointer_grabbed(&self) -> bool {
