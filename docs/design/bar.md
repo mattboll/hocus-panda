@@ -494,7 +494,9 @@ the product.
     one runs go together in one command. The `pipewire` crate would need
     libpipewire's headers and bindgen to build, for the same events. A
     PipeWire not there (no socket, no `pw-dump`) is tried again after 2 s,
-    doubling up to a minute: it announces nothing when it starts.
+    doubling up to a minute: it announces nothing when it starts. With
+    PipeWire 1.0's `pw-dump` (Ubuntu 24.04), a default sink changed alone
+    shows with the graph's next change; PipeWire 1.6's shows it at once.
   - A service missing hides its row, says so once in the log, and once
     again when it is back.
 - **Its own surface, woken without a message.** The levels draw on a
