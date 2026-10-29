@@ -132,9 +132,9 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     assert_eq!(hp.bar_commits(), bars);
 
     // The battery runs low: amber, and only the levels' region is drawn.
-    only_the_levels_drawn(&mut hp, |_| {
+    only_the_levels_drawn(&mut hp, |_, attempt| {
         fakes.set_power(|p| {
-            p.percentage = 14.0;
+            p.percentage = 14.0 + f64::from(attempt);
             p.to_empty = 35 * 60;
         })
     })?;
@@ -170,16 +170,16 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
 
 /// Runs `change`, then checks that what the compositor drew for it is the
 /// levels' surface alone. The clock ticks once a second: a try that
-/// crossed a tick is tried again.
+/// crossed a tick is tried again, with another change (its number given).
 fn only_the_levels_drawn(
     hp: &mut Headless,
-    mut change: impl FnMut(&mut Headless) -> anyhow::Result<()>,
+    mut change: impl FnMut(&mut Headless, u8) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
-    for _ in 0..5 {
+    for attempt in 0..5 {
         wait(hp, Duration::from_millis(100))?;
         hp.take_damage(0);
         let (clocks, levels, bars) = (hp.clock_commits(), hp.levels_commits(), hp.bar_commits());
-        change(hp)?;
+        change(hp, attempt)?;
         let drawn = hp.dispatch_until(WAIT, |hp| hp.levels_commits() > levels)?;
         anyhow::ensure!(drawn, "the levels did not draw the change");
         wait(hp, Duration::from_millis(100))?;
