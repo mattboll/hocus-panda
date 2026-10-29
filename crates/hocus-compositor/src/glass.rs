@@ -78,7 +78,13 @@ impl Panes {
     /// An output went, or the glass did: its textures go.
     pub fn forget(&mut self, output: &str) {
         self.0.remove(output);
+        self.0.remove(&popover_pane(output));
     }
+}
+
+/// The name of the pane under the popovers on `output`, beside its bar's.
+pub fn popover_pane(output: &str) -> String {
+    format!("{output} popover")
 }
 
 /// Renderers that can blur what is behind the bar.

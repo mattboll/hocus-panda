@@ -94,6 +94,10 @@ pub struct Panel {
     pub clock_commits: u64,
     /// Commits of the levels' surfaces, for tests: none at rest.
     pub levels_commits: u64,
+    /// Commits of the popovers' surfaces, for tests: none at rest.
+    pub popover_commits: u64,
+    /// The shell's popovers beside the bars, and their motion.
+    pub popovers: crate::popover::Popovers,
 }
 
 /// The file of remembered forms.
@@ -134,8 +138,9 @@ impl Panel {
         self.bars.get(name).map(|b| b.form.width())
     }
 
-    /// Switches over by `now` end; whether one is still under way.
-    pub fn tick(&mut self, now: Duration) -> bool {
+    /// Switches over by `now` end; whether one, or a popover's motion
+    /// (`popover_motion`), is still under way.
+    pub fn tick(&mut self, now: Duration, popover_motion: bool) -> bool {
         let mut moving = false;
         for bar in self.bars.values_mut() {
             if let Some((_, since)) = bar.switch {
@@ -146,7 +151,7 @@ impl Panel {
                 }
             }
         }
-        moving
+        moving || self.popovers.tick(now, popover_motion)
     }
 }
 

@@ -434,19 +434,30 @@ impl State {
                     )
                 });
             for layer in on {
-                let Some(geometry) = map.layer_geometry(&layer) else {
+                let Some(mut geometry) = map.layer_geometry(&layer) else {
                     continue;
+                };
+                // A popover moves in and out; it shows from its first frame.
+                let popover = layer.namespace() == hocus_link::POPOVER_NAMESPACE;
+                let look = self.panel.popovers.look(&layer, now, self.popover_motion());
+                let alpha = match (popover, look) {
+                    (false, _) => 1.0,
+                    (true, Some(look)) if look.alpha > 0.0 => {
+                        geometry.loc.x += look.shift.round() as i32;
+                        look.alpha
+                    }
+                    (true, _) => continue,
                 };
                 let loc = geometry.loc.to_physical_precise_round(scale);
                 let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
-                    AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, 1.0);
+                    AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, alpha);
                 // The CPU renderer's buffers have no alpha: what the bar
                 // leaves out at its corners would show black. The clock's
                 // and the levels' surfaces are opaque too, and cut to the
                 // bar: they change size in their own commits when the form
                 // switches.
                 let cut = match layer.namespace() {
-                    hocus_link::NAMESPACE => Some(Rectangle::new(
+                    hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => Some(Rectangle::new(
                         loc,
                         geometry.size.to_physical_precise_round(scale),
                     )),
@@ -460,6 +471,23 @@ impl State {
                     }));
                 } else {
                     out.extend(surfaces.into_iter().map(OutputElements::Surface));
+                }
+                // The popover's shadow, right under it: over the bar, as
+                // the mockup's popover's is.
+                if let Some(shown) = self.panel.popovers.shown(&layer).filter(|_| popover) {
+                    out.extend(
+                        shadow_elements(
+                            renderer,
+                            &self.textures,
+                            &shown.ids,
+                            crate::popover::SHADOW,
+                            geometry.to_f64(),
+                            scale,
+                            alpha,
+                        )
+                        .into_iter()
+                        .map(OutputElements::Shadow),
+                    );
                 }
             }
         };
@@ -597,8 +625,11 @@ impl State {
         if let Some(backdrop) = self.backdrop_element(renderer, output) {
             elements.push(backdrop);
         }
-        if let Some(glass) = self.glass_element(renderer, output, now, &elements[glass_at..]) {
-            elements.insert(glass_at, glass);
+        let behind = &elements[glass_at..];
+        let glass = self.glass_element(renderer, output, now, behind);
+        let popovers = self.popover_glass(renderer, output, now, behind);
+        for pane in popovers.into_iter().chain(glass) {
+            elements.insert(glass_at, pane);
         }
         elements
     }
@@ -697,42 +728,125 @@ impl State {
             behind,
         )?;
         let pane: Rectangle<i32, Physical> = bar.to_physical_precise_round(scale);
-        let inside = pane.intersection(blurred.region)?;
-        // The bar's part of the region, in the blur's pixels.
-        let (kx, ky) = (
-            f64::from(blurred.size.w) / f64::from(blurred.region.size.w),
-            f64::from(blurred.size.h) / f64::from(blurred.region.size.h),
-        );
-        let src = Rectangle::<f64, Logical>::new(
-            (
-                f64::from(inside.loc.x - blurred.region.loc.x) * kx,
-                f64::from(inside.loc.y - blurred.region.loc.y) * ky,
-            )
-                .into(),
-            (f64::from(inside.size.w) * kx, f64::from(inside.size.h) * ky).into(),
-        );
-        let element = TextureRenderElement::from_static_texture(
-            blurred.id,
-            renderer.context_id(),
-            inside.loc.to_f64(),
-            blurred.texture,
-            1,
-            smithay::utils::Transform::Normal,
-            None,
-            Some(src),
-            Some(inside.size.to_f64().to_logical(scale).to_i32_round()),
-            None,
-            Kind::Unspecified,
-        );
-        let radius = (hocus_link::RADIUS * scale).round() as i32;
-        Some(OutputElements::Picture(Rounded::new(
-            element,
-            pane,
-            radius,
-            Outside::Cropped,
-        )))
+        glass_piece(renderer, blurred, pane, scale, 1.0)
     }
 
+    /// The glass under the shell's popovers on `output` at `now`, as under
+    /// the bar, in a pane of its own: over where a popover is and where it
+    /// slides from, so that its motion does not blur it again.
+    fn popover_glass<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        now: Duration,
+        behind: &[OutputElement<R>],
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        if !self.glass_on() {
+            return Vec::new();
+        }
+        let Some(size) = self.space.output_geometry(output).map(|g| g.size) else {
+            return Vec::new();
+        };
+        let scale = output.current_scale().fractional_scale();
+        let motion = self.popover_motion();
+        let map = layer_map_for_output(output);
+        let mut panes = Vec::new();
+        for layer in map.layers() {
+            let (Some(look), Some(geometry)) = (
+                self.panel.popovers.look(layer, now, motion),
+                map.layer_geometry(layer),
+            ) else {
+                continue;
+            };
+            if look.alpha <= 0.0 {
+                continue;
+            }
+            let reach = crate::glass::REACH;
+            let rect = geometry.to_f64();
+            let screen = Rectangle::<f64, Logical>::from_size(size.to_f64());
+            let Some(around) = Rectangle::<f64, Logical>::new(
+                (rect.loc.x - reach, rect.loc.y - reach).into(),
+                (
+                    rect.size.w + hocus_link::POPOVER_SHIFT + 2.0 * reach,
+                    rect.size.h + 2.0 * reach,
+                )
+                    .into(),
+            )
+            .intersection(screen) else {
+                continue;
+            };
+            let Some(blurred) = renderer.frost(
+                &mut self.panes.borrow_mut(),
+                &crate::glass::popover_pane(&output.name()),
+                around.to_physical_precise_round(scale),
+                scale,
+                behind,
+            ) else {
+                continue;
+            };
+            let mut at = rect;
+            at.loc.x += look.shift.round();
+            let pane: Rectangle<i32, Physical> = at.to_physical_precise_round(scale);
+            panes.extend(glass_piece(renderer, blurred, pane, scale, look.alpha));
+        }
+        panes
+    }
+}
+
+/// The part of `blurred` over `pane` (physical, output-local), cut to the
+/// bar's rounded corners, `alpha` opaque.
+fn glass_piece<R>(
+    renderer: &mut R,
+    blurred: crate::glass::Blurred<R::TextureId>,
+    pane: Rectangle<i32, Physical>,
+    scale: f64,
+    alpha: f32,
+) -> Option<OutputElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem + Bend,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let inside = pane.intersection(blurred.region)?;
+    // The bar's part of the region, in the blur's pixels.
+    let (kx, ky) = (
+        f64::from(blurred.size.w) / f64::from(blurred.region.size.w),
+        f64::from(blurred.size.h) / f64::from(blurred.region.size.h),
+    );
+    let src = Rectangle::<f64, Logical>::new(
+        (
+            f64::from(inside.loc.x - blurred.region.loc.x) * kx,
+            f64::from(inside.loc.y - blurred.region.loc.y) * ky,
+        )
+            .into(),
+        (f64::from(inside.size.w) * kx, f64::from(inside.size.h) * ky).into(),
+    );
+    let element = TextureRenderElement::from_static_texture(
+        blurred.id,
+        renderer.context_id(),
+        inside.loc.to_f64(),
+        blurred.texture,
+        1,
+        smithay::utils::Transform::Normal,
+        (alpha < 1.0).then_some(alpha),
+        Some(src),
+        Some(inside.size.to_f64().to_logical(scale).to_i32_round()),
+        None,
+        Kind::Unspecified,
+    );
+    let radius = (hocus_link::RADIUS * scale).round() as i32;
+    Some(OutputElements::Picture(Rounded::new(
+        element,
+        pane,
+        radius,
+        Outside::Cropped,
+    )))
+}
+
+impl State {
     /// Tells the clients shown on `output` that a frame went out, so that
     /// they draw their next one. `states` says which surfaces it showed,
     /// when the backend knows: a surface is then told only by the output
