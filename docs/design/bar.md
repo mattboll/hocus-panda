@@ -355,8 +355,13 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   protected one unfolds under its row (the row's block lit
   `rgba(255,255,255,0.05)`) a 34 px field ("Mot de passe" / "Password",
   dots, an eye to show it), "Annuler" / "Cancel" and "Se connecter" /
-  "Connect" (green from 8 characters). `Enter` tries it, `Esc` folds it (a
-  second `Esc` closes the popover). Refused: "Mot de passe incorrect.
+  "Connect" (green from 8 characters). `Ctrl+V` or `Shift+Insert` in the
+  field pastes the clipboard's text at its end (3.5b, issue #453): its
+  line breaks and other control characters dropped, whole if it fits in
+  the field (64 characters at most) or not at all, clearing the error as
+  typing does; nothing from a clipboard without text. It is kept as a
+  typed one is. `Enter` tries it, `Esc` folds it (a second `Esc` closes
+  the popover). Refused: "Mot de passe incorrect.
   Vérifie-le et réessaie." / "Wrong password. Check it and try again."
   (12.5 px, `#F7B98A`, wrapped) and the field's border `#F2945B`, the
   field keeping what was typed and the keyboard. A saved network whose
@@ -812,9 +817,8 @@ slots are not part of the product.
   when its row folds, when the connection succeeds, when the popover
   closes and when dropped; its `Debug` says its length; it leaves the shell
   only in NetworkManager's D-Bus call. It is shown as dots unless the eye
-  is pressed. The compositor logs no key, not even at trace. Ctrl+V does
-  not paste (iced's canvas has no clipboard; a ticket of its own);
-  Ctrl+Backspace clears the field.
+  is pressed. The compositor logs no key, not even at trace.
+  Ctrl+Backspace clears the field. Paste came after (3.5b).
 - **Popover**: its bottom on the bar's whatever its height (the mockup's),
   where the sound's top is on its item; it grows and shrinks as rows come,
   unfold and go. A hovered popover in the mini form whose row unfolds
@@ -827,9 +831,47 @@ slots are not part of the product.
 - **For tests**, `HOCUS_OPENER` names the program that opens the sign-in
   page (`xdg-open` otherwise).
 - **Not built**: the connecting row's pulse in the bar (the mockup's: an
-  animation as long as a connection, against §12); paste; a secret agent
+  animation as long as a connection, against §12); a secret agent
   (passwords NetworkManager asks for later, for connections whose secrets
   are kept by an agent: such a network unfolds its field when refused);
   hidden networks, forgetting a network, enterprise and WEP networks,
   airplane mode and VPN (the Settings, Sprint 6); names for screen readers
   (§11).
+
+### 3.5b, paste into the password field (2026-10-29)
+
+What issue #453 adds to 3.5 (§9); nothing changes on screen but the field
+filling, so there is no mockup.
+
+- **The keys**: `Ctrl+V` (with Shift too, as terminals take it) and
+  `Shift+Insert`, in the field holding the keyboard; elsewhere in the
+  popover they do nothing. `V` is the key the layout types as v, its
+  modifiers aside (AZERTY and bépo alike).
+- **The clipboard**, not the primary selection. The compositor gives the
+  selection to the client holding the keyboard, layer surfaces included,
+  so the popover's surface gets it as a window would. The shell reads it
+  itself, on the Wayland connection iced draws on (made by the shell and
+  handed to iced): a data device on an event queue of its own, whose
+  events are read along with iced's and handled only when a paste asks or
+  a popover closes, so that nothing wakes for them. iced's own clipboard
+  is off: it reads on the loop and waits there as long as the client that
+  copied takes to write, forever if that client hangs, and it keeps a
+  thread awake for every key and every move of the pointer.
+- **Off the loop**: the shell asks for `text/plain;charset=utf-8` (else
+  `UTF8_STRING`, else `text/plain`), and a thread of its own reads the
+  pipe for 2 s at most and 4 KiB at most; the field takes the text when it
+  comes, if it still holds the keyboard and its row is still unfolded
+  (folding or closing drops a paste on its way). One paste at a time. Text
+  that is not UTF-8, too long, late, or empty once cleaned pastes nothing.
+- **A secret as a typed password**: read into a buffer of fixed size,
+  cleaned into another, both overwritten with zeros once the field's
+  `Secret` has taken it; no `String` holds it. Nothing logs it nor its
+  length (the shell logs, at debug, that it was pasted or did not fit).
+  What the client that copied keeps, and the kernel's pipe, are theirs.
+- **For later fields**: `paste::asks` (the keys) and `paste::request` (the
+  text, once, off the loop) are what any text field of the shell uses.
+- **Measured headless**, against a test client that copies: the password
+  pasted with its line break reaches NetworkManager exactly, by `Ctrl+V`
+  and by `Shift+Insert`; out of the field, from an empty clipboard, one
+  holding only an image, or a client that never writes, nothing is
+  pasted, and the field takes keys while the paste waits.
