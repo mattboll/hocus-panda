@@ -7,9 +7,11 @@
 //! message is one line of text, words separated by spaces. The compositor
 //! decides where bars are and in which form, reserves their space and
 //! takes the clicks on their edge, passes on the clock's settings and the
-//! level keys (volume, brightness) pressed; the shell draws the bars, keeps
-//! the levels, and says when it draws on the CPU. Neither side waits for
-//! the other: a message is a fact, never a question.
+//! level keys (volume, brightness) pressed, and the presses outside the
+//! shell's surfaces while a popover shows; the shell draws the bars and
+//! their popovers, keeps the levels, and says when it draws on the CPU and
+//! when a popover closes. Neither side waits for the other: a message is a
+//! fact, never a question.
 //!
 //! The form switch is one motion, which both sides compute from the same
 //! start on the same clock (`CLOCK_MONOTONIC`, in microseconds): the
@@ -31,6 +33,21 @@ pub const CLOCK_NAMESPACE: &str = "hocus-bar-clock";
 /// the bar's bottom: for the same reason as the clock's, a change of level
 /// draws only that region.
 pub const LEVELS_NAMESPACE: &str = "hocus-bar-levels";
+/// The namespace of a popover's layer surface, beside the bar (bar.md §9):
+/// one at a time. The compositor blurs behind it as behind the bar, draws
+/// its shadow, and moves it in and out ([`POPOVER_OPEN`], [`POPOVER_CLOSE`]).
+pub const POPOVER_NAMESPACE: &str = "hocus-bar-popover";
+
+/// A popover's width, its distance from the bar, and how far it slides from
+/// the bar as it opens and closes (logical pixels). Its corners are the
+/// bar's ([`RADIUS`]).
+pub const POPOVER_WIDTH: i32 = 280;
+pub const POPOVER_SHIFT: f64 = 8.0;
+/// A popover fades and slides in over this, CSS's `ease-out` (`cubic-bezier(0,
+/// 0, 0.58, 1)`), and out over [`POPOVER_CLOSE`], `ease-in` (`cubic-bezier(0.42,
+/// 0, 1, 1)`); neither with reduced motion, nor for a shell on the CPU.
+pub const POPOVER_OPEN: Duration = Duration::from_millis(160);
+pub const POPOVER_CLOSE: Duration = Duration::from_millis(120);
 
 /// The bar's distance from the output's top, right and bottom edges, and
 /// the windows' from the bar (logical pixels).
@@ -116,6 +133,12 @@ pub enum ToShell {
     /// A level key was pressed (or repeats, held): the shell, which keeps
     /// the sound and the backlight, changes them.
     Level(LevelKey),
+    /// A press on none of the shell's surfaces while a popover shows, or
+    /// while one of the shell's surfaces holds the keyboard: the shell
+    /// closes the popover, or lets the keyboard go. A popover that holds
+    /// the keyboard is a menu: the compositor keeps that press from what
+    /// is under it. The shell sees the presses on its own surfaces itself.
+    Outside,
 }
 
 /// The keyboard's level keys, as `[shortcuts]` names their actions.
@@ -274,6 +297,11 @@ pub enum ToCompositor {
     /// bar would be drawn again; a configure makes it draw that surface
     /// alone (bar.md, as built, 3.3).
     Wake(String),
+    /// The shell's surfaces of this namespace (a popover) are closing: the
+    /// compositor fades them out over [`POPOVER_CLOSE`] (at once without
+    /// motion), and they are no longer a menu; the shell removes them
+    /// after that.
+    Closing(String),
 }
 
 /// A line that does not read.
@@ -316,6 +344,7 @@ impl fmt::Display for ToShell {
             } => write!(f, "bar {output} {} {since}", form.name()),
             Self::NoBar { output } => write!(f, "nobar {output}"),
             Self::Level(key) => write!(f, "level {}", key.name()),
+            Self::Outside => f.write_str("outside"),
             Self::Clock(look) => {
                 let [r, g, b] = look.color;
                 write!(
@@ -351,6 +380,7 @@ impl FromStr for ToShell {
                 output: word(&mut words, "output")?.to_owned(),
             }),
             Some("level") => Ok(Self::Level(word(&mut words, "level key")?.parse()?)),
+            Some("outside") => Ok(Self::Outside),
             Some("clock") => {
                 let seconds = flag(words.next(), "seconds", "noseconds")?;
                 let transition = word(&mut words, "transition")?.parse()?;
@@ -376,6 +406,7 @@ impl fmt::Display for ToCompositor {
         match self {
             Self::Software => f.write_str("software"),
             Self::Wake(namespace) => write!(f, "wake {namespace}"),
+            Self::Closing(namespace) => write!(f, "closing {namespace}"),
         }
     }
 }
@@ -388,6 +419,7 @@ impl FromStr for ToCompositor {
         match words.next() {
             Some("software") => Ok(Self::Software),
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
+            Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
     }
@@ -457,16 +489,18 @@ mod tests {
             }),
         ];
         let keys = LevelKey::ALL.map(ToShell::Level);
-        for message in to_shell.into_iter().chain(keys) {
+        for message in to_shell.into_iter().chain(keys).chain([ToShell::Outside]) {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
         }
         for message in [
             ToCompositor::Software,
             ToCompositor::Wake(LEVELS_NAMESPACE.to_owned()),
+            ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()),
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
         assert!("wake".parse::<ToCompositor>().is_err());
+        assert!("closing".parse::<ToCompositor>().is_err());
         for bad in [
             "",
             "bar eDP-1",
