@@ -6,8 +6,9 @@ the prototype disagree, this document wins once approved. Sections 2 and
 3 (the empty column, its glass and its two forms) are built since
 2026-10-28 (3.1, issue #358), the clock of section 4 group 1 and of
 section 5 (3.2, issue #359), the levels of section 4 group 10 and of
-section 5 (3.3, issue #360), and the popovers of section 9 with the
-sound's (3.4a, issue #361): see [as built](#as-built).
+section 5 (3.3, issue #360), the popovers of section 9 with the
+sound's (3.4a, issue #361), and the Wi-Fi's row and popover (section 4
+group 9, section 5, section 9; 3.5, issue #362): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -98,7 +99,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 6 | Spacer | Takes what is left | flexible |
 | 7 | Secretary | Section 7. Panda 62 px, title, one line | 74 px |
 | 8 | Desktops | 4 tiles, 30 px high, with a sketch of their windows; the current one outlined in the accent | 30 px |
-| 9 | Connections | 2×2 tiles of 34 px: Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (short name, one click cycles) | 73 px |
+| 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (short name, one click cycles) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
 | 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
 
@@ -161,6 +162,26 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   No sound and no window for a low battery either. The gauges are read
   only here; their popovers are §9's (the sound's since 3.4a).
 
+### 4.3 The connections (approved 2026-10-29, issue #362, variant B)
+
+- **Rows**, not the first draft's 2×2 tiles, so that a network's name
+  reads in full: one 30 px row per connection (6 px side padding inside a
+  −6 px margin, radius 8), 14 px above the levels. An 18 px icon, 8 px,
+  the name in Manrope 14.5 px, cut with an ellipsis. Lit
+  `rgba(255,255,255,0.06)` under the pointer, `0.08` while its popover is
+  open, as the sound's row. Only the Wi-Fi's exists so far; Bluetooth
+  (3.6), the phone and the keyboard layout (3.8) add theirs.
+- **The Wi-Fi's row**: connected, the Wi-Fi icon with its dot and three
+  arcs, 1 to 4 lit in `text` by the signal (the others
+  `rgba(255,255,255,0.22)`), and the network's name in `text`; on its way,
+  every arc in `text.dim` and "Connexion…" / "Connecting…" in `text.dim`;
+  Wi-Fi on without a network, the icon slashed and "Hors ligne" /
+  "Offline" in `text.faint`; Wi-Fi off, slashed, "Wi-Fi coupé" / "Wi-Fi
+  off"; a cable connected (first, whatever the Wi-Fi does), a cable's icon
+  and "Câble" / "Wired". A 7 px `#F2945B` dot (ringed with the bar's
+  colour) at the icon's top right when a sign-in page waits.
+- A click opens its popover (§9).
+
 When the output is too short (1366×768 gives 752 px of bar), groups give
 way in this order: Today, then To do, then the agent lines beyond the
 first, then Levels collapse to battery only. Clock, meeting, agent tiles,
@@ -179,7 +200,9 @@ Width 56 px, padding 12 px top, 10 px bottom, items centred, 14 px apart:
 clock on two lines, hours over minutes, no seconds (Martian Mono 400,
 19 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
 blue, glowing when under 10 min), waiting tile (44 px, panda 40 px, count
-badge), working count, spacer, secretary (46 px), the sound's gauge
+badge), working count, spacer, secretary (46 px), the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
+icon in the row's states, the sign-in page's dot 9 px from its right and
+7 px from its top), the sound's gauge
 (vertical, 8 × 48 px, filled from the bottom, grey when muted), the
 battery's percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
 §4.2, a bolt before it when charging), layout, notifications count. The
@@ -299,6 +322,48 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   "muted"); none: "Aucune application ne joue de son." / "No application
   is playing sound.". Moving a slider unmutes what it sets. The popover
   grows to fit, its bottom on the bar's.
+- **The Wi-Fi's** (3.5, issue #362), its bottom on the bar's whatever its
+  height: "Wi-Fi" (Manrope 700, 16 px) in a 32 px header with a switch
+  (40 × 22, radius 11, `#6CC287` on, `rgba(255,255,255,0.18)` off, an
+  18 px white knob sliding in 160 ms, `ease-out`; at once without motion);
+  no switch without a Wi-Fi adapter, and "Aucune carte Wi-Fi." / "No Wi-Fi
+  adapter." instead. A cable connected: a 32 px line, its icon and
+  "Connecté par câble" / "Connected by cable" (13.5 px, `text.dim`). Off:
+  "Le Wi-Fi est coupé." / "Wi-Fi is off." and nothing else. The network
+  connected: a block of 48 px at least on `rgba(108,194,135,0.10)`,
+  radius 8, its icon in `#6CC287`, its name (14 px, 600, cut), under it
+  "Connecté" / "Connected" (12.5 px, `#6CC287`) or, behind a sign-in page,
+  "Page de connexion à ouvrir" / "Sign-in page to open" (`#F7B98A`, on two
+  lines beside the button, the block growing), and "Déconnecter" /
+  "Disconnect" (28 px, radius 7, `rgba(255,255,255,0.06)`, 12.5 px
+  `text.dim`). Behind a sign-in page, a 34 px button
+  (`rgba(229,121,63,0.18)`, `#F7B98A` 13.5 px 600) "Ouvrir la page de
+  connexion" / "Open the sign-in page" opens NetworkManager's check address
+  in the browser, where the page shows itself. Then the divider,
+  "RÉSEAUX" / "NETWORKS" and, while the scan asked as it opened runs,
+  "Recherche…" / "Searching…" with a 12 px spinner (none without motion);
+  one 36 px row per network but the connected one: its signal, its name
+  (14 px, cut), "enregistré" / "saved" (12 px, `text.faint`) when a
+  connection is saved for it, "dans les Réglages" / "in Settings" for those
+  it cannot join (802.1X, WEP: their rows greyed and inert), a 14 px lock
+  for protected ones; strongest first; past six rows the list scrolls
+  (236 px at most: six rows and a peek of the seventh, a 6 px thumb). None:
+  "Aucun réseau trouvé." / "No network found." ("Recherche des réseaux…" /
+  "Searching for networks…" while the first scan runs). A saved or open
+  network joins with a click, its row saying "Connexion…" with a spinner
+  until NetworkManager says it is done, the others inert meanwhile. A
+  protected one unfolds under its row (the row's block lit
+  `rgba(255,255,255,0.05)`) a 34 px field ("Mot de passe" / "Password",
+  dots, an eye to show it), "Annuler" / "Cancel" and "Se connecter" /
+  "Connect" (green from 8 characters). `Enter` tries it, `Esc` folds it (a
+  second `Esc` closes the popover). Refused: "Mot de passe incorrect.
+  Vérifie-le et réessaie." / "Wrong password. Check it and try again."
+  (12.5 px, `#F7B98A`, wrapped) and the field's border `#F2945B`, the
+  field keeping what was typed and the keyboard. A saved network whose
+  password is refused unfolds its field the same way. The keyboard: `Tab`
+  goes through the switch, Disconnect, the sign-in page's button, each
+  network that can be joined, then in an unfolded row its field, its eye,
+  Cancel and Connect; the arrows go through the networks.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
@@ -313,7 +378,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Fallback for agents | Claude Code hooks `permission_prompt`, `idle_prompt` | when herdr is not running |
 | Meetings, events | calendar accounts (CalDAV, Google), local `.ics` | |
 | Tasks | local list, CalDAV VTODO, Google Tasks | |
-| Network | NetworkManager | |
+| Network | NetworkManager | on the system bus: `WirelessEnabled`, `Connectivity` (2: a sign-in page) and `ConnectivityCheckUri`, the devices (the Wi-Fi one, a wired one, their state), the access points (SSID, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`), the active connections and the saved ones (their SSID); followed by their signals; set with `RequestScan`, `WirelessEnabled`, `ActivateConnection`, `AddAndActivateConnection`, `Update`, `Disconnect` (as built, 3.5) |
 | Bluetooth | BlueZ | |
 | Sound | PipeWire | the sinks (their names, what they are, their own volume and mute) and the default one, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` (`set-volume`, `set-mute`, `set-default`) |
 | Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `org.freedesktop.UPower.PowerProfiles` |
@@ -677,3 +742,94 @@ What the approved mockup of 3.4 shows under the outputs (§9; issue #380).
 - **Not built:** a hover look on the applications' tiles (the pointer
   changes); scrolling past five applications; per-tab rows; input
   streams (applications recording).
+
+### 3.5, the Wi-Fi (2026-10-29)
+
+What the approved mockup of 3.5 shows, variant B (§4.3, §5, §9; issue
+#362); its control panel and its dashed Bluetooth, phone and keyboard
+slots are not part of the product.
+
+- **Its own surface.** The connections draw on a layer surface of their
+  own (`hocus-bar-connections`), inside the bar's rim: 194 × 40 px in the
+  full form (the row and room for its ring), 54 × 48 px in the mini (the
+  button and its ring), both while the form switches. It sits 14 px above
+  the levels' group and follows it: the levels say where their group's top
+  is (a row coming, the status line on two lines) and the surface moves by
+  its margins, which draws only it. So a network's change draws only that
+  surface, woken through the compositor (`wake hocus-bar-connections`)
+  and only when the row's state changes (a strength that lights the same
+  arcs draws nothing), and a level's change never draws it; the levels and
+  the clock never draw for the network. On the CPU the compositor cuts it
+  to the bar, as the levels'. Measured headless with the real shell: at
+  rest, popover closed or open, nothing commits but the clock; a network's
+  change damages only the connections' rectangle.
+- **NetworkManager, off the loop.** A thread of its own, with zbus on a
+  small runtime, keeps NetworkManager's objects as last said: read whole
+  when NetworkManager has an owner on the system bus, then followed by
+  every signal under its path (`PropertiesChanged` with the values, and
+  the older per-interface one, `AccessPointAdded` and `…Removed`, devices
+  and connections added and removed, `StateChanged` with its reason) and
+  by its owner's changes: nothing is polled. A burst of signals (a scan's
+  strengths) is shown once. What it asks: `RequestScan` as the popover
+  opens (NetworkManager refuses one too soon after another: then what it
+  has is fresh; "Recherche…" lasts until `LastScan` changes, 15 s at
+  most); `WirelessEnabled` from the switch; `ActivateConnection` for a
+  saved network; `AddAndActivateConnection` with only the SSID for an
+  open one, and with `802-11-wireless-security` (`key-mgmt` `wpa-psk`, or
+  `sae` for a WPA3-only network, and `psk`) for a protected one, as nmcli
+  does; for a saved network whose password is refused, its connection
+  `Update`d with the new one, then activated; `Disconnect` on the Wi-Fi
+  device, which keeps it from connecting again by itself. A connection it
+  added that fails is deleted: a wrong password is not saved.
+  NetworkManager keeps a password in the connection's profile, in
+  `/etc/NetworkManager/system-connections/` (readable by root only) with
+  `psk-flags=0`.
+- **Networks**: access points of the same SSID are one network (the
+  strongest's strength, security and path); hidden ones (an empty SSID)
+  are left out; an SSID that is not UTF-8 shows with replacement marks.
+  Strength to arcs: 70 and up four, 50 three, 30 two, below the dot alone.
+  Security from the flags: 802.1X (or Suite B) enterprise; PSK, or SAE
+  alone (WPA3); WEP (privacy without WPA): left to the Settings with
+  802.1X; anything else open (OWE too). The rows hold their order while the
+  pointer is over the list, a row is unfolded or focused, or a connection
+  runs (newcomers join at the end); otherwise strongest first.
+- **Failures**: an active connection that ends with reason 9 (no secrets)
+  or 10 (login failed), or a Wi-Fi device that failed with reason 7 (no
+  secrets: NetworkManager found no agent to ask again after the network
+  refused the key), is a wrong password: the field says so. Anything else
+  is "La connexion a échoué. Réessaie." / "Could not connect. Try again."
+  under the field, or "échec" / "failed" (`#F7B98A`) on a row joined
+  with a click.
+- **Missing**: without NetworkManager on the bus, no row (as a level whose
+  service is missing), and it is picked up when it comes. Without a Wi-Fi
+  adapter: the row says the cable or "Hors ligne"; the popover, "Aucune
+  carte Wi-Fi.", without a switch.
+- **The password** comes from the keys as xkbcommon types them in the
+  shell with the keymap and the modifiers the compositor sends (the user's
+  layouts, Shift, AltGr, dead keys composed): the popover's surface holds
+  the keyboard, and the shell's surfaces that receive its keys hand them
+  over with their text. It lives in one buffer that never grows, zeroed
+  when its row folds, when the connection succeeds, when the popover
+  closes and when dropped; its `Debug` says its length; it leaves the shell
+  only in NetworkManager's D-Bus call. It is shown as dots unless the eye
+  is pressed. The compositor logs no key, not even at trace. Ctrl+V does
+  not paste (iced's canvas has no clipboard; a ticket of its own);
+  Ctrl+Backspace clears the field.
+- **Popover**: its bottom on the bar's whatever its height (the mockup's),
+  where the sound's top is on its item; it grows and shrinks as rows come,
+  unfold and go. A hovered popover in the mini form whose row unfolds
+  takes the keyboard and stays, as if clicked. The list and the field's
+  text are drawn in frames cut to their bounds; on the CPU, whose renderer
+  does not cut text to a frame, a list's text that does not show whole is
+  not drawn. The caret does not blink (a blink would draw at rest).
+- **Fonts**: Manrope SemiBold (wght 600, an instance of the same variable
+  font, SIL OFL 1.1) for the network's name and the sign-in page's button.
+- **For tests**, `HOCUS_OPENER` names the program that opens the sign-in
+  page (`xdg-open` otherwise).
+- **Not built**: the connecting row's pulse in the bar (the mockup's: an
+  animation as long as a connection, against §12); paste; a secret agent
+  (passwords NetworkManager asks for later, for connections whose secrets
+  are kept by an agent: such a network unfolds its field when refused);
+  hidden networks, forgetting a network, enterprise and WEP networks,
+  airplane mode and VPN (the Settings, Sprint 6); names for screen readers
+  (§11).
