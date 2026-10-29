@@ -378,6 +378,7 @@ where
                 state.presented(&out.output, state.clock.now().into(), out.frames);
             }
             state.send_frames(&out.output, Some(&states));
+            state.desktops_drawn(&out.output);
         }
     }
 }

@@ -195,5 +195,6 @@ impl WinitBackend {
             }
         }
         state.send_frames(&self.output, None);
+        state.desktops_drawn(&self.output);
     }
 }
