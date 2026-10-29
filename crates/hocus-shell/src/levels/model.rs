@@ -147,6 +147,40 @@ impl Words {
         if self.fr() { "SORTIE" } else { "OUTPUT" }
     }
 
+    /// Over the microphone, in capitals.
+    pub fn microphone(self) -> &'static str {
+        if self.fr() { "MICRO" } else { "MICROPHONE" }
+    }
+
+    /// Over the applications' volumes, in capitals.
+    pub fn applications(self) -> &'static str {
+        "APPLICATIONS"
+    }
+
+    /// In place of the microphone's volume, muted.
+    pub fn off(self) -> &'static str {
+        if self.fr() { "coupé" } else { "off" }
+    }
+
+    /// In place of the applications' list.
+    pub fn no_application(self) -> &'static str {
+        if self.fr() {
+            "Aucune application ne joue de son."
+        } else {
+            "No application is playing sound."
+        }
+    }
+
+    /// Under the applications listed, the others' number.
+    pub fn more_applications(self, more: usize) -> String {
+        match (self.fr(), more) {
+            (true, 1) => "+1 autre application".to_owned(),
+            (true, n) => format!("+{n} autres applications"),
+            (false, 1) => "+1 more application".to_owned(),
+            (false, n) => format!("+{n} more applications"),
+        }
+    }
+
     pub fn profile(self, profile: Profile) -> &'static str {
         match (profile, self.fr()) {
             (Profile::PowerSaver, true) => "économie",

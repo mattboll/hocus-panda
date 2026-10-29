@@ -1,20 +1,36 @@
 //! The sound's popover (bar.md §9, the 3.4 mockup): its title and the
 //! default output's name; the master volume, its mute button and its
-//! value; then the outputs, the default one checked. A click on an output
-//! makes it the default, which keeps its own volume (PipeWire's, per sink):
-//! the slider then shows that one's.
+//! value; the outputs, the default one checked; the microphone, its mute
+//! button, its volume and, when there are several, the one to use; then
+//! the applications playing sound, each with its volume and its mute. A
+//! click on an output makes it the default, which keeps its own volume
+//! (PipeWire's, per sink): the slider then shows that one's.
 //!
 //! One canvas draws it all, and takes the pointer and the keys itself:
 //! what changes draws this surface alone, without a message to iced. The
-//! slider's volumes go to the sound's service as they come; it sends
-//! PipeWire only the last one each time `wpctl` is ready. The slider shows
-//! the volume asked until PipeWire says it, a second at most.
+//! sliders' volumes go to the sound's service as they come; it sends
+//! PipeWire only the last one each time `wpctl` is ready. A slider shows
+//! the volume asked until PipeWire says it, a second at most; moving one
+//! unmutes what it sets.
+//!
+//! **The applications listed**: on opening, those with a stream playing
+//! now (its node running, not corked: a paused tab's stream lingers for
+//! minutes, idle); while it is open, one that starts to play joins the
+//! list, and one leaves it only when its last stream goes, so that no row
+//! moves under the pointer when a video is paused. At most
+//! [`MOST_APPLICATIONS`] rows, the others counted under them. One row per
+//! application, setting all its streams.
 //!
 //! The keyboard: `Tab` and `Shift+Tab` go through the mute button, the
-//! slider and the outputs; `Enter` or `Space` acts; the arrows move the
-//! slider by 5 % (and go through the outputs); `Esc` closes.
+//! slider, the outputs, the microphone's mute button and slider, the
+//! microphones, then each application's tile and slider; `Enter` or
+//! `Space` acts; the arrows move a slider by 5 % (and go through the
+//! outputs and the microphones); `Esc` closes.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
 use hocus_link::{LevelKey, POPOVER_WIDTH, RADIUS};
 use iced::{
@@ -31,10 +47,11 @@ use crate::levels::{
     self,
     draw::{
         ACCENT, DIM, FAINT, HOVER, LINE, MANROPE, MANROPE_BOLD, MUTED_FILL, SOUND, TEXT, TRACK,
-        VALUE, cell, ring, stroke,
+        VALUE, cell, rgb, ring, stroke,
     },
-    model::{Sound, Words},
-    sound::{Ask, Kind, Sink},
+    icons::Icon,
+    model::{STEP, Sound, Words},
+    sound::{App, Ask, Kind, Mixer, Set, Sink},
 };
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
@@ -70,6 +87,26 @@ const ROW_OUT: f32 = 6.0;
 const ROW_TEXT: f32 = 14.0;
 const ROW_ICON_GAP: f32 = 10.0;
 const CHECK: f32 = 16.0;
+/// The microphones' rows: their names 48 px into the row.
+const MIC_INDENT: f32 = 48.0;
+/// An application's row: its tile, its name over a slimmer slider.
+const APP_ROW: f32 = 46.0;
+const TILE: f32 = BUTTON;
+const APP_NAME: f32 = 13.5;
+const APP_SLIDER: f32 = 18.0;
+const APP_TRACK: f32 = 6.0;
+const APP_KNOB: f32 = 14.0;
+/// Between the name and its slider.
+const APP_NAME_GAP: f32 = 2.0;
+/// The value sits on the row's bottom, 2 px up.
+const APP_VALUE_PAD: f32 = 2.0;
+const LETTER: f32 = 14.0;
+/// "No application…", and the others' number: 13.5 px, 4 px above, 2 below.
+const NOTE: f32 = 13.5;
+const NOTE_TOP: f32 = 4.0;
+const NOTE_BOTTOM: f32 = 2.0;
+/// Applications listed at most; the others are counted under them.
+pub const MOST_APPLICATIONS: usize = 5;
 
 const HEADER_TOP: f32 = BORDER + PAD_TOP;
 const MASTER_TOP: f32 = HEADER_TOP + HEADER + GAP;
@@ -88,15 +125,164 @@ const BUTTON_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
 const RULE_COLOUR: Color = Color::from_rgba8(255, 255, 255, 0.08);
 const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.05);
 const KNOB_SHADOW: Color = Color::from_rgba8(0, 0, 0, 0.45);
+/// The microphone muted: its button tinted, its icon `gauge.critical`'s
+/// light end.
+const MIC_OFF_FILL: Color = Color::from_rgba8(229, 121, 63, 0.18);
+const MIC_OFF_HOVER: Color = Color::from_rgba8(229, 121, 63, 0.26);
+const MIC_OFF: Color = rgb(0xF7B98A);
+/// A muted application's tile.
+const TILE_MUTED: f32 = 0.45;
+const LETTER_INK: Color = rgb(0x0B1020);
+/// The letter tiles' colours (the mockup's two first), one per application
+/// by its name.
+const TILES: [Color; 6] = [
+    rgb(0xF5B34A),
+    rgb(0x8FB3FF),
+    rgb(0x7EE0A0),
+    rgb(0xF7B98A),
+    rgb(0xC9A7F5),
+    rgb(0x6FD3D8),
+];
 
-/// The slider shows the volume asked this long at most, until PipeWire
-/// says it.
+/// A slider shows the volume asked this long at most, until PipeWire says
+/// it.
 const ASKED_FOR: Duration = Duration::from_secs(1);
 
-/// The popover's height with `outputs` outputs listed.
-pub fn height(outputs: usize) -> u32 {
-    let rows = outputs as f32 * (ROW + ROW_GAP) - if outputs > 0 { ROW_GAP } else { 0.0 };
-    (ROWS_TOP + rows + PAD_BOTTOM + BORDER).round() as u32
+/// What the popover lists, and so its height.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Layout {
+    pub outputs: usize,
+    /// The microphones: none hides the section, one shows no list.
+    pub microphones: usize,
+    /// The applications' rows, and whether others are counted under them.
+    pub applications: usize,
+    pub more: bool,
+}
+
+/// The height of `n` rows `height` tall, `gap` apart.
+fn rows(n: usize, height: f32, gap: f32) -> f32 {
+    if n == 0 {
+        0.0
+    } else {
+        n as f32 * (height + gap) - gap
+    }
+}
+
+/// A section's divider after `end`, its label's top and its content's.
+fn section(end: f32) -> (f32, f32, f32) {
+    let rule = end + GAP + RULE;
+    let label = rule + 1.0 + RULE + GAP;
+    (rule, label, label + LABEL_PAD * 2.0 + LABEL * LINE + GAP)
+}
+
+impl Layout {
+    /// What `mixer` shows with `listed` applications listed.
+    pub fn of(mixer: &Mixer, listed: usize) -> Self {
+        Self {
+            outputs: mixer.sinks.len(),
+            microphones: mixer.sources.len(),
+            applications: listed.min(MOST_APPLICATIONS),
+            more: listed > MOST_APPLICATIONS,
+        }
+    }
+
+    fn outputs_end(self) -> f32 {
+        ROWS_TOP + rows(self.outputs, ROW, ROW_GAP)
+    }
+
+    /// The microphone's section, if any.
+    fn microphone(self) -> Option<(f32, f32, f32)> {
+        (self.microphones > 0).then(|| section(self.outputs_end()))
+    }
+
+    /// Its row: mute, slider, value.
+    fn mic_row(self) -> f32 {
+        self.microphone().map_or(0.0, |(_, _, top)| top)
+    }
+
+    /// Its list, when there are several.
+    fn mics_top(self) -> f32 {
+        self.mic_row() + MASTER + GAP
+    }
+
+    fn mic_end(self) -> f32 {
+        match self.microphones {
+            0 => self.outputs_end(),
+            1 => self.mic_row() + MASTER,
+            n => self.mics_top() + rows(n, ROW, ROW_GAP),
+        }
+    }
+
+    fn applications_section(self) -> (f32, f32, f32) {
+        section(self.mic_end())
+    }
+
+    fn app_row(self, i: usize) -> f32 {
+        self.applications_section().2 + i as f32 * (APP_ROW + GAP)
+    }
+
+    /// The line under the applications' rows ("No application…", or the
+    /// others' number): its top.
+    fn note_top(self) -> f32 {
+        match self.applications {
+            0 => self.applications_section().2,
+            n => self.app_row(n),
+        }
+    }
+
+    fn end(self) -> f32 {
+        if self.applications == 0 || self.more {
+            self.note_top() + NOTE_TOP + NOTE * LINE + NOTE_BOTTOM
+        } else {
+            self.app_row(self.applications) - GAP
+        }
+    }
+
+    /// The popover's height, logical pixels.
+    pub fn height(self) -> u32 {
+        (self.end() + PAD_BOTTOM + BORDER).round() as u32
+    }
+}
+
+// --- The applications listed, kept while the popover is open -----------------
+
+static LISTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The applications' keys listed now, from `apps`: on `opening`, those
+/// playing; else those listed, less those gone, with those that started
+/// to play.
+fn relist(listed: &mut Vec<String>, apps: &[App], opening: bool) {
+    if opening {
+        listed.clear();
+    }
+    listed.retain(|key| apps.iter().any(|a| a.key == *key));
+    for app in apps.iter().filter(|a| a.playing) {
+        if !listed.contains(&app.key) {
+            listed.push(app.key.clone());
+        }
+    }
+}
+
+/// The popover's layout now, its list of applications made again (from
+/// scratch when `opening`): the popover's controller asks, as it opens it
+/// and when the sound changes.
+pub fn layout(opening: bool) -> Layout {
+    let mixer = levels::sound::mixer();
+    let mut listed = LISTED.lock().unwrap_or_else(PoisonError::into_inner);
+    relist(&mut listed, &mixer.apps, opening);
+    Layout::of(&mixer, listed.len())
+}
+
+/// The applications listed, in their order, the others' number.
+fn listed(mixer: &Mixer) -> (Vec<App>, usize) {
+    let listed = LISTED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut apps: Vec<App> = listed
+        .iter()
+        .filter_map(|key| mixer.apps.iter().find(|a| a.key == *key).cloned())
+        .collect();
+    let more = apps.len().saturating_sub(MOST_APPLICATIONS);
+    apps.truncate(MOST_APPLICATIONS);
+    (apps, more)
 }
 
 /// The sound's popover on its surface.
@@ -115,29 +301,50 @@ enum Target {
     Mute,
     Slider,
     Output(usize),
+    MicMute,
+    MicSlider,
+    Mic(usize),
+    Tile(usize),
+    AppSlider(usize),
+}
+
+/// A slider, by what it sets: an application's by its key, so that it
+/// stays the same when the list changes under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Slider {
+    Master,
+    Mic,
+    App(String),
 }
 
 /// What the surface keeps between draws.
 #[derive(Debug, Default)]
 pub struct State {
-    /// The outputs and the default one's sound, as last drawn.
-    sinks: Vec<Sink>,
+    /// What it shows, as last drawn: the outputs, the microphones, the
+    /// applications listed and the others' number, the default output's
+    /// sound.
+    mixer: Mixer,
+    apps: Vec<App>,
+    more: usize,
     sound: Option<Sound>,
-    /// Their names as they fit, the title's output name, and the label's
-    /// letters' places.
+    layout: Layout,
+    /// The names as they fit (outputs', microphones', applications'), the
+    /// title's output name, and the labels' letters' places.
     names: Vec<String>,
+    mic_names: Vec<String>,
+    app_names: Vec<String>,
     header: String,
-    label: Vec<(char, f32)>,
-    /// What the names were made for: the outputs', and the default one.
-    made_for: (Vec<String>, Option<usize>),
+    labels: [Vec<(char, f32)>; 3],
+    /// What the names were made for.
+    made_for: Vec<String>,
     /// The `0`'s advance of the value's font, for tabular figures.
     zero: Option<f32>,
     hover: Option<Target>,
     pressed: Option<Target>,
-    dragging: bool,
-    /// The slider's volume while dragged, or asked and not yet said by
+    dragging: Option<Slider>,
+    /// A slider's volume while dragged, or asked and not yet said by
     /// PipeWire, and since when.
-    asked: Option<(f32, Instant)>,
+    asked: Option<(Slider, f32, Instant)>,
     focus: Option<Target>,
     pointer: Option<Point>,
     inside: bool,
@@ -177,30 +384,23 @@ impl<Message> canvas::Program<Message> for Panel {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
+        let layout = state.layout;
         self.background(&mut frame, bounds.size());
         self.header(&mut frame, state);
         self.master(&mut frame, state);
-        frame.fill_rectangle(
-            Point::new(LEFT, RULE_TOP),
-            Size::new(RIGHT - LEFT, 1.0),
-            RULE_COLOUR,
-        );
-        for (ch, x) in &state.label {
-            let mut letter = text(
-                ch.to_string(),
-                Point::new(*x, LABEL_TOP + LABEL_PAD + LABEL * LINE / 2.0),
-                LABEL,
-                DIM,
-                Alignment::Left,
-            );
-            letter.font = MANROPE_BOLD;
-            frame.fill_text(letter);
-        }
-        for (i, sink) in state.sinks.iter().enumerate() {
+        label(&mut frame, &state.labels[0], RULE_TOP, LABEL_TOP);
+        for (i, sink) in state.mixer.sinks.iter().enumerate() {
             self.output(&mut frame, state, i, sink);
         }
+        if let Some((rule, top, _)) = layout.microphone() {
+            label(&mut frame, &state.labels[1], rule, top);
+            self.microphone(&mut frame, state);
+        }
+        let (rule, top, _) = layout.applications_section();
+        label(&mut frame, &state.labels[2], rule, top);
+        self.applications(&mut frame, state);
         if let Some(target) = state.focus {
-            let (rect, radius) = target.shape();
+            let (rect, radius) = target.shape(layout);
             ring(&mut frame, rect, radius);
         }
         vec![frame.into_geometry()]
@@ -212,7 +412,7 @@ impl<Message> canvas::Program<Message> for Panel {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.dragging {
+        if state.dragging.is_some() {
             mouse::Interaction::Grabbing
         } else if state.hover.is_some() {
             mouse::Interaction::Pointer
@@ -222,25 +422,106 @@ impl<Message> canvas::Program<Message> for Panel {
     }
 }
 
+/// A section's divider at `rule` and its label's letters, from `top`.
+fn label(f: &mut Frame, letters: &[(char, f32)], rule: f32, top: f32) {
+    f.fill_rectangle(
+        Point::new(LEFT, rule),
+        Size::new(RIGHT - LEFT, 1.0),
+        RULE_COLOUR,
+    );
+    for (ch, x) in letters {
+        let mut letter = text(
+            ch.to_string(),
+            Point::new(*x, top + LABEL_PAD + LABEL * LINE / 2.0),
+            LABEL,
+            DIM,
+            Alignment::Left,
+        );
+        letter.font = MANROPE_BOLD;
+        f.fill_text(letter);
+    }
+}
+
+/// A slider's track, from `left` to `right` and centred on `middle`: its
+/// height, its knob's size.
+#[derive(Debug, Clone, Copy)]
+struct Track {
+    left: f32,
+    right: f32,
+    middle: f32,
+    height: f32,
+    knob: f32,
+}
+
+impl Track {
+    /// Its volume at `x`, in percent: the knob's centre under the pointer,
+    /// its travel the track less the knob.
+    fn volume_at(self, x: f32) -> f32 {
+        let travel = self.right - self.left - self.knob;
+        ((x - self.left - self.knob / 2.0) / travel * 100.0)
+            .round()
+            .clamp(0.0, 100.0)
+    }
+}
+
+impl Layout {
+    /// The application's row `i`'s parts: its name's middle, its slider.
+    fn app_parts(self, i: usize) -> (f32, Track) {
+        let column = APP_NAME * LINE + APP_NAME_GAP + APP_SLIDER;
+        let top = self.app_row(i) + (APP_ROW - column) / 2.0;
+        let track = Track {
+            left: app_left(),
+            right: slider_right(),
+            middle: top + APP_NAME * LINE + APP_NAME_GAP + APP_SLIDER / 2.0,
+            height: APP_TRACK,
+            knob: APP_KNOB,
+        };
+        (top + APP_NAME * LINE / 2.0, track)
+    }
+
+    /// The master's slider, or the microphone's.
+    fn track(self, mic: bool) -> Track {
+        let top = if mic { self.mic_row() } else { MASTER_TOP };
+        Track {
+            left: slider_left(),
+            right: slider_right(),
+            middle: top + MASTER / 2.0,
+            height: TRACK_HEIGHT,
+            knob: KNOB,
+        }
+    }
+}
+
 impl Target {
     /// Where it is, and its corners' radius.
-    fn shape(self) -> (Rectangle, f32) {
+    fn shape(self, layout: Layout) -> (Rectangle, f32) {
+        let button = |top: f32| {
+            Rectangle::new(
+                Point::new(LEFT, top + (MASTER - BUTTON) / 2.0),
+                Size::new(BUTTON, BUTTON),
+            )
+        };
+        let slider = |track: Track, height: f32| {
+            Rectangle::new(
+                Point::new(track.left, track.middle - height / 2.0),
+                Size::new(track.right - track.left, height),
+            )
+        };
         match self {
-            Self::Mute => (
+            Self::Mute => (button(MASTER_TOP), BUTTON_RADIUS),
+            Self::Slider => (slider(layout.track(false), SLIDER), SLIDER / 2.0),
+            Self::Output(i) => (row_rect(ROWS_TOP, i), BUTTON_RADIUS),
+            Self::MicMute => (button(layout.mic_row()), BUTTON_RADIUS),
+            Self::MicSlider => (slider(layout.track(true), SLIDER), SLIDER / 2.0),
+            Self::Mic(i) => (row_rect(layout.mics_top(), i), BUTTON_RADIUS),
+            Self::Tile(i) => (
                 Rectangle::new(
-                    Point::new(LEFT, MASTER_TOP + (MASTER - BUTTON) / 2.0),
-                    Size::new(BUTTON, BUTTON),
+                    Point::new(LEFT, layout.app_row(i) + (APP_ROW - TILE) / 2.0),
+                    Size::new(TILE, TILE),
                 ),
                 BUTTON_RADIUS,
             ),
-            Self::Slider => (
-                Rectangle::new(
-                    Point::new(slider_left(), MASTER_TOP + (MASTER - SLIDER) / 2.0),
-                    Size::new(slider_right() - slider_left(), SLIDER),
-                ),
-                SLIDER / 2.0,
-            ),
-            Self::Output(i) => (output_rect(i), BUTTON_RADIUS),
+            Self::AppSlider(i) => (slider(layout.app_parts(i).1, APP_SLIDER), APP_SLIDER / 2.0),
         }
     }
 }
@@ -253,20 +534,119 @@ fn slider_right() -> f32 {
     RIGHT - VALUE_BOX - 8.0
 }
 
-fn output_rect(i: usize) -> Rectangle {
+fn app_left() -> f32 {
+    LEFT + TILE + 8.0
+}
+
+/// Row `i` of a list from `top`.
+fn row_rect(top: f32, i: usize) -> Rectangle {
     Rectangle::new(
-        Point::new(LEFT - ROW_OUT, ROWS_TOP + i as f32 * (ROW + ROW_GAP)),
+        Point::new(LEFT - ROW_OUT, top + i as f32 * (ROW + ROW_GAP)),
         Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, ROW),
     )
 }
 
-/// The slider's volume at `x`, in percent: the knob's centre under the
-/// pointer, its travel the track less the knob.
-fn volume_at(x: f32) -> f32 {
-    let travel = slider_right() - slider_left() - KNOB;
-    ((x - slider_left() - KNOB / 2.0) / travel * 100.0)
-        .round()
+impl State {
+    /// What can be pointed at, in the keyboard's order.
+    fn targets(&self) -> Vec<Target> {
+        let mics = self.mixer.sources.len();
+        let mut order = vec![Target::Mute, Target::Slider];
+        order.extend((0..self.mixer.sinks.len()).map(Target::Output));
+        if mics > 0 {
+            order.extend([Target::MicMute, Target::MicSlider]);
+        }
+        if mics > 1 {
+            order.extend((0..mics).map(Target::Mic));
+        }
+        for i in 0..self.apps.len() {
+            order.extend([Target::Tile(i), Target::AppSlider(i)]);
+        }
+        order
+    }
+
+    /// What is under `at`.
+    fn target_at(&self, at: Point) -> Option<Target> {
+        self.targets()
+            .into_iter()
+            .find(|t| t.shape(self.layout).0.contains(at))
+    }
+
+    /// The sound a slider sets, as PipeWire says it.
+    fn said(&self, slider: &Slider) -> Option<Sound> {
+        match slider {
+            Slider::Master => self.sound,
+            Slider::Mic => self.mixer.microphone().and_then(|m| m.sound),
+            Slider::App(key) => self
+                .mixer
+                .apps
+                .iter()
+                .find(|a| a.key == *key)
+                .and_then(|a| a.sound),
+        }
+    }
+
+    /// A slider's volume as shown: the one asked, else PipeWire's.
+    fn shown(&self, slider: &Slider) -> f32 {
+        match &self.asked {
+            Some((asked, volume, _)) if asked == slider => *volume,
+            _ => self.said(slider).map_or(0.0, |s| s.volume),
+        }
         .clamp(0.0, 100.0)
+    }
+
+    fn slider_of(&self, target: Target) -> Option<(Slider, Track)> {
+        match target {
+            Target::Slider => Some((Slider::Master, self.layout.track(false))),
+            Target::MicSlider => Some((Slider::Mic, self.layout.track(true))),
+            Target::AppSlider(i) => {
+                let app = self.apps.get(i)?;
+                Some((Slider::App(app.key.clone()), self.layout.app_parts(i).1))
+            }
+            _ => None,
+        }
+    }
+
+    fn track_of(&self, slider: &Slider) -> Option<Track> {
+        match slider {
+            Slider::Master => Some(self.layout.track(false)),
+            Slider::Mic => Some(self.layout.track(true)),
+            Slider::App(key) => {
+                let i = self.apps.iter().position(|a| a.key == *key)?;
+                Some(self.layout.app_parts(i).1)
+            }
+        }
+    }
+}
+
+/// Asks for `slider`'s volume `volume`, unmuting what it sets: the master
+/// through the default sink's asks, the others on their nodes.
+fn ask_volume(mixer: &Mixer, slider: &Slider, volume: f32) {
+    let nodes: Vec<(u32, bool)> = match slider {
+        Slider::Master => {
+            levels::ask(Ask::Volume(volume));
+            return;
+        }
+        Slider::Mic => mixer
+            .microphone()
+            .map(|m| (m.id, m.sound.is_some_and(|s| s.muted)))
+            .into_iter()
+            .collect(),
+        Slider::App(key) => mixer
+            .apps
+            .iter()
+            .filter(|a| a.key == *key)
+            .flat_map(|a| {
+                let muted = a.sound.is_some_and(|s| s.muted);
+                a.streams.iter().map(move |id| (*id, muted))
+            })
+            .collect(),
+    };
+    for (id, muted) in nodes {
+        levels::ask(Ask::Node(id, Set::Volume(volume)));
+        if muted {
+            levels::ask(Ask::Node(id, Set::Mute(false)));
+        }
+    }
 }
 
 impl Panel {
@@ -282,31 +662,41 @@ impl Panel {
                 let _: Option<canvas::Action<Message>> = self.key(state, &key, shift);
             }
         }
-        state.sinks = levels::sound::sinks();
+        state.mixer = levels::sound::mixer();
+        (state.apps, state.more) = listed(&state.mixer);
+        state.layout = Layout::of(&state.mixer, state.apps.len() + state.more);
         state.sound = levels::snapshot().sound;
-        let names: Vec<String> = state.sinks.iter().map(|s| s.description.clone()).collect();
-        let default = state.sinks.iter().position(|s| s.default);
-        if state.made_for != (names.clone(), default) || state.label.is_empty() {
-            self.fit(state, &names);
-            state.made_for = (names, default);
+        let default = state.mixer.sinks.iter().position(|s| s.default);
+        let made_for: Vec<String> = (state.mixer.sinks.iter().map(|s| &s.description))
+            .chain(std::iter::once(&String::new()))
+            .chain(state.mixer.sources.iter().map(|s| &s.description))
+            .chain(std::iter::once(&String::new()))
+            .chain(state.apps.iter().map(|a| &a.name))
+            .cloned()
+            .chain(std::iter::once(format!("{default:?}")))
+            .collect();
+        if state.made_for != made_for || state.labels[0].is_empty() {
+            self.fit(state);
+            state.made_for = made_for;
         }
-        if let Some(focus) = state.focus
-            && let Target::Output(i) = focus
-            && i >= state.sinks.len()
+        if state
+            .focus
+            .is_some_and(|focus| !state.targets().contains(&focus))
         {
             state.focus = None;
         }
         // The volume asked stays shown until PipeWire says it, or a while.
-        match state.asked {
-            Some((asked, since)) if !state.dragging => {
+        match &state.asked {
+            Some((slider, asked, since)) if state.dragging.is_none() => {
                 let said = state
-                    .sound
+                    .said(slider)
                     .is_some_and(|s| (s.volume.round() - asked).abs() < 0.5);
-                if said || now.saturating_duration_since(since) >= ASKED_FOR {
+                let until = *since + ASKED_FOR;
+                if said || now >= until {
                     state.asked = None;
                     None
                 } else {
-                    Some(canvas::Action::request_redraw_at(since + ASKED_FOR))
+                    Some(canvas::Action::request_redraw_at(until))
                 }
             }
             _ => None,
@@ -314,21 +704,40 @@ impl Panel {
     }
 
     /// The names elided to fit, the title's output name too, and the
-    /// label's letters spaced.
-    fn fit(&self, state: &mut State, names: &[String]) {
+    /// labels' letters spaced.
+    fn fit(&self, state: &mut State) {
+        let outputs: Vec<String> = state
+            .mixer
+            .sinks
+            .iter()
+            .map(|s| s.description.clone())
+            .collect();
+        let mics: Vec<String> = state
+            .mixer
+            .sources
+            .iter()
+            .map(|s| s.description.clone())
+            .collect();
+        let apps: Vec<String> = state.apps.iter().map(|a| a.name.clone()).collect();
         let Ok(mut system) = iced::advanced::graphics::text::font_system().write() else {
-            state.names = names.to_vec();
+            (state.names, state.mic_names, state.app_names) = (outputs, mics, apps);
             return;
         };
         let system = system.raw();
-        // Between the icon and the check, each with its gap.
-        let row_room = RIGHT - CHECK - ROW_ICON_GAP - (LEFT + ICON + ROW_ICON_GAP);
-        state.names = names
-            .iter()
-            .map(|n| elide(n, row_room, |t| measure(system, t, MANROPE, ROW_TEXT)))
-            .collect();
+        let mut fit = |names: &[String], room: f32, size: f32| -> Vec<String> {
+            names
+                .iter()
+                .map(|n| elide(n, room, |t| measure(system, t, MANROPE, size)))
+                .collect()
+        };
+        // Between the icon (or the indent) and the check, each with its gap.
+        let checked = RIGHT - CHECK - ROW_ICON_GAP;
+        state.names = fit(&outputs, checked - (LEFT + ICON + ROW_ICON_GAP), ROW_TEXT);
+        state.mic_names = fit(&mics, checked - (LEFT - ROW_OUT + MIC_INDENT), ROW_TEXT);
+        state.app_names = fit(&apps, slider_right() - app_left(), APP_NAME);
         let title = measure(system, self.words.sound(), MANROPE_BOLD, TITLE);
         let default = state
+            .mixer
             .sinks
             .iter()
             .find(|s| s.default)
@@ -337,17 +746,21 @@ impl Panel {
         state.header = elide(&default, RIGHT - LEFT - title - 12.0, |t| {
             measure(system, t, MANROPE, NAME)
         });
-        let mut x = LEFT;
-        state.label = self
-            .words
-            .output()
-            .chars()
-            .map(|ch| {
-                let at = x;
-                x += measure(system, &ch.to_string(), MANROPE_BOLD, LABEL) + LABEL_SPACING;
-                (ch, at)
-            })
-            .collect();
+        let words = [
+            self.words.output(),
+            self.words.microphone(),
+            self.words.applications(),
+        ];
+        state.labels = words.map(|word| {
+            let mut x = LEFT;
+            word.chars()
+                .map(|ch| {
+                    let at = x;
+                    x += measure(system, &ch.to_string(), MANROPE_BOLD, LABEL) + LABEL_SPACING;
+                    (ch, at)
+                })
+                .collect()
+        });
         state.zero = crate::clock::measure(system, MANROPE, VALUE, VALUE * LINE).map(|m| m.zero);
     }
 
@@ -357,7 +770,7 @@ impl Panel {
         seen: &mouse::Event,
         at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| target_at(state, at));
+        let target = at.and_then(|at| state.target_at(at));
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
@@ -365,10 +778,10 @@ impl Panel {
                     state.inside = true;
                     event(Seen::PopoverEnter);
                 }
-                if state.dragging
+                if let Some(slider) = state.dragging.clone()
                     && let Some(at) = at
                 {
-                    self.slide(state, at.x);
+                    self.slide(state, slider, at.x);
                     return redraw;
                 }
                 if state.hover != target {
@@ -386,19 +799,19 @@ impl Panel {
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
                 state.focus = None;
                 state.pressed = target;
-                if target == Some(Target::Slider)
+                if let Some((slider, _)) = target.and_then(|t| state.slider_of(t))
                     && let Some(at) = at
                 {
-                    state.dragging = true;
-                    self.slide(state, at.x);
+                    state.dragging = Some(slider.clone());
+                    self.slide(state, slider, at.x);
                 }
                 redraw
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
                 let pressed = state.pressed.take();
-                if std::mem::take(&mut state.dragging) {
-                    if let Some((v, _)) = state.asked {
-                        state.asked = Some((v, Instant::now()));
+                if state.dragging.take().is_some() {
+                    if let Some((_, _, since)) = &mut state.asked {
+                        *since = Instant::now();
                     }
                 } else if pressed.is_some() && pressed == target {
                     self.act(state, pressed);
@@ -409,24 +822,47 @@ impl Panel {
         }
     }
 
-    /// The slider moved to `x`: that volume, asked at once.
-    fn slide(&self, state: &mut State, x: f32) {
-        let volume = volume_at(x);
-        if state.asked.map(|(v, _)| v) != Some(volume) {
-            levels::ask(Ask::Volume(volume));
+    /// Slider `slider` moved to `x`: that volume, asked at once.
+    fn slide(&self, state: &mut State, slider: Slider, x: f32) {
+        let Some(track) = state.track_of(&slider) else {
+            return;
+        };
+        let volume = track.volume_at(x);
+        let same = matches!(&state.asked, Some((s, v, _)) if *s == slider && *v == volume);
+        if !same {
+            ask_volume(&state.mixer, &slider, volume);
         }
-        state.asked = Some((volume, Instant::now()));
+        state.asked = Some((slider, volume, Instant::now()));
     }
 
     fn act(&self, state: &State, target: Option<Target>) {
         match target {
             Some(Target::Mute) => levels::key(LevelKey::Mute),
             Some(Target::Output(i)) => {
-                if let Some(sink) = state.sinks.get(i).filter(|s| !s.default) {
+                if let Some(sink) = state.mixer.sinks.get(i).filter(|s| !s.default) {
                     levels::ask(Ask::Default(sink.id));
                 }
             }
-            Some(Target::Slider) | None => {}
+            Some(Target::MicMute) => {
+                if let Some(mic) = state.mixer.microphone() {
+                    let muted = mic.sound.is_some_and(|s| s.muted);
+                    levels::ask(Ask::Node(mic.id, Set::Mute(!muted)));
+                }
+            }
+            Some(Target::Mic(i)) => {
+                if let Some(mic) = state.mixer.sources.get(i).filter(|s| !s.default) {
+                    levels::ask(Ask::DefaultSource(mic.id));
+                }
+            }
+            Some(Target::Tile(i)) => {
+                if let Some(app) = state.apps.get(i) {
+                    let muted = app.sound.is_some_and(|s| s.muted);
+                    for id in &app.streams {
+                        levels::ask(Ask::Node(*id, Set::Mute(!muted)));
+                    }
+                }
+            }
+            Some(Target::Slider | Target::MicSlider | Target::AppSlider(_)) | None => {}
         }
     }
 
@@ -437,10 +873,7 @@ impl Panel {
         shift: bool,
     ) -> Option<canvas::Action<Message>> {
         use keyboard::{Key, key::Named};
-        let order: Vec<Target> = [Target::Mute, Target::Slider]
-            .into_iter()
-            .chain((0..state.sinks.len()).map(Target::Output))
-            .collect();
+        let order = state.targets();
         let at = state.focus.and_then(|f| order.iter().position(|t| *t == f));
         let step = |by: isize| {
             let n = order.len() as isize;
@@ -462,6 +895,9 @@ impl Panel {
                 arrow @ (Named::ArrowLeft | Named::ArrowRight | Named::ArrowUp | Named::ArrowDown),
             ) => {
                 let up = matches!(arrow, Named::ArrowRight | Named::ArrowUp);
+                let vertical = matches!(arrow, Named::ArrowUp | Named::ArrowDown);
+                // Through a list: the next row, round.
+                let next = |i: usize, n: usize| if up { i + n - 1 } else { i + 1 } % n.max(1);
                 match state.focus {
                     Some(Target::Slider) => {
                         state.asked = None;
@@ -471,12 +907,18 @@ impl Panel {
                             LevelKey::VolumeDown
                         });
                     }
-                    Some(Target::Output(i))
-                        if matches!(arrow, Named::ArrowUp | Named::ArrowDown) =>
-                    {
-                        let n = state.sinks.len();
-                        let next = if up { i + n - 1 } else { i + 1 } % n.max(1);
-                        state.focus = Some(Target::Output(next));
+                    Some(focus @ (Target::MicSlider | Target::AppSlider(_))) => {
+                        let (slider, _) = state.slider_of(focus)?;
+                        let by = if up { STEP } else { -STEP };
+                        let volume = (state.shown(&slider) + by).clamp(0.0, 100.0);
+                        ask_volume(&state.mixer, &slider, volume);
+                        state.asked = Some((slider, volume, Instant::now()));
+                    }
+                    Some(Target::Output(i)) if vertical => {
+                        state.focus = Some(Target::Output(next(i, state.mixer.sinks.len())));
+                    }
+                    Some(Target::Mic(i)) if vertical => {
+                        state.focus = Some(Target::Mic(next(i, state.mixer.sources.len())));
                     }
                     _ => return None,
                 }
@@ -534,10 +976,8 @@ impl Panel {
     }
 
     fn master(&self, f: &mut Frame, state: &State) {
-        let middle = MASTER_TOP + MASTER / 2.0;
         let muted = state.sound.is_some_and(|s| s.muted);
-        // The mute button.
-        let (button, radius) = Target::Mute.shape();
+        let (button, radius) = Target::Mute.shape(state.layout);
         let fill = if state.hover == Some(Target::Mute) {
             BUTTON_HOVER
         } else {
@@ -547,94 +987,29 @@ impl Panel {
             &Path::rounded_rectangle(button.position(), button.size(), radius.into()),
             fill,
         );
-        let icon = Point::new(button.center_x() - ICON / 2.0, middle - ICON / 2.0);
+        let icon = Point::new(
+            button.center_x() - ICON / 2.0,
+            button.center_y() - ICON / 2.0,
+        );
         speaker(f, icon, muted);
-        // The slider: its track, its fill to the volume, its knob.
-        let volume = state
-            .asked
-            .map(|(v, _)| v)
-            .or(state.sound.map(|s| s.volume))
-            .unwrap_or(0.0)
-            .clamp(0.0, 100.0);
-        let (left, right) = (slider_left(), slider_right());
-        let travel = right - left - KNOB;
-        let track_top = middle - TRACK_HEIGHT / 2.0;
-        let radius = TRACK_HEIGHT / 2.0;
-        f.fill(
-            &Path::rounded_rectangle(
-                Point::new(left, track_top),
-                Size::new(right - left, TRACK_HEIGHT),
-                radius.into(),
-            ),
-            TRACK,
-        );
-        let knob = left + travel * volume / 100.0;
-        let filled = Path::rounded_rectangle(
-            Point::new(left, track_top),
-            Size::new(knob + KNOB / 2.0 - left, TRACK_HEIGHT),
-            radius.into(),
-        );
-        if muted {
-            f.fill(&filled, MUTED_FILL);
-        } else {
-            let fill = gradient::Linear::new(
-                Point::new(left, middle),
-                Point::new(knob + KNOB / 2.0, middle),
-            )
-            .add_stop(0.0, SOUND.0)
-            .add_stop(1.0, SOUND.1);
-            f.fill(&filled, canvas::Fill::from(fill));
-        }
-        let centre = Point::new(knob + KNOB / 2.0, middle);
-        // `box-shadow: 0 1px 4px`: rings fading out under the knob, 1 px
-        // down.
-        for (grow, share) in [(2.5_f32, 0.12_f32), (1.6, 0.2), (0.8, 0.3)] {
-            f.fill(
-                &Path::circle(Point::new(centre.x, centre.y + 1.0), KNOB / 2.0 + grow),
-                KNOB_SHADOW.scale_alpha(share),
-            );
-        }
-        f.fill(&Path::circle(centre, KNOB / 2.0), TEXT);
-        // The value.
-        let at = Point::new(RIGHT, middle);
-        match state.sound {
-            Some(sound) if sound.muted => {
-                f.fill_text(text(
-                    self.words.muted().to_owned(),
-                    at,
-                    VALUE,
-                    FAINT,
-                    Alignment::Right,
-                ));
-            }
-            Some(_) => {
-                let zero = state.zero.unwrap_or(VALUE * 0.6);
-                let digits = (volume.round() as u32).to_string();
-                let mut x = RIGHT - zero * digits.len() as f32;
-                for ch in digits.chars() {
-                    cell(f, ch, x + zero / 2.0, middle, VALUE, MANROPE, DIM);
-                    x += zero;
-                }
-            }
-            None => {}
+        let track = state.layout.track(false);
+        let volume = state.shown(&Slider::Master);
+        slide(f, track, volume, muted);
+        let at = Point::new(RIGHT, track.middle);
+        let word = state.sound.filter(|s| s.muted).map(|_| self.words.muted());
+        if state.sound.is_some() {
+            value(f, state, at, word, volume, DIM);
         }
     }
 
     fn output(&self, f: &mut Frame, state: &State, i: usize, sink: &Sink) {
-        let rect = output_rect(i);
-        let fill = if sink.default {
-            Some(HOVER)
-        } else if state.hover == Some(Target::Output(i)) {
-            Some(ROW_HOVER)
-        } else {
-            None
-        };
-        if let Some(fill) = fill {
-            f.fill(
-                &Path::rounded_rectangle(rect.position(), rect.size(), BUTTON_RADIUS.into()),
-                fill,
-            );
-        }
+        let rect = row_rect(ROWS_TOP, i);
+        row_fill(
+            f,
+            rect,
+            sink.default,
+            state.hover == Some(Target::Output(i)),
+        );
         let middle = rect.center_y();
         device(f, Point::new(LEFT, middle - ICON / 2.0), sink.kind);
         let name = state.names.get(i).unwrap_or(&sink.description);
@@ -649,14 +1024,223 @@ impl Panel {
             check(f, Point::new(RIGHT - CHECK, middle - CHECK / 2.0));
         }
     }
+
+    fn microphone(&self, f: &mut Frame, state: &State) {
+        let Some(mic) = state.mixer.microphone() else {
+            return;
+        };
+        let muted = mic.sound.is_some_and(|s| s.muted);
+        let (button, radius) = Target::MicMute.shape(state.layout);
+        let hover = state.hover == Some(Target::MicMute);
+        let fill = match (muted, hover) {
+            (true, false) => MIC_OFF_FILL,
+            (true, true) => MIC_OFF_HOVER,
+            (false, false) => BUTTON_FILL,
+            (false, true) => BUTTON_HOVER,
+        };
+        f.fill(
+            &Path::rounded_rectangle(button.position(), button.size(), radius.into()),
+            fill,
+        );
+        let icon = Point::new(
+            button.center_x() - ICON / 2.0,
+            button.center_y() - ICON / 2.0,
+        );
+        microphone(f, icon, muted);
+        let track = state.layout.track(true);
+        let volume = state.shown(&Slider::Mic);
+        slide(f, track, volume, muted);
+        let word = muted.then(|| self.words.off());
+        value(f, state, Point::new(RIGHT, track.middle), word, volume, DIM);
+        if state.mixer.sources.len() < 2 {
+            return;
+        }
+        for (i, source) in state.mixer.sources.iter().enumerate() {
+            let rect = row_rect(state.layout.mics_top(), i);
+            row_fill(f, rect, source.default, state.hover == Some(Target::Mic(i)));
+            let name = state.mic_names.get(i).unwrap_or(&source.description);
+            f.fill_text(text(
+                name.clone(),
+                Point::new(rect.x + MIC_INDENT, rect.center_y()),
+                ROW_TEXT,
+                TEXT,
+                Alignment::Left,
+            ));
+            if source.default {
+                check(f, Point::new(RIGHT - CHECK, rect.center_y() - CHECK / 2.0));
+            }
+        }
+    }
+
+    fn applications(&self, f: &mut Frame, state: &State) {
+        let layout = state.layout;
+        let master_muted = state.sound.is_some_and(|s| s.muted);
+        for (i, app) in state.apps.iter().enumerate() {
+            let muted = app.sound.is_some_and(|s| s.muted);
+            let (tile, _) = Target::Tile(i).shape(layout);
+            self.tile(f, tile, app, muted);
+            let (name_middle, track) = layout.app_parts(i);
+            let name = state.app_names.get(i).unwrap_or(&app.name);
+            f.fill_text(text(
+                name.clone(),
+                Point::new(track.left, name_middle),
+                APP_NAME,
+                if muted { FAINT } else { TEXT },
+                Alignment::Left,
+            ));
+            let volume = state.shown(&Slider::App(app.key.clone()));
+            slide(f, track, volume, muted || master_muted);
+            let middle = layout.app_row(i) + APP_ROW - APP_VALUE_PAD - VALUE * LINE / 2.0;
+            let word = muted.then(|| self.words.muted());
+            let colour = if master_muted { FAINT } else { DIM };
+            value(f, state, Point::new(RIGHT, middle), word, volume, colour);
+        }
+        let note = match (state.apps.is_empty(), state.more) {
+            (true, _) => Some(self.words.no_application().to_owned()),
+            (false, 0) => None,
+            (false, more) => Some(self.words.more_applications(more)),
+        };
+        if let Some(note) = note {
+            let middle = layout.note_top() + NOTE_TOP + NOTE * LINE / 2.0;
+            f.fill_text(text(
+                note,
+                Point::new(LEFT, middle),
+                NOTE,
+                FAINT,
+                Alignment::Left,
+            ));
+        }
+    }
+
+    /// An application's tile: its icon, else its letter on a colour of its
+    /// own; faded when muted.
+    fn tile(&self, f: &mut Frame, rect: Rectangle, app: &App, muted: bool) {
+        let opacity = if muted { TILE_MUTED } else { 1.0 };
+        match &app.icon {
+            Some(Icon::Raster(handle)) => {
+                f.draw_image(rect, canvas::Image::new(handle.clone()).opacity(opacity));
+            }
+            Some(Icon::Vector(handle)) => {
+                f.draw_svg(
+                    rect,
+                    iced::advanced::svg::Svg::new(handle.clone()).opacity(opacity),
+                );
+            }
+            None => {
+                let colour = TILES[tile_colour(&app.name)].scale_alpha(opacity);
+                f.fill(
+                    &Path::rounded_rectangle(rect.position(), rect.size(), BUTTON_RADIUS.into()),
+                    colour,
+                );
+                let letter = app
+                    .name
+                    .chars()
+                    .find(|c| c.is_alphanumeric())
+                    .map(|c| c.to_uppercase().collect::<String>())
+                    .unwrap_or_default();
+                let mut letter = text(
+                    letter,
+                    rect.center(),
+                    LETTER,
+                    LETTER_INK.scale_alpha(opacity),
+                    Alignment::Center,
+                );
+                letter.font = MANROPE_BOLD;
+                f.fill_text(letter);
+            }
+        }
+    }
 }
 
-/// What is under `at`.
-fn target_at(state: &State, at: Point) -> Option<Target> {
-    [Target::Mute, Target::Slider]
-        .into_iter()
-        .chain((0..state.sinks.len()).map(Target::Output))
-        .find(|t| t.shape().0.contains(at))
+/// The colour of an application's letter tile: the same for the same
+/// name.
+fn tile_colour(name: &str) -> usize {
+    let sum = name.bytes().fold(0_usize, |sum, b| {
+        sum.wrapping_mul(31).wrapping_add(usize::from(b))
+    });
+    sum % TILES.len()
+}
+
+/// A list's row lit: the chosen one, or the one under the pointer.
+fn row_fill(f: &mut Frame, rect: Rectangle, chosen: bool, hovered: bool) {
+    let fill = if chosen {
+        Some(HOVER)
+    } else if hovered {
+        Some(ROW_HOVER)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        f.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), BUTTON_RADIUS.into()),
+            fill,
+        );
+    }
+}
+
+/// A slider at `volume`: its track, its fill to the knob (grey when what
+/// it sets is muted), its knob.
+fn slide(f: &mut Frame, track: Track, volume: f32, grey: bool) {
+    let Track {
+        left,
+        right,
+        middle,
+        height,
+        knob: size,
+    } = track;
+    let travel = right - left - size;
+    let top = middle - height / 2.0;
+    let radius = height / 2.0;
+    f.fill(
+        &Path::rounded_rectangle(
+            Point::new(left, top),
+            Size::new(right - left, height),
+            radius.into(),
+        ),
+        TRACK,
+    );
+    let knob = left + travel * volume / 100.0;
+    let filled = Path::rounded_rectangle(
+        Point::new(left, top),
+        Size::new(knob + size / 2.0 - left, height),
+        radius.into(),
+    );
+    if grey {
+        f.fill(&filled, MUTED_FILL);
+    } else {
+        let fill = gradient::Linear::new(
+            Point::new(left, middle),
+            Point::new(knob + size / 2.0, middle),
+        )
+        .add_stop(0.0, SOUND.0)
+        .add_stop(1.0, SOUND.1);
+        f.fill(&filled, canvas::Fill::from(fill));
+    }
+    let centre = Point::new(knob + size / 2.0, middle);
+    // `box-shadow: 0 1px 4px`: rings fading out under the knob, 1 px down.
+    for (grow, share) in [(2.5_f32, 0.12_f32), (1.6, 0.2), (0.8, 0.3)] {
+        f.fill(
+            &Path::circle(Point::new(centre.x, centre.y + 1.0), size / 2.0 + grow),
+            KNOB_SHADOW.scale_alpha(share),
+        );
+    }
+    f.fill(&Path::circle(centre, size / 2.0), TEXT);
+}
+
+/// A value right-aligned on `at`: `word` in `text.faint` (muted, off),
+/// else the volume in tabular figures, in `colour`.
+fn value(f: &mut Frame, state: &State, at: Point, word: Option<&str>, volume: f32, colour: Color) {
+    if let Some(word) = word {
+        f.fill_text(text(word.to_owned(), at, VALUE, FAINT, Alignment::Right));
+        return;
+    }
+    let zero = state.zero.unwrap_or(VALUE * 0.6);
+    let digits = (volume.round() as u32).to_string();
+    let mut x = at.x - zero * digits.len() as f32;
+    for ch in digits.chars() {
+        cell(f, ch, x + zero / 2.0, at.y, VALUE, MANROPE, colour);
+        x += zero;
+    }
 }
 
 fn text(
@@ -836,27 +1420,79 @@ fn check(f: &mut Frame, at: Point) {
     );
 }
 
+/// The microphone: `M5 11a7 7 0 0 0 14 0`, its capsule and its foot;
+/// crossed out in `MIC_OFF` when muted.
+fn microphone(f: &mut Frame, at: Point, muted: bool) {
+    let s = ICON / 24.0;
+    let colour = if muted { MIC_OFF } else { TEXT };
+    let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
+    let line = stroke(2.0 * s, colour);
+    f.stroke(
+        &Path::rounded_rectangle(p(9.0, 3.0), Size::new(6.0 * s, 11.0 * s), (3.0 * s).into()),
+        line,
+    );
+    let cup = Path::new(|b| {
+        b.arc(canvas::path::Arc {
+            center: p(12.0, 11.0),
+            radius: 7.0 * s,
+            start_angle: Radians(0.0),
+            end_angle: Radians(std::f32::consts::PI),
+        });
+    });
+    f.stroke(&cup, line);
+    lines(f, at, s, 2.0, colour, &[(12.0, 18.0), (12.0, 21.0)]);
+    if muted {
+        lines(f, at, s, 2.0, colour, &[(4.0, 4.0), (20.0, 20.0)]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn its_height_follows_its_outputs() {
-        // The mockup's, at ×1: 261 px with three outputs, 185 with one.
-        assert_eq!(height(3), 261);
-        assert_eq!(height(1), 185);
-        assert_eq!(height(2), 223);
+    fn layout(outputs: usize, microphones: usize, listed: usize) -> Layout {
+        Layout {
+            outputs,
+            microphones,
+            applications: listed.min(MOST_APPLICATIONS),
+            more: listed > MOST_APPLICATIONS,
+        }
     }
 
     #[test]
-    fn the_slider_covers_0_to_100() {
-        let (left, right) = (slider_left(), slider_right());
+    fn its_height_follows_what_it_lists() {
+        // The mockup's, at ×1: the outputs' list ends 15 px above the
+        // bottom of 3.4a's (261 px with three outputs, 185 with one).
+        assert_eq!(layout(3, 0, 0).outputs_end().round() + 15.0, 261.0);
+        assert_eq!(layout(1, 0, 0).outputs_end().round() + 15.0, 185.0);
+        // Then each section: its divider, its label, its rows.
+        assert_eq!(layout(3, 0, 0).height(), 332);
+        assert_eq!(layout(1, 0, 0).height(), 256);
+        // One microphone: its row; two, their list.
+        assert_eq!(layout(3, 1, 0).height(), 332 + 47 + 36);
+        assert_eq!(layout(3, 2, 0).height(), 332 + 47 + 36 + 6 + 74);
+        // Two applications instead of "No application…".
+        assert_eq!(layout(3, 2, 2).height(), 568);
+        // At most five, and a line for the others.
+        assert_eq!(layout(3, 2, 5).height(), layout(3, 2, 2).height() + 3 * 52);
+        assert_eq!(layout(3, 2, 7).height(), 755);
+    }
+
+    #[test]
+    fn the_sliders_cover_0_to_100() {
+        let master = layout(3, 1, 1).track(false);
+        let (left, right) = (master.left, master.right);
         assert_eq!(right - left, 166.0);
-        assert_eq!(volume_at(left), 0.0);
-        assert_eq!(volume_at(left + KNOB / 2.0), 0.0);
-        assert_eq!(volume_at(right - KNOB / 2.0), 100.0);
-        assert_eq!(volume_at(right + 50.0), 100.0);
-        assert_eq!(volume_at((left + right) / 2.0), 50.0);
+        assert_eq!(master.volume_at(left), 0.0);
+        assert_eq!(master.volume_at(left + KNOB / 2.0), 0.0);
+        assert_eq!(master.volume_at(right - KNOB / 2.0), 100.0);
+        assert_eq!(master.volume_at(right + 50.0), 100.0);
+        assert_eq!(master.volume_at((left + right) / 2.0), 50.0);
+        // An application's: from its tile to the value, its knob 14 px.
+        let (_, app) = layout(3, 1, 1).app_parts(0);
+        assert_eq!((app.left, app.right), (left, right));
+        assert_eq!(app.volume_at(left + APP_KNOB / 2.0), 0.0);
+        assert_eq!(app.volume_at(right - APP_KNOB / 2.0), 100.0);
     }
 
     #[test]
@@ -871,23 +1507,80 @@ mod tests {
     }
 
     #[test]
-    fn its_rows_and_controls_lie_inside_it() {
-        let height = height(3) as f32;
-        for target in [
-            Target::Mute,
-            Target::Slider,
-            Target::Output(0),
-            Target::Output(2),
-        ] {
-            let (rect, _) = target.shape();
-            // With the keyboard's ring.
+    fn its_rows_and_controls_lie_inside_it_and_apart() {
+        for layout in [layout(3, 2, 2), layout(1, 1, 0), layout(2, 0, 7)] {
+            let height = layout.height() as f32;
+            let mut targets = vec![Target::Mute, Target::Slider, Target::Output(0)];
+            if layout.microphones > 0 {
+                targets.extend([Target::MicMute, Target::MicSlider]);
+            }
+            if layout.microphones > 1 {
+                targets.extend([Target::Mic(0), Target::Mic(layout.microphones - 1)]);
+            }
+            for i in 0..layout.applications {
+                targets.extend([Target::Tile(i), Target::AppSlider(i)]);
+            }
             let out = crate::levels::draw::RING_OUT + crate::levels::draw::RING;
-            assert!(rect.x - out >= 0.0, "{target:?}");
-            assert!(
-                rect.x + rect.width + out <= POPOVER_WIDTH as f32,
-                "{target:?}"
-            );
-            assert!(rect.y + rect.height <= height, "{target:?}");
+            for target in &targets {
+                let (rect, _) = target.shape(layout);
+                // With the keyboard's ring.
+                assert!(rect.x - out >= 0.0, "{target:?}");
+                assert!(
+                    rect.x + rect.width + out <= POPOVER_WIDTH as f32,
+                    "{target:?}"
+                );
+                assert!(rect.y + rect.height <= height - PAD_BOTTOM, "{target:?}");
+                for other in targets.iter().filter(|o| *o != target) {
+                    let (o, _) = other.shape(layout);
+                    assert!(rect.intersection(&o).is_none(), "{target:?} on {other:?}");
+                }
+            }
         }
+    }
+
+    fn app(key: &str, playing: bool) -> App {
+        App {
+            key: key.to_owned(),
+            name: key.to_owned(),
+            icon: None,
+            streams: vec![1],
+            sound: None,
+            playing,
+        }
+    }
+
+    #[test]
+    fn the_applications_playing_are_listed_and_kept_while_it_is_open() {
+        let mut listed = vec!["old".to_owned()];
+        // On opening: those playing, not a paused one.
+        let apps = [
+            app("firefox", true),
+            app("paused", false),
+            app("music", true),
+        ];
+        relist(&mut listed, &apps, true);
+        assert_eq!(listed, ["firefox", "music"]);
+        // Firefox pauses: it stays; another starts: it comes last.
+        let apps = [app("firefox", false), app("music", true), app("mpv", true)];
+        relist(&mut listed, &apps, false);
+        assert_eq!(listed, ["firefox", "music", "mpv"]);
+        // Its stream gone, Firefox goes.
+        relist(&mut listed, &apps[1..], false);
+        assert_eq!(listed, ["music", "mpv"]);
+        // Opened again: those playing only.
+        let apps = [app("music", false), app("mpv", true)];
+        relist(&mut listed, &apps, true);
+        assert_eq!(listed, ["mpv"]);
+    }
+
+    #[test]
+    fn a_letter_tile_keeps_its_colour() {
+        assert_eq!(tile_colour("Musique"), tile_colour("Musique"));
+        let colours: std::collections::HashSet<_> =
+            ["Firefox", "Musique", "mpv", "Spotify", "Zoom"]
+                .iter()
+                .map(|n| tile_colour(n))
+                .collect();
+        assert!(colours.len() > 1);
     }
 }

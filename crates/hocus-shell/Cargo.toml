@@ -28,7 +28,13 @@ iced = { version = "0.14", default-features = false, features = [
     # The clock draws its glyphs in cells, and measures its font.
     "canvas",
     "advanced",
+    # Applications' icons in the sound's popover: PNG (the codec below)
+    # and SVG.
+    "image-without-codecs",
+    "svg",
 ] }
+# PNG alone of the image crate's codecs, for the applications' icons.
+image = { version = "0.25", default-features = false, features = ["png"] }
 # Without its default theme detection (mundy, over the session's D-Bus).
 # Pinned: its winit-core prerelease dependencies broke it once (spike).
 iced_layershell = { version = "=0.19.1", default-features = false }

@@ -50,10 +50,11 @@ pub enum Item {
 }
 
 impl Item {
-    /// Its popover's height, logical pixels.
-    fn height(self) -> u32 {
+    /// Its popover's height, logical pixels, for what it shows now: as it
+    /// opens (`opening`), or after a change.
+    fn height(self, opening: bool) -> u32 {
         match self {
-            Self::Sound => sound::height(crate::levels::sound::sinks().len()),
+            Self::Sound => sound::layout(opening).height(),
         }
     }
 }
@@ -136,6 +137,13 @@ pub enum Effect {
         keyboard: KeyboardInteractivity,
     },
     Keyboard(window::Id, KeyboardInteractivity),
+    /// The popover's surface to a new size, and its new margins if they
+    /// change.
+    Resize {
+        id: window::Id,
+        size: (u32, u32),
+        margin: Option<(i32, i32, i32, i32)>,
+    },
     /// The compositor fades it out (`closing`).
     Closing,
     Remove(window::Id),
@@ -419,14 +427,9 @@ impl Controller {
         let Some(place) = self.bars.get(bar).copied() else {
             return;
         };
-        let size = (POPOVER_WIDTH.unsigned_abs(), item.height());
+        let size = (POPOVER_WIDTH.unsigned_abs(), item.height(true));
         let rect = placed(place, from, size);
-        // Its layer-shell margins: from the screen's right edge, past the
-        // bar and the gap; from the screen's bottom (the bar's frame starts
-        // 8 px down).
-        let right = EDGE + place.form.width() + EDGE;
-        let bottom = (place.height + 2.0 * EDGE as f32 - (rect.y + rect.height) - EDGE as f32)
-            .round() as i32;
+        let margin = margins(place, rect);
         let surface = window::Id::unique();
         tracing::debug!(?item, ?how, bar, "a popover opens");
         effects.push(Effect::Open {
@@ -434,7 +437,7 @@ impl Controller {
             bar: bar.to_owned(),
             item,
             size,
-            margin: (0, right, bottom, 0),
+            margin,
             keyboard: match how {
                 Opened::Click => KeyboardInteractivity::Exclusive,
                 Opened::Hover => KeyboardInteractivity::OnDemand,
@@ -452,6 +455,31 @@ impl Controller {
             leave: None,
             last: None,
         });
+    }
+
+    /// What the open popover shows changed: to its new size, if it
+    /// changed, still beside its item and within the bar.
+    pub fn refit(&mut self) -> Vec<Effect> {
+        let Phase::Open(open) = &mut self.phase else {
+            return Vec::new();
+        };
+        let height = open.item.height(false);
+        let Some(place) = self.bars.get(&open.bar).copied() else {
+            return Vec::new();
+        };
+        if open.rect.height.round() as u32 == height {
+            return Vec::new();
+        }
+        let size = (POPOVER_WIDTH.unsigned_abs(), height);
+        let before = margins(place, open.rect);
+        open.rect = placed(place, open.from, size);
+        let margin = margins(place, open.rect);
+        tracing::debug!(height, "the popover's size changes");
+        vec![Effect::Resize {
+            id: open.surface,
+            size,
+            margin: (margin != before).then_some(margin),
+        }]
     }
 
     fn close(&mut self, now: Instant, effects: &mut Vec<Effect>) {
@@ -523,6 +551,16 @@ pub fn toward(from: Point, to: Point, popover: Rectangle) -> bool {
     let negative = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
     let positive = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
     !(negative && positive)
+}
+
+/// A popover's layer-shell margins at `rect` (the bar's frame) on the bar
+/// at `place`: from the screen's right edge, past the bar and the gap;
+/// from the screen's bottom (the bar's frame starts 8 px down).
+fn margins(place: Place, rect: Rectangle) -> (i32, i32, i32, i32) {
+    let right = EDGE + place.form.width() + EDGE;
+    let bottom =
+        (place.height + 2.0 * EDGE as f32 - (rect.y + rect.height) - EDGE as f32).round() as i32;
+    (0, right, bottom, 0)
 }
 
 /// Where a popover of `size` opened from `item` on the bar at `place` is,
@@ -657,11 +695,13 @@ fn send(effects: Vec<Effect>) {
     }
 }
 
-/// The popover shows something new (the sound changed): it draws again.
+/// The popover shows something new (the sound changed): it draws again,
+/// to its new size if it changed.
 pub fn changed() {
-    let open = with(|c| matches!(c.phase, Phase::Open(_)));
+    let (open, mut effects) = with(|c| (matches!(c.phase, Phase::Open(_)), c.refit()));
     if open {
-        send(vec![Effect::Wake(POPOVER_NAMESPACE)]);
+        effects.push(Effect::Wake(POPOVER_NAMESPACE));
+        send(effects);
     }
 }
 
@@ -706,7 +746,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
             let Some(effects) = effects else {
                 return;
             };
-            for message in effects.into_iter().filter_map(carry_out) {
+            for message in effects.into_iter().flat_map(carry_out) {
                 if output.send(message).await.is_err() {
                     return;
                 }
@@ -715,8 +755,8 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
     })
 }
 
-/// An effect as a message for iced, or a line to the compositor.
-fn carry_out(effect: Effect) -> Option<crate::Message> {
+/// An effect as messages for iced, or a line to the compositor.
+fn carry_out(effect: Effect) -> Vec<crate::Message> {
     use crate::Message;
     use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings, OutputOption};
     match effect {
@@ -727,7 +767,7 @@ fn carry_out(effect: Effect) -> Option<crate::Message> {
             margin,
             keyboard,
             ..
-        } => Some(Message::NewLayerShell {
+        } => vec![Message::NewLayerShell {
             settings: NewLayerShellSettings {
                 size: Some(size),
                 layer: Layer::Top,
@@ -744,23 +784,26 @@ fn carry_out(effect: Effect) -> Option<crate::Message> {
                 namespace: Some(POPOVER_NAMESPACE.to_owned()),
             },
             id,
-        }),
+        }],
         Effect::Keyboard(id, keyboard_interactivity) => {
-            Some(Message::KeyboardInteractivityChange {
+            vec![Message::KeyboardInteractivityChange {
                 id,
                 keyboard_interactivity,
-            })
+            }]
         }
+        Effect::Resize { id, size, margin } => std::iter::once(Message::SizeChange { id, size })
+            .chain(margin.map(|margin| Message::MarginChange { id, margin }))
+            .collect(),
         Effect::Closing => {
             tell(ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()));
-            None
+            Vec::new()
         }
-        Effect::Remove(id) => Some(Message::RemoveWindow(id)),
+        Effect::Remove(id) => vec![Message::RemoveWindow(id)],
         Effect::Wake(namespace) => {
             if tell(ToCompositor::Wake(namespace.to_owned())) {
-                None
+                Vec::new()
             } else {
-                Some(Message::Levels)
+                vec![Message::Levels]
             }
         }
     }
@@ -1062,5 +1105,34 @@ mod tests {
         assert_eq!(placed(place, item, (280, 261)).y, 300.0);
         // Taller than the bar: from the top.
         assert_eq!(placed(place, item, (280, 2000)).y, 0.0);
+    }
+
+    #[test]
+    fn a_popover_growing_at_the_bars_foot_keeps_its_bottom_and_margins() {
+        let place = Place {
+            form: Form::Full,
+            height: 1064.0,
+            levels: window::Id::unique(),
+            surface: window::Id::unique(),
+        };
+        let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
+        let small = placed(place, item, (280, 332));
+        let tall = placed(place, item, (280, 568));
+        assert_eq!(small.y + small.height, tall.y + tall.height);
+        // 8 px left of the 196 px bar, 8 px from the screen's bottom.
+        assert_eq!(margins(place, small), (0, 212, 8, 0));
+        assert_eq!(margins(place, tall), margins(place, small));
+        // An open popover whose contents did not change is not resized.
+        let mut c = Controller::default();
+        c.place(BAR, Form::Full, window::Id::unique(), window::Id::unique());
+        c.handle(
+            Event::ItemPress {
+                bar: BAR.to_owned(),
+                item: Item::Sound,
+                rect: item,
+            },
+            Instant::now(),
+        );
+        assert!(c.refit().is_empty());
     }
 }
