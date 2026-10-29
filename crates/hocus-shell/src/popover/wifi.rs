@@ -858,6 +858,11 @@ impl Panel {
             {
                 ui.focus = None;
             }
+            // Resized under a still pointer: what it is over is not known
+            // until it moves.
+            if state.layout.as_ref().map(Layout::height) != Some(layout.height()) {
+                state.hover = None;
+            }
             state.layout = Some(layout);
             hold
         });
