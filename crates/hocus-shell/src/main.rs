@@ -17,6 +17,7 @@
 //! presents a surface whole, so that only its region is drawn again.
 
 mod clock;
+mod levels;
 mod renderer;
 
 use std::{
@@ -27,7 +28,8 @@ use std::{
 };
 
 use hocus_link::{
-    CLOCK_NAMESPACE, ClockLook, EDGE, Form, NAMESPACE, RADIUS, ToCompositor, ToShell,
+    CLOCK_NAMESPACE, ClockLook, EDGE, Form, LEVELS_NAMESPACE, NAMESPACE, RADIUS, ToCompositor,
+    ToShell,
 };
 use iced::{
     Background, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme,
@@ -74,6 +76,7 @@ fn main() -> ExitCode {
         .init();
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose();
+    levels::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -153,6 +156,9 @@ struct Bar {
     /// Its clock's surface, and its size as last asked for.
     clock: window::Id,
     clock_surface: (u32, u32),
+    /// Its levels' surface, and its size as last asked for.
+    levels: window::Id,
+    levels_surface: (u32, u32),
 }
 
 impl Bar {
@@ -175,10 +181,32 @@ impl Bar {
         }
     }
 
+    /// The levels' surface's size, as the clock's.
+    fn levels_size(&self) -> (u32, u32) {
+        match (self.switch, self.form) {
+            (Some(_), _) | (None, Form::Full) => levels::draw::FULL_SURFACE,
+            (None, Form::Mini) => levels::draw::MINI_SURFACE,
+        }
+    }
+
     fn moving(&self, now: Instant) -> bool {
         self.switch.is_some_and(|(_, since)| {
             now.saturating_duration_since(since) < hocus_link::SWITCH + AHEAD
         })
+    }
+
+    /// The forms its contents show at `at`, with their opacity: they
+    /// cross-fade over 120 ms, 60 ms into a switch (§3).
+    fn forms(&self, at: Instant) -> Vec<(Form, f32)> {
+        let forms = match self.switch {
+            Some((_, since)) => {
+                let t = at.saturating_duration_since(since).as_secs_f32();
+                let new = ((t - 0.060) / 0.120).clamp(0.0, 1.0);
+                vec![(self.form.other(), 1.0 - new), (self.form, new)]
+            }
+            None => vec![(self.form, 1.0)],
+        };
+        forms.into_iter().filter(|(_, a)| *a > 0.0).collect()
     }
 
     /// The width its surface needs: the full form's while it switches,
@@ -206,6 +234,7 @@ struct Shell {
     clock: clock::Style,
     wall: clock::time::Wall,
     lang: clock::time::Lang,
+    words: levels::model::Words,
 }
 
 #[to_layer_message(multi)]
@@ -217,6 +246,9 @@ enum Message {
     Frame,
     /// The system's time zone changed.
     Zone(jiff::tz::TimeZone),
+    /// The levels changed, for a shell alone (with the compositor, it
+    /// wakes their surface instead).
+    Levels,
     Resized(window::Id, Size),
 }
 
@@ -245,6 +277,7 @@ impl Shell {
             clock: clock_style(&ClockLook::default()),
             wall: clock::time::Wall { zone, shift },
             lang: clock::time::Lang::from_env(),
+            words: levels::model::Words::new(clock::time::Lang::of_messages()),
         };
         // Alone: one full bar where the compositor puts it.
         let task = if socket.is_none() {
@@ -257,8 +290,9 @@ impl Shell {
 
     fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = Vec::new();
-        if let Some(socket) = &self.socket {
-            subscriptions.push(Subscription::run_with(socket.clone(), link));
+        match &self.socket {
+            Some(socket) => subscriptions.push(Subscription::run_with(socket.clone(), link)),
+            None => subscriptions.push(Subscription::run(levels_alone)),
         }
         // Frames only while a bar moves, and one past its switch's end,
         // which narrows its surface: at rest, nothing is drawn.
@@ -310,6 +344,7 @@ impl Shell {
                 self.wall.zone = zone;
                 Task::none()
             }
+            Message::Levels => Task::none(),
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -350,6 +385,7 @@ impl Shell {
                 Task::batch(gone.into_iter().filter_map(|id| {
                     let bar = self.bars.remove(&id)?;
                     Some(Task::batch([
+                        Task::done(Message::RemoveWindow(bar.levels)),
                         Task::done(Message::RemoveWindow(bar.clock)),
                         Task::done(Message::RemoveWindow(id)),
                     ]))
@@ -359,12 +395,18 @@ impl Shell {
                 self.clock = clock_style(&look);
                 Task::none()
             }
+            // Taken by the link itself, without a message: here only if
+            // the link changes.
+            ToShell::Level(key) => {
+                levels::key(key);
+                Task::none()
+            }
         }
     }
 
     /// A bar's surface on `output`: against its right edge, its height
-    /// less the margins; and its clock's, over its top, opened after it so
-    /// that it is in front.
+    /// less the margins; and its clock's, over its top, and its levels',
+    /// near its bottom, opened after it so that they are in front.
     fn open_bar(&mut self, option: OutputOption, output: String, form: Form) -> Task<Message> {
         tracing::info!(output, form = form.name(), "a bar");
         let mut bar = Bar {
@@ -375,9 +417,12 @@ impl Shell {
             height: 0.0,
             clock: window::Id::unique(),
             clock_surface: (0, 0),
+            levels: window::Id::unique(),
+            levels_surface: (0, 0),
         };
         bar.surface = bar.surface_width();
         bar.clock_surface = bar.clock_size();
+        bar.levels_surface = bar.levels_size();
         let settings = NewLayerShellSettings {
             size: Some((bar.surface, 0)),
             layer: Layer::Top,
@@ -400,14 +445,27 @@ impl Shell {
             exclusive_zone: Some(0),
             margin: Some((EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0)),
             keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option,
+            output_option: option.clone(),
             events_transparent: true,
             namespace: Some(CLOCK_NAMESPACE.to_owned()),
         };
         let (clock_id, open_clock) = Message::layershell_open(clock);
         bar.clock = clock_id;
+        let levels = NewLayerShellSettings {
+            size: Some(bar.levels_surface),
+            layer: Layer::Top,
+            anchor: Anchor::Right | Anchor::Bottom,
+            exclusive_zone: Some(0),
+            margin: Some((0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0)),
+            keyboard_interactivity: KeyboardInteractivity::None,
+            output_option: option,
+            events_transparent: true,
+            namespace: Some(LEVELS_NAMESPACE.to_owned()),
+        };
+        let (levels_id, open_levels) = Message::layershell_open(levels);
+        bar.levels = levels_id;
         self.bars.insert(id, bar);
-        open.chain(open_clock)
+        open.chain(open_clock).chain(open_levels)
     }
 
     /// `form` for bar `id`, switching from where it is since `start`; at
@@ -458,6 +516,14 @@ impl Shell {
                 size,
             }));
         }
+        let size = bar.levels_size();
+        if bar.levels_surface != size {
+            bar.levels_surface = size;
+            tasks.push(Task::done(Message::SizeChange {
+                id: bar.levels,
+                size,
+            }));
+        }
         Task::batch(tasks)
     }
 
@@ -465,15 +531,7 @@ impl Shell {
     fn clock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = self.bars.values().find(|b| b.clock == id)?;
         let at = self.now + AHEAD;
-        // The contents cross-fade over 120 ms, 60 ms into a switch (§3).
-        let forms = match bar.switch {
-            Some((_, since)) => {
-                let t = at.saturating_duration_since(since).as_secs_f32();
-                let new = ((t - 0.060) / 0.120).clamp(0.0, 1.0);
-                vec![(bar.form.other(), 1.0 - new), (bar.form, new)]
-            }
-            None => vec![(bar.form, 1.0)],
-        };
+        let forms = bar.forms(at);
         let (width, height) = bar.clock_surface;
         let backdrop = (!self.look.glass).then(|| {
             // The bar's gradient where the clock is, which changes by less
@@ -491,7 +549,7 @@ impl Shell {
             motion: self.look.motion,
             wall: self.wall.clone(),
             lang: self.lang,
-            forms: forms.into_iter().filter(|(_, a)| *a > 0.0).collect(),
+            forms,
             bar_width: bar.width(at),
             surface_width: width as f32,
             backdrop,
@@ -504,9 +562,41 @@ impl Shell {
         )
     }
 
+    /// The levels of the bar whose levels' surface is `id`.
+    fn levels_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self.bars.values().find(|b| b.levels == id)?;
+        let at = self.now + AHEAD;
+        let (_, height) = bar.levels_surface;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = bar_height - levels::draw::BOTTOM as f32 - height as f32 / 2.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = levels::draw::Levels {
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            motion: self.look.motion,
+            words: self.words,
+            backdrop,
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
     fn view(&self, id: window::Id) -> Element<'_, Message> {
         let Some(bar) = self.bars.get(&id) else {
-            return self.clock_view(id).unwrap_or_else(|| Space::new().into());
+            return self
+                .clock_view(id)
+                .or_else(|| self.levels_view(id))
+                .unwrap_or_else(|| Space::new().into());
         };
         let width = bar.width(self.now + AHEAD);
         let (top, bottom) = if self.look.glass {
@@ -605,6 +695,18 @@ fn zone_changes() -> impl iced::futures::Stream<Item = Message> {
     })
 }
 
+/// A shell alone: a change of level is a message (every surface is drawn).
+fn levels_alone() -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(4, async |output| {
+        let mut out = output.clone();
+        levels::on_change(
+            move || !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected()),
+        );
+        drop(output);
+        std::future::pending::<()>().await;
+    })
+}
+
 /// The `Instant` of a time on `CLOCK_MONOTONIC` (microseconds), which is
 /// the clock `Instant` reads on Linux, through the time between it and now.
 fn instant_of(monotonic_us: u64) -> Instant {
@@ -634,6 +736,13 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
         };
         let (read, mut write) = stream.into_split();
         let (sender, mut outgoing) = mpsc::unbounded::<String>();
+        // A change of level wakes the levels' surfaces through the
+        // compositor, without a message that would draw every surface.
+        let waker = sender.clone();
+        levels::on_change(move || {
+            let wake = ToCompositor::Wake(LEVELS_NAMESPACE.to_owned());
+            waker.unbounded_send(wake.to_string()).is_ok()
+        });
         let _ = output.send(Message::Linked(sender)).await;
         tokio::spawn(async move {
             while let Some(line) = outgoing.next().await {
@@ -647,6 +756,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
+                    // A level key goes to its service: no message, no
+                    // drawing; the gauge shows what the service then reads.
+                    if let Ok(ToShell::Level(key)) = line.parse() {
+                        levels::key(key);
+                        continue;
+                    }
                     let _ = output.send(Message::FromCompositor(line)).await;
                 }
                 Ok(None) => break,

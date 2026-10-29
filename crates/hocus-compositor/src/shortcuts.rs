@@ -5,11 +5,11 @@
 
 use std::{fmt, str::FromStr};
 
+use hocus_link::LevelKey;
 use serde::{
     Deserialize, Deserializer,
     de::{self, SeqAccess, Visitor},
 };
-use hocus_link::LevelKey;
 use smithay::input::keyboard::{Keysym, ModifiersState, xkb};
 
 use crate::{
@@ -479,9 +479,15 @@ mod tests {
             (Keysym::XF86_MonBrightnessDown, LevelKey::BrightnessDown),
         ] {
             assert_eq!(action(none, key), Some(Action::Level(level)));
-            assert_eq!(nested(none, key).map(|(a, _)| a), Some(Action::Level(level)));
+            assert_eq!(
+                nested(none, key).map(|(a, _)| a),
+                Some(Action::Level(level))
+            );
         }
-        assert_eq!(action(mods(true, false, false, false), Keysym::XF86_AudioMute), None);
+        assert_eq!(
+            action(mods(true, false, false, false), Keysym::XF86_AudioMute),
+            None
+        );
     }
 
     #[test]
