@@ -248,6 +248,7 @@ impl State {
         for bar in bars {
             self.tell_shell(bar);
         }
+        self.tell_screens(true);
         self.hand_kept_levels();
     }
 

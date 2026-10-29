@@ -15,6 +15,90 @@ pub struct Snapshot {
     pub brightness: Option<f32>,
     pub battery: Option<Battery>,
     pub profile: Option<Profile>,
+    /// The profiles power-profiles-daemon offers (none without it).
+    pub profiles: Profiles,
+    /// Why power-profiles-daemon holds the performance profile back.
+    pub degraded: Option<Degraded>,
+    /// The keyboard's backlight, from UPower.
+    pub keyboard: Option<Keyboard>,
+}
+
+/// The keyboard's backlight: its level, from 0 (off) to `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keyboard {
+    pub level: u32,
+    pub max: u32,
+}
+
+impl Keyboard {
+    /// Its levels, off included.
+    pub fn levels(self) -> u32 {
+        self.max + 1
+    }
+
+    /// Chosen among named levels (four at most), else with a slider.
+    pub fn segmented(self) -> bool {
+        self.levels() <= 4
+    }
+}
+
+/// Which profiles there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Profiles {
+    pub power_saver: bool,
+    pub balanced: bool,
+    pub performance: bool,
+}
+
+impl Profiles {
+    pub fn has(self, profile: Profile) -> bool {
+        match profile {
+            Profile::PowerSaver => self.power_saver,
+            Profile::Balanced => self.balanced,
+            Profile::Performance => self.performance,
+        }
+    }
+
+    pub fn any(self) -> bool {
+        self.power_saver || self.balanced || self.performance
+    }
+
+    /// From power-profiles-daemon's names.
+    pub fn from_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut profiles = Self::default();
+        for name in names {
+            match Profile::from_name(name) {
+                Some(Profile::PowerSaver) => profiles.power_saver = true,
+                Some(Profile::Balanced) => profiles.balanced = true,
+                Some(Profile::Performance) => profiles.performance = true,
+                None => {}
+            }
+        }
+        profiles
+    }
+}
+
+/// power-profiles-daemon's `PerformanceDegraded`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Degraded {
+    /// `lap-detected`: the computer sits on a lap.
+    Lap,
+    /// `high-operating-temperature`.
+    Hot,
+    /// Another reason.
+    Other,
+}
+
+impl Degraded {
+    /// From its reason; `None` when empty (not degraded).
+    pub fn from_reason(reason: &str) -> Option<Self> {
+        match reason {
+            "" => None,
+            "lap-detected" => Some(Self::Lap),
+            "high-operating-temperature" => Some(Self::Hot),
+            _ => Some(Self::Other),
+        }
+    }
 }
 
 /// The default output's volume.
@@ -32,6 +116,8 @@ pub struct Battery {
     pub charge: Charge,
     /// Until empty when discharging, until full when charging, when known.
     pub left: Option<Duration>,
+    /// Its capacity now, in percent of its capacity new, when known.
+    pub health: Option<f32>,
 }
 
 /// Whether the battery charges, from UPower's `State`.
@@ -61,6 +147,19 @@ impl Charge {
 
     pub fn plugged(self) -> bool {
         matches!(self, Self::Charging | Self::Full | Self::PluggedIn)
+    }
+
+    /// What it is, knowing whether the machine is on AC (UPower's
+    /// `OnBattery`, which covers a charge limit holding the battery that
+    /// the firmware may call discharging): on AC, charging or full stay,
+    /// anything else is plugged in, not charging; on battery, it
+    /// discharges.
+    pub fn on_ac(self, on_ac: bool) -> Self {
+        match (on_ac, self) {
+            (true, Self::Charging | Self::Full) => self,
+            (true, _) => Self::PluggedIn,
+            (false, _) => Self::Discharging,
+        }
     }
 }
 
@@ -92,9 +191,17 @@ impl Battery {
         }
     }
 
-    /// Whether the bolt shows: on the charger, charging or full.
+    /// Whether the bolt shows: on AC, charging, full, or held by a charge
+    /// limit; never on battery.
     pub fn bolt(&self) -> bool {
-        matches!(self.charge, Charge::Charging | Charge::Full)
+        self.charge.plugged()
+    }
+
+    /// Its health in whole percent, when known (0 is not).
+    pub fn health(&self) -> Option<u32> {
+        self.health
+            .map(|h| h.round().clamp(0.0, 100.0) as u32)
+            .filter(|h| *h > 0)
     }
 }
 
@@ -191,6 +298,160 @@ impl Words {
         }
     }
 
+    /// The brightness's popover's title, and what it sets.
+    pub fn brightness(self) -> &'static str {
+        if self.fr() {
+            "Luminosité"
+        } else {
+            "Brightness"
+        }
+    }
+
+    pub fn built_in(self) -> &'static str {
+        if self.fr() {
+            "Écran du portable"
+        } else {
+            "Built-in screen"
+        }
+    }
+
+    /// Under the brightness, for each other screen.
+    pub fn own_buttons(self, screen: &str) -> String {
+        if self.fr() {
+            format!("L'écran {screen} se règle avec ses propres boutons.")
+        } else {
+            format!("The {screen} screen is set with its own buttons.")
+        }
+    }
+
+    /// The keyboard's backlight's levels' names, from off: two, three or
+    /// four of them.
+    pub fn keyboard_levels(self, levels: u32) -> &'static [&'static str] {
+        match (self.fr(), levels) {
+            (true, 2) => &["Éteint", "Allumé"],
+            (true, 3) => &["Éteint", "Faible", "Fort"],
+            (true, _) => &["Éteint", "Faible", "Moyen", "Fort"],
+            (false, 2) => &["Off", "On"],
+            (false, 3) => &["Off", "Low", "High"],
+            (false, _) => &["Off", "Low", "Medium", "High"],
+        }
+    }
+
+    /// The battery's popover's title; without a battery, the modes'.
+    pub fn battery_title(self, battery: bool) -> &'static str {
+        match (battery, self.fr()) {
+            (true, true) => "Batterie",
+            (true, false) => "Battery",
+            (false, true) => "Énergie",
+            (false, false) => "Power",
+        }
+    }
+
+    /// Beside the title: on battery, or plugged in.
+    pub fn plugged(self, on_ac: bool) -> &'static str {
+        match (on_ac, self.fr()) {
+            (true, true) => "Branché",
+            (true, false) => "Plugged in",
+            (false, true) => "Sur batterie",
+            (false, false) => "On battery",
+        }
+    }
+
+    /// Over the modes, in capitals.
+    pub fn power_mode(self) -> &'static str {
+        if self.fr() {
+            "MODE D'ÉNERGIE"
+        } else {
+            "POWER MODE"
+        }
+    }
+
+    /// A mode's tile.
+    pub fn mode(self, profile: Profile) -> &'static str {
+        match (profile, self.fr()) {
+            (Profile::PowerSaver, true) => "Économie",
+            (Profile::PowerSaver, false) => "Power saver",
+            (Profile::Balanced, true) => "Équilibré",
+            (Profile::Balanced, false) => "Balanced",
+            (Profile::Performance, _) => "Performance",
+        }
+    }
+
+    pub fn no_performance(self) -> &'static str {
+        if self.fr() {
+            "Le mode performance n'existe pas sur cet ordinateur."
+        } else {
+            "This computer has no performance mode."
+        }
+    }
+
+    /// Why performance is held back.
+    pub fn degraded(self, why: Degraded) -> &'static str {
+        match (why, self.fr()) {
+            (Degraded::Lap, true) => "Performance réduite\u{a0}: l'ordinateur est sur tes genoux.",
+            (Degraded::Lap, false) => "Performance reduced: the computer is on a lap.",
+            (Degraded::Hot, true) => "Performance réduite\u{a0}: l'ordinateur est trop chaud.",
+            (Degraded::Hot, false) => "Performance reduced: the computer is too hot.",
+            (Degraded::Other, true) => "Performance réduite par le système.",
+            (Degraded::Other, false) => "Performance reduced by the system.",
+        }
+    }
+
+    /// The battery's health; its number and its sign kept together.
+    pub fn health(self, percent: u32) -> String {
+        if self.fr() {
+            format!("État de la batterie\u{a0}: {percent}\u{a0}% de sa capacité d'origine")
+        } else {
+            format!("Battery health: {percent}\u{a0}% of its original capacity")
+        }
+    }
+
+    /// The battery's popover's line under its level.
+    pub fn battery_line(self, battery: &Battery) -> String {
+        let fr = self.fr();
+        let left = battery.left.filter(|d| !d.is_zero()).map(duration);
+        let mut text = match (battery.charge, left) {
+            (Charge::Discharging | Charge::Unknown, Some(t)) => {
+                if fr {
+                    format!("{t} restantes")
+                } else {
+                    format!("{t} left")
+                }
+            }
+            (Charge::Discharging | Charge::Unknown, None) => {
+                (if fr { "Sur batterie" } else { "On battery" }).into()
+            }
+            (Charge::Charging, Some(t)) => {
+                if fr {
+                    format!("En charge · plein dans {t}")
+                } else {
+                    format!("Charging · full in {t}")
+                }
+            }
+            (Charge::Charging, None) => (if fr { "En charge" } else { "Charging" }).into(),
+            (Charge::Full, _) => (if fr {
+                "Branché, plein"
+            } else {
+                "Plugged in, full"
+            })
+            .into(),
+            (Charge::PluggedIn, _) => (if fr {
+                "Branché, ne charge pas"
+            } else {
+                "Plugged in, not charging"
+            })
+            .into(),
+        };
+        if battery.band() == Band::Critical {
+            text.push_str(if fr {
+                " · branche le chargeur"
+            } else {
+                " · plug in the charger"
+            });
+        }
+        text
+    }
+
     /// The battery's part of the status line, if any.
     fn battery(self, battery: &Battery) -> Option<String> {
         let fr = self.fr();
@@ -262,6 +523,17 @@ pub const STEP: f32 = 5.0;
 /// The lowest brightness the keys go to: the screen never goes black.
 pub const BRIGHTNESS_FLOOR: f32 = 5.0;
 
+/// The backlight's raw value for `percent` of `max` (the popover's
+/// slider): never below 5 % (nor 1).
+pub fn brightness_raw(percent: f32, max: u32) -> u32 {
+    if max == 0 {
+        return 0;
+    }
+    let max_f = max as f32;
+    let floor = ((BRIGHTNESS_FLOOR * max_f / 100.0).round() as u32).clamp(1, max);
+    ((percent.clamp(BRIGHTNESS_FLOOR, 100.0) * max_f / 100.0).round() as u32).clamp(floor, max)
+}
+
 /// The backlight's raw value one step up or down from `raw`, out of `max`:
 /// 5 % of the range (a level at least), never above `max`, never below 5 %
 /// (nor 1).
@@ -294,6 +566,7 @@ mod tests {
             percent,
             charge,
             left: Some(Duration::from_secs(minutes * MIN)),
+            health: None,
         }
     }
 
@@ -396,13 +669,97 @@ mod tests {
         assert_eq!(band(5.0, Charge::Unknown), Band::Critical);
         assert_eq!(band(5.0, Charge::Charging), Band::Ok);
         assert_eq!(band(15.0, Charge::PluggedIn), Band::Ok);
+        // The bolt whenever on AC, a charge limit's hold too.
         assert!(battery(50.0, Charge::Charging, 1).bolt());
         assert!(battery(100.0, Charge::Full, 1).bolt());
-        assert!(!battery(80.0, Charge::PluggedIn, 1).bolt());
+        assert!(battery(80.0, Charge::PluggedIn, 1).bolt());
         assert!(!battery(80.0, Charge::Discharging, 1).bolt());
+        // UPower's `OnBattery` decides: a firmware calling a held battery
+        // discharging, on AC, is plugged in; full on battery discharges.
+        assert_eq!(Charge::Discharging.on_ac(true), Charge::PluggedIn);
+        assert_eq!(Charge::Unknown.on_ac(true), Charge::PluggedIn);
+        assert_eq!(Charge::Charging.on_ac(true), Charge::Charging);
+        assert_eq!(Charge::Full.on_ac(true), Charge::Full);
+        assert_eq!(Charge::Full.on_ac(false), Charge::Discharging);
         assert_eq!(Charge::from_upower(4), Charge::Full);
         assert_eq!(Charge::from_upower(6), Charge::Discharging);
         assert_eq!(Charge::from_upower(9), Charge::Unknown);
+    }
+
+    #[test]
+    fn the_battery_popovers_line_in_each_state_and_language() {
+        let fr = Words::new(Lang::French);
+        let en = Words::new(Lang::English);
+        let cases = [
+            (
+                battery(82.0, Charge::Discharging, 220),
+                "3 h 40 restantes",
+                "3 h 40 left",
+            ),
+            (
+                battery(46.0, Charge::Charging, 70),
+                "En charge · plein dans 1 h 10",
+                "Charging · full in 1 h 10",
+            ),
+            (
+                battery(100.0, Charge::Full, 0),
+                "Branché, plein",
+                "Plugged in, full",
+            ),
+            (
+                battery(9.0, Charge::Discharging, 25),
+                "25 min restantes · branche le chargeur",
+                "25 min left · plug in the charger",
+            ),
+            (
+                battery(80.0, Charge::PluggedIn, 0),
+                "Branché, ne charge pas",
+                "Plugged in, not charging",
+            ),
+            (
+                battery(60.0, Charge::Discharging, 0),
+                "Sur batterie",
+                "On battery",
+            ),
+        ];
+        for (b, french, english) in cases {
+            assert_eq!(fr.battery_line(&b), french);
+            assert_eq!(en.battery_line(&b), english);
+        }
+        let mut b = battery(60.0, Charge::Discharging, 0);
+        assert_eq!(b.health(), None);
+        b.health = Some(0.0);
+        assert_eq!(b.health(), None);
+        b.health = Some(90.6);
+        assert_eq!(b.health(), Some(91));
+        assert_eq!(
+            fr.health(91),
+            "État de la batterie\u{a0}: 91\u{a0}% de sa capacité d'origine"
+        );
+        assert_eq!(
+            en.own_buttons("DELL U3419W"),
+            "The DELL U3419W screen is set with its own buttons."
+        );
+        assert_eq!(fr.keyboard_levels(3), ["Éteint", "Faible", "Fort"]);
+        assert_eq!(en.keyboard_levels(2), ["Off", "On"]);
+    }
+
+    #[test]
+    fn profiles_degraded_and_keyboard_levels() {
+        let p = Profiles::from_names(["power-saver", "balanced", "turbo"]);
+        assert!(p.has(Profile::PowerSaver) && p.has(Profile::Balanced));
+        assert!(!p.has(Profile::Performance));
+        assert!(!Profiles::default().any());
+        assert_eq!(Degraded::from_reason(""), None);
+        assert_eq!(Degraded::from_reason("lap-detected"), Some(Degraded::Lap));
+        assert_eq!(
+            Degraded::from_reason("high-operating-temperature"),
+            Some(Degraded::Hot)
+        );
+        assert_eq!(Degraded::from_reason("other"), Some(Degraded::Other));
+        let keyboard = |max| Keyboard { level: 0, max };
+        assert!(keyboard(1).segmented() && keyboard(3).segmented());
+        assert!(!keyboard(4).segmented());
     }
 
     #[test]
@@ -435,6 +792,12 @@ mod tests {
         assert_eq!(brightness_step(3, 7, true), 4);
         assert_eq!(brightness_step(3, 7, false), 2);
         assert_eq!(brightness_step(0, 0, true), 0);
+        // The slider's: from 5 % to 100 %.
+        assert_eq!(brightness_raw(42.0, 1000), 420);
+        assert_eq!(brightness_raw(0.0, 1000), 50);
+        assert_eq!(brightness_raw(120.0, 1000), 1000);
+        assert_eq!(brightness_raw(1.0, 7), 1);
+        assert_eq!(brightness_raw(50.0, 0), 0);
     }
 
     #[test]

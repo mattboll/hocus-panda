@@ -24,9 +24,9 @@ const KEY_BRIGHTNESSDOWN: u32 = 224;
 const KEY_BRIGHTNESSUP: u32 = 225;
 
 /// The levels' surfaces on a 1920×1080 screen: inside the bar's rim, 41 px
-/// above its bottom, 194 × 175 in the full form, 54 × 97 in the mini.
+/// above its bottom, 194 × 175 in the full form, 54 × 128 in the mini.
 const FULL: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
-const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 97, 54, 97);
+const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 128, 54, 128);
 
 /// Where to look in the full form, a few pixels into each gauge (x), and
 /// each row's middle (y), with all three rows and a status line of one

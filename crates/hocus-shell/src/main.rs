@@ -456,6 +456,10 @@ impl Shell {
                 popover::event(popover::Event::Outside);
                 Task::none()
             }
+            ToShell::Screens(names) => {
+                screens(names);
+                Task::none()
+            }
         }
     }
 
@@ -753,6 +757,22 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Brightness => canvas(popover::brightness::Panel {
+                id,
+                words: self.words,
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            popover::Item::Battery => canvas(popover::battery::Panel {
+                id,
+                words: self.words,
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
         };
         Some(panel)
     }
@@ -894,6 +914,14 @@ fn zone_changes() -> impl iced::futures::Stream<Item = Message> {
     })
 }
 
+/// The other screens are `names`: the brightness's popover says so if it
+/// is open (drawn again, resized).
+fn screens(names: Vec<String>) {
+    if levels::set_screens(names) {
+        popover::changed(popover::Item::Brightness);
+    }
+}
+
 /// A shell alone: a change of level or of network is a message (every
 /// surface is drawn).
 fn levels_alone() -> impl iced::futures::Stream<Item = Message> {
@@ -952,8 +980,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
         let (sender, mut outgoing) = mpsc::unbounded::<String>();
         // A change of level wakes the levels' surfaces through the
         // compositor, without a message that would draw every surface.
+        // The brightness's and the battery's popovers show them too.
         let waker = sender.clone();
         levels::on_change(move || {
+            popover::changed(popover::Item::Brightness);
+            popover::changed(popover::Item::Battery);
             let wake = ToCompositor::Wake(LEVELS_NAMESPACE.to_owned());
             waker.unbounded_send(wake.to_string()).is_ok()
         });
@@ -1008,6 +1039,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // either, the controller draws what changes.
                         Ok(ToShell::Outside) => {
                             popover::event(popover::Event::Outside);
+                            continue;
+                        }
+                        // The other screens: only an open brightness's
+                        // popover draws for them.
+                        Ok(ToShell::Screens(names)) => {
+                            screens(names);
                             continue;
                         }
                         _ => {}

@@ -2,22 +2,26 @@
 //! at the larger sizes of #378.
 //!
 //! Full form: a row for the sound, the brightness and the battery (icon,
-//! 8 px gauge with its gradient, value in tabular figures), then the status
-//! line, right-aligned; the group's bottom sits 61 px above the bar's,
-//! above the footer's place. Mini form: the sound's vertical gauge, then
-//! the battery's percentage (a bolt when charging), 41 px above the bar's
-//! bottom, above the place of what comes under it. A row whose service is
+//! 8 px gauge with its gradient, value in tabular figures; a bolt in the
+//! battery whenever the machine is on AC), then the status line,
+//! right-aligned; the group's bottom sits 61 px above the bar's, above the
+//! footer's place. Mini form: the sound's vertical gauge, then the
+//! battery's sign (26 × 15, filled to its level, a bolt on AC) over its
+//! percentage, as the 3.7 mockup draws them. A row whose service is
 //! missing is not drawn, and the group closes up from the bottom.
 //!
 //! A gauge's length moves to a new value over 160 ms, CSS's `ease-out`;
 //! with reduced motion, or on the CPU, it changes at once. The surface asks
 //! to be drawn again only while one moves.
 //!
-//! The sound's row (the gauge, in the mini form) opens its popover (§9,
-//! [`crate::popover`]): a click, or in the mini form a hover; it lights up
-//! under the pointer and while its popover is open, and wears a ring while
-//! it holds the keyboard; the wheel over it changes the volume, 5 % a
-//! notch. All of it draws this surface alone.
+//! Each row opens its popover (§9, [`crate::popover`]) with a click: the
+//! sound's, the brightness's, the battery's (its row and the status line
+//! under it; the status line alone, for the power modes, without a
+//! battery); in the mini form the sound's gauge and the battery's sign, a
+//! hover opening them too. An item lights up under the pointer and while
+//! its popover is open, and wears a ring while it holds the keyboard; the
+//! wheel over the sound's changes the volume, over the brightness's the
+//! brightness, 5 % a notch. All of it draws this surface alone.
 
 use std::time::{Duration, Instant};
 
@@ -43,9 +47,12 @@ use crate::{
 /// form switches), and the sound's item lit and ringed above it.
 pub const BOTTOM: i32 = 41;
 pub const FULL_SURFACE: (u32, u32) = (194, 175);
-pub const MINI_SURFACE: (u32, u32) = (54, 97);
+pub const MINI_SURFACE: (u32, u32) = (54, 128);
 /// The full group's bottom above the surface's: the footer's place.
 const FULL_RAISE: f32 = 20.0;
+/// The mini group's: its battery's item, lit and ringed, above the
+/// layout's place (the 3.7 mockup's 22 px and 14 px between).
+const MINI_RAISE: f32 = 10.0;
 /// From the bar's inside edges to the group's: 12 px padding less the rim.
 pub(crate) const SIDE: f32 = 11.0;
 
@@ -66,11 +73,12 @@ const ICON_GAP: f32 = 8.0;
 const VALUE_BOX: f32 = 36.0;
 const GAUGE: f32 = 8.0;
 const MINI_GAUGE: f32 = 48.0;
-const MINI_GAP: f32 = 16.0;
-/// The mini form's bolt and the gap after it, in the mockup's units: a
-/// pixel each at its 11 px percentage, scaled with it.
-const BOLT_GAP: f32 = 2.0;
-const MINI_BOLT: f32 = MINI_VALUE / 11.0;
+/// The mini form's battery: its sign over its percentage, 4 px apart, in
+/// a 44 × 46 item 14 px under the gauge's.
+const MINI_SIGN: Size = Size::new(26.0, 15.0);
+const SIGN_GAP: f32 = 4.0;
+const MINI_BATTERY: Size = Size::new(44.0, 46.0);
+const MINI_GAP: f32 = 14.0;
 
 /// The sound's item: the whole row in the full form (30 px, 6 px past the
 /// group's sides), around the gauge in the mini (44 × 64), as the 3.4
@@ -78,6 +86,8 @@ const MINI_BOLT: f32 = MINI_VALUE / 11.0;
 /// open; the keyboard's ring 3 px wide, 2 px out, in the accent.
 pub(crate) const ITEM_HEIGHT: f32 = 30.0;
 pub(crate) const ITEM_OUT: f32 = 6.0;
+/// The battery's item reaches this far under the status line.
+const ITEM_PAD: f32 = 4.0;
 pub(crate) const ITEM_RADIUS: f32 = 8.0;
 const MINI_ITEM: Size = Size::new(44.0, 64.0);
 pub(crate) const MINI_ITEM_RADIUS: f32 = 10.0;
@@ -103,10 +113,13 @@ pub(crate) const MUTED_FILL: Color = Color::from_rgba8(255, 255, 255, 0.22);
 /// and critical ones, from the left (or the bottom) to the right (the top).
 pub(crate) const SOUND: (Color, Color) = (rgb(0x5B8DEF), rgb(0x8FB3FF));
 const LIGHT: (Color, Color) = (rgb(0xE8B44E), rgb(0xFFE08A));
+pub(crate) const LIGHT_GAUGE: (Color, Color) = LIGHT;
 const BATTERY: (Color, Color) = (rgb(0x3FA66B), rgb(0x7EE0A0));
-const LOW: (Color, Color) = (rgb(0xE8A13A), rgb(0xF5C46E));
-const CRITICAL: (Color, Color) = (rgb(0xE5793F), rgb(0xF7B98A));
-const BOLT: Color = rgb(0x7EE0A0);
+pub(crate) const LOW: (Color, Color) = (rgb(0xE8A13A), rgb(0xF5C46E));
+pub(crate) const CRITICAL: (Color, Color) = (rgb(0xE5793F), rgb(0xF7B98A));
+pub(crate) const BOLT: Color = rgb(0x7EE0A0);
+/// The bolt's outline over a battery's fill.
+const BOLT_EDGE: Color = rgb(0x0B1020);
 
 /// A gauge's motion: 160 ms, `ease-out`.
 const MOVE: Duration = Duration::from_millis(160);
@@ -191,10 +204,10 @@ pub struct State {
     at: Option<Instant>,
     /// The `0`'s advance of the values' fonts, for tabular figures.
     zero: Option<(f32, f32)>,
-    /// The pointer on the surface; on the sound's item; and where it was
+    /// The pointer on the surface; the item it is on; and where it was
     /// last seen, in the bar's frame.
     pointer: Option<Point>,
-    hover: bool,
+    hover: Option<Item>,
     last: Option<Point>,
     /// Scrolling not yet a notch; a wheel's notch also comes as pixels,
     /// right after it, which then count for nothing.
@@ -295,32 +308,28 @@ impl<Message> canvas::Program<Message> for Levels {
             Point::new(left.max(0.0), 0.0),
             Size::new((right - left.max(0.0)).max(0.0), bounds.height),
         );
-        if let Some(item) = self.item(state, bounds.size()) {
-            let (open, focused) = popover::with(|c| {
-                (
-                    c.shows(&self.bar, Item::Sound),
-                    c.focused(&self.bar, Item::Sound),
-                )
-            });
-            let radius = match self.forms.first() {
-                Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
-                _ => ITEM_RADIUS,
-            };
+        let radius = match self.forms.first() {
+            Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
+            _ => ITEM_RADIUS,
+        };
+        for (item, rect) in self.items(state, bounds.size()) {
+            let (open, focused) =
+                popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
             let lit = if open {
                 Some(OPEN)
-            } else if state.hover {
+            } else if state.hover == Some(item) {
                 Some(HOVER)
             } else {
                 None
             };
             if let Some(colour) = lit {
                 frame.fill(
-                    &Path::rounded_rectangle(item.position(), item.size(), radius.into()),
+                    &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
                     colour,
                 );
             }
             if focused {
-                ring(&mut frame, item, radius);
+                ring(&mut frame, rect, radius);
             }
         }
         let gauges = state.gauges.map(|g| g.at(at));
@@ -352,37 +361,86 @@ impl<Message> canvas::Program<Message> for Levels {
 }
 
 impl Levels {
-    /// Where the sound's item is on the surface (`size`), if it shows and
-    /// the bar is not switching.
-    fn item(&self, state: &State, size: Size) -> Option<Rectangle> {
+    /// Where the items are on the surface (`size`), those that show, if the
+    /// bar is not switching.
+    fn items(&self, state: &State, size: Size) -> Vec<(Item, Rectangle)> {
         let [(form, _)] = self.forms.as_slice() else {
-            return None;
+            return Vec::new();
         };
-        state.levels.sound?;
-        state.at?;
+        if state.at.is_none() {
+            return Vec::new();
+        }
+        let levels = &state.levels;
         let right = size.width;
         let left = right + 2.0 - self.bar_width;
-        Some(match form {
+        let mut items = Vec::new();
+        match form {
             Form::Full => {
                 let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
-                let middle = full_rows(&state.levels, lines, size.height)[2]?;
+                let [battery, light, sound] = full_rows(levels, lines, size.height);
                 let (from, to) = (left + SIDE - ITEM_OUT, right - SIDE + ITEM_OUT);
-                Rectangle::new(
-                    Point::new(from, middle - ITEM_HEIGHT / 2.0),
-                    Size::new(to - from, ITEM_HEIGHT),
-                )
+                let row = |top: f32, bottom: f32| {
+                    Rectangle::new(Point::new(from, top), Size::new(to - from, bottom - top))
+                };
+                let half = ITEM_HEIGHT / 2.0;
+                for (item, middle) in [(Item::Sound, sound), (Item::Brightness, light)] {
+                    if let Some(middle) = middle {
+                        items.push((item, row(middle - half, middle + half)));
+                    }
+                }
+                // The status line's lines, under the rows.
+                let status_bottom = size.height - FULL_RAISE;
+                let status_top = status_bottom - lines as f32 * STATUS * LINE;
+                match battery {
+                    // Its row and the status line under it.
+                    Some(middle) => {
+                        let bottom = if lines > 0 {
+                            status_bottom + ITEM_PAD
+                        } else {
+                            middle + half
+                        };
+                        items.push((Item::Battery, row(middle - half, bottom)));
+                    }
+                    // The status line alone: the power modes.
+                    None if lines > 0 && levels.profiles.any() => {
+                        let pad =
+                            ((ITEM_HEIGHT - (status_bottom - status_top)) / 2.0).max(ITEM_PAD);
+                        items.push((Item::Battery, row(status_top - pad, status_bottom + pad)));
+                    }
+                    None => {}
+                }
             }
             Form::Mini => {
-                let middle = mini_gauge_bottom(&state.levels, size.height) - MINI_GAUGE / 2.0;
-                Rectangle::new(
-                    Point::new(
-                        (left + right - MINI_ITEM.width) / 2.0,
-                        middle - MINI_ITEM.height / 2.0,
-                    ),
-                    MINI_ITEM,
-                )
+                let centre = (left + right) / 2.0;
+                if levels.sound.is_some() {
+                    let middle = mini_gauge_bottom(levels, size.height) - MINI_GAUGE / 2.0;
+                    items.push((
+                        Item::Sound,
+                        Rectangle::new(
+                            Point::new(
+                                centre - MINI_ITEM.width / 2.0,
+                                middle - MINI_ITEM.height / 2.0,
+                            ),
+                            MINI_ITEM,
+                        ),
+                    ));
+                }
+                if levels.battery.is_some() {
+                    let bottom = size.height - MINI_RAISE + mini_battery_pad();
+                    items.push((
+                        Item::Battery,
+                        Rectangle::new(
+                            Point::new(
+                                centre - MINI_BATTERY.width / 2.0,
+                                bottom - MINI_BATTERY.height,
+                            ),
+                            MINI_BATTERY,
+                        ),
+                    ));
+                }
             }
-        })
+        }
+        items
     }
 
     /// A point of the surface (`size`) in the bar's frame: the surface's
@@ -399,8 +457,8 @@ impl Levels {
         Rectangle::new(self.in_bar(rect.position(), size), rect.size())
     }
 
-    /// The pointer on the surface: the item lights up, its popover opens or
-    /// stays; the wheel over it changes the volume.
+    /// The pointer on the surface: an item lights up, its popover opens or
+    /// stays; the wheel over the sound's or the brightness's changes it.
     fn mouse<Message>(
         &self,
         state: &mut State,
@@ -409,61 +467,64 @@ impl Levels {
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         let size = bounds.size();
-        let item = self.item(state, size);
         let at = pointer(event, bounds, cursor, state.pointer);
         state.pointer = at;
-        let over = item.zip(at).is_some_and(|(item, at)| item.contains(at));
+        let under = at.and_then(|at| {
+            self.items(state, size)
+                .into_iter()
+                .find(|(_, rect)| rect.contains(at))
+        });
+        let over = under.map(|(item, _)| item);
         match event {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
                 let at = at?;
                 let bar_at = self.in_bar(at, size);
                 state.last = Some(bar_at);
                 if over == state.hover {
-                    if !over {
+                    if over.is_none() {
                         popover::event(popover::Event::Pointer { at: bar_at });
                     }
                     return None;
                 }
+                if state.hover.take().is_some() {
+                    popover::event(popover::Event::ItemLeave { at: bar_at });
+                }
                 state.hover = over;
-                match item.filter(|_| over) {
-                    Some(item) => popover::event(popover::Event::ItemEnter {
+                if let Some((item, rect)) = under {
+                    popover::event(popover::Event::ItemEnter {
                         bar: self.bar.clone(),
-                        item: Item::Sound,
-                        rect: self.in_bar_rect(item, size),
-                    }),
-                    None => popover::event(popover::Event::ItemLeave { at: bar_at }),
+                        item,
+                        rect: self.in_bar_rect(rect, size),
+                    });
                 }
                 Some(canvas::Action::request_redraw())
             }
             mouse::Event::CursorLeft => {
-                if !std::mem::take(&mut state.hover) {
-                    return None;
-                }
+                state.hover.take()?;
                 let at = state.last.unwrap_or_default();
                 popover::event(popover::Event::ItemLeave { at });
                 Some(canvas::Action::request_redraw())
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                let item = item.filter(|_| over);
-                let event = match item {
-                    Some(item) => popover::Event::ItemPress {
+                let event = match under {
+                    Some((item, rect)) => popover::Event::ItemPress {
                         bar: self.bar.clone(),
-                        item: Item::Sound,
-                        rect: self.in_bar_rect(item, size),
+                        item,
+                        rect: self.in_bar_rect(rect, size),
                     },
                     None => popover::Event::PressElsewhere,
                 };
                 popover::event(event);
                 Some(canvas::Action::request_redraw().and_capture())
             }
-            mouse::Event::WheelScrolled { delta } if over => {
+            mouse::Event::WheelScrolled { delta } => {
+                let (up, down) = match over {
+                    Some(Item::Sound) => (LevelKey::VolumeUp, LevelKey::VolumeDown),
+                    Some(Item::Brightness) => (LevelKey::BrightnessUp, LevelKey::BrightnessDown),
+                    _ => return None,
+                };
                 for _ in 0..notches(state, *delta).unsigned_abs() {
-                    let up = state.scroll_up;
-                    super::key(if up {
-                        LevelKey::VolumeUp
-                    } else {
-                        LevelKey::VolumeDown
-                    });
+                    super::key(if state.scroll_up { up } else { down });
                 }
                 Some(canvas::Action::capture())
             }
@@ -553,8 +614,8 @@ fn full_rows(levels: &Snapshot, status: usize, bottom: f32) -> [Option<f32>; 3] 
 
 /// How far above the surface's bottom the group's top is, in the full
 /// form and in the mini: its first row's item (30 px) in the full form, the
-/// gauge (or the battery's percentage) in the mini; nothing shown, the
-/// group's bottom.
+/// gauge (or the battery's item) in the mini; nothing shown, the group's
+/// bottom.
 pub fn group_tops(levels: &Snapshot, status: usize) -> (f32, f32) {
     let height = FULL_SURFACE.1 as f32;
     let rows = full_rows(levels, status, height);
@@ -566,17 +627,27 @@ pub fn group_tops(levels: &Snapshot, status: usize) -> (f32, f32) {
     let height = MINI_SURFACE.1 as f32;
     let mini = match (levels.sound, levels.battery) {
         (Some(_), _) => height - (mini_gauge_bottom(levels, height) - MINI_GAUGE),
-        (None, Some(_)) => MINI_VALUE * LINE,
+        (None, Some(_)) => MINI_RAISE - mini_battery_pad() + MINI_BATTERY.height,
         (None, None) => 0.0,
     };
     (full, mini)
 }
 
-/// The mini form's sound gauge's bottom: over the battery's percentage;
+/// The mini form's battery's sign and percentage, together.
+fn mini_battery_content() -> f32 {
+    MINI_SIGN.height + SIGN_GAP + MINI_VALUE * LINE
+}
+
+/// Its item's room above and under them.
+fn mini_battery_pad() -> f32 {
+    (MINI_BATTERY.height - mini_battery_content()) / 2.0
+}
+
+/// The mini form's sound gauge's bottom: 14 px over the battery's item;
 /// without it, high enough for the gauge's light and ring under it.
 fn mini_gauge_bottom(levels: &Snapshot, bottom: f32) -> f32 {
     match levels.battery {
-        Some(_) => bottom - MINI_VALUE * LINE - MINI_GAP,
+        Some(_) => bottom - MINI_RAISE + mini_battery_pad() - MINI_BATTERY.height - MINI_GAP,
         None => bottom - (MINI_ITEM.height - MINI_GAUGE) / 2.0 - RING_OUT - RING,
     }
 }
@@ -707,24 +778,10 @@ impl Drawn<'_> {
         let bottom = self.bottom;
         let levels = self.levels;
         if let Some(battery) = levels.battery {
-            let colour = match battery.band() {
-                Band::Ok => BOLT,
-                Band::Low => LOW.1,
-                Band::Critical => CRITICAL.1,
-            };
+            let colour = band_colour(battery.band());
             let digits = battery.shown().to_string();
-            let bolt = if battery.bolt() {
-                (8.0 + BOLT_GAP) * MINI_BOLT
-            } else {
-                0.0
-            };
-            let width = bolt + self.zero_bold * digits.len() as f32;
-            let mut x = centre - width / 2.0;
-            let middle = bottom - MINI_VALUE * LINE / 2.0;
-            if battery.bolt() {
-                Icon::MiniBolt.draw(f, Point::new(x, middle - 5.0 * MINI_BOLT), alpha);
-                x += bolt;
-            }
+            let middle = bottom - MINI_RAISE - MINI_VALUE * LINE / 2.0;
+            let mut x = centre - self.zero_bold * digits.len() as f32 / 2.0;
             for ch in digits.chars() {
                 cell(
                     f,
@@ -737,6 +794,18 @@ impl Drawn<'_> {
                 );
                 x += self.zero_bold;
             }
+            let top = bottom - MINI_RAISE - mini_battery_content();
+            battery_sign(
+                f,
+                Rectangle::new(Point::new(centre - MINI_SIGN.width / 2.0, top), MINI_SIGN),
+                Sign {
+                    percent: battery.percent,
+                    fill: colour,
+                    bolt: battery.bolt(),
+                    outline: 1.6,
+                },
+                alpha,
+            );
         }
         if let Some(sound) = levels.sound {
             let bottom = mini_gauge_bottom(levels, bottom);
@@ -947,15 +1016,9 @@ pub(crate) fn cell(f: &mut Frame, ch: char, x: f32, y: f32, size: f32, font: Fon
 /// The rows' icons, from the mockup's SVGs (a 24-unit box drawn 18 px).
 #[derive(Debug, Clone, Copy)]
 enum Icon {
-    Speaker {
-        muted: bool,
-    },
+    Speaker { muted: bool },
     Sun,
-    Battery {
-        bolt: bool,
-    },
-    /// The mini form's bolt, 8 × 10 units.
-    MiniBolt,
+    Battery { bolt: bool },
 }
 
 impl Icon {
@@ -1041,27 +1104,106 @@ impl Icon {
                 );
                 f.fill(&tip, faded(TEXT, alpha));
                 if bolt {
+                    // `M13.5 4 9 9h3.5l-1.5 4L15.5 8H12z`.
                     let at = Point::new(at.x, top);
                     let p = |(x, y): (f32, f32)| Point::new(at.x + x * s, at.y + y * s);
-                    let path = Path::new(|b| {
-                        b.move_to(p((13.5, 4.2)));
-                        b.line_to(p((9.5, 8.6)));
-                        b.line_to(p((13.5, 8.6)));
-                        b.line_to(p((10.5, 12.2)));
-                    });
-                    f.stroke(&path, stroke(1.8 * s, faded(BOLT, alpha)));
+                    let path = polygon(&[
+                        p((13.5, 4.0)),
+                        p((9.0, 9.0)),
+                        p((12.5, 9.0)),
+                        p((11.0, 13.0)),
+                        p((15.5, 8.0)),
+                        p((12.0, 8.0)),
+                    ]);
+                    f.fill(&path, faded(BOLT, alpha));
                 }
             }
-            Self::MiniBolt => {
-                line(
-                    f,
-                    MINI_BOLT,
-                    1.4,
-                    BOLT,
-                    &[(5.0, 0.8), (1.4, 5.2), (4.4, 5.2), (2.4, 9.2)],
-                );
-            }
         }
+    }
+}
+
+/// The sun, 18 px, at `at`: the brightness's.
+pub(crate) fn sun(f: &mut Frame, at: Point) {
+    Icon::Sun.draw(f, at, 1.0);
+}
+
+/// A battery's level's colour: green, amber when low, orange when
+/// critical (§4.2).
+pub(crate) fn band_colour(band: Band) -> Color {
+    match band {
+        Band::Ok => BOLT,
+        Band::Low => LOW.1,
+        Band::Critical => CRITICAL.1,
+    }
+}
+
+/// A closed shape through `points`.
+pub(crate) fn polygon(points: &[Point]) -> Path {
+    Path::new(|b| {
+        if let Some((first, rest)) = points.split_first() {
+            b.move_to(*first);
+            for point in rest {
+                b.line_to(*point);
+            }
+            b.close();
+        }
+    })
+}
+
+/// How a battery's sign looks.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Sign {
+    pub percent: f32,
+    pub fill: Color,
+    pub bolt: bool,
+    /// Its outline's width, in its 28 × 16 units.
+    pub outline: f32,
+}
+
+/// A battery's sign in `rect` (the mockup's 28 × 16 units, kept in
+/// proportion and centred): its outline and its tip, filled to its level,
+/// and a bolt over it while on AC.
+pub(crate) fn battery_sign(f: &mut Frame, rect: Rectangle, sign: Sign, alpha: f32) {
+    let s = (rect.width / 28.0).min(rect.height / 16.0);
+    let at = Point::new(
+        rect.x + (rect.width - 28.0 * s) / 2.0,
+        rect.y + (rect.height - 16.0 * s) / 2.0,
+    );
+    let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
+    let body =
+        Path::rounded_rectangle(p(1.0, 2.0), Size::new(22.0 * s, 12.0 * s), (3.0 * s).into());
+    f.stroke(&body, stroke(sign.outline * s, faded(TEXT, alpha)));
+    let tip = Path::rounded_rectangle(p(24.5, 6.0), Size::new(2.0 * s, 4.0 * s), s.into());
+    f.fill(&tip, faded(TEXT, alpha));
+    let width = 18.0 * (sign.percent / 100.0).clamp(0.0, 1.0) * s;
+    if width >= 0.25 {
+        let level = Path::rounded_rectangle(
+            p(3.0, 4.0),
+            Size::new(width, 8.0 * s),
+            (1.5 * s).min(width / 2.0).into(),
+        );
+        f.fill(&level, faded(sign.fill, alpha));
+    }
+    if sign.bolt {
+        // `M13.5 3 9 9h3.5l-1.5 4.5L16 7.5h-3.5z`, outlined in the dark.
+        let bolt = polygon(&[
+            p(13.5, 3.0),
+            p(9.0, 9.0),
+            p(12.5, 9.0),
+            p(11.0, 13.5),
+            p(16.0, 7.5),
+            p(12.5, 7.5),
+        ]);
+        f.fill(&bolt, faded(TEXT, alpha));
+        f.stroke(
+            &bolt,
+            Stroke {
+                style: Style::Solid(faded(BOLT_EDGE, alpha)),
+                width: 0.8 * s,
+                line_join: canvas::LineJoin::Miter,
+                ..Stroke::default()
+            },
+        );
     }
 }
 
@@ -1141,8 +1283,7 @@ mod tests {
                 muted: false,
             }),
             brightness: Some(70.0),
-            battery: None,
-            profile: None,
+            ..Snapshot::default()
         };
         // No battery, no status line: brightness at the bottom, sound over.
         let [battery, light, sound] = full_rows(&levels, 0, 175.0);
@@ -1219,17 +1360,115 @@ mod tests {
         let full = 3.0 * ROW + 3.0 * STATUS * LINE + 3.0 * ROW_GAP + FULL_RAISE;
         let lit = (ITEM_HEIGHT - ROW) / 2.0 + RING_OUT + RING;
         assert!(full + lit <= FULL_SURFACE.1 as f32, "{full} + {lit}");
-        // Mini: the gauge, and the battery under it, the gauge lit and
-        // ringed, as wide as the surface at most.
-        let mini = MINI_GAUGE + MINI_GAP + MINI_VALUE * LINE;
+        // Mini: the gauge 14 px over the battery's item, the gauge lit and
+        // ringed, as wide as the surface at most; the battery's item ringed
+        // above the surface's bottom.
+        let mini = MINI_RAISE - mini_battery_pad() + MINI_BATTERY.height + MINI_GAP + MINI_GAUGE;
         let lit = (MINI_ITEM.height - MINI_GAUGE) / 2.0 + RING_OUT + RING;
         assert!(mini + lit <= MINI_SURFACE.1 as f32, "{mini} + {lit}");
         assert!(MINI_ITEM.width + 2.0 * (RING_OUT + RING) <= MINI_SURFACE.0 as f32);
+        assert!(MINI_RAISE - mini_battery_pad() >= RING_OUT + RING);
+        // The sign and the percentage, 4 px apart, centred in the item.
+        assert!((mini_battery_pad() - (46.0 - 15.0 - 4.0 - 14.0 * LINE) / 2.0).abs() < 0.01);
         // The full group's bottom is 61 px above the bar's: 12 px of
         // padding, the footer's 34 px and 14 px between, and the rim.
         assert_eq!(BOTTOM as f32 + FULL_RAISE, 1.0 + 12.0 + 34.0 + 14.0);
-        // The mini's, 41 px: 10 px of padding, 18 px and 12 px between (the
-        // place of what comes under the battery, as the 3.3 mockup has it).
-        assert_eq!(BOTTOM, 1 + 10 + 18 + 12);
+        // The mini's battery item's bottom, 47 px: 10 px of padding, the
+        // layout's 22 px and 14 px between, and the rim (the 3.7 mockup).
+        let item_bottom = BOTTOM as f32 + MINI_RAISE - mini_battery_pad();
+        assert!(
+            (item_bottom - (1.0 + 10.0 + 22.0 + 14.0)).abs() < 0.1,
+            "{item_bottom}"
+        );
+    }
+
+    fn levels(form: Form) -> Levels {
+        Levels {
+            forms: vec![(form, 1.0)],
+            bar_width: form.width() as f32,
+            motion: false,
+            words: Words::new(crate::clock::time::Lang::French),
+            backdrop: None,
+            bar: "eDP-1".to_owned(),
+        }
+    }
+
+    fn state(levels: Snapshot, lines: usize) -> State {
+        State {
+            levels,
+            status: (lines > 0).then(|| (String::new(), vec![String::new(); lines])),
+            at: Some(Instant::now()),
+            ..State::default()
+        }
+    }
+
+    #[test]
+    fn each_row_is_an_item_the_batterys_with_its_status_line() {
+        use super::super::model::{Battery, Charge, Profile, Profiles, Sound};
+        let battery = Battery {
+            percent: 82.0,
+            charge: Charge::Discharging,
+            left: None,
+            health: None,
+        };
+        let all = Snapshot {
+            sound: Some(Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            brightness: Some(70.0),
+            battery: Some(battery),
+            profile: Some(Profile::Balanced),
+            profiles: Profiles::from_names(["power-saver", "balanced", "performance"]),
+            ..Snapshot::default()
+        };
+        let size = Size::new(FULL_SURFACE.0 as f32, FULL_SURFACE.1 as f32);
+        for lines in [1, 3] {
+            let items = levels(Form::Full).items(&state(all, lines), size);
+            let kinds: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
+            assert_eq!(kinds, [Item::Sound, Item::Brightness, Item::Battery]);
+            for (i, (item, rect)) in items.iter().enumerate() {
+                // Inside the surface with their ring, apart.
+                assert!(rect.y >= RING_OUT + RING, "{item:?}");
+                assert!(
+                    rect.y + rect.height <= size.height - RING_OUT - RING,
+                    "{item:?}"
+                );
+                for (_, other) in &items[i + 1..] {
+                    assert!(rect.y + rect.height <= other.y + 0.5, "{item:?}");
+                }
+            }
+            // The battery's reaches 4 px under the status line.
+            let (_, battery) = items[2];
+            assert_eq!(
+                battery.y + battery.height,
+                size.height - FULL_RAISE + ITEM_PAD
+            );
+        }
+        // No battery: the status line (the profile) opens the modes; nor
+        // without profiles.
+        let modes = Snapshot {
+            battery: None,
+            ..all
+        };
+        let items = levels(Form::Full).items(&state(modes, 1), size);
+        let (item, line) = items.last().copied().expect("an item");
+        assert_eq!(item, Item::Battery);
+        assert_eq!(line.height, ITEM_HEIGHT);
+        let none = Snapshot {
+            profiles: Profiles::default(),
+            ..modes
+        };
+        let items = levels(Form::Full).items(&state(none, 1), size);
+        assert!(items.iter().all(|(i, _)| *i != Item::Battery));
+        // Mini: the gauge and the battery's 44 × 46, apart.
+        let size = Size::new(MINI_SURFACE.0 as f32, MINI_SURFACE.1 as f32);
+        let items = levels(Form::Mini).items(&state(all, 1), size);
+        let [(Item::Sound, gauge), (Item::Battery, sign)] = items.as_slice() else {
+            panic!("{items:?}");
+        };
+        assert_eq!(sign.size(), MINI_BATTERY);
+        assert!(gauge.y + gauge.height + 5.0 < sign.y);
+        assert!(gauge.y >= RING_OUT + RING);
     }
 }

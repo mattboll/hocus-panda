@@ -1,5 +1,7 @@
 //! The levels' services, faked privately, never the machine's: a D-Bus
-//! daemon of its own serving UPower, power-profiles-daemon and logind
+//! daemon of its own serving UPower (its display device, whether on AC,
+//! the battery's device and its health, the keyboard's backlight if
+//! asked for), power-profiles-daemon (its profiles, settable) and logind
 //! objects; a PipeWire of its own, in a short runtime directory of its own,
 //! with null sinks (two by default, or those asked for), null sources if
 //! asked for, applications' streams (null nodes of the streams' class,
@@ -26,6 +28,9 @@ pub const DEVICE_PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
 pub const DEVICE: &str = "org.freedesktop.UPower.Device";
 pub const PROFILES: &str = "org.freedesktop.UPower.PowerProfiles";
 pub const PROFILES_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
+pub const ROOT: &str = "/org/freedesktop/UPower";
+pub const BATTERY_PATH: &str = "/org/freedesktop/UPower/devices/battery_BAT0";
+pub const KEYBOARD_PATH: &str = "/org/freedesktop/UPower/KbdBacklight";
 
 /// What the fake UPower and power-profiles-daemon say.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +42,20 @@ pub struct Power {
     pub to_empty: i64,
     pub to_full: i64,
     pub profile: String,
+    /// UPower's `OnBattery`.
+    pub on_battery: bool,
+    /// The battery's device's `Capacity` (0: not known).
+    pub capacity: f64,
+    /// The profiles power-profiles-daemon has, and why performance is
+    /// held back (empty: it is not).
+    pub profiles: Vec<&'static str>,
+    pub degraded: String,
+    /// The keyboard's backlight's level and highest level; none: UPower
+    /// has no `KbdBacklight` (as it is when `start_upower` runs).
+    pub keyboard: Option<(i32, i32)>,
+    /// The profiles and keyboard levels set through D-Bus.
+    pub profiles_set: Vec<String>,
+    pub keyboard_set: Vec<i32>,
 }
 
 impl Default for Power {
@@ -48,6 +67,13 @@ impl Default for Power {
             to_empty: 220 * 60,
             to_full: 0,
             profile: "balanced".to_owned(),
+            on_battery: true,
+            capacity: 91.0,
+            profiles: vec!["power-saver", "balanced", "performance"],
+            degraded: String::new(),
+            keyboard: None,
+            profiles_set: Vec::new(),
+            keyboard_set: Vec::new(),
         }
     }
 }
@@ -87,6 +113,86 @@ impl Device {
     }
 }
 
+/// UPower itself: whether on AC, and its devices.
+struct Root(Shared);
+
+#[zbus::interface(name = "org.freedesktop.UPower")]
+impl Root {
+    #[zbus(property)]
+    fn on_battery(&self) -> bool {
+        power(&self.0).on_battery
+    }
+
+    fn enumerate_devices(&self) -> Vec<zbus::OwnedObjectPath> {
+        [BATTERY_PATH]
+            .into_iter()
+            .filter_map(|p| zbus::OwnedObjectPath::try_from(p).ok())
+            .collect()
+    }
+}
+
+/// The laptop's battery, as UPower has it besides its display device.
+struct Battery(Shared);
+
+#[zbus::interface(name = "org.freedesktop.UPower.Device")]
+impl Battery {
+    #[zbus(property, name = "Type")]
+    fn kind(&self) -> u32 {
+        2
+    }
+    #[zbus(property)]
+    fn power_supply(&self) -> bool {
+        true
+    }
+    #[zbus(property)]
+    fn capacity(&self) -> f64 {
+        power(&self.0).capacity
+    }
+}
+
+/// UPower's keyboard's backlight.
+struct Keyboard(Shared);
+
+#[zbus::interface(name = "org.freedesktop.UPower.KbdBacklight")]
+impl Keyboard {
+    fn get_max_brightness(&self) -> i32 {
+        power(&self.0).keyboard.map_or(0, |(_, max)| max)
+    }
+
+    fn get_brightness(&self) -> i32 {
+        power(&self.0).keyboard.map_or(0, |(level, _)| level)
+    }
+
+    async fn set_brightness(
+        &self,
+        value: i32,
+        #[zbus(signal_emitter)] emitter: zbus::object_server::SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        {
+            let mut power = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            power.keyboard_set.push(value);
+            if let Some((level, max)) = power.keyboard.as_mut() {
+                *level = value.clamp(0, *max);
+            }
+        }
+        Self::brightness_changed(&emitter, value).await?;
+        Ok(())
+    }
+
+    #[zbus(signal)]
+    async fn brightness_changed(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        value: i32,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn brightness_changed_with_source(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        value: i32,
+        source: &str,
+    ) -> zbus::Result<()>;
+}
+
 struct Profiles(Shared);
 
 #[zbus::interface(name = "org.freedesktop.UPower.PowerProfiles")]
@@ -95,21 +201,65 @@ impl Profiles {
     fn active_profile(&self) -> String {
         power(&self.0).profile
     }
+
+    #[zbus(property)]
+    fn set_active_profile(&mut self, name: String) -> zbus::fdo::Result<()> {
+        let mut power = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        power.profiles_set.push(name.clone());
+        if !power.profiles.contains(&name.as_str()) {
+            return Err(zbus::fdo::Error::InvalidArgs(format!("no profile {name}")));
+        }
+        power.profile = name;
+        Ok(())
+    }
+
+    #[zbus(property)]
+    fn profiles(&self) -> Vec<HashMap<String, zbus::OwnedVariant>> {
+        power(&self.0)
+            .profiles
+            .iter()
+            .map(|name| {
+                [("Profile", *name), ("Driver", "hocus-test")]
+                    .into_iter()
+                    .filter_map(|(k, v)| {
+                        Some((
+                            k.to_owned(),
+                            zbus::OwnedVariant::try_from(Variant::from(v)).ok()?,
+                        ))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[zbus(property)]
+    fn performance_degraded(&self) -> String {
+        power(&self.0).degraded
+    }
 }
 
-/// logind's session: `SetBrightness` writes the fake backlight.
+/// logind's session: `SetBrightness` writes the fake backlight, after
+/// `delay` (a slow logind).
 struct Session {
     backlights: PathBuf,
     calls: Arc<Mutex<Vec<(String, String, u32)>>>,
+    delay: Arc<Mutex<Duration>>,
 }
 
 #[zbus::interface(name = "org.freedesktop.login1.Session")]
 impl Session {
-    fn set_brightness(&self, subsystem: &str, name: &str, value: u32) -> zbus::fdo::Result<()> {
+    async fn set_brightness(
+        &self,
+        subsystem: &str,
+        name: &str,
+        value: u32,
+    ) -> zbus::fdo::Result<()> {
         self.calls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push((subsystem.to_owned(), name.to_owned(), value));
+        let delay = *self.delay.lock().unwrap_or_else(PoisonError::into_inner);
+        tokio::time::sleep(delay).await;
         std::fs::write(
             self.backlights.join(name).join("brightness"),
             format!("{value}\n"),
@@ -129,6 +279,8 @@ pub struct Fakes {
     profiles: Option<Connection>,
     login: Option<Connection>,
     pub brightness_calls: Arc<Mutex<Vec<(String, String, u32)>>>,
+    /// How long the fake logind takes to set the brightness.
+    pub brightness_delay: Arc<Mutex<Duration>>,
     pipewire: Option<Child>,
     /// The default sink's follower, WirePlumber's part.
     policy: Option<Child>,
@@ -194,7 +346,22 @@ impl Fakes {
     /// The same with these sources too (microphones), the first the
     /// default.
     pub fn start_with_sources(sinks: &[FakeSink], sources: &[FakeSink]) -> anyhow::Result<Self> {
+        Self::start_all(sinks, sources, |_| {})
+    }
+
+    /// Everything there, the battery, the profiles and the keyboard's
+    /// backlight as `change` says from the start.
+    pub fn start_with_power(change: impl FnOnce(&mut Power)) -> anyhow::Result<Self> {
+        Self::start_all(&TWO_SINKS, &[], change)
+    }
+
+    fn start_all(
+        sinks: &[FakeSink],
+        sources: &[FakeSink],
+        change: impl FnOnce(&mut Power),
+    ) -> anyhow::Result<Self> {
         let mut fakes = Self::empty()?;
+        change(&mut fakes.power.lock().unwrap_or_else(PoisonError::into_inner));
         fakes.sinks = sinks.to_vec();
         fakes.sources = sources.to_vec();
         fakes.backlight(700, 1000)?;
@@ -225,6 +392,7 @@ impl Fakes {
             profiles: None,
             login: None,
             brightness_calls: Arc::default(),
+            brightness_delay: Arc::default(),
             pipewire: None,
             policy: None,
             pw_runtime: tempfile::Builder::new().prefix("hp-").tempdir_in("/tmp")?,
@@ -232,6 +400,11 @@ impl Fakes {
             sources: Vec::new(),
             streams: Vec::new(),
         })
+    }
+
+    /// What the fake UPower and power-profiles-daemon say and were asked.
+    pub fn power_now(&self) -> Power {
+        power(&self.power)
     }
 
     /// The runtime the fake services run on.
@@ -303,6 +476,7 @@ impl Fakes {
         let session = Session {
             backlights: self.backlights(),
             calls: self.brightness_calls.clone(),
+            delay: self.brightness_delay.clone(),
         };
         self.login = Some(self.serve(
             "org.freedesktop.login1",
@@ -330,8 +504,53 @@ impl Fakes {
         })
     }
 
+    /// UPower: its display device, itself, the battery's device, and the
+    /// keyboard's backlight if `Power::keyboard` says it has one.
     pub fn start_upower(&mut self) -> anyhow::Result<()> {
-        self.upower = Some(self.serve(UPOWER, DEVICE_PATH, Device(self.power.clone()))?);
+        let address = self.address.clone();
+        let shared = self.power.clone();
+        let keyboard = power(&shared).keyboard.is_some();
+        let connection = self.runtime.block_on(async move {
+            let mut builder = Builder::address(address.as_str())
+                .name(UPOWER)
+                .serve_at(DEVICE_PATH, Device(shared.clone()))
+                .serve_at(ROOT, Root(shared.clone()))
+                .serve_at(BATTERY_PATH, Battery(shared.clone()));
+            if keyboard {
+                builder = builder.serve_at(KEYBOARD_PATH, Keyboard(shared));
+            }
+            builder.build().await
+        })?;
+        self.upower = Some(connection);
+        Ok(())
+    }
+
+    /// The keyboard's backlight changed by itself (its keys): at `level`,
+    /// said as UPower says it.
+    pub fn set_keyboard(&self, level: i32) -> anyhow::Result<()> {
+        if let Some((now, _)) = self
+            .power
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keyboard
+            .as_mut()
+        {
+            *now = level;
+        }
+        let Some(connection) = self.upower.clone() else {
+            return Ok(());
+        };
+        self.runtime.block_on(async move {
+            connection
+                .emit_signal(
+                    None::<&str>,
+                    KEYBOARD_PATH,
+                    "org.freedesktop.UPower.KbdBacklight",
+                    "BrightnessChangedWithSource",
+                    &(level, "external"),
+                )
+                .await
+        })?;
         Ok(())
     }
 
@@ -352,6 +571,8 @@ impl Fakes {
         change(&mut self.power.lock().unwrap_or_else(PoisonError::into_inner));
         for (connection, path, iface) in [
             (&self.upower, DEVICE_PATH, DEVICE),
+            (&self.upower, ROOT, UPOWER),
+            (&self.upower, BATTERY_PATH, DEVICE),
             (&self.profiles, PROFILES_PATH, PROFILES),
         ] {
             let Some(connection) = connection.clone() else {
@@ -367,7 +588,12 @@ impl Fakes {
                         &(
                             iface,
                             HashMap::<&str, Variant<'_>>::new(),
-                            Vec::<&str>::new(),
+                            // The health is read again only when said.
+                            if path == BATTERY_PATH {
+                                vec!["Capacity"]
+                            } else {
+                                Vec::new()
+                            },
                         ),
                     )
                     .await
