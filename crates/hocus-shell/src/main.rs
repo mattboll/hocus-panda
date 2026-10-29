@@ -78,12 +78,17 @@ const OPAQUE_BOTTOM: Color = rgba(0x0E, 0x11, 0x1C, 1.0);
 const RIM: Color = rgba(255, 255, 255, 0.10);
 
 fn main() -> ExitCode {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,hocuspanda_shell=info".into());
+    // cosmic-text traces the text it shapes, a password shown with the eye
+    // too: never, whatever RUST_LOG asks.
+    let filter = match "cosmic_text::shape=off".parse() {
+        Ok(quiet) => filter.add_directive(quiet),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "warn,hocuspanda_shell=info".into()),
-        )
+        .with_env_filter(filter)
         .init();
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose();
