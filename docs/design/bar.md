@@ -89,7 +89,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 
 | # | Group | Contents | Size |
 |---|---|---|---|
-| 1 | Clock | `HH:MM` in Martian Mono 400, 34 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 15 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 13 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 60 px |
+| 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
 | 2 | Next meeting | Card: 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`. Hidden when nothing remains today | 44 px |
 | 3 | Agents | Header `AGENTS` and total. Three tiles: working, waiting, resting, each with its panda (48 px) and its count. Below, up to 3 lines: agents waiting (oldest first), then stuck ones | 80 px + 18 px a line |
 | 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
@@ -98,10 +98,10 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 7 | Secretary | Section 7. Panda 62 px, title, one line | 74 px |
 | 8 | Desktops | 4 tiles, 30 px high, with a sketch of their windows; the current one outlined in the accent | 30 px |
 | 9 | Connections | 2×2 tiles of 34 px: Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (short name, one click cycles) | 73 px |
-| 10 | Levels | Volume, brightness and battery rows (§4.2): a 14 px icon, a 6 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 83 px |
+| 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
 | 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
 
-### 4.1 The clock (approved 2026-10-28, issues #359 and #332)
+### 4.1 The clock (approved 2026-10-28, issues #359 and #332; sizes of #378, 2026-10-29)
 
 - **Cells.** Each character sits in a cell as wide as the font's `0` (the
   colon 0.55 of it) and 1.05 em high, centred in it, so that nothing
@@ -125,12 +125,12 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   changed, a clock set or a resume show within a second); the next look
   is on the monotonic clock, just past the next wall-clock second.
 
-### 4.2 The levels (approved 2026-10-29, issue #360)
+### 4.2 The levels (approved 2026-10-29, issue #360; sizes of #378)
 
-- **Rows**, 7 px apart, Manrope 11.5 px `text.dim`: the icon (sound,
-  sun, battery; `text`), 8 px, the gauge (6 px high, radius 3, track
-  `rgba(255,255,255,0.10)`, fill with its gradient from the left), 8 px,
-  the value right-aligned in 30 px. The sound's gauge is `gauge.sound`,
+- **Rows**, 10 px apart, Manrope 14.5 px `text.dim`: the icon (sound,
+  sun, battery; `text`; 18 px), 8 px, the gauge (8 px high, radius 4,
+  track `rgba(255,255,255,0.10)`, fill with its gradient from the left),
+  8 px, the value right-aligned in 36 px. The sound's gauge is `gauge.sound`,
   the brightness's `gauge.light`, the battery's `gauge.battery`, amber
   (`#E8A13A → #F5C46E`, value and status `#F5C46E`) at 20 % or less, orange
   (`#E5793F → #F7B98A`, `#F7B98A`) at 10 % or less, both only off the
@@ -138,7 +138,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   `rgba(255,255,255,0.22)` at the volume's length, the value "muet" /
   "muted" in `text.faint`. Charging or full: a bolt `#7EE0A0` in the
   battery.
-- **The status line**, Manrope 11 px, right-aligned, `text.faint` (the
+- **The status line**, Manrope 13.5 px, right-aligned, `text.faint` (the
   battery's band colour when low or critical): "3 h 40 restantes ·
   équilibré" / "3 h 40 left · balanced"; "plein dans 1 h 10" / "full in
   1 h 10"; "branché, plein" / "plugged in, full"; "branché" / "plugged in"
@@ -176,13 +176,13 @@ Clicks:
 
 Width 56 px, padding 12 px top, 10 px bottom, items centred, 14 px apart:
 clock on two lines, hours over minutes, no seconds (Martian Mono 400,
-15 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
+19 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
 blue, glowing when under 10 min), waiting tile (44 px, panda 40 px, count
 badge), working count, spacer, secretary (46 px), the sound's gauge
-(vertical, 6 × 40 px, filled from the bottom, grey when muted), the
-battery's percentage (Manrope 700, 11 px, `#7EE0A0`, amber or orange as in
+(vertical, 8 × 48 px, filled from the bottom, grey when muted), the
+battery's percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
 §4.2, a bolt before it when charging), layout, notifications count. The
-levels are 12 px apart, as the mockup has them.
+gauge and the percentage are 16 px apart (#378).
 
 A hover of 150 ms on an item opens its popover beside the bar; it floats
 over the windows and closes 300 ms after the pointer leaves, unless the
@@ -412,8 +412,8 @@ mockup's control panel is not part of the product.
   present, and softbuffer's present damages the whole buffer), so a clock
   drawn in the bar's surface would draw the whole bar each second. The
   clock has a layer surface of its own (`hocus-bar-clock`), over the bar's
-  top, inside its rim: 12 px below the bar's top, 194 × 62 px in the full
-  form and 54 × 32 px in the mini, the full size while the form switches.
+  top, inside its rim: 12 px below the bar's top, 194 × 74 px in the full
+  form and 54 × 40 px in the mini, the full size while the form switches.
   Pointer events go through it to the bar. Opened after the bar's, it is
   in front of it. On glass it is transparent; without glass it fills
   itself with the bar's opaque colour at its height, and with a shell on
@@ -425,7 +425,7 @@ mockup's control panel is not part of the product.
   draws only that surface: no message goes through the shell, which would
   draw every surface. **At rest** the shell commits the clock's surface
   once a second and nothing else, and the compositor draws only its
-  rectangle (194 × 62 or 54 × 32 px), measured headless on an Intel GPU
+  rectangle (194 × 74 or 54 × 40 px), measured headless on an Intel GPU
   and with pixman. Without seconds it still draws once a second, so that
   a clock set or a resume shows within a second: iced wakes a widget only
   by drawing it.
@@ -444,6 +444,9 @@ mockup's control panel is not part of the product.
   binary; their licences are in `crates/hocus-shell/fonts` and the
   package's copyright file. A family named in `[panel.clock] font` is
   looked for among the installed fonts.
+- **Sizes** (#378): `HH:MM` and its seconds take 163 px at most, inside
+  the padding; the longest English dates ("Wednesday 30 September",
+  187 px) reach into the padding, inside the rim.
 - **Cross-fade.** While the form switches, the old form's clock fades out
   and the new one's in, over 120 ms from 60 ms (§3), each centred in the
   bar as wide as it is at that frame and cut to it.
@@ -501,13 +504,14 @@ the product.
     again when it is back.
 - **Its own surface, woken without a message.** The levels draw on a
   layer surface of their own (`hocus-bar-levels`), inside the bar's rim,
-  41 px above its bottom: 194 × 120 px in the full form (the group's
-  bottom 61 px above the bar's, above the footer's place), 54 × 68 px in
-  the mini (40 px above, above the next item's place), the full size while
-  the form switches. iced draws every surface after any message of the
-  shell's, so a change of level is not a message: the shell asks the
-  compositor (`wake hocus-bar-levels`), which sends that surface a
-  configure as it is, and iced draws it alone. A level key reaches its
+  41 px above its bottom: 194 × 165 px in the full form (the group's
+  bottom 61 px above the bar's, above the footer's place; room for the
+  status line on three lines, a part a line), 54 × 84 px in the mini (40
+  px above, above the next item's place: 12 px under the battery, as the
+  3.3 mockup has it), the full size while the form switches. iced draws
+  every surface after any message of the shell's, so a change of level is
+  not a message: the shell asks the compositor (`wake hocus-bar-levels`),
+  which sends that surface a configure as it is, and iced draws it alone. A level key reaches its
   service straight from the link, without a message either. **At rest**
   the levels draw nothing; a change draws their rectangle only, measured
   headless with the real shell. A shell alone, without a compositor, draws

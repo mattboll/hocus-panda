@@ -1,7 +1,8 @@
-//! The levels' surface, near the bar's bottom, as the 3.3 mockup draws it.
+//! The levels' surface, near the bar's bottom, as the 3.3 mockup draws it
+//! at the larger sizes of #378.
 //!
 //! Full form: a row for the sound, the brightness and the battery (icon,
-//! 6 px gauge with its gradient, value in tabular figures), then the status
+//! 8 px gauge with its gradient, value in tabular figures), then the status
 //! line, right-aligned; the group's bottom sits 61 px above the bar's,
 //! above the footer's place. Mini form: the sound's vertical gauge, then
 //! the battery's percentage (a bolt when charging), 41 px above the bar's
@@ -31,8 +32,8 @@ use crate::clock::{self, motion::bezier};
 /// bar's bottom; tall enough for its form's group (the full one while the
 /// form switches).
 pub const BOTTOM: i32 = 41;
-pub const FULL_SURFACE: (u32, u32) = (194, 120);
-pub const MINI_SURFACE: (u32, u32) = (54, 68);
+pub const FULL_SURFACE: (u32, u32) = (194, 165);
+pub const MINI_SURFACE: (u32, u32) = (54, 84);
 /// The full group's bottom above the surface's: the footer's place.
 const FULL_RAISE: f32 = 20.0;
 /// From the bar's inside edges to the group's: 12 px padding less the rim.
@@ -45,18 +46,21 @@ const MANROPE_BOLD: Font = Font {
 };
 /// CSS's `normal` line height for Manrope.
 const LINE: f32 = 1.366;
-const VALUE: f32 = 11.5;
-const STATUS: f32 = 11.0;
-const MINI_VALUE: f32 = 11.0;
+const VALUE: f32 = 14.5;
+const STATUS: f32 = 13.5;
+const MINI_VALUE: f32 = 14.0;
 const ROW: f32 = VALUE * LINE;
-const ROW_GAP: f32 = 7.0;
-const ICON: f32 = 14.0;
+const ROW_GAP: f32 = 10.0;
+const ICON: f32 = 18.0;
 const ICON_GAP: f32 = 8.0;
-const VALUE_BOX: f32 = 30.0;
-const GAUGE: f32 = 6.0;
-const MINI_GAUGE: f32 = 40.0;
-const MINI_GAP: f32 = 12.0;
+const VALUE_BOX: f32 = 36.0;
+const GAUGE: f32 = 8.0;
+const MINI_GAUGE: f32 = 48.0;
+const MINI_GAP: f32 = 16.0;
+/// The mini form's bolt and the gap after it, in the mockup's units: a
+/// pixel each at its 11 px percentage, scaled with it.
 const BOLT_GAP: f32 = 2.0;
+const MINI_BOLT: f32 = MINI_VALUE / 11.0;
 
 const fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -375,12 +379,16 @@ impl Drawn<'_> {
                 Band::Critical => CRITICAL.1,
             };
             let digits = battery.shown().to_string();
-            let bolt = if battery.bolt() { 8.0 + BOLT_GAP } else { 0.0 };
+            let bolt = if battery.bolt() {
+                (8.0 + BOLT_GAP) * MINI_BOLT
+            } else {
+                0.0
+            };
             let width = bolt + self.zero_bold * digits.len() as f32;
             let mut x = centre - width / 2.0;
             let middle = bottom - MINI_VALUE * LINE / 2.0;
             if battery.bolt() {
-                Icon::MiniBolt.draw(f, Point::new(x, middle - 5.0), alpha);
+                Icon::MiniBolt.draw(f, Point::new(x, middle - 5.0 * MINI_BOLT), alpha);
                 x += bolt;
             }
             for ch in digits.chars() {
@@ -602,7 +610,7 @@ fn cell(f: &mut Frame, ch: char, x: f32, y: f32, size: f32, font: Font, colour: 
     });
 }
 
-/// The rows' icons, from the mockup's SVGs (a 24-unit box drawn 14 px).
+/// The rows' icons, from the mockup's SVGs (a 24-unit box drawn 18 px).
 #[derive(Debug, Clone, Copy)]
 enum Icon {
     Speaker {
@@ -612,7 +620,7 @@ enum Icon {
     Battery {
         bolt: bool,
     },
-    /// The mini form's bolt, 8 × 10 px.
+    /// The mini form's bolt, 8 × 10 units.
     MiniBolt,
 }
 
@@ -683,7 +691,7 @@ impl Icon {
                 }
             }
             Self::Battery { bolt } => {
-                // A 28 × 16 box, 14 px wide: half a pixel a unit, centred.
+                // A 28 × 16 box, as wide as the others: centred.
                 let s = ICON / 28.0;
                 let top = at.y + (ICON - 16.0 * s) / 2.0;
                 let body = Path::rounded_rectangle(
@@ -713,7 +721,7 @@ impl Icon {
             Self::MiniBolt => {
                 line(
                     f,
-                    1.0,
+                    MINI_BOLT,
                     1.4,
                     BOLT,
                     &[(5.0, 0.8), (1.4, 5.2), (4.4, 5.2), (2.4, 9.2)],
@@ -825,9 +833,10 @@ mod tests {
 
     #[test]
     fn the_groups_fit_their_surfaces() {
-        // Full: three rows and the status line on two lines, above the
-        // footer's place.
-        let full = 3.0 * ROW + 2.0 * STATUS * LINE + 3.0 * ROW_GAP + FULL_RAISE;
+        // Full: three rows and the status line on three lines (a line a
+        // part at most: the time, the charger's hint, the profile), above
+        // the footer's place.
+        let full = 3.0 * ROW + 3.0 * STATUS * LINE + 3.0 * ROW_GAP + FULL_RAISE;
         assert!(full <= FULL_SURFACE.1 as f32, "{full}");
         // Mini: the gauge, and the battery under it.
         let mini = MINI_GAUGE + MINI_GAP + MINI_VALUE * LINE;
@@ -835,7 +844,8 @@ mod tests {
         // The full group's bottom is 61 px above the bar's: 12 px of
         // padding, the footer's 34 px and 14 px between, and the rim.
         assert_eq!(BOTTOM as f32 + FULL_RAISE, 1.0 + 12.0 + 34.0 + 14.0);
-        // The mini's, 41 px: 10 px of padding, 18 px and 12 px between.
+        // The mini's, 41 px: 10 px of padding, 18 px and 12 px between (the
+        // place of what comes under the battery, as the 3.3 mockup has it).
         assert_eq!(BOTTOM, 1 + 10 + 18 + 12);
     }
 }

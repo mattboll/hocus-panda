@@ -24,18 +24,18 @@ const KEY_BRIGHTNESSDOWN: u32 = 224;
 const KEY_BRIGHTNESSUP: u32 = 225;
 
 /// The levels' surfaces on a 1920×1080 screen: inside the bar's rim, 41 px
-/// above its bottom, 194 × 120 in the full form, 54 × 68 in the mini.
-const FULL: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 120, 194, 120);
-const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 68, 54, 68);
+/// above its bottom, 194 × 165 in the full form, 54 × 84 in the mini.
+const FULL: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 165, 194, 165);
+const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 84, 54, 84);
 
 /// Where to look in the full form, a few pixels into each gauge (x), and
 /// each row's middle (y), with all three rows and a status line of one
 /// line; and the mini form's gauge.
-const GAUGE_X: i32 = FULL.x + 36;
-const SOUND_Y: i32 = FULL.y + 25;
-const LIGHT_Y: i32 = FULL.y + 47;
-const BATTERY_Y: i32 = FULL.y + 70;
-const MINI_GAUGE: (i32, i32) = (MINI.x + 27, MINI.y + 36);
+const GAUGE_X: i32 = FULL.x + 40;
+const SOUND_Y: i32 = FULL.y + 47;
+const LIGHT_Y: i32 = FULL.y + 77;
+const BATTERY_Y: i32 = FULL.y + 107;
+const MINI_GAUGE: (i32, i32) = (MINI.x + 27, MINI.y + 44);
 
 /// The fakes there, or why the test cannot run.
 fn ready() -> Option<std::path::PathBuf> {
@@ -120,8 +120,8 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     until(&mut hp, (GAUGE_X, SOUND_Y), blue)?;
     until(&mut hp, (GAUGE_X, LIGHT_Y), yellow)?;
     until(&mut hp, (GAUGE_X, BATTERY_Y), green)?;
-    // 62 % of the 112 px gauge reaches past 55 px; 30 % does not.
-    let past_a_third = (FULL.x + 33 + 55, SOUND_Y);
+    // 62 % of the 102 px gauge reaches past 55 px; 30 % does not.
+    let past_a_third = (FULL.x + 37 + 55, SOUND_Y);
     until(&mut hp, past_a_third, blue)?;
 
     // At rest: nothing drawn but the clock, once every service has
@@ -154,7 +154,7 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     let other = fakes.sink("hocus-test-other")?.to_string();
     fakes.wpctl(&["set-volume", &other, "1.0"])?;
     fakes.default_sink("hocus-test-other")?;
-    until(&mut hp, (FULL.x + 33 + 108, SOUND_Y), blue).map_err(|err| {
+    until(&mut hp, (FULL.x + 37 + 98, SOUND_Y), blue).map_err(|err| {
         let status = fakes.wpctl(&["status"]).unwrap_or_default();
         let volume = fakes.volume("hocus-test-other");
         anyhow::anyhow!("{err}; other at {volume:?}; {status}")
@@ -173,9 +173,9 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     fakes.wpctl(&["set-volume", &other, "0.5"])?;
     until(&mut hp, (MINI_GAUGE.0, MINI.y + 5), dark)?;
     assert!(blue(rgb(&mut hp, MINI_GAUGE)?));
-    // Its whole width, just under its level (from 21 px down).
-    for x in [MINI.x + 25, MINI.x + 28] {
-        assert!(blue(rgb(&mut hp, (x, MINI.y + 23))?), "{x}");
+    // Its whole width, just under its level (from 25 px down).
+    for x in [MINI.x + 24, MINI.x + 29] {
+        assert!(blue(rgb(&mut hp, (x, MINI.y + 27))?), "{x}");
     }
     Ok(())
 }
@@ -307,7 +307,7 @@ fn a_missing_service_hides_its_row_until_it_comes() -> anyhow::Result<()> {
     // UPower goes: its row and the status line go, the others close up
     // to the bottom: the brightness's row last, the sound's above it.
     fakes.stop_upower();
-    let lowest = (GAUGE_X, FULL.y + 92);
+    let lowest = (GAUGE_X, FULL.y + 135);
     until(&mut hp, lowest, yellow)?;
     until(&mut hp, (GAUGE_X, BATTERY_Y), blue)?;
     // PipeWire goes: the sound's row goes.
