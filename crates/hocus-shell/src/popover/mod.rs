@@ -566,6 +566,8 @@ impl Controller {
         };
         tracing::debug!(item = ?open.item, "a popover closes");
         open.item.closing();
+        // What the clipboard said while it held the keyboard.
+        crate::paste::tidy();
         if self.motion {
             effects.push(Effect::Closing);
             self.closing

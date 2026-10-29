@@ -54,6 +54,9 @@ udev = "0.9.3"
 serde_json = "1.0.154"
 # What zbus calls take, for a call helper of the network's.
 serde = "1.0.229"
+# The Wayland connection iced draws on, made here to read the clipboard
+# on it (paste); the same version as iced_layershell's.
+wayland-client = "0.31.15"
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 
