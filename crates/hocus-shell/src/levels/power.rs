@@ -109,17 +109,22 @@ async fn follow(
     let mut presence = Presence::Unknown;
     let watched = async {
         let bus = DBusProxy::new(&connection).await?;
+        // Whether it has an owner now.
         let owners = bus
             .receive_name_owner_changed_with_args(&[(0, name)])
             .await?
-            .map(|_| ());
+            .map(|changed| {
+                changed
+                    .args()
+                    .map_or(true, |args| args.new_owner().is_some())
+            });
         let properties = PropertiesProxy::builder(&connection)
             .destination(name)
             .path(path)
             .cache_properties(zbus::proxy::CacheProperties::No)
             .build()
             .await?;
-        let changes = properties.receive_properties_changed().await?.map(|_| ());
+        let changes = properties.receive_properties_changed().await?.map(|_| true);
         Ok::<_, zbus::Error>((properties, stream::select(owners, changes)))
     };
     let (properties, mut changes) = match watched.await {
@@ -130,24 +135,29 @@ async fn follow(
             return;
         }
     };
+    // Read when it starts, then at each change while it has an owner: not
+    // when it went, which would start it again through the bus.
+    let mut owned = true;
     loop {
-        match properties
-            .get_all(zbus::names::InterfaceName::from_static_str_unchecked(
-                interface,
-            ))
-            .await
-        {
-            Ok(all) => {
-                presence.now(true, what, "");
-                show(Some(all));
+        if owned {
+            let interface = zbus::names::InterfaceName::from_static_str_unchecked(interface);
+            match properties.get_all(interface).await {
+                Ok(all) => {
+                    presence.now(true, what, "");
+                    show(Some(all));
+                }
+                Err(err) => {
+                    presence.now(false, what, &err);
+                    show(None);
+                }
             }
-            Err(err) => {
-                presence.now(false, what, &err);
-                show(None);
-            }
+        } else {
+            presence.now(false, what, "it stopped");
+            show(None);
         }
-        if changes.next().await.is_none() {
-            return;
+        match changes.next().await {
+            Some(owner) => owned = owner,
+            None => return,
         }
     }
 }
