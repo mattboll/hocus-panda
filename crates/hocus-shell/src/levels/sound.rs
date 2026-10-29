@@ -419,16 +419,21 @@ impl Graph {
         let Some(entries) = object.get("metadata").and_then(Value::as_array) else {
             return;
         };
-        let value = |key: &str| {
-            entries
+        // An update lists the keys that changed only (WirePlumber writes
+        // the sink's and the source's apart): a key not listed keeps its
+        // value; one listed without a value is gone.
+        for (key, kept) in [
+            ("default.audio.sink", &mut self.sink),
+            ("default.audio.source", &mut self.source),
+        ] {
+            let entry = entries
                 .iter()
                 .filter(|e| e.get("subject").and_then(Value::as_u64) == Some(0))
-                .find(|e| e.get("key").and_then(Value::as_str) == Some(key))
-                .and_then(|e| e.get("value"))
-                .and_then(sink_name)
-        };
-        self.sink = value("default.audio.sink");
-        self.source = value("default.audio.source");
+                .find(|e| e.get("key").and_then(Value::as_str) == Some(key));
+            if let Some(entry) = entry {
+                *kept = entry.get("value").and_then(sink_name);
+            }
+        }
     }
 
     fn node(&mut self, id: u32, object: &Value) {
@@ -1183,9 +1188,20 @@ mod tests {
         assert!(graph.sinks().is_empty());
         let mixer = graph.mixer(&mut HashMap::new());
         assert_eq!(mixer.microphone().map(|s| s.id), Some(41));
-        // Without a default one, the first.
-        default["metadata"] = json!([]);
+        // An update of the sink's alone keeps the source's.
+        let mut sink = default.clone();
+        sink["metadata"][0]["key"] = json!("default.audio.sink");
+        sink["metadata"][0]["value"] = json!({ "name": "speakers" });
+        graph.apply(sink);
+        assert_eq!(graph.sink.as_deref(), Some("speakers"));
+        assert_eq!(
+            graph.mixer(&mut HashMap::new()).microphone().map(|s| s.id),
+            Some(41)
+        );
+        // Without a default one (its key gone), the first.
+        default["metadata"][0]["value"] = Value::Null;
         graph.apply(default);
+        assert_eq!(graph.sink.as_deref(), Some("speakers"));
         assert_eq!(
             graph.mixer(&mut HashMap::new()).microphone().map(|s| s.id),
             Some(40)
