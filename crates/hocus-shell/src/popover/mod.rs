@@ -31,8 +31,6 @@
 pub mod battery;
 pub mod bluetooth;
 pub mod brightness;
-// Until each popover is on it.
-#[allow(dead_code, unused_imports)]
 pub mod kit;
 pub mod sound;
 pub mod wifi;
