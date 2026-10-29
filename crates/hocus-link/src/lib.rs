@@ -8,11 +8,13 @@
 //! names by tabs). The compositor decides where bars are and in which
 //! form, reserves their space and takes the clicks on their edge, passes on
 //! the clock's settings, the level keys (volume, brightness) pressed, the
-//! presses outside the shell's surfaces while a popover shows, and the
-//! names of the screens besides the built-in one; the shell draws the bars and
-//! their popovers, keeps the levels, and says when it draws on the CPU and
-//! when a popover closes. Neither side waits for the other: a message is a
-//! fact, never a question.
+//! presses outside the shell's surfaces while a popover shows, the
+//! names of the screens besides the built-in one, and the keyboard's
+//! layouts and which one is active; the shell draws the bars and their
+//! popovers, keeps the levels, and says when it draws on the CPU, when a
+//! popover closes, and when the user asks for the next layout. Neither
+//! side waits for the other: a message is a fact or a request, never a
+//! question.
 //!
 //! The form switch is one motion, which both sides compute from the same
 //! start on the same clock (`CLOCK_MONOTONIC`, in microseconds): the
@@ -151,6 +153,25 @@ pub enum ToShell {
     /// that they are set with their own buttons. Written `screens`, then
     /// each name after a tab (a name may hold spaces, never a tab).
     Screens(Vec<String>),
+    /// The keyboard's layouts, in the keymap's order (XKB's groups): sent
+    /// as the shell connects. Written `layouts`, then for each a tab, its
+    /// code, a tab, its name.
+    Layouts(Vec<KeyLayout>),
+    /// The active layout, its index in [`ToShell::Layouts`]' list: sent as
+    /// the shell connects and whenever it changes (the bar's row, an XKB
+    /// group-switch option). Written `layout N`.
+    Layout(u32),
+}
+
+/// A keyboard layout as the compositor's keymap has it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyLayout {
+    /// Its XKB layout and variant as `[keyboard] layouts` writes them
+    /// (`fr`, `fr(bepo)`); empty when unknown.
+    pub code: String,
+    /// The name the keymap gives it: XKB's description, in English
+    /// (`French (BEPO)`).
+    pub name: String,
 }
 
 /// The keyboard's level keys, as `[shortcuts]` names their actions.
@@ -314,6 +335,10 @@ pub enum ToCompositor {
     /// motion), and they are no longer a menu; the shell removes them
     /// after that.
     Closing(String),
+    /// The user asks for the next keyboard layout (the bar's row): the
+    /// compositor switches the seat's keyboard to it, then says which is
+    /// active ([`ToShell::Layout`]).
+    NextLayout,
 }
 
 /// A screen's name as a [`ToShell::Screens`] line carries it: on one
@@ -374,6 +399,19 @@ impl fmt::Display for ToShell {
                 }
                 Ok(())
             }
+            Self::Layouts(layouts) => {
+                f.write_str("layouts")?;
+                for layout in layouts {
+                    write!(
+                        f,
+                        "\t{}\t{}",
+                        screen_name(&layout.code),
+                        screen_name(&layout.name)
+                    )?;
+                }
+                Ok(())
+            }
+            Self::Layout(index) => write!(f, "layout {index}"),
             Self::Clock(look) => {
                 let [r, g, b] = look.color;
                 write!(
@@ -403,6 +441,24 @@ impl FromStr for ToShell {
                     .collect(),
             ));
         }
+        if let Some(fields) = line.strip_prefix("layouts")
+            && (fields.is_empty() || fields.starts_with('\t'))
+        {
+            let fields: Vec<&str> = fields.split('\t').skip(1).collect();
+            let (pairs, rest) = fields.as_chunks::<2>();
+            if !rest.is_empty() {
+                return Err(BadLine(format!("a layout without its name: {line:?}")));
+            }
+            return Ok(Self::Layouts(
+                pairs
+                    .iter()
+                    .map(|[code, name]| KeyLayout {
+                        code: (*code).to_owned(),
+                        name: (*name).to_owned(),
+                    })
+                    .collect(),
+            ));
+        }
         let mut words = line.split_whitespace();
         match words.next() {
             Some("look") => Ok(Self::Look {
@@ -421,6 +477,11 @@ impl FromStr for ToShell {
             }),
             Some("level") => Ok(Self::Level(word(&mut words, "level key")?.parse()?)),
             Some("outside") => Ok(Self::Outside),
+            Some("layout") => Ok(Self::Layout(
+                word(&mut words, "layout")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("layout: {e}")))?,
+            )),
             Some("clock") => {
                 let seconds = flag(words.next(), "seconds", "noseconds")?;
                 let transition = word(&mut words, "transition")?.parse()?;
@@ -447,6 +508,7 @@ impl fmt::Display for ToCompositor {
             Self::Software => f.write_str("software"),
             Self::Wake(namespace) => write!(f, "wake {namespace}"),
             Self::Closing(namespace) => write!(f, "closing {namespace}"),
+            Self::NextLayout => f.write_str("next-layout"),
         }
     }
 }
@@ -460,6 +522,7 @@ impl FromStr for ToCompositor {
             Some("software") => Ok(Self::Software),
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
+            Some("next-layout") => Ok(Self::NextLayout),
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
     }
@@ -533,11 +596,31 @@ mod tests {
             ToShell::Screens(Vec::new()),
             ToShell::Screens(vec!["DELL U3419W".into(), "HDMI-A-1".into()]),
         ];
+        let layouts = [
+            ToShell::Layouts(Vec::new()),
+            ToShell::Layouts(vec![
+                KeyLayout {
+                    code: "fr".into(),
+                    name: "French".into(),
+                },
+                KeyLayout {
+                    code: "fr(bepo)".into(),
+                    name: "French (BEPO)".into(),
+                },
+                KeyLayout {
+                    code: String::new(),
+                    name: "English (US)".into(),
+                },
+            ]),
+            ToShell::Layout(0),
+            ToShell::Layout(2),
+        ];
         for message in to_shell
             .into_iter()
             .chain(keys)
             .chain([ToShell::Outside])
             .chain(screens)
+            .chain(layouts)
         {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
         }
@@ -546,6 +629,7 @@ mod tests {
             ToCompositor::Wake(LEVELS_NAMESPACE.to_owned()),
             ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned()),
             ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()),
+            ToCompositor::NextLayout,
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
@@ -562,6 +646,10 @@ mod tests {
             "clock seconds odometer white Martian Mono",
             "level",
             "level louder",
+            "layout",
+            "layout first",
+            "layouts\tfr",
+            "layoutsfr\tFrench",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }

@@ -6,8 +6,9 @@
 //! its connections (§4 group 9, §5) and its levels (§4 group 10, §5): a
 //! glass tint and a rim against the right edge of each output the
 //! compositor names, in its full or its mini form, the time at its top, the
-//! Wi-Fi ([`network`]) and Bluetooth ([`bluetooth`]) above the sound, the
-//! brightness and the battery near its bottom ([`levels`]).
+//! Wi-Fi ([`network`]), Bluetooth ([`bluetooth`]) and the keyboard's layout
+//! ([`layouts`]) above the sound, the brightness and the battery near its
+//! bottom ([`levels`]).
 //! The compositor blurs what is behind it; the shell draws the tint over
 //! that blur, or an opaque background when there is no blur. The line
 //! between the two is `hocus-link`.
@@ -23,6 +24,7 @@
 
 mod bluetooth;
 mod clock;
+mod layouts;
 mod levels;
 mod network;
 mod paste;
@@ -218,11 +220,12 @@ impl Bar {
         }
     }
 
-    /// The levels' surface's size, as the clock's.
+    /// The levels' surface's size, as the clock's; the mini form's taller
+    /// with the keyboard layout's button.
     fn levels_size(&self) -> (u32, u32) {
         match (self.switch, self.form) {
             (Some(_), _) | (None, Form::Full) => levels::draw::FULL_SURFACE,
-            (None, Form::Mini) => levels::draw::MINI_SURFACE,
+            (None, Form::Mini) => levels::draw::mini_surface(layouts::snapshot().shown().is_some()),
         }
     }
 
@@ -286,6 +289,9 @@ enum Message {
     /// The levels changed, for a shell alone (with the compositor, it
     /// wakes their surface instead).
     Levels,
+    /// The keyboard's layouts, as the compositor says them as the shell
+    /// connects: the row comes (or goes), the surfaces to their sizes.
+    Layouts(Vec<layouts::Layout>),
     Resized(window::Id, Size),
 }
 
@@ -385,6 +391,11 @@ impl Shell {
                 Task::none()
             }
             Message::Levels => Task::none(),
+            Message::Layouts(list) => {
+                layouts::set(list);
+                let ids: Vec<window::Id> = self.bars.keys().copied().collect();
+                Task::batch(ids.into_iter().map(|id| self.fit(id)))
+            }
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -458,6 +469,12 @@ impl Shell {
             }
             ToShell::Screens(names) => {
                 screens(names);
+                Task::none()
+            }
+            // Made into what the bar shows by the link first.
+            ToShell::Layouts(_) => Task::none(),
+            ToShell::Layout(index) => {
+                layouts::activate(index);
                 Task::none()
             }
         }
@@ -773,6 +790,8 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            // It opens none.
+            popover::Item::Keyboard => return None,
         };
         Some(panel)
     }
@@ -1045,6 +1064,23 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // popover draws for them.
                         Ok(ToShell::Screens(names)) => {
                             screens(names);
+                            continue;
+                        }
+                        // The layouts' names in the bar's language, read
+                        // from XKB's catalog off the loop; then a message,
+                        // once a connection: the surfaces take their sizes.
+                        Ok(ToShell::Layouts(list)) => {
+                            let lang = clock::time::Lang::of_messages();
+                            let made =
+                                tokio::task::spawn_blocking(move || layouts::made(&list, lang))
+                                    .await
+                                    .unwrap_or_default();
+                            let _ = output.send(Message::Layouts(made)).await;
+                            continue;
+                        }
+                        // The active layout: only the row draws.
+                        Ok(ToShell::Layout(index)) => {
+                            layouts::activate(index);
                             continue;
                         }
                         _ => {}

@@ -203,6 +203,9 @@ pub struct State {
     /// Keys whose press was a shortcut: their release is kept from the
     /// clients too.
     pub kept_keys: HashSet<Keycode>,
+    /// The keymap's layouts' XKB codes (`fr`, `fr(bepo)`), by group, for
+    /// the bar's row; empty when XKB refused them and took its defaults.
+    pub layout_codes: Vec<String>,
     /// Set once the compositor is asked to end, and why.
     pub ending: Option<Ending>,
 }
@@ -237,7 +240,9 @@ impl State {
             ..XkbConfig::default()
         };
         let added = seat.add_keyboard(xkb, keyboard.repeat_delay, keyboard.repeat_rate);
+        let mut layout_codes = crate::layouts::codes(&names);
         if let Err(err) = added {
+            layout_codes.clear();
             // A layout XKB does not know: its defaults, rather than no
             // keyboard at all.
             tracing::warn!(
@@ -344,6 +349,7 @@ impl State {
             backdrops: std::cell::RefCell::default(),
             session: None,
             kept_keys: HashSet::new(),
+            layout_codes,
             ending: None,
         })
     }

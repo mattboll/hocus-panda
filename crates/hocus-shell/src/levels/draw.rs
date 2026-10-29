@@ -7,8 +7,10 @@
 //! right-aligned; the group's bottom sits 61 px above the bar's, above the
 //! footer's place. Mini form: the sound's vertical gauge, then the
 //! battery's sign (26 × 15, filled to its level, a bolt on AC) over its
-//! percentage, as the 3.7 mockup draws them. A row whose service is
-//! missing is not drawn, and the group closes up from the bottom.
+//! percentage, as the 3.7 mockup draws them, and under them the keyboard
+//! layout's code in its button (with two layouts or more; 3.8). A row
+//! whose service is missing is not drawn, and the group closes up from the
+//! bottom.
 //!
 //! A gauge's length moves to a new value over 160 ms, CSS's `ease-out`;
 //! with reduced motion, or on the CPU, it changes at once. The surface asks
@@ -18,10 +20,11 @@
 //! sound's, the brightness's, the battery's (its row and the status line
 //! under it; the status line alone, for the power modes, without a
 //! battery); in the mini form the sound's gauge and the battery's sign, a
-//! hover opening them too. An item lights up under the pointer and while
-//! its popover is open, and wears a ring while it holds the keyboard; the
-//! wheel over the sound's changes the volume, over the brightness's the
-//! brightness, 5 % a notch. All of it draws this surface alone.
+//! hover opening them too; the layout's button asks for the next layout.
+//! An item lights up under the pointer and while its popover is open, and
+//! wears a ring while it holds the keyboard; the wheel over the sound's
+//! changes the volume, over the brightness's the brightness, 5 % a notch.
+//! All of it draws this surface alone.
 
 use std::time::{Duration, Instant};
 
@@ -44,7 +47,9 @@ use crate::{
 
 /// The surface: as wide as the bar inside its rim, from 41 px above the
 /// bar's bottom; tall enough for its form's group (the full one while the
-/// form switches), and the sound's item lit and ringed above it.
+/// form switches), and the sound's item lit and ringed above it. The mini
+/// form's grows by the keyboard layout's button and the gap over it when
+/// it shows ([`mini_surface`]).
 pub const BOTTOM: i32 = 41;
 pub const FULL_SURFACE: (u32, u32) = (194, 175);
 pub const MINI_SURFACE: (u32, u32) = (54, 128);
@@ -53,6 +58,11 @@ const FULL_RAISE: f32 = 20.0;
 /// The mini group's: its battery's item, lit and ringed, above the
 /// layout's place (the 3.7 mockup's 22 px and 14 px between).
 const MINI_RAISE: f32 = 10.0;
+/// The layout's button's bottom above the surface's, where the battery's
+/// item was: 14 px over the notifications' place (the 3.8 mockup), the
+/// battery's percentage 14 px over it.
+const KEY_BOTTOM: f32 = 6.0;
+const MINI_KEY: Size = crate::layouts::draw::MINI_BUTTON;
 /// From the bar's inside edges to the group's: 12 px padding less the rim.
 pub(crate) const SIDE: f32 = 11.0;
 
@@ -214,6 +224,25 @@ pub struct State {
     scroll: f32,
     after_notch: bool,
     scroll_up: bool,
+    /// The keyboard layout's button (the mini form).
+    keyboard: crate::layouts::draw::RowState,
+}
+
+impl State {
+    /// Whether the layout's button shows.
+    fn keys(&self) -> bool {
+        self.keyboard.layout.is_some()
+    }
+}
+
+/// The mini form's surface, with the layout's button (`keys`) or not.
+pub fn mini_surface(keys: bool) -> (u32, u32) {
+    let more = if keys {
+        (MINI_KEY.height + MINI_GAP + KEY_BOTTOM - MINI_RAISE) as u32
+    } else {
+        0
+    };
+    (MINI_SURFACE.0, MINI_SURFACE.1 + more)
 }
 
 impl<Message> canvas::Program<Message> for Levels {
@@ -256,6 +285,9 @@ impl<Message> canvas::Program<Message> for Levels {
         }
         state.levels = levels;
         state.at = Some(now);
+        state
+            .keyboard
+            .refresh(&crate::layouts::snapshot(), FULL_SURFACE.0 as f32);
         let status = self.words.status(&levels);
         if state.status.as_ref().map(|(s, _)| s) != status.as_ref() {
             state.status = status.map(|status| {
@@ -271,7 +303,7 @@ impl<Message> canvas::Program<Message> for Levels {
         }
         // The connections sit above the group: they follow its top.
         let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
-        crate::network::draw::levels_moved(&self.bar, group_tops(&levels, lines));
+        crate::network::draw::levels_moved(&self.bar, group_tops(&levels, lines, state.keys()));
         if state.zero.is_none()
             && let Ok(mut system) = iced::advanced::graphics::text::font_system().write()
         {
@@ -312,7 +344,19 @@ impl<Message> canvas::Program<Message> for Levels {
             Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
             _ => ITEM_RADIUS,
         };
-        for (item, rect) in self.items(state, bounds.size()) {
+        let size = bounds.size();
+        let items = self.items(state, size);
+        let in_bar = items
+            .iter()
+            .map(|(item, rect)| (*item, self.in_bar_rect(*rect, size)))
+            .collect();
+        popover::with(|c| c.set_items(&self.bar, hocus_link::LEVELS_NAMESPACE, in_bar));
+        for (item, rect) in items {
+            let radius = if item == Item::Keyboard {
+                crate::layouts::draw::MINI_RADIUS
+            } else {
+                radius
+            };
             let (open, focused) =
                 popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
             let lit = if open {
@@ -347,6 +391,7 @@ impl<Message> canvas::Program<Message> for Levels {
             bottom: bounds.height,
             zero,
             zero_bold,
+            keyboard: &state.keyboard,
         };
         frame.with_clip(column, |f| {
             for &(form, alpha) in &self.forms {
@@ -413,7 +458,8 @@ impl Levels {
             Form::Mini => {
                 let centre = (left + right) / 2.0;
                 if levels.sound.is_some() {
-                    let middle = mini_gauge_bottom(levels, size.height) - MINI_GAUGE / 2.0;
+                    let middle =
+                        mini_gauge_bottom(levels, size.height, state.keys()) - MINI_GAUGE / 2.0;
                     items.push((
                         Item::Sound,
                         Rectangle::new(
@@ -426,7 +472,7 @@ impl Levels {
                     ));
                 }
                 if levels.battery.is_some() {
-                    let bottom = size.height - MINI_RAISE + mini_battery_pad();
+                    let bottom = size.height - mini_raise(state.keys()) + mini_battery_pad();
                     items.push((
                         Item::Battery,
                         Rectangle::new(
@@ -437,6 +483,9 @@ impl Levels {
                             MINI_BATTERY,
                         ),
                     ));
+                }
+                if state.keys() {
+                    items.push((Item::Keyboard, mini_key(centre, size.height)));
                 }
             }
         }
@@ -614,9 +663,9 @@ fn full_rows(levels: &Snapshot, status: usize, bottom: f32) -> [Option<f32>; 3] 
 
 /// How far above the surface's bottom the group's top is, in the full
 /// form and in the mini: its first row's item (30 px) in the full form, the
-/// gauge (or the battery's item) in the mini; nothing shown, the group's
-/// bottom.
-pub fn group_tops(levels: &Snapshot, status: usize) -> (f32, f32) {
+/// gauge (or the battery's item, or the layout's button: `keys`) in the
+/// mini; nothing shown, the group's bottom.
+pub fn group_tops(levels: &Snapshot, status: usize, keys: bool) -> (f32, f32) {
     let height = FULL_SURFACE.1 as f32;
     let rows = full_rows(levels, status, height);
     let full = match rows.iter().flatten().copied().reduce(f32::min) {
@@ -624,13 +673,35 @@ pub fn group_tops(levels: &Snapshot, status: usize) -> (f32, f32) {
         None if status > 0 => FULL_RAISE + status as f32 * STATUS * LINE,
         None => FULL_RAISE,
     };
-    let height = MINI_SURFACE.1 as f32;
+    let height = mini_surface(keys).1 as f32;
     let mini = match (levels.sound, levels.battery) {
-        (Some(_), _) => height - (mini_gauge_bottom(levels, height) - MINI_GAUGE),
-        (None, Some(_)) => MINI_RAISE - mini_battery_pad() + MINI_BATTERY.height,
+        (Some(_), _) => height - (mini_gauge_bottom(levels, height, keys) - MINI_GAUGE),
+        (None, Some(_)) => mini_raise(keys) - mini_battery_pad() + MINI_BATTERY.height,
+        (None, None) if keys => KEY_BOTTOM + MINI_KEY.height,
         (None, None) => 0.0,
     };
     (full, mini)
+}
+
+/// The mini form's battery's percentage's bottom above the surface's:
+/// 14 px over the layout's button when it shows (`keys`).
+fn mini_raise(keys: bool) -> f32 {
+    if keys {
+        KEY_BOTTOM + MINI_KEY.height + MINI_GAP
+    } else {
+        MINI_RAISE
+    }
+}
+
+/// The layout's button, centred on `centre`, over a surface `bottom` tall.
+fn mini_key(centre: f32, bottom: f32) -> Rectangle {
+    Rectangle::new(
+        Point::new(
+            centre - MINI_KEY.width / 2.0,
+            bottom - KEY_BOTTOM - MINI_KEY.height,
+        ),
+        MINI_KEY,
+    )
 }
 
 /// The mini form's battery's sign and percentage, together.
@@ -644,11 +715,14 @@ fn mini_battery_pad() -> f32 {
 }
 
 /// The mini form's sound gauge's bottom: 14 px over the battery's item;
-/// without it, high enough for the gauge's light and ring under it.
-fn mini_gauge_bottom(levels: &Snapshot, bottom: f32) -> f32 {
+/// without it, its item 14 px over the layout's button (`keys`), or high
+/// enough for the gauge's light and ring under it.
+fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
+    let lit = (MINI_ITEM.height - MINI_GAUGE) / 2.0;
     match levels.battery {
-        Some(_) => bottom - MINI_RAISE + mini_battery_pad() - MINI_BATTERY.height - MINI_GAP,
-        None => bottom - (MINI_ITEM.height - MINI_GAUGE) / 2.0 - RING_OUT - RING,
+        Some(_) => bottom - mini_raise(keys) + mini_battery_pad() - MINI_BATTERY.height - MINI_GAP,
+        None if keys => bottom - KEY_BOTTOM - MINI_KEY.height - MINI_GAP - lit,
+        None => bottom - lit - RING_OUT - RING,
     }
 }
 
@@ -684,6 +758,8 @@ struct Drawn<'a> {
     bottom: f32,
     zero: f32,
     zero_bold: f32,
+    /// The keyboard layout's button.
+    keyboard: &'a crate::layouts::draw::RowState,
 }
 
 impl Drawn<'_> {
@@ -777,10 +853,15 @@ impl Drawn<'_> {
     fn mini(&self, f: &mut Frame, centre: f32, alpha: f32) {
         let bottom = self.bottom;
         let levels = self.levels;
+        let keys = self.keyboard.layout.is_some();
+        if keys {
+            crate::layouts::draw::mini(f, mini_key(centre, bottom), self.keyboard, alpha);
+        }
+        let raise = mini_raise(keys);
         if let Some(battery) = levels.battery {
             let colour = band_colour(battery.band());
             let digits = battery.shown().to_string();
-            let middle = bottom - MINI_RAISE - MINI_VALUE * LINE / 2.0;
+            let middle = bottom - raise - MINI_VALUE * LINE / 2.0;
             let mut x = centre - self.zero_bold * digits.len() as f32 / 2.0;
             for ch in digits.chars() {
                 cell(
@@ -794,7 +875,7 @@ impl Drawn<'_> {
                 );
                 x += self.zero_bold;
             }
-            let top = bottom - MINI_RAISE - mini_battery_content();
+            let top = bottom - raise - mini_battery_content();
             battery_sign(
                 f,
                 Rectangle::new(Point::new(centre - MINI_SIGN.width / 2.0, top), MINI_SIGN),
@@ -808,7 +889,7 @@ impl Drawn<'_> {
             );
         }
         if let Some(sound) = levels.sound {
-            let bottom = mini_gauge_bottom(levels, bottom);
+            let bottom = mini_gauge_bottom(levels, bottom, keys);
             let fill = if sound.muted {
                 Fill::Flat(MUTED_FILL)
             } else {
@@ -1294,7 +1375,12 @@ mod tests {
         assert!((light - sound - ROW - ROW_GAP).abs() < 0.01);
         // Alone in the mini form, the gauge keeps its light and its ring
         // on the surface.
-        assert_eq!(mini_gauge_bottom(&levels, 97.0), 97.0 - 8.0 - 5.0);
+        assert_eq!(mini_gauge_bottom(&levels, 97.0, false), 97.0 - 8.0 - 5.0);
+        // Over the layout's button: its item 14 px above it.
+        assert_eq!(
+            mini_gauge_bottom(&levels, 97.0, true),
+            97.0 - 6.0 - 30.0 - 14.0 - 8.0
+        );
     }
 
     #[test]
@@ -1380,6 +1466,18 @@ mod tests {
             (item_bottom - (1.0 + 10.0 + 22.0 + 14.0)).abs() < 0.1,
             "{item_bottom}"
         );
+        // With the layout's button there, 44 × 30 (the 3.8 mockup): its
+        // bottom there, the battery's percentage 14 px over its top, and
+        // the whole group still lit and ringed on its taller surface.
+        assert_eq!(BOTTOM as f32 + KEY_BOTTOM, 1.0 + 10.0 + 22.0 + 14.0);
+        const { assert!(KEY_BOTTOM >= RING_OUT + RING) };
+        assert_eq!(mini_raise(true), KEY_BOTTOM + 30.0 + 14.0);
+        let keys = mini_surface(true);
+        assert_eq!(keys, (54, 168));
+        let mini =
+            mini_raise(true) - mini_battery_pad() + MINI_BATTERY.height + MINI_GAP + MINI_GAUGE;
+        assert!(mini + lit <= keys.1 as f32, "{mini} + {lit}");
+        assert_eq!(mini_surface(false), MINI_SURFACE);
     }
 
     fn levels(form: Form) -> Levels {
@@ -1468,6 +1566,41 @@ mod tests {
             panic!("{items:?}");
         };
         assert_eq!(sign.size(), MINI_BATTERY);
+        assert!(gauge.y + gauge.height + 5.0 < sign.y);
+        assert!(gauge.y >= RING_OUT + RING);
+        // With two layouts, their button under the battery, apart, and
+        // everything within its taller surface.
+        let (w, h) = mini_surface(true);
+        let size = Size::new(w as f32, h as f32);
+        let mut with_keys = state(all, 1);
+        with_keys.keyboard.refresh(
+            &crate::layouts::Layouts {
+                list: vec![
+                    crate::layouts::Layout {
+                        name: "Français".into(),
+                        code: "FR".into(),
+                    },
+                    crate::layouts::Layout {
+                        name: "Anglais (US)".into(),
+                        code: "US".into(),
+                    },
+                ],
+                active: 0,
+            },
+            194.0,
+        );
+        let items = levels(Form::Mini).items(&with_keys, size);
+        let [
+            (Item::Sound, gauge),
+            (Item::Battery, sign),
+            (Item::Keyboard, key),
+        ] = items.as_slice()
+        else {
+            panic!("{items:?}");
+        };
+        assert_eq!(key.size(), Size::new(44.0, 30.0));
+        assert_eq!(key.y + key.height, size.height - KEY_BOTTOM);
+        assert!(sign.y + sign.height < key.y);
         assert!(gauge.y + gauge.height + 5.0 < sign.y);
         assert!(gauge.y >= RING_OUT + RING);
     }
