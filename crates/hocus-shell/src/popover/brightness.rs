@@ -19,7 +19,6 @@
 
 use std::time::{Duration, Instant};
 
-use hocus_link::POPOVER_WIDTH;
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
     widget::{
@@ -30,35 +29,27 @@ use iced::{
 };
 
 use super::{
-    Event as Seen, event,
-    sound::{Track, slider},
-    wifi::{MANROPE_SEMIBOLD, background, measure, text, wrap},
+    Event as Seen, Pressed, event,
+    kit::{
+        self, HEADER, HEADER_TOP, ICON, Input, LEFT, MANROPE_SEMIBOLD, Pointer, RIGHT, Track,
+        Wheel, rounded, text,
+    },
 };
 use crate::levels::{
     self,
-    draw::{DIM, FAINT, LIGHT_GAUGE, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, cell, ring, sun},
+    draw::{DIM, FAINT, LIGHT_GAUGE, MANROPE, TEXT, ring, sun},
     model::{BRIGHTNESS_FLOOR, Keyboard, STEP, Words},
     power::Ask,
 };
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
-const BORDER: f32 = 1.0;
-const PAD_TOP: f32 = 12.0;
-const PAD_SIDE: f32 = 14.0;
-const PAD_BOTTOM: f32 = 14.0;
 const GAP: f32 = 6.0;
-const LEFT: f32 = BORDER + PAD_SIDE;
-const RIGHT: f32 = POPOVER_WIDTH as f32 - BORDER - PAD_SIDE;
-const HEADER: f32 = 32.0;
-const HEADER_TOP: f32 = BORDER + PAD_TOP;
-const TITLE: f32 = 16.0;
-const NAME: f32 = 13.0;
-/// A row: its icon in a 32 px slot, then the slider or the levels.
+/// A row: its icon in a 32 px slot, then the slider or the levels, 8 px
+/// apart.
 const ROW: f32 = 36.0;
 const SLOT: f32 = 32.0;
-const ICON: f32 = 18.0;
-const ROW_GAP: f32 = 8.0;
+const BESIDE: f32 = 8.0;
 const SLIDER: f32 = 24.0;
 const TRACK: f32 = 8.0;
 const KNOB: f32 = 16.0;
@@ -85,18 +76,13 @@ const ASKED_FOR: Duration = Duration::from_secs(1);
 const LIGHT_TOP: f32 = HEADER_TOP + HEADER + GAP;
 const KEYBOARD_TOP: f32 = LIGHT_TOP + ROW + GAP;
 
-/// The words of the shell's language, for what the height measures.
-fn words() -> Words {
-    Words::new(crate::clock::time::Lang::of_messages())
-}
-
 /// Each other screen's line, broken to fit.
 fn notes(words: Words, screens: &[String]) -> Vec<Vec<String>> {
     screens
         .iter()
         .map(|name| {
-            wrap(&words.own_buttons(name), RIGHT - LEFT, |t| {
-                measure(t, NOTE, MANROPE)
+            kit::wrap(&words.own_buttons(name), RIGHT - LEFT, |t| {
+                kit::measure(t, NOTE, MANROPE)
             })
         })
         .collect()
@@ -134,7 +120,7 @@ impl Layout {
     }
 
     fn height(&self) -> u32 {
-        (self.end + PAD_BOTTOM + BORDER).round() as u32
+        kit::height(self.end)
     }
 }
 
@@ -143,7 +129,7 @@ pub fn opening() {}
 
 /// Its height for what it shows now.
 pub fn height() -> u32 {
-    let words = words();
+    let words = kit::words();
     let keyboard = levels::snapshot().keyboard.is_some();
     Layout::of(keyboard, notes(words, &levels::screens())).height()
 }
@@ -187,17 +173,11 @@ pub struct State {
     made_for: Option<(bool, Vec<String>)>,
     /// The `0`'s advance of the value's font, for tabular figures.
     zero: Option<f32>,
-    hover: Option<Target>,
-    pressed: Option<Target>,
+    pointer: Pointer<Target>,
     dragging: Option<Target>,
     asked: [Option<(Asked, Instant)>; 2],
     focus: Option<Target>,
-    pointer: Option<Point>,
-    inside: bool,
-    /// A wheel's notch comes as lines, then as pixels, which count for
-    /// nothing; a touchpad's pixels add up to notches.
-    after_notch: bool,
-    scroll: f32,
+    wheel: Wheel,
 }
 
 impl State {
@@ -243,8 +223,8 @@ impl State {
 /// The brightness's slider: from the icon's slot to the value.
 fn track(top: f32) -> Track {
     Track {
-        left: LEFT + SLOT + ROW_GAP,
-        right: RIGHT - VALUE_BOX - ROW_GAP,
+        left: LEFT + SLOT + BESIDE,
+        right: RIGHT - VALUE_BOX - BESIDE,
         middle: top + ROW / 2.0,
         height: TRACK,
         knob: KNOB,
@@ -262,7 +242,7 @@ fn light_at(share: f32) -> f32 {
 
 /// The keyboard's levels' strip, and level `i`'s button in it.
 fn strip() -> Rectangle {
-    let left = LEFT + SLOT + ROW_GAP;
+    let left = LEFT + SLOT + BESIDE;
     let height = SEGMENT + 2.0 * STRIP_PAD;
     Rectangle::new(
         Point::new(left, KEYBOARD_TOP + (ROW - height) / 2.0),
@@ -286,15 +266,9 @@ fn segment(i: u32, levels: u32) -> Rectangle {
 impl Target {
     /// Where it is, and its corners' radius.
     fn shape(self, keyboard: Option<Keyboard>) -> (Rectangle, f32) {
-        let slider = |track: Track| {
-            Rectangle::new(
-                Point::new(track.left, track.middle - SLIDER / 2.0),
-                Size::new(track.right - track.left, SLIDER),
-            )
-        };
         match self {
-            Self::Light => (slider(track(LIGHT_TOP)), SLIDER / 2.0),
-            Self::Keys => (slider(track(KEYBOARD_TOP)), SLIDER / 2.0),
+            Self::Light => (track(LIGHT_TOP).rect(SLIDER), SLIDER / 2.0),
+            Self::Keys => (track(KEYBOARD_TOP).rect(SLIDER), SLIDER / 2.0),
             Self::Level(i) => (
                 segment(i, keyboard.map_or(1, Keyboard::levels)),
                 SEGMENT_RADIUS,
@@ -313,18 +287,11 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(now)) => self.refresh(state, *now),
-            _ if !super::with(|c| c.is_open(self.id)) => None,
-            iced::Event::Mouse(event) => {
-                let at = crate::levels::draw::pointer(event, bounds, cursor, state.pointer);
-                state.pointer = at;
-                self.mouse(state, event, at)
-            }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                self.key(state, key, modifiers.shift())
-            }
-            _ => None,
+        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
+            Input::Redraw(now) => self.refresh(state, now),
+            Input::Mouse(event, at) => self.mouse(state, event, at),
+            Input::Key(pressed) => self.key(state, &pressed),
+            Input::Nothing => None,
         }
     }
 
@@ -337,11 +304,12 @@ impl<Message> canvas::Program<Message> for Panel {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        background(&mut frame, bounds.size(), self.glass);
+        kit::background(&mut frame, bounds.size(), self.glass);
         let Some(layout) = &state.layout else {
             return vec![frame.into_geometry()];
         };
-        self.header(&mut frame);
+        kit::title(&mut frame, self.words.brightness());
+        kit::title_aside(&mut frame, self.words.built_in().to_owned());
         // The panel's brightness.
         let middle = LIGHT_TOP + ROW / 2.0;
         sun(
@@ -349,29 +317,21 @@ impl<Message> canvas::Program<Message> for Panel {
             Point::new(LEFT + (SLOT - ICON) / 2.0, middle - ICON / 2.0),
         );
         let light = state.light();
-        slider(
+        kit::slider(
             &mut frame,
             track(LIGHT_TOP),
             light_share(light),
             Some(LIGHT_GAUGE),
         );
-        let zero = state.zero.unwrap_or(VALUE * 0.6);
+        let zero = state.zero.unwrap_or(kit::ZERO);
         if state.brightness.is_some() {
-            number(&mut frame, Point::new(RIGHT, middle), light, zero);
+            kit::figures(&mut frame, Point::new(RIGHT, middle), light, zero, DIM);
         }
         if let Some(keyboard) = state.keyboard.filter(|_| layout.keyboard) {
             self.keyboard(&mut frame, state, keyboard, zero);
         }
         for (top, lines) in &layout.notes {
-            for (i, line) in lines.iter().enumerate() {
-                let mut note = text(
-                    line.clone(),
-                    Point::new(LEFT, top + (i as f32 + 0.5) * NOTE * NOTE_LINE),
-                    NOTE,
-                    FAINT,
-                    Alignment::Left,
-                );
-                note.line_height = iced::widget::text::LineHeight::Relative(NOTE_LINE);
+            for note in kit::lines(lines, (LEFT, *top), NOTE, NOTE_LINE, FAINT) {
                 frame.fill_text(note);
             }
         }
@@ -388,23 +348,7 @@ impl<Message> canvas::Program<Message> for Panel {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.dragging.is_some() {
-            mouse::Interaction::Grabbing
-        } else if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
-    }
-}
-
-/// `value` right-aligned on `at` in tabular figures.
-fn number(f: &mut Frame, at: Point, value: f32, zero: f32) {
-    let digits = (value.round() as u32).to_string();
-    let mut x = at.x - zero * digits.len() as f32;
-    for ch in digits.chars() {
-        cell(f, ch, x + zero / 2.0, at.y, VALUE, MANROPE, DIM);
-        x += zero;
+        state.pointer.interaction(state.dragging.is_some())
     }
 }
 
@@ -412,14 +356,8 @@ impl Panel {
     /// What it shows, read afresh: the brightness, the keyboard's
     /// backlight, the other screens.
     fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        // Keys that reached another of the shell's surfaces (see
-        // `popover::key`).
-        let keys = super::take_keys();
-        if !keys.is_empty() && super::with(|c| c.is_open(self.id)) {
-            for pressed in keys {
-                let shift = pressed.modifiers.shift();
-                let _: Option<canvas::Action<Message>> = self.key(state, &pressed.key, shift);
-            }
+        for pressed in kit::keys(self.id) {
+            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
         let snapshot = levels::snapshot();
         if state.layout.is_none() || state.keyboard != snapshot.keyboard {
@@ -443,8 +381,7 @@ impl Panel {
         if state.zero.is_none()
             && let Ok(mut system) = iced::advanced::graphics::text::font_system().write()
         {
-            state.zero =
-                crate::clock::measure(system.raw(), MANROPE, VALUE, VALUE * LINE).map(|m| m.zero);
+            state.zero = kit::zero(system.raw());
         }
         if state
             .focus
@@ -461,7 +398,7 @@ impl Panel {
         ];
         let mut until = None;
         for (asked, said) in state.asked.iter_mut().zip(said) {
-            let Some((what, since)) = *asked else {
+            let Some((what, _)) = *asked else {
                 continue;
             };
             let dragged = matches!(
@@ -471,34 +408,11 @@ impl Panel {
             if dragged {
                 continue;
             }
-            if said == Some(what) || now >= since + ASKED_FOR {
-                *asked = None;
-            } else {
-                until =
-                    Some(until.map_or(since + ASKED_FOR, |u: Instant| u.min(since + ASKED_FOR)));
+            if let Some(at) = kit::awaited(asked, said == Some(what), now, ASKED_FOR) {
+                until = Some(until.map_or(at, |u: Instant| u.min(at)));
             }
         }
         until.map(canvas::Action::request_redraw_at)
-    }
-
-    fn header(&self, f: &mut Frame) {
-        let middle = HEADER_TOP + HEADER / 2.0;
-        let mut title = text(
-            self.words.brightness().to_owned(),
-            Point::new(LEFT, middle),
-            TITLE,
-            TEXT,
-            Alignment::Left,
-        );
-        title.font = MANROPE_BOLD;
-        f.fill_text(title);
-        f.fill_text(text(
-            self.words.built_in().to_owned(),
-            Point::new(RIGHT, middle),
-            NAME,
-            FAINT,
-            Alignment::Right,
-        ));
     }
 
     /// The keyboard's row: its icon, then its levels or its slider.
@@ -511,45 +425,39 @@ impl Panel {
         let level = state.level().min(keyboard.max);
         if !keyboard.segmented() {
             let share = level as f32 / keyboard.max as f32;
-            slider(f, track(KEYBOARD_TOP), share, Some(LIGHT_GAUGE));
-            number(f, Point::new(RIGHT, middle), share * 100.0, zero);
+            kit::slider(f, track(KEYBOARD_TOP), share, Some(LIGHT_GAUGE));
+            kit::figures(f, Point::new(RIGHT, middle), share * 100.0, zero, DIM);
             return;
         }
-        let strip = strip();
-        f.fill(
-            &Path::rounded_rectangle(strip.position(), strip.size(), STRIP_RADIUS.into()),
-            STRIP,
-        );
+        f.fill(&rounded(strip(), STRIP_RADIUS), STRIP);
         let names = self.words.keyboard_levels(keyboard.levels());
         for i in 0..keyboard.levels() {
             let rect = segment(i, keyboard.levels());
             let chosen = i == level;
             let fill = if chosen {
                 Some(CHOSEN)
-            } else if state.hover == Some(Target::Level(i)) {
+            } else if state.pointer.hover == Some(Target::Level(i)) {
                 Some(SEGMENT_HOVER)
             } else {
                 None
             };
             if let Some(fill) = fill {
-                f.fill(
-                    &Path::rounded_rectangle(rect.position(), rect.size(), SEGMENT_RADIUS.into()),
-                    fill,
-                );
+                f.fill(&rounded(rect, SEGMENT_RADIUS), fill);
             }
-            let mut name = text(
-                names
-                    .get(i as usize)
-                    .copied()
-                    .unwrap_or_default()
-                    .to_owned(),
-                rect.center(),
-                SEGMENT_TEXT,
-                if chosen { TEXT } else { DIM },
-                Alignment::Center,
-            );
-            name.font = MANROPE_SEMIBOLD;
-            f.fill_text(name);
+            f.fill_text(kit::text_in(
+                MANROPE_SEMIBOLD,
+                text(
+                    names
+                        .get(i as usize)
+                        .copied()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    rect.center(),
+                    SEGMENT_TEXT,
+                    if chosen { TEXT } else { DIM },
+                    Alignment::Center,
+                ),
+            ));
         }
     }
 
@@ -568,29 +476,23 @@ impl Panel {
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                if !state.inside && at.is_some() {
-                    state.inside = true;
-                    event(Seen::PopoverEnter);
-                }
+                state.pointer.moved();
                 if let (Some(slider), Some(at)) = (state.dragging, at) {
                     self.slide(state, slider, at.x);
                     return redraw;
                 }
-                if state.hover != target {
-                    state.hover = target;
+                if state.pointer.over(target) {
                     return redraw;
                 }
                 None
             }
             mouse::Event::CursorLeft => {
-                state.inside = false;
-                event(Seen::PopoverLeave);
-                state.hover = None;
+                state.pointer.left();
                 redraw
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
                 state.focus = None;
-                state.pressed = target;
+                state.pointer.pressed = target;
                 if let (Some(slider @ (Target::Light | Target::Keys)), Some(at)) = (target, at) {
                     state.dragging = Some(slider);
                     self.slide(state, slider, at.x);
@@ -598,12 +500,12 @@ impl Panel {
                 redraw
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                let pressed = state.pressed.take();
+                let clicked = state.pointer.release(target);
                 if state.dragging.take().is_some() {
                     for (_, since) in state.asked.iter_mut().flatten() {
                         *since = Instant::now();
                     }
-                } else if let Some(Target::Level(i)) = pressed.filter(|p| Some(*p) == target) {
+                } else if let Some(Target::Level(i)) = clicked {
                     state.ask(Asked::Keys(i));
                 }
                 redraw
@@ -614,23 +516,7 @@ impl Panel {
                 if !at.is_some_and(|at| row.contains(at)) {
                     return None;
                 }
-                let notches = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => {
-                        state.after_notch = true;
-                        state.scroll = 0.0;
-                        y.signum() as i32
-                    }
-                    mouse::ScrollDelta::Pixels { .. } if state.after_notch => {
-                        state.after_notch = false;
-                        0
-                    }
-                    mouse::ScrollDelta::Pixels { y, .. } => {
-                        state.scroll += y;
-                        let n = (state.scroll / 15.0).trunc();
-                        state.scroll -= n * 15.0;
-                        n as i32
-                    }
-                };
+                let notches = state.wheel.notches(delta);
                 if notches != 0 {
                     let light =
                         (state.light() + notches as f32 * STEP).clamp(BRIGHTNESS_FLOOR, 100.0);
@@ -663,26 +549,16 @@ impl Panel {
     fn key<Message>(
         &self,
         state: &mut State,
-        key: &keyboard::Key,
-        shift: bool,
+        pressed: &Pressed,
     ) -> Option<canvas::Action<Message>> {
         use keyboard::{Key, key::Named};
-        let order = state.targets();
-        let at = state.focus.and_then(|f| order.iter().position(|t| *t == f));
-        match key {
+        match &pressed.key {
             Key::Named(Named::Escape) => {
                 event(Seen::Escape);
                 return Some(canvas::Action::capture());
             }
             Key::Named(Named::Tab) => {
-                let n = order.len() as isize;
-                let by = if shift { -1 } else { 1 };
-                let next = match at {
-                    Some(i) => (i as isize + by).rem_euclid(n),
-                    None if by > 0 => 0,
-                    None => n - 1,
-                };
-                state.focus = order.get(next as usize).copied();
+                state.focus = kit::step(&state.targets(), state.focus, pressed.modifiers.shift());
             }
             Key::Named(Named::Enter | Named::Space) => {
                 if let Some(Target::Level(i)) = state.focus {
