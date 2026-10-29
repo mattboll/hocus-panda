@@ -9,8 +9,15 @@ use anyhow::Context;
 use hocus_compositor::{Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_layer, delegate_output, delegate_pointer, delegate_registry,
-    delegate_seat, delegate_shm, delegate_xdg_popup, delegate_xdg_shell, delegate_xdg_window,
+    data_device_manager::{
+        DataDeviceManagerState, WritePipe,
+        data_device::{DataDevice, DataDeviceHandler},
+        data_offer::{DataOfferHandler, DragOffer},
+        data_source::{CopyPasteSource, DataSourceHandler},
+    },
+    delegate_compositor, delegate_data_device, delegate_layer, delegate_output, delegate_pointer,
+    delegate_registry, delegate_seat, delegate_shm, delegate_xdg_popup, delegate_xdg_shell,
+    delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -32,9 +39,12 @@ use smithay_client_toolkit::{
     shm::{Shm, ShmHandler, slot::SlotPool},
 };
 use wayland_client::{
-    Connection, QueueHandle,
+    Connection, Dispatch, QueueHandle,
     globals::registry_queue_init,
-    protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+    protocol::{
+        wl_callback, wl_data_device, wl_data_device_manager, wl_data_source, wl_output, wl_pointer,
+        wl_seat, wl_shm, wl_surface,
+    },
 };
 
 pub const WAIT: Duration = Duration::from_secs(10);
@@ -150,6 +160,19 @@ pub enum Shows {
 #[derive(Debug, Clone, Copy)]
 pub enum Command {
     Fullscreen(bool),
+    /// Takes the clipboard (it must hold the keyboard), then says
+    /// [`Event::Copied`] once the compositor has it.
+    Copy(Clip),
+}
+
+/// What a client puts on the clipboard: its types, and the text it writes
+/// for any of them; or, `hang`ing, the pipe kept open and nothing written,
+/// as a client that stopped answering.
+#[derive(Debug, Clone, Copy)]
+pub struct Clip {
+    pub types: &'static [&'static str],
+    pub text: &'static str,
+    pub hang: bool,
 }
 
 /// What a client tells the test.
@@ -160,6 +183,8 @@ pub enum Event {
     PopupDone,
     /// The compositor asked its window to close; it stays.
     CloseRequested,
+    /// The compositor has its clipboard.
+    Copied,
 }
 
 /// A client running on its thread.
@@ -209,6 +234,7 @@ fn run_client(
     let compositor = CompositorState::bind(&globals, &qh).context("no wl_compositor")?;
     let shm = Shm::bind(&globals, &qh).context("no wl_shm")?;
     let xdg = XdgShell::bind(&globals, &qh).ok();
+    let data = DataDeviceManagerState::bind(&globals, &qh).ok();
     let mut client = Client {
         registry: RegistryState::new(&globals),
         outputs: OutputState::new(&globals, &qh),
@@ -226,6 +252,10 @@ fn run_client(
         events: events.clone(),
         compositor,
         xdg,
+        data,
+        device: None,
+        clip: None,
+        hung: Vec::new(),
     };
     match shows {
         Some(Shows::Window {
@@ -300,11 +330,11 @@ fn run_client(
     loop {
         queue.dispatch_pending(&mut client)?;
         while let Ok(command) = commands.try_recv() {
-            if let Some(window) = &client.window {
-                match command {
-                    Command::Fullscreen(true) => window.set_fullscreen(None),
-                    Command::Fullscreen(false) => window.unset_fullscreen(),
-                }
+            match (command, &client.window) {
+                (Command::Fullscreen(true), Some(window)) => window.set_fullscreen(None),
+                (Command::Fullscreen(false), Some(window)) => window.unset_fullscreen(),
+                (Command::Fullscreen(_), None) => {}
+                (Command::Copy(clip), _) => client.copy(conn, &qh, clip),
             }
         }
         queue.flush()?;
@@ -341,9 +371,29 @@ struct Client {
     events: mpsc::Sender<Event>,
     compositor: CompositorState,
     xdg: Option<XdgShell>,
+    data: Option<DataDeviceManagerState>,
+    device: Option<DataDevice>,
+    /// What it offers on the clipboard, and its source.
+    clip: Option<(Clip, CopyPasteSource)>,
+    /// The pipes it was asked to write to and never will.
+    hung: Vec<WritePipe>,
 }
 
 impl Client {
+    fn copy(&mut self, conn: &Connection, qh: &QueueHandle<Self>, clip: Clip) {
+        let (Some(data), Some(seat)) = (&self.data, self.seats.seats().next()) else {
+            return;
+        };
+        let device = self
+            .device
+            .get_or_insert_with(|| data.get_data_device(qh, &seat));
+        let source = data.create_copy_paste_source(qh, clip.types.iter().copied());
+        // The compositor checks the keyboard, not the serial.
+        source.set_selection(device, 0);
+        self.clip = Some((clip, source));
+        conn.display().sync(qh, ());
+    }
+
     /// Fills `surface` with a solid colour, `size` large.
     fn draw(&mut self, surface: &wl_surface::WlSurface, size: (u32, u32)) {
         self.draw_framed(surface, size, 0);
@@ -593,6 +643,145 @@ delegate_xdg_window!(Client);
 delegate_xdg_popup!(Client);
 delegate_layer!(Client);
 delegate_registry!(Client);
+delegate_data_device!(Client);
+
+/// The answer to the sync after a copy.
+impl Dispatch<wl_callback::WlCallback, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        _: wl_callback::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let _ = client.events.send(Event::Copied);
+    }
+}
+
+impl DataSourceHandler for Client {
+    fn accept_mime(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_source::WlDataSource,
+        _: Option<String>,
+    ) {
+    }
+
+    fn send_request(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_source::WlDataSource,
+        _: String,
+        mut pipe: WritePipe,
+    ) {
+        use std::io::Write;
+        let Some((clip, _)) = &self.clip else {
+            return;
+        };
+        if clip.hang {
+            self.hung.push(pipe);
+        } else {
+            let _ = pipe.write_all(clip.text.as_bytes());
+        }
+    }
+
+    fn cancelled(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_source::WlDataSource,
+    ) {
+    }
+
+    fn dnd_dropped(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_source::WlDataSource,
+    ) {
+    }
+
+    fn dnd_finished(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_source::WlDataSource,
+    ) {
+    }
+
+    fn action(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_source::WlDataSource,
+        _: wl_data_device_manager::DndAction,
+    ) {
+    }
+}
+
+impl DataDeviceHandler for Client {
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_device::WlDataDevice,
+        _: f64,
+        _: f64,
+        _: &wl_surface::WlSurface,
+    ) {
+    }
+
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_data_device::WlDataDevice) {}
+
+    fn motion(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_device::WlDataDevice,
+        _: f64,
+        _: f64,
+    ) {
+    }
+
+    fn selection(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_device::WlDataDevice,
+    ) {
+    }
+
+    fn drop_performed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_data_device::WlDataDevice,
+    ) {
+    }
+}
+
+impl DataOfferHandler for Client {
+    fn source_actions(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: wl_data_device_manager::DndAction,
+    ) {
+    }
+
+    fn selected_action(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: wl_data_device_manager::DndAction,
+    ) {
+    }
+}
 
 /// Opens a window and waits until the compositor has mapped it.
 pub fn open_with(

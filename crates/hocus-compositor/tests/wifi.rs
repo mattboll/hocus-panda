@@ -10,6 +10,11 @@
 //! on a French keyboard and handed to NetworkManager exactly; a wrong one
 //! said and kept; `Esc` folding, then closing; the switch, Disconnect, the
 //! sign-in page opened; the password in no log; nothing drawn at rest.
+//! A password pasted (issue #453): copied by a test client with its line
+//! break, `Ctrl+V` and `Shift+Insert` in the field hand NetworkManager
+//! exactly the password; out of the field, from an empty clipboard, one
+//! without text, or a client that never writes, nothing is pasted and the
+//! field goes on taking keys.
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 
@@ -24,7 +29,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, KEY_ESC, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_TAB, WAIT, chord, wait};
+use common::{
+    BTN_LEFT, ClientHandle, Clip, Command, Event, KEY_ESC, KEY_LEFTCTRL, KEY_LEFTMETA,
+    KEY_LEFTSHIFT, KEY_TAB, WAIT, chord, wait,
+};
 use fakes::Fakes;
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use nm::{Call, FakeAp, Nm, Security, Setup};
@@ -45,6 +53,8 @@ const KEY_Y: u32 = 21;
 const KEY_1: u32 = 2;
 const KEY_0: u32 = 11;
 const KEY_LEFTBRACE: u32 = 26;
+const KEY_V: u32 = 47;
+const KEY_INSERT: u32 = 110;
 
 /// The password typed in the tests: an obvious one, with what a French
 /// keyboard types through Shift, AltGr and a dead key.
@@ -356,6 +366,42 @@ impl Bed {
             wait(&mut self.hp, Duration::from_millis(50))?;
         }
         anyhow::bail!("the icon's parts lit: {seen:?}, not {count}")
+    }
+
+    /// A window that takes the keyboard puts `clip` on the clipboard; it
+    /// keeps offering it while it runs.
+    fn copy(&mut self, clip: Clip) -> anyhow::Result<ClientHandle> {
+        let (rect, client) = common::open_with(&mut self.hp, "test.copy", (300, 200), false)?;
+        self.copy_again(&client, rect, clip)?;
+        Ok(client)
+    }
+
+    /// The window `client` at `rect` takes the keyboard and copies `clip`.
+    fn copy_again(&mut self, client: &ClientHandle, rect: Rect, clip: Clip) -> anyhow::Result<()> {
+        self.click((
+            f64::from(rect.x + rect.width / 2),
+            f64::from(rect.y + rect.height / 2),
+        ));
+        wait(&mut self.hp, Duration::from_millis(100))?;
+        client.commands.send(Command::Copy(clip))?;
+        let copied = self.hp.dispatch_until(WAIT, |_| {
+            client.events.try_iter().any(|e| e == Event::Copied)
+        })?;
+        anyhow::ensure!(copied, "the clipboard was never taken");
+        Ok(())
+    }
+
+    /// Opens the popover, `rows` networks, and unfolds row `i`'s field.
+    fn unfold(&mut self, rows: usize, i: usize) -> anyhow::Result<Rect> {
+        let item = self.item();
+        self.click(item);
+        let rect = popover(height(&[], rows, 0.0));
+        self.popover_is(Some(rect))?;
+        self.click(row(rect, &[], i));
+        self.popover_is(Some(popover(height(&[], rows, FORM))))?;
+        // Drawn unfolded, so that the keys find the field.
+        wait(&mut self.hp, Duration::from_millis(300))?;
+        Ok(rect)
     }
 
     /// Types `PASSWORD` on the French keyboard: `azerty`, `&`, `1` (Shift),
@@ -1006,5 +1052,183 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     hp.button(BTN_LEFT, false);
     wait(&mut hp, Duration::from_millis(500))?;
     assert!(hp.popover_surfaces().is_empty());
+    Ok(())
+}
+
+/// What the copying client offers: text, with the line break a password
+/// copied from a file ends with.
+const COPIED: Clip = Clip {
+    types: &["text/plain;charset=utf-8", "text/plain"],
+    text: "azerty&1@ê\n",
+    hang: false,
+};
+
+#[test]
+fn a_password_pasted_with_ctrl_v_reaches_networkmanager_without_its_line_break()
+-> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: around(),
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, true)?;
+    let _copier = bed.copy(COPIED)?;
+    let item = bed.item();
+    bed.click(item);
+    let rect = popover(height(&[], 8, 0.0));
+    bed.popover_is(Some(rect))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // No field yet: nothing to paste into.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // The Freebox's field; then the eye holds the keyboard: nothing either.
+    bed.click(row(rect, &[], 2));
+    bed.popover_is(Some(popover(height(&[], 8, FORM))))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    bed.press(KEY_TAB);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // Back in the field: pasted, without its line break.
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_TAB]);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    bed.logged("the clipboard's text pasted into the field")?;
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: FREEBOX.to_owned(),
+        psk: Some(PASSWORD.to_owned()),
+    })?;
+    let joined = bed
+        .hp
+        .dispatch_until(WAIT, |_| bed_connected(&bed.nm, FREEBOX))?;
+    assert!(joined, "connected to {:?}", bed.nm.connected());
+    // Pasted once only: the one call.
+    let tries = bed
+        .nm
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, Call::AddAndActivate { .. }))
+        .count();
+    assert_eq!(tries, 1, "{:?}", bed.nm.calls());
+    // Nothing the shell logged, every crate at trace, says it.
+    let log = plain(bed.log.as_ref().expect("a log"));
+    for part in [PASSWORD, "azerty&", "rty&1@"] {
+        assert!(!log.contains(part), "the log says {part:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn shift_insert_pastes_too_and_clears_a_wrong_password() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: vec![
+            FakeAp::new(SNCF, 62, Security::Open),
+            FakeAp::new(FREEBOX, 58, Security::Psk("the-right-one")),
+        ],
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, false)?;
+    let _copier = bed.copy(Clip {
+        text: "azerty&1@ê\r\n",
+        ..COPIED
+    })?;
+    bed.unfold(2, 1)?;
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_INSERT]);
+    // Enter as soon as it is there.
+    let mut tried = false;
+    let start = Instant::now();
+    while !tried && start.elapsed() < WAIT {
+        bed.press(KEY_ENTER);
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        tried = bed
+            .nm
+            .calls()
+            .iter()
+            .any(|c| matches!(c, Call::AddAndActivate { .. }));
+    }
+    bed.asked(&Call::AddAndActivate {
+        ssid: FREEBOX.to_owned(),
+        psk: Some(PASSWORD.to_owned()),
+    })?;
+    // Refused: said under the field; a paste clears it, as typing does,
+    // and adds to what the field holds.
+    let refused = popover(height(&[], 2, FORM + ERROR));
+    bed.popover_is(Some(refused))?;
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_INSERT]);
+    bed.popover_is(Some(popover(height(&[], 2, FORM))))?;
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: FREEBOX.to_owned(),
+        psk: Some(format!("{PASSWORD}{PASSWORD}")),
+    })?;
+    Ok(())
+}
+
+#[test]
+fn nothing_is_pasted_from_an_empty_clipboard_one_without_text_or_a_client_that_hangs()
+-> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: vec![
+            FakeAp::new(SNCF, 62, Security::Open),
+            FakeAp::new(FREEBOX, 58, Security::Psk(PASSWORD)),
+        ],
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, true)?;
+    // Nothing was ever copied.
+    bed.unfold(2, 1)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    bed.logged("the clipboard is empty")?;
+    bed.press(KEY_ESC);
+    bed.press(KEY_ESC);
+    bed.popover_is(None)?;
+    // An image only.
+    let image = Clip {
+        types: &["image/png"],
+        text: "not an image",
+        hang: false,
+    };
+    let copier = bed.copy(image)?;
+    bed.unfold(2, 1)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    bed.logged("the clipboard holds no text")?;
+    bed.press(KEY_ESC);
+    bed.press(KEY_ESC);
+    bed.popover_is(None)?;
+    // A client that never writes: the field goes on taking keys while
+    // the paste waits, and the paste gives up.
+    let window = common::rect_of(&bed.hp, "test.copy").expect("the copying window");
+    bed.copy_again(
+        &copier,
+        window,
+        Clip {
+            hang: true,
+            ..COPIED
+        },
+    )?;
+    bed.unfold(2, 1)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    bed.logged("the clipboard's text asked for")?;
+    bed.type_password();
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: FREEBOX.to_owned(),
+        psk: Some(PASSWORD.to_owned()),
+    })?;
+    bed.logged("did not write it in time")?;
+    let log = plain(bed.log.as_ref().expect("a log"));
+    assert!(
+        !log.contains("pasted into the field"),
+        "something was pasted"
+    );
     Ok(())
 }
