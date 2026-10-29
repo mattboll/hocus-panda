@@ -10,7 +10,8 @@
 //!   `Enter` or `Space` opens it again and `Esc` lets the keyboard go.
 //! - **The keyboard** on an item (after `Esc` in its popover): `Tab` and
 //!   `Shift+Tab` (or the arrows up and down) take it to the next and the
-//!   previous item of the same surface, round its ends.
+//!   previous item of the bar, from its top (the desktops' tiles) to its
+//!   bottom (the levels), round its ends, from one surface to the next.
 //! - **By hovering** the item for 150 ms in the mini form: it closes 300 ms
 //!   after the pointer has really left the item and the popover, and stays
 //!   while the pointer moves toward it, within the cone from where the
@@ -42,8 +43,8 @@ use std::{
 };
 
 use hocus_link::{
-    CONNECTIONS_NAMESPACE, EDGE, Form, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE,
-    POPOVER_WIDTH, ToCompositor,
+    CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, Form, LEVELS_NAMESPACE,
+    POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -53,7 +54,8 @@ pub const HOVER_OPEN: Duration = Duration::from_millis(150);
 /// A popover opened by hovering closes this long after the pointer left.
 pub const LEAVE_CLOSE: Duration = Duration::from_millis(300);
 
-/// What opens a popover, and the keyboard layout's item, which opens none.
+/// What opens a popover, and the keyboard layout's item and the desktops'
+/// tiles, which open none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Item {
     Sound,
@@ -66,12 +68,15 @@ pub enum Item {
     /// The keyboard's layout: a click, or `Enter` while it holds the
     /// keyboard, asks for the next one (3.8).
     Keyboard,
+    /// A desktop's tile (or dot), from 0: a click, or `Enter` while it
+    /// holds the keyboard, goes to that desktop (3.9).
+    Desktop(u8),
 }
 
 impl Item {
     /// Whether it opens a popover.
     fn has_popover(self) -> bool {
-        self != Self::Keyboard
+        !matches!(self, Self::Keyboard | Self::Desktop(_))
     }
 
     /// Its popover's height, logical pixels, for what it shows now: as it
@@ -83,7 +88,7 @@ impl Item {
             Self::Bluetooth => bluetooth::height(),
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
-            Self::Keyboard => 0,
+            Self::Keyboard | Self::Desktop(_) => 0,
         }
     }
 
@@ -95,14 +100,14 @@ impl Item {
             Self::Bluetooth => bluetooth::opening(),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
-            Self::Keyboard => {}
+            Self::Keyboard | Self::Desktop(_) => {}
         }
     }
 
     /// Its popover closes: what it kept goes (a password typed).
     fn closing(self) {
         match self {
-            Self::Sound | Self::Brightness | Self::Battery | Self::Keyboard => {}
+            Self::Sound | Self::Brightness | Self::Battery | Self::Keyboard | Self::Desktop(_) => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
         }
@@ -119,6 +124,7 @@ impl Item {
             (Self::Wifi | Self::Bluetooth, _) | (Self::Keyboard, Form::Full) => {
                 CONNECTIONS_NAMESPACE
             }
+            (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
         }
     }
 
@@ -135,6 +141,7 @@ impl Item {
     fn surface(self, place: &Place) -> window::Id {
         match self.namespace(place.form) {
             LEVELS_NAMESPACE => place.levels,
+            DESKTOPS_NAMESPACE => place.desktops,
             _ => place.connections,
         }
     }
@@ -156,6 +163,7 @@ pub struct Place {
     pub height: f32,
     pub levels: window::Id,
     pub connections: window::Id,
+    pub desktops: window::Id,
     /// The bar's own surface, whose size gives its height.
     pub surface: window::Id,
 }
@@ -246,6 +254,11 @@ pub enum Effect {
     },
     /// The compositor is asked for the next keyboard layout.
     NextLayout,
+    /// The compositor is asked for a desktop of `bar`'s screen.
+    Desktop {
+        bar: String,
+        to: DesktopTo,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -309,14 +322,14 @@ impl Default for Controller {
 }
 
 impl Controller {
-    /// Bar `bar` in `form`, its surfaces `surface`, `levels` and
-    /// `connections`; its height stays as known.
+    /// Bar `bar` in `form`, its surfaces `surface`, `levels`,
+    /// `connections` and `desktops`; its height stays as known.
     pub fn place(
         &mut self,
         bar: &str,
         form: Form,
         surface: window::Id,
-        (levels, connections): (window::Id, window::Id),
+        (levels, connections, desktops): (window::Id, window::Id, window::Id),
     ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
         let place = Place {
@@ -324,6 +337,7 @@ impl Controller {
             height,
             levels,
             connections,
+            desktops,
             surface,
         };
         self.bars.insert(bar.to_owned(), place);
@@ -460,10 +474,10 @@ impl Controller {
                     open.seen(at, now);
                 }
             }
-            Event::ItemPress { item, .. } if !item.has_popover() => {
+            Event::ItemPress { bar, item, .. } if !item.has_popover() => {
                 self.unfocus(&mut effects);
                 self.close(now, &mut effects);
-                effects.push(Effect::NextLayout);
+                effects.extend(acts(bar, item));
             }
             Event::ItemPress { bar, item, rect } => {
                 self.unfocus(&mut effects);
@@ -518,7 +532,7 @@ impl Controller {
                 }
             }
             Event::ItemActivate => match self.focused.clone() {
-                Some((_, item, _)) if !item.has_popover() => effects.push(Effect::NextLayout),
+                Some((bar, item, _)) if !item.has_popover() => effects.extend(acts(bar, item)),
                 Some((bar, item, from)) => {
                     self.unfocus(&mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
@@ -672,28 +686,55 @@ impl Controller {
         }
     }
 
-    /// The keyboard from the item holding it to the next item of its
-    /// surface (the previous, `back`), round the ends: the same surface
-    /// keeps it.
+    /// The keyboard from the item holding it to the next item of the bar
+    /// (the previous, `back`), from its top to its bottom and round: the
+    /// next item's surface takes the keyboard when it is another (the
+    /// desktops' tiles, above the connections, are reached so).
     fn step(&mut self, back: bool, effects: &mut Vec<Effect>) {
         let Some((bar, item, _)) = self.focused.clone() else {
             return;
         };
-        let Some(place) = self.bars.get(&bar) else {
+        let Some(place) = self.bars.get(&bar).copied() else {
             return;
         };
-        let namespace = item.namespace(place.form);
-        let Some(items) = self.items.get(&(bar.clone(), namespace)) else {
+        let mut items: Vec<(Item, Rectangle)> = self
+            .items
+            .iter()
+            .filter(|((b, _), _)| *b == bar)
+            .flat_map(|(_, items)| items.iter().copied())
+            .collect();
+        items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y).then(a.1.x.total_cmp(&b.1.x)));
+        let order: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
+        if !order.contains(&item) {
+            return;
+        }
+        let Some(next) = kit::step(&order, Some(item), back) else {
             return;
         };
-        let Some(at) = items.iter().position(|(i, _)| *i == item) else {
+        let Some(&(_, rect)) = items.iter().find(|(i, _)| *i == next) else {
             return;
         };
-        let n = items.len();
-        let next = if back { (at + n - 1) % n } else { (at + 1) % n };
-        let (item, rect) = items[next];
-        self.focused = Some((bar, item, rect));
-        effects.push(Effect::Wake(namespace));
+        let (from, to) = (item.surface(&place), next.surface(&place));
+        if from != to {
+            effects.push(Effect::Keyboard(from, KeyboardInteractivity::None));
+            effects.push(Effect::Keyboard(to, KeyboardInteractivity::Exclusive));
+            effects.push(Effect::Wake(item.namespace(place.form)));
+        }
+        self.focused = Some((bar, next, rect));
+        effects.push(Effect::Wake(next.namespace(place.form)));
+    }
+}
+
+/// What an item without a popover does when clicked, or on `Enter`: the
+/// next layout, or the tile's desktop.
+fn acts(bar: String, item: Item) -> Option<Effect> {
+    match item {
+        Item::Keyboard => Some(Effect::NextLayout),
+        Item::Desktop(index) => Some(Effect::Desktop {
+            bar,
+            to: DesktopTo::At(index),
+        }),
+        Item::Sound | Item::Wifi | Item::Bluetooth | Item::Brightness | Item::Battery => None,
     }
 }
 
@@ -1071,6 +1112,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             tell(ToCompositor::NextLayout);
             Vec::new()
         }
+        Effect::Desktop { bar, to } => {
+            tell(ToCompositor::Desktop { output: bar, to });
+            Vec::new()
+        }
     }
 }
 
@@ -1088,7 +1133,7 @@ mod tests {
             BAR,
             form,
             window::Id::unique(),
-            (levels, window::Id::unique()),
+            (levels, window::Id::unique(), window::Id::unique()),
         );
         (c, levels)
     }
@@ -1327,7 +1372,12 @@ mod tests {
     fn the_wifis_popover_gives_the_keyboard_back_to_its_row_and_holds_when_worked_in() {
         let mut c = Controller::default();
         let (levels, connections) = (window::Id::unique(), window::Id::unique());
-        c.place(BAR, Form::Mini, window::Id::unique(), (levels, connections));
+        c.place(
+            BAR,
+            Form::Mini,
+            window::Id::unique(),
+            (levels, connections, window::Id::unique()),
+        );
         c.motion = false;
         let t = Instant::now();
         let wifi = Event::ItemPress {
@@ -1416,6 +1466,7 @@ mod tests {
             height: 1064.0,
             levels: window::Id::unique(),
             connections: window::Id::unique(),
+            desktops: window::Id::unique(),
             surface: window::Id::unique(),
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
@@ -1439,6 +1490,7 @@ mod tests {
             height: 1064.0,
             levels: window::Id::unique(),
             connections: window::Id::unique(),
+            desktops: window::Id::unique(),
             surface: window::Id::unique(),
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -1454,7 +1506,11 @@ mod tests {
             BAR,
             Form::Full,
             window::Id::unique(),
-            (window::Id::unique(), window::Id::unique()),
+            (
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+            ),
         );
         c.handle(
             Event::ItemPress {
@@ -1531,5 +1587,98 @@ mod tests {
         // In the full form the layout's row is the connections'.
         assert_eq!(Item::Keyboard.namespace(Form::Full), CONNECTIONS_NAMESPACE);
         assert_eq!(Item::Keyboard.namespace(Form::Mini), LEVELS_NAMESPACE);
+    }
+
+    #[test]
+    fn a_tile_goes_to_its_desktop_and_the_keyboard_reaches_the_tiles_from_the_rows_under_them() {
+        let mut c = Controller::default();
+        let (levels, connections, desktops) = (
+            window::Id::unique(),
+            window::Id::unique(),
+            window::Id::unique(),
+        );
+        c.place(
+            BAR,
+            Form::Full,
+            window::Id::unique(),
+            (levels, connections, desktops),
+        );
+        c.motion = false;
+        let t = Instant::now();
+        let tile = |i: u8| {
+            Rectangle::new(
+                Point::new(
+                    -185.0 + 44.0 * f32::from(i % 4),
+                    700.0 + 36.0 * f32::from(i / 4),
+                ),
+                Size::new(38.0, 30.0),
+            )
+        };
+        let wifi = Rectangle::new(Point::new(-190.0, 800.0), Size::new(184.0, 30.0));
+        c.set_items(
+            BAR,
+            DESKTOPS_NAMESPACE,
+            (0..6).map(|i| (Item::Desktop(i), tile(i))).collect(),
+        );
+        c.set_items(BAR, CONNECTIONS_NAMESPACE, vec![(Item::Wifi, wifi)]);
+        c.set_items(BAR, LEVELS_NAMESPACE, vec![(Item::Sound, gauge())]);
+        // A click: that desktop, no popover.
+        let effects = c.handle(
+            Event::ItemPress {
+                bar: BAR.to_owned(),
+                item: Item::Desktop(4),
+                rect: tile(4),
+            },
+            t,
+        );
+        let go = |i| Effect::Desktop {
+            bar: BAR.to_owned(),
+            to: DesktopTo::At(i),
+        };
+        assert_eq!(effects, vec![go(4)]);
+        assert_eq!(c.open_item(), None);
+        // The keyboard on the Wi-Fi's row; Shift+Tab: up to the last tile,
+        // its surface taking the keyboard.
+        c.handle(
+            Event::ItemPress {
+                bar: BAR.to_owned(),
+                item: Item::Wifi,
+                rect: wifi,
+            },
+            t,
+        );
+        c.handle(Event::Escape, t);
+        assert!(c.focused(BAR, Item::Wifi));
+        let effects = c.handle(Event::ItemStep { back: true }, t);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::Keyboard(connections, KeyboardInteractivity::None),
+                Effect::Keyboard(desktops, KeyboardInteractivity::Exclusive),
+                Effect::Wake(CONNECTIONS_NAMESPACE),
+                Effect::Wake(DESKTOPS_NAMESPACE),
+            ]
+        );
+        assert!(c.focused(BAR, Item::Desktop(5)));
+        // Up again, along the row: the same surface.
+        assert_eq!(
+            c.handle(Event::ItemStep { back: true }, t),
+            vec![Effect::Wake(DESKTOPS_NAMESPACE)]
+        );
+        assert!(c.focused(BAR, Item::Desktop(4)));
+        // Enter: that desktop, the keyboard kept.
+        assert_eq!(c.handle(Event::ItemActivate, t), vec![go(4)]);
+        assert!(c.focused(BAR, Item::Desktop(4)));
+        // From the first tile back round to the levels' last item.
+        for _ in 0..4 {
+            c.handle(Event::ItemStep { back: true }, t);
+        }
+        assert!(c.focused(BAR, Item::Desktop(0)));
+        let effects = c.handle(Event::ItemStep { back: true }, t);
+        assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive)));
+        assert!(c.focused(BAR, Item::Sound));
+        // Esc lets it go from there.
+        let effects = c.handle(Event::ItemRelease, t);
+        assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::None)));
     }
 }

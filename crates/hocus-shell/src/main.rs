@@ -3,11 +3,12 @@
 //! it when it ends.
 //!
 //! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5),
-//! its connections (§4 group 9, §5) and its levels (§4 group 10, §5): a
-//! glass tint and a rim against the right edge of each output the
-//! compositor names, in its full or its mini form, the time at its top, the
-//! Wi-Fi ([`network`]), Bluetooth ([`bluetooth`]) and the keyboard's layout
-//! ([`layouts`]) above the sound, the brightness and the battery near its
+//! its desktops (§4 group 8, §5), its connections (§4 group 9, §5) and its
+//! levels (§4 group 10, §5): a glass tint and a rim against the right edge
+//! of each output the compositor names, in its full or its mini form, the
+//! time at its top, the screen's desktops ([`desktops`]) over the Wi-Fi
+//! ([`network`]), Bluetooth ([`bluetooth`]) and the keyboard's layout
+//! ([`layouts`]), above the sound, the brightness and the battery near its
 //! bottom ([`levels`]).
 //! The compositor blurs what is behind it; the shell draws the tint over
 //! that blur, or an opaque background when there is no blur. The line
@@ -19,11 +20,13 @@
 //! bar's edge, which switch the form. The clock has a small surface of its
 //! own over the bar's top ([`clock`]): it draws every second, and iced
 //! presents a surface whole, so that only its region is drawn again. The
-//! levels have theirs, for the same reason, the connections theirs, and so
-//! has a popover beside the bar ([`popover`]), opened from an item.
+//! levels have theirs, for the same reason, the connections and the
+//! desktops theirs, and so has a popover beside the bar ([`popover`]),
+//! opened from an item.
 
 mod bluetooth;
 mod clock;
+mod desktops;
 mod layouts;
 mod levels;
 mod network;
@@ -39,8 +42,8 @@ use std::{
 };
 
 use hocus_link::{
-    CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, ClockLook, EDGE, Form, LEVELS_NAMESPACE, NAMESPACE,
-    RADIUS, ToCompositor, ToShell,
+    CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, ClockLook, DESKTOPS_NAMESPACE, EDGE, Form,
+    LEVELS_NAMESPACE, NAMESPACE, RADIUS, ToCompositor, ToShell,
 };
 use iced::{
     Background, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme,
@@ -198,6 +201,8 @@ struct Bar {
     levels_surface: (u32, u32),
     /// Its connections' surface (placed by [`network::draw`]).
     connections: window::Id,
+    /// Its desktops' surface (placed by [`desktops::draw`]).
+    desktops: window::Id,
 }
 
 impl Bar {
@@ -445,7 +450,9 @@ impl Shell {
                     });
                     popover::with(|c| c.forget(&bar.output));
                     network::draw::forget(&bar.output);
+                    desktops::draw::forget(&bar.output);
                     Some(Task::batch([
+                        Task::done(Message::RemoveWindow(bar.desktops)),
                         Task::done(Message::RemoveWindow(bar.connections)),
                         Task::done(Message::RemoveWindow(bar.levels)),
                         Task::done(Message::RemoveWindow(bar.clock)),
@@ -477,6 +484,10 @@ impl Shell {
                 layouts::activate(index);
                 Task::none()
             }
+            ToShell::Desktops(screen) => {
+                desktops::set(screen);
+                Task::none()
+            }
         }
     }
 
@@ -496,6 +507,7 @@ impl Shell {
             levels: window::Id::unique(),
             levels_surface: (0, 0),
             connections: window::Id::unique(),
+            desktops: window::Id::unique(),
         };
         bar.surface = bar.surface_width();
         bar.clock_surface = bar.clock_size();
@@ -562,6 +574,26 @@ impl Shell {
             id: connections_id,
         });
         bar.connections = connections_id;
+        // Above the connections, following their group's top; a tile goes
+        // to its desktop.
+        let desktops_id = window::Id::unique();
+        let (size, margin) = desktops::draw::opened(&bar.output, desktops_id, form);
+        let desktops = NewLayerShellSettings {
+            size: Some(size),
+            layer: Layer::Top,
+            anchor: Anchor::Right | Anchor::Bottom,
+            exclusive_zone: Some(0),
+            margin: Some(margin),
+            keyboard_interactivity: KeyboardInteractivity::None,
+            output_option: option.clone(),
+            events_transparent: false,
+            namespace: Some(DESKTOPS_NAMESPACE.to_owned()),
+        };
+        let open_desktops = Task::done(Message::NewLayerShell {
+            settings: desktops,
+            id: desktops_id,
+        });
+        bar.desktops = desktops_id;
         self.bars.insert(id, bar);
         BARS.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -570,6 +602,7 @@ impl Shell {
         open.chain(open_clock)
             .chain(open_levels)
             .chain(open_connections)
+            .chain(open_desktops)
     }
 
     /// Where bar `id` is, for the popovers.
@@ -577,7 +610,14 @@ impl Shell {
         let Some(bar) = self.bars.get(&id) else {
             return;
         };
-        popover::with(|c| c.place(&bar.output, bar.form, id, (bar.levels, bar.connections)));
+        popover::with(|c| {
+            c.place(
+                &bar.output,
+                bar.form,
+                id,
+                (bar.levels, bar.connections, bar.desktops),
+            );
+        });
     }
 
     /// `form` for bar `id`, switching from where it is since `start`; at
@@ -640,8 +680,13 @@ impl Shell {
                 size,
             }));
         }
-        if let Some((id, size, margin)) =
-            network::draw::form(&bar.output, bar.form, bar.switch.is_some())
+        let switching = bar.switch.is_some();
+        for (id, size, margin) in [
+            network::draw::form(&bar.output, bar.form, switching),
+            desktops::draw::form(&bar.output, bar.form, switching),
+        ]
+        .into_iter()
+        .flatten()
         {
             tasks.push(Task::done(Message::SizeChange { id, size }));
             tasks.push(Task::done(Message::MarginChange { id, margin }));
@@ -742,6 +787,36 @@ impl Shell {
         )
     }
 
+    /// The desktops of the bar whose desktops' surface is `id`.
+    fn desktops_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self.bars.values().find(|b| b.desktops == id)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle =
+                bar_height - levels::draw::BOTTOM as f32 - desktops::draw::middle(&bar.output);
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = desktops::draw::Tiles {
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            motion: self.look.motion,
+            words: self.words,
+            backdrop,
+            bar: bar.output.clone(),
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
     /// The popover whose surface is `id`.
     fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let item = popover::with(|c| c.item_of(id))?;
@@ -790,8 +865,8 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            // It opens none.
-            popover::Item::Keyboard => return None,
+            // They open none.
+            popover::Item::Keyboard | popover::Item::Desktop(_) => return None,
         };
         Some(panel)
     }
@@ -802,6 +877,7 @@ impl Shell {
                 .clock_view(id)
                 .or_else(|| self.levels_view(id))
                 .or_else(|| self.connections_view(id))
+                .or_else(|| self.desktops_view(id))
                 .or_else(|| self.popover_view(id))
                 .unwrap_or_else(|| Space::new().into());
         };
@@ -1081,6 +1157,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The active layout: only the row draws.
                         Ok(ToShell::Layout(index)) => {
                             layouts::activate(index);
+                            continue;
+                        }
+                        // A screen's desktops: only their surface draws
+                        // (resized when their rows change).
+                        Ok(ToShell::Desktops(screen)) => {
+                            desktops::set(screen);
                             continue;
                         }
                         _ => {}
