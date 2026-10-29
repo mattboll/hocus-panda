@@ -17,7 +17,6 @@
 
 use std::time::{Duration, Instant};
 
-use hocus_link::POPOVER_WIDTH;
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
     widget::{
@@ -28,8 +27,11 @@ use iced::{
 };
 
 use super::{
-    Event as Seen, event,
-    wifi::{MANROPE_SEMIBOLD, background, measure, text, wrap},
+    Event as Seen, Pressed, event,
+    kit::{
+        self, HEADER, HEADER_TOP, ICON, Input, LABEL, LABEL_PAD, LEFT, MANROPE_SEMIBOLD, Pointer,
+        RIGHT, rounded, text,
+    },
 };
 use crate::levels::{
     self,
@@ -43,17 +45,7 @@ use crate::levels::{
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
-const BORDER: f32 = 1.0;
-const PAD_TOP: f32 = 12.0;
-const PAD_SIDE: f32 = 14.0;
-const PAD_BOTTOM: f32 = 14.0;
 const GAP: f32 = 8.0;
-const LEFT: f32 = BORDER + PAD_SIDE;
-const RIGHT: f32 = POPOVER_WIDTH as f32 - BORDER - PAD_SIDE;
-const HEADER: f32 = 32.0;
-const HEADER_TOP: f32 = BORDER + PAD_TOP;
-const TITLE: f32 = 16.0;
-const NAME: f32 = 13.0;
 /// The large battery, 42 × 24, 12 px before its level (26 px on 1.1
 /// lines) over its line (13.5 px), 1 px apart; 2 px above, 4 px under.
 const BIG: Size = Size::new(42.0, 24.0);
@@ -67,14 +59,10 @@ const BLOCK: f32 = 2.0 + LEVEL * LEVEL_LINE + 1.0 + STATE * LINE + 4.0;
 const STATE_ROOM: f32 = RIGHT - LEFT - BIG.width - BIG_GAP;
 /// The divider: 1 px, 2 px around it.
 const RULE: f32 = 2.0;
-const LABEL: f32 = 11.5;
-const LABEL_SPACING: f32 = 0.08 * LABEL;
-const LABEL_PAD: f32 = 2.0;
 /// The modes' tiles: three in a row, 6 px apart, 58 px high.
 const TILE: f32 = 58.0;
 const TILE_GAP: f32 = 6.0;
 const TILE_RADIUS: f32 = 10.0;
-const ICON: f32 = 18.0;
 const ICON_GAP: f32 = 4.0;
 const MODE: f32 = 12.5;
 /// The lines under them: 12.5 px on 1.4 lines; the health's on normal
@@ -88,17 +76,11 @@ const TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.04);
 const TILE_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.08);
 const TILE_EDGE: Color = Color::from_rgba8(255, 255, 255, 0.08);
 const MISSING: Color = Color::from_rgba8(255, 255, 255, 0.28);
-const RULE_COLOUR: Color = Color::from_rgba8(255, 255, 255, 0.08);
 
 /// A tile shows the profile asked this long at most, until it is said.
 const ASKED_FOR: Duration = Duration::from_secs(3);
 
 const MODES: [Profile; 3] = [Profile::PowerSaver, Profile::Balanced, Profile::Performance];
-
-/// The words of the shell's language, for what the height measures.
-fn words() -> Words {
-    Words::new(crate::clock::time::Lang::of_messages())
-}
 
 /// Where its parts are, for what it shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -120,11 +102,11 @@ struct Layout {
 impl Layout {
     fn of(levels: &Snapshot, words: Words) -> Self {
         let room = RIGHT - LEFT;
-        let lines = |text: &str| wrap(text, room, |t| measure(t, NOTE, MANROPE));
+        let lines = |text: &str| kit::wrap(text, room, |t| kit::measure(t, NOTE, MANROPE));
         let mut end = HEADER_TOP + HEADER;
         let state = levels.battery.map_or_else(Vec::new, |b| {
             crate::levels::draw::lines(&words.battery_line(&b), STATE_ROOM, |t| {
-                measure(t, STATE, MANROPE)
+                kit::measure(t, STATE, MANROPE)
             })
         });
         let battery = levels.battery.map(|_| {
@@ -160,7 +142,9 @@ impl Layout {
         }
         let health = levels.battery.and_then(|b| b.health()).map(|percent| {
             let top = end + GAP + HEALTH_PAD;
-            let health = wrap(&words.health(percent), room, |t| measure(t, NOTE, MANROPE));
+            let health = kit::wrap(&words.health(percent), room, |t| {
+                kit::measure(t, NOTE, MANROPE)
+            });
             end = top + health.len() as f32 * NOTE * LINE;
             (top, health)
         });
@@ -176,7 +160,7 @@ impl Layout {
     }
 
     fn height(&self) -> u32 {
-        (self.end + PAD_BOTTOM + BORDER).round() as u32
+        kit::height(self.end)
     }
 }
 
@@ -185,7 +169,7 @@ pub fn opening() {}
 
 /// Its height for what it shows now.
 pub fn height() -> u32 {
-    Layout::of(&levels::snapshot(), words()).height()
+    Layout::of(&levels::snapshot(), kit::words()).height()
 }
 
 /// The battery's popover on its surface.
@@ -205,13 +189,10 @@ pub struct State {
     layout: Option<Layout>,
     /// The label's letters and their places.
     label: Vec<(char, f32)>,
-    hover: Option<Profile>,
-    pressed: Option<Profile>,
+    pointer: Pointer<Profile>,
     /// The profile asked, and since when.
     asked: Option<(Profile, Instant)>,
     focus: Option<Profile>,
-    pointer: Option<Point>,
-    inside: bool,
 }
 
 impl State {
@@ -263,18 +244,11 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(now)) => self.refresh(state, *now),
-            _ if !super::with(|c| c.is_open(self.id)) => None,
-            iced::Event::Mouse(event) => {
-                let at = crate::levels::draw::pointer(event, bounds, cursor, state.pointer);
-                state.pointer = at;
-                self.mouse(state, event, at)
-            }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                self.key(state, key, modifiers.shift())
-            }
-            _ => None,
+        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
+            Input::Redraw(now) => self.refresh(state, now),
+            Input::Mouse(event, at) => self.mouse(state, event, at),
+            Input::Key(pressed) => self.key(state, &pressed),
+            Input::Nothing => None,
         }
     }
 
@@ -287,7 +261,7 @@ impl<Message> canvas::Program<Message> for Panel {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        background(&mut frame, bounds.size(), self.glass);
+        kit::background(&mut frame, bounds.size(), self.glass);
         let Some(layout) = &state.layout else {
             return vec![frame.into_geometry()];
         };
@@ -296,31 +270,21 @@ impl<Message> canvas::Program<Message> for Panel {
             self.battery(&mut frame, top, &battery, &layout.state);
         }
         if let Some((rule, label)) = layout.label {
-            frame.fill_rectangle(
-                Point::new(LEFT, rule),
-                Size::new(RIGHT - LEFT, 1.0),
-                RULE_COLOUR,
-            );
-            for (ch, x) in &state.label {
-                let mut letter = text(
-                    ch.to_string(),
-                    Point::new(*x, label + LABEL_PAD + LABEL * LINE / 2.0),
-                    LABEL,
-                    DIM,
-                    Alignment::Left,
-                );
-                letter.font = MANROPE_BOLD;
-                frame.fill_text(letter);
-            }
+            kit::rule(&mut frame, rule);
+            kit::label(&mut frame, &state.label, kit::label_middle(label));
         }
         for profile in MODES {
             self.tile(&mut frame, state, profile);
         }
-        for (top, lines) in &layout.notes {
-            lines_at(&mut frame, *top, lines, NOTE_LINE);
-        }
-        if let Some((top, lines)) = &layout.health {
-            lines_at(&mut frame, *top, lines, LINE);
+        let notes = layout
+            .notes
+            .iter()
+            .map(|(top, lines)| (top, lines, NOTE_LINE));
+        let health = layout.health.iter().map(|(top, lines)| (top, lines, LINE));
+        for (top, lines, height) in notes.chain(health) {
+            for line in kit::lines(lines, (LEFT, *top), NOTE, height, FAINT) {
+                frame.fill_text(line);
+            }
         }
         if let Some(rect) = state.focus.and_then(|p| state.tile(p)) {
             ring(&mut frame, rect, TILE_RADIUS);
@@ -334,26 +298,7 @@ impl<Message> canvas::Program<Message> for Panel {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
-    }
-}
-
-/// `lines` in `text.faint` from `top`, `height` (em) apart.
-fn lines_at(f: &mut Frame, top: f32, lines: &[String], height: f32) {
-    for (i, line) in lines.iter().enumerate() {
-        let mut note = text(
-            line.clone(),
-            Point::new(LEFT, top + (i as f32 + 0.5) * NOTE * height),
-            NOTE,
-            FAINT,
-            Alignment::Left,
-        );
-        note.line_height = LineHeight::Relative(height);
-        f.fill_text(note);
+        state.pointer.interaction(false)
     }
 }
 
@@ -368,14 +313,8 @@ fn band(band: Band) -> (Color, Color) {
 impl Panel {
     /// What it shows, read afresh.
     fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        // Keys that reached another of the shell's surfaces (see
-        // `popover::key`).
-        let keys = super::take_keys();
-        if !keys.is_empty() && super::with(|c| c.is_open(self.id)) {
-            for pressed in keys {
-                let shift = pressed.modifiers.shift();
-                let _: Option<canvas::Action<Message>> = self.key(state, &pressed.key, shift);
-            }
+        for pressed in kit::keys(self.id) {
+            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
         let levels = levels::snapshot();
         if state.layout.is_none() || levels != state.levels {
@@ -398,7 +337,7 @@ impl Panel {
                 layout.health.as_ref().map(|(_, l)| l.join(" ")),
             );
             if state.layout.as_ref() != Some(&layout) {
-                state.hover = None;
+                state.pointer.hover = None;
                 state.layout = Some(layout);
                 // A change of size reaches the controller, which resizes
                 // the surface (without waking it again).
@@ -407,17 +346,7 @@ impl Panel {
             state.levels = levels;
         }
         if state.label.is_empty() {
-            let mut x = LEFT;
-            state.label = self
-                .words
-                .power_mode()
-                .chars()
-                .map(|ch| {
-                    let at = x;
-                    x += measure(&ch.to_string(), LABEL, MANROPE_BOLD) + LABEL_SPACING;
-                    (ch, at)
-                })
-                .collect();
+            state.label = kit::label_letters(self.words.power_mode());
         }
         if state
             .focus
@@ -425,35 +354,16 @@ impl Panel {
         {
             state.focus = None;
         }
-        let (asked, since) = state.asked?;
-        let until = since + ASKED_FOR;
-        if state.levels.profile == Some(asked) || now >= until {
-            state.asked = None;
-            None
-        } else {
-            Some(canvas::Action::request_redraw_at(until))
-        }
+        let said = state
+            .asked
+            .is_some_and(|(asked, _)| state.levels.profile == Some(asked));
+        kit::awaited(&mut state.asked, said, now, ASKED_FOR).map(canvas::Action::request_redraw_at)
     }
 
     fn header(&self, f: &mut Frame, battery: Option<Battery>) {
-        let middle = HEADER_TOP + HEADER / 2.0;
-        let mut title = text(
-            self.words.battery_title(battery.is_some()).to_owned(),
-            Point::new(LEFT, middle),
-            TITLE,
-            TEXT,
-            Alignment::Left,
-        );
-        title.font = MANROPE_BOLD;
-        f.fill_text(title);
+        kit::title(f, self.words.battery_title(battery.is_some()));
         if let Some(battery) = battery {
-            f.fill_text(text(
-                self.words.plugged(battery.charge.plugged()).to_owned(),
-                Point::new(RIGHT, middle),
-                NAME,
-                FAINT,
-                Alignment::Right,
-            ));
+            kit::title_aside(f, self.words.plugged(battery.charge.plugged()).to_owned());
         }
     }
 
@@ -486,14 +396,8 @@ impl Panel {
         big.line_height = LineHeight::Relative(LEVEL_LINE);
         f.fill_text(big);
         let first = top + 2.0 + LEVEL * LEVEL_LINE + 1.0;
-        for (i, text_line) in lines.iter().enumerate() {
-            f.fill_text(text(
-                text_line.clone(),
-                Point::new(x, first + (i as f32 + 0.5) * STATE * LINE),
-                STATE,
-                line,
-                Alignment::Left,
-            ));
+        for said in kit::lines(lines, (x, first), STATE, LINE, line) {
+            f.fill_text(said);
         }
     }
 
@@ -507,11 +411,10 @@ impl Panel {
         let (fill, edge, ink) = match (there, chosen) {
             (false, _) => (TILE_FILL, TILE_EDGE, MISSING),
             (true, true) => (CHOSEN, ACCENT, TEXT),
-            (true, false) if state.hover == Some(profile) => (TILE_HOVER, TILE_EDGE, DIM),
+            (true, false) if state.pointer.hover == Some(profile) => (TILE_HOVER, TILE_EDGE, DIM),
             (true, false) => (TILE_FILL, TILE_EDGE, DIM),
         };
-        let shape = Path::rounded_rectangle(rect.position(), rect.size(), TILE_RADIUS.into());
-        f.fill(&shape, fill);
+        f.fill(&rounded(rect, TILE_RADIUS), fill);
         let inside = Path::rounded_rectangle(
             Point::new(rect.x + 0.5, rect.y + 0.5),
             Size::new(rect.width - 1.0, rect.height - 1.0),
@@ -526,15 +429,16 @@ impl Panel {
             profile,
             ink,
         );
-        let mut name = text(
-            self.words.mode(profile).to_owned(),
-            Point::new(rect.center_x(), top + ICON + ICON_GAP + MODE * LINE / 2.0),
-            MODE,
-            ink,
-            Alignment::Center,
-        );
-        name.font = MANROPE_SEMIBOLD;
-        f.fill_text(name);
+        f.fill_text(kit::text_in(
+            MANROPE_SEMIBOLD,
+            text(
+                self.words.mode(profile).to_owned(),
+                Point::new(rect.center_x(), top + ICON + ICON_GAP + MODE * LINE / 2.0),
+                MODE,
+                ink,
+                Alignment::Center,
+            ),
+        ));
     }
 
     fn mouse<Message>(
@@ -552,29 +456,23 @@ impl Panel {
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                if !state.inside && at.is_some() {
-                    state.inside = true;
-                    event(Seen::PopoverEnter);
-                }
-                if state.hover != target {
-                    state.hover = target;
+                state.pointer.moved();
+                if state.pointer.over(target) {
                     return redraw;
                 }
                 None
             }
             mouse::Event::CursorLeft => {
-                state.inside = false;
-                event(Seen::PopoverLeave);
-                state.hover = None;
+                state.pointer.left();
                 redraw
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
                 state.focus = None;
-                state.pressed = target;
+                state.pointer.pressed = target;
                 redraw
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(profile) = state.pressed.take().filter(|p| Some(*p) == target) {
+                if let Some(profile) = state.pointer.release(target) {
                     state.choose(profile);
                 }
                 redraw
@@ -586,29 +484,21 @@ impl Panel {
     fn key<Message>(
         &self,
         state: &mut State,
-        key: &keyboard::Key,
-        shift: bool,
+        pressed: &Pressed,
     ) -> Option<canvas::Action<Message>> {
         use keyboard::{Key, key::Named};
         let order = state.targets();
         let at = state.focus.and_then(|f| order.iter().position(|t| *t == f));
-        match key {
+        match &pressed.key {
             Key::Named(Named::Escape) => {
                 event(Seen::Escape);
                 return Some(canvas::Action::capture());
             }
             Key::Named(Named::Tab) => {
-                let n = order.len() as isize;
-                if n == 0 {
+                if order.is_empty() {
                     return None;
                 }
-                let by = if shift { -1 } else { 1 };
-                let next = match at {
-                    Some(i) => (i as isize + by).rem_euclid(n),
-                    None if by > 0 => 0,
-                    None => n - 1,
-                };
-                state.focus = order.get(next as usize).copied();
+                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
             }
             Key::Named(Named::Enter | Named::Space) => {
                 if let Some(profile) = state.focus {
