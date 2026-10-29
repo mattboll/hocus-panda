@@ -67,7 +67,7 @@ impl RowState {
     fn fit(&mut self, words: Words, row: &Row, width: f32) {
         let mut system = iced::advanced::graphics::text::font_system().write().ok();
         let mut measure = |text: &str, size: f32| match system.as_mut() {
-            Some(system) => crate::popover::sound::measure(system.raw(), text, MANROPE, size),
+            Some(system) => crate::popover::kit::measure_in(system.raw(), text, size, MANROPE),
             None => text.chars().count() as f32 * size * 0.55,
         };
         let mut room = width - 2.0 * ITEM_OUT - ICON - ICON_GAP;
@@ -100,7 +100,7 @@ impl RowState {
                 name.clone()
             }
         };
-        self.label = crate::popover::sound::elide(&label, room.max(0.0), |t| measure(t, LABEL));
+        self.label = crate::popover::kit::elide(&label, room.max(0.0), |t| measure(t, LABEL));
     }
 }
 
