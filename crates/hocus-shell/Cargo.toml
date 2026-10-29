@@ -43,7 +43,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The levels: UPower, power-profiles-daemon and logind on the system bus
 # (MIT); the backlight's changes from udev (MIT); PipeWire's graph as
 # `pw-dump` writes it, in JSON.
-zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy"] }
 udev = "0.9.3"
 serde_json = "1.0.154"
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.

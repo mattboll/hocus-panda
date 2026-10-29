@@ -16,7 +16,7 @@
 use std::{
     collections::HashMap,
     io::BufReader,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex, PoisonError,
         mpsc::{Receiver, TryRecvError},
@@ -90,6 +90,7 @@ fn dump(default: &Default, presence: &mut Presence) -> String {
     let Some(out) = child.stdout.take() else {
         return "pw-dump: no output".to_owned();
     };
+    *DUMP.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
     let mut graph = Graph::default();
     let updates =
         serde_json::Deserializer::from_reader(BufReader::new(out)).into_iter::<Vec<Value>>();
@@ -112,11 +113,26 @@ fn dump(default: &Default, presence: &mut Presence) -> String {
             sound.map(|(id, sound)| (id, sound.muted));
         publish(|levels| levels.sound = sound.map(|(_, sound)| sound));
     }
-    let _ = child.kill();
-    match child.wait() {
-        Ok(status) => format!("pw-dump ended: {status}"),
-        Err(err) => format!("pw-dump: {err}"),
+    match end_dump() {
+        Some(Ok(status)) => format!("pw-dump ended: {status}"),
+        Some(Err(err)) => format!("pw-dump: {err}"),
+        None => "the shell ends".to_owned(),
     }
+}
+
+/// The `pw-dump` running: ended with the shell, which it would otherwise
+/// outlive until PipeWire's next change.
+static DUMP: Mutex<Option<Child>> = Mutex::new(None);
+
+fn end_dump() -> Option<std::io::Result<std::process::ExitStatus>> {
+    let mut child = DUMP.lock().unwrap_or_else(PoisonError::into_inner).take()?;
+    let _ = child.kill();
+    Some(child.wait())
+}
+
+/// The shell ends: its `pw-dump` too.
+pub fn stop() {
+    end_dump();
 }
 
 /// What the shell keeps of PipeWire's graph.

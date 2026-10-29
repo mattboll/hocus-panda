@@ -11,9 +11,8 @@ use hocus_link::LevelKey;
 use iced::futures::{StreamExt, stream};
 use tokio::sync::mpsc::UnboundedReceiver;
 use zbus::{
-    Connection,
+    Connection, OwnedVariant, Variant,
     fdo::{DBusProxy, PropertiesProxy},
-    zvariant::OwnedValue,
 };
 
 use super::{
@@ -30,7 +29,7 @@ const PROFILES_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
 const LOGIN: &str = "org.freedesktop.login1";
 const SESSION: &str = "/org/freedesktop/login1/session/auto";
 
-type Properties = HashMap<String, OwnedValue>;
+type Properties = HashMap<String, OwnedVariant>;
 
 pub fn start(keys: UnboundedReceiver<LevelKey>) {
     let started = std::thread::Builder::new()
@@ -115,8 +114,8 @@ async fn follow(
             .await?
             .map(|_| ());
         let properties = PropertiesProxy::builder(&connection)
-            .destination(name)?
-            .path(path)?
+            .destination(name)
+            .path(path)
             .cache_properties(zbus::proxy::CacheProperties::No)
             .build()
             .await?;
@@ -155,8 +154,8 @@ async fn follow(
 
 fn get<'a, T>(properties: &'a Properties, name: &str) -> Option<T>
 where
-    T: TryFrom<&'a zbus::zvariant::Value<'a>>,
-    <T as TryFrom<&'a zbus::zvariant::Value<'a>>>::Error: Into<zbus::zvariant::Error>,
+    T: TryFrom<&'a Variant<'a>>,
+    <T as TryFrom<&'a Variant<'a>>>::Error: Into<zbus::Error>,
 {
     properties.get(name)?.downcast_ref::<T>().ok()
 }

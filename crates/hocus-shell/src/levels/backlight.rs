@@ -111,6 +111,8 @@ fn watch() {
         let Some(fd) = &notify else { return };
         let flags = inotify::WatchFlags::CREATE
             | inotify::WatchFlags::DELETE
+            | inotify::WatchFlags::MOVED_TO
+            | inotify::WatchFlags::MOVED_FROM
             | inotify::WatchFlags::MODIFY
             | inotify::WatchFlags::CLOSE_WRITE;
         let _ = inotify::add_watch(fd, dir(), flags);
