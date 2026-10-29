@@ -216,8 +216,9 @@ impl<Message> canvas::Program<Message> for Levels {
         let now = match event {
             iced::Event::Window(window::Event::RedrawRequested(now)) => *now,
             iced::Event::Mouse(event) => return self.mouse(state, event, bounds, cursor),
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
-                return self.key(key);
+            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                return popover::key(key, modifiers.shift())
+                    .then(|| canvas::Action::request_redraw().and_capture());
             }
             _ => return None,
         };
@@ -461,22 +462,6 @@ impl Levels {
             _ => None,
         }
     }
-
-    /// A key on the item holding the keyboard: `Enter` or `Space` opens
-    /// its popover again, `Esc` lets the keyboard go.
-    fn key<Message>(&self, key: &keyboard::Key) -> Option<canvas::Action<Message>> {
-        use keyboard::key::Named;
-        if !popover::with(|c| c.focused(&self.bar, Item::Sound)) {
-            return None;
-        }
-        let event = match key {
-            keyboard::Key::Named(Named::Enter | Named::Space) => popover::Event::ItemActivate,
-            keyboard::Key::Named(Named::Escape) => popover::Event::ItemRelease,
-            _ => return None,
-        };
-        popover::event(event);
-        Some(canvas::Action::request_redraw().and_capture())
-    }
 }
 
 /// Where the pointer is on a canvas at `bounds` as of `event`, which was
@@ -558,11 +543,12 @@ fn full_rows(levels: &Snapshot, status: usize, bottom: f32) -> [Option<f32>; 3] 
     middles
 }
 
-/// The mini form's sound gauge's bottom: over the battery's percentage.
+/// The mini form's sound gauge's bottom: over the battery's percentage;
+/// without it, high enough for the gauge's light and ring under it.
 fn mini_gauge_bottom(levels: &Snapshot, bottom: f32) -> f32 {
     match levels.battery {
         Some(_) => bottom - MINI_VALUE * LINE - MINI_GAP,
-        None => bottom,
+        None => bottom - (MINI_ITEM.height - MINI_GAUGE) / 2.0 - RING_OUT - RING,
     }
 }
 
@@ -1136,7 +1122,9 @@ mod tests {
         let sound = sound.expect("sound");
         assert!((light - (175.0 - FULL_RAISE - ROW / 2.0)).abs() < 0.01);
         assert!((light - sound - ROW - ROW_GAP).abs() < 0.01);
-        assert_eq!(mini_gauge_bottom(&levels, 97.0), 97.0);
+        // Alone in the mini form, the gauge keeps its light and its ring
+        // on the surface.
+        assert_eq!(mini_gauge_bottom(&levels, 97.0), 97.0 - 8.0 - 5.0);
     }
 
     #[test]

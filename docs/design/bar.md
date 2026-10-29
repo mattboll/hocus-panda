@@ -590,7 +590,8 @@ control panel is not part of the product.
   runs without drawing anything else, and `wake` lines. The levels'
   surface takes the pointer since 3.4a; it grew to 194 × 175 (full) and
   54 × 97 (mini), upward, for the item's light and its keyboard ring (3 px
-  of the accent, 2 px out). The bars' heights come from their surfaces as
+  of the accent, 2 px out); in the mini form without a battery, the gauge
+  sits 13 px higher than in 3.3, for them to stay on that surface. The bars' heights come from their surfaces as
   they open, not as messages. **Measured** headless with the real shell:
   opening a popover commits no bar surface; open or closed, at rest
   nothing commits but the clock; a hover in the popover damages exactly
