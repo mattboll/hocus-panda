@@ -39,11 +39,13 @@ use self::{
 };
 
 /// The bundled fonts (SIL Open Font License 1.1, in `fonts/`): Martian
-/// Mono in the weights the clock uses, Manrope for the date.
-pub const FONTS: [&[u8]; 3] = [
+/// Mono in the weights the clock uses, Manrope for the date and the
+/// levels (its bold for the mini form's battery).
+pub const FONTS: [&[u8]; 4] = [
     include_bytes!("../../fonts/MartianMono-Regular.ttf"),
     include_bytes!("../../fonts/MartianMono-Light.ttf"),
     include_bytes!("../../fonts/Manrope-Regular.ttf"),
+    include_bytes!("../../fonts/Manrope-Bold.ttf"),
 ];
 
 const MANROPE: Font = Font::with_name("Manrope");

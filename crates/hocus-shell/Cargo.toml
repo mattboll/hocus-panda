@@ -36,9 +36,18 @@ iced_layershell = { version = "=0.19.1", default-features = false }
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 # CLOCK_MONOTONIC, the compositor's clock, to start a form switch when it
 # does; inotify, to see the time zone change.
-rustix = { version = "1.1.6", features = ["time", "fs"] }
-tokio = { version = "1.54.1", features = ["net", "io-util", "rt"] }
+rustix = { version = "1.1.6", features = ["time", "fs", "event"] }
+tokio = { version = "1.54.1", features = ["net", "io-util", "rt", "sync", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The levels: UPower, power-profiles-daemon and logind on the system bus
+# (MIT); the backlight's changes from udev (MIT); PipeWire's graph as
+# `pw-dump` writes it, in JSON.
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+udev = "0.9.3"
+serde_json = "1.0.154"
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

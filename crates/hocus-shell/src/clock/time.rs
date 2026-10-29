@@ -27,7 +27,16 @@ impl Lang {
     /// From `LC_ALL`, `LC_TIME` and `LANG`, the first one set, as the C
     /// library takes them; English unless French.
     pub fn from_env() -> Self {
-        let locale = ["LC_ALL", "LC_TIME", "LANG"]
+        Self::from_vars(["LC_ALL", "LC_TIME", "LANG"])
+    }
+
+    /// The messages' language: `LC_ALL`, `LC_MESSAGES`, then `LANG`.
+    pub fn of_messages() -> Self {
+        Self::from_vars(["LC_ALL", "LC_MESSAGES", "LANG"])
+    }
+
+    fn from_vars(names: [&str; 3]) -> Self {
+        let locale = names
             .into_iter()
             .filter_map(|name| std::env::var(name).ok())
             .find(|value| !value.is_empty())

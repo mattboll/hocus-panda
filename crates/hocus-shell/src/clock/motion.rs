@@ -42,7 +42,7 @@ impl Pose {
 }
 
 /// CSS's `cubic-bezier(x1, y1, x2, y2)` at linear progress `x`.
-fn bezier((x1, y1, x2, y2): (f32, f32, f32, f32), x: f32) -> f32 {
+pub fn bezier((x1, y1, x2, y2): (f32, f32, f32, f32), x: f32) -> f32 {
     let axis = |p1: f32, p2: f32, t: f32| {
         let u = 1.0 - t;
         3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
