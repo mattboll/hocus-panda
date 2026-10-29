@@ -18,6 +18,7 @@ mod grabs;
 mod handlers;
 mod harness;
 mod input;
+mod levels;
 mod magnet;
 pub mod model;
 pub mod motion;

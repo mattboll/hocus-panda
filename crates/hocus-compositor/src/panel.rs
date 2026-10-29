@@ -92,6 +92,8 @@ pub struct Panel {
     pub commits: u64,
     /// Commits of the clocks' surfaces, for tests: one a second at rest.
     pub clock_commits: u64,
+    /// Commits of the levels' surfaces, for tests: none at rest.
+    pub levels_commits: u64,
 }
 
 /// The file of remembered forms.

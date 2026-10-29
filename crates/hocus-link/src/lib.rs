@@ -6,9 +6,10 @@
 //! in the session's runtime directory, which only it listens on. Each
 //! message is one line of text, words separated by spaces. The compositor
 //! decides where bars are and in which form, reserves their space and
-//! takes the clicks on their edge, and passes on the clock's settings; the
-//! shell draws them, and says when it draws on the CPU. Neither side waits
-//! for the other: a message is a fact, never a question.
+//! takes the clicks on their edge, passes on the clock's settings and the
+//! level keys (volume, brightness) pressed; the shell draws the bars, keeps
+//! the levels, and says when it draws on the CPU. Neither side waits for
+//! the other: a message is a fact, never a question.
 //!
 //! The form switch is one motion, which both sides compute from the same
 //! start on the same clock (`CLOCK_MONOTONIC`, in microseconds): the
@@ -26,6 +27,10 @@ pub const NAMESPACE: &str = "hocus-bar";
 /// clock draws every second, and a surface of its own is what keeps that
 /// to its region (bar.md §12), since iced presents a surface whole.
 pub const CLOCK_NAMESPACE: &str = "hocus-bar-clock";
+/// The namespace of the levels' surface (sound, brightness, battery), near
+/// the bar's bottom: for the same reason as the clock's, a change of level
+/// draws only that region.
+pub const LEVELS_NAMESPACE: &str = "hocus-bar-levels";
 
 /// The bar's distance from the output's top, right and bottom edges, and
 /// the windows' from the bar (logical pixels).
@@ -108,6 +113,55 @@ pub enum ToShell {
     /// How the clock looks. The font's name comes last: it may hold
     /// spaces.
     Clock(ClockLook),
+    /// A level key was pressed (or repeats, held): the shell, which keeps
+    /// the sound and the backlight, changes them.
+    Level(LevelKey),
+}
+
+/// The keyboard's level keys, as `[shortcuts]` names their actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LevelKey {
+    VolumeUp,
+    VolumeDown,
+    Mute,
+    BrightnessUp,
+    BrightnessDown,
+}
+
+impl LevelKey {
+    pub const ALL: [Self; 5] = [
+        Self::VolumeUp,
+        Self::VolumeDown,
+        Self::Mute,
+        Self::BrightnessUp,
+        Self::BrightnessDown,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::VolumeUp => "volume-up",
+            Self::VolumeDown => "volume-down",
+            Self::Mute => "mute",
+            Self::BrightnessUp => "brightness-up",
+            Self::BrightnessDown => "brightness-down",
+        }
+    }
+
+    /// Whether it steps on while held, as a key repeats (not mute).
+    pub const fn repeats(self) -> bool {
+        !matches!(self, Self::Mute)
+    }
+}
+
+impl FromStr for LevelKey {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|k| k.name() == s)
+            .ok_or_else(|| BadLine(format!("no level key {s:?}")))
+    }
 }
 
 /// What the clock does when the minute changes (`[panel.clock]
@@ -214,6 +268,12 @@ pub fn parse_color(text: &str) -> Result<[u8; 3], BadLine> {
 pub enum ToCompositor {
     /// The shell draws on the CPU: its bars are opaque, nothing to blur.
     Software,
+    /// The shell's surfaces of this namespace have something new to show:
+    /// the compositor sends them a configure, as they are. iced draws
+    /// every surface after any message of the shell's own, and the whole
+    /// bar would be drawn again; a configure makes it draw that surface
+    /// alone (bar.md, as built, 3.3).
+    Wake(String),
 }
 
 /// A line that does not read.
@@ -255,6 +315,7 @@ impl fmt::Display for ToShell {
                 since,
             } => write!(f, "bar {output} {} {since}", form.name()),
             Self::NoBar { output } => write!(f, "nobar {output}"),
+            Self::Level(key) => write!(f, "level {}", key.name()),
             Self::Clock(look) => {
                 let [r, g, b] = look.color;
                 write!(
@@ -289,6 +350,7 @@ impl FromStr for ToShell {
             Some("nobar") => Ok(Self::NoBar {
                 output: word(&mut words, "output")?.to_owned(),
             }),
+            Some("level") => Ok(Self::Level(word(&mut words, "level key")?.parse()?)),
             Some("clock") => {
                 let seconds = flag(words.next(), "seconds", "noseconds")?;
                 let transition = word(&mut words, "transition")?.parse()?;
@@ -313,6 +375,7 @@ impl fmt::Display for ToCompositor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Software => f.write_str("software"),
+            Self::Wake(namespace) => write!(f, "wake {namespace}"),
         }
     }
 }
@@ -324,6 +387,7 @@ impl FromStr for ToCompositor {
         let mut words = line.split_whitespace();
         match words.next() {
             Some("software") => Ok(Self::Software),
+            Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
     }
@@ -392,13 +456,17 @@ mod tests {
                 seconds: false,
             }),
         ];
-        for message in to_shell {
+        let keys = LevelKey::ALL.map(ToShell::Level);
+        for message in to_shell.into_iter().chain(keys) {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
         }
-        assert_eq!(
-            ToCompositor::Software.to_string().parse::<ToCompositor>(),
-            Ok(ToCompositor::Software)
-        );
+        for message in [
+            ToCompositor::Software,
+            ToCompositor::Wake(LEVELS_NAMESPACE.to_owned()),
+        ] {
+            assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
+        }
+        assert!("wake".parse::<ToCompositor>().is_err());
         for bad in [
             "",
             "bar eDP-1",
@@ -408,6 +476,8 @@ mod tests {
             "clock seconds odometer #EEF1F6",
             "clock seconds spin #EEF1F6 Martian Mono",
             "clock seconds odometer white Martian Mono",
+            "level",
+            "level louder",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }

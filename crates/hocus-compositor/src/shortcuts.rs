@@ -9,6 +9,7 @@ use serde::{
     Deserialize, Deserializer,
     de::{self, SeqAccess, Visitor},
 };
+use hocus_link::LevelKey;
 use smithay::input::keyboard::{Keysym, ModifiersState, xkb};
 
 use crate::{
@@ -44,6 +45,8 @@ pub enum Action {
     TakeToDesktop(usize),
     /// The bar's other form, on the screen under the pointer.
     ToggleBar,
+    /// Volume, mute or brightness: to the shell, which keeps them.
+    Level(LevelKey),
 }
 
 /// Modifiers and a key, as `Super+Shift+E`. The key is the one of the
@@ -212,6 +215,11 @@ shortcuts! {
     take_to_desktop_8: ["Super+Ctrl+Shift+8"] => Action::TakeToDesktop(7),
     take_to_desktop_9: ["Super+Ctrl+Shift+9"] => Action::TakeToDesktop(8),
     toggle_bar: ["Super+B"] => Action::ToggleBar,
+    volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
+    volume_down: ["XF86AudioLowerVolume"] => Action::Level(LevelKey::VolumeDown),
+    mute: ["XF86AudioMute"] => Action::Level(LevelKey::Mute),
+    brightness_up: ["XF86MonBrightnessUp"] => Action::Level(LevelKey::BrightnessUp),
+    brightness_down: ["XF86MonBrightnessDown"] => Action::Level(LevelKey::BrightnessDown),
 }
 
 impl Shortcuts {
@@ -284,7 +292,12 @@ impl State {
     /// Runs `action`, from its shortcut `chord` as it is held (as
     /// [`Shortcuts::action`] gives it).
     pub fn run_action(&mut self, action: Action, chord: Chord) {
-        tracing::info!(?action, "shortcut");
+        // Held level keys repeat at the keyboard's rate: not worth a line.
+        if matches!(action, Action::Level(_)) {
+            tracing::debug!(?action, "shortcut");
+        } else {
+            tracing::info!(?action, "shortcut");
+        }
         match action {
             Action::Terminal => {
                 // The window it opens takes the focus (§4).
@@ -318,6 +331,7 @@ impl State {
                     self.toggle_bar(&output.name());
                 }
             }
+            Action::Level(key) => self.level_key(key),
         }
     }
 
@@ -455,6 +469,19 @@ mod tests {
             nested(mods(false, false, false, true), Keysym::F4).map(|(a, _)| a),
             Some(Action::Close)
         );
+        // The level keys, alone, nested or not.
+        let none = mods(false, false, false, false);
+        for (key, level) in [
+            (Keysym::XF86_AudioRaiseVolume, LevelKey::VolumeUp),
+            (Keysym::XF86_AudioLowerVolume, LevelKey::VolumeDown),
+            (Keysym::XF86_AudioMute, LevelKey::Mute),
+            (Keysym::XF86_MonBrightnessUp, LevelKey::BrightnessUp),
+            (Keysym::XF86_MonBrightnessDown, LevelKey::BrightnessDown),
+        ] {
+            assert_eq!(action(none, key), Some(Action::Level(level)));
+            assert_eq!(nested(none, key).map(|(a, _)| a), Some(Action::Level(level)));
+        }
+        assert_eq!(action(mods(true, false, false, false), Keysym::XF86_AudioMute), None);
     }
 
     #[test]

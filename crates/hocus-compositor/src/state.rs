@@ -173,6 +173,9 @@ pub struct State {
     /// The switcher's key held down, stepping at the keyboard's repeat
     /// delay and rate: its keycode and its timer (§11).
     pub switcher_repeat: Option<(Keycode, RegistrationToken)>,
+    /// A level key held down (volume, brightness), and the presses kept
+    /// for the shell while it is away.
+    pub levels: crate::levels::Levels,
     /// What draws the switcher, the desktops' dots and their text.
     pub overlay: Overlay,
 
@@ -310,6 +313,7 @@ impl State {
             preview: None,
             preview_out: None,
             switcher_repeat: None,
+            levels: crate::levels::Levels::default(),
             preview_ids: std::array::from_fn(|_| Id::new()),
             seam_handle: None,
             seam_handle_id: Id::new(),

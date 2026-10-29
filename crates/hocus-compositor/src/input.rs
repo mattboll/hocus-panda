@@ -186,6 +186,9 @@ impl State {
         if state == KeyState::Released && self.switcher_repeat.is_some_and(|(c, _)| c == code) {
             self.stop_switcher_repeat();
         }
+        if state == KeyState::Released {
+            self.level_key_released(code);
+        }
         match kept {
             Some(Kept::Vt(vt)) => self.switch_vt(vt),
             Some(Kept::Shortcut(action, chord)) => {
@@ -198,6 +201,10 @@ impl State {
                         SwitchKey::Next
                     };
                     self.repeat_switcher_key(code, key);
+                }
+                // A volume or brightness key held steps on.
+                if let Action::Level(key) = action {
+                    self.repeat_level_key(code, key);
                 }
             }
             Some(Kept::Switch(key)) => {

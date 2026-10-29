@@ -228,6 +228,11 @@ impl Headless {
         self.app.state.panel.clock_commits
     }
 
+    /// Commits of the levels' surfaces so far.
+    pub fn levels_commits(&self) -> u64 {
+        self.app.state.panel.levels_commits
+    }
+
     /// What output `index` (in the order given) drew over since the last
     /// call, as one rectangle of its pixels; `None`: nothing.
     pub fn take_damage(&mut self, index: usize) -> Option<Rect> {
@@ -239,6 +244,12 @@ impl Headless {
     /// where they are (global).
     pub fn clock_surfaces(&self) -> Vec<(String, Rect)> {
         self.layer_rects(hocus_link::CLOCK_NAMESPACE)
+    }
+
+    /// The levels' surfaces as the shell placed them: their screen, and
+    /// where they are (global).
+    pub fn levels_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::LEVELS_NAMESPACE)
     }
 
     /// The bars' surfaces as the shell placed them: their screen, and
