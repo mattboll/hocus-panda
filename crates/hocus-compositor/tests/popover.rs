@@ -506,13 +506,12 @@ fn nothing_draws_at_rest_and_a_change_draws_the_popover_alone() -> anyhow::Resul
     // An output's row under the pointer: the popover alone draws, and only
     // its rectangle changes on the screen.
     for attempt in 0..5 {
+        // The clock's count first: a tick committed before it is drawn
+        // during the wait, and its damage taken away with the rest.
+        let clocks = hp.clock_commits();
         wait(&mut hp, Duration::from_millis(100))?;
         hp.take_damage(0);
-        let (clocks, popover, levels) = (
-            hp.clock_commits(),
-            hp.popover_commits(),
-            hp.levels_commits(),
-        );
+        let (popover, levels) = (hp.popover_commits(), hp.levels_commits());
         let row = at(POPOVER, (140, OUTPUT_Y[attempt % 3]));
         hp.pointer_move(row.0, row.1);
         let drawn = hp.dispatch_until(WAIT, |hp| hp.popover_commits() > popover)?;
