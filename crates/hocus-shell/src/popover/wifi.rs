@@ -31,22 +31,28 @@
 //! cut to their bounds, which both renderers honour.
 
 use std::{
-    collections::HashMap,
     sync::{Mutex, PoisonError},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
-use hocus_link::{POPOVER_WIDTH, RADIUS};
 use iced::{
-    Color, Pixels, Point, Radians, Rectangle, Renderer, Size, Theme, alignment, keyboard, mouse,
+    Color, Point, Radians, Rectangle, Renderer, Size, Theme, keyboard, mouse,
     widget::{
-        canvas::{self, Frame, Geometry, Path, gradient},
-        text::{Alignment, LineHeight, Shaping},
+        canvas::{self, Frame, Geometry, Path},
+        text::Alignment,
     },
     window,
 };
 
-use super::{Event as Seen, Item, Pressed, event};
+use super::{
+    Event as Seen, Item, Pressed, event,
+    kit::{
+        self, Aside, Clip, FILL, FILL_HOVER, HEADER, HEADER_TOP, ICON, ICON_GAP, Input, LEFT, List,
+        MANROPE_SEMIBOLD, NOTE, NOTE_HEIGHT, PEACH, Pointer, RIGHT, ROW, ROW_GAP, ROW_OUT, ROW_PAD,
+        ROW_RADIUS, ROW_TEXT, SMALL, SMALL_PAD, SMALL_RADIUS, STATUS, SWITCH, Spin, Switch, Wheel,
+        Widths, rounded, text,
+    },
+};
 use crate::{
     levels::{
         draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring, stroke},
@@ -62,47 +68,19 @@ use crate::{
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
-const BORDER: f32 = 1.0;
-const PAD_TOP: f32 = 12.0;
-const PAD_SIDE: f32 = 14.0;
-const PAD_BOTTOM: f32 = 14.0;
 const GAP: f32 = 6.0;
-const LEFT: f32 = BORDER + PAD_SIDE;
-const RIGHT: f32 = POPOVER_WIDTH as f32 - BORDER - PAD_SIDE;
-const HEADER: f32 = 32.0;
-const TITLE: f32 = 16.0;
-const SWITCH: Size = Size::new(40.0, 22.0);
-const KNOB: f32 = 18.0;
 const WIRED: f32 = 32.0;
-const NOTE: f32 = 13.5;
-const NOTE_TOP: f32 = 4.0;
-const NOTE_BOTTOM: f32 = 2.0;
-const CURRENT: f32 = 48.0;
-const NAME: f32 = 14.0;
-const STATUS: f32 = 12.5;
-const SMALL_BUTTON: f32 = 28.0;
-const SMALL_PAD: f32 = 9.0;
 const PORTAL: f32 = 34.0;
 const PORTAL_TEXT: f32 = 13.5;
 /// The divider, 1 px with 4 px around it.
 const RULE: f32 = 4.0;
-const LABEL: f32 = 11.5;
-const LABEL_SPACING: f32 = 0.08 * LABEL;
-const SMALL: f32 = 12.0;
 /// The label's line: its padding and the "Searching…" beside it.
 const LABEL_ROW: f32 = 2.0 + SMALL * LINE + 2.0;
-const ROW: f32 = 36.0;
-const ROW_GAP: f32 = 2.0;
-const ROW_OUT: f32 = 6.0;
-const ROW_PAD: f32 = 6.0;
-const ROW_TEXT: f32 = 14.0;
-const ICON: f32 = 18.0;
-const ICON_GAP: f32 = 10.0;
+/// The rows end 2 px short of the list's right while it does not scroll.
+const ROW_END: f32 = 2.0;
 const LOCK: f32 = 14.0;
-const SPINNER: f32 = 12.0;
 /// The list's height at most: six rows and a peek of the seventh.
 const LIST: f32 = 236.0;
-const SCROLLBAR: f32 = 6.0;
 /// The password's form under its row.
 const FORM_TOP: f32 = 2.0;
 const FORM_INDENT: f32 = 34.0;
@@ -124,35 +102,11 @@ const DOT_ADVANCE: f32 = 8.0;
 /// A notch of a mouse's wheel scrolls two rows.
 const NOTCH: f32 = 2.0 * (ROW + ROW_GAP);
 
-const HEADER_TOP: f32 = BORDER + PAD_TOP;
-
-const GLASS_TOP: Color = Color::from_rgba8(22, 27, 42, 0.72);
-const GLASS_BOTTOM: Color = Color::from_rgba8(14, 17, 28, 0.82);
-const OPAQUE_TOP: Color = Color::from_rgba8(0x16, 0x1B, 0x2A, 1.0);
-const OPAQUE_BOTTOM: Color = Color::from_rgba8(0x0E, 0x11, 0x1C, 1.0);
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const FILL_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.05);
-const RULE_COLOUR: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const SWITCH_OFF: Color = Color::from_rgba8(255, 255, 255, 0.18);
-const KNOB_SHADOW: Color = Color::from_rgba8(0, 0, 0, 0.4);
-const CURRENT_FILL: Color = Color::from_rgba8(108, 194, 135, 0.10);
 const PORTAL_FILL: Color = Color::from_rgba8(229, 121, 63, 0.18);
 const PORTAL_HOVER: Color = Color::from_rgba8(229, 121, 63, 0.26);
-const PEACH: Color = rgb(0xF7B98A);
 const ORANGE: Color = rgb(0xF2945B);
 const FIELD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.16);
 const INK: Color = rgb(0x0B1020);
-const THUMB: Color = Color::from_rgba8(255, 255, 255, 0.16);
-
-/// The switch's knob slides over this, `ease-out`; the spinners turn once
-/// in the other.
-const SLIDE: Duration = Duration::from_millis(160);
-const TURN: Duration = Duration::from_millis(900);
-/// The switch shows what was asked this long at most, until
-/// NetworkManager says it.
-const ASKED_FOR: Duration = Duration::from_secs(3);
 
 // --- What the popover keeps while it is open -----------------------------------
 
@@ -192,10 +146,8 @@ struct Ui {
     scroll: f32,
     /// The pointer is over the list.
     over_list: bool,
-    /// The switch asked, and when.
-    switch: Option<(bool, Instant)>,
-    /// The knob's slide: from where (0 off, 1 on), since when.
-    knob: Option<(f32, Instant)>,
+    /// The Wi-Fi's switch, until NetworkManager says it.
+    switch: Switch,
     paste: Paste,
     /// Pastes asked, to tell a late one from the one awaited.
     pastes: u64,
@@ -325,22 +277,7 @@ impl Ui {
 
     /// The switch as shown: as asked, until NetworkManager says it.
     fn enabled(&self, network: &Network, now: Instant) -> bool {
-        match self.switch {
-            Some((asked, since)) if now < since + ASKED_FOR => asked,
-            _ => network.enabled,
-        }
-    }
-
-    /// The knob's place, 0 (off) to 1 (on), at `now`.
-    fn knob_at(&self, on: bool, now: Instant, motion: bool) -> f32 {
-        let to = if on { 1.0 } else { 0.0 };
-        match self.knob {
-            Some((from, since)) if motion && now < since + SLIDE => {
-                let t = now.duration_since(since).as_secs_f32() / SLIDE.as_secs_f32();
-                from + (to - from) * crate::clock::motion::bezier((0.0, 0.0, 0.58, 1.0), t)
-            }
-            _ => to,
-        }
+        self.switch.shown(network.enabled, now)
     }
 }
 
@@ -435,8 +372,7 @@ struct Section {
     label: f32,
     /// "No network found." in place of the list.
     note: Option<f32>,
-    /// The list's viewport, and its content's height.
-    list: Option<(Rectangle, f32)>,
+    list: Option<List>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -449,7 +385,7 @@ struct Layout {
     current: Option<(f32, f32)>,
     portal: Option<f32>,
     section: Option<Section>,
-    /// Each row's top and height, in the list's content.
+    /// Each row's top and height, in the list.
     rows: Vec<(f32, f32)>,
     /// The unfolded row, and its error's lines.
     unfolded: Option<(usize, usize)>,
@@ -470,75 +406,33 @@ fn form_height(error: usize) -> f32 {
 /// that scrolls.
 const ERROR_ROOM: f32 = RIGHT - 2.0 - (LEFT - ROW_OUT) - FORM_INDENT - ROW_PAD;
 
-/// The words of the shell's language, for what the layout measures.
-fn words() -> Words {
-    Words::new(crate::clock::time::Lang::of_messages())
-}
-
-/// `text` at `size` in lines that fit `room`, as the mockup's text wraps;
-/// measured once each.
-fn wrapped(text: &'static str, size: f32, room: f32) -> Vec<String> {
-    type Key = (&'static str, u32, u32);
-    static WRAPPED: Mutex<Vec<(Key, Vec<String>)>> = Mutex::new(Vec::new());
-    let key = (text, tenths(size), room as u32);
-    let mut known = WRAPPED.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some((_, lines)) = known.iter().find(|(k, _)| *k == key) {
-        return lines.clone();
-    }
-    let lines = wrap(text, room, |t| measure(t, size, MANROPE));
-    known.push((key, lines.clone()));
-    lines
-}
-
 /// What a failure says under the field, in lines.
 fn error_lines(failure: Failure) -> Vec<String> {
-    let words = words();
+    let words = kit::words();
     let said = match failure {
         Failure::Secret => words.wrong_password(),
         Failure::Other => words.could_not_connect(),
     };
-    wrapped(said, ERROR, ERROR_ROOM)
+    kit::wrapped(said, ERROR, ERROR_ROOM)
 }
 
 /// The network connected's state, under its name, in lines: "Connecté",
 /// or "Page de connexion à ouvrir", which wraps beside Disconnect as the
 /// mockup's does.
 fn status_lines(portal: bool) -> Vec<String> {
-    let words = words();
+    let words = kit::words();
     let said = if portal {
         words.sign_in_waits()
     } else {
         words.connected()
     };
-    let disconnect = measure(words.disconnect(), STATUS, MANROPE) + 2.0 * SMALL_PAD;
-    let room = RIGHT - disconnect - ICON_GAP - (LEFT + ICON + ICON_GAP);
-    wrapped(said, STATUS, room)
+    let disconnect = kit::measure(words.disconnect(), STATUS, MANROPE) + 2.0 * SMALL_PAD;
+    kit::wrapped(said, STATUS, kit::block_room(disconnect))
 }
 
 /// The network connected's block: 48 px, or more for its state's lines.
 fn current_height(portal: bool) -> f32 {
-    let lines = status_lines(portal).len().max(1) as f32;
-    CURRENT.max(NAME * LINE + 1.0 + lines * STATUS * LINE)
-}
-
-/// `text` broken between its words into lines that fit `room` as `width`
-/// measures them; a word too wide alone keeps its own line.
-pub(super) fn wrap(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    for word in text.split(' ') {
-        match lines.last_mut() {
-            Some(line) if width(&format!("{line} {word}")) <= room => {
-                line.push(' ');
-                line.push_str(word);
-            }
-            _ => lines.push(word.to_owned()),
-        }
-    }
-    lines
-}
-
-fn note_height() -> f32 {
-    NOTE_TOP + NOTE * LINE + NOTE_BOTTOM
+    kit::block_height(status_lines(portal).len().max(1) as f32)
 }
 
 impl Layout {
@@ -552,7 +446,7 @@ impl Layout {
         };
         let enabled = ui.enabled(network, now) && network.hardware;
         let wired = network.wired.then(|| next(WIRED));
-        let note = (!enabled).then(|| next(note_height()));
+        let note = (!enabled).then(|| next(NOTE_HEIGHT));
         let current = network.current.as_ref().filter(|_| enabled).map(|_| {
             let height = current_height(network.portal);
             (next(height), height)
@@ -563,31 +457,18 @@ impl Layout {
             .as_ref()
             .and_then(|s| rows.iter().position(|n| n.ssid == *s))
             .map(|i| (i, ui.error.map_or(0, |e| error_lines(e).len())));
-        let mut tops = Vec::new();
-        let mut content = 0.0;
-        for i in 0..rows.len() {
-            let height = match unfolded {
-                Some((u, error)) if u == i => ROW + form_height(error),
-                _ => ROW,
-            };
-            tops.push((content, height));
-            content += height + ROW_GAP;
-        }
-        let content = (content - ROW_GAP).max(0.0);
+        let (tops, content) = kit::stack((0..rows.len()).map(|i| match unfolded {
+            Some((u, error)) if u == i => ROW + form_height(error),
+            _ => ROW,
+        }));
         let section = enabled.then(|| {
             let rule = next(2.0 * RULE + 1.0) + RULE;
             let label = next(LABEL_ROW);
-            let note = rows.is_empty().then(|| next(note_height()));
+            let note = rows.is_empty().then(|| next(NOTE_HEIGHT));
             let list = (!rows.is_empty()).then(|| {
                 let height = content.min(LIST);
                 let top = next(height);
-                (
-                    Rectangle::new(
-                        Point::new(LEFT - ROW_OUT, top),
-                        Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, height),
-                    ),
-                    content,
-                )
+                kit::list(top, height, content)
             });
             Section {
                 rule,
@@ -610,38 +491,28 @@ impl Layout {
     }
 
     fn height(&self) -> u32 {
-        (self.end + PAD_BOTTOM + BORDER).round() as u32
+        kit::height(self.end)
     }
 
-    fn list(&self) -> Option<(Rectangle, f32)> {
+    fn list(&self) -> Option<List> {
         self.section.and_then(|s| s.list)
     }
 
     /// Whether the list scrolls.
+    #[cfg(test)]
     fn scrolls(&self) -> bool {
-        self.list()
-            .is_some_and(|(view, content)| content > view.height + 0.5)
+        self.list().is_some_and(List::scrolls)
     }
 
     /// How far the list can scroll.
     fn most_scroll(&self) -> f32 {
-        self.list()
-            .map_or(0.0, |(view, content)| (content - view.height).max(0.0))
+        self.list().map_or(0.0, List::most_scroll)
     }
 
     /// Row `i`'s 36 px, on the popover, scrolled.
     fn row(&self, i: usize, scroll: f32) -> Option<Rectangle> {
-        let (view, _) = self.list()?;
         let (top, _) = *self.rows.get(i)?;
-        let right = if self.scrolls() {
-            RIGHT - 2.0
-        } else {
-            view.x + view.width - 2.0
-        };
-        Some(Rectangle::new(
-            Point::new(view.x, view.y + top - scroll),
-            Size::new(right - view.x, ROW),
-        ))
+        Some(self.list()?.row(top, scroll, ROW_END))
     }
 
     /// The unfolded row's whole block (its row and its form).
@@ -722,10 +593,7 @@ pub struct State {
     network: Network,
     rows: Vec<Wifi>,
     layout: Option<Layout>,
-    /// Words measured: (text, size, bold) → width.
-    widths: HashMap<(&'static str, u32, bool), f32>,
-    /// Names cut to fit their room: (name, room) → shown.
-    names: HashMap<(String, u32), String>,
+    widths: Widths,
     /// The rows' names as shown, and the current network's.
     row_names: Vec<String>,
     current_name: String,
@@ -733,66 +601,10 @@ pub struct State {
     shown_width: f32,
     /// The label's letters and their places.
     label: Vec<(char, f32)>,
-    hover: Option<Target>,
-    pressed: Option<Target>,
-    pointer: Option<Point>,
-    inside: bool,
-    /// When the spinners started, for their turn.
-    since: Option<Instant>,
-    /// A wheel's notch comes as lines, then as pixels, which count for
-    /// nothing.
-    after_notch: bool,
+    pointer: Pointer<Target>,
+    spin: Spin,
+    wheel: Wheel,
     now: Option<Instant>,
-}
-
-/// A key for a measure: the size in tenths.
-pub(super) fn tenths(size: f32) -> u32 {
-    (size * 10.0).round() as u32
-}
-
-/// `text`'s width, measured.
-pub(super) fn measure(text: &str, size: f32, font: iced::Font) -> f32 {
-    match iced::advanced::graphics::text::font_system().write() {
-        Ok(mut system) => super::sound::measure(system.raw(), text, font, size),
-        Err(_) => text.chars().count() as f32 * size * 0.55,
-    }
-}
-
-impl State {
-    /// A word's width, measured once.
-    fn width(&mut self, text: &'static str, size: f32, bold: bool) -> f32 {
-        let key = (text, tenths(size), bold);
-        if let Some(width) = self.widths.get(&key) {
-            return *width;
-        }
-        let width = measure(text, size, if bold { MANROPE_BOLD } else { MANROPE });
-        self.widths.insert(key, width);
-        width
-    }
-
-    /// A word's width as measured (an estimate if it was not).
-    fn known(&self, text: &'static str, size: f32, bold: bool) -> f32 {
-        self.widths
-            .get(&(text, tenths(size), bold))
-            .copied()
-            .unwrap_or(text.chars().count() as f32 * size * 0.55)
-    }
-
-    /// `name` cut to fit `room` at `size` in `font`, once.
-    fn fit(&mut self, name: &str, room: f32, font: iced::Font) -> String {
-        let key = (name.to_owned(), room.max(0.0) as u32);
-        if let Some(shown) = self.names.get(&key) {
-            return shown.clone();
-        }
-        let shown = match iced::advanced::graphics::text::font_system().write() {
-            Ok(mut system) => super::sound::elide(name, room, |t| {
-                super::sound::measure(system.raw(), t, font, ROW_TEXT)
-            }),
-            Err(_) => name.to_owned(),
-        };
-        self.names.insert(key, shown.clone());
-        shown
-    }
 }
 
 impl<Message> canvas::Program<Message> for Panel {
@@ -805,28 +617,11 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(now)) => self.refresh(state, *now),
-            _ if !super::with(|c| c.is_open(self.id)) => None,
-            iced::Event::Mouse(event) => {
-                let at = crate::levels::draw::pointer(event, bounds, cursor, state.pointer);
-                state.pointer = at;
-                self.mouse(state, event, at)
-            }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => {
-                let pressed = Pressed {
-                    key: key.clone(),
-                    modifiers: *modifiers,
-                    text: text.as_deref().map(str::to_owned),
-                };
-                self.key(state, &pressed)
-            }
-            _ => None,
+        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
+            Input::Redraw(now) => self.refresh(state, now),
+            Input::Mouse(event, at) => self.mouse(state, event, at),
+            Input::Key(pressed) => self.key(state, &pressed),
+            Input::Nothing => None,
         }
     }
 
@@ -839,7 +634,7 @@ impl<Message> canvas::Program<Message> for Panel {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        self.background(&mut frame, bounds.size());
+        kit::background(&mut frame, bounds.size(), self.glass);
         let Some(layout) = &state.layout else {
             return vec![frame.into_geometry()];
         };
@@ -855,7 +650,8 @@ impl<Message> canvas::Program<Message> for Panel {
             drawn.header(&mut frame);
             drawn.blocks(&mut frame);
             let mut geometry = vec![];
-            if let Some((view, _)) = layout.list() {
+            if let Some(shown) = layout.list() {
+                let view = shown.view;
                 let mut list = Frame::with_bounds(renderer, view);
                 drawn.list(&mut list);
                 let mut field = None;
@@ -870,7 +666,7 @@ impl<Message> canvas::Program<Message> for Panel {
                         field = Some(text.into_geometry());
                     }
                 }
-                drawn.scrollbar(&mut frame, view);
+                shown.scrollbar(&mut frame, ui.scroll);
                 geometry.push(list.into_geometry());
                 geometry.extend(field);
             }
@@ -887,7 +683,7 @@ impl<Message> canvas::Program<Message> for Panel {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        match state.hover {
+        match state.pointer.hover {
             Some(Target::Field) => mouse::Interaction::Text,
             Some(_) => mouse::Interaction::Pointer,
             None => mouse::Interaction::default(),
@@ -899,22 +695,14 @@ impl Panel {
     /// What it shows, read afresh: the keys that reached another surface,
     /// the network, the rows' order, the outcome of a connection.
     fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        let keys = super::take_keys();
-        if !keys.is_empty() && super::with(|c| c.is_open(self.id)) {
-            for pressed in keys {
-                let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-            }
+        for pressed in kit::keys(self.id) {
+            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
         let network = network::snapshot();
         let hold = ui(|ui| {
             let hold = ui.react(&network);
             ui.relist(&network);
-            if ui
-                .switch
-                .is_some_and(|(asked, since)| asked == network.enabled || now >= since + ASKED_FOR)
-            {
-                ui.switch = None;
-            }
+            ui.switch.settle(network.enabled, now);
             state.rows = ui.rows(&network);
             let layout = Layout::of(&network, ui, &state.rows, now);
             ui.scroll = ui.scroll.clamp(0.0, layout.most_scroll());
@@ -927,7 +715,7 @@ impl Panel {
             // Resized under a still pointer: what it is over is not known
             // until it moves.
             if state.layout.as_ref().map(Layout::height) != Some(layout.height()) {
-                state.hover = None;
+                state.pointer.hover = None;
             }
             state.layout = Some(layout);
             hold
@@ -941,14 +729,10 @@ impl Panel {
         // A change of size reaches the controller, which resizes the
         // surface (without waking it again).
         super::refit(Item::Wifi);
-        let spinning =
+        let spins =
             self.motion && (state.network.scanning || state.network.connecting_to().is_some());
-        if spinning {
-            state.since.get_or_insert(now);
-        } else {
-            state.since = None;
-        }
-        let sliding = self.motion && ui(|ui| ui.knob.is_some_and(|(_, since)| now < since + SLIDE));
+        let spinning = state.spin.run(spins, now);
+        let sliding = self.motion && ui(|ui| ui.switch.sliding(now));
         (spinning || sliding).then(canvas::Action::request_redraw)
     }
 
@@ -960,30 +744,24 @@ impl Panel {
     ) -> Option<canvas::Action<Message>> {
         let layout = state.layout.clone()?;
         let target = at.and_then(|at| self.target_at(state, &layout, at));
-        let in_list = at.is_some_and(|at| layout.list().is_some_and(|(v, _)| v.contains(at)));
+        let in_list = at.is_some_and(|at| layout.list().is_some_and(|l| l.view.contains(at)));
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                if !state.inside && at.is_some() {
-                    state.inside = true;
-                    event(Seen::PopoverEnter);
-                }
+                state.pointer.moved();
                 let held = ui(|ui| std::mem::replace(&mut ui.over_list, in_list));
-                if state.hover != target || held != in_list {
-                    state.hover = target;
+                if state.pointer.over(target) || held != in_list {
                     return redraw;
                 }
                 None
             }
             mouse::Event::CursorLeft => {
-                state.inside = false;
-                event(Seen::PopoverLeave);
-                state.hover = None;
+                state.pointer.left();
                 ui(|ui| ui.over_list = false);
                 redraw
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.pressed = target;
+                state.pointer.pressed = target;
                 // The field takes the keyboard on the press, as a browser's.
                 ui(|ui| {
                     ui.focus = match target {
@@ -997,28 +775,17 @@ impl Panel {
                 redraw
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                let pressed = state.pressed.take();
-                if pressed.is_some() && pressed == target {
-                    self.act(state, pressed);
+                if let Some(clicked) = state.pointer.release(target) {
+                    self.act(state, Some(clicked));
                 }
                 redraw
             }
             mouse::Event::WheelScrolled { delta } if in_list => {
-                let by = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => {
-                        state.after_notch = true;
-                        -y.signum() * NOTCH
-                    }
-                    mouse::ScrollDelta::Pixels { .. } if state.after_notch => {
-                        state.after_notch = false;
-                        0.0
-                    }
-                    mouse::ScrollDelta::Pixels { y, .. } => -y,
-                };
+                let by = state.wheel.down(delta, NOTCH);
                 let most = layout.most_scroll();
                 ui(|ui| ui.scroll = (ui.scroll + by).clamp(0.0, most));
                 // What is under the pointer now.
-                state.hover = at.and_then(|at| self.target_at(state, &layout, at));
+                state.pointer.hover = at.and_then(|at| self.target_at(state, &layout, at));
                 redraw
             }
             _ => None,
@@ -1042,7 +809,7 @@ impl Panel {
                 t,
                 Target::Row(_) | Target::Field | Target::Eye | Target::Cancel | Target::Join
             );
-            rect.contains(at) && (!in_list || list.is_some_and(|(v, _)| v.contains(at)))
+            rect.contains(at) && (!in_list || list.is_some_and(|l| l.view.contains(at)))
         })
     }
 
@@ -1055,9 +822,9 @@ impl Panel {
             self.words.join()
         };
         [
-            state.width(self.words.disconnect(), STATUS, false) + 2.0 * SMALL_PAD,
-            state.width(self.words.cancel(), BUTTON_TEXT, false) + 2.0 * BUTTON_PAD,
-            state.width(join, BUTTON_TEXT, true) + 2.0 * BUTTON_PAD,
+            state.widths.width(self.words.disconnect(), STATUS, false) + 2.0 * SMALL_PAD,
+            state.widths.width(self.words.cancel(), BUTTON_TEXT, false) + 2.0 * BUTTON_PAD,
+            state.widths.width(join, BUTTON_TEXT, true) + 2.0 * BUTTON_PAD,
         ]
     }
 
@@ -1069,18 +836,11 @@ impl Panel {
         scroll: f32,
         [disconnect, cancel, join]: [f32; 3],
     ) -> Option<Rectangle> {
-        let middle = HEADER_TOP + HEADER / 2.0;
         Some(match target {
-            Target::Switch => Rectangle::new(
-                Point::new(RIGHT - SWITCH.width, middle - SWITCH.height / 2.0),
-                SWITCH,
-            ),
+            Target::Switch => Switch::rect(),
             Target::Disconnect => {
                 let (top, height) = layout.current?;
-                Rectangle::new(
-                    Point::new(RIGHT - disconnect, top + (height - SMALL_BUTTON) / 2.0),
-                    Size::new(disconnect, SMALL_BUTTON),
-                )
+                kit::block_button(top, height, disconnect)
             }
             Target::Portal => Rectangle::new(
                 Point::new(LEFT, layout.portal?),
@@ -1100,14 +860,8 @@ impl Panel {
         let busy = network.connecting_to().is_some();
         match target {
             Some(Target::Switch) => {
-                let now = Instant::now();
-                ui(|ui| {
-                    let on = ui.enabled(&network, now);
-                    let from = ui.knob_at(on, now, self.motion);
-                    ui.switch = Some((!on, now));
-                    ui.knob = Some((from, now));
-                    network::ask(Ask::Enable(!on));
-                });
+                let on = ui(|ui| ui.switch.flip(network.enabled, Instant::now(), self.motion));
+                network::ask(Ask::Enable(on));
             }
             Some(Target::Disconnect) => network::ask(Ask::Disconnect),
             Some(Target::Portal) => {
@@ -1205,19 +959,6 @@ impl Panel {
             (layout, order)
         });
         let focus = ui(|ui| ui.focus);
-        let at = focus.and_then(|f| order.iter().position(|t| *t == f));
-        let step = |by: isize| {
-            let n = order.len() as isize;
-            if n == 0 {
-                return None;
-            }
-            let next = match at {
-                Some(i) => (i as isize + by).rem_euclid(n),
-                None if by > 0 => 0,
-                None => n - 1,
-            };
-            order.get(next as usize).copied()
-        };
         let typing = focus == Some(Target::Field);
         let modifiers = pressed.modifiers;
         match &pressed.key {
@@ -1239,25 +980,21 @@ impl Panel {
                 }
             }
             Key::Named(Named::Tab) => {
-                let next = step(if modifiers.shift() { -1 } else { 1 });
+                let next = kit::step(&order, focus, modifiers.shift());
                 ui(|ui| ui.focus = next);
             }
             Key::Named(Named::ArrowUp | Named::ArrowDown) => {
-                let Some(Target::Row(i)) = focus else {
+                let Some(row @ Target::Row(_)) = focus else {
                     return None;
                 };
                 let down = matches!(pressed.key, Key::Named(Named::ArrowDown));
-                let enabled: Vec<usize> = order
+                let rows: Vec<Target> = order
                     .iter()
-                    .filter_map(|t| match t {
-                        Target::Row(r) => Some(*r),
-                        _ => None,
-                    })
+                    .copied()
+                    .filter(|t| matches!(t, Target::Row(_)))
                     .collect();
-                let at = enabled.iter().position(|r| *r == i)?;
-                let n = enabled.len();
-                let next = if down { (at + 1) % n } else { (at + n - 1) % n };
-                ui(|ui| ui.focus = Some(Target::Row(enabled[next])));
+                let next = kit::cycle(&rows, row, down)?;
+                ui(|ui| ui.focus = Some(next));
             }
             Key::Named(Named::Enter) => match focus {
                 Some(Target::Field | Target::Join) => self.submit(&network),
@@ -1296,7 +1033,7 @@ impl Panel {
 
     /// The list scrolled so that what holds the keyboard shows.
     fn reveal(&self, state: &mut State, layout: &Layout) {
-        let Some((view, _)) = layout.list() else {
+        let Some(List { view, .. }) = layout.list() else {
             return;
         };
         let network = state.network.clone();
@@ -1316,52 +1053,12 @@ impl Panel {
         };
         // The new layout (a row unfolded) before scrolling.
         let layout = ui(|ui| Layout::of(&network, ui, &rows, Instant::now()));
-        let Some(&(top, height)) = layout.rows.get(i) else {
+        let Some(&row) = layout.rows.get(i) else {
             return;
         };
         let most = layout.most_scroll();
-        ui(|ui| {
-            let mut scroll = ui.scroll;
-            if top < scroll {
-                scroll = top;
-            } else if top + height > scroll + view.height {
-                scroll = top + height - view.height;
-            }
-            ui.scroll = scroll.clamp(0.0, most);
-        });
+        ui(|ui| ui.scroll = kit::reveal(row, view.height, ui.scroll, most));
     }
-
-    fn background(&self, f: &mut Frame, size: Size) {
-        background(f, size, self.glass);
-    }
-}
-
-/// A popover's glass (or its opaque colour) and its rim.
-pub(super) fn background(f: &mut Frame, size: Size, glass: bool) {
-    let (top, bottom) = if glass {
-        (GLASS_TOP, GLASS_BOTTOM)
-    } else {
-        (OPAQUE_TOP, OPAQUE_BOTTOM)
-    };
-    let radius = RADIUS as f32;
-    let shape = Path::rounded_rectangle(Point::ORIGIN, size, radius.into());
-    let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-        .add_stop(0.0, top)
-        .add_stop(1.0, bottom);
-    f.fill(&shape, canvas::Fill::from(tint));
-    let rim = Path::rounded_rectangle(
-        Point::new(BORDER / 2.0, BORDER / 2.0),
-        Size::new(size.width - BORDER, size.height - BORDER),
-        (radius - BORDER / 2.0).into(),
-    );
-    f.stroke(
-        &rim,
-        canvas::Stroke {
-            style: canvas::Style::Solid(RIM),
-            width: BORDER,
-            ..canvas::Stroke::default()
-        },
-    );
 }
 
 /// What can hold the keyboard, in `Tab`'s order: the switch, Disconnect,
@@ -1412,11 +1109,11 @@ impl Drawn<'_> {
     }
 
     fn hover(&self, target: Target) -> bool {
-        self.state.hover == Some(target)
+        self.state.pointer.hover == Some(target)
     }
 
     fn width(&self, text: &'static str, size: f32, bold: bool) -> f32 {
-        self.state.known(text, size, bold)
+        self.state.widths.known(text, size, bold)
     }
 
     fn widths(&self) -> [f32; 3] {
@@ -1443,49 +1140,23 @@ impl Drawn<'_> {
         self.layout.form(self.ui.scroll, (cancel, join))
     }
 
-    /// The spinners' turn now, radians.
-    fn turn(&self) -> f32 {
-        let since = self.state.since.unwrap_or(self.now);
-        let t = self.now.saturating_duration_since(since).as_secs_f32() / TURN.as_secs_f32();
-        t.fract() * std::f32::consts::TAU
+    /// The spinners' turn now, if they turn.
+    fn turn(&self) -> Option<f32> {
+        self.panel.motion.then(|| self.state.spin.turn(self.now))
+    }
+
+    /// Text in the list: cut to it on the CPU.
+    fn clip(&self) -> Clip {
+        Clip::new(self.panel.software, self.layout.list().map(|l| l.view))
     }
 
     fn header(&self, f: &mut Frame) {
-        let middle = HEADER_TOP + HEADER / 2.0;
-        let mut title = text(
-            self.words().wifi().to_owned(),
-            Point::new(LEFT, middle),
-            TITLE,
-            TEXT,
-            Alignment::Left,
-        );
-        title.font = MANROPE_BOLD;
-        f.fill_text(title);
+        kit::title(f, self.words().wifi());
         if !self.layout.switch {
             return;
         }
-        let Some(rect) = self.shape(Target::Switch) else {
-            return;
-        };
         let on = self.ui.enabled(&self.state.network, self.now);
-        let p = self.ui.knob_at(on, self.now, self.panel.motion);
-        let fill = mix(SWITCH_OFF, ACCENT, p);
-        f.fill(
-            &Path::rounded_rectangle(rect.position(), rect.size(), (SWITCH.height / 2.0).into()),
-            fill,
-        );
-        let centre = Point::new(
-            rect.x + 2.0 + (SWITCH.width - KNOB - 4.0) * p + KNOB / 2.0,
-            rect.center_y(),
-        );
-        // `box-shadow: 0 1px 3px`: rings fading out, 1 px down.
-        for (grow, share) in [(2.0_f32, 0.15_f32), (1.2, 0.25), (0.5, 0.35)] {
-            f.fill(
-                &Path::circle(Point::new(centre.x, centre.y + 1.0), KNOB / 2.0 + grow),
-                KNOB_SHADOW.scale_alpha(share),
-            );
-        }
-        f.fill(&Path::circle(centre, KNOB / 2.0), TEXT);
+        Switch::draw(f, self.ui.switch.knob_at(on, self.now, self.panel.motion));
     }
 
     /// The parts above the list.
@@ -1509,13 +1180,7 @@ impl Drawn<'_> {
             } else {
                 words.no_adapter()
             };
-            f.fill_text(text(
-                note.to_owned(),
-                Point::new(LEFT, top + NOTE_TOP + NOTE * LINE / 2.0),
-                NOTE,
-                FAINT,
-                Alignment::Left,
-            ));
+            f.fill_text(kit::note(note.to_owned(), top));
         }
         if let (Some((top, height)), Some(current)) = (self.layout.current, &network.current) {
             self.current(f, top, height, current);
@@ -1527,58 +1192,28 @@ impl Drawn<'_> {
             } else {
                 PORTAL_FILL
             };
-            f.fill(
-                &Path::rounded_rectangle(rect.position(), rect.size(), 8.0.into()),
-                fill,
-            );
-            let mut label = text(
-                words.open_sign_in().to_owned(),
-                rect.center(),
-                PORTAL_TEXT,
-                PEACH,
-                Alignment::Center,
-            );
-            label.font = MANROPE_SEMIBOLD;
-            f.fill_text(label);
+            f.fill(&rounded(rect, ROW_RADIUS), fill);
+            f.fill_text(kit::text_in(
+                MANROPE_SEMIBOLD,
+                text(
+                    words.open_sign_in().to_owned(),
+                    rect.center(),
+                    PORTAL_TEXT,
+                    PEACH,
+                    Alignment::Center,
+                ),
+            ));
         }
         let Some(section) = self.layout.section else {
             return;
         };
-        f.fill_rectangle(
-            Point::new(LEFT, section.rule),
-            Size::new(RIGHT - LEFT, 1.0),
-            RULE_COLOUR,
-        );
+        kit::rule(f, section.rule);
         let middle = section.label + LABEL_ROW / 2.0;
-        for (ch, x) in &self.state.label {
-            let mut letter = text(
-                ch.to_string(),
-                Point::new(*x, middle),
-                LABEL,
-                DIM,
-                Alignment::Left,
-            );
-            letter.font = MANROPE_BOLD;
-            f.fill_text(letter);
-        }
+        kit::label(f, &self.state.label, middle);
         if network.scanning {
             let label = words.searching();
-            f.fill_text(text(
-                label.to_owned(),
-                Point::new(RIGHT, middle),
-                SMALL,
-                FAINT,
-                Alignment::Right,
-            ));
-            if self.panel.motion {
-                let at = RIGHT - self.width(label, SMALL, false) - 6.0 - SPINNER;
-                spinner(
-                    f,
-                    Point::new(at, middle - SPINNER / 2.0),
-                    FAINT,
-                    self.turn(),
-                );
-            }
+            let width = self.width(label, SMALL, false);
+            kit::searching(f, label, width, middle, self.turn());
         }
         if let Some(top) = section.note {
             let note = if network.scanning {
@@ -1586,28 +1221,14 @@ impl Drawn<'_> {
             } else {
                 words.no_network()
             };
-            f.fill_text(text(
-                note.to_owned(),
-                Point::new(LEFT, top + NOTE_TOP + NOTE * LINE / 2.0),
-                NOTE,
-                FAINT,
-                Alignment::Left,
-            ));
+            f.fill_text(kit::note(note.to_owned(), top));
         }
     }
 
     /// The network connected: its block, its name, its state, Disconnect.
     fn current(&self, f: &mut Frame, top: f32, height: f32, current: &Wifi) {
         let words = self.words();
-        let block = Rectangle::new(
-            Point::new(LEFT - ROW_OUT, top),
-            Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, height),
-        );
-        f.fill(
-            &Path::rounded_rectangle(block.position(), block.size(), 8.0.into()),
-            CURRENT_FILL,
-        );
-        let middle = block.center_y();
+        let middle = kit::block(f, top, height).center_y();
         wifi(
             f,
             Point::new(LEFT, middle - ICON / 2.0),
@@ -1619,37 +1240,16 @@ impl Drawn<'_> {
         );
         if let Some(button) = self.shape(Target::Disconnect) {
             let hover = self.hover(Target::Disconnect);
-            f.fill(
-                &Path::rounded_rectangle(button.position(), button.size(), 7.0.into()),
-                if hover { FILL_HOVER } else { FILL },
-            );
-            f.fill_text(text(
-                words.disconnect().to_owned(),
-                button.center(),
-                STATUS,
-                if hover { TEXT } else { DIM },
-                Alignment::Center,
-            ));
+            kit::small_button(f, button, words.disconnect(), hover);
         }
         let x = LEFT + ICON + ICON_GAP;
         // Name and state: 14 px over 12.5 px (a line or two), 1 px apart,
         // centred.
         let portal = self.state.network.portal;
         let lines = status_lines(portal);
-        let column = NAME * LINE + 1.0 + lines.len() as f32 * STATUS * LINE;
-        let name_middle = middle - column / 2.0 + NAME * LINE / 2.0;
         let name = self.state.current_name.clone();
-        let mut label = text(
-            name,
-            Point::new(x, name_middle),
-            NAME,
-            TEXT,
-            Alignment::Left,
-        );
-        label.font = MANROPE_SEMIBOLD;
-        f.fill_text(label);
+        let first = kit::block_name(f, name, middle, lines.len() as f32);
         let colour = if portal { PEACH } else { ACCENT };
-        let first = name_middle + NAME * LINE / 2.0 + 1.0 + STATUS * LINE / 2.0;
         for (i, line) in lines.into_iter().enumerate() {
             f.fill_text(text(
                 line,
@@ -1674,16 +1274,10 @@ impl Drawn<'_> {
             let joinable = row.security.joinable() && busy.is_none();
             if unfolded {
                 if let Some(block) = self.layout.block(i, self.ui.scroll) {
-                    f.fill(
-                        &Path::rounded_rectangle(block.position(), block.size(), 8.0.into()),
-                        ROW_HOVER,
-                    );
+                    kit::row_fill(f, block, false, true);
                 }
-            } else if joinable && self.hover(Target::Row(i)) {
-                f.fill(
-                    &Path::rounded_rectangle(rect.position(), rect.size(), 8.0.into()),
-                    ROW_HOVER,
-                );
+            } else {
+                kit::row_fill(f, rect, false, joinable && self.hover(Target::Row(i)));
             }
             let enterprise = !row.security.joinable();
             let colour = if enterprise { FAINT } else { TEXT };
@@ -1695,32 +1289,14 @@ impl Drawn<'_> {
                 lock(f, Point::new(right - LOCK, middle - LOCK / 2.0));
                 right -= LOCK + ICON_GAP;
             }
-            let note = row_note(words, row, unfolded, busy, self.ui.failed.as_deref());
-            if let Some(note) = note {
-                self.list_text(
-                    f,
-                    text(
-                        note.text.to_owned(),
-                        Point::new(right, middle),
-                        SMALL,
-                        note.colour,
-                        Alignment::Right,
-                    ),
-                );
-                right -= self.width(note.text, SMALL, false);
-                if note.spinner && self.panel.motion {
-                    right -= 6.0 + SPINNER;
-                    spinner(
-                        f,
-                        Point::new(right, middle - SPINNER / 2.0),
-                        DIM,
-                        self.turn(),
-                    );
-                }
+            let aside = row_aside(words, row, unfolded, busy, self.ui.failed.as_deref());
+            if let Some(aside) = aside {
+                let width = self.width(aside.text, SMALL, false);
+                kit::aside(f, self.clip(), aside, (right, middle), width, self.turn());
             }
             let x = icon.x + ICON + ICON_GAP;
             let name = self.state.row_names.get(i).cloned().unwrap_or_default();
-            self.list_text(
+            self.clip().fill(
                 f,
                 text(
                     name,
@@ -1749,10 +1325,7 @@ impl Drawn<'_> {
             FIELD_BORDER
         };
         let field = form.field;
-        f.fill(
-            &Path::rounded_rectangle(field.position(), field.size(), 8.0.into()),
-            FILL,
-        );
+        f.fill(&rounded(field, ROW_RADIUS), FILL);
         f.stroke(
             &Path::rounded_rectangle(
                 Point::new(field.x + 0.5, field.y + 0.5),
@@ -1767,27 +1340,18 @@ impl Drawn<'_> {
         );
         eye(f, form.eye, self.ui.shown);
         if let (Some(top), Some(error)) = (form.error, error) {
-            for (i, line) in error_lines(error).into_iter().enumerate() {
-                let middle = top + (i as f32 + 0.5) * ERROR * LINE;
-                self.list_text(
-                    f,
-                    text(
-                        line,
-                        Point::new(field.x, middle),
-                        ERROR,
-                        PEACH,
-                        Alignment::Left,
-                    ),
-                );
+            let lines = error_lines(error);
+            for said in kit::lines(&lines, (field.x, top), ERROR, LINE, PEACH) {
+                self.clip().fill(f, said);
             }
         }
         let cancel = form.cancel;
         let hover = self.hover(Target::Cancel);
         f.fill(
-            &Path::rounded_rectangle(cancel.position(), cancel.size(), 8.0.into()),
+            &rounded(cancel, ROW_RADIUS),
             if hover { FILL_HOVER } else { FILL },
         );
-        self.list_text(
+        self.clip().fill(
             f,
             text(
                 words.cancel().to_owned(),
@@ -1801,10 +1365,10 @@ impl Drawn<'_> {
         let ready = self.ui.password.complete() && !busy;
         let join = form.join;
         f.fill(
-            &Path::rounded_rectangle(join.position(), join.size(), 8.0.into()),
+            &rounded(join, ROW_RADIUS),
             if ready { ACCENT } else { FILL_HOVER },
         );
-        let mut label = text(
+        let label = text(
             if busy {
                 words.connecting()
             } else {
@@ -1816,8 +1380,7 @@ impl Drawn<'_> {
             if ready { INK } else { FAINT },
             Alignment::Center,
         );
-        label.font = MANROPE_BOLD;
-        self.list_text(f, label);
+        self.clip().fill(f, kit::text_in(MANROPE_BOLD, label));
     }
 
     /// The field's text, in its own frame: dots, or the password when the
@@ -1830,7 +1393,7 @@ impl Drawn<'_> {
         let password = &self.ui.password;
         let caret = self.ui.focus == Some(Target::Field);
         if password.is_empty() {
-            self.list_text(
+            self.clip().fill(
                 f,
                 text(
                     self.words().password().to_owned(),
@@ -1853,7 +1416,7 @@ impl Drawn<'_> {
         // The end in view, as a field scrolls to its caret.
         let x = left - (width + 2.0 - room).max(0.0);
         if self.ui.shown {
-            self.list_text(
+            self.clip().fill(
                 f,
                 text(
                     password.as_str().to_owned(),
@@ -1878,42 +1441,6 @@ impl Drawn<'_> {
         }
     }
 
-    /// A text in the list: on the CPU, whose renderer does not cut text to
-    /// a frame's bounds, only when it shows whole.
-    fn list_text(&self, f: &mut Frame, text: canvas::Text) {
-        if self.panel.software
-            && let Some((view, _)) = self.layout.list()
-        {
-            let half = text.size.0 * LINE / 2.0;
-            if text.position.y - half < view.y - 1.0
-                || text.position.y + half > view.y + view.height + 1.0
-            {
-                return;
-            }
-        }
-        f.fill_text(text);
-    }
-
-    fn scrollbar(&self, f: &mut Frame, view: Rectangle) {
-        let Some((_, content)) = self.layout.list() else {
-            return;
-        };
-        if !self.layout.scrolls() {
-            return;
-        }
-        let height = (view.height * view.height / content).max(20.0);
-        let travel = view.height - height;
-        let share = self.ui.scroll / self.layout.most_scroll().max(1.0);
-        let thumb = Rectangle::new(
-            Point::new(RIGHT, view.y + travel * share),
-            Size::new(SCROLLBAR, height),
-        );
-        f.fill(
-            &Path::rounded_rectangle(thumb.position(), thumb.size(), (SCROLLBAR / 2.0).into()),
-            THUMB,
-        );
-    }
-
     /// The keyboard's ring, around what holds it (not the field, whose
     /// caret says so).
     fn focus(&self, f: &mut Frame) {
@@ -1925,64 +1452,12 @@ impl Drawn<'_> {
         };
         let radius = match target {
             Target::Switch => SWITCH.height / 2.0,
-            Target::Disconnect => 7.0,
+            Target::Disconnect => SMALL_RADIUS,
             Target::Eye => 6.0,
-            _ => 8.0,
+            _ => ROW_RADIUS,
         };
         ring(f, rect, radius);
     }
-}
-
-/// Manrope at 600, the mockup's for the network's name and the sign-in
-/// page's button.
-pub(crate) const MANROPE_SEMIBOLD: iced::Font = iced::Font {
-    weight: iced::font::Weight::Semibold,
-    ..MANROPE
-};
-
-pub(super) fn mix(a: Color, b: Color, t: f32) -> Color {
-    Color {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a + (b.a - a.a) * t,
-    }
-}
-
-pub(super) fn text(
-    content: String,
-    position: Point,
-    size: f32,
-    color: Color,
-    align: Alignment,
-) -> canvas::Text {
-    canvas::Text {
-        content,
-        position,
-        max_width: f32::INFINITY,
-        color,
-        size: Pixels(size),
-        line_height: LineHeight::Relative(LINE),
-        font: MANROPE,
-        align_x: align,
-        align_y: alignment::Vertical::Center,
-        shaping: Shaping::Advanced,
-    }
-}
-
-/// The spinner: `M21 12a9 9 0 1 1-6.2-8.6`, three quarters and more of a
-/// circle, turned by `turn`.
-pub(super) fn spinner(f: &mut Frame, at: Point, colour: Color, turn: f32) {
-    let s = SPINNER / 24.0;
-    let arc = Path::new(|b| {
-        b.arc(canvas::path::Arc {
-            center: Point::new(at.x + 12.0 * s, at.y + 12.0 * s),
-            radius: 9.0 * s,
-            start_angle: Radians(turn),
-            end_angle: Radians(turn + 288.0_f32.to_radians()),
-        });
-    });
-    f.stroke(&arc, stroke(3.0 * s, colour));
 }
 
 /// The lock, 14 px: `rect x5 y11 w14 h10 rx2` and `M8 11V8a4 4 0 0 1 8 0v3`.
@@ -2038,24 +1513,16 @@ fn eye(f: &mut Frame, button: Rectangle, shown: bool) {
     }
 }
 
-/// What a row says at its right, before its lock.
-#[derive(Debug, Clone, Copy)]
-struct Note {
-    text: &'static str,
-    colour: Color,
-    /// With a spinner before it.
-    spinner: bool,
-}
-
-/// `row`'s note: "Connexion…" while it joins, "dans les Réglages" when the
-/// popover cannot join it, "échec" when it failed, "enregistré" when saved.
-fn row_note(
+/// What `row` says on its right, before its lock: "Connexion…" while it
+/// joins, "dans les Réglages" when the popover cannot join it, "échec" when
+/// it failed, "enregistré" when saved.
+fn row_aside(
     words: Words,
     row: &Wifi,
     unfolded: bool,
     busy: Option<&[u8]>,
     failed: Option<&[u8]>,
-) -> Option<Note> {
+) -> Option<Aside> {
     let this = Some(row.ssid.as_slice());
     let (text, colour, spinner) = if busy == this && !unfolded {
         (words.connecting(), DIM, true)
@@ -2068,7 +1535,7 @@ fn row_note(
     } else {
         return None;
     };
-    Some(Note {
+    Some(Aside {
         text,
         colour,
         spinner,
@@ -2092,19 +1559,10 @@ impl Panel {
             (words.failed(), SMALL, false),
             (words.connecting(), SMALL, false),
         ] {
-            state.width(text, size, bold);
+            state.widths.width(text, size, bold);
         }
         if state.label.is_empty() {
-            let mut x = LEFT;
-            state.label = words
-                .networks()
-                .chars()
-                .map(|ch| {
-                    let at = x;
-                    x += measure(&ch.to_string(), LABEL, MANROPE_BOLD) + LABEL_SPACING;
-                    (ch, at)
-                })
-                .collect();
+            state.label = kit::label_letters(words.networks());
         }
         let Some(layout) = state.layout.clone() else {
             return;
@@ -2120,28 +1578,30 @@ impl Panel {
                 let Some(rect) = layout.row(i, scroll) else {
                     return row.name.clone();
                 };
-                let mut room = rect.width - 2.0 * ROW_PAD - ICON - ICON_GAP;
-                if row.security.locked() {
-                    room -= LOCK + ICON_GAP;
-                }
+                let lock = if row.security.locked() {
+                    LOCK + ICON_GAP
+                } else {
+                    0.0
+                };
                 let open = unfolded.as_ref() == Some(&row.ssid);
-                if let Some(note) = row_note(words, row, open, busy.as_deref(), failed.as_deref()) {
-                    room -= state.known(note.text, SMALL, false) + ICON_GAP;
-                    if note.spinner && self.motion {
-                        room -= 6.0 + SPINNER;
-                    }
-                }
-                state.fit(&row.name, room, MANROPE)
+                let aside =
+                    row_aside(words, row, open, busy.as_deref(), failed.as_deref()).map(|aside| {
+                        let width = state.widths.known(aside.text, SMALL, false);
+                        (width, aside.spinner && self.motion)
+                    });
+                let room = kit::name_room(rect.width, lock, aside);
+                state.widths.fit(&row.name, room, false)
             })
             .collect();
         if let Some(current) = state.network.current.clone() {
-            let disconnect = state.known(words.disconnect(), STATUS, false) + 2.0 * SMALL_PAD;
-            let room = RIGHT - disconnect - ICON_GAP - (LEFT + ICON + ICON_GAP);
-            state.current_name = state.fit(&current.name, room, MANROPE_SEMIBOLD);
+            let disconnect =
+                state.widths.known(words.disconnect(), STATUS, false) + 2.0 * SMALL_PAD;
+            let room = kit::block_room(disconnect);
+            state.current_name = state.widths.fit(&current.name, room, true);
         }
         state.shown_width = ui(|ui| {
             if ui.shown && !ui.password.is_empty() {
-                measure(ui.password.as_str(), FIELD_TEXT, MANROPE)
+                kit::measure(ui.password.as_str(), FIELD_TEXT, MANROPE)
             } else {
                 0.0
             }
@@ -2152,21 +1612,6 @@ impl Panel {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_error_wraps_between_its_words() {
-        let width = |t: &str| t.chars().count() as f32 * 6.0;
-        assert_eq!(
-            wrap(
-                "Mot de passe incorrect. Vérifie-le et réessaie.",
-                150.0,
-                width
-            ),
-            ["Mot de passe incorrect.", "Vérifie-le et réessaie."]
-        );
-        assert_eq!(wrap("Short.", 214.0, width), ["Short."]);
-        assert_eq!(wrap("a b", 1.0, width), ["a", "b"]);
-    }
 
     fn wifi(name: &str, strength: u8, security: Security) -> Wifi {
         Wifi {
@@ -2231,7 +1676,7 @@ mod tests {
         ui.relist(&around);
         let rows = ui.rows(&around);
         let layout = Layout::of(&around, &ui, &rows, now);
-        assert_eq!(layout.list().map(|(v, _)| v.height), Some(LIST));
+        assert_eq!(layout.list().map(|l| l.view.height), Some(LIST));
         assert!(layout.scrolls());
         // Two: no scrolling, and a row unfolded grows it.
         let two = network(&[("a", 80), ("b", 60)]);
