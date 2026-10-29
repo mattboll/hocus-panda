@@ -233,6 +233,32 @@ impl Headless {
         self.app.state.panel.levels_commits
     }
 
+    /// Commits of the popovers' surfaces so far.
+    pub fn popover_commits(&self) -> u64 {
+        self.app.state.panel.popover_commits
+    }
+
+    /// The popovers' surfaces as the shell placed them: their screen, and
+    /// where they are (global).
+    pub fn popover_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::POPOVER_NAMESPACE)
+    }
+
+    /// The namespace of the layer surface holding the keyboard, if one does.
+    pub fn keyboard_layer(&self) -> Option<String> {
+        let state = &self.app.state;
+        let focus = state.seat.get_keyboard()?.current_focus()?;
+        let crate::focus::KeyboardFocus::Wayland(surface) = focus else {
+            return None;
+        };
+        state.space.outputs().find_map(|output| {
+            let map = smithay::desktop::layer_map_for_output(output);
+            map.layers()
+                .find(|l| l.wl_surface() == &surface)
+                .map(|l| l.namespace().to_owned())
+        })
+    }
+
     /// What output `index` (in the order given) drew over since the last
     /// call, as one rectangle of its pixels; `None`: nothing.
     pub fn take_damage(&mut self, index: usize) -> Option<Rect> {
@@ -337,6 +363,42 @@ impl Headless {
         };
         let time = self.time;
         self.app.state.pointer_button(button, state, time);
+    }
+
+    /// The wheel turned `notches` (positive: toward the user, down), as a
+    /// mouse's: 15 px and 120 units of value120 a notch.
+    pub fn wheel(&mut self, notches: i32) {
+        self.scroll(
+            smithay::backend::input::AxisSource::Wheel,
+            15.0 * f64::from(notches),
+            Some(120 * notches),
+        );
+    }
+
+    /// Two fingers on a touchpad moved `pixels` down, in one event.
+    pub fn finger_scroll(&mut self, pixels: f64) {
+        self.scroll(smithay::backend::input::AxisSource::Finger, pixels, None);
+    }
+
+    fn scroll(
+        &mut self,
+        source: smithay::backend::input::AxisSource,
+        value: f64,
+        v120: Option<i32>,
+    ) {
+        use smithay::{backend::input::Axis, input::pointer::AxisFrame};
+        self.time += 10;
+        let mut frame = AxisFrame::new(self.time)
+            .source(source)
+            .value(Axis::Vertical, value);
+        if let Some(v120) = v120 {
+            frame = frame.v120(Axis::Vertical, v120);
+        }
+        let state = &mut self.app.state;
+        if let Some(pointer) = state.seat.get_pointer() {
+            pointer.axis(state, frame);
+            pointer.frame(state);
+        }
     }
 
     /// A key by its evdev code.

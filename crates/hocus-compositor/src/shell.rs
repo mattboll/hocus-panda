@@ -272,6 +272,7 @@ impl State {
                 self.tell_shell(self.bar_look());
             }
             ToCompositor::Wake(namespace) => self.wake_shell_surfaces(&namespace),
+            ToCompositor::Closing(namespace) => self.popovers_closing(&namespace),
         }
     }
 

@@ -1207,7 +1207,8 @@ impl State {
         for strip in self.strips.values_mut() {
             moving |= strip.tick(now);
         }
-        moving |= self.panel.tick(now);
+        let popover_motion = self.popover_motion();
+        moving |= self.panel.tick(now, popover_motion);
         moving |= self.tick_switcher(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();

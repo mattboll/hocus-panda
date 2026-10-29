@@ -452,7 +452,7 @@ impl State {
             return;
         }
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
-            if self.dismiss_popups_at(at) {
+            if self.dismiss_popups_at(at) || self.press_outside_shell(at) {
                 self.kept_buttons.insert(button);
                 return;
             }
