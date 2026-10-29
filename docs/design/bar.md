@@ -868,10 +868,17 @@ filling, so there is no mockup.
   `Secret` has taken it; no `String` holds it. Nothing logs it nor its
   length (the shell logs, at debug, that it was pasted or did not fit).
   What the client that copied keeps, and the kernel's pipe, are theirs.
+- **Found on the way**: a click on the field's eye went to the field,
+  which holds it (the eye works by its button now; `Tab` then `Enter`
+  already did); and cosmic-text traces the text it shapes, a password
+  shown with the eye too: the shell turns `cosmic_text::shape` off
+  whatever `RUST_LOG` says.
 - **For later fields**: `paste::asks` (the keys) and `paste::request` (the
   text, once, off the loop) are what any text field of the shell uses.
 - **Measured headless**, against a test client that copies: the password
   pasted with its line break reaches NetworkManager exactly, by `Ctrl+V`
   and by `Shift+Insert`; out of the field, from an empty clipboard, one
   holding only an image, or a client that never writes, nothing is
-  pasted, and the field takes keys while the paste waits.
+  pasted, and the field takes keys while the paste waits; the eye shows
+  the pasted password and hides it, and the shell's log, every crate at
+  trace, never holds it.
