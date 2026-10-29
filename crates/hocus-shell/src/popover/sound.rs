@@ -273,6 +273,15 @@ impl Panel {
     /// What the popover shows, read afresh; the names made to fit when
     /// they changed.
     fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
+        // Keys that reached another of the shell's surfaces (see
+        // `popover::key`).
+        let keys = super::take_keys();
+        let keyed = !keys.is_empty() && super::with(|c| c.is_open(self.id));
+        if keyed {
+            for (key, shift) in keys {
+                let _: Option<canvas::Action<Message>> = self.key(state, &key, shift);
+            }
+        }
         state.sinks = levels::sound::sinks();
         state.sound = levels::snapshot().sound;
         let names: Vec<String> = state.sinks.iter().map(|s| s.description.clone()).collect();

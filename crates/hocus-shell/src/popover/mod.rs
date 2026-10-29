@@ -561,6 +561,47 @@ pub fn event(event: Event) {
     }
 }
 
+/// Keys for the popover that reached another of the shell's surfaces.
+static KEYS: Mutex<Vec<(iced::keyboard::Key, bool)>> = Mutex::new(Vec::new());
+
+/// A key pressed on one of the shell's surfaces other than the popover
+/// (`shift`: with Shift), for what holds the keyboard. layershellev hands
+/// keys to the surface last clicked, not to the one the keyboard entered:
+/// a click on an item whose release comes after its popover took the
+/// keyboard sends the keys to the item's surface. So the popover's keys go
+/// to it (woken to take them), and the item's are its own. Whether the key
+/// was taken.
+pub fn key(key: &iced::keyboard::Key, shift: bool) -> bool {
+    use iced::keyboard::{Key, key::Named};
+    let (menu, focused) = with(|c| {
+        let menu = matches!(&c.phase, Phase::Open(open) if open.how == Opened::Click);
+        (menu, c.focused.is_some())
+    });
+    if menu {
+        KEYS.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((key.clone(), shift));
+        send(vec![Effect::Wake(POPOVER_NAMESPACE)]);
+        return true;
+    }
+    if !focused {
+        return false;
+    }
+    // The item holding the keyboard: Enter or Space opens its popover
+    // again, Esc lets the keyboard go.
+    match key {
+        Key::Named(Named::Enter | Named::Space) => event(Event::ItemActivate),
+        Key::Named(Named::Escape) => event(Event::ItemRelease),
+        _ => return false,
+    }
+    true
+}
+
+/// The keys the popover was sent elsewhere.
+pub fn take_keys() -> Vec<(iced::keyboard::Key, bool)> {
+    std::mem::take(&mut *KEYS.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
 /// The bar's own surface, under its clock and its levels, for the
 /// popovers: where the pointer goes (the cone), and presses off the
 /// items. It never draws, nor asks to.
@@ -584,6 +625,11 @@ impl<Message> iced::widget::canvas::Program<Message> for BarPointer {
                 event(Event::Pointer { at });
             }
             iced::Event::Mouse(Mouse::ButtonPressed(_)) => event(Event::PressElsewhere),
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: k, modifiers, ..
+            }) => {
+                key(k, modifiers.shift());
+            }
             _ => {}
         }
         None

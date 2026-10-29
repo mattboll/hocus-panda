@@ -221,6 +221,28 @@ fn a_click_opens_it_and_it_stays_until_a_click_outside_a_second_click_or_esc() -
     let back = hp.dispatch_until(WAIT, |hp| hp.keyboard_layer().is_none())?;
     assert!(back, "the keyboard is on {:?}", hp.keyboard_layer());
 
+    // A click whose release comes once the popover holds the keyboard, as
+    // a person's does: the keys still reach it.
+    hp.pointer_move(ROW.0 - 1.0, ROW.1);
+    hp.pointer_move(ROW.0, ROW.1);
+    hp.button(BTN_LEFT, true);
+    let held = hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some("hocus-bar-popover")
+    })?;
+    assert!(held, "the keyboard is on {:?}", hp.keyboard_layer());
+    wait(&mut hp, Duration::from_millis(100))?;
+    hp.button(BTN_LEFT, false);
+    wait(&mut hp, Duration::from_millis(100))?;
+    press(&mut hp, KEY_ESC);
+    popover_is(&mut hp, None)?;
+    let row = hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some("hocus-bar-levels")
+    })?;
+    assert!(row, "the keyboard is on {:?}", hp.keyboard_layer());
+    press(&mut hp, KEY_ESC);
+    let gone = hp.dispatch_until(WAIT, |hp| hp.keyboard_layer().is_none())?;
+    assert!(gone, "the keyboard is on {:?}", hp.keyboard_layer());
+
     // A second click on the row closes it.
     click(&mut hp, ROW);
     popover_is(&mut hp, Some(POPOVER))?;
@@ -313,6 +335,28 @@ fn in_the_mini_form_hovering_the_gauge_opens_it_and_leaving_closes_it() -> anyho
     assert_eq!(popovers(&hp), vec![MINI_POPOVER]);
     click(&mut hp, (800.0, 300.0));
     popover_is(&mut hp, None)?;
+
+    // Opened by hovering, then a click on the gauge: it stays, and takes
+    // the keyboard, which Esc gives to the gauge.
+    hp.pointer_move(MINI_GAUGE.0 - 1.0, MINI_GAUGE.1);
+    hp.pointer_move(MINI_GAUGE.0, MINI_GAUGE.1);
+    popover_is(&mut hp, Some(MINI_POPOVER))?;
+    wait(&mut hp, Duration::from_millis(100))?;
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
+    let held = hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some("hocus-bar-popover")
+    })?;
+    assert!(held, "the keyboard is on {:?}", hp.keyboard_layer());
+    hp.pointer_move(800.0, 300.0);
+    wait(&mut hp, Duration::from_millis(700))?;
+    assert_eq!(popovers(&hp), vec![MINI_POPOVER]);
+    press(&mut hp, KEY_ESC);
+    popover_is(&mut hp, None)?;
+    let row = hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some("hocus-bar-levels")
+    })?;
+    assert!(row, "the keyboard is on {:?}", hp.keyboard_layer());
     Ok(())
 }
 
