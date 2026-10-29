@@ -24,18 +24,18 @@ const KEY_BRIGHTNESSDOWN: u32 = 224;
 const KEY_BRIGHTNESSUP: u32 = 225;
 
 /// The levels' surfaces on a 1920×1080 screen: inside the bar's rim, 41 px
-/// above its bottom, 194 × 165 in the full form, 54 × 84 in the mini.
-const FULL: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 165, 194, 165);
-const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 84, 54, 84);
+/// above its bottom, 194 × 175 in the full form, 54 × 97 in the mini.
+const FULL: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
+const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 97, 54, 97);
 
 /// Where to look in the full form, a few pixels into each gauge (x), and
 /// each row's middle (y), with all three rows and a status line of one
 /// line; and the mini form's gauge.
 const GAUGE_X: i32 = FULL.x + 40;
-const SOUND_Y: i32 = FULL.y + 47;
-const LIGHT_Y: i32 = FULL.y + 77;
-const BATTERY_Y: i32 = FULL.y + 107;
-const MINI_GAUGE: (i32, i32) = (MINI.x + 27, MINI.y + 44);
+const SOUND_Y: i32 = FULL.y + 57;
+const LIGHT_Y: i32 = FULL.y + 87;
+const BATTERY_Y: i32 = FULL.y + 117;
+const MINI_GAUGE: (i32, i32) = (MINI.x + 27, MINI.y + 57);
 
 /// The fakes there, or why the test cannot run.
 fn ready() -> Option<std::path::PathBuf> {
@@ -171,11 +171,11 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     until(&mut hp, MINI_GAUGE, blue)?;
     // At half, filled from the bottom only.
     fakes.wpctl(&["set-volume", &other, "0.5"])?;
-    until(&mut hp, (MINI_GAUGE.0, MINI.y + 5), dark)?;
+    until(&mut hp, (MINI_GAUGE.0, MINI.y + 18), dark)?;
     assert!(blue(rgb(&mut hp, MINI_GAUGE)?));
     // Its whole width, just under its level (from 25 px down).
     for x in [MINI.x + 24, MINI.x + 29] {
-        assert!(blue(rgb(&mut hp, (x, MINI.y + 27))?), "{x}");
+        assert!(blue(rgb(&mut hp, (x, MINI.y + 40))?), "{x}");
     }
     Ok(())
 }
@@ -307,7 +307,7 @@ fn a_missing_service_hides_its_row_until_it_comes() -> anyhow::Result<()> {
     // UPower goes: its row and the status line go, the others close up
     // to the bottom: the brightness's row last, the sound's above it.
     fakes.stop_upower();
-    let lowest = (GAUGE_X, FULL.y + 135);
+    let lowest = (GAUGE_X, FULL.y + 145);
     until(&mut hp, lowest, yellow)?;
     until(&mut hp, (GAUGE_X, BATTERY_Y), blue)?;
     // PipeWire goes: the sound's row goes.

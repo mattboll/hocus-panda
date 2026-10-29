@@ -1,7 +1,9 @@
 //! The levels' services, faked privately, never the machine's: a D-Bus
 //! daemon of its own serving UPower, power-profiles-daemon and logind
 //! objects; a PipeWire of its own, in a short runtime directory of its own,
-//! with two null sinks; and a backlight directory. The shell is started
+//! with null sinks (two by default, or those asked for), and WirePlumber's
+//! part in choosing the default one (a sink chosen with `wpctl set-default`
+//! becomes the default); and a backlight directory. The shell is started
 //! through a script pointing it at them.
 #![allow(dead_code)]
 
@@ -126,9 +128,38 @@ pub struct Fakes {
     login: Option<Connection>,
     pub brightness_calls: Arc<Mutex<Vec<(String, String, u32)>>>,
     pipewire: Option<Child>,
+    /// The default sink's follower, WirePlumber's part.
+    policy: Option<Child>,
     /// PipeWire's runtime directory: short, its socket's path has a limit.
     pw_runtime: tempfile::TempDir,
+    /// The null sinks, the first the default.
+    sinks: Vec<FakeSink>,
 }
+
+/// A null sink: its node's name, its description, and what it says it is
+/// (`device.form-factor`), if anything.
+#[derive(Debug, Clone)]
+pub struct FakeSink {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub form_factor: Option<&'static str>,
+}
+
+impl FakeSink {
+    pub const fn new(name: &'static str, description: &'static str) -> Self {
+        Self {
+            name,
+            description,
+            form_factor: None,
+        }
+    }
+}
+
+/// The two sinks of the levels' tests.
+pub const TWO_SINKS: [FakeSink; 2] = [
+    FakeSink::new("hocus-test-sink", "Test"),
+    FakeSink::new("hocus-test-other", "Other"),
+];
 
 /// Whether the programs the fakes need are installed.
 pub fn available() -> bool {
@@ -147,17 +178,20 @@ impl Fakes {
     /// Everything there: a battery at 82 % with 3 h 40 left, balanced, a
     /// backlight at 70 %, and the default sink at 62 %.
     pub fn start() -> anyhow::Result<Self> {
+        Self::start_with(&TWO_SINKS)
+    }
+
+    /// The same with these sinks, the first the default at 62 %.
+    pub fn start_with(sinks: &[FakeSink]) -> anyhow::Result<Self> {
         let mut fakes = Self::empty()?;
+        fakes.sinks = sinks.to_vec();
         fakes.backlight(700, 1000)?;
         fakes.start_bus()?;
         fakes.start_upower()?;
         fakes.start_profiles()?;
         fakes.start_pipewire()?;
-        fakes.wpctl(&[
-            "set-volume",
-            &fakes.sink("hocus-test-sink")?.to_string(),
-            "0.62",
-        ])?;
+        let first = sinks.first().map_or("hocus-test-sink", |s| s.name);
+        fakes.wpctl(&["set-volume", &fakes.sink(first)?.to_string(), "0.62"])?;
         Ok(fakes)
     }
 
@@ -180,7 +214,9 @@ impl Fakes {
             login: None,
             brightness_calls: Arc::default(),
             pipewire: None,
+            policy: None,
             pw_runtime: tempfile::Builder::new().prefix("hp-").tempdir_in("/tmp")?,
+            sinks: TWO_SINKS.to_vec(),
         })
     }
 
@@ -321,21 +357,30 @@ impl Fakes {
         Ok(())
     }
 
-    /// A PipeWire of its own, with two null sinks, the first the default.
+    /// A PipeWire of its own, with its null sinks, the first the default.
     pub fn start_pipewire(&mut self) -> anyhow::Result<()> {
         let conf = self.dir.path().join("pw-config/pipewire/pipewire.conf.d");
         std::fs::create_dir_all(&conf)?;
-        std::fs::write(
-            conf.join("hocus-test.conf"),
+        let first = self.sinks.first().map_or("hocus-test-sink", |s| s.name);
+        let mut objects = format!(
             "context.objects = [\n\
-             { factory = metadata args = { metadata.name = default metadata.values = [\n\
-               { key = default.audio.sink type = \"Spa:String:JSON\" value = { name = hocus-test-sink } } ] } }\n\
-             { factory = adapter args = { factory.name = support.null-audio-sink node.name = hocus-test-sink\n\
-               node.description = Test media.class = Audio/Sink audio.position = [ FL FR ] object.linger = true } }\n\
-             { factory = adapter args = { factory.name = support.null-audio-sink node.name = hocus-test-other\n\
-               node.description = Other media.class = Audio/Sink audio.position = [ FL FR ] object.linger = true } }\n\
-             ]\n",
-        )?;
+             {{ factory = metadata args = {{ metadata.name = default metadata.values = [\n\
+               {{ key = default.audio.sink type = \"Spa:String:JSON\" value = {{ name = {first} }} }} ] }} }}\n"
+        );
+        for sink in &self.sinks {
+            let form = sink
+                .form_factor
+                .map(|f| format!(" device.form-factor = {f}"))
+                .unwrap_or_default();
+            objects.push_str(&format!(
+                "{{ factory = adapter args = {{ factory.name = support.null-audio-sink node.name = {}\n\
+                   node.description = \"{}\"{form} media.class = Audio/Sink audio.position = [ FL FR ] \
+                   object.linger = true }} }}\n",
+                sink.name, sink.description
+            ));
+        }
+        objects.push_str("]\n");
+        std::fs::write(conf.join("hocus-test.conf"), objects)?;
         let home = self.dir.path().join("pw-home");
         std::fs::create_dir_all(&home)?;
         let pipewire = Command::new("pipewire")
@@ -354,15 +399,101 @@ impl Fakes {
         self.pipewire = Some(pipewire);
         let socket = self.pw_socket();
         wait_for(|| socket.exists(), "PipeWire's socket")?;
-        wait_for(|| self.sink("hocus-test-sink").is_ok(), "the test sink")?;
+        wait_for(|| self.sink(first).is_ok(), "the test sink")?;
+        self.start_policy()?;
+        Ok(())
+    }
+
+    /// WirePlumber's part: `wpctl set-default` writes the sink chosen
+    /// (`default.configured.audio.sink`), and WirePlumber makes it the
+    /// default (`default.audio.sink`). Here a `pw-metadata` follows the
+    /// first, and the second is set when it changes.
+    fn start_policy(&mut self) -> anyhow::Result<()> {
+        use std::io::BufRead;
+        let mut monitor = self
+            .pw("pw-metadata")
+            .args(["-m", "-n", "default"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .context("pw-metadata")?;
+        let out = monitor.stdout.take().context("pw-metadata's output")?;
+        let (home, runtime, socket) = (
+            self.dir.path().join("pw-home"),
+            self.pw_runtime.path().to_owned(),
+            self.pw_socket(),
+        );
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(out).lines() {
+                let Ok(line) = line else {
+                    return;
+                };
+                if !line.contains("key:'default.configured.audio.sink'") {
+                    continue;
+                }
+                let Some(value) = line
+                    .split("value:'")
+                    .nth(1)
+                    .and_then(|v| v.split('\'').next())
+                else {
+                    continue;
+                };
+                let pw = |program: &str| {
+                    let mut command = Command::new(program);
+                    command
+                        .env_clear()
+                        .env("PATH", "/usr/bin:/bin")
+                        .env("HOME", &home)
+                        .env("XDG_RUNTIME_DIR", &runtime)
+                        .env("PIPEWIRE_REMOTE", &socket)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+                    command
+                };
+                let _ = pw("pw-metadata")
+                    .args(["-n", "default", "0", "default.audio.sink", value])
+                    .arg("Spa:String:JSON")
+                    .status();
+                // PipeWire 1.0's pw-dump writes a metadata change out with
+                // the graph's next change only: a client connecting is one.
+                let _ = pw("wpctl").arg("status").status();
+            }
+        });
+        self.policy = Some(monitor);
         Ok(())
     }
 
     pub fn stop_pipewire(&mut self) {
-        if let Some(mut child) = self.pipewire.take() {
+        for mut child in [self.policy.take(), self.pipewire.take()]
+            .into_iter()
+            .flatten()
+        {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+
+    /// The default sink's node name, as PipeWire's metadata says.
+    pub fn default_sink_name(&self) -> anyhow::Result<String> {
+        let out = self
+            .pw("pw-metadata")
+            .args(["-n", "default", "0", "default.audio.sink"])
+            .output()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let value = text
+            .lines()
+            .find(|l| l.contains("key:'default.audio.sink'"))
+            .and_then(|l| l.split("value:'").nth(1))
+            .and_then(|v| v.split('\'').next())
+            .context("no default sink")?;
+        // `{"name":"…"}`, or SPA's `{ name = … }`.
+        let name = value
+            .trim_matches(|c| c == '{' || c == '}' || c == ' ')
+            .trim_start_matches("\"name\"")
+            .trim_start_matches("name")
+            .trim_start_matches([':', '=', ' '])
+            .trim_matches('"');
+        Ok(name.to_owned())
     }
 
     pub fn pw_socket(&self) -> PathBuf {
@@ -445,7 +576,7 @@ impl Fakes {
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='{}' PIPEWIRE_REMOTE='{}' \
                  HOCUS_BACKLIGHT_DIR='{}' LC_ALL='{lang}' LANG='{lang}' \
-                 RUST_LOG=hocuspanda_shell=debug\n\
+                 RUST_LOG=${{HOCUS_SHELL_LOG:-hocuspanda_shell=debug}}\n\
                  exec '{}' \"$@\"\n",
                 self.address,
                 self.pw_socket().display(),
