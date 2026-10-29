@@ -223,6 +223,9 @@ impl State {
             let mods = keyboard.modifier_state();
             self.switcher_modifiers(&mods);
         }
+        // A group-switch option of the user's XKB options may have changed
+        // the layout: the bar's row follows.
+        self.layout_maybe_changed();
     }
 
     /// Whether the modifiers held move a window under the pointer:

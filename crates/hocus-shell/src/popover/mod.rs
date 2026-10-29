@@ -8,6 +8,9 @@
 //!   outside it, `Esc`, or another click on the item. It takes the
 //!   keyboard: `Esc` closes it and gives the keyboard to the item, where
 //!   `Enter` or `Space` opens it again and `Esc` lets the keyboard go.
+//! - **The keyboard** on an item (after `Esc` in its popover): `Tab` and
+//!   `Shift+Tab` (or the arrows up and down) take it to the next and the
+//!   previous item of the same surface, round its ends.
 //! - **By hovering** the item for 150 ms in the mini form: it closes 300 ms
 //!   after the pointer has really left the item and the popover, and stays
 //!   while the pointer moves toward it, within the cone from where the
@@ -49,7 +52,7 @@ pub const HOVER_OPEN: Duration = Duration::from_millis(150);
 /// A popover opened by hovering closes this long after the pointer left.
 pub const LEAVE_CLOSE: Duration = Duration::from_millis(300);
 
-/// What opens a popover.
+/// What opens a popover, and the keyboard layout's item, which opens none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Item {
     Sound,
@@ -59,9 +62,17 @@ pub enum Item {
     /// The battery and the power modes (the modes alone without a
     /// battery).
     Battery,
+    /// The keyboard's layout: a click, or `Enter` while it holds the
+    /// keyboard, asks for the next one (3.8).
+    Keyboard,
 }
 
 impl Item {
+    /// Whether it opens a popover.
+    fn has_popover(self) -> bool {
+        self != Self::Keyboard
+    }
+
     /// Its popover's height, logical pixels, for what it shows now: as it
     /// opens (`opening`), or after a change.
     fn height(self, opening: bool) -> u32 {
@@ -71,6 +82,7 @@ impl Item {
             Self::Bluetooth => bluetooth::height(),
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
+            Self::Keyboard => 0,
         }
     }
 
@@ -82,24 +94,30 @@ impl Item {
             Self::Bluetooth => bluetooth::opening(),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
+            Self::Keyboard => {}
         }
     }
 
     /// Its popover closes: what it kept goes (a password typed).
     fn closing(self) {
         match self {
-            Self::Sound | Self::Brightness | Self::Battery => {}
+            Self::Sound | Self::Brightness | Self::Battery | Self::Keyboard => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
         }
     }
 
-    /// The namespace of the surface it is on, drawn again as its popover
-    /// opens and closes.
-    fn namespace(self) -> &'static str {
-        match self {
-            Self::Sound | Self::Brightness | Self::Battery => LEVELS_NAMESPACE,
-            Self::Wifi | Self::Bluetooth => CONNECTIONS_NAMESPACE,
+    /// The namespace of the surface it is on in `form`, drawn again as
+    /// its popover opens and closes: the keyboard layout's is the
+    /// connections' row in the full form, the levels' button in the mini.
+    fn namespace(self, form: Form) -> &'static str {
+        match (self, form) {
+            (Self::Sound | Self::Brightness | Self::Battery, _) | (Self::Keyboard, Form::Mini) => {
+                LEVELS_NAMESPACE
+            }
+            (Self::Wifi | Self::Bluetooth, _) | (Self::Keyboard, Form::Full) => {
+                CONNECTIONS_NAMESPACE
+            }
         }
     }
 
@@ -114,9 +132,9 @@ impl Item {
     /// Its surface on the bar at `place`, which holds the keyboard after
     /// `Esc` in its popover.
     fn surface(self, place: &Place) -> window::Id {
-        match self {
-            Self::Sound | Self::Brightness | Self::Battery => place.levels,
-            Self::Wifi | Self::Bluetooth => place.connections,
+        match self.namespace(place.form) {
+            LEVELS_NAMESPACE => place.levels,
+            _ => place.connections,
         }
     }
 }
@@ -181,6 +199,11 @@ pub enum Event {
     Hold,
     /// `Enter` or `Space` on the item holding the keyboard.
     ItemActivate,
+    /// `Tab` (or down) on the item holding the keyboard: to the next item
+    /// of its surface; `back`, `Shift+Tab` (or up): to the previous.
+    ItemStep {
+        back: bool,
+    },
     /// `Esc` on the item holding the keyboard.
     ItemRelease,
     /// `bar` changed form, or went.
@@ -220,6 +243,8 @@ pub enum Effect {
         id: window::Id,
         takes: bool,
     },
+    /// The compositor is asked for the next keyboard layout.
+    NextLayout,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -262,6 +287,9 @@ pub struct Controller {
     /// and where it is.
     focused: Option<(String, Item, Rectangle)>,
     bars: HashMap<String, Place>,
+    /// The items each bar's surfaces show, by namespace, from the top, and
+    /// where (the bar's frame): the keyboard steps through them.
+    items: HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
     /// Popovers move in and out (else they show and go at once).
     pub motion: bool,
 }
@@ -273,6 +301,7 @@ impl Default for Controller {
             closing: Vec::new(),
             focused: None,
             bars: HashMap::new(),
+            items: HashMap::new(),
             motion: true,
         }
     }
@@ -313,6 +342,24 @@ impl Controller {
 
     pub fn forget(&mut self, bar: &str) {
         self.bars.remove(bar);
+        self.items.retain(|(b, _), _| b != bar);
+    }
+
+    /// The forms the bars are in.
+    pub fn forms(&self) -> Vec<Form> {
+        self.bars.values().map(|p| p.form).collect()
+    }
+
+    /// Bar `bar`'s surface of `namespace` shows `items` (in the bar's
+    /// frame).
+    pub fn set_items(
+        &mut self,
+        bar: &str,
+        namespace: &'static str,
+        mut items: Vec<(Item, Rectangle)>,
+    ) {
+        items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y));
+        self.items.insert((bar.to_owned(), namespace), items);
     }
 
     /// What the popover's surface `id` shows, open or closing.
@@ -368,7 +415,10 @@ impl Controller {
         let mut effects = Vec::new();
         match event {
             Event::ItemEnter { bar, item, rect } => match &mut self.phase {
-                Phase::Closed if self.bars.get(&bar).map(|p| p.form) == Some(Form::Mini) => {
+                Phase::Closed
+                    if item.has_popover()
+                        && self.bars.get(&bar).map(|p| p.form) == Some(Form::Mini) =>
+                {
                     self.phase = Phase::Hovering {
                         bar,
                         item,
@@ -408,6 +458,11 @@ impl Controller {
                 if let Phase::Open(open) = &mut self.phase {
                     open.seen(at, now);
                 }
+            }
+            Event::ItemPress { item, .. } if !item.has_popover() => {
+                self.unfocus(&mut effects);
+                self.close(now, &mut effects);
+                effects.push(Effect::NextLayout);
             }
             Event::ItemPress { bar, item, rect } => {
                 self.unfocus(&mut effects);
@@ -461,12 +516,15 @@ impl Controller {
                     ));
                 }
             }
-            Event::ItemActivate => {
-                if let Some((bar, item, from)) = self.focused.clone() {
+            Event::ItemActivate => match self.focused.clone() {
+                Some((_, item, _)) if !item.has_popover() => effects.push(Effect::NextLayout),
+                Some((bar, item, from)) => {
                     self.unfocus(&mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
                 }
-            }
+                None => {}
+            },
+            Event::ItemStep { back } => self.step(back, &mut effects),
             Event::ItemRelease => self.unfocus(&mut effects),
             Event::BarChanged { bar } => {
                 let on_it = match &self.phase {
@@ -542,7 +600,7 @@ impl Controller {
                 Opened::Hover => KeyboardInteractivity::OnDemand,
             },
         });
-        effects.push(Effect::Wake(item.namespace()));
+        effects.push(Effect::Wake(item.namespace(place.form)));
         self.phase = Phase::Open(Open {
             bar: bar.to_owned(),
             item,
@@ -597,7 +655,8 @@ impl Controller {
         } else {
             effects.push(Effect::Remove(open.surface));
         }
-        effects.push(Effect::Wake(open.item.namespace()));
+        let form = self.bars.get(&open.bar).map_or(Form::Full, |p| p.form);
+        effects.push(Effect::Wake(open.item.namespace(form)));
     }
 
     fn unfocus(&mut self, effects: &mut Vec<Effect>) {
@@ -608,8 +667,32 @@ impl Controller {
                 item.surface(place),
                 KeyboardInteractivity::None,
             ));
-            effects.push(Effect::Wake(item.namespace()));
+            effects.push(Effect::Wake(item.namespace(place.form)));
         }
+    }
+
+    /// The keyboard from the item holding it to the next item of its
+    /// surface (the previous, `back`), round the ends: the same surface
+    /// keeps it.
+    fn step(&mut self, back: bool, effects: &mut Vec<Effect>) {
+        let Some((bar, item, _)) = self.focused.clone() else {
+            return;
+        };
+        let Some(place) = self.bars.get(&bar) else {
+            return;
+        };
+        let namespace = item.namespace(place.form);
+        let Some(items) = self.items.get(&(bar.clone(), namespace)) else {
+            return;
+        };
+        let Some(at) = items.iter().position(|(i, _)| *i == item) else {
+            return;
+        };
+        let n = items.len();
+        let next = if back { (at + n - 1) % n } else { (at + 1) % n };
+        let (item, rect) = items[next];
+        self.focused = Some((bar, item, rect));
+        effects.push(Effect::Wake(namespace));
     }
 }
 
@@ -758,10 +841,16 @@ pub fn key(
         return false;
     }
     // The item holding the keyboard: Enter or Space opens its popover
-    // again, Esc lets the keyboard go.
+    // again (the layout's goes to the next layout), Esc lets the keyboard
+    // go, Tab and the arrows go through its surface's items.
     match key {
         Key::Named(Named::Enter | Named::Space) => event(Event::ItemActivate),
         Key::Named(Named::Escape) => event(Event::ItemRelease),
+        Key::Named(Named::Tab) => event(Event::ItemStep {
+            back: modifiers.shift(),
+        }),
+        Key::Named(Named::ArrowDown) => event(Event::ItemStep { back: false }),
+        Key::Named(Named::ArrowUp) => event(Event::ItemStep { back: true }),
         _ => return false,
     }
     true
@@ -976,6 +1065,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                     }
                 });
             vec![Message::SetInputRegion { id, callback }]
+        }
+        Effect::NextLayout => {
+            tell(ToCompositor::NextLayout);
+            Vec::new()
         }
     }
 }
@@ -1371,5 +1464,71 @@ mod tests {
             Instant::now(),
         );
         assert!(c.refit().is_empty());
+    }
+
+    #[test]
+    fn the_layouts_item_asks_for_the_next_layout_and_opens_nothing() {
+        let (mut c, levels) = controller(Form::Mini);
+        let t = Instant::now();
+        c.motion = false;
+        let key = Rectangle::new(Point::new(-50.0, 1010.0), Size::new(44.0, 30.0));
+        let at = |item| Event::ItemPress {
+            bar: BAR.to_owned(),
+            item,
+            rect: key,
+        };
+        // Hovered in the mini form: nothing opens.
+        c.handle(
+            Event::ItemEnter {
+                bar: BAR.to_owned(),
+                item: Item::Keyboard,
+                rect: key,
+            },
+            t,
+        );
+        assert_eq!(c.deadline(), None);
+        assert!(c.tick(t + MS(500)).is_empty());
+        // A click: the next layout, and an open popover closes.
+        c.handle(press(), t);
+        let effects = c.handle(at(Item::Keyboard), t);
+        assert!(effects.contains(&Effect::NextLayout));
+        assert!(opened(&effects).is_none());
+        assert_eq!(c.open_item(), None);
+        // The keyboard on the sound's gauge (Esc in its popover), then Tab
+        // through the surface's items, round its ends; Enter on the
+        // layout's: the next layout, the keyboard kept.
+        c.set_items(
+            BAR,
+            LEVELS_NAMESPACE,
+            vec![
+                (Item::Keyboard, key),
+                (Item::Battery, gauge()),
+                (
+                    Item::Sound,
+                    Rectangle::new(Point::new(-50.0, 850.0), Size::new(44.0, 64.0)),
+                ),
+            ],
+        );
+        c.handle(press(), t);
+        c.handle(Event::Escape, t);
+        assert!(c.focused(BAR, Item::Sound));
+        let effects = c.handle(Event::ItemStep { back: false }, t);
+        assert_eq!(effects, vec![Effect::Wake(LEVELS_NAMESPACE)]);
+        assert!(c.focused(BAR, Item::Battery));
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Keyboard));
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Sound));
+        c.handle(Event::ItemStep { back: true }, t);
+        assert!(c.focused(BAR, Item::Keyboard));
+        let effects = c.handle(Event::ItemActivate, t);
+        assert_eq!(effects, vec![Effect::NextLayout]);
+        assert!(c.focused(BAR, Item::Keyboard));
+        // Esc lets it go, from the levels' surface.
+        let effects = c.handle(Event::ItemRelease, t);
+        assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::None)));
+        // In the full form the layout's row is the connections'.
+        assert_eq!(Item::Keyboard.namespace(Form::Full), CONNECTIONS_NAMESPACE);
+        assert_eq!(Item::Keyboard.namespace(Form::Mini), LEVELS_NAMESPACE);
     }
 }
