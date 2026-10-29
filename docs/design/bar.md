@@ -10,7 +10,8 @@ section 5 (3.3, issue #360), the popovers of section 9 with the
 sound's (3.4a, issue #361), the Wi-Fi's row and popover (section 4
 group 9, section 5, section 9; 3.5, issue #362), Bluetooth's (3.6,
 issue #363), the brightness's and the battery's popovers (3.7,
-issue #364), and the keyboard layout's row (3.8, issue #365): see
+issue #364), the keyboard layout's row (3.8, issue #365), and the
+desktops' tiles of section 4 group 8 and section 5 (3.9, issue #366): see
 [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
@@ -101,7 +102,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
 | 6 | Spacer | Takes what is left | flexible |
 | 7 | Secretary | Section 7. Panda 62 px, title, one line | 74 px |
-| 8 | Desktops | 4 tiles, 30 px high, with a sketch of their windows; the current one outlined in the accent | 30 px |
+| 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows; the current one ringed in the accent | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
 | 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
@@ -218,6 +219,29 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 - A click opens its popover (§9); the keyboard layout's goes to the next
   layout.
 
+### 4.4 The desktops (approved 2026-10-29, issue #366, variant A)
+
+- **Tiles**, 14 px above the connections: one per desktop of the bar's
+  screen, 4 to a row, 6 px apart (rows 6 px apart: 5 to 9 desktops take a
+  second or a third row, filled from the left), 30 px high, radius 6,
+  `rgba(255,255,255,0.05)` (`0.10` under the pointer). In each, a sketch of
+  its windows at their places and sizes on the screen, in stacking order:
+  4 px in, radius 1.5, `rgba(236,239,244,0.30)`, the focused window of the
+  current desktop `0.62`. The current desktop ringed 2 px inside in the
+  accent; the others a 1 px `rgba(255,255,255,0.10)` ring. An empty desktop
+  shows its number (11 px, 600, `text.faint`).
+- **A click** on a tile goes to that desktop, the strip sliding as with the
+  shortcuts (windows.md §12). **The wheel** over the tiles goes to the next
+  or the previous desktop, a notch a desktop, no further than the last or
+  the first.
+- **Motion**: the sketch follows the windows as they open, close, move and
+  resize, and nothing draws at rest; nothing moves in the tiles but the
+  ring, from the desktop left to the one shown (none with reduced motion).
+- **Several screens**: a bar shows its own screen's desktops (sprint 8
+  decides the rest).
+- **Names** of desktops (6.14) come later; for now a tile's name for
+  screen readers is "Bureau N, M fenêtres" / "Desktop N, M windows".
+
 When the output is too short (1366×768 gives 752 px of bar), groups give
 way in this order: Today, then To do, then the agent lines beyond the
 first, then Levels collapse to battery only. Clock, meeting, agent tiles,
@@ -228,7 +252,8 @@ Clicks:
 - A tile or line of an agent: go to it (section 8).
 - The meeting card: open the meeting's link, or the calendar on that day.
 - A connection tile or a gauge: opens its popover (section 9).
-- A desktop tile: switch to it. A task's box: toggles it.
+- A desktop tile: switch to it (§4.4); the wheel over the tiles, to the
+  next or the previous one. A task's box: toggles it.
 
 ## 5. Mini form
 
@@ -236,7 +261,12 @@ Width 56 px, padding 12 px top, 10 px bottom, items centred, 14 px apart:
 clock on two lines, hours over minutes, no seconds (Martian Mono 400,
 19 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
 blue, glowing when under 10 min), waiting tile (44 px, panda 40 px, count
-badge), working count, spacer, secretary (46 px), the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
+badge), working count, spacer, secretary (46 px), the desktops (3.9, variant
+A): a dot per desktop (18 × 13, radius 4), two to a row, 4 px apart, 14 px
+above the connections' buttons: the current one filled with the accent,
+those with windows `rgba(255,255,255,0.30)`, the empty ones
+`rgba(255,255,255,0.10)` with a 1 px `rgba(255,255,255,0.12)` ring; a click
+goes to that desktop, the wheel as in the full form; the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
 icon in the row's states, the sign-in page's dot 9 px from its right and
 7 px from its top), the sound's gauge
 (vertical, 8 × 48 px, filled from the bottom, grey when muted), Bluetooth's
@@ -528,6 +558,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Keyboard's backlight | UPower's `org.freedesktop.UPower.KbdBacklight` | `GetMaxBrightness`, `GetBrightness`, `SetBrightness`; followed by `BrightnessChanged` and `BrightnessChangedWithSource`; none: no row (as built, 3.7) |
 | Other screens | the compositor | their EDID's model, else their connector's name, on the `screens` line of `hocus-link` (as built, 3.7) |
 | Phone | KDE Connect (D-Bus) | |
+| Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, and whether it is the focused one, on the `desktops` line of `hocus-link`; a desktop asked with `desktop` (as built, 3.9) |
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications, clipboard | the desktop's own servers | |
 
@@ -1290,3 +1321,78 @@ What issue #465 changes under the five popovers, nothing on screen.
   CPU, at ×1 and ×2: every popover in its main states (open, hovered, the
   keyboard's ring, muted, a row unfolded, a password refused, a failure, a
   list scrolled), pixel for pixel the same.
+
+### 3.9, the desktops (2026-10-30)
+
+What the approved mockup of 3.9 shows, variant A for the mini form (§4
+group 8, §4.4, §5; issue #366); its control panel, its screen and its
+dashed slots are not part of the product.
+
+- **Its own surface.** The tiles draw on a layer surface of their own
+  (`hocus-bar-desktops`): a desktop's change draws only it, a connection's
+  or a level's never does, and the clock goes on alone. It is 194 px wide
+  and as tall as its rows and the keyboard's ring's room (5 px around): 194
+  × 40 with up to four desktops, 194 × 76 with five to eight, 194 × 112
+  with nine; in the mini form 54 × (13 a row of dots, 4 between, and the
+  room), both while the form switches. It sits 14 px above the
+  connections' group (the levels' when no connection shows), on a whole
+  pixel, and follows it as the connections follow the levels: by its
+  margins, drawing nothing else. In the mini form the dots sit above the
+  connections' buttons, as the tiles do above their rows (the mockup's
+  mini form had no buttons: there, right above the sound's gauge). With no
+  desktop said yet it takes no pointer. On the CPU the compositor cuts it
+  to the bar, as the others.
+- **The compositor tells**, for each bar's screen, a `desktops` line: the
+  count, the current desktop, and each window on the screen, bottom
+  first, minimised ones aside: its desktop, its place and size in
+  thousandths of the screen (cut to it; where it comes back to while its
+  desktop is out of sight), and whether it is the focused window of the
+  current desktop. As the shell connects, then after any frame of that
+  screen in which it changed: at most once a frame, and never at rest,
+  where nothing is drawn; a thousandth of the screen is a tenth of a pixel
+  in a tile, so smaller moves tell nothing. **A drag or a resize** is told
+  where the window lands, once the grab ends: following it would draw the
+  tiles at every frame of every drag for a move of a pixel or two in them.
+  **The strip's slide** changes nothing but the current desktop, told as
+  it starts, so that the ring moves with the strip. The shell keeps it
+  without a message and wakes the desktops' surface; a count that changes
+  the rows resizes it (layer-shell actions).
+- **Going there.** A click, `Enter` or `Space` sends `desktop SCREEN N`,
+  the wheel `desktop SCREEN next` or `previous` a notch (a touchpad's
+  15 px); the compositor switches that screen as its shortcuts do, sliding,
+  no further than the last or the first (the dots at the top showing where
+  the strip is, as with the keys there). The tiles change when the
+  compositor tells, not before.
+- **The ring's move**: from the desktop left to the one shown, in the
+  strip's 320 ms and curve (windows.md §12); in the mini form the accent
+  dot slides the same way. None with reduced motion or on the CPU.
+- **The sketch**: each window half a pixel in from its place, so that
+  windows side by side on the screen (8 px apart, a tenth of a pixel in a
+  tile) show apart, as the mockup's do.
+- **The keyboard**: `Tab` and `Shift+Tab` (or the arrows up and down) now
+  go through the bar's items from its top to its bottom, round its ends,
+  from one surface to the next (3.8 stayed on one surface): the tiles,
+  first, are reached from the rows under them (`Shift+Tab` from the Wi-Fi's
+  row or the sound's, once it holds the keyboard after `Esc` in its
+  popover). On a tile, `Enter` or `Space` goes to its desktop and keeps the
+  keyboard; `Esc` lets it go.
+- **Names for screen readers** ("Bureau 1, 2 fenêtres" / "Desktop 1,
+  2 windows", "aucune fenêtre" / "no windows" for an empty one) are made,
+  and logged at debug as the tiles change; iced 0.14 has no accessibility
+  tree to give them to (§11).
+- **Measured headless**, the real shell against the fakes, the
+  compositor's desktops from `[desktops] count` (`tests/bar_desktops.rs`):
+  four tiles in one row, an empty desktop's number; a window opened
+  sketched where it is, light while focused; dragged with Super, nothing
+  drawn on the way and its sketch where it landed; closed, the number
+  back; the ring on the first, then on the second after Super+2; a click
+  on the third sliding the strip past the second; the wheel a desktop a
+  notch, stopping at both ends; six desktops on two rows (194 × 76), the
+  sixth clicked; the mini form's dots, the current one in the accent, one
+  with a window light, the empty ones faint with a lighter rim, a click;
+  `Shift+Tab` from the sound's row to the last tile, `Enter` and `Space`;
+  a desktop's change committing the desktops' surface alone; nothing
+  committing at rest. On the Intel GPU, the ring's move.
+- **Not built**: names of desktops (6.14); a window dragged onto a tile;
+  previews of a desktop under the pointer; other screens' desktops in a
+  bar (sprint 8); names for screen readers (§11).

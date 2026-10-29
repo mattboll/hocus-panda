@@ -268,8 +268,9 @@ Keyboard:
 - **Per screen**: each output has its own desktops and switches alone
   (first build's decision, kept). 4 desktops by default (1 to 9).
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
-  swipe on a touchpad (following the fingers), and later the bar's tiles.
-  Keys and swipes act on the screen under the pointer.
+  swipe on a touchpad (following the fingers), and the bar's tiles (a
+  click, the wheel; bar.md §4.4). Keys and swipes act on the screen under
+  the pointer, the tiles on their bar's screen.
 - **Animation**: the desktops sit side by side, in their order, like one
   strip. Switching slides the strip: the outgoing desktop's windows move
   out on one side while the incoming one's move in from the other, in
@@ -289,7 +290,7 @@ Keyboard:
   high, 6 px apart, 18 px from the top, the current one 22 px wide in the
   accent, the others 8 px in white at 35 %; the wide dot follows the
   strip as it slides. They fade in and out in 300 ms around the motion
-  (the prototype's). The bar's tiles will show it at all times.
+  (the prototype's). The bar's tiles show it at all times (bar.md §4.4).
 - Reduced motion: the desktops cross-fade in 120 ms instead of sliding; a
   swipe does not follow the fingers, the release decides.
 - `Super+Shift+1…4` sends the focused window to that desktop, without

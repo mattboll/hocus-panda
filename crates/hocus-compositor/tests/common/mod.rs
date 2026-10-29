@@ -169,6 +169,8 @@ pub enum Command {
     /// Takes the clipboard (it must hold the keyboard), then says
     /// [`Event::Copied`] once the compositor has it.
     Copy(Clip),
+    /// Closes its window, as an application quitting.
+    Close,
 }
 
 /// What a client puts on the clipboard: its types, and the text it writes
@@ -354,6 +356,7 @@ fn run_client(
                 (Command::Fullscreen(false), Some(window)) => window.unset_fullscreen(),
                 (Command::Fullscreen(_), None) => {}
                 (Command::Copy(clip), _) => client.copy(conn, &qh, clip),
+                (Command::Close, _) => client.window = None,
             }
         }
         queue.flush()?;
