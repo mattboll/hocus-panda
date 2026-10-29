@@ -154,7 +154,11 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     let other = fakes.sink("hocus-test-other")?.to_string();
     fakes.wpctl(&["set-volume", &other, "1.0"])?;
     fakes.default_sink("hocus-test-other")?;
-    until(&mut hp, (FULL.x + 33 + 108, SOUND_Y), blue)?;
+    until(&mut hp, (FULL.x + 33 + 108, SOUND_Y), blue).map_err(|err| {
+        let status = fakes.wpctl(&["status"]).unwrap_or_default();
+        let volume = fakes.volume("hocus-test-other");
+        anyhow::anyhow!("{err}; other at {volume:?}; {status}")
+    })?;
     // The bar itself was never drawn again.
     assert_eq!(hp.bar_commits(), bars);
 
