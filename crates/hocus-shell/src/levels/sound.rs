@@ -1,13 +1,16 @@
-//! The sound: the outputs (sinks), the default one's volume and mute, from
+//! The sound: the outputs (sinks), the inputs (sources), the streams
+//! applications play, and the default output's volume and mute, from
 //! PipeWire.
 //!
 //! `pw-dump --monitor` (PipeWire's own tool) streams the graph's changes as
-//! JSON: the `default` metadata names the default sink, each sink's node
-//! its description and its `Props` (volumes, mute), its device what it is
-//! (a headset, a screen). No polling: it writes when something changes,
-//! and the shell follows a new default sink as it follows a new volume.
-//! `wpctl` (WirePlumber's) sets them as the user would: a volume, a mute,
-//! the default sink, each sink keeping its own volume. Both run as
+//! JSON: the `default` metadata names the default sink and source, each
+//! sink's or source's node its description and its `Props` (volumes,
+//! mute), its device what it is (a headset, a screen), each stream's node
+//! its application, its state and its own volume. No polling: it writes
+//! when something changes, and the shell follows a new default sink as it
+//! follows a new volume or a stream starting to play. `wpctl`
+//! (WirePlumber's) sets them as the user would: a volume, a mute, the
+//! default sink or source, each keeping its own volume. Both run as
 //! programs, on threads of their own; linking to libpipewire would need its
 //! headers to build, for the same result.
 //!
@@ -31,6 +34,7 @@ use serde_json::Value;
 
 use super::{
     Presence, RETRY_FIRST,
+    icons::Icon,
     model::{STEP, Sound},
     next_retry, publish,
 };
@@ -67,7 +71,7 @@ fn follow(default: &Default) {
         let ended = dump(default, &mut presence);
         *default.lock().unwrap_or_else(PoisonError::into_inner) = None;
         publish(|levels| levels.sound = None);
-        publish_sinks(Vec::new());
+        publish_mixer(Mixer::default());
         presence.now(false, "PipeWire", ended);
         if started.elapsed() >= STEADY {
             wait = RETRY_FIRST;
@@ -95,6 +99,7 @@ fn dump(default: &Default, presence: &mut Presence) -> String {
     };
     *DUMP.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
     let mut graph = Graph::default();
+    let mut icons = HashMap::new();
     let updates =
         serde_json::Deserializer::from_reader(BufReader::new(out)).into_iter::<Vec<Value>>();
     for update in updates {
@@ -115,7 +120,7 @@ fn dump(default: &Default, presence: &mut Presence) -> String {
         *default.lock().unwrap_or_else(PoisonError::into_inner) =
             sound.map(|(id, sound)| (id, sound.muted));
         publish(|levels| levels.sound = sound.map(|(_, sound)| sound));
-        publish_sinks(graph.sinks());
+        publish_mixer(graph.mixer(&mut icons));
     }
     match end_dump() {
         Some(Ok(status)) => format!("pw-dump ended: {status}"),
@@ -139,20 +144,25 @@ pub fn stop() {
     end_dump();
 }
 
-/// The sinks as last read, for the sound's popover.
-static SINKS: Mutex<Vec<Sink>> = Mutex::new(Vec::new());
+/// The outputs, the inputs and the applications as last read, for the
+/// sound's popover.
+static MIXER: Mutex<Mixer> = Mutex::new(Mixer {
+    sinks: Vec::new(),
+    sources: Vec::new(),
+    apps: Vec::new(),
+});
 
-/// The sinks as last read, by id.
-pub fn sinks() -> Vec<Sink> {
-    SINKS.lock().unwrap_or_else(PoisonError::into_inner).clone()
+/// The outputs, the inputs and the applications as last read.
+pub fn mixer() -> Mixer {
+    MIXER.lock().unwrap_or_else(PoisonError::into_inner).clone()
 }
 
-/// The sinks now `sinks`: the popover shows the change.
-fn publish_sinks(sinks: Vec<Sink>) {
+/// The mixer now `mixer`: the popover shows the change.
+fn publish_mixer(mixer: Mixer) {
     let changed = {
-        let mut kept = SINKS.lock().unwrap_or_else(PoisonError::into_inner);
-        let changed = *kept != sinks;
-        *kept = sinks;
+        let mut kept = MIXER.lock().unwrap_or_else(PoisonError::into_inner);
+        let changed = *kept != mixer;
+        *kept = mixer;
         changed
     };
     if changed {
@@ -160,7 +170,29 @@ fn publish_sinks(sinks: Vec<Sink>) {
     }
 }
 
-/// An output, as the popover lists it.
+/// What the sound's popover lists, each by id.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Mixer {
+    pub sinks: Vec<Sink>,
+    /// The microphones (sources), as the sinks.
+    pub sources: Vec<Sink>,
+    /// The applications with a stream, in the order their first stream
+    /// came.
+    pub apps: Vec<App>,
+}
+
+impl Mixer {
+    /// The microphone the popover's slider sets: the default source, else
+    /// the first.
+    pub fn microphone(&self) -> Option<&Sink> {
+        self.sources
+            .iter()
+            .find(|s| s.default)
+            .or(self.sources.first())
+    }
+}
+
+/// An output or an input, as the popover lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sink {
     pub id: u32,
@@ -169,6 +201,22 @@ pub struct Sink {
     /// Its own volume and mute: each keeps its own.
     pub sound: Option<Sound>,
     pub default: bool,
+}
+
+/// An application playing sound, its streams taken together.
+#[derive(Debug, Clone, PartialEq)]
+pub struct App {
+    /// What its streams share: its sandbox's app id, else its name, else
+    /// its program.
+    pub key: String,
+    pub name: String,
+    pub icon: Option<Icon>,
+    /// Its streams' node ids, the oldest first.
+    pub streams: Vec<u32>,
+    /// Its oldest stream's volume; muted when all its streams are.
+    pub sound: Option<Sound>,
+    /// Whether one of its streams plays now: its node runs, not corked.
+    pub playing: bool,
 }
 
 /// What an output is, for its icon.
@@ -203,24 +251,102 @@ impl Kind {
 /// What the shell keeps of PipeWire's graph.
 #[derive(Debug, Default)]
 pub struct Graph {
-    /// The default sink's name, from the `default` metadata.
+    /// The default sink's and source's names, from the `default` metadata.
     sink: Option<String>,
+    source: Option<String>,
     /// The `default` metadata's id, to see it go.
     metadata: Option<u32>,
-    /// Audio sinks by id: their name, and their volume and mute.
+    /// Audio sinks, sources and output streams by id.
     nodes: HashMap<u32, Node>,
     /// Devices by id: what they are.
     devices: HashMap<u32, Device>,
 }
 
+/// What a node is, from its `media.class`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Class {
+    #[default]
+    Sink,
+    Source,
+    /// An application's output stream (a "sink input").
+    Stream,
+}
+
+impl Class {
+    fn of(media_class: &str) -> Option<Self> {
+        match media_class {
+            "Audio/Sink" => Some(Self::Sink),
+            "Audio/Source" | "Audio/Source/Virtual" => Some(Self::Source),
+            "Stream/Output/Audio" => Some(Self::Stream),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Node {
+    class: Class,
     name: String,
     description: Option<String>,
     device: Option<u32>,
     /// What its own props say it is, if they do.
     what: Device,
     sound: Option<Sound>,
+    /// A stream's application, and whether it plays: its node runs
+    /// (`info.state`), and PulseAudio's clients did not cork it.
+    app: Who,
+    running: bool,
+    corked: bool,
+}
+
+/// Who plays a stream, from its node's props.
+#[derive(Debug, Default, Clone)]
+struct Who {
+    name: Option<String>,
+    binary: Option<String>,
+    icon: Option<String>,
+    /// `application.id`, and a sandbox's (Flatpak's) app id: desktop
+    /// files' names.
+    id: Option<String>,
+    sandboxed: Option<String>,
+}
+
+impl Who {
+    fn read(props: &Value) -> Self {
+        let text = |key: &str| {
+            props
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned)
+        };
+        Self {
+            name: text("application.name"),
+            binary: text("application.process.binary"),
+            icon: text("application.icon-name"),
+            id: text("application.id"),
+            sandboxed: text("pipewire.access.portal.app_id"),
+        }
+    }
+
+    /// What groups the streams of one application.
+    fn key(&self, node: &str) -> String {
+        self.sandboxed
+            .clone()
+            .or_else(|| self.name.clone())
+            .or_else(|| self.binary.clone())
+            .unwrap_or_else(|| node.to_owned())
+    }
+
+    /// The names its icon may go by, the likeliest first: its icon's name,
+    /// then its desktop file's (its ids, its program).
+    fn icon_names(&self) -> Vec<String> {
+        [&self.icon, &self.sandboxed, &self.id, &self.binary]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
+    }
 }
 
 /// `device.form-factor` and `device.bus`.
@@ -265,6 +391,7 @@ impl Graph {
             if self.metadata == Some(id) {
                 self.metadata = None;
                 self.sink = None;
+                self.source = None;
             }
             return;
         }
@@ -292,24 +419,40 @@ impl Graph {
         let Some(entries) = object.get("metadata").and_then(Value::as_array) else {
             return;
         };
-        self.sink = entries
-            .iter()
-            .filter(|e| e.get("subject").and_then(Value::as_u64) == Some(0))
-            .find(|e| e.get("key").and_then(Value::as_str) == Some("default.audio.sink"))
-            .and_then(|e| e.get("value"))
-            .and_then(sink_name);
+        let value = |key: &str| {
+            entries
+                .iter()
+                .filter(|e| e.get("subject").and_then(Value::as_u64) == Some(0))
+                .find(|e| e.get("key").and_then(Value::as_str) == Some(key))
+                .and_then(|e| e.get("value"))
+                .and_then(sink_name)
+        };
+        self.sink = value("default.audio.sink");
+        self.source = value("default.audio.source");
     }
 
     fn node(&mut self, id: u32, object: &Value) {
         let Some(info) = object.get("info") else {
             return;
         };
-        let class = info.pointer("/props/media.class").and_then(Value::as_str);
-        if class != Some("Audio/Sink") {
+        let props = info.get("props");
+        let class = match props
+            .and_then(|p| p.get("media.class"))
+            .and_then(Value::as_str)
+        {
+            Some(media_class) => Class::of(media_class),
+            // An update without props: the class known.
+            None => self.nodes.get(&id).map(|n| n.class),
+        };
+        let Some(class) = class else {
+            return;
+        };
+        if class == Class::Source && props.is_some_and(is_monitor) {
             return;
         }
         let node = self.nodes.entry(id).or_default();
-        if let Some(props) = info.get("props") {
+        node.class = class;
+        if let Some(props) = props {
             if let Some(name) = props.get("node.name").and_then(Value::as_str) {
                 name.clone_into(&mut node.name);
             }
@@ -322,6 +465,14 @@ impl Graph {
                 .and_then(Value::as_u64)
                 .and_then(|d| u32::try_from(d).ok());
             node.what = Device::read(Some(props));
+            node.app = Who::read(props);
+            node.corked = props
+                .get("pulse.corked")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        }
+        if let Some(state) = info.get("state").and_then(Value::as_str) {
+            node.running = state == "running";
         }
         // An update without the params keeps those known.
         if let Some(props) = info.pointer("/params/Props").and_then(Value::as_array) {
@@ -332,10 +483,19 @@ impl Graph {
     /// The sinks, by id: what they are called, what they are, their own
     /// sound, and which is the default.
     pub fn sinks(&self) -> Vec<Sink> {
-        let default = self.default_sink().map(|(id, _)| id);
+        self.devices_of(Class::Sink, self.sink.as_deref())
+    }
+
+    /// The sources, as the sinks.
+    pub fn sources(&self) -> Vec<Sink> {
+        self.devices_of(Class::Source, self.source.as_deref())
+    }
+
+    fn devices_of(&self, class: Class, default: Option<&str>) -> Vec<Sink> {
         let mut sinks: Vec<Sink> = self
             .nodes
             .iter()
+            .filter(|(_, node)| node.class == class)
             .map(|(id, node)| {
                 let device = node.device.and_then(|d| self.devices.get(&d));
                 let form_factor = node
@@ -356,7 +516,7 @@ impl Graph {
                         .unwrap_or_else(|| node.name.clone()),
                     kind: Kind::of(form_factor, bus, &node.name),
                     sound: node.sound,
-                    default: default == Some(*id),
+                    default: default == Some(node.name.as_str()),
                 }
             })
             .collect();
@@ -364,14 +524,98 @@ impl Graph {
         sinks
     }
 
+    /// The applications with a stream, each with the names its icon may go
+    /// by; their icons not looked for.
+    fn apps(&self) -> Vec<(App, Vec<String>)> {
+        let mut streams: Vec<(&u32, &Node)> = self
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.class == Class::Stream)
+            .collect();
+        streams.sort_by_key(|(id, _)| **id);
+        let mut apps: Vec<(App, Vec<String>)> = Vec::new();
+        for (id, node) in streams {
+            let key = node.app.key(&node.name);
+            let playing = node.running && !node.corked;
+            match apps.iter_mut().find(|(app, _)| app.key == key) {
+                Some((app, _)) => {
+                    app.streams.push(*id);
+                    app.playing |= playing;
+                    match (&mut app.sound, node.sound) {
+                        (Some(sound), Some(this)) => sound.muted &= this.muted,
+                        (sound @ None, this) => *sound = this,
+                        (Some(_), None) => {}
+                    }
+                }
+                None => {
+                    let name = node
+                        .app
+                        .name
+                        .clone()
+                        .or_else(|| node.app.binary.clone())
+                        .unwrap_or_else(|| node.name.clone());
+                    let app = App {
+                        key,
+                        name,
+                        icon: None,
+                        streams: vec![*id],
+                        sound: node.sound,
+                        playing,
+                    };
+                    apps.push((app, node.app.icon_names()));
+                }
+            }
+        }
+        apps
+    }
+
+    /// The sinks, the sources and the applications, their icons looked for
+    /// once each (`icons`, by application).
+    fn mixer(&self, icons: &mut HashMap<String, Option<Icon>>) -> Mixer {
+        let apps = self
+            .apps()
+            .into_iter()
+            .map(|(mut app, names)| {
+                app.icon = icons
+                    .entry(app.key.clone())
+                    .or_insert_with(|| {
+                        let icon = super::icons::find(&names);
+                        tracing::debug!(
+                            app = app.key,
+                            ?names,
+                            found = icon.is_some(),
+                            "an application's icon"
+                        );
+                        icon
+                    })
+                    .clone();
+                app
+            })
+            .collect();
+        Mixer {
+            sinks: self.sinks(),
+            sources: self.sources(),
+            apps,
+        }
+    }
+
     /// The default sink's node id and its sound.
     pub fn default_sink(&self) -> Option<(u32, Sound)> {
         let name = self.sink.as_deref()?;
         self.nodes
             .iter()
-            .filter(|(_, node)| node.name == name)
+            .filter(|(_, node)| node.class == Class::Sink && node.name == name)
             .find_map(|(id, node)| node.sound.map(|sound| (*id, sound)))
     }
+}
+
+/// A sink's monitor made a source: not a microphone.
+fn is_monitor(props: &Value) -> bool {
+    props.get("device.class").and_then(Value::as_str) == Some("monitor")
+        || props
+            .get("node.name")
+            .and_then(Value::as_str)
+            .is_some_and(|n| n.ends_with(".monitor"))
 }
 
 /// `{"name": "…"}`, as WirePlumber writes it, or the same as a string.
@@ -407,17 +651,30 @@ fn sound_of(props: &Value) -> Option<Sound> {
 }
 
 /// What the shell asks of the sound: a key's step or mute, a volume set
-/// (the popover's slider, in percent), another default sink (by node id).
+/// (the popover's slider, in percent), another default sink (by node id);
+/// a volume or a mute for a node of its own (a microphone, an
+/// application's stream), another default source.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Ask {
     Key(LevelKey),
     Volume(f32),
     Default(u32),
+    Node(u32, Set),
+    DefaultSource(u32),
+}
+
+/// What is set on a node of its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Set {
+    /// In percent.
+    Volume(f32),
+    Mute(bool),
 }
 
 /// What was asked so far, taken together: a volume set and the steps after
 /// it (up less down), whether the volume was touched (which unmutes),
-/// whether to toggle mute, and another default sink.
+/// whether to toggle mute, and another default sink; the last volume and
+/// mute asked of each other node, and another default source.
 #[derive(Debug, Default, PartialEq)]
 pub struct Asked {
     pub steps: i32,
@@ -425,6 +682,8 @@ pub struct Asked {
     pub toggle: bool,
     pub to: Option<f32>,
     pub default: Option<u32>,
+    pub nodes: std::collections::BTreeMap<u32, (Option<f32>, Option<bool>)>,
+    pub source: Option<u32>,
 }
 
 impl Asked {
@@ -439,6 +698,18 @@ impl Asked {
             }
             Ask::Default(id) => {
                 self.default = Some(id);
+                return;
+            }
+            Ask::Node(id, set) => {
+                let node = self.nodes.entry(id).or_default();
+                match set {
+                    Set::Volume(to) => node.0 = Some(to.clamp(0.0, 100.0)),
+                    Set::Mute(muted) => node.1 = Some(muted),
+                }
+                return;
+            }
+            Ask::DefaultSource(id) => {
+                self.source = Some(id);
                 return;
             }
         };
@@ -460,6 +731,35 @@ impl Asked {
     /// another default sink asked after must not take.
     fn for_the_default(&self) -> bool {
         self.default.is_none() && (self.volume || self.toggle)
+    }
+
+    /// Whether something was asked of the default sink, or of another to
+    /// be.
+    fn for_a_sink(&self) -> bool {
+        self.default.is_some() || self.volume || self.toggle
+    }
+
+    /// `wpctl`'s commands for the other nodes: their volumes, then their
+    /// mutes; another default source.
+    pub fn node_commands(&self) -> Vec<Vec<String>> {
+        let mut commands = Vec::new();
+        if let Some(id) = self.source {
+            commands.push(vec!["set-default".into(), id.to_string()]);
+        }
+        for (id, (volume, muted)) in &self.nodes {
+            if let Some(to) = volume {
+                commands.push(vec![
+                    "set-volume".into(),
+                    id.to_string(),
+                    format!("{:.3}", to / 100.0),
+                ]);
+            }
+            if let Some(muted) = muted {
+                let muted = if *muted { "1" } else { "0" };
+                commands.push(vec!["set-mute".into(), id.to_string(), muted.into()]);
+            }
+        }
+        commands
     }
 
     /// `wpctl`'s commands for node `id` (the default sink, or the one
@@ -536,19 +836,24 @@ fn set(asks: &Receiver<Ask>, default: &Default) {
             return;
         };
         next = after;
-        let current = *default.lock().unwrap_or_else(PoisonError::into_inner);
-        let target = match (asked.default, current) {
-            (Some(id), _) => sinks()
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| (id, s.sound.is_some_and(|s| s.muted))),
-            (None, current) => current,
-        };
-        let Some((id, muted)) = target else {
-            tracing::debug!("no default sink: the key does nothing");
-            continue;
-        };
-        for args in asked.commands(id, muted) {
+        let mut commands = Vec::new();
+        if asked.for_a_sink() {
+            let current = *default.lock().unwrap_or_else(PoisonError::into_inner);
+            let target = match (asked.default, current) {
+                (Some(id), _) => mixer()
+                    .sinks
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| (id, s.sound.is_some_and(|s| s.muted))),
+                (None, current) => current,
+            };
+            match target {
+                Some((id, muted)) => commands = asked.commands(id, muted),
+                None => tracing::debug!("no default sink: the key does nothing"),
+            }
+        }
+        commands.extend(asked.node_commands());
+        for args in commands {
             match Command::new("wpctl")
                 .args(&args)
                 .stdin(Stdio::null())
@@ -804,5 +1109,249 @@ mod tests {
             asked(&[mute, mute]).commands(7, false),
             Vec::<Vec<String>>::new()
         );
+    }
+
+    fn node(id: u32, props: Value, state: &str, volumes: &[f64], mute: bool) -> Value {
+        json!({
+            "id": id,
+            "type": "PipeWire:Interface:Node",
+            "info": {
+                "state": state,
+                "props": props,
+                "params": { "Props": [ { "mute": mute, "channelVolumes": volumes } ] }
+            }
+        })
+    }
+
+    #[test]
+    fn the_microphones_and_the_default_one_not_the_monitors() {
+        let mut graph = Graph::default();
+        let source = |name: &str, description: &str| {
+            json!({ "node.name": name, "node.description": description,
+                    "media.class": "Audio/Source" })
+        };
+        graph.apply(node(
+            40,
+            source("mic.internal", "Micro du portable"),
+            "suspended",
+            &[0.343; 2],
+            false,
+        ));
+        graph.apply(node(
+            41,
+            source("mic.headset", "Micro du casque"),
+            "idle",
+            &[0.614_125; 2],
+            true,
+        ));
+        let mut null = source("null-source", "Null");
+        null["media.class"] = json!("Audio/Source/Virtual");
+        graph.apply(node(42, null, "idle", &[1.0; 2], false));
+        // A sink's monitor made a source is not a microphone.
+        let mut monitor = source("speakers.monitor", "Monitor of speakers");
+        monitor["device.class"] = json!("monitor");
+        graph.apply(node(43, monitor, "idle", &[1.0; 2], false));
+        let mut default = json!({
+            "id": 29, "type": "PipeWire:Interface:Metadata",
+            "props": { "metadata.name": "default" },
+            "metadata": [
+                { "subject": 0, "key": "default.audio.source", "type": "Spa:String:JSON",
+                  "value": { "name": "mic.headset" } }
+            ]
+        });
+        graph.apply(default.clone());
+        let sources = graph.sources();
+        let shown: Vec<_> = sources
+            .iter()
+            .map(|s| (s.id, s.description.as_str(), s.default))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (40, "Micro du portable", false),
+                (41, "Micro du casque", true),
+                (42, "Null", false)
+            ]
+        );
+        let volumes: Vec<_> = sources
+            .iter()
+            .filter_map(|s| s.sound)
+            .map(|s| (s.volume.round() as u32, s.muted))
+            .collect();
+        assert_eq!(volumes, [(70, false), (85, true), (100, false)]);
+        // No sink among them, no source among the sinks.
+        assert!(graph.sinks().is_empty());
+        let mixer = graph.mixer(&mut HashMap::new());
+        assert_eq!(mixer.microphone().map(|s| s.id), Some(41));
+        // Without a default one, the first.
+        default["metadata"] = json!([]);
+        graph.apply(default);
+        assert_eq!(
+            graph.mixer(&mut HashMap::new()).microphone().map(|s| s.id),
+            Some(40)
+        );
+    }
+
+    #[test]
+    fn the_streams_by_application_and_which_play() {
+        let mut graph = Graph::default();
+        let stream = |app: &str, binary: &str, corked: bool| {
+            json!({ "node.name": app, "media.class": "Stream/Output/Audio",
+                    "application.name": app, "application.process.binary": binary,
+                    "pulse.corked": corked })
+        };
+        // Firefox: two tabs, one paused (idle and corked).
+        graph.apply(node(
+            60,
+            stream("Firefox", "firefox", false),
+            "running",
+            &[1.0; 2],
+            false,
+        ));
+        graph.apply(node(
+            61,
+            stream("Musique", "music", false),
+            "running",
+            &[0.262_144; 2],
+            true,
+        ));
+        graph.apply(node(
+            62,
+            stream("Firefox", "firefox", true),
+            "idle",
+            &[0.125; 2],
+            false,
+        ));
+        // A stream with no application's name: its program's.
+        let mut bare = stream("", "pw-play", false);
+        bare["node.name"] = json!("pw-play");
+        bare.as_object_mut().map(|o| o.remove("application.name"));
+        graph.apply(node(63, bare, "idle", &[1.0; 2], false));
+        // A sink is not a stream.
+        graph.apply(sink(30, "speakers", &[1.0; 2], false));
+        let apps: Vec<_> = graph
+            .apps()
+            .into_iter()
+            .map(|(a, _)| {
+                let sound = a.sound.map(|s| (s.volume.round() as u32, s.muted));
+                (a.key, a.name, a.streams, sound, a.playing)
+            })
+            .collect();
+        assert_eq!(
+            apps,
+            [
+                (
+                    "Firefox".into(),
+                    "Firefox".into(),
+                    vec![60, 62],
+                    Some((100, false)),
+                    true
+                ),
+                (
+                    "Musique".into(),
+                    "Musique".into(),
+                    vec![61],
+                    Some((64, true)),
+                    true
+                ),
+                (
+                    "pw-play".into(),
+                    "pw-play".into(),
+                    vec![63],
+                    Some((100, false)),
+                    false
+                ),
+            ]
+        );
+        // The first tab paused too: Firefox plays no more. An update
+        // without props keeps the stream's class and application.
+        graph.apply(json!({ "id": 60, "type": "PipeWire:Interface:Node",
+                            "info": { "state": "idle" } }));
+        let firefox = graph.apps().into_iter().next().map(|(a, _)| a);
+        assert_eq!(
+            firefox.map(|a| (a.name, a.playing)),
+            Some(("Firefox".into(), false))
+        );
+        // Muted when all its streams are.
+        graph.apply(node(
+            62,
+            stream("Firefox", "firefox", true),
+            "idle",
+            &[0.125; 2],
+            true,
+        ));
+        graph.apply(node(
+            60,
+            stream("Firefox", "firefox", false),
+            "running",
+            &[1.0; 2],
+            true,
+        ));
+        let firefox = graph.apps().into_iter().next().map(|(a, _)| a);
+        assert_eq!(firefox.and_then(|a| a.sound).map(|s| s.muted), Some(true));
+        // A stream going leaves its application; the last, the list.
+        graph.apply(json!({ "id": 61, "info": null }));
+        assert_eq!(graph.apps().len(), 2);
+    }
+
+    #[test]
+    fn an_application_is_known_by_its_sandbox_then_its_name_then_its_program() {
+        let who = |props: Value| Who::read(&props);
+        let flatpak = who(json!({ "application.name": "Firefox",
+                                  "pipewire.access.portal.app_id": "org.mozilla.firefox",
+                                  "application.process.binary": "firefox" }));
+        assert_eq!(flatpak.key("n"), "org.mozilla.firefox");
+        assert_eq!(flatpak.icon_names(), ["org.mozilla.firefox", "firefox"]);
+        let chrome = who(json!({ "application.name": "Google Chrome",
+                                 "application.icon-name": "google-chrome",
+                                 "application.process.binary": "chrome" }));
+        assert_eq!(chrome.key("n"), "Google Chrome");
+        assert_eq!(chrome.icon_names(), ["google-chrome", "chrome"]);
+        assert_eq!(
+            who(json!({ "application.process.binary": "mpv" })).key("n"),
+            "mpv"
+        );
+        assert_eq!(
+            who(json!({})).key("alsa_playback.speaker-test"),
+            "alsa_playback.speaker-test"
+        );
+    }
+
+    #[test]
+    fn microphones_and_applications_asks_make_few_commands() {
+        let line = |c: &[&str]| c.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let mut asked = Asked::default();
+        // A slider dragged: only its last volume; a mute after it.
+        for v in [10.0, 30.0, 55.0] {
+            asked.add(Ask::Node(61, Set::Volume(v)));
+        }
+        asked.add(Ask::Node(61, Set::Mute(false)));
+        // An application of two streams muted, then unmuted.
+        for id in [60, 62] {
+            asked.add(Ask::Node(id, Set::Mute(true)));
+        }
+        for id in [60, 62] {
+            asked.add(Ask::Node(id, Set::Mute(false)));
+        }
+        asked.add(Ask::DefaultSource(41));
+        assert!(!asked.for_a_sink());
+        assert_eq!(
+            asked.node_commands(),
+            vec![
+                line(&["set-default", "41"]),
+                line(&["set-mute", "60", "0"]),
+                line(&["set-volume", "61", "0.550"]),
+                line(&["set-mute", "61", "0"]),
+                line(&["set-mute", "62", "0"]),
+            ]
+        );
+        // Asked of the default sink too: both.
+        asked.add(Ask::Key(LevelKey::VolumeUp));
+        assert!(asked.for_a_sink());
+        // Another default source does not wait for the next batch.
+        let (send, asks) = std::sync::mpsc::channel();
+        send.send(Ask::DefaultSource(40)).expect("sent");
+        let (both, next) = batch(Ask::Key(LevelKey::Mute), &asks).expect("a batch");
+        assert_eq!((both.toggle, both.source, next), (true, Some(40), None));
     }
 }

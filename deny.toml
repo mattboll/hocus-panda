@@ -39,6 +39,10 @@ ignore = [
     # iced's text through fontdb and cosmic-text (decision 0003, spike #315).
     # Revisit on every iced update.
     { id = "RUSTSEC-2026-0192", reason = "transitive through iced's text stack" },
+    # rustybuzz is unmaintained (no known vulnerability); usvg shapes SVG
+    # text with it, through iced's `svg` (resvg), which draws the sound
+    # popover's applications' icons. Revisit on every iced update.
+    { id = "RUSTSEC-2026-0206", reason = "transitive through iced's resvg" },
 ]
 
 [bans]

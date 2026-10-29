@@ -12,8 +12,10 @@
 //!   through logind (`SetBrightness` on the session: no root, no helper);
 //! - the backlight from sysfs, its changes from udev ([`backlight`]);
 //! - the sound from PipeWire: `pw-dump --monitor` streams the graph's
-//!   changes (the default sink, its volume and mute), and `wpctl` sets
-//!   them ([`sound`]).
+//!   changes (the default sink, its volume and mute; the outputs, the
+//!   microphones and the applications' streams, for the popover), and
+//!   `wpctl` sets them ([`sound`]); the applications' icons are found as
+//!   the freedesktop specifications say ([`icons`]).
 //!
 //! A service missing hides its row or its part, says so once in the log,
 //! and is picked up when it comes: from the bus's name changes, from udev,
@@ -29,6 +31,7 @@
 
 pub mod backlight;
 pub mod draw;
+pub mod icons;
 pub mod model;
 pub mod power;
 pub mod sound;
