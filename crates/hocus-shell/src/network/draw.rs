@@ -548,8 +548,8 @@ impl Connections {
         if label != state.made_for {
             let room = FULL_SURFACE.0 as f32 - 2.0 * SIDE - ICON - ICON_GAP;
             state.label = match iced::advanced::graphics::text::font_system().write() {
-                Ok(mut system) => crate::popover::sound::elide(&label, room, |t| {
-                    crate::popover::sound::measure(system.raw(), t, MANROPE, LABEL)
+                Ok(mut system) => crate::popover::kit::elide(&label, room, |t| {
+                    crate::popover::kit::measure_in(system.raw(), t, LABEL, MANROPE)
                 }),
                 Err(_) => label.clone(),
             };

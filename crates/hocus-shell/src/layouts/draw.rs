@@ -66,16 +66,15 @@ impl RowState {
     fn fit(&mut self, layout: &Layout, width: f32) {
         let mut system = iced::advanced::graphics::text::font_system().write().ok();
         let mut measure = |text: &str, font, size: f32| match system.as_mut() {
-            Some(system) => crate::popover::sound::measure(system.raw(), text, font, size),
+            Some(system) => crate::popover::kit::measure_in(system.raw(), text, size, font),
             None => text.chars().count() as f32 * size * 0.6,
         };
         self.chip = measure(&layout.code, MANROPE_BOLD, CHIP) + 2.0 * CHIP_PAD;
         let room = width - 2.0 * ITEM_OUT - ICON - ICON_GAP - self.chip - ICON_GAP;
-        self.label = crate::popover::sound::elide(&layout.name, room.max(0.0), |t| {
-            measure(t, MANROPE, LABEL)
-        });
+        self.label =
+            crate::popover::kit::elide(&layout.name, room.max(0.0), |t| measure(t, MANROPE, LABEL));
         let button = MINI_BUTTON.width - 4.0;
-        self.mini = crate::popover::sound::elide(&layout.code, button, |t| {
+        self.mini = crate::popover::kit::elide(&layout.code, button, |t| {
             measure(t, MANROPE_BOLD, MINI_CODE)
         });
     }

@@ -1,7 +1,7 @@
 //! Popovers beside the bar (bar.md §9): what opens them, what closes them,
 //! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]),
 //! Bluetooth's ([`bluetooth`]), the brightness's ([`brightness`]) and the
-//! battery's ([`battery`]).
+//! battery's ([`battery`]), drawn and handled with the pieces of [`kit`].
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -31,6 +31,9 @@
 pub mod battery;
 pub mod bluetooth;
 pub mod brightness;
+// Until each popover is on it.
+#[allow(dead_code, unused_imports)]
+pub mod kit;
 pub mod sound;
 pub mod wifi;
 
