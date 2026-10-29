@@ -300,7 +300,7 @@ fn the_shell_draws_the_bar_as_wide_as_its_form_and_rests() -> anyhow::Result<()>
     assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));
     // At rest, the shell draws only its clock, once a second, and the
     // compositor only the clock's place.
-    let clock = Rect::new(1920 - 8 - 1 - 54, 8 + 12, 54, 32);
+    let clock = Rect::new(1920 - 8 - 1 - 54, 8 + 12, 54, 40);
     let placed = hp.dispatch_until(WAIT, |hp| {
         hp.clock_surfaces() == vec![("HEADLESS-1".to_owned(), clock)]
     })?;
@@ -342,7 +342,7 @@ fn the_clock_shows_in_its_place_in_both_forms() -> anyhow::Result<()> {
         Some(shell),
     )?;
     // Inside the bar's rim, 12 px below its top.
-    let full = Rect::new(1920 - 8 - 1 - 194, 8 + 12, 194, 62);
+    let full = Rect::new(1920 - 8 - 1 - 194, 8 + 12, 194, 74);
     let placed = hp.dispatch_until(Duration::from_secs(20), |hp| {
         hp.clock_surfaces() == vec![("HEADLESS-1".to_owned(), full)] && hp.clock_commits() > 0
     })?;
@@ -366,7 +366,7 @@ fn the_clock_shows_in_its_place_in_both_forms() -> anyhow::Result<()> {
     // The mini form's clock, in its narrower place.
     hp.pointer_move(1000.0, 500.0);
     chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
-    let mini = Rect::new(1920 - 8 - 1 - 54, 8 + 12, 54, 32);
+    let mini = Rect::new(1920 - 8 - 1 - 54, 8 + 12, 54, 40);
     let placed = hp.dispatch_until(WAIT, |hp| {
         hp.clock_surfaces() == vec![("HEADLESS-1".to_owned(), mini)]
     })?;

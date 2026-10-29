@@ -59,21 +59,21 @@ const FAINT: Color = Color::from_rgb8(0x8C, 0x96, 0xA8);
 pub const SURFACE_TOP: i32 = 12;
 /// The surface's sizes: the bar's width less its 1 px rim on each side,
 /// and as tall as the form's clock.
-pub const FULL_SURFACE: (u32, u32) = (194, 62);
-pub const MINI_SURFACE: (u32, u32) = (54, 32);
+pub const FULL_SURFACE: (u32, u32) = (194, 74);
+pub const MINI_SURFACE: (u32, u32) = (54, 40);
 
-/// Full form: `HH:MM` at 34 px, line height 1, in cells 1.05 em high; the
-/// seconds at 15 px, 4 px after, on the same baseline; the date 6 px below,
-/// Manrope 13 px, its line as CSS's `normal`.
+/// Full form: `HH:MM` at 42 px, line height 1, in cells 1.05 em high; the
+/// seconds at 18 px, 4 px after, on the same baseline; the date 6 px below,
+/// Manrope 15.5 px, its line as CSS's `normal`.
 const FULL_TOP: f32 = 2.0;
-const BIG: f32 = 34.0;
-const SECONDS: f32 = 15.0;
+const BIG: f32 = 42.0;
+const SECONDS: f32 = 18.0;
 const SECONDS_GAP: f32 = 4.0;
-const DATE: f32 = 13.0;
+const DATE: f32 = 15.5;
 const DATE_GAP: f32 = 6.0;
 const DATE_LINE: f32 = 1.366;
-/// Mini form: hours over minutes, 15 px, line height 1.1.
-const MINI: f32 = 15.0;
+/// Mini form: hours over minutes, 19 px, line height 1.1.
+const MINI: f32 = 19.0;
 const MINI_LINE: f32 = 1.1;
 /// The blur's copies, in half deviations.
 const BLUR_STEPS: [f32; 9] = [-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0];
@@ -620,6 +620,25 @@ mod tests {
         assert!(big.baseline > small.baseline);
         let mini = measure(&mut system, martian, MINI, MINI * MINI_LINE).expect("a measure");
         assert!(2.0 * mini.zero <= 56.0 - 2.0 * 8.0, "{}", mini.zero);
+        // The longest dates fit inside the bar's rim; the English ones
+        // reach into its padding.
+        for date in ["mercredi 30 septembre", "Wednesday 30 September"] {
+            let mut buffer = cosmic_text::Buffer::new(
+                &mut system,
+                cosmic_text::Metrics::new(DATE, DATE * DATE_LINE),
+            );
+            let attrs = iced::advanced::graphics::text::to_attributes(MANROPE);
+            buffer.set_text(
+                &mut system,
+                date,
+                &attrs,
+                cosmic_text::Shaping::Advanced,
+                None,
+            );
+            buffer.shape_until_scroll(&mut system, false);
+            let w = buffer.layout_runs().map(|r| r.line_w).fold(0.0, f32::max);
+            assert!(w <= FULL_SURFACE.0 as f32, "{date}: {w}");
+        }
         // The surfaces hold their form's clock.
         let full = FULL_TOP + BIG * CELL_HEIGHT + DATE_GAP + DATE * DATE_LINE;
         assert!(full <= FULL_SURFACE.1 as f32, "{full}");
