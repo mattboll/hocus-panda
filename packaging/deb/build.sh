@@ -62,7 +62,8 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # the session tells it reaches D-Bus-activated programs), a terminal for
 # Super+Return, and what the bar's levels read: UPower, a power profiles
 # daemon, PipeWire's pw-dump and WirePlumber's wpctl (each missing hides
-# its row).
+# its row); and what the connections' rows read: NetworkManager and BlueZ
+# (each missing hides its row).
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
 Version: $version-$revision
@@ -73,7 +74,8 @@ Depends: $depends, libegl1
 Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  dbus-user-session,
  kitty | foot | alacritty | xterm,
- upower, power-profiles-daemon | tuned-ppd, pipewire-bin, wireplumber
+ upower, power-profiles-daemon | tuned-ppd, pipewire-bin, wireplumber,
+ network-manager, bluez
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda
