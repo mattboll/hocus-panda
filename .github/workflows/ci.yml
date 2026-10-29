@@ -48,5 +48,9 @@ jobs:
           tool: cargo-nextest
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Shell
+        # The compositor's tests start the real shell from beside them: a
+        # test binary does not build it, and those tests skip without it.
+        run: cargo build -p hocus-shell
       - name: Tests
         run: cargo nextest run --workspace
