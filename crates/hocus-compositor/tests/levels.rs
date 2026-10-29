@@ -157,6 +157,14 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     })?;
     assert!(placed, "{:?}", hp.levels_surfaces());
     until(&mut hp, MINI_GAUGE, blue)?;
+    // At half, filled from the bottom only.
+    fakes.wpctl(&["set-volume", &other, "0.5"])?;
+    until(&mut hp, (MINI_GAUGE.0, MINI.y + 5), dark)?;
+    assert!(blue(rgb(&mut hp, MINI_GAUGE)?));
+    // Its whole width, just under its level (from 21 px down).
+    for x in [MINI.x + 25, MINI.x + 28] {
+        assert!(blue(rgb(&mut hp, (x, MINI.y + 23))?), "{x}");
+    }
     Ok(())
 }
 
