@@ -2,9 +2,11 @@
 //! wlr-layer-shell client of the compositor, which starts it and restarts
 //! it when it ends.
 //!
-//! So far the bar is its column (§2, §3, §13) and its clock (§4 group 1,
-//! §5): a glass tint and a rim against the right edge of each output the
-//! compositor names, in its full or its mini form, and the time at its top.
+//! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5)
+//! and its levels (§4 group 10, §5): a glass tint and a rim against the
+//! right edge of each output the compositor names, in its full or its mini
+//! form, the time at its top, and the sound, the brightness and the battery
+//! near its bottom ([`levels`]).
 //! The compositor blurs what is behind it; the shell draws the tint over
 //! that blur, or an opaque background when there is no blur. The line
 //! between the two is `hocus-link`.
@@ -14,7 +16,8 @@
 //! that the bar has room to move. The compositor takes the clicks on the
 //! bar's edge, which switch the form. The clock has a small surface of its
 //! own over the bar's top ([`clock`]): it draws every second, and iced
-//! presents a surface whole, so that only its region is drawn again.
+//! presents a surface whole, so that only its region is drawn again. The
+//! levels have theirs, for the same reason.
 
 mod clock;
 mod levels;
@@ -103,6 +106,7 @@ fn main() -> ExitCode {
         ..Settings::default()
     })
     .run();
+    levels::sound::stop();
     match started {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
