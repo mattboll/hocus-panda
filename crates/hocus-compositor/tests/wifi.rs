@@ -17,8 +17,13 @@
 //! without text, or a client that never writes, nothing is pasted and the
 //! field goes on taking keys.
 //!
+//! Bluetooth's row is there too, under the Wi-Fi's (issue #363): the
+//! connections' surface holds both.
+//!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 
+#[path = "levels/bluez.rs"]
+mod bluez;
 mod common;
 #[path = "levels/fakes.rs"]
 mod fakes;
@@ -64,6 +69,9 @@ const PASSWORD: &str = "azerty&1@ê";
 const LIVEBOX: &str = "Livebox-A3F2";
 const FREEBOX: &str = "Freebox-7C21E0";
 const SNCF: &str = "_SNCF_WIFI_INOUI";
+
+/// The connections' surface with the Wi-Fi's and Bluetooth's rows.
+const TWO_ROWS: i32 = 72;
 
 /// The mockup's networks: seven others around the Livebox.
 fn around() -> Vec<FakeAp> {
@@ -140,6 +148,7 @@ fn row(rect: Rect, blocks: &[f64], i: usize) -> (f64, f64) {
 struct Bed {
     fakes: Fakes,
     nm: Nm,
+    _bluez: bluez::Bluez,
     hp: Headless,
     /// What the shell logged, if kept.
     log: Option<PathBuf>,
@@ -162,6 +171,8 @@ fn ready() -> Option<PathBuf> {
 fn start(shell: &Path, setup: Setup, keep_log: bool) -> anyhow::Result<Bed> {
     let fakes = Fakes::start()?;
     let nm = Nm::start(fakes.runtime(), &fakes.address, setup)?;
+    // An adapter, nothing paired: Bluetooth's row under the Wi-Fi's.
+    let bluez = bluez::Bluez::start(fakes.runtime(), &fakes.address, bluez::Setup::default())?;
     let log = keep_log.then(|| fakes.dir.path().join("shell.log"));
     let opener = opener(&fakes)?;
     let env = [("HOCUS_OPENER", opener.display().to_string())];
@@ -178,12 +189,20 @@ fn start(shell: &Path, setup: Setup, keep_log: bool) -> anyhow::Result<Bed> {
         Some(script),
     )?;
     let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| {
-        hp.connections_surfaces().len() == 1
+        hp.connections_surfaces()
+            .first()
+            .is_some_and(|(_, r)| r.height == TWO_ROWS)
             && hp.connections_commits() > 0
             && hp.levels_commits() > 0
     })?;
     anyhow::ensure!(drawn, "no connections: {:?}", hp.connections_surfaces());
-    let mut bed = Bed { fakes, nm, hp, log };
+    let mut bed = Bed {
+        fakes,
+        nm,
+        _bluez: bluez,
+        hp,
+        log,
+    };
     // Where the levels' group ends, once they read their services.
     bed.settle()?;
     Ok(bed)
@@ -237,13 +256,11 @@ impl Bed {
             .map_or(Rect::new(0, 0, 0, 0), |(_, r)| *r)
     }
 
-    /// The Wi-Fi's row (full) or button (mini): its middle.
+    /// The Wi-Fi's row (full) or button (mini), the top one: its middle.
     fn item(&self) -> (f64, f64) {
         let s = self.surface();
-        (
-            f64::from(s.x + s.width / 2),
-            f64::from(s.y + s.height / 2) - 0.5,
-        )
+        let middle = if s.width == 54 { 24.0 } else { 20.0 };
+        (f64::from(s.x + s.width / 2), f64::from(s.y) + middle - 0.5)
     }
 
     fn click(&mut self, (x, y): (f64, f64)) {
@@ -342,9 +359,9 @@ impl Bed {
     fn arcs(&mut self) -> anyhow::Result<[bool; 4]> {
         let s = self.surface();
         // The icon, 18 px, 6 px into the row, centred on it: the row's
-        // middle is the surface's, give or take a pixel (the levels'
+        // middle 20 px into the surface, give or take a pixel (the levels'
         // group's top is not whole).
-        let (x, top) = (s.x + 11 + 9, s.y + s.height / 2 - 9);
+        let (x, top) = (s.x + 11 + 9, s.y + 20 - 9);
         // The SVG's tops of the arcs and the dot's middle, ×0.75.
         let mut lit = [false; 4];
         for (part, y) in [(0, 14.25), (1, 10.55), (2, 7.24), (3, 3.82)] {
@@ -470,7 +487,7 @@ fn the_row_shows_the_network_and_its_signal_in_both_forms() -> anyhow::Result<()
     // 14 px above the levels' group: the sound's row's top.
     let levels = bed.hp.levels_surfaces()[0].1;
     let s = bed.surface();
-    assert_eq!((s.x, s.width, s.height), (levels.x, 194, 40));
+    assert_eq!((s.x, s.width, s.height), (levels.x, 194, TWO_ROWS));
     assert!(s.y + s.height > levels.y, "{s:?} over {levels:?}");
     bed.bars(4)?;
     // Each strength lights its parts; the levels and the bar do not draw.
@@ -499,7 +516,7 @@ fn the_row_shows_the_network_and_its_signal_in_both_forms() -> anyhow::Result<()
     bed.settle()?;
     let s = bed.surface();
     let gauge = bed.hp.levels_surfaces()[0].1;
-    assert_eq!((s.width, s.height), (54, 48));
+    assert_eq!((s.width, s.height), (54, 88));
     assert!(s.y + s.height <= gauge.y + 10, "{s:?} over {gauge:?}");
     // Its icon, 20 px in the button's middle: the outer arc lit.
     let top = (s.x + 5 + 22, s.y + 5 + 9 + 4);
@@ -534,7 +551,7 @@ fn the_row_says_offline_off_connecting_a_cable_and_a_sign_in_page() -> anyhow::R
     bed.logged("link=Connecting")?;
     bed.logged("Connected { name: \"_SNCF_WIFI_INOUI\"")?;
     let s = bed.surface();
-    bed.until((s.x + 11 + 17, s.y + s.height / 2 - 9 + 1), orange)?;
+    bed.until((s.x + 11 + 17, s.y + 20 - 9 + 1), orange)?;
     // Its popover: the orange button under the network.
     let blocks = [SIGN_IN_CURRENT, PORTAL];
     bed.popover_is(Some(popover(height(&blocks, 7, 0.0))))?;
@@ -1061,6 +1078,13 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     let (x, y) = (f64::from(s.x + 97), f64::from(s.y + 20));
     hp.pointer_move(x - 1.0, y);
     hp.pointer_move(x, y);
+    // Its surface draws no row, and lets the pointer through to the bar's
+    // surfaces under it.
+    let through = hp.dispatch_until(WAIT, |hp| {
+        hp.pointer_layer()
+            .is_some_and(|l| l != hocus_link::CONNECTIONS_NAMESPACE)
+    })?;
+    assert!(through, "the pointer is on {:?}", hp.pointer_layer());
     hp.button(BTN_LEFT, true);
     hp.button(BTN_LEFT, false);
     wait(&mut hp, Duration::from_millis(500))?;
