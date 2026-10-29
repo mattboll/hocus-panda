@@ -12,7 +12,8 @@
 //! sign-in page opened; the password in no log; nothing drawn at rest.
 //! A password pasted (issue #453): copied by a test client with its line
 //! break, `Ctrl+V` and `Shift+Insert` in the field hand NetworkManager
-//! exactly the password; out of the field, from an empty clipboard, one
+//! exactly the password; the eye shows it and hides it, and no log says
+//! it even shown; out of the field, from an empty clipboard, one
 //! without text, or a client that never writes, nothing is pasted and the
 //! field goes on taking keys.
 //!
@@ -389,6 +390,18 @@ impl Bed {
         })?;
         anyhow::ensure!(copied, "the clipboard was never taken");
         Ok(())
+    }
+
+    /// The light pixels on line `y` from `x` to `x + width` (global).
+    fn ink(&mut self, (x, y): (i32, i32), width: i32) -> anyhow::Result<usize> {
+        let mut lit = 0;
+        for x in x..x + width {
+            let (r, g, b) = self.rgb((x, y))?;
+            if r.min(g).min(b) > 150 {
+                lit += 1;
+            }
+        }
+        Ok(lit)
     }
 
     /// Opens the popover, `rows` networks, and unfolds row `i`'s field.
@@ -1096,6 +1109,24 @@ fn a_password_pasted_with_ctrl_v_reaches_networkmanager_without_its_line_break()
     wait(&mut bed.hp, Duration::from_millis(300))?;
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
     bed.logged("the clipboard's text pasted into the field")?;
+    // The eye shows it, then hides it again; the field keeps the keyboard.
+    let field = popover(height(&[], 8, FORM));
+    let middle = f64::from(field.y) + list_top(&[]) + 2.0 * ROW_STEP + ROW + 2.0 + 17.0;
+    let eye = (f64::from(field.x) + 240.0, middle);
+    // Above the dots, under the letters' tops.
+    let band = (field.x + 53, middle as i32 - 5);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    let dots = bed.ink(band, 150)?;
+    bed.click(eye);
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    let letters = bed.ink(band, 150)?;
+    bed.click(eye);
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    let hidden = bed.ink(band, 150)?;
+    assert!(
+        dots <= 2 && letters >= 5 && hidden <= 2,
+        "light pixels above the dots: {dots}, shown {letters}, hidden {hidden}"
+    );
     bed.press(KEY_ENTER);
     bed.asked(&Call::AddAndActivate {
         ssid: FREEBOX.to_owned(),
@@ -1113,7 +1144,8 @@ fn a_password_pasted_with_ctrl_v_reaches_networkmanager_without_its_line_break()
         .filter(|c| matches!(c, Call::AddAndActivate { .. }))
         .count();
     assert_eq!(tries, 1, "{:?}", bed.nm.calls());
-    // Nothing the shell logged, every crate at trace, says it.
+    // Nothing the shell logged, every crate at trace, says it, though it
+    // was shown.
     let log = plain(bed.log.as_ref().expect("a log"));
     for part in [PASSWORD, "azerty&", "rty&1@"] {
         assert!(!log.contains(part), "the log says {part:?}");
