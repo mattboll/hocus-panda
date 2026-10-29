@@ -18,7 +18,8 @@
 //! none, taking no pointer then: the bar under it does). It follows the
 //! levels' group as that grows or shrinks (a row coming, the status line on
 //! two lines): the levels say where their top is ([`levels_moved`]) and the
-//! surface moves, by its margins, without drawing anything else. A row
+//! surface moves, by its margins, without drawing anything else; the
+//! desktops' surface above follows it in turn ([`group_tops`]). A row
 //! opens its popover (§9) as the sound's row does its own.
 
 use std::{
@@ -259,6 +260,29 @@ pub fn levels_moved(bar: &str, tops: (f32, f32)) {
             margin: Some(margin),
         }]);
     }
+    crate::desktops::draw::follow(bar);
+}
+
+/// The connections' group's tops above the levels' surface's bottom (full,
+/// mini): their highest row's, or the levels' group's where none shows.
+/// The desktops sit above them.
+pub fn group_tops(bar: &str) -> (f32, f32) {
+    let (tops, rows) = places(|places| {
+        places
+            .get(bar)
+            .map_or(((20.0, 0.0), (0, 0)), |p| (p.tops, p.rows))
+    });
+    let up = |top: f32, rows: usize, height: f32| {
+        if rows == 0 {
+            top
+        } else {
+            top + GAP + rows as f32 * height + (rows - 1) as f32 * ROW_GAP
+        }
+    };
+    (
+        up(tops.0, rows.0, ITEM_HEIGHT),
+        up(tops.1, rows.1, MINI_BUTTON.height),
+    )
 }
 
 /// A connection came or went: every bar's surface to its rows' height.
@@ -282,6 +306,7 @@ pub fn rows_changed() {
         tracing::debug!(?rows, "the connections' rows change");
         popover::send(effects);
     }
+    crate::desktops::draw::follow_all();
 }
 
 /// Bar `bar`'s surface takes the pointer (`takes`), or lets it through to
@@ -452,7 +477,14 @@ impl<Message> canvas::Program<Message> for Connections {
                         (Item::Keyboard, Form::Full) => {
                             crate::layouts::draw::full(f, rect, &state.keyboard, alpha);
                         }
-                        (Item::Sound | Item::Brightness | Item::Battery | Item::Keyboard, _) => {}
+                        (
+                            Item::Sound
+                            | Item::Brightness
+                            | Item::Battery
+                            | Item::Keyboard
+                            | Item::Desktop(_),
+                            _,
+                        ) => {}
                     }
                 }
             }

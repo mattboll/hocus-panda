@@ -406,6 +406,19 @@ impl Words {
         }
     }
 
+    /// A desktop's tile for screen readers (3.9): its number (from 1) and
+    /// how many windows it has.
+    pub fn desktop(self, number: usize, windows: usize) -> String {
+        match (self.fr(), windows) {
+            (true, 0) => format!("Bureau {number}, aucune fenêtre"),
+            (true, 1) => format!("Bureau {number}, 1 fenêtre"),
+            (true, n) => format!("Bureau {number}, {n} fenêtres"),
+            (false, 0) => format!("Desktop {number}, no windows"),
+            (false, 1) => format!("Desktop {number}, 1 window"),
+            (false, n) => format!("Desktop {number}, {n} windows"),
+        }
+    }
+
     /// The battery's popover's line under its level.
     pub fn battery_line(self, battery: &Battery) -> String {
         let fr = self.fr();
