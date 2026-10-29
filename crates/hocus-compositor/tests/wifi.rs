@@ -15,7 +15,8 @@
 //! exactly the password; the eye shows it and hides it, and no log says
 //! it even shown; out of the field, from an empty clipboard, one
 //! without text, or a client that never writes, nothing is pasted and the
-//! field goes on taking keys.
+//! field goes on taking keys. A `Tab` pressed in the frame a row unfolds
+//! in goes to its eye (issue #455).
 //!
 //! Bluetooth's row is there too, under the Wi-Fi's (issue #363): the
 //! connections' surface holds both.
@@ -61,6 +62,7 @@ const KEY_0: u32 = 11;
 const KEY_LEFTBRACE: u32 = 26;
 const KEY_V: u32 = 47;
 const KEY_INSERT: u32 = 110;
+const KEY_SPACE: u32 = 57;
 
 /// The password typed in the tests: an obvious one, with what a French
 /// keyboard types through Shift, AltGr and a dead key.
@@ -849,6 +851,61 @@ fn a_saved_network_whose_password_is_refused_unfolds_its_field() -> anyhow::Resu
         bed.nm.calls()
     );
     bed.popover_is(Some(popover(height(&[CURRENT], 1, 0.0))))?;
+    Ok(())
+}
+
+#[test]
+fn a_tab_in_the_frame_a_row_unfolds_in_goes_to_its_eye() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: vec![
+            FakeAp::new(SNCF, 62, Security::Open),
+            FakeAp::new(FREEBOX, 58, Security::Psk(PASSWORD)),
+        ],
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, false)?;
+    let item = bed.item();
+    bed.click(item);
+    let rect = popover(height(&[], 2, 0.0));
+    bed.popover_is(Some(rect))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // The switch, the SNCF's row, the Freebox's.
+    for _ in 0..3 {
+        bed.press(KEY_TAB);
+    }
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // Enter unfolds its field, and Tab, read before the popover draws
+    // again, goes on from the field to the eye, not back to the switch.
+    bed.press(KEY_ENTER);
+    bed.press(KEY_TAB);
+    let unfolded = popover(height(&[], 2, FORM));
+    bed.popover_is(Some(unfolded))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // Space on the eye shows the password; on the switch it would turn
+    // the Wi-Fi off.
+    bed.press(KEY_SPACE);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(
+        !bed.nm.calls().contains(&Call::Enable(false)),
+        "{:?}",
+        bed.nm.calls()
+    );
+    // Back in the field, typed: letters, not dots.
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_TAB]);
+    bed.type_password();
+    let middle = f64::from(unfolded.y) + list_top(&[]) + ROW_STEP + ROW + 2.0 + 17.0;
+    let band = (unfolded.x + 53, middle as i32 - 5);
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    let letters = bed.ink(band, 150)?;
+    assert!(letters >= 5, "light pixels above the dots: {letters}");
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: FREEBOX.to_owned(),
+        psk: Some(PASSWORD.to_owned()),
+    })?;
     Ok(())
 }
 

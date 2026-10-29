@@ -1193,10 +1193,17 @@ impl Panel {
         pressed: &Pressed,
     ) -> Option<canvas::Action<Message>> {
         use keyboard::{Key, key::Named};
-        let layout = state.layout.clone()?;
+        state.layout.as_ref()?;
         let network = state.network.clone();
         let rows = state.rows.clone();
-        let order = ui(|ui| targets(&layout, ui, &rows, &network));
+        // The layout as the keys before this one left it, not as last
+        // drawn: a row unfolded or the switch turned in the same frame
+        // already changes what Tab goes to.
+        let (layout, order) = ui(|ui| {
+            let layout = Layout::of(&network, ui, &rows, Instant::now());
+            let order = targets(&layout, ui, &rows, &network);
+            (layout, order)
+        });
         let focus = ui(|ui| ui.focus);
         let at = focus.and_then(|f| order.iter().position(|t| *t == f));
         let step = |by: isize| {
