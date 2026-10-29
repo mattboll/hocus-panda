@@ -41,6 +41,8 @@ pub enum Ask {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Change {
     pub row: bool,
+    /// Whether there is a row at all.
+    pub shown: bool,
 }
 
 type Waker = Box<dyn FnMut(Change) -> bool + Send>;
@@ -90,8 +92,9 @@ fn publish(network: Network) {
             return;
         }
         let row = kept.link() != network.link() || kept.warns() != network.warns();
+        let shown = (kept.link() == model::Link::Hidden) != (network.link() == model::Link::Hidden);
         *kept = network;
-        Change { row }
+        Change { row, shown }
     };
     tracing::debug!(row = change.row, "the network changed");
     let mut waker = service.waker.lock().unwrap_or_else(PoisonError::into_inner);
@@ -105,7 +108,10 @@ fn publish(network: Network) {
 pub fn on_change(wake: impl FnMut(Change) -> bool + Send + 'static) {
     if let Some(service) = SERVICE.get() {
         let mut wake: Waker = Box::new(wake);
-        let alive = wake(Change { row: true });
+        let alive = wake(Change {
+            row: true,
+            shown: true,
+        });
         *service.waker.lock().unwrap_or_else(PoisonError::into_inner) = alive.then_some(wake);
     }
 }

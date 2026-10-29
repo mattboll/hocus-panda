@@ -33,9 +33,9 @@ pub const CLOCK_NAMESPACE: &str = "hocus-bar-clock";
 /// the bar's bottom: for the same reason as the clock's, a change of level
 /// draws only that region.
 pub const LEVELS_NAMESPACE: &str = "hocus-bar-levels";
-/// The namespace of the connections' surface (Wi-Fi), above the levels: a
-/// change of network draws only that region, and a change of level does
-/// not draw it.
+/// The namespace of the connections' surface (Wi-Fi, Bluetooth), above
+/// the levels: a change of connection draws only that region, and a change
+/// of level does not draw it.
 pub const CONNECTIONS_NAMESPACE: &str = "hocus-bar-connections";
 /// The namespace of a popover's layer surface, beside the bar (bar.md §9):
 /// one at a time. The compositor blurs behind it as behind the bar, draws

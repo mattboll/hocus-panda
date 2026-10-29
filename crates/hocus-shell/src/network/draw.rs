@@ -1,20 +1,23 @@
-//! The connections' surface, above the levels, as the 3.5 mockup draws it
-//! (variant B, rows; bar.md §4 group 9, §5).
+//! The connections' surface, above the levels, as the 3.5 and 3.6 mockups
+//! draw it (variant B, rows; bar.md §4 group 9, §4.3, §5).
 //!
-//! Full form: one 30 px row per connection, like a level's (an 18 px
-//! icon, the name at 14.5 px cut with an ellipsis), 14 px above the
-//! levels' group. Only the Wi-Fi's exists so far: its icon lights one to
-//! four parts with the signal and its name follows; else "Connexion…",
-//! "Hors ligne" or "Wi-Fi coupé" (the icon slashed), or a cable and
-//! "Câble". A 7 px orange dot on the icon when a sign-in page waits. Mini
-//! form: a 44 × 38 button with a 20 px icon, 14 px above the sound's gauge.
+//! Full form: one 30 px row per connection, 2 px apart, like a level's (an
+//! 18 px icon, the name at 14.5 px cut with an ellipsis), the lowest 14 px
+//! above the levels' group: the Wi-Fi's, then Bluetooth's under it. The
+//! Wi-Fi's icon lights one to four parts with the signal and its name
+//! follows; else "Connexion…", "Hors ligne" or "Wi-Fi coupé" (the icon
+//! slashed), or a cable and "Câble". A 7 px orange dot on the icon when a
+//! sign-in page waits. Bluetooth's row is [`crate::bluetooth::draw`]'s.
+//! Mini form: 44 × 38 buttons, 2 px apart, with a 20 px icon, 14 px above
+//! the sound's gauge.
 //!
-//! It is a surface of its own, so that a network's change draws only it,
-//! and a level's never does. It follows the levels' group as that grows or
-//! shrinks (a row coming, the status line on two lines): the levels say
-//! where their top is ([`levels_moved`]) and the surface moves, by its
-//! margins, without drawing anything else. The row opens the Wi-Fi's
-//! popover (§9) as the sound's row does its own.
+//! It is a surface of its own, so that a connection's change draws only it,
+//! and a level's never does. It is as tall as its rows (one when there is
+//! none, taking no pointer then: the bar under it does). It follows the
+//! levels' group as that grows or shrinks (a row coming, the status line on
+//! two lines): the levels say where their top is ([`levels_moved`]) and the
+//! surface moves, by its margins, without drawing anything else. A row
+//! opens its popover (§9) as the sound's row does its own.
 
 use std::{
     collections::HashMap,
@@ -33,6 +36,7 @@ use iced::{
 
 use super::model::{Link, Network};
 use crate::{
+    bluetooth::{self, draw::RowState, model::Row},
     levels::{
         draw::{
             DIM, FAINT, HOVER, ITEM_HEIGHT, ITEM_OUT, ITEM_RADIUS, LINE, MANROPE, MINI_ITEM_RADIUS,
@@ -43,14 +47,17 @@ use crate::{
     popover::{self, Item},
 };
 
-/// The surface: as wide as the bar inside its rim; its row (or button)
-/// with room around for the keyboard's ring.
+/// The surface with one row: as wide as the bar inside its rim; its row
+/// (or button) with room around for the keyboard's ring. Each more row
+/// adds its height and the 2 px between.
 pub const FULL_SURFACE: (u32, u32) = (194, 40);
 pub const MINI_SURFACE: (u32, u32) = (54, 48);
-/// Around the item: the keyboard's ring, 2 px out and 3 px wide.
+/// Around the items: the keyboard's ring, 2 px out and 3 px wide.
 const ROOM: f32 = 5.0;
 /// Between the bar's groups.
 const GAP: f32 = 14.0;
+/// Between two rows, or two buttons.
+const ROW_GAP: f32 = 2.0;
 const LABEL: f32 = 14.5;
 const ICON: f32 = 18.0;
 const ICON_GAP: f32 = 8.0;
@@ -60,6 +67,19 @@ const MINI_ICON: f32 = 20.0;
 const DOT: f32 = 7.0;
 const DOT_COLOUR: Color = crate::levels::draw::rgb(0xF2945B);
 const DOT_RING: Color = Color::from_rgba8(14, 17, 28, 0.9);
+
+/// The connections shown, from the top: the Wi-Fi's while NetworkManager
+/// is there, Bluetooth's while BlueZ has an adapter.
+pub fn shown(network: &Network, bluetooth: &bluetooth::Bluetooth) -> Vec<Item> {
+    let mut items = Vec::new();
+    if network.link() != Link::Hidden {
+        items.push(Item::Wifi);
+    }
+    if bluetooth.row() != Row::Hidden {
+        items.push(Item::Bluetooth);
+    }
+    items
+}
 
 // --- Where the surface goes ----------------------------------------------------
 
@@ -71,9 +91,13 @@ struct Place {
     switching: bool,
     /// The levels' group's tops above their surface's bottom (full, mini).
     tops: (f32, f32),
+    /// The rows it is tall for: one at least.
+    rows: usize,
     /// The surface's bottom above the levels' surface's bottom.
     bottom: f32,
     asked: Option<((u32, u32), i32)>,
+    /// Whether it takes the pointer, as last asked.
+    input: Option<bool>,
 }
 
 static PLACES: Mutex<Option<HashMap<String, Place>>> = Mutex::new(None);
@@ -86,21 +110,42 @@ fn places<T>(with: impl FnOnce(&mut HashMap<String, Place>) -> T) -> T {
     with(places.get_or_insert_with(HashMap::new))
 }
 
+/// The surface's height for `rows` rows in `form`.
+fn height(form: Form, rows: usize) -> f32 {
+    let more = rows.max(1) as f32 - 1.0;
+    match form {
+        Form::Full => FULL_SURFACE.1 as f32 + more * (ITEM_HEIGHT + ROW_GAP),
+        Form::Mini => MINI_SURFACE.1 as f32 + more * (MINI_BUTTON.height + ROW_GAP),
+    }
+}
+
 /// The surface's size and its bottom above the levels' surface's, for
-/// `form` (both while the bar switches) over levels whose tops are `tops`.
-pub fn placement(form: Form, switching: bool, (full, mini): (f32, f32)) -> ((u32, u32), f32) {
+/// `form` (both while the bar switches) over levels whose tops are `tops`,
+/// tall for `rows` rows.
+pub fn placement(
+    form: Form,
+    switching: bool,
+    (full, mini): (f32, f32),
+    rows: usize,
+) -> ((u32, u32), f32) {
     let full_bottom = full + GAP - ROOM;
     let mini_bottom = mini + GAP - ROOM;
-    let full_top = full_bottom + FULL_SURFACE.1 as f32;
-    let mini_top = mini_bottom + MINI_SURFACE.1 as f32;
+    let full_top = full_bottom + height(Form::Full, rows);
+    let mini_top = mini_bottom + height(Form::Mini, rows);
     match (switching, form) {
         (true, _) => {
             let bottom = full_bottom.min(mini_bottom).floor();
             let top = full_top.max(mini_top);
             ((FULL_SURFACE.0, (top - bottom).ceil() as u32), bottom)
         }
-        (false, Form::Full) => (FULL_SURFACE, full_bottom.floor()),
-        (false, Form::Mini) => (MINI_SURFACE, mini_bottom.floor()),
+        (false, Form::Full) => (
+            (FULL_SURFACE.0, height(Form::Full, rows) as u32),
+            full_bottom.floor(),
+        ),
+        (false, Form::Mini) => (
+            (MINI_SURFACE.0, height(Form::Mini, rows) as u32),
+            mini_bottom.floor(),
+        ),
     }
 }
 
@@ -110,11 +155,17 @@ fn margin(bottom: f32) -> (i32, i32, i32, i32) {
     (0, EDGE + 1, bottom, 0)
 }
 
+/// The rows shown now, one at least for the surface's size.
+fn rows_now() -> usize {
+    shown(&super::snapshot(), &bluetooth::snapshot()).len()
+}
+
 /// Bar `bar`'s surface `id` opens in `form`: its size and margins.
 pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, i32, i32)) {
+    let rows = rows_now();
     places(|places| {
         let tops = places.get(bar).map_or((20.0, 0.0), |p| p.tops);
-        let (size, bottom) = placement(form, false, tops);
+        let (size, bottom) = placement(form, false, tops, rows);
         let margin = margin(bottom);
         places.insert(
             bar.to_owned(),
@@ -123,8 +174,11 @@ pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, 
                 form,
                 switching: false,
                 tops,
+                rows,
                 bottom,
                 asked: Some((size, margin.2)),
+                // A surface takes the pointer everywhere until told.
+                input: Some(true),
             },
         );
         (size, margin)
@@ -138,7 +192,7 @@ pub fn forget(bar: &str) {
 /// What bar `bar`'s surface needs now, if it changed: its id, size and
 /// margins.
 fn refit(place: &mut Place) -> Option<Placed> {
-    let (size, bottom) = placement(place.form, place.switching, place.tops);
+    let (size, bottom) = placement(place.form, place.switching, place.tops, place.rows);
     place.bottom = bottom;
     let margin = margin(bottom);
     if place.asked == Some((size, margin.2)) {
@@ -180,6 +234,46 @@ pub fn levels_moved(bar: &str, tops: (f32, f32)) {
     }
 }
 
+/// A connection came or went: every bar's surface to its rows' height.
+pub fn rows_changed() {
+    let rows = rows_now();
+    let effects: Vec<popover::Effect> = places(|places| {
+        places
+            .values_mut()
+            .filter_map(|place| {
+                place.rows = rows;
+                refit(place)
+            })
+            .map(|(id, size, margin)| popover::Effect::Resize {
+                id,
+                size,
+                margin: Some(margin),
+            })
+            .collect()
+    });
+    if !effects.is_empty() {
+        tracing::debug!(rows, "the connections' rows change");
+        popover::send(effects);
+    }
+}
+
+/// Bar `bar`'s surface takes the pointer (`takes`), or lets it through to
+/// the bar where it draws no row: asked when it changes.
+fn takes_pointer(bar: &str, takes: bool) {
+    let id = places(|places| {
+        let place = places.get_mut(bar)?;
+        if place.input == Some(takes) {
+            return None;
+        }
+        place.input = Some(takes);
+        Some(place.id)
+    });
+    if let Some(id) = id {
+        tracing::debug!(bar, takes, "the connections' surface and the pointer");
+        popover::send(vec![popover::Effect::Input { id, takes }]);
+    }
+}
+
 /// Where bar `bar`'s connections are: their surface's bottom above the
 /// levels' surface's, and the levels' group's tops.
 fn where_is(bar: &str) -> (f32, (f32, f32)) {
@@ -214,8 +308,11 @@ pub struct State {
     /// The label as it fits, and what it was made from.
     label: String,
     made_for: String,
+    bluetooth: RowState,
+    /// The rows shown, from the top.
+    shown: Vec<Item>,
     pointer: Option<Point>,
-    hover: bool,
+    hover: Option<Item>,
     last: Option<Point>,
 }
 
@@ -231,7 +328,7 @@ impl<Message> canvas::Program<Message> for Connections {
     ) -> Option<canvas::Action<Message>> {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                self.refresh(state, &super::snapshot());
+                self.refresh(state, &super::snapshot(), &bluetooth::snapshot());
                 None
             }
             iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
@@ -258,36 +355,32 @@ impl<Message> canvas::Program<Message> for Connections {
         if let Some(colour) = self.backdrop {
             frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
         }
-        let Some(link) = state.link.as_ref().filter(|l| **l != Link::Hidden) else {
+        if state.shown.is_empty() {
             return vec![frame.into_geometry()];
-        };
+        }
         let size = bounds.size();
-        if let Some(item) = self.item(state, size) {
-            let (open, focused) = popover::with(|c| {
-                (
-                    c.shows(&self.bar, Item::Wifi),
-                    c.focused(&self.bar, Item::Wifi),
-                )
-            });
-            let radius = match self.forms.first() {
-                Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
-                _ => ITEM_RADIUS,
-            };
+        let radius = match self.forms.first() {
+            Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
+            _ => ITEM_RADIUS,
+        };
+        for (item, rect) in self.items(state, size) {
+            let (open, focused) =
+                popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
             let lit = if open {
                 Some(OPEN)
-            } else if state.hover {
+            } else if state.hover == Some(item) {
                 Some(HOVER)
             } else {
                 None
             };
             if let Some(colour) = lit {
                 frame.fill(
-                    &Path::rounded_rectangle(item.position(), item.size(), radius.into()),
+                    &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
                     colour,
                 );
             }
             if focused {
-                ring(&mut frame, item, radius);
+                ring(&mut frame, rect, radius);
             }
         }
         let (right, left) = self.sides(size);
@@ -297,10 +390,27 @@ impl<Message> canvas::Program<Message> for Connections {
         );
         frame.with_clip(column, |f| {
             for &(form, alpha) in &self.forms {
-                let rect = self.rect(form, size);
-                match form {
-                    Form::Full => full(f, rect, link, state, alpha),
-                    Form::Mini => mini(f, rect, link, state.warns, alpha),
+                for (slot, item) in state.shown.iter().rev().enumerate() {
+                    let rect = self.rect(form, size, slot);
+                    match (item, form) {
+                        (Item::Wifi, Form::Full) => {
+                            if let Some(link) = &state.link {
+                                full(f, rect, link, state, alpha);
+                            }
+                        }
+                        (Item::Wifi, Form::Mini) => {
+                            if let Some(link) = &state.link {
+                                mini(f, rect, link, state.warns, alpha);
+                            }
+                        }
+                        (Item::Bluetooth, Form::Full) => {
+                            bluetooth::draw::full(f, rect, &state.bluetooth, alpha);
+                        }
+                        (Item::Bluetooth, Form::Mini) => {
+                            bluetooth::draw::mini(f, rect, &state.bluetooth, alpha);
+                        }
+                        (Item::Sound, _) => {}
+                    }
                 }
             }
         });
@@ -313,7 +423,7 @@ impl<Message> canvas::Program<Message> for Connections {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.hover {
+        if state.hover.is_some() {
             mouse::Interaction::Pointer
         } else {
             mouse::Interaction::default()
@@ -329,23 +439,25 @@ impl Connections {
         (right, right + 2.0 - self.bar_width)
     }
 
-    /// The row (full) or the button (mini) of `form`, on the surface.
-    fn rect(&self, form: Form, size: Size) -> Rectangle {
+    /// The row (full) or the button (mini) of `form` in `slot`, from the
+    /// lowest (0), on the surface.
+    fn rect(&self, form: Form, size: Size, slot: usize) -> Rectangle {
         let (right, left) = self.sides(size);
         let (bottom, (full, mini)) = where_is(&self.bar);
         // From the levels' surface's bottom to this surface's.
         let at = |above: f32| size.height - (above - bottom);
+        let slot = slot as f32;
         match form {
             Form::Full => {
                 let (from, to) = (left + SIDE - ITEM_OUT, right - SIDE + ITEM_OUT);
-                let low = at(full + GAP);
+                let low = at(full + GAP) - slot * (ITEM_HEIGHT + ROW_GAP);
                 Rectangle::new(
                     Point::new(from, low - ITEM_HEIGHT),
                     Size::new(to - from, ITEM_HEIGHT),
                 )
             }
             Form::Mini => {
-                let low = at(mini + GAP);
+                let low = at(mini + GAP) - slot * (MINI_BUTTON.height + ROW_GAP);
                 Rectangle::new(
                     Point::new(
                         (left + right - MINI_BUTTON.width) / 2.0,
@@ -357,13 +469,18 @@ impl Connections {
         }
     }
 
-    /// The Wi-Fi's item, if it shows and the bar is not switching.
-    fn item(&self, state: &State, size: Size) -> Option<Rectangle> {
+    /// The items shown and where they are, unless the bar is switching.
+    fn items(&self, state: &State, size: Size) -> Vec<(Item, Rectangle)> {
         let [(form, _)] = self.forms.as_slice() else {
-            return None;
+            return Vec::new();
         };
-        state.link.as_ref().filter(|l| **l != Link::Hidden)?;
-        Some(self.rect(*form, size))
+        state
+            .shown
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(slot, item)| (*item, self.rect(*form, size, slot)))
+            .collect()
     }
 
     /// A point of the surface (`size`) in the bar's frame.
@@ -376,8 +493,8 @@ impl Connections {
         )
     }
 
-    /// What the row shows now, its label cut to fit.
-    fn refresh(&self, state: &mut State, network: &Network) {
+    /// What the rows show now, their labels cut to fit.
+    fn refresh(&self, state: &mut State, network: &Network, bt: &bluetooth::Bluetooth) {
         let link = network.link();
         state.warns = network.warns();
         let label = self.words.label(&link).to_owned();
@@ -395,6 +512,13 @@ impl Connections {
             tracing::debug!(?link, "the connections' row shows it");
         }
         state.link = Some(link);
+        let row = FULL_SURFACE.0 as f32 - 2.0 * SIDE + 2.0 * ITEM_OUT;
+        state.bluetooth.refresh(self.words, bt, row);
+        state.shown = shown(network, bt);
+        if state.hover.is_some_and(|h| !state.shown.contains(&h)) {
+            state.hover = None;
+        }
+        takes_pointer(&self.bar, !state.shown.is_empty());
     }
 
     fn mouse<Message>(
@@ -405,10 +529,10 @@ impl Connections {
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         let size = bounds.size();
-        let item = self.item(state, size);
+        let items = self.items(state, size);
         let at = pointer(event, bounds, cursor, state.pointer);
         state.pointer = at;
-        let over = item.zip(at).is_some_and(|(item, at)| item.contains(at));
+        let over = at.and_then(|at| items.iter().find(|(_, r)| r.contains(at)).copied());
         let rect =
             |item: Rectangle| Rectangle::new(self.in_bar(item.position(), size), item.size());
         match event {
@@ -416,37 +540,38 @@ impl Connections {
                 let at = at?;
                 let bar_at = self.in_bar(at, size);
                 state.last = Some(bar_at);
-                if over == state.hover {
-                    if !over {
+                let now = over.map(|(item, _)| item);
+                if now == state.hover {
+                    if now.is_none() {
                         popover::event(popover::Event::Pointer { at: bar_at });
                     }
                     return None;
                 }
-                state.hover = over;
-                match item.filter(|_| over) {
-                    Some(item) => popover::event(popover::Event::ItemEnter {
+                if state.hover.take().is_some() {
+                    popover::event(popover::Event::ItemLeave { at: bar_at });
+                }
+                state.hover = now;
+                if let Some((item, r)) = over {
+                    popover::event(popover::Event::ItemEnter {
                         bar: self.bar.clone(),
-                        item: Item::Wifi,
-                        rect: rect(item),
-                    }),
-                    None => popover::event(popover::Event::ItemLeave { at: bar_at }),
+                        item,
+                        rect: rect(r),
+                    });
                 }
                 Some(canvas::Action::request_redraw())
             }
             mouse::Event::CursorLeft => {
-                if !std::mem::take(&mut state.hover) {
-                    return None;
-                }
+                state.hover.take()?;
                 let at = state.last.unwrap_or_default();
                 popover::event(popover::Event::ItemLeave { at });
                 Some(canvas::Action::request_redraw())
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                let event = match item.filter(|_| over) {
-                    Some(item) => popover::Event::ItemPress {
+                let event = match over {
+                    Some((item, r)) => popover::Event::ItemPress {
                         bar: self.bar.clone(),
-                        item: Item::Wifi,
-                        rect: rect(item),
+                        item,
+                        rect: rect(r),
                     },
                     None => popover::Event::PressElsewhere,
                 };
@@ -531,7 +656,7 @@ fn glyph(f: &mut Frame, at: Point, size: f32, link: &Link, alpha: f32) {
     }
 }
 
-fn dot(f: &mut Frame, centre: Point, alpha: f32) {
+pub(crate) fn dot(f: &mut Frame, centre: Point, alpha: f32) {
     f.fill(
         &Path::circle(centre, DOT / 2.0 + 2.0),
         faded(DOT_RING, alpha),
@@ -638,21 +763,30 @@ mod tests {
         // Three rows and a one-line status line: the sound's item's top
         // 133 px above the levels' surface's bottom.
         let tops = (133.0, 83.1);
-        let (size, bottom) = placement(Form::Full, false, tops);
+        let (size, bottom) = placement(Form::Full, false, tops, 1);
         assert_eq!(size, FULL_SURFACE);
         // The row's bottom 14 px above, its ring's room under it.
         assert_eq!(bottom, 142.0);
-        let (size, bottom) = placement(Form::Mini, false, tops);
+        let (size, bottom) = placement(Form::Mini, false, tops, 1);
         assert_eq!(size, MINI_SURFACE);
         assert_eq!(bottom, 92.0);
         // While switching, both.
-        let (size, bottom) = placement(Form::Mini, true, tops);
+        let (size, bottom) = placement(Form::Mini, true, tops, 1);
         assert_eq!(bottom, 92.0);
         assert_eq!(size, (194, 90));
         // The status line on two lines: up by its line.
-        let (_, higher) = placement(Form::Full, false, (151.5, 83.1));
+        let (_, higher) = placement(Form::Full, false, (151.5, 83.1), 1);
         assert!(higher > 142.0);
         assert_eq!(margin(142.0), (0, 9, 8 + 41 + 142, 0));
+        // None shown: as tall as one. Two: the second row 2 px above the
+        // first, the bottom where it was.
+        assert_eq!(placement(Form::Full, false, tops, 0).0, FULL_SURFACE);
+        assert_eq!(
+            placement(Form::Full, false, tops, 2),
+            ((194, 40 + 32), 142.0)
+        );
+        assert_eq!(placement(Form::Mini, false, tops, 2), ((54, 48 + 40), 92.0));
+        assert_eq!(placement(Form::Mini, true, tops, 2).0, (194, 50 + 72));
     }
 
     #[test]
