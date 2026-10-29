@@ -24,6 +24,7 @@
 mod clock;
 mod levels;
 mod network;
+mod paste;
 mod popover;
 mod renderer;
 
@@ -95,6 +96,19 @@ fn main() -> ExitCode {
             hocus_link::SOCKET_ENV
         );
     }
+    // The connection iced draws on, made here: the shell reads the
+    // clipboard on it (paste), and iced's own clipboard is not needed.
+    let connection = match wayland_client::Connection::connect_to_env() {
+        Ok(connection) => {
+            paste::start(&connection);
+            Some(connection)
+        }
+        Err(err) => {
+            tracing::error!(%err, "could not reach the compositor's Wayland socket");
+            None
+        }
+    };
+    iced_layershell::disable_clipboard();
     let started = iced_layershell::daemon(
         move || Shell::new(link.clone(), software, clock_shift()),
         || NAMESPACE.to_owned(),
@@ -111,6 +125,7 @@ fn main() -> ExitCode {
             start_mode: StartMode::Background,
             ..LayerShellSettings::default()
         },
+        with_connection: connection.map(Into::into),
         ..Settings::default()
     })
     .run();

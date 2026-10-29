@@ -16,8 +16,10 @@
 //! them (the user's layout, AltGr, dead keys: xkbcommon's text, with the
 //! keymap and the modifiers the compositor sends), is kept in a
 //! [`Secret`], shown as dots unless the eye is pressed, and goes to
-//! NetworkManager only. It is cleared when its row folds, when the
-//! connection succeeds, and when the popover closes.
+//! NetworkManager only. `Ctrl+V` or `Shift+Insert` pastes the clipboard's
+//! text at its end ([`crate::paste`]), without its line breaks. It is
+//! cleared when its row folds, when the connection succeeds, and when the
+//! popover closes.
 //!
 //! **The order** of the networks holds while it is worked in (the pointer
 //! over the list, a row unfolded or focused, a connection under way): rows
@@ -194,6 +196,19 @@ struct Ui {
     switch: Option<(bool, Instant)>,
     /// The knob's slide: from where (0 off, 1 on), since when.
     knob: Option<(f32, Instant)>,
+    paste: Paste,
+    /// Pastes asked, to tell a late one from the one awaited.
+    pastes: u64,
+}
+
+/// A paste into the field: the clipboard's text, read off the loop, lands
+/// only in the field that asked, still unfolded and holding the keyboard.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Paste {
+    #[default]
+    None,
+    /// The text of paste `n` is on its way.
+    Awaited(u64),
 }
 
 static UI: Mutex<Option<Ui>> = Mutex::new(None);
@@ -252,6 +267,8 @@ impl Ui {
         self.password.clear();
         self.shown = false;
         self.error = None;
+        // A paste on its way lands nowhere.
+        self.paste = Paste::None;
         if matches!(
             self.focus,
             Some(Target::Field | Target::Eye | Target::Cancel | Target::Join)
@@ -349,6 +366,55 @@ pub fn closing() {
         ui.fold();
         ui.focus = None;
     });
+}
+
+/// Asks for the clipboard's text, for the field holding the keyboard: it
+/// lands at the field's end as if typed (whole if it fits, or not at all),
+/// and clears the error; the popover then draws again. One at a time.
+fn paste() {
+    let n = ui(|ui| {
+        if ui.paste != Paste::None {
+            return None;
+        }
+        ui.pastes += 1;
+        ui.paste = Paste::Awaited(ui.pastes);
+        Some(ui.pastes)
+    });
+    let Some(n) = n else {
+        return;
+    };
+    let asked = crate::paste::request(move |text| {
+        let landed = ui(|ui| {
+            if ui.paste != Paste::Awaited(n) {
+                return false;
+            }
+            ui.paste = Paste::None;
+            let Some(text) = text.filter(|t| !t.is_empty()) else {
+                return false;
+            };
+            if ui.unfolded.is_none() || ui.focus != Some(Target::Field) {
+                return false;
+            }
+            let fits = ui.password.push(text);
+            if fits {
+                ui.error = None;
+                tracing::debug!("the clipboard's text pasted into the field");
+            } else {
+                tracing::debug!("the clipboard's text does not fit in the field");
+            }
+            fits
+        });
+        if landed {
+            super::changed(Item::Wifi);
+        }
+    });
+    if !asked {
+        ui(|ui| {
+            if ui.paste == Paste::Awaited(n) {
+                ui.paste = Paste::None;
+            }
+        });
+    }
 }
 
 /// The popover's height for what it shows now.
@@ -1198,6 +1264,11 @@ impl Panel {
                 ui.error = None;
             }),
             Key::Named(Named::Space) if !typing => self.act(state, focus),
+            // Nothing shows until the text comes.
+            _ if typing && crate::paste::asks(&pressed.key, modifiers) => {
+                paste();
+                return Some(canvas::Action::capture());
+            }
             _ if typing && !(modifiers.control() || modifiers.logo() || modifiers.alt()) => {
                 let text = pressed
                     .text
