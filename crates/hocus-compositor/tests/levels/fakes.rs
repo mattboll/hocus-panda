@@ -430,6 +430,9 @@ impl Fakes {
             .stdout(Stdio::null())
             .status()?;
         anyhow::ensure!(status.success(), "pw-metadata: {status}");
+        // PipeWire 1.0's pw-dump (CI's) writes a metadata change out with
+        // the graph's next change only: a client connecting is one.
+        self.wpctl(&["status"])?;
         Ok(())
     }
 
