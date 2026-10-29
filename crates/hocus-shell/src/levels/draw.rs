@@ -175,6 +175,9 @@ impl<Message> canvas::Program<Message> for Levels {
         let now = *now;
         let levels = super::snapshot();
         let before = state.levels;
+        if levels != before {
+            tracing::debug!("the levels' surface shows the change");
+        }
         let targets = [
             (levels.sound.map(|s| s.volume), before.sound.is_some()),
             (levels.brightness, before.brightness.is_some()),

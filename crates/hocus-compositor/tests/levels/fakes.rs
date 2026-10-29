@@ -441,7 +441,8 @@ impl Fakes {
             format!(
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='{}' PIPEWIRE_REMOTE='{}' \
-                 HOCUS_BACKLIGHT_DIR='{}' LC_ALL='{lang}' LANG='{lang}'\n\
+                 HOCUS_BACKLIGHT_DIR='{}' LC_ALL='{lang}' LANG='{lang}' \
+                 RUST_LOG=hocuspanda_shell=debug\n\
                  exec '{}' \"$@\"\n",
                 self.address,
                 self.pw_socket().display(),

@@ -94,6 +94,7 @@ pub fn publish(change: impl FnOnce(&mut Snapshot)) {
         *levels != before
     };
     if changed {
+        tracing::debug!(levels = ?snapshot(), "the levels changed");
         let mut waker = service.waker.lock().unwrap_or_else(PoisonError::into_inner);
         if waker.as_mut().is_some_and(|wake| !wake()) {
             *waker = None;
