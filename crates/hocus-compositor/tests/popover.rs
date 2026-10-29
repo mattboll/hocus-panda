@@ -105,6 +105,19 @@ fn start_on(fakes: &Fakes, shell: &std::path::Path, height: i32) -> anyhow::Resu
     anyhow::ensure!(placed, "no levels: {:?}", hp.levels_surfaces());
     // The sound's row, there and blue.
     until(&mut hp, (levels.x + 40, levels.y + 57), blue)?;
+    // The connections' surface, which follows the levels' group up as the
+    // sound's row comes, off it: else a click there is the connections'.
+    let row = levels.y + 57;
+    let clear = hp.dispatch_until(WAIT, |hp| {
+        hp.connections_surfaces()
+            .iter()
+            .all(|(_, r)| r.y + r.height <= row)
+    })?;
+    anyhow::ensure!(
+        clear,
+        "the connections over the sound's row: {:?}",
+        hp.connections_surfaces()
+    );
     Ok(hp)
 }
 
