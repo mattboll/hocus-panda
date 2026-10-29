@@ -17,10 +17,12 @@
 //! bar's edge, which switch the form. The clock has a small surface of its
 //! own over the bar's top ([`clock`]): it draws every second, and iced
 //! presents a surface whole, so that only its region is drawn again. The
-//! levels have theirs, for the same reason.
+//! levels have theirs, for the same reason, and so has a popover beside
+//! the bar ([`popover`]), opened from an item.
 
 mod clock;
 mod levels;
+mod popover;
 mod renderer;
 
 use std::{
@@ -38,7 +40,7 @@ use iced::{
     Background, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme,
     futures::{SinkExt, StreamExt, channel::mpsc},
     gradient,
-    widget::{Space, canvas, container, row, space},
+    widget::{Space, canvas, container, row, space, stack},
     window,
 };
 use iced_layershell::{
@@ -48,6 +50,9 @@ use iced_layershell::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing_subscriber::EnvFilter;
+
+/// The name the shell alone gives its one bar, on the active output.
+const ALONE: &str = "active";
 
 /// A frame drawn now shows about one refresh later: the bar is drawn as it
 /// will be then, so that it keeps in step with what the compositor moves
@@ -283,9 +288,10 @@ impl Shell {
             lang: clock::time::Lang::from_env(),
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
         };
+        popover::with(|c| c.motion = shell.look.motion);
         // Alone: one full bar where the compositor puts it.
         let task = if socket.is_none() {
-            shell.open_bar(OutputOption::Active, "active".to_owned(), Form::Full)
+            shell.open_bar(OutputOption::Active, ALONE.to_owned(), Form::Full)
         } else {
             Task::none()
         };
@@ -304,7 +310,8 @@ impl Shell {
             subscriptions.push(window::frames().map(|_| Message::Frame));
         }
         subscriptions.push(Subscription::run(zone_changes));
-        subscriptions.push(window::resize_events().map(|(id, size)| Message::Resized(id, size)));
+        subscriptions.push(Subscription::run(popover::effects));
+        subscriptions.push(bar_sizes());
         Subscription::batch(subscriptions)
     }
 
@@ -315,6 +322,7 @@ impl Shell {
                 if self.software {
                     let _ = sender.unbounded_send(ToCompositor::Software.to_string());
                 }
+                popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
                 Task::none()
             }
@@ -352,6 +360,7 @@ impl Shell {
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
+                    self.place_popovers(id);
                 }
                 Task::none()
             }
@@ -366,6 +375,7 @@ impl Shell {
                     glass: glass && !self.software,
                     motion: motion && !self.software,
                 };
+                popover::with(|c| c.motion = self.look.motion);
                 Task::none()
             }
             ToShell::Bar {
@@ -388,6 +398,13 @@ impl Shell {
                     .collect();
                 Task::batch(gone.into_iter().filter_map(|id| {
                     let bar = self.bars.remove(&id)?;
+                    BARS.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .retain(|b| *b != id);
+                    popover::event(popover::Event::BarChanged {
+                        bar: bar.output.clone(),
+                    });
+                    popover::with(|c| c.forget(&bar.output));
                     Some(Task::batch([
                         Task::done(Message::RemoveWindow(bar.levels)),
                         Task::done(Message::RemoveWindow(bar.clock)),
@@ -403,6 +420,10 @@ impl Shell {
             // the link changes.
             ToShell::Level(key) => {
                 levels::key(key);
+                Task::none()
+            }
+            ToShell::Outside => {
+                popover::event(popover::Event::Outside);
                 Task::none()
             }
         }
@@ -455,6 +476,7 @@ impl Shell {
         };
         let (clock_id, open_clock) = Message::layershell_open(clock);
         bar.clock = clock_id;
+        // Its items take the pointer: the sound's opens its popover.
         let levels = NewLayerShellSettings {
             size: Some(bar.levels_surface),
             layer: Layer::Top,
@@ -463,13 +485,25 @@ impl Shell {
             margin: Some((0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0)),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option,
-            events_transparent: true,
+            events_transparent: false,
             namespace: Some(LEVELS_NAMESPACE.to_owned()),
         };
         let (levels_id, open_levels) = Message::layershell_open(levels);
         bar.levels = levels_id;
         self.bars.insert(id, bar);
+        BARS.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(id);
+        self.place_popovers(id);
         open.chain(open_clock).chain(open_levels)
+    }
+
+    /// Where bar `id` is, for the popovers.
+    fn place_popovers(&self, id: window::Id) {
+        let Some(bar) = self.bars.get(&id) else {
+            return;
+        };
+        popover::with(|c| c.place(&bar.output, bar.form, id, bar.levels));
     }
 
     /// `form` for bar `id`, switching from where it is since `start`; at
@@ -484,6 +518,9 @@ impl Shell {
             return Task::none();
         }
         tracing::debug!(output = bar.output, form = form.name(), "form");
+        popover::event(popover::Event::BarChanged {
+            bar: bar.output.clone(),
+        });
         // A switch reversed midway starts from where the bar is then, as
         // the compositor's does.
         let from = start.map_or(0.0, |start| f64::from(bar.width(start)));
@@ -494,6 +531,7 @@ impl Shell {
             _ => None,
         };
         bar.form = form;
+        self.place_popovers(id);
         self.fit(id)
     }
 
@@ -586,9 +624,28 @@ impl Shell {
             motion: self.look.motion,
             words: self.words,
             backdrop,
+            bar: bar.output.clone(),
         };
         Some(
             canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// The popover whose surface is `id`.
+    fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let item = popover::with(|c| c.item_of(id))?;
+        let panel = match item {
+            popover::Item::Sound => popover::sound::Panel {
+                id,
+                words: self.words,
+                glass: self.look.glass,
+            },
+        };
+        Some(
+            canvas(panel)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -600,6 +657,7 @@ impl Shell {
             return self
                 .clock_view(id)
                 .or_else(|| self.levels_view(id))
+                .or_else(|| self.popover_view(id))
                 .unwrap_or_else(|| Space::new().into());
         };
         let width = bar.width(self.now + AHEAD);
@@ -625,10 +683,13 @@ impl Shell {
                 },
                 ..container::Style::default()
             });
-        container(row![space::horizontal(), column])
+        let bar = container(row![space::horizontal(), column])
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+        let pointer = canvas(popover::BarPointer)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        stack![bar, pointer].into()
     }
 }
 
@@ -678,6 +739,34 @@ fn clock_font(family: &str) -> Font {
             default
         }
     }
+}
+
+/// The bars' surfaces, by id: their sizes are messages, not the other
+/// surfaces', which would draw every surface again.
+static BARS: std::sync::Mutex<Vec<window::Id>> = std::sync::Mutex::new(Vec::new());
+
+fn is_bar(id: window::Id) -> bool {
+    BARS.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(&id)
+}
+
+/// The bars' sizes, as they open and change: their height places their
+/// items, for the popovers, which take it at once; a change of size is a
+/// message too (the opaque backdrops follow the bar's height), as a bar
+/// opening is not: it would draw every surface again.
+fn bar_sizes() -> Subscription<Message> {
+    iced::event::listen_with(|event, _, id| match event {
+        iced::Event::Window(window::Event::Opened { size, .. }) if is_bar(id) => {
+            popover::with(|c| c.height(id, size.height));
+            None
+        }
+        iced::Event::Window(window::Event::Resized(size)) if is_bar(id) => {
+            popover::with(|c| c.height(id, size.height));
+            Some(Message::Resized(id, size))
+        }
+        _ => None,
+    })
 }
 
 /// The time zone, as it changes: a thread waits on the system's file.
@@ -762,9 +851,18 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                 Ok(Some(line)) => {
                     // A level key goes to its service: no message, no
                     // drawing; the gauge shows what the service then reads.
-                    if let Ok(ToShell::Level(key)) = line.parse() {
-                        levels::key(key);
-                        continue;
+                    match line.parse() {
+                        Ok(ToShell::Level(key)) => {
+                            levels::key(key);
+                            continue;
+                        }
+                        // A press outside closes the popover: no message
+                        // either, the controller draws what changes.
+                        Ok(ToShell::Outside) => {
+                            popover::event(popover::Event::Outside);
+                            continue;
+                        }
+                        _ => {}
                     }
                     let _ = output.send(Message::FromCompositor(line)).await;
                 }
