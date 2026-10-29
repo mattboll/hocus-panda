@@ -9,8 +9,9 @@ section 5 (3.2, issue #359), the levels of section 4 group 10 and of
 section 5 (3.3, issue #360), the popovers of section 9 with the
 sound's (3.4a, issue #361), the Wi-Fi's row and popover (section 4
 group 9, section 5, section 9; 3.5, issue #362), Bluetooth's (3.6,
-issue #363), and the brightness's and the battery's popovers (3.7,
-issue #364): see [as built](#as-built).
+issue #363), the brightness's and the battery's popovers (3.7,
+issue #364), and the keyboard layout's row (3.8, issue #365): see
+[as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -101,7 +102,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 6 | Spacer | Takes what is left | flexible |
 | 7 | Secretary | Section 7. Panda 62 px, title, one line | 74 px |
 | 8 | Desktops | 4 tiles, 30 px high, with a sketch of their windows; the current one outlined in the accent | 30 px |
-| 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (short name, one click cycles) | 30 px a row, 2 px apart |
+| 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
 | 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
 
@@ -173,9 +174,9 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   the name in Manrope 14.5 px, cut with an ellipsis. Lit
   `rgba(255,255,255,0.06)` under the pointer, `0.08` while its popover is
   open, as the sound's row. The Wi-Fi's, then Bluetooth's under it
-  (3.6); the phone and the keyboard layout (3.8) will add theirs. A row
-  whose service is missing is not drawn, and the others close up from the
-  bottom.
+  (3.6), then the keyboard layout's (3.8); the phone will add its own. A
+  row whose service is missing is not drawn, and the others close up from
+  the bottom.
 - **The Wi-Fi's row**: connected, the Wi-Fi icon with its dot and three
   arcs, 1 to 4 lit in `text` by the signal (the others
   `rgba(255,255,255,0.22)`), and the network's name in `text`; on its way,
@@ -198,7 +199,24 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   appareil" / "No device", sign and words in `text.faint`. Off (or blocked
   by rfkill): the sign slashed, "Bluetooth coupé" / "Bluetooth off", in
   `text.faint`. No adapter, or no BlueZ: no row.
-- A click opens its popover (§9).
+- **The keyboard layout's row** (approved 2026-10-29, issue #365, variant
+  A), 2 px under Bluetooth's: the keyboard icon, the active layout's full
+  name in `text` ("Français", "Anglais (US)" / "French", "English (US)"),
+  cut with an ellipsis, and on the right its code in a chip (12 px bold,
+  `text.dim` on `rgba(255,255,255,0.08)`, radius 6, 6 px each side). A
+  click goes to the next layout, round the list: no popover, no popup, no
+  sound; the row changes when the compositor says the layout changed,
+  whatever changed it (the row, a group-switch option of the user's XKB
+  options). No default shortcut: `Super+Space` stays the launcher's. Only
+  with two layouts or more; one, no row. **The code**: the layout's XKB
+  name in capitals ("FR", "US", "RU"); when another configured layout
+  shares it, the variant's, spelled as the layout's name writes it when it
+  holds it ("BÉPO" for `fr(bepo)`, "Français (BÉPO)"; "BEPO" in English,
+  "French (BEPO)"), else as XKB names it ("INTL" for `us(intl)`). Lit
+  `rgba(255,255,255,0.06)` under the pointer, ringed while it holds the
+  keyboard.
+- A click opens its popover (§9); the keyboard layout's goes to the next
+  layout.
 
 When the output is too short (1366×768 gives 752 px of bar), groups give
 way in this order: Today, then To do, then the agent lines beyond the
@@ -229,7 +247,10 @@ battery (3.7): a 26 × 15 battery, its outline `text`, filled to its level
 in its band's colour, a bolt (`text`, edged `#0B1020`) while on AC, 4 px
 above its percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
 §4.2); the whole a 44 × 46 item 14 px under the sound's gauge, which a
-hover opens; layout, notifications count.
+hover opens; the keyboard layout (3.8): its code alone (Manrope 700, 13 px,
+`text`) in a 44 × 30 button, radius 8, 14 px under the battery's
+percentage, which a click (not a hover) takes to the next layout, with two
+layouts or more; notifications count.
 
 A hover of 150 ms on an item opens its popover beside the bar; it floats
 over the windows and closes 300 ms after the pointer leaves, unless the
@@ -487,8 +508,9 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
-  file, ring), keyboard layouts, clipboard history, notifications (clear
-  all), menu (apps, settings, session).
+  file, ring), clipboard history, notifications (clear all), menu (apps,
+  settings, session). The keyboard layouts have none: their row goes to the
+  next layout (§4.3, 3.8).
 
 ## 10. Data sources
 
@@ -506,7 +528,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Keyboard's backlight | UPower's `org.freedesktop.UPower.KbdBacklight` | `GetMaxBrightness`, `GetBrightness`, `SetBrightness`; followed by `BrightnessChanged` and `BrightnessChangedWithSource`; none: no row (as built, 3.7) |
 | Other screens | the compositor | their EDID's model, else their connector's name, on the `screens` line of `hocus-link` (as built, 3.7) |
 | Phone | KDE Connect (D-Bus) | |
-| Keyboard layouts | the compositor's XKB configuration | |
+| Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications, clipboard | the desktop's own servers | |
 
 Every source is read off the event loop and pushes changes; nothing is
@@ -1157,3 +1179,84 @@ not part of the product.
 - **Not built**: other screens' brightness (DDC/CI, variant A); hiding the
   brightness when the laptop's panel is off (lid closed, an external
   screen alone); a link to the Settings; names for screen readers (§11).
+
+### 3.8, the keyboard layout (2026-10-29)
+
+What the approved mockup of 3.8 shows, variant A: a click goes to the
+next layout (§4.3, §5, §9; issue #365); its control panel, its variant B
+(a popover listing the layouts) and its "Super + Espace" button are not
+part of the product: there is no default shortcut.
+
+- **Where it draws.** The full form's row is the connections' surface's
+  lowest, which grows by one row for it (194 × 104 with the Wi-Fi's and
+  Bluetooth's, 194 × 40 alone). The mini form's button is on the levels'
+  surface, under the battery, as §5 orders them (the battery's percentage,
+  then the layout): the connections' surface sits above the levels, so it
+  could not hold it there. With the button the levels' mini surface is
+  54 × 168: the button's bottom is 47 px over the bar's, where the
+  battery's item's was, and the battery's percentage 14 px over its top,
+  so the battery, the sound's gauge and the connections above move up by
+  40 px. One layout: the surfaces as they were.
+- **The compositor owns XKB.** As the shell connects, it sends the
+  keymap's layouts (`layouts`, then a tab, the XKB code, a tab, the name,
+  for each) and the active one (`layout N`), and the active one again
+  whenever it changes: after every key the compositor handles (a
+  group-switch option such as `grp:alt_shift_toggle`), and after a switch
+  it made. The shell asks with `next-layout`; the compositor moves the
+  seat's keyboard to the next group, round the list, which sends the
+  client holding the keyboard its modifiers with the new group (the others
+  get them as the keyboard enters them). The row changes when `layout N`
+  comes, not before. Nothing is polled: the check after a key reads the
+  keyboard's state, already at hand.
+- **The names.** XKB's own: the keymap's group names
+  (`xkb_keymap_layout_get_name`), which xkeyboard-config writes as the
+  registry's descriptions ("French", "English (US)", "French (BEPO)"),
+  already compiled into the keymap, so the compositor reads nothing and
+  needs no registry library. In French, the shell translates them with
+  xkeyboard-config's own gettext catalog, the one every desktop listing
+  layouts uses (`xkeyboard-config-2.mo`, or its older name
+  `xkeyboard-config.mo`, in `/usr/share/locale/fr/LC_MESSAGES`; shipped
+  by Debian's `xkb-data`), read once as the layouts come, on a blocking
+  thread of tokio's, never on the loop that draws; its `.mo` format is
+  read in a few lines, every offset checked, rather than through a gettext
+  library and the C library's locale. The bar's language decides, as for
+  its other words (`LC_ALL`, `LC_MESSAGES`, `LANG`). A name the catalog
+  lacks, or no catalog, stays in English. So "English (US)" is "Anglais
+  (US)", the catalog's, where the mockup wrote "Anglais (États-Unis)".
+- **The codes** (§4.3): the layout's XKB name in capitals; when two
+  configured layouts share it, the variant's, spelled as the name in the
+  bar's language writes it (a word of the name with the variant's letters,
+  accents allowed: "BÉPO" in French, "BEPO" in English), else the
+  variant's XKB name in capitals. A layout XKB gave no code for (its own
+  default) shows its name's first two letters.
+- **The keyboard.** Since the row opens no popover, it is reached from
+  another item holding the keyboard (`Esc` in its popover): `Tab` and
+  `Shift+Tab`, or the arrows up and down, now go through the items of that
+  item's surface (the Wi-Fi's, Bluetooth's and the layout's rows in the
+  full form; the sound's gauge, the battery and the layout's button in the
+  mini), round its ends. On the layout's, `Enter` or `Space` goes to the
+  next layout and keeps the keyboard; `Esc` lets it go. A click never takes
+  the keyboard from the window that has it: the next layout is typed there
+  at once.
+- **Drawing.** A layout change wakes the connections' surface where a bar
+  is in the full form and the levels' where one is in the mini, nothing
+  else. The layouts, which come once as the shell connects, are a message
+  (every surface draws once) that sizes the surfaces for the row. Measured
+  headless with the real shell: at rest nothing commits; a group switch
+  from the keyboard damages only the connections' rectangle (full form)
+  or the levels' (mini form).
+- **For tests**, `HOCUS_LOCALE_DIR` names where the catalogs are
+  (`/usr/share/locale` otherwise).
+- **Measured headless**, the real shell against the fakes, the
+  compositor's keymap set by `[keyboard]` (`tests/layouts.rs`): two
+  layouts, the first's name and code, a click switching the compositor's
+  group (a test window holding the keyboard is given it in its modifiers)
+  and the row following, round the list; three with two French ones,
+  "BÉPO"; English names; one layout, no row, the pointer let through, no
+  switch, the mini surface as it was; `grp:alt_shift_toggle` moving the
+  row and drawing it alone, nothing at rest; the mini button, its place,
+  its click, no popover on a hover, a switch drawing the levels alone; the
+  keyboard from the Wi-Fi's row to the layout's, `Enter` and `Space`.
+- **Not built**: the letter spacing of the code (0.03 em, a third of a
+  pixel: iced's canvas has none); choosing a layout from a list (variant
+  B); per-window layouts; names for screen readers (§11).
