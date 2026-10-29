@@ -124,8 +124,16 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     let past_a_third = (FULL.x + 33 + 55, SOUND_Y);
     until(&mut hp, past_a_third, blue)?;
 
-    // At rest: nothing drawn but the clock.
-    wait(&mut hp, Duration::from_millis(500))?;
+    // At rest: nothing drawn but the clock, once every service has
+    // answered (the profile, which no pixel above shows, may come last).
+    let start = std::time::Instant::now();
+    loop {
+        let levels = hp.levels_commits();
+        wait(&mut hp, Duration::from_millis(700))?;
+        if hp.levels_commits() == levels || start.elapsed() > WAIT {
+            break;
+        }
+    }
     let (levels, bars) = (hp.levels_commits(), hp.bar_commits());
     wait(&mut hp, Duration::from_secs(2))?;
     assert_eq!(hp.levels_commits(), levels, "the levels drew at rest");
