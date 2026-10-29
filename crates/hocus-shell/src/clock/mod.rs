@@ -40,12 +40,14 @@ use self::{
 
 /// The bundled fonts (SIL Open Font License 1.1, in `fonts/`): Martian
 /// Mono in the weights the clock uses, Manrope for the date and the
-/// levels (its bold for the mini form's battery).
-pub const FONTS: [&[u8]; 4] = [
+/// levels (its bold for the mini form's battery, its semibold, 600, for the
+/// Wi-Fi's network name).
+pub const FONTS: [&[u8]; 5] = [
     include_bytes!("../../fonts/MartianMono-Regular.ttf"),
     include_bytes!("../../fonts/MartianMono-Light.ttf"),
     include_bytes!("../../fonts/Manrope-Regular.ttf"),
     include_bytes!("../../fonts/Manrope-Bold.ttf"),
+    include_bytes!("../../fonts/Manrope-SemiBold.ttf"),
 ];
 
 const MANROPE: Font = Font::with_name("Manrope");

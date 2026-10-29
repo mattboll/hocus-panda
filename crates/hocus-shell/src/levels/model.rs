@@ -128,7 +128,7 @@ impl Words {
         Self { lang }
     }
 
-    fn fr(self) -> bool {
+    pub(crate) fn fr(self) -> bool {
         self.lang == Lang::French
     }
 

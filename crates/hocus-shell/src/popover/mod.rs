@@ -1,6 +1,6 @@
 //! Popovers beside the bar (bar.md §9): what opens them, what closes them,
-//! one at a time. The sound's ([`sound`]) is the first; Wi-Fi, Bluetooth,
-//! the brightness and the battery will open the same way.
+//! one at a time. The sound's ([`sound`]) and the Wi-Fi's ([`wifi`]);
+//! Bluetooth, the brightness and the battery will open the same way.
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -25,6 +25,7 @@
 //! presses on none of its surfaces (`outside`).
 
 pub mod sound;
+pub mod wifi;
 
 use std::{
     collections::HashMap,
@@ -33,7 +34,8 @@ use std::{
 };
 
 use hocus_link::{
-    EDGE, Form, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
+    CONNECTIONS_NAMESPACE, EDGE, Form, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE,
+    POPOVER_WIDTH, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -47,6 +49,7 @@ pub const LEAVE_CLOSE: Duration = Duration::from_millis(300);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Item {
     Sound,
+    Wifi,
 }
 
 impl Item {
@@ -55,6 +58,48 @@ impl Item {
     fn height(self, opening: bool) -> u32 {
         match self {
             Self::Sound => sound::layout(opening).height(),
+            Self::Wifi => wifi::height(),
+        }
+    }
+
+    /// Its popover opens: what it shows starts afresh.
+    fn opening(self) {
+        match self {
+            Self::Sound => {}
+            Self::Wifi => wifi::opening(),
+        }
+    }
+
+    /// Its popover closes: what it kept goes (a password typed).
+    fn closing(self) {
+        match self {
+            Self::Sound => {}
+            Self::Wifi => wifi::closing(),
+        }
+    }
+
+    /// The namespace of the surface it is on, drawn again as its popover
+    /// opens and closes.
+    fn namespace(self) -> &'static str {
+        match self {
+            Self::Sound => LEVELS_NAMESPACE,
+            Self::Wifi => CONNECTIONS_NAMESPACE,
+        }
+    }
+
+    /// Whether its popover's bottom sits on the bar's whatever its height,
+    /// as the 3.5 mockup draws the Wi-Fi's (else its top is on the item's,
+    /// pushed up to stay inside the bar).
+    fn on_bottom(self) -> bool {
+        self == Self::Wifi
+    }
+
+    /// Its surface on the bar at `place`, which holds the keyboard after
+    /// `Esc` in its popover.
+    fn surface(self, place: &Place) -> window::Id {
+        match self {
+            Self::Sound => place.levels,
+            Self::Wifi => place.connections,
         }
     }
 }
@@ -66,14 +111,15 @@ pub enum Opened {
     Hover,
 }
 
-/// A bar, as the popovers need it: its form, its height, and its levels'
-/// surface (which holds the keyboard after `Esc`). Points are in its frame:
+/// A bar, as the popovers need it: its form, its height, and its items'
+/// surfaces (which hold the keyboard after `Esc`). Points are in its frame:
 /// from its outer right edge (negative inside it) and from its top.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Place {
     pub form: Form,
     pub height: f32,
     pub levels: window::Id,
+    pub connections: window::Id,
     /// The bar's own surface, whose size gives its height.
     pub surface: window::Id,
 }
@@ -113,6 +159,9 @@ pub enum Event {
     Outside,
     /// `Esc` in the popover.
     Escape,
+    /// The popover, opened by hovering, is now worked in (a password to
+    /// type): it stays and takes the keyboard, as if a click had opened it.
+    Hold,
     /// `Enter` or `Space` on the item holding the keyboard.
     ItemActivate,
     /// `Esc` on the item holding the keyboard.
@@ -208,14 +257,21 @@ impl Default for Controller {
 }
 
 impl Controller {
-    /// Bar `bar` in `form`, its surfaces `surface` and `levels`; its
-    /// height stays as known.
-    pub fn place(&mut self, bar: &str, form: Form, surface: window::Id, levels: window::Id) {
+    /// Bar `bar` in `form`, its surfaces `surface`, `levels` and
+    /// `connections`; its height stays as known.
+    pub fn place(
+        &mut self,
+        bar: &str,
+        form: Form,
+        surface: window::Id,
+        (levels, connections): (window::Id, window::Id),
+    ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
         let place = Place {
             form,
             height,
             levels,
+            connections,
             surface,
         };
         self.bars.insert(bar.to_owned(), place);
@@ -252,6 +308,14 @@ impl Controller {
     /// Whether the popover `id` is open (not closing): it reacts.
     pub fn is_open(&self, id: window::Id) -> bool {
         matches!(&self.phase, Phase::Open(open) if open.surface == id)
+    }
+
+    /// The item whose popover is open, if one is.
+    pub fn open_item(&self) -> Option<Item> {
+        match &self.phase {
+            Phase::Open(open) => Some(open.item),
+            _ => None,
+        }
     }
 
     /// Whether `item` of `bar` has its popover open.
@@ -356,11 +420,23 @@ impl Controller {
                     self.close(now, &mut effects);
                     if let Some(place) = self.bars.get(&bar) {
                         effects.push(Effect::Keyboard(
-                            place.levels,
+                            item.surface(place),
                             KeyboardInteractivity::Exclusive,
                         ));
                         self.focused = Some((bar, item, from));
                     }
+                }
+            }
+            Event::Hold => {
+                if let Phase::Open(open) = &mut self.phase
+                    && open.how == Opened::Hover
+                {
+                    open.how = Opened::Click;
+                    open.leave = None;
+                    effects.push(Effect::Keyboard(
+                        open.surface,
+                        KeyboardInteractivity::Exclusive,
+                    ));
                 }
             }
             Event::ItemActivate => {
@@ -427,8 +503,9 @@ impl Controller {
         let Some(place) = self.bars.get(bar).copied() else {
             return;
         };
+        item.opening();
         let size = (POPOVER_WIDTH.unsigned_abs(), item.height(true));
-        let rect = placed(place, from, size);
+        let rect = placed(place, from, size, item.on_bottom());
         let margin = margins(place, rect);
         let surface = window::Id::unique();
         tracing::debug!(?item, ?how, bar, "a popover opens");
@@ -443,7 +520,7 @@ impl Controller {
                 Opened::Hover => KeyboardInteractivity::OnDemand,
             },
         });
-        effects.push(Effect::Wake(LEVELS_NAMESPACE));
+        effects.push(Effect::Wake(item.namespace()));
         self.phase = Phase::Open(Open {
             bar: bar.to_owned(),
             item,
@@ -472,7 +549,7 @@ impl Controller {
         }
         let size = (POPOVER_WIDTH.unsigned_abs(), height);
         let before = margins(place, open.rect);
-        open.rect = placed(place, open.from, size);
+        open.rect = placed(place, open.from, size, open.item.on_bottom());
         let margin = margins(place, open.rect);
         tracing::debug!(height, "the popover's size changes");
         vec![Effect::Resize {
@@ -488,6 +565,7 @@ impl Controller {
             return;
         };
         tracing::debug!(item = ?open.item, "a popover closes");
+        open.item.closing();
         if self.motion {
             effects.push(Effect::Closing);
             self.closing
@@ -495,15 +573,18 @@ impl Controller {
         } else {
             effects.push(Effect::Remove(open.surface));
         }
-        effects.push(Effect::Wake(LEVELS_NAMESPACE));
+        effects.push(Effect::Wake(open.item.namespace()));
     }
 
     fn unfocus(&mut self, effects: &mut Vec<Effect>) {
-        if let Some((bar, _, _)) = self.focused.take()
+        if let Some((bar, item, _)) = self.focused.take()
             && let Some(place) = self.bars.get(&bar)
         {
-            effects.push(Effect::Keyboard(place.levels, KeyboardInteractivity::None));
-            effects.push(Effect::Wake(LEVELS_NAMESPACE));
+            effects.push(Effect::Keyboard(
+                item.surface(place),
+                KeyboardInteractivity::None,
+            ));
+            effects.push(Effect::Wake(item.namespace()));
         }
     }
 }
@@ -564,13 +645,15 @@ fn margins(place: Place, rect: Rectangle) -> (i32, i32, i32, i32) {
 }
 
 /// Where a popover of `size` opened from `item` on the bar at `place` is,
-/// in the bar's frame: 8 px left of the bar, its top on the item's, pushed
-/// up to stay 8 px from the screen's bottom (the bar's own bottom), and
-/// down to stay 8 px from its top.
-pub fn placed(place: Place, item: Rectangle, (w, h): (u32, u32)) -> Rectangle {
+/// in the bar's frame: 8 px left of the bar, its top on the item's (or its
+/// bottom on the bar's, `on_bottom`), pushed up to stay 8 px from the
+/// screen's bottom (the bar's own bottom), and down to stay 8 px from its
+/// top.
+pub fn placed(place: Place, item: Rectangle, (w, h): (u32, u32), on_bottom: bool) -> Rectangle {
     let (w, h) = (w as f32, h as f32);
     let x = -(place.form.width() as f32) - EDGE as f32 - w;
-    let y = item.y.min(place.height - h).max(0.0);
+    let top = if on_bottom { place.height } else { item.y };
+    let y = top.min(place.height - h).max(0.0);
     Rectangle::new(Point::new(x, y), Size::new(w, h))
 }
 
@@ -599,17 +682,38 @@ pub fn event(event: Event) {
     }
 }
 
-/// Keys for the popover that reached another of the shell's surfaces.
-static KEYS: Mutex<Vec<(iced::keyboard::Key, bool)>> = Mutex::new(Vec::new());
+/// A key pressed: the key, the modifiers held, and the text it typed, as
+/// the keymap and the modifiers the compositor gives say (the user's
+/// layout, AltGr, dead keys composed): never made again from the key here.
+#[derive(Clone)]
+pub struct Pressed {
+    pub key: iced::keyboard::Key,
+    pub modifiers: iced::keyboard::Modifiers,
+    pub text: Option<String>,
+}
 
-/// A key pressed on one of the shell's surfaces other than the popover
-/// (`shift`: with Shift), for what holds the keyboard. layershellev hands
-/// keys to the surface last clicked, not to the one the keyboard entered:
-/// a click on an item whose release comes after its popover took the
-/// keyboard sends the keys to the item's surface. So the popover's keys go
-/// to it (woken to take them), and the item's are its own. Whether the key
-/// was taken.
-pub fn key(key: &iced::keyboard::Key, shift: bool) -> bool {
+impl std::fmt::Debug for Pressed {
+    // What is typed may be a password: never shown.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pressed").finish_non_exhaustive()
+    }
+}
+
+/// Keys for the popover that reached another of the shell's surfaces.
+static KEYS: Mutex<Vec<Pressed>> = Mutex::new(Vec::new());
+
+/// A key pressed on one of the shell's surfaces other than the popover,
+/// with the `modifiers` held and the `text` it typed, for what holds the
+/// keyboard. layershellev hands keys to the surface last clicked, not to
+/// the one the keyboard entered: a click on an item whose release comes
+/// after its popover took the keyboard sends the keys to the item's
+/// surface. So the popover's keys go to it (woken to take them), and the
+/// item's are its own. Whether the key was taken.
+pub fn key(
+    key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+    text: Option<&str>,
+) -> bool {
     use iced::keyboard::{Key, key::Named};
     let (menu, focused) = with(|c| {
         let menu = matches!(&c.phase, Phase::Open(open) if open.how == Opened::Click);
@@ -618,7 +722,11 @@ pub fn key(key: &iced::keyboard::Key, shift: bool) -> bool {
     if menu {
         KEYS.lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push((key.clone(), shift));
+            .push(Pressed {
+                key: key.clone(),
+                modifiers,
+                text: text.map(str::to_owned),
+            });
         send(vec![Effect::Wake(POPOVER_NAMESPACE)]);
         return true;
     }
@@ -636,7 +744,7 @@ pub fn key(key: &iced::keyboard::Key, shift: bool) -> bool {
 }
 
 /// The keys the popover was sent elsewhere.
-pub fn take_keys() -> Vec<(iced::keyboard::Key, bool)> {
+pub fn take_keys() -> Vec<Pressed> {
     std::mem::take(&mut *KEYS.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
@@ -664,9 +772,12 @@ impl<Message> iced::widget::canvas::Program<Message> for BarPointer {
             }
             iced::Event::Mouse(Mouse::ButtonPressed(_)) => event(Event::PressElsewhere),
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: k, modifiers, ..
+                key: k,
+                modifiers,
+                text,
+                ..
             }) => {
-                key(k, modifiers.shift());
+                key(k, *modifiers, text.as_deref());
             }
             _ => {}
         }
@@ -685,7 +796,8 @@ impl<Message> iced::widget::canvas::Program<Message> for BarPointer {
     }
 }
 
-fn send(effects: Vec<Effect>) {
+/// Effects to carry out, from outside the controller (a surface moving).
+pub fn send(effects: Vec<Effect>) {
     if let Some(sender) = EFFECTS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -695,12 +807,30 @@ fn send(effects: Vec<Effect>) {
     }
 }
 
-/// The popover shows something new (the sound changed): it draws again,
-/// to its new size if it changed.
-pub fn changed() {
-    let (open, mut effects) = with(|c| (matches!(c.phase, Phase::Open(_)), c.refit()));
+/// What `item`'s popover shows changed: if it is open, it draws again, to
+/// its new size if that changed.
+pub fn changed(item: Item) {
+    let (open, mut effects) = with(|c| {
+        let open = c.open_item() == Some(item);
+        (open, if open { c.refit() } else { Vec::new() })
+    });
     if open {
         effects.push(Effect::Wake(POPOVER_NAMESPACE));
+        send(effects);
+    }
+}
+
+/// `item`'s popover, as it draws, finds it needs another size: resized,
+/// without being woken again.
+pub fn refit(item: Item) {
+    let effects = with(|c| {
+        if c.open_item() == Some(item) {
+            c.refit()
+        } else {
+            Vec::new()
+        }
+    });
+    if !effects.is_empty() {
         send(effects);
     }
 }
@@ -819,7 +949,12 @@ mod tests {
     fn controller(form: Form) -> (Controller, window::Id) {
         let mut c = Controller::default();
         let levels = window::Id::unique();
-        c.place(BAR, form, window::Id::unique(), levels);
+        c.place(
+            BAR,
+            form,
+            window::Id::unique(),
+            (levels, window::Id::unique()),
+        );
         (c, levels)
     }
 
@@ -1054,6 +1189,57 @@ mod tests {
     }
 
     #[test]
+    fn the_wifis_popover_gives_the_keyboard_back_to_its_row_and_holds_when_worked_in() {
+        let mut c = Controller::default();
+        let (levels, connections) = (window::Id::unique(), window::Id::unique());
+        c.place(BAR, Form::Mini, window::Id::unique(), (levels, connections));
+        c.motion = false;
+        let t = Instant::now();
+        let wifi = Event::ItemPress {
+            bar: BAR.to_owned(),
+            item: Item::Wifi,
+            rect: gauge(),
+        };
+        let effects = c.handle(wifi, t);
+        // Its row's surface is drawn again, not the levels'.
+        assert!(effects.contains(&Effect::Wake(CONNECTIONS_NAMESPACE)));
+        assert!(!effects.contains(&Effect::Wake(LEVELS_NAMESPACE)));
+        let effects = c.handle(Event::Escape, t);
+        assert!(effects.contains(&Effect::Keyboard(
+            connections,
+            KeyboardInteractivity::Exclusive
+        )));
+        assert!(c.focused(BAR, Item::Wifi));
+        // Opened by hovering, then a password to type: it stays, and takes
+        // the keyboard.
+        c.handle(Event::ItemRelease, t);
+        c.handle(
+            Event::ItemEnter {
+                bar: BAR.to_owned(),
+                item: Item::Wifi,
+                rect: gauge(),
+            },
+            t,
+        );
+        let (id, keyboard) = opened(&c.tick(t + MS(150))).expect("opened");
+        assert_eq!(keyboard, KeyboardInteractivity::OnDemand);
+        assert_eq!(
+            c.handle(Event::Hold, t + MS(200)),
+            vec![Effect::Keyboard(id, KeyboardInteractivity::Exclusive)]
+        );
+        c.handle(
+            Event::ItemLeave {
+                at: Point::new(-300.0, 0.0),
+            },
+            t + MS(300),
+        );
+        assert!(c.tick(t + Duration::from_secs(5)).is_empty());
+        assert!(c.shows(BAR, Item::Wifi));
+        // Held already: nothing more.
+        assert!(c.handle(Event::Hold, t + MS(400)).is_empty());
+    }
+
+    #[test]
     fn a_form_switch_closes_it() {
         let (mut c, _) = controller(Form::Full);
         let t = Instant::now();
@@ -1094,17 +1280,21 @@ mod tests {
             form: Form::Full,
             height: 1064.0,
             levels: window::Id::unique(),
+            connections: window::Id::unique(),
             surface: window::Id::unique(),
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
-        let rect = placed(place, item, (280, 261));
+        let rect = placed(place, item, (280, 261), false);
         assert_eq!((rect.x, rect.y, rect.width), (-484.0, 803.0, 280.0));
         // Higher up: its top on the item's.
         let item = Rectangle::new(Point::new(-190.0, 300.0), Size::new(184.0, 30.0));
-        assert_eq!(placed(place, item, (280, 261)).y, 300.0);
+        assert_eq!(placed(place, item, (280, 261), false).y, 300.0);
         // Taller than the bar: from the top.
-        assert_eq!(placed(place, item, (280, 2000)).y, 0.0);
+        assert_eq!(placed(place, item, (280, 2000), false).y, 0.0);
+        // The Wi-Fi's: its bottom on the bar's, short as it may be.
+        let short = placed(place, item, (280, 90), true);
+        assert_eq!(short.y + short.height, 1064.0);
     }
 
     #[test]
@@ -1113,18 +1303,24 @@ mod tests {
             form: Form::Full,
             height: 1064.0,
             levels: window::Id::unique(),
+            connections: window::Id::unique(),
             surface: window::Id::unique(),
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
-        let small = placed(place, item, (280, 332));
-        let tall = placed(place, item, (280, 568));
+        let small = placed(place, item, (280, 332), false);
+        let tall = placed(place, item, (280, 568), false);
         assert_eq!(small.y + small.height, tall.y + tall.height);
         // 8 px left of the 196 px bar, 8 px from the screen's bottom.
         assert_eq!(margins(place, small), (0, 212, 8, 0));
         assert_eq!(margins(place, tall), margins(place, small));
         // An open popover whose contents did not change is not resized.
         let mut c = Controller::default();
-        c.place(BAR, Form::Full, window::Id::unique(), window::Id::unique());
+        c.place(
+            BAR,
+            Form::Full,
+            window::Id::unique(),
+            (window::Id::unique(), window::Id::unique()),
+        );
         c.handle(
             Event::ItemPress {
                 bar: BAR.to_owned(),

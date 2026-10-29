@@ -658,8 +658,9 @@ impl Panel {
         let keys = super::take_keys();
         let keyed = !keys.is_empty() && super::with(|c| c.is_open(self.id));
         if keyed {
-            for (key, shift) in keys {
-                let _: Option<canvas::Action<Message>> = self.key(state, &key, shift);
+            for pressed in keys {
+                let shift = pressed.modifiers.shift();
+                let _: Option<canvas::Action<Message>> = self.key(state, &pressed.key, shift);
             }
         }
         state.mixer = levels::sound::mixer();
@@ -1285,7 +1286,7 @@ pub fn elide(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> Strin
 }
 
 /// `text`'s width in `font` at `size`.
-fn measure(
+pub(crate) fn measure(
     system: &mut iced::advanced::graphics::text::cosmic_text::FontSystem,
     text: &str,
     font: iced::Font,
