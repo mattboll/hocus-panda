@@ -188,9 +188,12 @@ fn only_the_levels_drawn(
     mut change: impl FnMut(&mut Headless, u8) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     for attempt in 0..5 {
+        // The clock's count first: a tick committed before it is drawn
+        // during the wait, and its damage taken away with the rest.
+        let clocks = hp.clock_commits();
         wait(hp, Duration::from_millis(100))?;
         hp.take_damage(0);
-        let (clocks, levels, bars) = (hp.clock_commits(), hp.levels_commits(), hp.bar_commits());
+        let (levels, bars) = (hp.levels_commits(), hp.bar_commits());
         change(hp, attempt)?;
         let drawn = hp.dispatch_until(WAIT, |hp| hp.levels_commits() > levels)?;
         anyhow::ensure!(drawn, "the levels did not draw the change");
