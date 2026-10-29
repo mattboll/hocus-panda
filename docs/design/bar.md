@@ -7,8 +7,9 @@ the prototype disagree, this document wins once approved. Sections 2 and
 2026-10-28 (3.1, issue #358), the clock of section 4 group 1 and of
 section 5 (3.2, issue #359), the levels of section 4 group 10 and of
 section 5 (3.3, issue #360), the popovers of section 9 with the
-sound's (3.4a, issue #361), and the Wi-Fi's row and popover (section 4
-group 9, section 5, section 9; 3.5, issue #362): see [as built](#as-built).
+sound's (3.4a, issue #361), the Wi-Fi's row and popover (section 4
+group 9, section 5, section 9; 3.5, issue #362), and Bluetooth's (3.6,
+issue #363): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -169,8 +170,10 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   −6 px margin, radius 8), 14 px above the levels. An 18 px icon, 8 px,
   the name in Manrope 14.5 px, cut with an ellipsis. Lit
   `rgba(255,255,255,0.06)` under the pointer, `0.08` while its popover is
-  open, as the sound's row. Only the Wi-Fi's exists so far; Bluetooth
-  (3.6), the phone and the keyboard layout (3.8) add theirs.
+  open, as the sound's row. The Wi-Fi's, then Bluetooth's under it
+  (3.6); the phone and the keyboard layout (3.8) will add theirs. A row
+  whose service is missing is not drawn, and the others close up from the
+  bottom.
 - **The Wi-Fi's row**: connected, the Wi-Fi icon with its dot and three
   arcs, 1 to 4 lit in `text` by the signal (the others
   `rgba(255,255,255,0.22)`), and the network's name in `text`; on its way,
@@ -180,6 +183,19 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   off"; a cable connected (first, whatever the Wi-Fi does), a cable's icon
   and "Câble" / "Wired". A 7 px `#F2945B` dot (ringed with the bar's
   colour) at the icon's top right when a sign-in page waits.
+- **Bluetooth's row** (approved 2026-10-29, issue #363, variant A), 2 px
+  under the Wi-Fi's, the Bluetooth sign as its icon: one device connected,
+  its name (`text`), and on the right its battery ("82 %", 13 px,
+  `text.dim`, the digits in fixed cells) when it reports one; several,
+  the one connected last, then a "+N" chip (12 px, `text.dim` on
+  `rgba(255,255,255,0.08)`, radius 6, 5 px each side) before the battery;
+  the name cut to leave them room. A 7 px `#F2945B` dot (ringed with the
+  bar's colour) at the sign's top right while a connected device's battery
+  is at 15 % or less. Connecting with nothing connected: the sign and
+  "Connexion…" / "Connecting…" in `text.dim`. On, nothing connected: "Aucun
+  appareil" / "No device", sign and words in `text.faint`. Off (or blocked
+  by rfkill): the sign slashed, "Bluetooth coupé" / "Bluetooth off", in
+  `text.faint`. No adapter, or no BlueZ: no row.
 - A click opens its popover (§9).
 
 When the output is too short (1366×768 gives 752 px of bar), groups give
@@ -203,7 +219,10 @@ blue, glowing when under 10 min), waiting tile (44 px, panda 40 px, count
 badge), working count, spacer, secretary (46 px), the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
 icon in the row's states, the sign-in page's dot 9 px from its right and
 7 px from its top), the sound's gauge
-(vertical, 8 × 48 px, filled from the bottom, grey when muted), the
+(vertical, 8 × 48 px, filled from the bottom, grey when muted), Bluetooth's
+button under the Wi-Fi's (2 px apart, the same 44 × 38 px, a 20 px sign in
+the row's states, the low battery's dot 10 px from its right and 7 px from
+its top; 3.6), the
 battery's percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
 §4.2, a bolt before it when charging), layout, notifications count. The
 gauge and the percentage are 16 px apart (#378).
@@ -369,6 +388,42 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   goes through the switch, Disconnect, the sign-in page's button, each
   network that can be joined, then in an unfolded row its field, its eye,
   Cancel and Connect; the arrows go through the networks.
+- **Bluetooth's** (3.6, issue #363, variant A), 280 px, its bottom on the
+  bar's as the Wi-Fi's: "Bluetooth" (16 px, 700) and its switch (the
+  Wi-Fi's; the adapter's `Powered`). Off: "Le Bluetooth est coupé." /
+  "Bluetooth is off." and nothing else. Each device connected, the last
+  first, in a block of 48 px at least on `rgba(108,194,135,0.10)`, radius
+  8: its kind's icon in `#6CC287` (headphones, speaker, mouse, keyboard,
+  phone, else the Bluetooth sign), its name (14 px, 600, cut), "Connecté" /
+  "Connected" (12.5 px, `#6CC287`) and its battery, " · batterie 82 %" /
+  " · battery 82 %" (`#F7B98A` at 15 % or less), which goes under it,
+  whole, when it does not fit beside "Déconnecter" / "Disconnect" (the
+  Wi-Fi's button), the block growing. Then the divider, "MES APPAREILS" /
+  "MY DEVICES" and the paired devices not connected, by name, one 36 px
+  row each (their icon, their name): a click connects one, its row saying
+  "Connexion…" with a 12 px spinner, the others inert meanwhile; refused
+  or given up: "Il ne répond pas. Vérifie qu'il est allumé et à portée." /
+  "It does not answer. Check that it is on and in range." (12.5 px on
+  1.4 lines, `#F7B98A`, 34 px in) under its row. None: "Tous tes appareils
+  sont connectés." / "All your devices are connected.". Then the divider,
+  "AUTOUR" / "NEARBY" and, while the search's first pass runs,
+  "Recherche…" with a spinner; the devices found around, not paired, named
+  (one that never said its name is left out), the strongest first, one row
+  each; past four the list scrolls (152 px, a 6 px thumb). A click pairs
+  one, trusts it and connects it ("Association…", then "Connexion…" as it
+  joins "my devices", then its block); failed: "L'association a échoué.
+  Mets l'appareil en mode association et réessaie." / "Pairing failed. Put
+  the device in pairing mode and try again." under its row. One that asks
+  for a code (a phone or a computer, or one that asked the agent for one)
+  is greyed, inert, "dans les Réglages" / "in Settings" (6.7 pairs those).
+  None: "Aucun nouvel appareil trouvé." / "No new device found."
+  ("Recherche des appareils…" / "Searching for devices…" while the first
+  pass runs). The rows around keep their order while the pointer is over
+  them, one holds the keyboard, or something runs. The keyboard: `Tab`
+  goes through the switch, each Disconnect, then the rows that can be
+  acted on; the arrows through the rows; `Enter` or `Space` acts; `Esc`
+  closes, as the Wi-Fi's. The search runs while the popover is open, and
+  stops as it closes.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
@@ -384,7 +439,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Meetings, events | calendar accounts (CalDAV, Google), local `.ics` | |
 | Tasks | local list, CalDAV VTODO, Google Tasks | |
 | Network | NetworkManager | on the system bus: `WirelessEnabled`, `Connectivity` (2: a sign-in page) and `ConnectivityCheckUri`, the devices (the Wi-Fi one, a wired one, their state), the access points (SSID, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`), the active connections and the saved ones (their SSID); followed by their signals; set with `RequestScan`, `WirelessEnabled`, `ActivateConnection`, `AddAndActivateConnection`, `Update`, `Disconnect` (as built, 3.5) |
-| Bluetooth | BlueZ | |
+| Bluetooth | BlueZ | on the system bus: the object manager's objects (`GetManagedObjects`, then `InterfacesAdded`, `InterfacesRemoved`), `PropertiesChanged` under `/org/bluez`; the first adapter's `Powered`, its devices' `Name`, `Alias`, `Icon` (else `Class`, else `Appearance`), `Paired`, `Connected`, `RSSI`, and `Battery1`'s `Percentage`; set with `Powered`, `StartDiscovery` and `StopDiscovery`, `Connect`, `Disconnect`, `Pair` (through the shell's `NoInputNoOutput` agent), `Trusted`, `CancelPairing` (as built, 3.6) |
 | Sound | PipeWire | the sinks (their names, what they are, their own volume and mute) and the default one, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` (`set-volume`, `set-mute`, `set-default`) |
 | Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `org.freedesktop.UPower.PowerProfiles` |
 | Brightness | backlight through logind | read in sysfs, its changes from udev; set with logind's `SetBrightness` on the session |
@@ -882,3 +937,86 @@ filling, so there is no mockup.
   pasted, and the field takes keys while the paste waits; the eye shows
   the pasted password and hides it, and the shell's log, every crate at
   trace, never holds it.
+
+### 3.6, Bluetooth (2026-10-29)
+
+What the approved mockup of 3.6 shows, variant A: new devices paired from
+the popover (§4.3, §5, §9; issue #363); its control panel and its dashed
+phone and keyboard slots are not part of the product.
+
+- **The connections' surface holds both rows.** It is as tall as the rows
+  it draws (the Wi-Fi's on top, Bluetooth's under it, 2 px apart; one
+  button above the other in the mini form): 194 × 72 px with both, 194 ×
+  40 with one, 54 × 88 and 54 × 48 in the mini form. A service that comes
+  or goes resizes it (layer-shell actions, nothing else drawn). With no row
+  at all it keeps one row's size and takes no pointer (an empty input
+  region), so that a click there reaches the bar's surfaces under it; it
+  takes the pointer again when a row comes (#455's leftover, for the
+  Wi-Fi too). A Bluetooth change draws only that surface, woken through
+  the compositor when the row's words change; the levels and the clock
+  never draw for it, nor it for a level. Measured headless with the real
+  shell: at rest, popover closed or open (the search running), nothing
+  commits but the clock; a battery's change damages only the connections'
+  rectangle.
+- **BlueZ, off the loop.** A thread of its own, with zbus on a small
+  runtime, keeps BlueZ's objects as last said: read whole with
+  `GetManagedObjects` when BlueZ has an owner on the system bus, then
+  followed by `InterfacesAdded` and `…Removed` (from its object manager at
+  `/`, for paths under `/org/bluez`), `PropertiesChanged` under
+  `/org/bluez`, and its owner's changes: nothing is polled. The first
+  adapter by path is used. What it publishes holds the order the devices
+  are listed in, not their strength: a strength that moves no row draws
+  nothing. Calls that wait on a device (`Connect`, `Pair`) run aside and
+  say how they ended; nothing on the loop that draws waits on D-Bus.
+- **The order**: connected devices, the one seen connecting last first
+  (those connected as the shell starts, by path); paired ones by name;
+  those around by `RSSI`, the strongest first, those not heard in this
+  search last.
+- **Names**: `Alias` (what the user may have renamed), shown for a device
+  that said its `Name`, or is paired or connected. A device around
+  without `Name` (BlueZ's alias is then its address) is not listed.
+- **The search**: `StartDiscovery` as the popover opens, if the adapter is
+  on (and again if it is turned on while open), `StopDiscovery` as it
+  closes and as the shell ends (BlueZ also ends a client's search when its
+  connection goes). "Recherche…" and its spinner show for its first 10 s
+  only: the search goes on while the popover is open, and what it finds
+  still comes, but a spinner turning all along would draw at every frame.
+- **Connecting**: `Device1.Connect`, given up after 20 s (BlueZ pages a
+  device that is off for about 5 s and fails sooner) with `Disconnect`,
+  which cancels it. A refusal or the time out: "Il ne répond pas…" under
+  its row. `Disconnect` for a connected one. One at a time: the rows are
+  inert while one runs.
+- **Pairing**: the shell serves an `org.bluez.Agent1` and registers it
+  with `RegisterAgent` as `NoInputNoOutput`; BlueZ uses the agent of the
+  client that asked for the pairing, so the shell does not ask to be the
+  default agent. `Pair` (30 s at most, then `CancelPairing`), then
+  `Trusted` set (so that the device comes back by itself), then
+  `Connect`. A device that pairs without a code ("Just Works") does.
+  **Telling a code before the click**: BlueZ says nothing of the pairing
+  method ahead, so a phone or a computer (its `Icon`, else its class or
+  appearance) is taken to ask for one and shows "dans les Réglages",
+  inert. Any other that asks the agent for a PIN, a passkey, or a
+  confirmation is refused (`org.bluez.Error.Rejected`): its pairing fails,
+  and its row turns "dans les Réglages" for the rest of the session,
+  without a failure message. The agent authorizes only the device the
+  popover pairs.
+- **Missing**: no BlueZ on the bus, or BlueZ without an adapter: no row
+  (as a level whose service is missing), said once in the log, and picked
+  up when it comes. An adapter blocked by rfkill is off (`Powered` false):
+  the switch asks, BlueZ refuses, and it stays off.
+- **The battery** is `Battery1`'s, which BlueZ gives while a device is
+  connected.
+- **For tests**, `HOCUS_BLUETOOTH_TIMEOUT` (seconds) sets the time a
+  connection and a pairing get, and the search's first pass.
+- **Measured headless**, the real shell against a fake BlueZ on the
+  fakes' private bus (`tests/levels/bluez.rs`): the row's states in both
+  forms, the dot, no row and the pointer let through without an adapter;
+  the popover by a click and by a hover; the search started and stopped; a
+  Just Works pairing reaching the connected blocks; a refusal and a time
+  out said; Disconnect; the switch, and a blocked adapter; a passkey
+  refused by the agent; the list scrolling; the keyboard; nothing drawn at
+  rest. The Wi-Fi's tests run with both rows.
+- **Not built**: pairing devices that ask for a code, forgetting a device,
+  renaming one, several adapters (the first is used), audio profiles (the
+  Settings, 6.7); scrolling "my devices" (it grows with them); names for
+  screen readers (§11).
