@@ -12,12 +12,19 @@
 //! A gauge's length moves to a new value over 160 ms, CSS's `ease-out`;
 //! with reduced motion, or on the CPU, it changes at once. The surface asks
 //! to be drawn again only while one moves.
+//!
+//! The sound's row (the gauge, in the mini form) opens its popover (§9,
+//! [`crate::popover`]): a click, or in the mini form a hover; it lights up
+//! under the pointer and while its popover is open, and wears a ring while
+//! it holds the keyboard; the wheel over it changes the volume, 5 % a
+//! notch. All of it draws this surface alone.
 
 use std::time::{Duration, Instant};
 
-use hocus_link::Form;
+use hocus_link::{Form, LevelKey};
 use iced::{
-    Color, Font, Pixels, Point, Radians, Rectangle, Renderer, Size, Theme, alignment, font, mouse,
+    Color, Font, Pixels, Point, Radians, Rectangle, Renderer, Size, Theme, alignment, font,
+    keyboard, mouse,
     widget::{
         canvas::{self, Frame, Geometry, Path, Stroke, Style, gradient},
         text::{Alignment, LineHeight, Shaping},
@@ -26,27 +33,30 @@ use iced::{
 };
 
 use super::model::{Band, Snapshot, Words};
-use crate::clock::{self, motion::bezier};
+use crate::{
+    clock::{self, motion::bezier},
+    popover::{self, Item},
+};
 
 /// The surface: as wide as the bar inside its rim, from 41 px above the
 /// bar's bottom; tall enough for its form's group (the full one while the
-/// form switches).
+/// form switches), and the sound's item lit and ringed above it.
 pub const BOTTOM: i32 = 41;
-pub const FULL_SURFACE: (u32, u32) = (194, 165);
-pub const MINI_SURFACE: (u32, u32) = (54, 84);
+pub const FULL_SURFACE: (u32, u32) = (194, 175);
+pub const MINI_SURFACE: (u32, u32) = (54, 97);
 /// The full group's bottom above the surface's: the footer's place.
 const FULL_RAISE: f32 = 20.0;
 /// From the bar's inside edges to the group's: 12 px padding less the rim.
 const SIDE: f32 = 11.0;
 
-const MANROPE: Font = Font::with_name("Manrope");
-const MANROPE_BOLD: Font = Font {
+pub(crate) const MANROPE: Font = Font::with_name("Manrope");
+pub(crate) const MANROPE_BOLD: Font = Font {
     weight: font::Weight::Bold,
     ..MANROPE
 };
 /// CSS's `normal` line height for Manrope.
-const LINE: f32 = 1.366;
-const VALUE: f32 = 14.5;
+pub(crate) const LINE: f32 = 1.366;
+pub(crate) const VALUE: f32 = 14.5;
 const STATUS: f32 = 13.5;
 const MINI_VALUE: f32 = 14.0;
 const ROW: f32 = VALUE * LINE;
@@ -62,19 +72,36 @@ const MINI_GAP: f32 = 16.0;
 const BOLT_GAP: f32 = 2.0;
 const MINI_BOLT: f32 = MINI_VALUE / 11.0;
 
-const fn rgb(hex: u32) -> Color {
+/// The sound's item: the whole row in the full form (30 px, 6 px past the
+/// group's sides), around the gauge in the mini (44 × 64), as the 3.4
+/// mockup's buttons; lit under the pointer, more while its popover is
+/// open; the keyboard's ring 3 px wide, 2 px out, in the accent.
+const ITEM_HEIGHT: f32 = 30.0;
+const ITEM_OUT: f32 = 6.0;
+const ITEM_RADIUS: f32 = 8.0;
+const MINI_ITEM: Size = Size::new(44.0, 64.0);
+const MINI_ITEM_RADIUS: f32 = 10.0;
+pub(crate) const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
+const OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
+pub(crate) const ACCENT: Color = rgb(0x6CC287);
+pub(crate) const RING: f32 = 3.0;
+pub(crate) const RING_OUT: f32 = 2.0;
+/// A wheel's notch is 15 px of scrolling, as the compositor writes it.
+const NOTCH: f32 = 15.0;
+
+pub(crate) const fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
 /// `text`, `text.dim`, `text.faint` (bar.md §13).
-const TEXT: Color = rgb(0xEEF1F6);
-const DIM: Color = rgb(0xA9B2C2);
-const FAINT: Color = rgb(0x8C96A8);
-const TRACK: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const MUTED_FILL: Color = Color::from_rgba8(255, 255, 255, 0.22);
+pub(crate) const TEXT: Color = rgb(0xEEF1F6);
+pub(crate) const DIM: Color = rgb(0xA9B2C2);
+pub(crate) const FAINT: Color = rgb(0x8C96A8);
+pub(crate) const TRACK: Color = Color::from_rgba8(255, 255, 255, 0.10);
+pub(crate) const MUTED_FILL: Color = Color::from_rgba8(255, 255, 255, 0.22);
 /// `gauge.sound`, `gauge.light`, `gauge.battery`, and the battery's low
 /// and critical ones, from the left (or the bottom) to the right (the top).
-const SOUND: (Color, Color) = (rgb(0x5B8DEF), rgb(0x8FB3FF));
+pub(crate) const SOUND: (Color, Color) = (rgb(0x5B8DEF), rgb(0x8FB3FF));
 const LIGHT: (Color, Color) = (rgb(0xE8B44E), rgb(0xFFE08A));
 const BATTERY: (Color, Color) = (rgb(0x3FA66B), rgb(0x7EE0A0));
 const LOW: (Color, Color) = (rgb(0xE8A13A), rgb(0xF5C46E));
@@ -97,6 +124,9 @@ pub struct Levels {
     pub words: Words,
     /// Without glass: the bar's opaque colour behind (no alpha on the CPU).
     pub backdrop: Option<Color>,
+    /// Its bar's output: where its items are in the bar's frame, for the
+    /// popovers.
+    pub bar: String,
 }
 
 /// A gauge's length, moving or still.
@@ -161,6 +191,16 @@ pub struct State {
     at: Option<Instant>,
     /// The `0`'s advance of the values' fonts, for tabular figures.
     zero: Option<(f32, f32)>,
+    /// The pointer on the surface; on the sound's item; and where it was
+    /// last seen, in the bar's frame.
+    pointer: Option<Point>,
+    hover: bool,
+    last: Option<Point>,
+    /// Scrolling not yet a notch; a wheel's notch also comes as pixels,
+    /// right after it, which then count for nothing.
+    scroll: f32,
+    after_notch: bool,
+    scroll_up: bool,
 }
 
 impl<Message> canvas::Program<Message> for Levels {
@@ -170,13 +210,17 @@ impl<Message> canvas::Program<Message> for Levels {
         &self,
         state: &mut State,
         event: &iced::Event,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        let iced::Event::Window(window::Event::RedrawRequested(now)) = event else {
-            return None;
+        let now = match event {
+            iced::Event::Window(window::Event::RedrawRequested(now)) => *now,
+            iced::Event::Mouse(event) => return self.mouse(state, event, bounds, cursor),
+            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
+                return self.key(key);
+            }
+            _ => return None,
         };
-        let now = *now;
         let levels = super::snapshot();
         let before = state.levels;
         if levels != before {
@@ -242,6 +286,34 @@ impl<Message> canvas::Program<Message> for Levels {
             Point::new(left.max(0.0), 0.0),
             Size::new((right - left.max(0.0)).max(0.0), bounds.height),
         );
+        if let Some(item) = self.item(state, bounds.size()) {
+            let (open, focused) = popover::with(|c| {
+                (
+                    c.shows(&self.bar, Item::Sound),
+                    c.focused(&self.bar, Item::Sound),
+                )
+            });
+            let radius = match self.forms.first() {
+                Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
+                _ => ITEM_RADIUS,
+            };
+            let lit = if open {
+                Some(OPEN)
+            } else if state.hover {
+                Some(HOVER)
+            } else {
+                None
+            };
+            if let Some(colour) = lit {
+                frame.fill(
+                    &Path::rounded_rectangle(item.position(), item.size(), radius.into()),
+                    colour,
+                );
+            }
+            if focused {
+                ring(&mut frame, item, radius);
+            }
+        }
         let gauges = state.gauges.map(|g| g.at(at));
         let (zero, zero_bold) = state.zero.unwrap_or((VALUE * 0.6, MINI_VALUE * 0.65));
         let drawn = Drawn {
@@ -270,6 +342,248 @@ impl<Message> canvas::Program<Message> for Levels {
     }
 }
 
+impl Levels {
+    /// Where the sound's item is on the surface (`size`), if it shows and
+    /// the bar is not switching.
+    fn item(&self, state: &State, size: Size) -> Option<Rectangle> {
+        let [(form, _)] = self.forms.as_slice() else {
+            return None;
+        };
+        state.levels.sound?;
+        state.at?;
+        let right = size.width;
+        let left = right + 2.0 - self.bar_width;
+        Some(match form {
+            Form::Full => {
+                let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
+                let middle = full_rows(&state.levels, lines, size.height)[2]?;
+                let (from, to) = (left + SIDE - ITEM_OUT, right - SIDE + ITEM_OUT);
+                Rectangle::new(
+                    Point::new(from, middle - ITEM_HEIGHT / 2.0),
+                    Size::new(to - from, ITEM_HEIGHT),
+                )
+            }
+            Form::Mini => {
+                let middle = mini_gauge_bottom(&state.levels, size.height) - MINI_GAUGE / 2.0;
+                Rectangle::new(
+                    Point::new(
+                        (left + right - MINI_ITEM.width) / 2.0,
+                        middle - MINI_ITEM.height / 2.0,
+                    ),
+                    MINI_ITEM,
+                )
+            }
+        })
+    }
+
+    /// A point of the surface (`size`) in the bar's frame: the surface's
+    /// right edge is 1 px inside the bar's, its bottom [`BOTTOM`] px above
+    /// the bar's.
+    fn in_bar(&self, at: Point, size: Size) -> Point {
+        Point::new(
+            at.x - size.width - 1.0,
+            popover::with(|c| c.bar_height(&self.bar)) - BOTTOM as f32 - size.height + at.y,
+        )
+    }
+
+    fn in_bar_rect(&self, rect: Rectangle, size: Size) -> Rectangle {
+        Rectangle::new(self.in_bar(rect.position(), size), rect.size())
+    }
+
+    /// The pointer on the surface: the item lights up, its popover opens or
+    /// stays; the wheel over it changes the volume.
+    fn mouse<Message>(
+        &self,
+        state: &mut State,
+        event: &mouse::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        let size = bounds.size();
+        let item = self.item(state, size);
+        let at = pointer(event, bounds, cursor, state.pointer);
+        state.pointer = at;
+        let over = item.zip(at).is_some_and(|(item, at)| item.contains(at));
+        match event {
+            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
+                let at = at?;
+                let bar_at = self.in_bar(at, size);
+                state.last = Some(bar_at);
+                if over == state.hover {
+                    if !over {
+                        popover::event(popover::Event::Pointer { at: bar_at });
+                    }
+                    return None;
+                }
+                state.hover = over;
+                match item.filter(|_| over) {
+                    Some(item) => popover::event(popover::Event::ItemEnter {
+                        bar: self.bar.clone(),
+                        item: Item::Sound,
+                        rect: self.in_bar_rect(item, size),
+                    }),
+                    None => popover::event(popover::Event::ItemLeave { at: bar_at }),
+                }
+                Some(canvas::Action::request_redraw())
+            }
+            mouse::Event::CursorLeft => {
+                if !std::mem::take(&mut state.hover) {
+                    return None;
+                }
+                let at = state.last.unwrap_or_default();
+                popover::event(popover::Event::ItemLeave { at });
+                Some(canvas::Action::request_redraw())
+            }
+            mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                let item = item.filter(|_| over);
+                let event = match item {
+                    Some(item) => popover::Event::ItemPress {
+                        bar: self.bar.clone(),
+                        item: Item::Sound,
+                        rect: self.in_bar_rect(item, size),
+                    },
+                    None => popover::Event::PressElsewhere,
+                };
+                popover::event(event);
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            mouse::Event::WheelScrolled { delta } if over => {
+                for _ in 0..notches(state, *delta).unsigned_abs() {
+                    let up = state.scroll_up;
+                    super::key(if up {
+                        LevelKey::VolumeUp
+                    } else {
+                        LevelKey::VolumeDown
+                    });
+                }
+                Some(canvas::Action::capture())
+            }
+            _ => None,
+        }
+    }
+
+    /// A key on the item holding the keyboard: `Enter` or `Space` opens
+    /// its popover again, `Esc` lets the keyboard go.
+    fn key<Message>(&self, key: &keyboard::Key) -> Option<canvas::Action<Message>> {
+        use keyboard::key::Named;
+        if !popover::with(|c| c.focused(&self.bar, Item::Sound)) {
+            return None;
+        }
+        let event = match key {
+            keyboard::Key::Named(Named::Enter | Named::Space) => popover::Event::ItemActivate,
+            keyboard::Key::Named(Named::Escape) => popover::Event::ItemRelease,
+            _ => return None,
+        };
+        popover::event(event);
+        Some(canvas::Action::request_redraw().and_capture())
+    }
+}
+
+/// Where the pointer is on a canvas at `bounds` as of `event`, which was
+/// at `before`: iced hands every event of a batch the cursor as it is after
+/// the batch, which may have left already when a press and a move away
+/// came together.
+pub(crate) fn pointer(
+    event: &mouse::Event,
+    bounds: Rectangle,
+    cursor: mouse::Cursor,
+    before: Option<Point>,
+) -> Option<Point> {
+    match event {
+        mouse::Event::CursorMoved { position } => {
+            Some(Point::new(position.x - bounds.x, position.y - bounds.y))
+        }
+        mouse::Event::CursorEntered => cursor.position_in(bounds),
+        mouse::Event::CursorLeft => None,
+        _ => before,
+    }
+}
+
+/// The notches a scroll makes, with what was scrolled before it: a wheel
+/// sends its notches as lines, then the same as pixels, which count for
+/// nothing; a touchpad sends pixels, a notch each [`NOTCH`]. Positive: up,
+/// louder; the direction is kept in `state.scroll_up`.
+fn notches(state: &mut State, delta: mouse::ScrollDelta) -> i32 {
+    let n = match delta {
+        mouse::ScrollDelta::Lines { y, .. } => {
+            state.after_notch = true;
+            state.scroll = 0.0;
+            if y > 0.0 {
+                1
+            } else if y < 0.0 {
+                -1
+            } else {
+                0
+            }
+        }
+        mouse::ScrollDelta::Pixels { y: 0.0, .. } => 0,
+        mouse::ScrollDelta::Pixels { .. } if state.after_notch => {
+            state.after_notch = false;
+            0
+        }
+        mouse::ScrollDelta::Pixels { y, .. } => {
+            if state.scroll * y < 0.0 {
+                state.scroll = 0.0;
+            }
+            state.scroll += y;
+            let n = (state.scroll / NOTCH).trunc();
+            state.scroll -= n * NOTCH;
+            n as i32
+        }
+    };
+    state.scroll_up = n > 0;
+    n
+}
+
+/// The full form's rows' middles, from the surface's bottom: the
+/// battery's, the brightness's and the sound's, each if it shows, under a
+/// status line of `status` lines.
+fn full_rows(levels: &Snapshot, status: usize, bottom: f32) -> [Option<f32>; 3] {
+    let mut bottom = bottom - FULL_RAISE;
+    if status > 0 {
+        bottom -= status as f32 * STATUS * LINE + ROW_GAP;
+    }
+    let mut middles = [None; 3];
+    let shown = [
+        levels.battery.is_some(),
+        levels.brightness.is_some(),
+        levels.sound.is_some(),
+    ];
+    for (middle, shown) in middles.iter_mut().zip(shown) {
+        if shown {
+            *middle = Some(bottom - ROW / 2.0);
+            bottom -= ROW + ROW_GAP;
+        }
+    }
+    middles
+}
+
+/// The mini form's sound gauge's bottom: over the battery's percentage.
+fn mini_gauge_bottom(levels: &Snapshot, bottom: f32) -> f32 {
+    match levels.battery {
+        Some(_) => bottom - MINI_VALUE * LINE - MINI_GAP,
+        None => bottom,
+    }
+}
+
+/// The keyboard's ring around `rect`: 3 px of the accent, 2 px out.
+pub(crate) fn ring(f: &mut Frame, rect: Rectangle, radius: f32) {
+    let out = RING_OUT + RING / 2.0;
+    let path = Path::rounded_rectangle(
+        Point::new(rect.x - out, rect.y - out),
+        Size::new(rect.width + 2.0 * out, rect.height + 2.0 * out),
+        (radius + out).into(),
+    );
+    f.stroke(
+        &path,
+        Stroke {
+            style: Style::Solid(ACCENT),
+            width: RING,
+            ..Stroke::default()
+        },
+    );
+}
+
 /// One draw of the levels.
 struct Drawn<'a> {
     levels: &'a Snapshot,
@@ -290,13 +604,14 @@ impl Drawn<'_> {
     fn full(&self, f: &mut Frame, alpha: f32) {
         let mut bottom = self.bottom - FULL_RAISE;
         let levels = self.levels;
+        let middles = full_rows(levels, self.status.len(), self.bottom);
         let band = levels.battery.map_or(Band::Ok, |b| b.band());
         let colour = match band {
             Band::Ok => FAINT,
             Band::Low => LOW.1,
             Band::Critical => CRITICAL.1,
         };
-        for (i, line) in self.status.iter().rev().enumerate() {
+        for line in self.status.iter().rev() {
             f.fill_text(canvas::Text {
                 content: line.clone(),
                 position: Point::new(self.right, bottom - STATUS * LINE / 2.0),
@@ -310,12 +625,8 @@ impl Drawn<'_> {
                 shaping: Shaping::Advanced,
             });
             bottom -= STATUS * LINE;
-            if i + 1 == self.status.len() {
-                bottom -= ROW_GAP;
-            }
         }
-        let mut row = |f: &mut Frame, icon: Icon, gauge: f32, fill: Fill, value: Value| {
-            let middle = bottom - ROW / 2.0;
+        let row = |f: &mut Frame, middle: f32, icon: Icon, gauge: f32, fill: Fill, value: Value| {
             icon.draw(f, Point::new(self.left, middle - ICON / 2.0), alpha);
             let x = self.left + ICON + ICON_GAP;
             let track = Rectangle::new(
@@ -324,9 +635,8 @@ impl Drawn<'_> {
             );
             bar(f, track, gauge, fill, Direction::Right, alpha);
             value.draw(f, Point::new(self.right, middle), self.zero, alpha);
-            bottom -= ROW + ROW_GAP;
         };
-        if let Some(battery) = levels.battery {
+        if let (Some(battery), Some(middle)) = (levels.battery, middles[0]) {
             let (fill, colour) = match band {
                 Band::Ok => (BATTERY, DIM),
                 Band::Low => (LOW, LOW.1),
@@ -335,6 +645,7 @@ impl Drawn<'_> {
             let value = Value::Number(battery.shown(), colour);
             row(
                 f,
+                middle,
                 Icon::Battery {
                     bolt: battery.bolt(),
                 },
@@ -343,11 +654,18 @@ impl Drawn<'_> {
                 value,
             );
         }
-        if let Some(brightness) = levels.brightness {
+        if let (Some(brightness), Some(middle)) = (levels.brightness, middles[1]) {
             let value = Value::Number(brightness.round() as u32, DIM);
-            row(f, Icon::Sun, self.gauges[1], Fill::Gradient(LIGHT), value);
+            row(
+                f,
+                middle,
+                Icon::Sun,
+                self.gauges[1],
+                Fill::Gradient(LIGHT),
+                value,
+            );
         }
-        if let Some(sound) = levels.sound {
+        if let (Some(sound), Some(middle)) = (levels.sound, middles[2]) {
             let (fill, value) = if sound.muted {
                 (
                     Fill::Flat(MUTED_FILL),
@@ -361,6 +679,7 @@ impl Drawn<'_> {
             };
             row(
                 f,
+                middle,
                 Icon::Speaker { muted: sound.muted },
                 self.gauges[0],
                 fill,
@@ -370,7 +689,7 @@ impl Drawn<'_> {
     }
 
     fn mini(&self, f: &mut Frame, centre: f32, alpha: f32) {
-        let mut bottom = self.bottom;
+        let bottom = self.bottom;
         let levels = self.levels;
         if let Some(battery) = levels.battery {
             let colour = match battery.band() {
@@ -403,9 +722,9 @@ impl Drawn<'_> {
                 );
                 x += self.zero_bold;
             }
-            bottom -= MINI_VALUE * LINE + MINI_GAP;
         }
         if let Some(sound) = levels.sound {
+            let bottom = mini_gauge_bottom(levels, bottom);
             let fill = if sound.muted {
                 Fill::Flat(MUTED_FILL)
             } else {
@@ -595,7 +914,7 @@ fn width(system: &mut iced::advanced::graphics::text::cosmic_text::FontSystem, t
 }
 
 /// `ch` centred on `x`, its line centred on `y`.
-fn cell(f: &mut Frame, ch: char, x: f32, y: f32, size: f32, font: Font, colour: Color) {
+pub(crate) fn cell(f: &mut Frame, ch: char, x: f32, y: f32, size: f32, font: Font, colour: Color) {
     f.fill_text(canvas::Text {
         content: ch.to_string(),
         position: Point::new(x, y),
@@ -731,7 +1050,7 @@ impl Icon {
     }
 }
 
-fn stroke(width: f32, colour: Color) -> Stroke<'static> {
+pub(crate) fn stroke(width: f32, colour: Color) -> Stroke<'static> {
     Stroke {
         style: Style::Solid(colour),
         width,
@@ -741,7 +1060,7 @@ fn stroke(width: f32, colour: Color) -> Stroke<'static> {
     }
 }
 
-fn faded(colour: Color, alpha: f32) -> Color {
+pub(crate) fn faded(colour: Color, alpha: f32) -> Color {
     Color {
         a: colour.a * alpha,
         ..colour
@@ -774,6 +1093,50 @@ mod tests {
         // A service gone keeps the gauge where it was.
         gauge.toward(None, t0, true, true);
         assert_eq!(gauge.at(t0), 100.0);
+    }
+
+    #[test]
+    fn a_wheels_notches_and_a_touchpads_pixels_make_steps() {
+        let mut state = State::default();
+        let lines = |y| mouse::ScrollDelta::Lines { x: 0.0, y };
+        let pixels = |y| mouse::ScrollDelta::Pixels { x: 0.0, y };
+        // A wheel: a notch each, its pixels counting for nothing.
+        assert_eq!(notches(&mut state, pixels(0.0)), 0);
+        assert_eq!(notches(&mut state, lines(1.0)), 1);
+        assert!(state.scroll_up);
+        assert_eq!(notches(&mut state, pixels(15.0)), 0);
+        // At scale 2, a notch is still one.
+        assert_eq!(notches(&mut state, lines(-2.0)), -1);
+        assert!(!state.scroll_up);
+        assert_eq!(notches(&mut state, pixels(-30.0)), 0);
+        // A touchpad: 15 px a notch, the rest kept, a turn back starting
+        // afresh.
+        assert_eq!(notches(&mut state, pixels(10.0)), 0);
+        assert_eq!(notches(&mut state, pixels(10.0)), 1);
+        assert_eq!(notches(&mut state, pixels(40.0)), 3);
+        assert_eq!(notches(&mut state, pixels(-4.0)), 0);
+        assert_eq!(notches(&mut state, pixels(-12.0)), -1);
+    }
+
+    #[test]
+    fn the_sound_row_sits_over_the_others() {
+        let levels = Snapshot {
+            sound: Some(super::super::model::Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            brightness: Some(70.0),
+            battery: None,
+            profile: None,
+        };
+        // No battery, no status line: brightness at the bottom, sound over.
+        let [battery, light, sound] = full_rows(&levels, 0, 175.0);
+        assert_eq!(battery, None);
+        let light = light.expect("brightness");
+        let sound = sound.expect("sound");
+        assert!((light - (175.0 - FULL_RAISE - ROW / 2.0)).abs() < 0.01);
+        assert!((light - sound - ROW - ROW_GAP).abs() < 0.01);
+        assert_eq!(mini_gauge_bottom(&levels, 97.0), 97.0);
     }
 
     #[test]
@@ -835,12 +1198,16 @@ mod tests {
     fn the_groups_fit_their_surfaces() {
         // Full: three rows and the status line on three lines (a line a
         // part at most: the time, the charger's hint, the profile), above
-        // the footer's place.
+        // the footer's place, and the sound's row lit and ringed.
         let full = 3.0 * ROW + 3.0 * STATUS * LINE + 3.0 * ROW_GAP + FULL_RAISE;
-        assert!(full <= FULL_SURFACE.1 as f32, "{full}");
-        // Mini: the gauge, and the battery under it.
+        let lit = (ITEM_HEIGHT - ROW) / 2.0 + RING_OUT + RING;
+        assert!(full + lit <= FULL_SURFACE.1 as f32, "{full} + {lit}");
+        // Mini: the gauge, and the battery under it, the gauge lit and
+        // ringed, as wide as the surface at most.
         let mini = MINI_GAUGE + MINI_GAP + MINI_VALUE * LINE;
-        assert!(mini <= MINI_SURFACE.1 as f32, "{mini}");
+        let lit = (MINI_ITEM.height - MINI_GAUGE) / 2.0 + RING_OUT + RING;
+        assert!(mini + lit <= MINI_SURFACE.1 as f32, "{mini} + {lit}");
+        assert!(MINI_ITEM.width + 2.0 * (RING_OUT + RING) <= MINI_SURFACE.0 as f32);
         // The full group's bottom is 61 px above the bar's: 12 px of
         // padding, the footer's 34 px and 14 px between, and the rim.
         assert_eq!(BOTTOM as f32 + FULL_RAISE, 1.0 + 12.0 + 34.0 + 14.0);

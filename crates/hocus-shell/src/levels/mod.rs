@@ -48,7 +48,7 @@ type Waker = Box<dyn FnMut() -> bool + Send>;
 struct Service {
     levels: Mutex<Snapshot>,
     waker: Mutex<Option<Waker>>,
-    sound: mpsc::Sender<LevelKey>,
+    sound: mpsc::Sender<sound::Ask>,
     brightness: tokio::sync::mpsc::UnboundedSender<LevelKey>,
 }
 
@@ -119,7 +119,7 @@ pub fn key(key: LevelKey) {
     };
     let sent = match key {
         LevelKey::VolumeUp | LevelKey::VolumeDown | LevelKey::Mute => {
-            service.sound.send(key).is_ok()
+            service.sound.send(sound::Ask::Key(key)).is_ok()
         }
         LevelKey::BrightnessUp | LevelKey::BrightnessDown => service.brightness.send(key).is_ok(),
     };
@@ -128,6 +128,16 @@ pub fn key(key: LevelKey) {
             key = key.name(),
             "the level's service has stopped: key dropped"
         );
+    }
+}
+
+/// Asks the sound for a volume or another default sink (the popover).
+pub fn ask(ask: sound::Ask) {
+    let sent = SERVICE
+        .get()
+        .is_some_and(|service| service.sound.send(ask).is_ok());
+    if !sent {
+        tracing::warn!(?ask, "the sound's service has stopped: dropped");
     }
 }
 

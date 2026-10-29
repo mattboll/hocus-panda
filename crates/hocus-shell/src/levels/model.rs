@@ -137,6 +137,16 @@ impl Words {
         if self.fr() { "muet" } else { "muted" }
     }
 
+    /// The sound popover's title.
+    pub fn sound(self) -> &'static str {
+        if self.fr() { "Son" } else { "Sound" }
+    }
+
+    /// Over the outputs' list, in capitals.
+    pub fn output(self) -> &'static str {
+        if self.fr() { "SORTIE" } else { "OUTPUT" }
+    }
+
     pub fn profile(self, profile: Profile) -> &'static str {
         match (profile, self.fr()) {
             (Profile::PowerSaver, true) => "économie",
