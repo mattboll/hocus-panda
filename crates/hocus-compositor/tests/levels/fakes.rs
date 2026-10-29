@@ -234,6 +234,11 @@ impl Fakes {
         })
     }
 
+    /// The runtime the fake services run on.
+    pub fn runtime(&self) -> &tokio::runtime::Runtime {
+        &self.runtime
+    }
+
     pub fn backlights(&self) -> PathBuf {
         self.dir.path().join("backlight")
     }
@@ -716,15 +721,37 @@ impl Fakes {
 
     /// A script starting `shell` against these fakes, in `lang`.
     pub fn shell(&self, shell: &Path, lang: &str) -> anyhow::Result<PathBuf> {
+        self.shell_with(shell, lang, &[], None)
+    }
+
+    /// The same, with `env` set too, and what the shell logs (at `trace`
+    /// for itself) written to `log` if given.
+    pub fn shell_with(
+        &self,
+        shell: &Path,
+        lang: &str,
+        env: &[(&str, String)],
+        log: Option<&Path>,
+    ) -> anyhow::Result<PathBuf> {
         let script = self.dir.path().join("shell");
+        let extra: String = env
+            .iter()
+            .map(|(name, value)| format!("export {name}='{value}'\n"))
+            .collect();
+        // Everything, every crate's, when it is kept: nothing may say a
+        // password even there.
+        let (level, redirect) = match log {
+            Some(log) => ("trace", format!(" 2>>'{}'", log.display())),
+            None => ("hocuspanda_shell=debug", String::new()),
+        };
         std::fs::write(
             &script,
             format!(
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='{}' PIPEWIRE_REMOTE='{}' \
                  HOCUS_BACKLIGHT_DIR='{}' LC_ALL='{lang}' LANG='{lang}' \
-                 RUST_LOG=${{HOCUS_SHELL_LOG:-hocuspanda_shell=debug}}\n\
-                 exec '{}' \"$@\"\n",
+                 RUST_LOG=${{HOCUS_SHELL_LOG:-{level}}}\n{extra}\
+                 exec '{}' \"$@\"{redirect}\n",
                 self.address,
                 self.pw_socket().display(),
                 self.backlights().display(),

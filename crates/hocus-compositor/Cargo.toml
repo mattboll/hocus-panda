@@ -51,5 +51,6 @@ wayland-client = "0.31.15"
 # The levels' services faked for the shell: UPower, power-profiles-daemon
 # and logind on a private bus; PipeWire's graph read back.
 serde_json = "1.0.154"
+serde = "1.0.229"
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
 zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service"] }
