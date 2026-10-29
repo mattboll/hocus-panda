@@ -445,22 +445,25 @@ fn label(f: &mut Frame, letters: &[(char, f32)], rule: f32, top: f32) {
 /// A slider's track, from `left` to `right` and centred on `middle`: its
 /// height, its knob's size.
 #[derive(Debug, Clone, Copy)]
-struct Track {
-    left: f32,
-    right: f32,
-    middle: f32,
-    height: f32,
-    knob: f32,
+pub(super) struct Track {
+    pub left: f32,
+    pub right: f32,
+    pub middle: f32,
+    pub height: f32,
+    pub knob: f32,
 }
 
 impl Track {
     /// Its volume at `x`, in percent: the knob's centre under the pointer,
     /// its travel the track less the knob.
     fn volume_at(self, x: f32) -> f32 {
+        (self.share_at(x) * 100.0).round()
+    }
+
+    /// The share of its travel at `x`, from 0 to 1.
+    pub(super) fn share_at(self, x: f32) -> f32 {
         let travel = self.right - self.left - self.knob;
-        ((x - self.left - self.knob / 2.0) / travel * 100.0)
-            .round()
-            .clamp(0.0, 100.0)
+        ((x - self.left - self.knob / 2.0) / travel).clamp(0.0, 1.0)
     }
 }
 
@@ -1182,6 +1185,12 @@ fn row_fill(f: &mut Frame, rect: Rectangle, chosen: bool, hovered: bool) {
 /// A slider at `volume`: its track, its fill to the knob (grey when what
 /// it sets is muted), its knob.
 fn slide(f: &mut Frame, track: Track, volume: f32, grey: bool) {
+    slider(f, track, volume / 100.0, (!grey).then_some(SOUND));
+}
+
+/// A slider at `share` of its travel: its track, its fill to the knob
+/// (`fill`'s gradient, else grey), its knob.
+pub(super) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Color, Color)>) {
     let Track {
         left,
         right,
@@ -1200,22 +1209,23 @@ fn slide(f: &mut Frame, track: Track, volume: f32, grey: bool) {
         ),
         TRACK,
     );
-    let knob = left + travel * volume / 100.0;
+    let knob = left + travel * share.clamp(0.0, 1.0);
     let filled = Path::rounded_rectangle(
         Point::new(left, top),
         Size::new(knob + size / 2.0 - left, height),
         radius.into(),
     );
-    if grey {
-        f.fill(&filled, MUTED_FILL);
-    } else {
-        let fill = gradient::Linear::new(
-            Point::new(left, middle),
-            Point::new(knob + size / 2.0, middle),
-        )
-        .add_stop(0.0, SOUND.0)
-        .add_stop(1.0, SOUND.1);
-        f.fill(&filled, canvas::Fill::from(fill));
+    match fill {
+        None => f.fill(&filled, MUTED_FILL),
+        Some((from, to)) => {
+            let fill = gradient::Linear::new(
+                Point::new(left, middle),
+                Point::new(knob + size / 2.0, middle),
+            )
+            .add_stop(0.0, from)
+            .add_stop(1.0, to);
+            f.fill(&filled, canvas::Fill::from(fill));
+        }
     }
     let centre = Point::new(knob + size / 2.0, middle);
     // `box-shadow: 0 1px 4px`: rings fading out under the knob, 1 px down.

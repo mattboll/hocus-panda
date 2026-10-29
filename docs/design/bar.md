@@ -8,8 +8,9 @@ the prototype disagree, this document wins once approved. Sections 2 and
 section 5 (3.2, issue #359), the levels of section 4 group 10 and of
 section 5 (3.3, issue #360), the popovers of section 9 with the
 sound's (3.4a, issue #361), the Wi-Fi's row and popover (section 4
-group 9, section 5, section 9; 3.5, issue #362), and Bluetooth's (3.6,
-issue #363): see [as built](#as-built).
+group 9, section 5, section 9; 3.5, issue #362), Bluetooth's (3.6,
+issue #363), and the brightness's and the battery's popovers (3.7,
+issue #364): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -139,8 +140,8 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   (`#E5793F → #F7B98A`, `#F7B98A`) at 10 % or less, both only off the
   charger. Muted: the speaker crossed in `text.faint`, the fill
   `rgba(255,255,255,0.22)` at the volume's length, the value "muet" /
-  "muted" in `text.faint`. Charging or full: a bolt `#7EE0A0` in the
-  battery.
+  "muted" in `text.faint`. On AC (charging, full, or held by a charge
+  limit; never on battery): a bolt `#7EE0A0` in the battery (3.7).
 - **The status line**, Manrope 13.5 px, right-aligned, `text.faint` (the
   battery's band colour when low or critical): "3 h 40 restantes ·
   équilibré" / "3 h 40 left · balanced"; "plein dans 1 h 10" / "full in
@@ -161,7 +162,8 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   brightness up and down (5 %, never below 5 %) work in the session; a
   volume key unmutes. Their only feedback is the gauge: no popup, no sound.
   No sound and no window for a low battery either. The gauges are read
-  only here; their popovers are §9's (the sound's since 3.4a).
+  only here; their popovers are §9's (the sound's since 3.4a, the
+  brightness's and the battery's since 3.7).
 
 ### 4.3 The connections (approved 2026-10-29, issue #362, variant B)
 
@@ -223,9 +225,11 @@ icon in the row's states, the sign-in page's dot 9 px from its right and
 button under the Wi-Fi's (2 px apart, the same 44 × 38 px, a 20 px sign in
 the row's states, the low battery's dot 10 px from its right and 7 px from
 its top; 3.6), the
-battery's percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
-§4.2, a bolt before it when charging), layout, notifications count. The
-gauge and the percentage are 16 px apart (#378).
+battery (3.7): a 26 × 15 battery, its outline `text`, filled to its level
+in its band's colour, a bolt (`text`, edged `#0B1020`) while on AC, 4 px
+above its percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
+§4.2); the whole a 44 × 46 item 14 px under the sound's gauge, which a
+hover opens; layout, notifications count.
 
 A hover of 150 ms on an item opens its popover beside the bar; it floats
 over the windows and closes 300 ms after the pointer leaves, unless the
@@ -424,6 +428,62 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   acted on; the arrows through the rows; `Enter` or `Space` acts; `Esc`
   closes, as the Wi-Fi's. The search runs while the popover is open, and
   stops as it closes.
+- **The brightness's** (3.7, issue #364, variant B), opened by a click on
+  the brightness's row (the full form only), its bottom on the bar's:
+  "Luminosité" / "Brightness" (16 px, 700) and on the right "Écran du
+  portable" / "Built-in screen" (13 px, `text.faint`). A 36 px row: the
+  sun (18 px in a 32 px slot, not a button), a slider as the sound's (8 px
+  track in `gauge.light`, 16 px knob) from 5 % to 100 % (never below, as
+  the keys), the value in 36 px. The keyboard's backlight, when UPower has
+  one: a 36 px row, the keyboard's icon, then its levels in a strip
+  (`rgba(255,255,255,0.06)`, radius 9, 3 px inside, 26 px buttons 4 px
+  apart, radius 7, 12.5 px 600; the chosen one `rgba(255,255,255,0.14)`
+  and `text`, the others `text.dim`): "Éteint" / "Off", "Faible" / "Low",
+  "Fort" / "High" for three levels; "Éteint", "Allumé" / "On" for two;
+  "Éteint", "Faible", "Moyen" / "Medium", "Fort" for four; past four, a
+  slider and its percentage. Then one line per other screen plugged in,
+  "L'écran <name> se règle avec ses propres boutons." / "The <name> screen
+  is set with its own buttons." (12.5 px on 1.4 lines, `text.faint`, 2 px
+  more above, wrapped): the panel sets only the laptop's screen and its
+  keyboard. The wheel over the brightness's row (the bar's or the
+  popover's) moves it by 5 %; the keyboard: `Tab` through the slider and
+  the levels (or the keyboard's slider), the arrows move a slider (5 %, a
+  level) and choose the next level, `Enter` or `Space` chooses.
+- **The battery's** (3.7), opened by a click on the battery's row and the
+  status line under it (full form), or in the mini form by a 150 ms hover
+  or a click on the battery; its bottom on the bar's: "Batterie" /
+  "Battery" and on the right "Sur batterie" / "On battery" or "Branché" /
+  "Plugged in". A 42 × 24 battery filled to its level in its band's
+  colour, a bolt on AC; 12 px after it the level (Manrope 700, 26 px on
+  1.1 lines) over its line (13.5 px, 1 px apart): "3 h 40 restantes" /
+  "3 h 40 left", "En charge · plein dans 1 h 10" / "Charging · full in 1 h
+  10", "Branché, plein" / "Plugged in, full", "Branché, ne charge pas" /
+  "Plugged in, not charging" (a charge limit), "Sur batterie" / "On
+  battery" and "En charge" / "Charging" without an estimate; at 10 % or
+  less "· branche le chargeur" / "· plug in the charger" after it, the
+  level and the line in `#F7B98A`, at 20 % or less in `#F5C46E`; too long
+  for its 196 px, it breaks between its parts. The divider, "MODE
+  D'ÉNERGIE" / "POWER MODE", three 58 px tiles 6 px apart (radius 10, a
+  1 px border, an 18 px icon over its 12.5 px 600 name, 4 px apart):
+  "Économie" / "Power saver" (a leaf), "Équilibré" / "Balanced" (scales),
+  "Performance" (a bolt); the active one `rgba(108,194,135,0.16)` with a
+  `#6CC287` border and `text`, the others `rgba(255,255,255,0.04)` with a
+  `rgba(255,255,255,0.08)` border and `text.dim` (`0.08` under the
+  pointer); one the machine does not have greyed (`rgba(255,255,255,0.28)`)
+  and inert, with "Le mode performance n'existe pas sur cet ordinateur." /
+  "This computer has no performance mode." under them (12.5 px on 1.4
+  lines, `text.faint`). While performance is chosen and
+  power-profiles-daemon holds it back, the reason the same way:
+  "Performance réduite : l'ordinateur est sur tes genoux." / "Performance
+  reduced: the computer is on a lap.", "… est trop chaud." / "… is too
+  hot.", else "Performance réduite par le système." / "Performance reduced
+  by the system.". Last, "État de la batterie : 91 % de sa capacité
+  d'origine" / "Battery health: 91 % of its original capacity" (12.5 px,
+  `text.faint`), when known. Gaps of 8 px. Without a battery but with
+  power profiles, the status line (the profile alone) opens it with the
+  modes only, under "Énergie" / "Power" (no divider, no label). Without
+  power profiles, the battery alone. The keyboard: `Tab` through the tiles
+  the machine has, the arrows choose the next, `Enter` or `Space` chooses.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
@@ -441,8 +501,10 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Network | NetworkManager | on the system bus: `WirelessEnabled`, `Connectivity` (2: a sign-in page) and `ConnectivityCheckUri`, the devices (the Wi-Fi one, a wired one, their state), the access points (SSID, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`), the active connections and the saved ones (their SSID); followed by their signals; set with `RequestScan`, `WirelessEnabled`, `ActivateConnection`, `AddAndActivateConnection`, `Update`, `Disconnect` (as built, 3.5) |
 | Bluetooth | BlueZ | on the system bus: the object manager's objects (`GetManagedObjects`, then `InterfacesAdded`, `InterfacesRemoved`), `PropertiesChanged` under `/org/bluez`; the first adapter's `Powered`, its devices' `Name`, `Alias`, `Icon` (else `Class`, else `Appearance`), `Paired`, `Connected`, `RSSI`, and `Battery1`'s `Percentage`; set with `Powered`, `StartDiscovery` and `StopDiscovery`, `Connect`, `Disconnect`, `Pair` (through the shell's `NoInputNoOutput` agent), `Trusted`, `CancelPairing` (as built, 3.6) |
 | Sound | PipeWire | the sinks (their names, what they are, their own volume and mute) and the default one, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` (`set-volume`, `set-mute`, `set-default`) |
-| Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `org.freedesktop.UPower.PowerProfiles` |
+| Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `OnBattery` (on AC: the bolt); the first battery powering the machine among `EnumerateDevices` (`Type` 2, `PowerSupply`), its `Capacity` (the health; 0 or none: unknown); followed by `PropertiesChanged` under `/org/freedesktop/UPower`, `DeviceAdded` and `DeviceRemoved`. `org.freedesktop.UPower.PowerProfiles`: `ActiveProfile` (set by the popover), `Profiles` (those there), `PerformanceDegraded` (as built, 3.7) |
 | Brightness | backlight through logind | read in sysfs, its changes from udev; set with logind's `SetBrightness` on the session |
+| Keyboard's backlight | UPower's `org.freedesktop.UPower.KbdBacklight` | `GetMaxBrightness`, `GetBrightness`, `SetBrightness`; followed by `BrightnessChanged` and `BrightnessChangedWithSource`; none: no row (as built, 3.7) |
+| Other screens | the compositor | their EDID's model, else their connector's name, on the `screens` line of `hocus-link` (as built, 3.7) |
 | Phone | KDE Connect (D-Bus) | |
 | Keyboard layouts | the compositor's XKB configuration | |
 | Notifications, clipboard | the desktop's own servers | |
@@ -685,8 +747,9 @@ the product.
 - **Fonts**: Manrope Bold (wght 700, an instance of the variable font of
   the same version as the Regular, SIL OFL 1.1) for the mini form's
   battery.
-- **Not built**: the levels' popovers and clicks (§9, slice 3.4); their
-  keyboard access and names for screen readers (§11); collapsing to the
+- **Not built**: the levels' popovers and clicks (§9, slices 3.4 and
+  3.7, since built); their keyboard access and names for screen readers
+  (§11); collapsing to the
   battery alone on short screens (§4); hiding the brightness when the
   laptop's panel is off (lid closed, an external screen alone) while its
   backlight device is still there.
@@ -747,8 +810,7 @@ control panel is not part of the product.
 - **The wheel**: a mouse's notch is one step (its pixels after it count for
   nothing); a touchpad's scrolling makes a step each 15 px.
 - **Not built:** the microphone and the volume per application (3.4b, below); the
-  other popovers (3.5–3.7: the brightness and battery rows are not
-  clickable yet); names for screen readers (iced 0.14 has no
+  other popovers (3.5–3.7, since built); names for screen readers (iced 0.14 has no
   accessibility tree: the Accessibility milestone); the bar's keyboard
   access beyond the item a popover came from (§11); following the pointer
   over the 8 px between the bar and a hovered popover, where no surface of
@@ -1020,3 +1082,78 @@ phone and keyboard slots are not part of the product.
   renaming one, several adapters (the first is used), audio profiles (the
   Settings, 6.7); scrolling "my devices" (it grows with them); names for
   screen readers (§11).
+
+### 3.7, the brightness and the battery (2026-10-29)
+
+What the approved mockup of 3.7 shows, variant B for the other screens
+(§4.2, §5, §9; issue #364); its control panel and its dashed slots are
+not part of the product.
+
+- **Two more items on the levels' surface.** The brightness's row and the
+  battery's (its row and the status line under it, 4 px past it; the
+  status line alone, for the modes, without a battery) open their
+  popovers as the sound's does, lit under the pointer and while open,
+  ringed while they hold the keyboard. The wheel over the brightness's row
+  steps it as its keys do. In the mini form the battery is the 3.7
+  mockup's sign over its percentage, a 44 × 46 item 14 px under the
+  sound's gauge, its percentage's bottom 51 px above the bar's (the
+  layout's place under it); the levels' surface grew to 54 × 128 for it.
+  Both popovers sit on the bar's bottom, and are drawn by one canvas each:
+  a change draws that surface alone.
+- **The system bus, off the loop.** The levels' thread for the system bus
+  follows UPower and power-profiles-daemon by their signals under
+  `/org/freedesktop/UPower` (one match rule) and their owners' changes:
+  the display device on its `PropertiesChanged`; `OnBattery` and the
+  battery's device on UPower's own, `DeviceAdded` and `DeviceRemoved`; the
+  health again only when the battery's device says its `Capacity` changed;
+  the keyboard's level from `BrightnessChanged` (or `…WithSource`); the
+  profiles on their `PropertiesChanged`. A burst is shown once. Nothing is
+  polled; a service that comes is read, one that goes is hidden.
+- **On AC.** UPower's `OnBattery` decides, when it says: on AC, charging
+  and full stay as the display device says, anything else (a charge limit
+  holding the battery, which some firmware calls discharging or pending
+  charge) is plugged in, not charging; on battery, it discharges. The bolt
+  shows whenever on AC, in the row, the mini form's sign and the popover.
+- **Asking.** The slider, the wheel, the arrows, the keyboard's levels and
+  the tiles go to that thread through a channel; what comes while a call
+  runs waits for it, then only the last of each is asked (the keys' steps
+  taken together): logind's `SetBrightness` (the slider's percentage made
+  a raw value, never below 5 % nor 1), UPower's `SetBrightness` on
+  `KbdBacklight`, power-profiles-daemon's `ActiveProfile`. A slider shows
+  what it asked until it is said (a second at most), a tile its profile
+  (3 s: the daemon may refuse). Nothing on the loop that draws waits on
+  D-Bus or sysfs.
+- **The other screens** are the compositor's: it knows them, so a line of
+  `hocus-link` carries them (`screens`, then each name after a tab), sent
+  as the shell connects and when they change, rather than the shell
+  binding the outputs itself on its Wayland connection (where only a
+  connector name and a free description are said). The screen the
+  backlight lights is the built-in panel (eDP, LVDS, DSI), else the first
+  screen; the others are named by their EDID's model (read already for the
+  outputs), else their connector's name (headless and nested outputs have
+  no EDID). The line reaches the shell without a message: only an open
+  brightness's popover draws (and resizes) for it.
+- **Decisions.** Four levels named "Éteint", "Faible", "Moyen", "Fort";
+  the popover's line for a charge limit says "Branché, ne charge pas"
+  (the bar's status line keeps "branché"); the state line breaks between
+  its parts, not inside one; the modes alone without the divider and the
+  label the title repeats; `PerformanceDegraded` shown, while performance
+  is chosen, as a line under the tiles (its two known reasons named); the
+  numbers kept to their sign with non-breaking spaces in French.
+- **Measured headless**, the real shell against the fakes (UPower with its
+  root, its battery's device and its keyboard's backlight, a settable
+  power-profiles-daemon, a slow logind on demand: `tests/power.rs`): both
+  popovers by a click, the battery's by a hover in the mini form; the
+  slider's calls coalesced against a slow logind, never below 5 %, the
+  wheel and the arrows by 5 %; the keyboard's backlight with two, three
+  and six levels, and none; another screen's line, gone when unplugged
+  while open and back when plugged; the battery's states, their words,
+  the bolt on AC (a charge limit too), low and critical colours; the
+  health shown and hidden; the profiles switched, a missing one inert with
+  its line, the reason performance is held back; the modes alone without a
+  battery; the mini sign's bolt and colours; the keyboard; nothing drawn
+  at rest, popovers closed or open; a hover drawing the popover's
+  rectangle alone, a battery's change the levels and the popover only.
+- **Not built**: other screens' brightness (DDC/CI, variant A); hiding the
+  brightness when the laptop's panel is off (lid closed, an external
+  screen alone); a link to the Settings; names for screen readers (§11).

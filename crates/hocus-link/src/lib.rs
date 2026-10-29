@@ -4,11 +4,12 @@
 //!
 //! The compositor starts the shell with [`SOCKET_ENV`] naming a Unix socket
 //! in the session's runtime directory, which only it listens on. Each
-//! message is one line of text, words separated by spaces. The compositor
-//! decides where bars are and in which form, reserves their space and
-//! takes the clicks on their edge, passes on the clock's settings and the
-//! level keys (volume, brightness) pressed, and the presses outside the
-//! shell's surfaces while a popover shows; the shell draws the bars and
+//! message is one line of text, words separated by spaces (the screens'
+//! names by tabs). The compositor decides where bars are and in which
+//! form, reserves their space and takes the clicks on their edge, passes on
+//! the clock's settings, the level keys (volume, brightness) pressed, the
+//! presses outside the shell's surfaces while a popover shows, and the
+//! names of the screens besides the built-in one; the shell draws the bars and
 //! their popovers, keeps the levels, and says when it draws on the CPU and
 //! when a popover closes. Neither side waits for the other: a message is a
 //! fact, never a question.
@@ -143,6 +144,13 @@ pub enum ToShell {
     /// the keyboard is a menu: the compositor keeps that press from what
     /// is under it. The shell sees the presses on its own surfaces itself.
     Outside,
+    /// The screens other than the one the backlight lights (the built-in
+    /// panel; without one, the first screen), by the names people know
+    /// them by: their EDID's model, else their connector's. Sent as the
+    /// shell connects and when they change: the brightness's popover says
+    /// that they are set with their own buttons. Written `screens`, then
+    /// each name after a tab (a name may hold spaces, never a tab).
+    Screens(Vec<String>),
 }
 
 /// The keyboard's level keys, as `[shortcuts]` names their actions.
@@ -308,6 +316,16 @@ pub enum ToCompositor {
     Closing(String),
 }
 
+/// A screen's name as a [`ToShell::Screens`] line carries it: on one
+/// line, without tabs, its spaces trimmed.
+pub fn screen_name(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    name.trim().to_owned()
+}
+
 /// A line that does not read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BadLine(pub String);
@@ -349,6 +367,13 @@ impl fmt::Display for ToShell {
             Self::NoBar { output } => write!(f, "nobar {output}"),
             Self::Level(key) => write!(f, "level {}", key.name()),
             Self::Outside => f.write_str("outside"),
+            Self::Screens(names) => {
+                f.write_str("screens")?;
+                for name in names {
+                    write!(f, "\t{}", screen_name(name))?;
+                }
+                Ok(())
+            }
             Self::Clock(look) => {
                 let [r, g, b] = look.color;
                 write!(
@@ -367,6 +392,17 @@ impl FromStr for ToShell {
     type Err = BadLine;
 
     fn from_str(line: &str) -> Result<Self, Self::Err> {
+        if let Some(names) = line.strip_prefix("screens")
+            && (names.is_empty() || names.starts_with('\t'))
+        {
+            return Ok(Self::Screens(
+                names
+                    .split('\t')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ));
+        }
         let mut words = line.split_whitespace();
         match words.next() {
             Some("look") => Ok(Self::Look {
@@ -493,7 +529,16 @@ mod tests {
             }),
         ];
         let keys = LevelKey::ALL.map(ToShell::Level);
-        for message in to_shell.into_iter().chain(keys).chain([ToShell::Outside]) {
+        let screens = [
+            ToShell::Screens(Vec::new()),
+            ToShell::Screens(vec!["DELL U3419W".into(), "HDMI-A-1".into()]),
+        ];
+        for message in to_shell
+            .into_iter()
+            .chain(keys)
+            .chain([ToShell::Outside])
+            .chain(screens)
+        {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
         }
         for message in [
@@ -520,6 +565,14 @@ mod tests {
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_screens_name_stays_on_its_line() {
+        assert_eq!(screen_name(" LG\tULTRA\nGEAR "), "LG ULTRA GEAR");
+        let line = ToShell::Screens(vec!["LG\tULTRA".into()]).to_string();
+        assert_eq!(line, "screens\tLG ULTRA");
+        assert!("screensaver".parse::<ToShell>().is_err());
     }
 
     #[test]

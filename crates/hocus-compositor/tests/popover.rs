@@ -57,7 +57,7 @@ const MUTE: (i32, i32) = (31, 69);
 const SLIDER: (i32, i32, i32) = (63, 213, 69);
 const OUTPUT_Y: [i32; 3] = [152, 190, 228];
 /// The mini bar's gauge, and its popover.
-const MINI_GAUGE: (f64, f64) = (1920.0 - 8.0 - 1.0 - 27.0, (1080 - 8 - 41 - 97 + 40) as f64);
+const MINI_GAUGE: (f64, f64) = (1920.0 - 8.0 - 1.0 - 27.0, (1080 - 8 - 41 - 128 + 40) as f64);
 const MINI_POPOVER: Rect = Rect::new(1920 - 8 - 56 - 8 - 280, 1080 - 8 - 332, 280, 332);
 
 /// The full bar's popover, `height` tall.

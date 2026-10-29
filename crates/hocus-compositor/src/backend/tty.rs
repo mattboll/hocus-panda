@@ -478,9 +478,15 @@ impl TtyBackend {
                 size: size_mm.into(),
                 subpixel: info.subpixel().into(),
                 make: make.unwrap_or_else(|| "Unknown".into()),
-                model: model.unwrap_or_else(|| "Unknown".into()),
+                model: model.clone().unwrap_or_else(|| "Unknown".into()),
             },
         );
+        // The name people know it by, for the shell (its EDID's model).
+        if let Some(model) = model {
+            output
+                .user_data()
+                .insert_if_missing(|| crate::panel::ScreenModel(model));
+        }
         let global = output.create_global::<State>(&state.display_handle);
         // To the right of the screens already lit, until the settings
         // arrange them (several-screens slice).

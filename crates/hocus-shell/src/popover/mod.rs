@@ -1,7 +1,7 @@
 //! Popovers beside the bar (bar.md §9): what opens them, what closes them,
-//! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]) and
-//! Bluetooth's ([`bluetooth`]); the brightness and the battery will open
-//! the same way.
+//! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]),
+//! Bluetooth's ([`bluetooth`]), the brightness's ([`brightness`]) and the
+//! battery's ([`battery`]).
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -25,7 +25,9 @@
 //! and out, blurs behind it and draws its shadow; it tells the shell about
 //! presses on none of its surfaces (`outside`).
 
+pub mod battery;
 pub mod bluetooth;
+pub mod brightness;
 pub mod sound;
 pub mod wifi;
 
@@ -53,6 +55,10 @@ pub enum Item {
     Sound,
     Wifi,
     Bluetooth,
+    Brightness,
+    /// The battery and the power modes (the modes alone without a
+    /// battery).
+    Battery,
 }
 
 impl Item {
@@ -63,6 +69,8 @@ impl Item {
             Self::Sound => sound::layout(opening).height(),
             Self::Wifi => wifi::height(),
             Self::Bluetooth => bluetooth::height(),
+            Self::Brightness => brightness::height(),
+            Self::Battery => battery::height(),
         }
     }
 
@@ -72,13 +80,15 @@ impl Item {
             Self::Sound => {}
             Self::Wifi => wifi::opening(),
             Self::Bluetooth => bluetooth::opening(),
+            Self::Brightness => brightness::opening(),
+            Self::Battery => battery::opening(),
         }
     }
 
     /// Its popover closes: what it kept goes (a password typed).
     fn closing(self) {
         match self {
-            Self::Sound => {}
+            Self::Sound | Self::Brightness | Self::Battery => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
         }
@@ -88,23 +98,24 @@ impl Item {
     /// opens and closes.
     fn namespace(self) -> &'static str {
         match self {
-            Self::Sound => LEVELS_NAMESPACE,
+            Self::Sound | Self::Brightness | Self::Battery => LEVELS_NAMESPACE,
             Self::Wifi | Self::Bluetooth => CONNECTIONS_NAMESPACE,
         }
     }
 
     /// Whether its popover's bottom sits on the bar's whatever its height,
-    /// as the 3.5 and 3.6 mockups draw the Wi-Fi's and Bluetooth's (else its
-    /// top is on the item's, pushed up to stay inside the bar).
+    /// as the 3.5, 3.6 and 3.7 mockups draw the Wi-Fi's, Bluetooth's, the
+    /// brightness's and the battery's (else its top is on the item's,
+    /// pushed up to stay inside the bar).
     fn on_bottom(self) -> bool {
-        matches!(self, Self::Wifi | Self::Bluetooth)
+        !matches!(self, Self::Sound)
     }
 
     /// Its surface on the bar at `place`, which holds the keyboard after
     /// `Esc` in its popover.
     fn surface(self, place: &Place) -> window::Id {
         match self {
-            Self::Sound => place.levels,
+            Self::Sound | Self::Brightness | Self::Battery => place.levels,
             Self::Wifi | Self::Bluetooth => place.connections,
         }
     }

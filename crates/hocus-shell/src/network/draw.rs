@@ -409,7 +409,7 @@ impl<Message> canvas::Program<Message> for Connections {
                         (Item::Bluetooth, Form::Mini) => {
                             bluetooth::draw::mini(f, rect, &state.bluetooth, alpha);
                         }
-                        (Item::Sound, _) => {}
+                        (Item::Sound | Item::Brightness | Item::Battery, _) => {}
                     }
                 }
             }

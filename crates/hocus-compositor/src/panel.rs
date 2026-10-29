@@ -100,7 +100,14 @@ pub struct Panel {
     pub popover_commits: u64,
     /// The shell's popovers beside the bars, and their motion.
     pub popovers: crate::popover::Popovers,
+    /// The other screens' names, as last told to the shell.
+    screens: Option<Vec<String>>,
 }
+
+/// A screen's model, as its EDID names it (none for the compositor's own
+/// outputs, headless or nested): kept in its output's user data.
+#[derive(Debug, Clone)]
+pub struct ScreenModel(pub String);
 
 /// The file of remembered forms.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -177,6 +184,17 @@ pub fn primary(names: &[String], named: &str, home: Option<&str>) -> Option<Stri
     }
 }
 
+/// The screens among `names` (in the desktop's order) that the backlight
+/// does not light: all but the built-in panel, or but the first screen
+/// without one.
+pub fn other_screens(names: &[String]) -> Vec<usize> {
+    let lit = names
+        .iter()
+        .position(|n| BUILT_IN.iter().any(|b| n.starts_with(b)))
+        .or((!names.is_empty()).then_some(0));
+    (0..names.len()).filter(|i| Some(*i) != lit).collect()
+}
+
 /// `CLOCK_MONOTONIC` in microseconds, as the line to the shell carries it.
 pub fn micros(time: Duration) -> u64 {
     u64::try_from(time.as_micros()).unwrap_or(u64::MAX)
@@ -237,6 +255,28 @@ impl State {
             self.rearrange();
             self.redraw = true;
         }
+        self.tell_screens(false);
+    }
+
+    /// Tells the shell the other screens' names (bar.md §9, the
+    /// brightness's popover), when they changed or `again`.
+    pub fn tell_screens(&mut self, again: bool) {
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        let names: Vec<String> = outputs.iter().map(Output::name).collect();
+        let screens: Vec<String> = other_screens(&names)
+            .into_iter()
+            .map(|i| {
+                let output = &outputs[i];
+                let model = output.user_data().get::<ScreenModel>();
+                let name = model.map_or_else(|| output.name(), |m| m.0.clone());
+                hocus_link::screen_name(&name)
+            })
+            .collect();
+        if !again && self.panel.screens.as_ref() == Some(&screens) {
+            return;
+        }
+        self.panel.screens = Some(screens.clone());
+        self.tell_shell(ToShell::Screens(screens));
     }
 
     /// The form a bar starts in on screen `name`, `width` logical pixels
@@ -421,6 +461,11 @@ mod tests {
             Some("HDMI-A-1")
         );
         assert_eq!(primary(&screens, "DP-9", None).as_deref(), Some("eDP-1"));
+        // The backlight lights the built-in panel, else the first screen.
+        assert_eq!(other_screens(&screens), [0, 2]);
+        assert_eq!(other_screens(&names(&["DP-1", "HDMI-A-1"])), [1]);
+        assert!(other_screens(&names(&["eDP-1"])).is_empty());
+        assert!(other_screens(&[]).is_empty());
         assert_eq!(primary(&screens, "", None).as_deref(), Some("eDP-1"));
         let desk = names(&["DP-1", "DP-2"]);
         assert_eq!(primary(&desk, "", None).as_deref(), Some("DP-1"));

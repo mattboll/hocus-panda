@@ -7,9 +7,11 @@
 //! shell shows them. Each is read on a thread of its own, never on the
 //! loop that draws, and pushes its changes:
 //!
-//! - the battery and the power profile from UPower and power-profiles-
-//!   daemon on the system bus ([`power`]), which also sets the brightness
-//!   through logind (`SetBrightness` on the session: no root, no helper);
+//! - the battery, the keyboard's backlight and the power profiles from
+//!   UPower and power-profiles-daemon on the system bus ([`power`]), which
+//!   also sets the brightness through logind (`SetBrightness` on the
+//!   session: no root, no helper), the keyboard's backlight and the
+//!   profile;
 //! - the backlight from sysfs, its changes from udev ([`backlight`]);
 //! - the sound from PipeWire: `pw-dump --monitor` streams the graph's
 //!   changes (the default sink, its volume and mute; the outputs, the
@@ -52,27 +54,30 @@ struct Service {
     levels: Mutex<Snapshot>,
     waker: Mutex<Option<Waker>>,
     sound: mpsc::Sender<sound::Ask>,
-    brightness: tokio::sync::mpsc::UnboundedSender<LevelKey>,
+    power: tokio::sync::mpsc::UnboundedSender<power::Ask>,
 }
+
+/// The other screens' names, as the compositor last said (`screens`).
+static SCREENS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
 
 /// Starts the services' threads, once.
 pub fn start() {
     let (sound, sound_keys) = mpsc::channel();
-    let (brightness, brightness_keys) = tokio::sync::mpsc::unbounded_channel();
+    let (power, power_asks) = tokio::sync::mpsc::unbounded_channel();
     let service = Service {
         levels: Mutex::new(Snapshot::default()),
         waker: Mutex::new(None),
         sound,
-        brightness,
+        power,
     };
     if SERVICE.set(service).is_err() {
         return;
     }
     sound::start(sound_keys);
     backlight::start();
-    power::start(brightness_keys);
+    power::start(power_asks);
 }
 
 /// The levels as last read.
@@ -124,7 +129,9 @@ pub fn key(key: LevelKey) {
         LevelKey::VolumeUp | LevelKey::VolumeDown | LevelKey::Mute => {
             service.sound.send(sound::Ask::Key(key)).is_ok()
         }
-        LevelKey::BrightnessUp | LevelKey::BrightnessDown => service.brightness.send(key).is_ok(),
+        LevelKey::BrightnessUp | LevelKey::BrightnessDown => {
+            service.power.send(power::Ask::Key(key)).is_ok()
+        }
     };
     if !sent {
         tracing::warn!(
@@ -142,6 +149,33 @@ pub fn ask(ask: sound::Ask) {
     if !sent {
         tracing::warn!(?ask, "the sound's service has stopped: dropped");
     }
+}
+
+/// Asks the system bus's services for a brightness, a keyboard's level or
+/// a profile (the popovers).
+pub fn ask_power(ask: power::Ask) {
+    let sent = SERVICE
+        .get()
+        .is_some_and(|service| service.power.send(ask).is_ok());
+    if !sent {
+        tracing::warn!(?ask, "the system bus's service has stopped: dropped");
+    }
+}
+
+/// The other screens are now `names`; whether they changed.
+pub fn set_screens(names: Vec<String>) -> bool {
+    let mut screens = SCREENS.lock().unwrap_or_else(PoisonError::into_inner);
+    let changed = *screens != names;
+    *screens = names;
+    changed
+}
+
+/// The other screens' names.
+pub fn screens() -> Vec<String> {
+    SCREENS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
 }
 
 /// A service that is away is tried again after this, doubled each time it
