@@ -1,6 +1,7 @@
 //! Popovers beside the bar (bar.md §9): what opens them, what closes them,
-//! one at a time. The sound's ([`sound`]) and the Wi-Fi's ([`wifi`]);
-//! Bluetooth, the brightness and the battery will open the same way.
+//! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]) and
+//! Bluetooth's ([`bluetooth`]); the brightness and the battery will open
+//! the same way.
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -24,6 +25,7 @@
 //! and out, blurs behind it and draws its shadow; it tells the shell about
 //! presses on none of its surfaces (`outside`).
 
+pub mod bluetooth;
 pub mod sound;
 pub mod wifi;
 
@@ -50,6 +52,7 @@ pub const LEAVE_CLOSE: Duration = Duration::from_millis(300);
 pub enum Item {
     Sound,
     Wifi,
+    Bluetooth,
 }
 
 impl Item {
@@ -59,6 +62,7 @@ impl Item {
         match self {
             Self::Sound => sound::layout(opening).height(),
             Self::Wifi => wifi::height(),
+            Self::Bluetooth => bluetooth::height(),
         }
     }
 
@@ -67,6 +71,7 @@ impl Item {
         match self {
             Self::Sound => {}
             Self::Wifi => wifi::opening(),
+            Self::Bluetooth => bluetooth::opening(),
         }
     }
 
@@ -75,6 +80,7 @@ impl Item {
         match self {
             Self::Sound => {}
             Self::Wifi => wifi::closing(),
+            Self::Bluetooth => bluetooth::closing(),
         }
     }
 
@@ -83,15 +89,15 @@ impl Item {
     fn namespace(self) -> &'static str {
         match self {
             Self::Sound => LEVELS_NAMESPACE,
-            Self::Wifi => CONNECTIONS_NAMESPACE,
+            Self::Wifi | Self::Bluetooth => CONNECTIONS_NAMESPACE,
         }
     }
 
     /// Whether its popover's bottom sits on the bar's whatever its height,
-    /// as the 3.5 mockup draws the Wi-Fi's (else its top is on the item's,
-    /// pushed up to stay inside the bar).
+    /// as the 3.5 and 3.6 mockups draw the Wi-Fi's and Bluetooth's (else its
+    /// top is on the item's, pushed up to stay inside the bar).
     fn on_bottom(self) -> bool {
-        self == Self::Wifi
+        matches!(self, Self::Wifi | Self::Bluetooth)
     }
 
     /// Its surface on the bar at `place`, which holds the keyboard after
@@ -99,7 +105,7 @@ impl Item {
     fn surface(self, place: &Place) -> window::Id {
         match self {
             Self::Sound => place.levels,
-            Self::Wifi => place.connections,
+            Self::Wifi | Self::Bluetooth => place.connections,
         }
     }
 }
@@ -198,6 +204,11 @@ pub enum Effect {
     Remove(window::Id),
     /// The surfaces of this namespace show something new.
     Wake(&'static str),
+    /// Surface `id` takes the pointer (`takes`), or lets it through.
+    Input {
+        id: window::Id,
+        takes: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -887,6 +898,11 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
     })
 }
 
+/// Wider than any surface: a region as large as can be.
+const EVERYWHERE: i32 = 1 << 20;
+
+type WlRegion = wayland_client::protocol::wl_region::WlRegion;
+
 /// An effect as messages for iced, or a line to the compositor.
 fn carry_out(effect: Effect) -> Vec<crate::Message> {
     use crate::Message;
@@ -937,6 +953,18 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             } else {
                 vec![Message::Levels]
             }
+        }
+        Effect::Input { id, takes } => {
+            // Whatever region it had (each bar's surfaces share one): all
+            // of it, or none.
+            let callback =
+                iced_layershell::actions::ActionCallback::new(move |region: &WlRegion| {
+                    region.subtract(-EVERYWHERE, -EVERYWHERE, 2 * EVERYWHERE, 2 * EVERYWHERE);
+                    if takes {
+                        region.add(0, 0, EVERYWHERE, EVERYWHERE);
+                    }
+                });
+            vec![Message::SetInputRegion { id, callback }]
         }
     }
 }

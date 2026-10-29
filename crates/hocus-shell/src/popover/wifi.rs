@@ -523,7 +523,7 @@ fn current_height(portal: bool) -> f32 {
 
 /// `text` broken between its words into lines that fit `room` as `width`
 /// measures them; a word too wide alone keeps its own line.
-fn wrap(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> Vec<String> {
+pub(super) fn wrap(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for word in text.split(' ') {
         match lines.last_mut() {
@@ -746,12 +746,12 @@ pub struct State {
 }
 
 /// A key for a measure: the size in tenths.
-fn tenths(size: f32) -> u32 {
+pub(super) fn tenths(size: f32) -> u32 {
     (size * 10.0).round() as u32
 }
 
 /// `text`'s width, measured.
-fn measure(text: &str, size: f32, font: iced::Font) -> f32 {
+pub(super) fn measure(text: &str, size: f32, font: iced::Font) -> f32 {
     match iced::advanced::graphics::text::font_system().write() {
         Ok(mut system) => super::sound::measure(system.raw(), text, font, size),
         Err(_) => text.chars().count() as f32 * size * 0.55,
@@ -1325,31 +1325,36 @@ impl Panel {
     }
 
     fn background(&self, f: &mut Frame, size: Size) {
-        let (top, bottom) = if self.glass {
-            (GLASS_TOP, GLASS_BOTTOM)
-        } else {
-            (OPAQUE_TOP, OPAQUE_BOTTOM)
-        };
-        let radius = RADIUS as f32;
-        let shape = Path::rounded_rectangle(Point::ORIGIN, size, radius.into());
-        let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-            .add_stop(0.0, top)
-            .add_stop(1.0, bottom);
-        f.fill(&shape, canvas::Fill::from(tint));
-        let rim = Path::rounded_rectangle(
-            Point::new(BORDER / 2.0, BORDER / 2.0),
-            Size::new(size.width - BORDER, size.height - BORDER),
-            (radius - BORDER / 2.0).into(),
-        );
-        f.stroke(
-            &rim,
-            canvas::Stroke {
-                style: canvas::Style::Solid(RIM),
-                width: BORDER,
-                ..canvas::Stroke::default()
-            },
-        );
+        background(f, size, self.glass);
     }
+}
+
+/// A popover's glass (or its opaque colour) and its rim.
+pub(super) fn background(f: &mut Frame, size: Size, glass: bool) {
+    let (top, bottom) = if glass {
+        (GLASS_TOP, GLASS_BOTTOM)
+    } else {
+        (OPAQUE_TOP, OPAQUE_BOTTOM)
+    };
+    let radius = RADIUS as f32;
+    let shape = Path::rounded_rectangle(Point::ORIGIN, size, radius.into());
+    let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
+        .add_stop(0.0, top)
+        .add_stop(1.0, bottom);
+    f.fill(&shape, canvas::Fill::from(tint));
+    let rim = Path::rounded_rectangle(
+        Point::new(BORDER / 2.0, BORDER / 2.0),
+        Size::new(size.width - BORDER, size.height - BORDER),
+        (radius - BORDER / 2.0).into(),
+    );
+    f.stroke(
+        &rim,
+        canvas::Stroke {
+            style: canvas::Style::Solid(RIM),
+            width: BORDER,
+            ..canvas::Stroke::default()
+        },
+    );
 }
 
 /// What can hold the keyboard, in `Tab`'s order: the switch, Disconnect,
@@ -1928,7 +1933,7 @@ pub(crate) const MANROPE_SEMIBOLD: iced::Font = iced::Font {
     ..MANROPE
 };
 
-fn mix(a: Color, b: Color, t: f32) -> Color {
+pub(super) fn mix(a: Color, b: Color, t: f32) -> Color {
     Color {
         r: a.r + (b.r - a.r) * t,
         g: a.g + (b.g - a.g) * t,
@@ -1937,7 +1942,7 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-fn text(
+pub(super) fn text(
     content: String,
     position: Point,
     size: f32,
@@ -1960,7 +1965,7 @@ fn text(
 
 /// The spinner: `M21 12a9 9 0 1 1-6.2-8.6`, three quarters and more of a
 /// circle, turned by `turn`.
-fn spinner(f: &mut Frame, at: Point, colour: Color, turn: f32) {
+pub(super) fn spinner(f: &mut Frame, at: Point, colour: Color, turn: f32) {
     let s = SPINNER / 24.0;
     let arc = Path::new(|b| {
         b.arc(canvas::path::Arc {

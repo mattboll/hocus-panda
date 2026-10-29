@@ -6,8 +6,8 @@
 //! its connections (§4 group 9, §5) and its levels (§4 group 10, §5): a
 //! glass tint and a rim against the right edge of each output the
 //! compositor names, in its full or its mini form, the time at its top, the
-//! Wi-Fi ([`network`]) above the sound, the brightness and the battery near
-//! its bottom ([`levels`]).
+//! Wi-Fi ([`network`]) and Bluetooth ([`bluetooth`]) above the sound, the
+//! brightness and the battery near its bottom ([`levels`]).
 //! The compositor blurs what is behind it; the shell draws the tint over
 //! that blur, or an opaque background when there is no blur. The line
 //! between the two is `hocus-link`.
@@ -21,6 +21,7 @@
 //! levels have theirs, for the same reason, the connections theirs, and so
 //! has a popover beside the bar ([`popover`]), opened from an item.
 
+mod bluetooth;
 mod clock;
 mod levels;
 mod network;
@@ -94,6 +95,7 @@ fn main() -> ExitCode {
     let software = renderer::choose();
     levels::start();
     network::start();
+    bluetooth::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -135,6 +137,7 @@ fn main() -> ExitCode {
     })
     .run();
     levels::sound::stop();
+    bluetooth::stop();
     match started {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -740,6 +743,16 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Bluetooth => canvas(popover::bluetooth::Panel {
+                id,
+                words: self.words,
+                glass: self.look.glass,
+                motion: self.look.motion,
+                software: self.software,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
         };
         Some(panel)
     }
@@ -890,9 +903,19 @@ fn levels_alone() -> impl iced::futures::Stream<Item = Message> {
             move || !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected()),
         );
         let mut out = output.clone();
-        network::on_change(
-            move |_| !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected()),
-        );
+        network::on_change(move |change| {
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
+        });
+        let mut out = output.clone();
+        bluetooth::on_change(move |change| {
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
+        });
         drop(output);
         std::future::pending::<()>().await;
     })
@@ -935,10 +958,26 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
             waker.unbounded_send(wake.to_string()).is_ok()
         });
         // A change of network wakes the connections' surface when the row
-        // changes, and the Wi-Fi's popover when it shows.
+        // changes (resized when it comes or goes), and the Wi-Fi's popover
+        // when it shows; Bluetooth's the same.
         let waker = sender.clone();
         network::on_change(move |change| {
             popover::changed(popover::Item::Wifi);
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            if !change.row {
+                return true;
+            }
+            let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
+            waker.unbounded_send(wake.to_string()).is_ok()
+        });
+        let waker = sender.clone();
+        bluetooth::on_change(move |change| {
+            popover::changed(popover::Item::Bluetooth);
+            if change.shown {
+                network::draw::rows_changed();
+            }
             if !change.row {
                 return true;
             }
