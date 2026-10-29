@@ -2,8 +2,8 @@
 //! daemon of its own serving UPower, power-profiles-daemon and logind
 //! objects; a PipeWire of its own, in a short runtime directory of its own,
 //! with null sinks (two by default, or those asked for), null sources if
-//! asked for, applications' streams (`pw-cat` playing silence, linked to
-//! the default sink, as WirePlumber would), and WirePlumber's part in
+//! asked for, applications' streams (null nodes of the streams' class,
+//! linked to the default sink, as WirePlumber would link a stream), and WirePlumber's part in
 //! choosing the default sink and source (one chosen with `wpctl
 //! set-default` becomes the default); and a backlight directory. The shell
 //! is started through a script pointing it at them.
@@ -137,8 +137,8 @@ pub struct Fakes {
     /// The null sinks, the first the default; the sources, the same.
     sinks: Vec<FakeSink>,
     sources: Vec<FakeSink>,
-    /// The streams playing, by node name.
-    streams: Vec<(String, Child)>,
+    /// The streams made, by node name.
+    streams: Vec<String>,
 }
 
 /// A null sink: its node's name, its description, and what it says it is
@@ -495,27 +495,31 @@ impl Fakes {
         Ok(())
     }
 
-    /// An application's stream playing silence: node `node` of
-    /// application `app` (and its icon's name), linked to the default
-    /// sink; once it runs, its node's id.
+    /// An application's stream: node `node` of application `app` (and its
+    /// icon's name), linked to the default sink; once it runs, its node's
+    /// id. Without WirePlumber, a client's stream gets no ports on every
+    /// PipeWire (1.0's): the stream is a null node of the streams' class,
+    /// made in PipeWire itself, which plays its monitor to the sink.
     pub fn play(&mut self, node: &str, app: &str, icon: Option<&str>) -> anyhow::Result<u32> {
         let icon = icon
             .map(|i| format!(" application.icon-name = \"{i}\""))
             .unwrap_or_default();
         let props = format!(
-            "{{ node.name = {node} application.name = \"{app}\"{icon} \
-             adapter.auto-port-config = {{ mode = dsp }} }}"
+            "{{ factory.name = support.null-audio-sink node.name = {node} \
+             media.class = Stream/Output/Audio application.name = \"{app}\"{icon} \
+             audio.position = [ FL FR ] object.linger = true \
+             adapter.auto-port-config = {{ mode = dsp monitor = true position = preserve }} }}"
         );
-        let child = self
-            .pw("pw-cat")
-            .args(["--playback", "--raw", "-P", &props, "-"])
-            .stdin(std::fs::File::open("/dev/zero")?)
+        let status = self
+            .pw("pw-cli")
+            .args(["create-node", "adapter", &props])
             .stdout(Stdio::null())
-            .spawn()
-            .context("pw-cat")?;
-        self.streams.push((node.to_owned(), child));
+            .status()
+            .context("pw-cli")?;
+        anyhow::ensure!(status.success(), "pw-cli create-node: {status}");
+        self.streams.push(node.to_owned());
         wait_for(
-            || self.ports(node, "output").len() == 2,
+            || self.ports(node, "monitor").len() == 2,
             "the stream's ports",
         )?;
         self.link(node, true)?;
@@ -540,10 +544,13 @@ impl Fakes {
 
     /// Stream `node` ends.
     pub fn stop(&mut self, node: &str) {
-        if let Some(at) = self.streams.iter().position(|(n, _)| n == node) {
-            let (_, mut child) = self.streams.remove(at);
-            let _ = child.kill();
-            let _ = child.wait();
+        self.streams.retain(|n| n != node);
+        if let Ok(id) = self.sink(node) {
+            let _ = self
+                .pw("pw-cli")
+                .args(["destroy", &id.to_string()])
+                .stdout(Stdio::null())
+                .status();
         }
     }
 
@@ -551,7 +558,7 @@ impl Fakes {
     fn link(&self, node: &str, linked: bool) -> anyhow::Result<()> {
         let sink = self.sinks.first().map_or("hocus-test-sink", |s| s.name);
         for (out, sink_port) in self
-            .ports(node, "output")
+            .ports(node, "monitor")
             .iter()
             .zip(self.ports(sink, "playback").iter())
         {
@@ -570,10 +577,12 @@ impl Fakes {
 
     /// Node `node`'s ports whose names start with `prefix`, in order.
     fn ports(&self, node: &str, prefix: &str) -> Vec<String> {
-        let Ok(out) = self.pw("pw-link").args(["-o", "-i"]).output() else {
-            return Vec::new();
-        };
-        let mut ports: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        let listed: String = ["-o", "-i"]
+            .iter()
+            .filter_map(|which| self.pw("pw-link").arg(which).output().ok())
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .collect();
+        let mut ports: Vec<String> = listed
             .lines()
             .filter(|l| {
                 l.strip_prefix(node)
@@ -600,12 +609,12 @@ impl Fakes {
     }
 
     pub fn stop_pipewire(&mut self) {
-        let streams = self.streams.drain(..).map(|(_, child)| child);
-        for mut child in streams.chain(
-            [self.policy.take(), self.pipewire.take()]
-                .into_iter()
-                .flatten(),
-        ) {
+        // The streams are PipeWire's own: they end with it.
+        self.streams.clear();
+        for mut child in [self.policy.take(), self.pipewire.take()]
+            .into_iter()
+            .flatten()
+        {
             let _ = child.kill();
             let _ = child.wait();
         }
