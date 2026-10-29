@@ -283,9 +283,22 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   output's name; the master volume (a mute button, a slider, the value or
   "muet" / "muted"); "SORTIE" / "OUTPUT" and one row per output, its icon
   (speaker, headphones, screen), its name, a check on the default one. A
-  row makes its output the default, which keeps its own volume. The
-  microphone and the volume per application are 3.4b's (#380); no
+  row makes its output the default, which keeps its own volume. No
   "Sound settings…" link until the Settings sprint.
+- **Its microphone and applications** (3.4b, issue #380), under the
+  outputs with the same divider and labels: "MICRO" / "MICROPHONE", a
+  36 px row (a 32 px mute button, the mic icon crossed and `#F7B98A` on
+  `rgba(229,121,63,0.18)` when muted; the slider as the master's, grey
+  when muted; the value or "coupé" / "off"), then, only with several
+  microphones, one 36 px row each, indented 48 px, the default checked:
+  a row makes it the default. No microphone: no section. Then
+  "APPLICATIONS": one 46 px row per application playing, its icon (or
+  its letter on a colour of its own) in a 32 px tile, its name over a
+  slimmer slider (track 6 px, knob 14 px), its value; a click on the
+  tile mutes it (tile at 45 %, name and value `text.faint`, "muet" /
+  "muted"); none: "Aucune application ne joue de son." / "No application
+  is playing sound.". Moving a slider unmutes what it sets. The popover
+  grows to fit, its bottom on the bar's.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
@@ -608,10 +621,59 @@ control panel is not part of the product.
   step asked for one output is never carried over to the next.
 - **The wheel**: a mouse's notch is one step (its pixels after it count for
   nothing); a touchpad's scrolling makes a step each 15 px.
-- **Not built:** the microphone and the volume per application (3.4b); the
+- **Not built:** the microphone and the volume per application (3.4b, below); the
   other popovers (3.5–3.7: the brightness and battery rows are not
   clickable yet); names for screen readers (iced 0.14 has no
   accessibility tree: the Accessibility milestone); the bar's keyboard
   access beyond the item a popover came from (§11); following the pointer
   over the 8 px between the bar and a hovered popover, where no surface of
   the shell's is (the 300 ms cover it).
+
+### 3.4b, the microphone and the applications (2026-10-29)
+
+What the approved mockup of 3.4 shows under the outputs (§9; issue #380).
+
+- **The sound's service** follows the sources and the applications'
+  streams in the same `pw-dump --monitor`: a source is a node of class
+  `Audio/Source` or `Audio/Source/Virtual` that is not a sink's monitor;
+  the default one is the `default` metadata's `default.audio.source`
+  (else the first). A stream is a `Stream/Output/Audio` node; it plays
+  while its node is `running` and not corked (`pulse.corked`). Streams
+  are grouped by application: a sandbox's app id
+  (`pipewire.access.portal.app_id`), else `application.name`, else the
+  program. An application's volume is its oldest stream's; it is muted
+  when all its streams are; a change sets all its streams. `wpctl` sets
+  them (`set-volume`, `set-mute` on the node ids, `set-default` for a
+  source), the last of each asked while `wpctl` ran taken together, never
+  waited on by the loop that draws.
+- **Which applications are listed.** On opening: those playing now. A
+  browser's paused tab leaves its stream idle and corked for minutes
+  (Firefox), or running silence for seconds (Chrome): neither is listed.
+  While the popover is open, an application that starts to play joins
+  the list (the popover grows), and one leaves it only when its last
+  stream goes: a pause does not move the rows under the pointer. At most
+  five rows, then "+N autres applications" / "+N more applications"
+  (no scrolling).
+- **Icons**: `application.icon-name`, else the desktop file named after
+  the application's ids or program, whose `Icon` is looked for in the
+  `hicolor` theme (where applications install theirs; scalable first,
+  then 64, 48, 128, 32… px) and `pixmaps`, in `XDG_DATA_HOME` and
+  `XDG_DATA_DIRS`. Read and decoded on the sound's thread, once per
+  application. None: the name's first letter on one of six colours,
+  chosen by the name. Icons need iced's `image` (PNG only) and `svg`
+  features.
+- **The popover resizes.** When what it lists changes while it is open,
+  the controller gives its surface the new height (and new margins if
+  its bottom moves), kept beside its item and inside the bar; nothing
+  else is drawn.
+- **The keyboard**: `Tab` goes on from the outputs to the microphone's
+  mute button and slider, the microphones, then each application's tile
+  and slider; the arrows move a slider by 5 % (and go through the
+  microphones); `Enter` or `Space` mutes, or chooses.
+- **Volume per browser tab** (studied on #380): Firefox gives each
+  playing tab a stream named after the tab's title; Chrome's streams per
+  tab are all named "Playback". One row per application for now; tabs
+  would need a browser extension (a ticket of its own).
+- **Not built:** a hover look on the applications' tiles (the pointer
+  changes); scrolling past five applications; per-tab rows; input
+  streams (applications recording).
