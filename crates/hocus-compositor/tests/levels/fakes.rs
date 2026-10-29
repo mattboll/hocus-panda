@@ -391,7 +391,13 @@ impl Fakes {
     /// A sink's node id, by name.
     pub fn sink(&self, name: &str) -> anyhow::Result<u32> {
         let out = self.pw("pw-dump").output()?;
-        let objects: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)?;
+        // Older pw-dumps may write the graph in several arrays.
+        let mut objects = Vec::new();
+        for array in
+            serde_json::Deserializer::from_slice(&out.stdout).into_iter::<Vec<serde_json::Value>>()
+        {
+            objects.extend(array?);
+        }
         objects
             .iter()
             .find(|o| o.pointer("/info/props/node.name").and_then(|n| n.as_str()) == Some(name))
