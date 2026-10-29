@@ -1260,3 +1260,33 @@ part of the product: there is no default shortcut.
 - **Not built**: the letter spacing of the code (0.03 em, a third of a
   pixel: iced's canvas has none); choosing a layout from a list (variant
   B); per-window layouts; names for screen readers (§11).
+
+### The popovers' kit (2026-10-29)
+
+What issue #465 changes under the five popovers, nothing on screen.
+
+- **One kit** (`hocus-shell/src/popover/kit/`) holds what they shared by
+  copy: the frame (its padding, its glass and rim, its height from where
+  the content ends), the header (the title, the word on its right, the
+  switch and its slide), the sections' divider and spaced label, notes and
+  wrapped lines, values in tabular figures, sliders and the wheel's
+  notches, list rows (lit, what they say on their right with a spinner,
+  the room left for their name), lists that scroll (their rows stacked,
+  the viewport, the scrollbar, scrolling to the row holding the keyboard,
+  text cut to the list on the CPU), the blocks of what is connected and
+  their button; text measured, cut with an ellipsis and broken into lines;
+  the pointer (coming in and leaving, what it is over and pressed), the
+  keys sent to another surface, `Tab`'s order and the arrows round a list,
+  and what was asked shown until it is said. Plain functions and small
+  types: each popover keeps its own layout, state and drawing order, and
+  its own sizes where the mockups differ (the sound's and the battery's
+  label lines, the Wi-Fi's rows ending 2 px short of an unscrolled list,
+  the brightness's 8 px between its slot, its slider and its value).
+- **Bluetooth's keys** lay the popover out from what it shows now, as the
+  Wi-Fi's do since #455, not as last drawn: an arrow in the frame where
+  `Enter` cleared a row's failure scrolls with the rows' new heights
+  (#462).
+- **Measured** before and after, headless, on the Intel GPU and on the
+  CPU, at ×1 and ×2: every popover in its main states (open, hovered, the
+  keyboard's ring, muted, a row unfolded, a password refused, a failure, a
+  list scrolled), pixel for pixel the same.
