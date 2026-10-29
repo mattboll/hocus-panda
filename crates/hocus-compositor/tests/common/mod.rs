@@ -42,8 +42,8 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle,
     globals::registry_queue_init,
     protocol::{
-        wl_callback, wl_data_device, wl_data_device_manager, wl_data_source, wl_output, wl_pointer,
-        wl_seat, wl_shm, wl_surface,
+        wl_callback, wl_data_device, wl_data_device_manager, wl_data_source, wl_keyboard,
+        wl_output, wl_pointer, wl_seat, wl_shm, wl_surface,
     },
 };
 
@@ -154,6 +154,12 @@ pub enum Shows {
         size: (u32, u32),
         cell: u32,
     },
+    /// An xdg toplevel of this size that takes the keyboard and says the
+    /// layout (XKB's group) each modifiers event gives it.
+    Typing {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
 }
 
 /// What the test asks of a client.
@@ -185,6 +191,8 @@ pub enum Event {
     CloseRequested,
     /// The compositor has its clipboard.
     Copied,
+    /// The keyboard's modifiers came, with this layout (XKB's group).
+    Group(u32),
 }
 
 /// A client running on its thread.
@@ -256,6 +264,7 @@ fn run_client(
         device: None,
         clip: None,
         hung: Vec::new(),
+        typing: false,
     };
     match shows {
         Some(Shows::Window {
@@ -285,6 +294,16 @@ fn run_client(
             client.size = size;
             client.margin = margin;
             client.window = Some(window);
+        }
+        Some(Shows::Typing { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.typing = true;
         }
         Some(Shows::Cells { app_id, size, cell }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -377,6 +396,8 @@ struct Client {
     clip: Option<(Clip, CopyPasteSource)>,
     /// The pipes it was asked to write to and never will.
     hung: Vec<WritePipe>,
+    /// It takes the keyboard and says its group.
+    typing: bool,
 }
 
 impl Client {
@@ -534,6 +555,8 @@ impl SeatHandler for Client {
         if capability == Capability::Pointer && self.popup_on_press {
             let _ = self.seats.get_pointer(qh, &seat);
             self.seat = Some(seat);
+        } else if capability == Capability::Keyboard && self.typing {
+            seat.get_keyboard(qh, ());
         }
     }
 
@@ -644,6 +667,22 @@ delegate_xdg_popup!(Client);
 delegate_layer!(Client);
 delegate_registry!(Client);
 delegate_data_device!(Client);
+
+/// A typing client's keyboard: its modifiers' group.
+impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_keyboard::WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_keyboard::Event::Modifiers { group, .. } = event {
+            let _ = client.events.send(Event::Group(group));
+        }
+    }
+}
 
 /// The answer to the sync after a copy.
 impl Dispatch<wl_callback::WlCallback, ()> for Client {

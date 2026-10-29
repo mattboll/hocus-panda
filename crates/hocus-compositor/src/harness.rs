@@ -249,6 +249,15 @@ impl Headless {
         self.layer_rects(hocus_link::POPOVER_NAMESPACE)
     }
 
+    /// The keyboard's active layout (XKB's group).
+    pub fn layout(&self) -> u32 {
+        self.app
+            .state
+            .seat
+            .get_keyboard()
+            .map_or(0, |k| k.modifier_state().serialized.layout_effective)
+    }
+
     /// The namespace of the layer surface holding the keyboard, if one does.
     pub fn keyboard_layer(&self) -> Option<String> {
         let state = &self.app.state;
