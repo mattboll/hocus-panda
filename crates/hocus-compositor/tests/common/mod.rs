@@ -60,6 +60,37 @@ pub const KEY_LEFTALT: u32 = 56;
 pub const KEY_Q: u32 = 16;
 pub const KEY_F4: u32 = 62;
 
+/// The shell's program, built next to the test's when the workspace is.
+pub fn shell_program() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let program = exe.parent()?.parent()?.join("hocuspanda-shell");
+    program.exists().then_some(program)
+}
+
+/// A script in `dir` starting `shell` away from the machine's services:
+/// no session bus, and a system bus, a PipeWire and backlights that are not
+/// there, unless `env` (set after) names some.
+pub fn shell_script(
+    dir: &Path,
+    shell: &Path,
+    env: &[(&str, String)],
+) -> anyhow::Result<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut text = String::from(
+        "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
+         export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
+         PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent\n",
+    );
+    for (name, value) in env {
+        text.push_str(&format!("export {name}='{value}'\n"));
+    }
+    text.push_str(&format!("exec '{}' \"$@\"\n", shell.display()));
+    let script = dir.join("shell");
+    std::fs::write(&script, text)?;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+    Ok(script)
+}
+
 pub fn compositor() -> anyhow::Result<Headless> {
     Headless::start(HeadlessConfig {
         // The same pixels on every machine, and no GPU needed.

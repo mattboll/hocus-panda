@@ -6,7 +6,7 @@ mod common;
 
 use std::{path::PathBuf, time::Duration};
 
-use common::{BTN_LEFT, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, open, rect_of, wait};
+use common::{BTN_LEFT, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, open, rect_of, shell_program, wait};
 use hocus_compositor::{
     BarForm, Config, Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect,
 };
@@ -242,19 +242,14 @@ fn a_chosen_form_is_remembered_for_the_next_session() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The shell's program, built next to the test's when the workspace is.
-fn shell_program() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let program = exe.parent()?.parent()?.join("hocuspanda-shell");
-    program.exists().then_some(program)
-}
-
 #[test]
 fn the_shell_draws_the_bar_as_wide_as_its_form_and_rests() -> anyhow::Result<()> {
     let Some(shell) = shell_program() else {
         eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
         return Ok(());
     };
+    let dir = tempfile::tempdir()?;
+    let shell = common::shell_script(dir.path(), &shell, &[])?;
     let mut hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],
@@ -326,17 +321,7 @@ fn the_shell_draws_the_bar_as_wide_as_its_form_and_rests() -> anyhow::Result<()>
 /// The shell, started through a script that sets its clock to `at` (a
 /// wall-clock time of today): the system's clock is never touched.
 fn shell_at(shell: &std::path::Path, at: &str, dir: &std::path::Path) -> anyhow::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let script = dir.join("shell");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nexec env HOCUS_CLOCK_AT={at} {} \"$@\"\n",
-            shell.display()
-        ),
-    )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
-    Ok(script)
+    common::shell_script(dir, shell, &[("HOCUS_CLOCK_AT", at.to_owned())])
 }
 
 #[test]
@@ -345,6 +330,8 @@ fn the_clock_shows_in_its_place_in_both_forms() -> anyhow::Result<()> {
         eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
         return Ok(());
     };
+    let dir = tempfile::tempdir()?;
+    let shell = common::shell_script(dir.path(), &shell, &[])?;
     let mut hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],
