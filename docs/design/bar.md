@@ -5,8 +5,9 @@ what the prototype on the design canvas shows, in numbers. Where it and
 the prototype disagree, this document wins once approved. Sections 2 and
 3 (the empty column, its glass and its two forms) are built since
 2026-10-28 (3.1, issue #358), the clock of section 4 group 1 and of
-section 5 (3.2, issue #359), and the levels of section 4 group 10 and of
-section 5 (3.3, issue #360): see [as built](#as-built).
+section 5 (3.2, issue #359), the levels of section 4 group 10 and of
+section 5 (3.3, issue #360), and the popovers of section 9 with the
+sound's (3.4a, issue #361): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -158,7 +159,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   brightness up and down (5 %, never below 5 %) work in the session; a
   volume key unmutes. Their only feedback is the gauge: no popup, no sound.
   No sound and no window for a low battery either. The gauges are read
-  only here; their popovers are §9's.
+  only here; their popovers are §9's (the sound's since 3.4a).
 
 When the output is too short (1366×768 gives 752 px of bar), groups give
 way in this order: Today, then To do, then the agent lines beyond the
@@ -253,12 +254,38 @@ A click on anything that names an agent:
 
 ## 9. Popovers
 
-- Width 280 px (briefing 320 px), radius 14 px, same glass as the bar,
-  8 px from it, aligned with the item that opened them.
-- Open on click, or after 150 ms of hover in the mini form.
-- Stay open while the pointer moves toward them (a cone from the pointer
-  to the popover's near corners), and close 300 ms after it has really
-  left. `Esc` closes; focus returns to the item.
+Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
+
+- Width 280 px (briefing 320 px), radius 14 px, same glass as the bar
+  (`bar.bg` a little denser: `rgba(22,27,42,0.72) → rgba(14,17,28,0.82)`),
+  its rim, a soft shadow (`0 14px 40px rgba(0,0,0,0.38)`); 8 px from the
+  bar, aligned with the item that opened them, pushed up to stay 8 px from
+  the screen's bottom. One at a time.
+- **Opened by a click** on its item (in the full form, the whole row of a
+  level, lit `rgba(255,255,255,0.06)` under the pointer and `0.08` while
+  its popover is open): it stays open until a click outside it, `Esc`, or
+  another click on the item; it does not close when the pointer leaves.
+- **Opened by hovering** an item of the mini form for 150 ms: it closes
+  300 ms after the pointer has really left the item and the popover, and
+  stays open while the pointer moves toward it (a cone from the pointer to
+  the popover's near corners). A click on the item opens it as in the full
+  form.
+- `Esc` closes; focus returns to the item, where `Enter` or `Space` opens
+  it again and `Esc` lets the keyboard go. `Tab` goes through what is in
+  the popover; `Enter` or `Space` acts.
+- It fades in and slides 8 px away from the bar in 160 ms, `ease-out`;
+  out in 120 ms, `ease-in`; neither with reduced motion or a shell on the
+  CPU.
+- **The wheel** over the sound's row (or the mini form's gauge) changes
+  the volume by 5 % a notch, up to 100 %, unmuting as the keys do, without
+  opening the popover.
+- **The sound's** (3.4a): the title "Son" / "Sound" and the default
+  output's name; the master volume (a mute button, a slider, the value or
+  "muet" / "muted"); "SORTIE" / "OUTPUT" and one row per output, its icon
+  (speaker, headphones, screen), its name, a check on the default one. A
+  row makes its output the default, which keeps its own volume. The
+  microphone and the volume per application are 3.4b's (#380); no
+  "Sound settings…" link until the Settings sprint.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
@@ -275,7 +302,7 @@ A click on anything that names an agent:
 | Tasks | local list, CalDAV VTODO, Google Tasks | |
 | Network | NetworkManager | |
 | Bluetooth | BlueZ | |
-| Sound | PipeWire | the default sink's volume and mute, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` |
+| Sound | PipeWire | the sinks (their names, what they are, their own volume and mute) and the default one, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` (`set-volume`, `set-mute`, `set-default`) |
 | Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `org.freedesktop.UPower.PowerProfiles` |
 | Brightness | backlight through logind | read in sysfs, its changes from udev; set with logind's `SetBrightness` on the session |
 | Phone | KDE Connect (D-Bus) | |
@@ -504,7 +531,8 @@ the product.
     again when it is back.
 - **Its own surface, woken without a message.** The levels draw on a
   layer surface of their own (`hocus-bar-levels`), inside the bar's rim,
-  41 px above its bottom: 194 × 165 px in the full form (the group's
+  41 px above its bottom: 194 × 165 px in the full form (175 px since
+  3.4a, and 97 px in the mini, for the sound's item; the group's
   bottom 61 px above the bar's, above the footer's place; room for the
   status line on three lines, a part a line), 54 × 84 px in the mini (40
   px above, above the next item's place: 12 px under the battery, as the
@@ -524,3 +552,65 @@ the product.
   battery alone on short screens (§4); hiding the brightness when the
   laptop's panel is off (lid closed, an external screen alone) while its
   backlight device is still there.
+
+### 3.4a, the popovers and the sound's (2026-10-29)
+
+What the approved mockup of 3.4 shows for 3.4a (§9; issue #361): the
+popovers' mechanics, the sound's popover's header, master volume and
+outputs. Its "Micro" and "Applications" sections are 3.4b's (#380); its
+control panel is not part of the product.
+
+- **A layer surface, not an xdg_popup.** A popover is a layer surface of
+  the shell's (`hocus-bar-popover`), anchored right and bottom, its
+  margins putting it 8 px left of the bar and its bottom where §9 says.
+  iced_layershell's popups take their grab serial only in the dispatch of
+  a press and cannot be moved by an offset; a hover must not grab; and
+  the compositor's popup grabs serve windows' menus. The layer surface
+  takes the keyboard when a click opened it (`exclusive`), and when
+  clicked when a hover did (`on-demand`).
+- **The compositor draws around it.** It blurs what is behind it in a
+  pane of its own, as behind the bar, cut to its corners; draws its shadow;
+  cuts it to its corners for a shell on the CPU; and moves it in and out
+  (§9), from its first frame and from the shell's `closing` line, so that
+  the shell draws it once for that motion. The shell removes it 120 ms
+  after `closing` (at once without motion).
+- **Clicks outside.** The compositor tells the shell about a press on
+  none of the shell's surfaces while a popover shows, or while a surface
+  of the shell's holds the keyboard (`outside`). A popover holding the
+  keyboard is a menu: that press goes no further, as a press outside a
+  window's menu does not. One opened by hovering does not hold it: the
+  press goes on to what is under it. The shell sees the presses on its own
+  surfaces itself (the bar's surface reports its presses and where the
+  pointer goes, for the cone, and never draws for it), which keeps a
+  second click on the item a toggle.
+- **Nothing through iced's messages.** iced draws every surface after any
+  message: the surfaces report what the pointer and the keys do to one
+  controller, which decides (a state machine, tested on its own clock), and
+  its effects are layer-shell actions (open, remove, keyboard), which iced
+  runs without drawing anything else, and `wake` lines. The levels'
+  surface takes the pointer since 3.4a; it grew to 194 × 175 (full) and
+  54 × 97 (mini), upward, for the item's light and its keyboard ring (3 px
+  of the accent, 2 px out). The bars' heights come from their surfaces as
+  they open, not as messages. **Measured** headless with the real shell:
+  opening a popover commits no bar surface; open or closed, at rest
+  nothing commits but the clock; a hover in the popover damages exactly
+  its rectangle.
+- **The sound.** `pw-dump --monitor` gives each sink's description
+  (`node.description`, else `node.nick`), what it is (`device.form-factor`
+  on the node or its device, `device.bus`, an `hdmi` in its name: headphones,
+  a screen, else a speaker) and its own volume and mute. The slider sends
+  each volume as it moves; the sound's thread runs `wpctl set-volume ID
+  0.42` with only the last one asked each time `wpctl` is ready, and shows
+  it until PipeWire says it (a second at most); a volume set unmutes, as in
+  the mockup. A row runs `wpctl set-default ID`: WirePlumber then makes
+  that sink the default, whose own volume the slider shows. A mute or a
+  step asked for one output is never carried over to the next.
+- **The wheel**: a mouse's notch is one step (its pixels after it count for
+  nothing); a touchpad's scrolling makes a step each 15 px.
+- **Not built:** the microphone and the volume per application (3.4b); the
+  other popovers (3.5–3.7: the brightness and battery rows are not
+  clickable yet); names for screen readers (iced 0.14 has no
+  accessibility tree: the Accessibility milestone); the bar's keyboard
+  access beyond the item a popover came from (§11); following the pointer
+  over the 8 px between the bar and a hovered popover, where no surface of
+  the shell's is (the 300 ms cover it).
