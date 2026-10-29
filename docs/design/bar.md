@@ -4,8 +4,9 @@ Status: draft, 2026-10-27, to be approved before any code. It describes
 what the prototype on the design canvas shows, in numbers. Where it and
 the prototype disagree, this document wins once approved. Sections 2 and
 3 (the empty column, its glass and its two forms) are built since
-2026-10-28 (3.1, issue #358), and the clock of section 4 group 1 and of
-section 5 (3.2, issue #359): see [as built](#as-built).
+2026-10-28 (3.1, issue #358), the clock of section 4 group 1 and of
+section 5 (3.2, issue #359), and the levels of section 4 group 10 and of
+section 5 (3.3, issue #360): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -97,7 +98,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 7 | Secretary | Section 7. Panda 62 px, title, one line | 74 px |
 | 8 | Desktops | 4 tiles, 30 px high, with a sketch of their windows; the current one outlined in the accent | 30 px |
 | 9 | Connections | 2×2 tiles of 34 px: Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (short name, one click cycles) | 73 px |
-| 10 | Levels | Volume, brightness and battery as 6 px gauges with a gradient and a value; then the battery's time left and the power profile | 74 px |
+| 10 | Levels | Volume, brightness and battery rows (§4.2): a 14 px icon, a 6 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 83 px |
 | 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
 
 ### 4.1 The clock (approved 2026-10-28, issues #359 and #332)
@@ -124,6 +125,41 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   changed, a clock set or a resume show within a second); the next look
   is on the monotonic clock, just past the next wall-clock second.
 
+### 4.2 The levels (approved 2026-10-29, issue #360)
+
+- **Rows**, 7 px apart, Manrope 11.5 px `text.dim`: the icon (sound,
+  sun, battery; `text`), 8 px, the gauge (6 px high, radius 3, track
+  `rgba(255,255,255,0.10)`, fill with its gradient from the left), 8 px,
+  the value right-aligned in 30 px. The sound's gauge is `gauge.sound`,
+  the brightness's `gauge.light`, the battery's `gauge.battery`, amber
+  (`#E8A13A → #F5C46E`, value and status `#F5C46E`) at 20 % or less, orange
+  (`#E5793F → #F7B98A`, `#F7B98A`) at 10 % or less, both only off the
+  charger. Muted: the speaker crossed in `text.faint`, the fill
+  `rgba(255,255,255,0.22)` at the volume's length, the value "muet" /
+  "muted" in `text.faint`. Charging or full: a bolt `#7EE0A0` in the
+  battery.
+- **The status line**, Manrope 11 px, right-aligned, `text.faint` (the
+  battery's band colour when low or critical): "3 h 40 restantes ·
+  équilibré" / "3 h 40 left · balanced"; "plein dans 1 h 10" / "full in
+  1 h 10"; "branché, plein" / "plugged in, full"; "branché" / "plugged in"
+  (a charge limit); without an estimate yet, "sur batterie" / "on battery"
+  and "en charge" / "charging"; at 10 % or less, "· branche le chargeur" /
+  "· plug in the charger" after the time. The profile: "économie",
+  "équilibré", "performance" / "power saver", "balanced", "performance".
+  Without a battery, the profile alone; without either, no line. Too long
+  for the bar, it breaks between its parts.
+- **Missing**: a row whose service or device is not there (no PipeWire,
+  no backlight, no battery, no UPower) is hidden, and the group closes up
+  from the bottom.
+- **Motion**: a gauge's length moves to a new value in 160 ms, `ease-out`;
+  none with reduced motion or a shell on the CPU. The numbers change at
+  once.
+- **Keys**: the keyboard's volume up and down (5 %, up to 100 %), mute,
+  brightness up and down (5 %, never below 5 %) work in the session; a
+  volume key unmutes. Their only feedback is the gauge: no popup, no sound.
+  No sound and no window for a low battery either. The gauges are read
+  only here; their popovers are §9's.
+
 When the output is too short (1366×768 gives 752 px of bar), groups give
 way in this order: Today, then To do, then the agent lines beyond the
 first, then Levels collapse to battery only. Clock, meeting, agent tiles,
@@ -142,8 +178,11 @@ Width 56 px, padding 12 px top, 10 px bottom, items centred, 14 px apart:
 clock on two lines, hours over minutes, no seconds (Martian Mono 400,
 15 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
 blue, glowing when under 10 min), waiting tile (44 px, panda 40 px, count
-badge), working count, spacer, secretary (46 px), battery value, layout,
-notifications count.
+badge), working count, spacer, secretary (46 px), the sound's gauge
+(vertical, 6 × 40 px, filled from the bottom, grey when muted), the
+battery's percentage (Manrope 700, 11 px, `#7EE0A0`, amber or orange as in
+§4.2, a bolt before it when charging), layout, notifications count. The
+levels are 12 px apart, as the mockup has them.
 
 A hover of 150 ms on an item opens its popover beside the bar; it floats
 over the windows and closes 300 ms after the pointer leaves, unless the
@@ -236,9 +275,9 @@ A click on anything that names an agent:
 | Tasks | local list, CalDAV VTODO, Google Tasks | |
 | Network | NetworkManager | |
 | Bluetooth | BlueZ | |
-| Sound | PipeWire | |
-| Battery, power profile | UPower, power-profiles-daemon | |
-| Brightness | backlight through logind | |
+| Sound | PipeWire | the default sink's volume and mute, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` |
+| Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `org.freedesktop.UPower.PowerProfiles` |
+| Brightness | backlight through logind | read in sysfs, its changes from udev; set with logind's `SetBrightness` on the session |
 | Phone | KDE Connect (D-Bus) | |
 | Keyboard layouts | the compositor's XKB configuration | |
 | Notifications, clipboard | the desktop's own servers | |
@@ -413,3 +452,69 @@ mockup's control panel is not part of the product.
   system's clock is never touched.
 - **Not built:** the clock's keyboard access and name for screen readers
   (§11).
+
+### 3.3, the levels (2026-10-29)
+
+What the approved mockup of 3.3 shows (§4 group 10, §4.2, §5); its
+control panel and its dashed "Connexions" and "Pied" slots are not part of
+the product.
+
+- **Who owns what.** The shell owns the services: only it shows them, and
+  the compositor stays small. The compositor takes the level keys as
+  `[shortcuts]` actions (`volume-up`, `volume-down`, `mute`,
+  `brightness-up`, `brightness-down`, on `XF86AudioRaiseVolume`,
+  `XF86AudioLowerVolume`, `XF86AudioMute`, `XF86MonBrightnessUp`,
+  `XF86MonBrightnessDown`), repeats the up and down ones while held at the
+  keyboard's delay and rate as it does Alt+Tab's Tab, and hands each step
+  to the shell as a `level` line. While the shell is away (restarting),
+  it keeps the presses, 16 at most, and hands those under 5 s old to the
+  shell when it is back: a key pressed during a restart works, one pressed
+  long before does not surprise.
+- **Read off the loop, pushed.** Each source runs on a thread of its own
+  and writes into one snapshot; nothing is polled where the service
+  signals.
+  - Battery and profile: the system bus (`DBUS_SYSTEM_BUS_ADDRESS`, else
+    the system's), with zbus on a small runtime of its own: UPower's
+    display device and power-profiles-daemon's `ActiveProfile`, read
+    again on their `PropertiesChanged` and when their owner changes (a
+    service that starts later is picked up). Without the bus, it is tried
+    again after 2 s, doubling up to a minute.
+  - Brightness: the panel's backlight in `/sys/class/backlight` (the
+    firmware's, else the platform's, else a raw one), read again on each
+    udev `backlight` event; set through logind's `SetBrightness` on
+    `/org/freedesktop/login1/session/auto`, without root or a helper.
+    `HOCUS_BACKLIGHT_DIR` names another directory, for tests (watched with
+    inotify, which sysfs does not feed).
+  - Sound: `pw-dump --monitor` (PipeWire's tool) streams the graph's
+    changes as JSON; the `default` metadata's `default.audio.sink` names
+    the sink, whose node's `Props` give its volume (the cube root of the
+    channels' mean, as `wpctl` shows it) and mute. A new default sink is
+    followed as a new volume is. The keys run `wpctl set-volume --limit 1.0
+    ID 5%+` (or `5%-`, or `set-mute`) on that node; steps pressed while
+    one runs go together in one command. The `pipewire` crate would need
+    libpipewire's headers and bindgen to build, for the same events. A
+    PipeWire not there (no socket, no `pw-dump`) is tried again after 2 s,
+    doubling up to a minute: it announces nothing when it starts.
+  - A service missing hides its row, says so once in the log, and once
+    again when it is back.
+- **Its own surface, woken without a message.** The levels draw on a
+  layer surface of their own (`hocus-bar-levels`), inside the bar's rim,
+  41 px above its bottom: 194 × 120 px in the full form (the group's
+  bottom 61 px above the bar's, above the footer's place), 54 × 68 px in
+  the mini (40 px above, above the next item's place), the full size while
+  the form switches. iced draws every surface after any message of the
+  shell's, so a change of level is not a message: the shell asks the
+  compositor (`wake hocus-bar-levels`), which sends that surface a
+  configure as it is, and iced draws it alone. A level key reaches its
+  service straight from the link, without a message either. **At rest**
+  the levels draw nothing; a change draws their rectangle only, measured
+  headless with the real shell. A shell alone, without a compositor, draws
+  every surface on a change.
+- **Fonts**: Manrope Bold (wght 700, an instance of the variable font of
+  the same version as the Regular, SIL OFL 1.1) for the mini form's
+  battery.
+- **Not built**: the levels' popovers and clicks (§9, slice 3.4); their
+  keyboard access and names for screen readers (§11); collapsing to the
+  battery alone on short screens (§4); hiding the brightness when the
+  laptop's panel is off (lid closed, an external screen alone) while its
+  backlight device is still there.

@@ -105,8 +105,8 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
 the real screen; nested and headless take `--output`; `panel-form`),
 `[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
-`toggle-bar = "Super+B"`, and the windows' keys of
-docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
+`toggle-bar = "Super+B"`, the volume and brightness keys, and the
+windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
 (`screens`, `output`, `form`) and `[appearance]` (`reduced-motion`,
 `high-contrast`, `reduce-transparency`). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
