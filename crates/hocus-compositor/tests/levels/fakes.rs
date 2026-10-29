@@ -309,7 +309,11 @@ impl Fakes {
                         path,
                         "org.freedesktop.DBus.Properties",
                         "PropertiesChanged",
-                        &(iface, HashMap::<&str, Variant<'_>>::new(), Vec::<&str>::new()),
+                        &(
+                            iface,
+                            HashMap::<&str, Variant<'_>>::new(),
+                            Vec::<&str>::new(),
+                        ),
                     )
                     .await
             })?;

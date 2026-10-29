@@ -451,22 +451,17 @@ fn bar(f: &mut Frame, track: Rectangle, percent: f32, fill: Fill, way: Direction
         return;
     }
     // Across, the fill is rounded at both ends, as the mockup's; upward,
-    // it is the track's shape cut flat at its level.
-    let (path, clip) = match way {
-        Direction::Right => (
-            Path::rounded_rectangle(
-                rect.position(),
-                rect.size(),
-                radius.min(rect.width / 2.0).into(),
-            ),
-            track,
+    // it is the track's shape cut flat at its level (drawn as that shape:
+    // the CPU renderer does not clip a canvas's paths).
+    let path = match way {
+        Direction::Right => Path::rounded_rectangle(
+            rect.position(),
+            rect.size(),
+            radius.min(rect.width / 2.0).into(),
         ),
-        Direction::Up => (
-            Path::rounded_rectangle(track.position(), track.size(), radius.into()),
-            rect,
-        ),
+        Direction::Up => track_below(track, rect.y),
     };
-    f.with_clip(clip, |f| match fill {
+    match fill {
         Fill::Gradient((from, to)) => {
             let gradient = gradient::Linear::new(start, end)
                 .add_stop(0.0, faded(from, alpha))
@@ -474,7 +469,44 @@ fn bar(f: &mut Frame, track: Rectangle, percent: f32, fill: Fill, way: Direction
             f.fill(&path, canvas::Fill::from(gradient));
         }
         Fill::Flat(colour) => f.fill(&path, faded(colour, alpha)),
-    });
+    }
+}
+
+/// The part of an upright track (rounded at its ends, as wide as their
+/// diameter) below `top`: its outline, down its left side and up its right.
+fn track_below(track: Rectangle, top: f32) -> Path {
+    const STEPS: usize = 8;
+    let radius = track.width / 2.0;
+    let (centre, bottom) = (track.center_x(), track.y + track.height);
+    let top = top.clamp(track.y, bottom);
+    // The track's half width at `y`.
+    let half = |y: f32| {
+        let from_end = (y - track.y).min(bottom - y);
+        if from_end >= radius {
+            radius
+        } else {
+            let d = radius - from_end;
+            (radius * radius - d * d).max(0.0).sqrt()
+        }
+    };
+    // Points close together in the rounded ends, none needed between.
+    let span =
+        |from: f32, to: f32| (0..=STEPS).map(move |i| from + (to - from) * i as f32 / STEPS as f32);
+    let mut ys = vec![top];
+    if top < track.y + radius {
+        ys.extend(span(top, track.y + radius));
+    }
+    ys.extend(span(top.max(bottom - radius), bottom));
+    Path::new(|p| {
+        p.move_to(Point::new(centre - half(top), top));
+        for &y in &ys {
+            p.line_to(Point::new(centre - half(y), y));
+        }
+        for &y in ys.iter().rev() {
+            p.line_to(Point::new(centre + half(y), y));
+        }
+        p.close();
+    })
 }
 
 /// A value at the right of its row.
@@ -751,6 +783,41 @@ mod tests {
         );
         assert_eq!(lines("a · b", 1.0, width), ["a", "b"]);
         assert_eq!(lines("économie", 172.0, width), ["économie"]);
+    }
+
+    #[test]
+    fn an_upright_fill_is_the_tracks_shape_below_its_level() {
+        let track = Rectangle::new(Point::new(10.0, 0.0), Size::new(6.0, 40.0));
+        for top in [0.0, 1.5, 20.0, 38.0, 40.0] {
+            let path = track_below(track, top);
+            let points: Vec<_> = path.raw().iter().flat_map(|e| [e.from(), e.to()]).collect();
+            assert!(
+                points.iter().all(|p| p.y >= top - 0.01 && p.y <= 40.01),
+                "{top}"
+            );
+            assert!(points.iter().all(|p| p.x >= 9.99 && p.x <= 16.01), "{top}");
+        }
+        // Half way: as wide as the track at its level, both sides, and a
+        // point at its end.
+        let points: Vec<_> = track_below(track, 20.0)
+            .raw()
+            .iter()
+            .map(|e| e.to())
+            .collect();
+        for (x, y) in [
+            (10.0, 20.0),
+            (16.0, 20.0),
+            (13.0, 40.0),
+            (10.0, 37.0),
+            (16.0, 37.0),
+        ] {
+            assert!(
+                points
+                    .iter()
+                    .any(|p| (p.x - x).abs() < 0.01 && (p.y - y).abs() < 0.01),
+                "{x}, {y}"
+            );
+        }
     }
 
     #[test]
