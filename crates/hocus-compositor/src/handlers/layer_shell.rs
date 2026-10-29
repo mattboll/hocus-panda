@@ -98,6 +98,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             hocus_link::NAMESPACE => state.panel.commits += 1,
             hocus_link::CLOCK_NAMESPACE => state.panel.clock_commits += 1,
             hocus_link::LEVELS_NAMESPACE => state.panel.levels_commits += 1,
+            hocus_link::CONNECTIONS_NAMESPACE => state.panel.connections_commits += 1,
             hocus_link::POPOVER_NAMESPACE => {
                 state.panel.popover_commits += 1;
                 state.popover_committed(&layer);

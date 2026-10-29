@@ -160,8 +160,9 @@ impl State {
                         FilterResult::Forward
                     };
                 }
+                // No key is logged, not even at trace level: what is typed
+                // may be a password (a terminal's, the Wi-Fi's).
                 let sym = keysym.modified_sym().raw();
-                tracing::trace!(sym, ?mods, "key");
                 if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym)
                 {
                     let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;

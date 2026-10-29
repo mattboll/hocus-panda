@@ -94,6 +94,8 @@ pub struct Panel {
     pub clock_commits: u64,
     /// Commits of the levels' surfaces, for tests: none at rest.
     pub levels_commits: u64,
+    /// Commits of the connections' surfaces, for tests: none at rest.
+    pub connections_commits: u64,
     /// Commits of the popovers' surfaces, for tests: none at rest.
     pub popover_commits: u64,
     /// The shell's popovers beside the bars, and their motion.

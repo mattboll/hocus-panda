@@ -452,16 +452,18 @@ impl State {
                 let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                     AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, alpha);
                 // The CPU renderer's buffers have no alpha: what the bar
-                // leaves out at its corners would show black. The clock's
-                // and the levels' surfaces are opaque too, and cut to the
-                // bar: they change size in their own commits when the form
-                // switches.
+                // leaves out at its corners would show black. The clock's,
+                // the levels' and the connections' surfaces are opaque too,
+                // and cut to the bar: they change size in their own commits
+                // when the form switches.
                 let cut = match layer.namespace() {
                     hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => Some(Rectangle::new(
                         loc,
                         geometry.size.to_physical_precise_round(scale),
                     )),
-                    hocus_link::CLOCK_NAMESPACE | hocus_link::LEVELS_NAMESPACE => bar,
+                    hocus_link::CLOCK_NAMESPACE
+                    | hocus_link::LEVELS_NAMESPACE
+                    | hocus_link::CONNECTIONS_NAMESPACE => bar,
                     _ => None,
                 };
                 if let Some(clip) = cut.filter(|_| self.shell.software) {
