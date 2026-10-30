@@ -759,6 +759,25 @@ impl crate::State {
         self.focus(next);
     }
 
+    /// Takes the focused window to the desktop on that side of its
+    /// screen's current one, going there with it; past the first or the
+    /// last, it stays, and the dots say where the strip ends.
+    pub fn take_to_desktop_by(&mut self, delta: i32) {
+        let Some(id) = self.model.focused() else {
+            return;
+        };
+        let Some(output) = self.output_of(id) else {
+            return;
+        };
+        let strip = self.strip(&output);
+        let to = strip.current() as i64 + i64::from(delta);
+        if (0..strip.count() as i64).contains(&to) {
+            self.send_to_desktop(to as usize, true);
+        } else {
+            self.switch_desktop_on(&output, delta);
+        }
+    }
+
     /// Brings `id` forward: to its desktop, back from minimised, focused.
     pub fn bring(&mut self, id: WindowId) {
         if let Some(output) = self.output_of(id) {

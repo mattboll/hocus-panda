@@ -1,7 +1,8 @@
 //! Desktops and Alt+Tab, headless (docs/design/windows.md §11, §12):
 //! which windows are on which desktop, switching by the keys and three
-//! fingers, sending a window and taking it along, the strip at rest once
-//! it has slid, and Alt+Tab's order, selection and minimised windows.
+//! fingers, sending a window and taking it along (to a desktop or to the
+//! side), the strip at rest once it has slid, and Alt+Tab's order,
+//! selection and minimised windows.
 
 mod common;
 
@@ -101,6 +102,28 @@ fn a_window_sent_away_stays_there_and_one_taken_goes_along() -> anyhow::Result<(
     assert_eq!(where_is(&hp, "test.sent"), Some((0, true)));
     assert_eq!(focused(&hp).as_deref(), Some("test.sent"));
     assert_eq!(hp.windows().len(), 2);
+    Ok(())
+}
+
+#[test]
+fn a_window_taken_to_the_side_goes_along_and_stays_at_the_last() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    open(&mut hp, "test.taken", (400, 300))?;
+    let take_right = [KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_RIGHT];
+    // Super+Ctrl+Shift+→: to the second desktop, going with it.
+    chord(&mut hp, &take_right);
+    assert_eq!(hp.desktop().0, 1);
+    assert_eq!(where_is(&hp, "test.taken"), Some((1, true)));
+    assert_eq!(focused(&hp).as_deref(), Some("test.taken"));
+    // On to the last of the four, then no further: no wrap.
+    chord(&mut hp, &take_right);
+    chord(&mut hp, &take_right);
+    assert_eq!(hp.desktop().0, 3);
+    chord(&mut hp, &take_right);
+    assert_eq!(hp.desktop().0, 3);
+    assert_eq!(where_is(&hp, "test.taken"), Some((3, true)));
+    assert_eq!(focused(&hp).as_deref(), Some("test.taken"));
+    settle_on(&mut hp, 3)?;
     Ok(())
 }
 

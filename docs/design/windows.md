@@ -298,7 +298,10 @@ Keyboard:
   width in 320 ms easing in, as leaving windows do (it fades with reduced
   motion), and the dots show. With `Ctrl`
   too, it follows it: the window stays in place as the strip slides
-  under it. A window being dragged while desktops switch goes along.
+  under it. `Super+Ctrl+Shift+←/→` takes it the same way to the desktop
+  on that side of its screen; past the first or the last, it stays (no
+  wrap), and the dots show, as with `Super+Ctrl+←/→`. A window being
+  dragged while desktops switch goes along.
 - Empty desktops stay; their order is fixed (1 to 4). `[desktops] count`
   sets how many, from 1 to 9, on every screen.
 
@@ -370,6 +373,7 @@ string or list turns an action's off. The package ships every setting with its d
 | `desktop-1` … `desktop-9` | `Super+1` … `Super+9` | That desktop (§12); the top row's keys, whatever the layout |
 | `send-to-desktop-1` … `send-to-desktop-9` | `Super+Shift+1` … | Sends the focused window there, staying here (§12) |
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
+| `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
