@@ -22,6 +22,8 @@ pub mod watch;
 
 use std::{fmt, str::FromStr};
 
+pub use hocus_link::Note;
+
 /// The environment variable naming the compositor's control socket, set
 /// for the programs it starts.
 pub const SOCKET_ENV: &str = "HOCUS_SOCKET";
@@ -132,6 +134,9 @@ pub struct Report {
     /// process's working directory's, empty when neither is known), or the
     /// name the command gave.
     pub name: String,
+    /// What it asks for, or why it failed, as its tool says it (never
+    /// logged: its [`fmt::Debug`] says its length only).
+    pub note: Option<Note>,
 }
 
 /// What a line's key may hold: no spaces, no control characters.
@@ -167,7 +172,8 @@ pub fn name_text(name: &str) -> String {
 
 /// The line on the control socket: `agent SOURCE KEY STATE PID NAME`, with
 /// `ended` for a state that ended and `-` for an unknown process; the name
-/// last, as it may hold spaces.
+/// last, as it may hold spaces; then, when there is one, a tab and the
+/// [`Note`] (`allow TOOL WHAT`, `says TEXT`).
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.state.map_or("ended", State::name);
@@ -178,7 +184,11 @@ impl fmt::Display for Report {
             self.source.name(),
             key_word(&self.key),
             name_text(&self.name)
-        )
+        )?;
+        match &self.note {
+            Some(note) => write!(f, "\t{note}"),
+            None => Ok(()),
+        }
     }
 }
 
@@ -187,6 +197,12 @@ impl FromStr for Report {
 
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         let line = line.trim_end_matches(['\n', '\r']);
+        // The note apart: what is said of a line that does not read never
+        // holds it. One that does not read is left out.
+        let (line, note) = match line.split_once('\t') {
+            Some((line, note)) => (line, note.parse::<Note>().ok()),
+            None => (line, None),
+        };
         let mut words = line.splitn(6, ' ');
         if words.next() != Some("agent") {
             return Err(BadLine(format!("not an agent's line: {line:?}")));
@@ -224,7 +240,22 @@ impl FromStr for Report {
             state,
             pid,
             name,
+            note,
         })
+    }
+}
+
+/// An agent's note once a report of `said`, in `state`, comes: a state
+/// that changed takes the report's note (none: none). In the same state, a
+/// tool's request replaces what was kept (a new question), and a text
+/// only fills a note missing: Claude Code's notification of a permission
+/// comes after its request, and says less ("Claude needs your
+/// permission").
+pub fn next_note(kept: Option<Note>, changed: bool, said: Option<Note>) -> Option<Note> {
+    match (changed, said) {
+        (true, said) => said,
+        (false, Some(said @ Note::Allow { .. })) => Some(said),
+        (false, said) => kept.or(said),
     }
 }
 
@@ -279,6 +310,7 @@ mod tests {
                 state: Some(State::Waiting),
                 pid: Some(4242),
                 name: "hocus panda".into(),
+                note: Some(Note::allow("Bash", "npm install")),
             },
             Report {
                 source: Source::Command,
@@ -286,6 +318,7 @@ mod tests {
                 state: None,
                 pid: None,
                 name: "build".into(),
+                note: None,
             },
         ];
         for report in reports {
@@ -298,6 +331,7 @@ mod tests {
             state: Some(State::Idle),
             pid: None,
             name: "a\tb\nc".into(),
+            note: None,
         };
         assert_eq!(odd.to_string(), "agent command my_agent idle - a b c");
         for bad in [
@@ -323,6 +357,49 @@ mod tests {
             ..hook.clone()
         };
         assert_eq!(unnamed.to_string().parse::<Report>(), Ok(hook));
+    }
+
+    #[test]
+    fn a_report_carries_its_note_apart() {
+        let failed = Report {
+            source: Source::ClaudeCode,
+            key: "s".into(),
+            state: Some(State::Failed),
+            pid: Some(1),
+            name: "site web".into(),
+            note: Note::says("API Error:\nRate limit reached"),
+        };
+        let line = failed.to_string();
+        assert_eq!(
+            line,
+            "agent claude-code s failed 1 site web\tsays API Error: Rate limit reached"
+        );
+        assert_eq!(line.parse::<Report>(), Ok(failed));
+        // A note that does not read is left out, the report kept; a line
+        // that does not read never says its note.
+        let odd: Report = "agent command k idle - k\tnope".parse().expect("a line");
+        assert_eq!(odd.note, None);
+        let bad = "agent command k sleeping - k\tsays secret"
+            .parse::<Report>()
+            .expect_err("no such state");
+        assert!(!bad.to_string().contains("secret"), "{bad}");
+    }
+
+    #[test]
+    fn a_request_replaces_the_note_and_a_text_only_fills_one_missing() {
+        let asked = || Some(Note::allow("Bash", "npm install"));
+        let notified = Note::says("Claude needs your permission");
+        // The permission's notification after its request: the request's.
+        assert_eq!(next_note(asked(), false, notified.clone()), asked());
+        // Alone, the notification's.
+        assert_eq!(next_note(None, false, notified.clone()), notified);
+        // Another request while it still waits: the new one.
+        let other = Some(Note::allow("Write", "schema.sql"));
+        assert_eq!(next_note(asked(), false, other.clone()), other);
+        // A report without one keeps it; a new state takes the report's.
+        assert_eq!(next_note(asked(), false, None), asked());
+        assert_eq!(next_note(asked(), true, None), None);
+        assert_eq!(next_note(None, true, notified.clone()), notified);
     }
 
     #[test]

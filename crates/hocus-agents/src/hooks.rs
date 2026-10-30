@@ -18,10 +18,15 @@
 //!   `Stop`): done. `StopFailure` (an API error): failed. Codex's
 //!   `Interrupt`: idle.
 //! - `SessionEnd`: the agent is forgotten.
+//!
+//! What the agent asks for, or why it failed, goes with its state as its
+//! [`Note`] (the secretary's briefing, bar.md §7 B): a permission's tool
+//! and its input in one line, the question it asks, the notification's
+//! text, the failure's message.
 
 use serde_json::Value;
 
-use crate::State;
+use crate::{Note, State};
 
 /// The tools whose hooks call `hocus agent-hook`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +76,8 @@ pub struct Said {
     pub name: Option<String>,
     /// Its state; `None`: its session ended.
     pub state: Option<State>,
+    /// What it asks for, or why it failed.
+    pub note: Option<Note>,
 }
 
 /// What `payload`, from a tool's hook, says; nothing for an event that
@@ -87,6 +94,7 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
             key: text("thread-id").unwrap_or_default().to_owned(),
             name: text("cwd").and_then(crate::folder),
             state: Some(State::Done),
+            note: None,
         });
     }
     let event = text("hook_event_name")?;
@@ -111,11 +119,63 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
         "SessionEnd" => None,
         _ => return None,
     };
+    let note = match (event, state) {
+        ("PermissionRequest", _) => text("tool_name").map(|tool| {
+            Note::allow(
+                tool,
+                &input_line(payload.get("tool_input").unwrap_or(&Value::Null)),
+            )
+        }),
+        ("PreToolUse", Some(State::Waiting)) => payload
+            .pointer("/tool_input/questions/0/question")
+            .and_then(Value::as_str)
+            .and_then(Note::says),
+        ("Notification", Some(State::Waiting)) => text("message").and_then(Note::says),
+        // Its `last_assistant_message` is the error as the conversation
+        // shows it ("API Error: Rate limit reached").
+        ("StopFailure", _) => ["last_assistant_message", "error_details", "error"]
+            .into_iter()
+            .find_map(|key| text(key).and_then(Note::says)),
+        _ => None,
+    };
     Some(Said {
         key: text("session_id").unwrap_or_default().to_owned(),
         name: text("cwd").and_then(crate::folder),
         state,
+        note,
     })
+}
+
+/// A tool's input in one line: what it runs, the file it writes (its
+/// name), the address it reads, else its first text.
+fn input_line(input: &Value) -> String {
+    const WHAT: [&str; 7] = [
+        "command",
+        "url",
+        "pattern",
+        "query",
+        "prompt",
+        "description",
+        "skill",
+    ];
+    const FILES: [&str; 3] = ["file_path", "notebook_path", "path"];
+    if let Some(text) = input.as_str() {
+        return text.to_owned();
+    }
+    let field = |key: &str| {
+        input
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|t| !t.trim().is_empty())
+    };
+    if let Some(file) = FILES.into_iter().find_map(field) {
+        return crate::folder(file).unwrap_or_else(|| file.to_owned());
+    }
+    WHAT.into_iter()
+        .find_map(field)
+        .or_else(|| input.as_object()?.values().find_map(Value::as_str))
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// What the hook prints on its standard output for `event`: nothing,
@@ -152,6 +212,7 @@ mod tests {
                 key: "abc123".into(),
                 name: Some("hocus-panda".into()),
                 state: Some(State::Idle),
+                note: None,
             })
         );
         let prompt = json!({ "session_id": "abc123", "cwd": "/w",
@@ -240,6 +301,76 @@ mod tests {
     }
 
     #[test]
+    fn what_a_waiting_agent_asks_and_why_a_stuck_one_failed() {
+        let note = |payload: Value| said(Tool::ClaudeCode, &payload).and_then(|s| s.note);
+        // A permission: its tool, and its input in one line.
+        let permission = |tool: &str, input: Value| {
+            json!({ "session_id": "s", "hook_event_name": "PermissionRequest",
+                "tool_name": tool, "tool_input": input })
+        };
+        assert_eq!(
+            note(permission(
+                "Bash",
+                json!({ "command": "npm install\n  --save",
+                "description": "Install" })
+            )),
+            Some(Note::allow("Bash", "npm install --save"))
+        );
+        // A file's name, not its whole path.
+        assert_eq!(
+            note(permission(
+                "Write",
+                json!({ "file_path": "/home/alex/db/schema.sql",
+                "content": "CREATE TABLE" })
+            )),
+            Some(Note::allow("Write", "schema.sql"))
+        );
+        assert_eq!(
+            note(permission(
+                "mcp__github__create_issue",
+                json!({ "title": "Bug" })
+            )),
+            Some(Note::allow("mcp__github__create_issue", "Bug"))
+        );
+        // The question it asks.
+        let question = json!({ "session_id": "s", "hook_event_name": "PreToolUse",
+            "tool_name": "AskUserQuestion", "tool_input": { "questions": [
+                { "question": "Which framework?", "header": "Framework",
+                  "options": [], "multiSelect": false } ] } });
+        assert_eq!(note(question), Note::says("Which framework?"));
+        // The notification's text; none for one that does not make it wait.
+        let notified = |kind: &str| {
+            json!({ "session_id": "s", "hook_event_name": "Notification",
+                "message": "Claude needs your permission", "notification_type": kind })
+        };
+        assert_eq!(
+            note(notified("permission_prompt")),
+            Note::says("Claude needs your permission")
+        );
+        assert_eq!(note(notified("idle_prompt")), None);
+        // The failure's message, as the conversation shows it.
+        let failed = json!({ "session_id": "s", "hook_event_name": "StopFailure",
+            "error": "rate_limit", "error_details": "429 Too Many Requests",
+            "last_assistant_message": "API Error: Rate limit reached" });
+        assert_eq!(note(failed), Note::says("API Error: Rate limit reached"));
+        let bare = json!({ "session_id": "s", "hook_event_name": "StopFailure",
+            "error": "server_error" });
+        assert_eq!(note(bare), Note::says("server_error"));
+        // Working: nothing.
+        let working = json!({ "session_id": "s", "hook_event_name": "PreToolUse",
+            "tool_name": "Bash", "tool_input": { "command": "ls" } });
+        assert_eq!(note(working), None);
+        // Codex's request, as its documentation shows it.
+        let codex = json!({ "session_id": "thr_123", "cwd": "/workspace",
+            "hook_event_name": "PermissionRequest", "model": "gpt-5", "turn_id": "t1",
+            "tool_name": "Bash", "tool_input": { "command": "cargo publish", "description": null } });
+        assert_eq!(
+            said(Tool::Codex, &codex).and_then(|s| s.note),
+            Some(Note::allow("Bash", "cargo publish"))
+        );
+    }
+
+    #[test]
     fn codexs_hooks_and_its_notify_program() {
         // The payloads of developers.openai.com/codex/hooks and of the
         // advanced configuration's `notify`.
@@ -266,6 +397,7 @@ mod tests {
                 key: "thr_123".into(),
                 name: Some("infra".into()),
                 state: Some(State::Done),
+                note: None,
             })
         );
         assert_eq!(

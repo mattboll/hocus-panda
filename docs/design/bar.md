@@ -17,7 +17,9 @@ group 3, section 10; 4.0, issue #383), and its rows, one per agent, with
 their pandas (section 4 group 3, section 7 A, section 8 in part; 4.1,
 issue #384), and going to an agent from its row, its streak, its rim's
 pulse and herdr's pane (section 8; 4.3, issue #386), and the agents'
-halo (section 6; 4.4, issue #387): see [as built](#as-built).
+halo (section 6; 4.4, issue #387), and the secretary at the agents'
+group's head and her briefing (section 7 B; 4.6, issue #389): see
+[as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -103,11 +105,11 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 |---|---|---|---|
 | 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
 | 2 | Next meeting | Card: 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`. Hidden when nothing remains today | 44 px |
-| 3 | Agents | Header `AGENTS` and the total, "Sources" on its right (4.0). One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
+| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
 | 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
 | 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
 | 6 | Spacer | Takes what is left | flexible |
-| 7 | Secretary | Section 7. Panda 62 px, title, one line | 74 px |
+| 7 | Secretary | Moved to the head of group 3 (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
@@ -359,18 +361,27 @@ never on battery saver, never with reduced motion.
   its laptop), waiting (holds out its hat, ear radiating), finished (arms
   up), stuck (smoking ears), resting (asleep, at 55 %). On a change, the
   changed agent's panda hops once (650 ms: 4 px up, down, 2 px up, down).
-- **B, the secretary**: one panda with round glasses, a clipboard, and a
-  pencil behind its ear (drawing to fix: the pencil must rest behind the
-  ear, not into the head). Its magic ear takes the colour of the bar's
-  state: green calm, amber waiting (radiates twice, two small hops), orange
-  stuck (still). Its line says the essential in five words: "Tout va
-  bien · 6 au travail", "2 t'attendent · hocus-panda, infra", "Réunion
-  bientôt · Point équipe 15:00".
-  A click opens its **briefing** beside the bar (320 px), in this order:
-  who waits and for what (the tool or the question, and since when); who
-  is stuck and why (one line); the next meeting; the notifications not
-  read (senders); how many work and rest. Each line acts like its source
-  (going to an agent, opening the meeting). It never opens by itself.
+- **B, the secretary** (approved 2026-10-30, issue #389, variant B: she
+  heads the agents' group): one panda with round glasses, a clipboard, and
+  a pencil behind her ear (the validated drawing, `Secretaire.dc.html`).
+  The group's header is her 40 px head, then "AGENTS N" (11.5 px 700) over
+  her line (12 px, ellipsis); "Sources" moves into her briefing. Her magic
+  ear follows the moment: green when calm; amber when someone waits (it
+  radiates twice, two small hops, only at the change); orange when an
+  agent is stuck (no motion). Her line: "N au travail · M à voir" when
+  calm (`text.dim`); "Quelqu'un t'attend" / "N t'attendent" then the
+  names (amber); "Un agent est bloqué" then the names (orange). The
+  header row is lit amber or orange at 8 % / 7 % in those states.
+  A click on her opens her **briefing** beside the bar (320 px; §9's
+  mechanics), in this order: T'ATTEND, each waiting agent, since when,
+  and what it asks (the text of the tool's notification, "Autoriser Bash
+  : npm install ?"); BLOQUÉ, each stuck agent, since when, and why, from
+  the failure's message; À VOIR, each finished agent not seen yet, and
+  since when; PROCHAINE RÉUNION, with the calendar, later; NOTIFICATIONS,
+  with sprint 5, later (nothing shows of either before it exists); a
+  footer "N au travail · M au repos", and "Sources" (the Sources
+  popover). Each line acts like its row: it goes to the agent (§8). She
+  never opens by herself.
 - **C, the peek**: when an agent starts waiting, its panda (96 px) slides
   out from the bar's edge, 18 px from the bar, with a label "**name**
   t'attend · 1 min". In 320 ms, `cubic-bezier(0.2, 0.9, 0.25, 1.15)`,
@@ -658,7 +669,8 @@ The light and neon themes give their own values for the same tokens.
 
 ## 14. Open questions
 
-1. The secretary's pencil drawing (section 7, B).
+1. ~~The secretary's pencil drawing (section 7, B).~~ Decided on the 4.6
+   mockup: the pencil rests behind her ear.
 2. Whether the peek's 8 s before it retracts is right (the prototype keeps
    it until the agent is handled).
 3. ~~The colour and animation of the clock when the minute changes.~~
@@ -1927,3 +1939,107 @@ finished agent not seen yet), with the maintainer's spec (§6; issue
 - **Not built**: the meetings' states (the calendar, "Your day"); the
   secretary's ear in the halo's colour (4.6); the peek (4.5); the halo on
   the CPU; the mini form's agents (4.7).
+
+### 4.6, the secretary and her briefing (2026-10-30)
+
+What the approved 4.6 mockup shows, variant B (the secretary heads the
+agents' group), with the maintainer's spec (§7 B; issue #389). The next
+meeting and the notifications wait for the calendar and sprint 5.
+
+- **Her drawing** is the validated one, as SVG
+  (`crates/hocus-shell/assets/pandas/secretary-*.svg`, with the pandas'
+  note of their origin): one file per mood, her ear and the dot on her
+  clipboard in its colour (green `#7BC47F`, amber `#F5B44A`, orange
+  `#F2945B`), drawn by iced's `svg` at the screen's scale, sharp at ×1 and
+  ×2; 40 px in the group, 34 px in her briefing.
+- **The header** is a row as wide as the agents' (6 px past the group's
+  sides), 44 px (2 px around her head), radius 9: her head, 8 px, then
+  "AGENTS" (11.5 px 700, spaced, `text.dim`) and the total (Manrope 600,
+  `text.faint`, 3 px after) over her line (12 px), 1 px apart, centred on
+  her head. The rows start 6 px under it: the group is 50 px, 34 px a
+  row and 20 px for the "+ N" line. Lit amber at 8 % when someone waits,
+  orange at 7 % when an agent is stuck; `0.06` under the pointer, `0.08`
+  while her briefing is open; the pointer a hand. She heads the group in
+  each of its forms: the card (4.0), "Aucun agent en cours." and the rows;
+  the group shows and hides as 4.0 built it.
+- **Her mood and her line** come from the agents as the shell is told
+  them (4.1): someone waiting first, as in the halo, then someone stuck,
+  else calm. Waiting: "Quelqu'un t'attend · site-web", "2 t'attendent ·
+  infra, site-web" (the longest waiting first), `#F5C46E`. Stuck: "Un
+  agent est bloqué · migration", "2 agents bloqués · …", `#F7A77A`. Calm:
+  "3 au travail", and " · 1 à voir" when a finished agent is not seen yet,
+  `text.dim`. Cut with an ellipsis to the 124 px her head leaves.
+- **Her motion**: when an agent starts waiting (one that was not waiting
+  as the group last drew; not as the shell starts), her ear sends out two
+  rings twice and she hops twice, the drawing's keyframes: the rings
+  (arcs of 15 and 20 units round the ear, the outer at 60 %) from 0.9 to
+  1.25 times their size and from 90 % to nothing in 1.4 s `ease-out`,
+  twice; the hops 3 px up and down in 1.6 s `ease-in-out`, twice. 3.2 s,
+  once, then she holds still; the same report again does not start her
+  again, another agent starting to wait while she moves starts her over.
+  None with reduced motion, nor on the CPU. The rings are
+  drawn by the shell over her drawing; the group's surface draws only
+  while she moves.
+- **What a tool said** (the hooks' payloads, docs/agents.md): a
+  permission request (`PermissionRequest`), its tool and its input in one
+  line (what it runs, the file it writes by its name, the address it
+  reads, else its first text); the question `AskUserQuestion` asks;
+  Claude Code's `Notification` text for the waiting ones; a
+  `StopFailure`'s `last_assistant_message` (the API error as the
+  conversation shows it), else its `error_details`, else its `error`.
+  One line, its runs of spaces made one, 120 characters at most
+  (`hocus_link::Note`). It goes on the report's line after a tab, and on
+  the shell's `agents` line after each agent's fields, a tab apart
+  (`allow TOOL WHAT`, `says TEXT`). The compositor keeps it with the
+  agent's state: a new state takes the report's (none: none); in the same
+  state a request replaces it and a text only fills one missing, since
+  Claude Code's notification of a permission comes after the request and
+  says less ("Claude needs your permission"). A state herdr gave more
+  recently than the hook has no note. It may hold code or a secret: it is
+  never logged, only its kind and its length (`allow (24 characters)`),
+  and a line that does not read never says it.
+- **Her briefing** (`popover/briefing.rs`, §9's mechanics and the kit):
+  320 px, its top on her row's (100 px under the bar's), 12, 14 and 14 px
+  in, its parts 8 px apart. Her head (34 px), "Le point" / "Briefing"
+  (16 px 700) and the time as the clock reads it (12 px, `text.faint`).
+  Then, each only when an agent is in it, "T'ATTEND" / "WAITING"
+  (`#F5C46E`), "BLOQUÉ" / "STUCK" (`#F7A77A`), "À VOIR" / "TO SEE"
+  (`#7EE0A0`): 11 px 700, spaced, 4 px more above; a line per agent, 2 px
+  apart, 6 px past the sides, 5 px in, radius 7, lit `0.06` under the
+  pointer: its name (13 px 700) and since when (`text.faint`, 6 px after:
+  "· 2 min", "· il y a 4 min" for a finished one, "· à l'instant" within
+  the minute, "1 h 05" from an hour), over what its tool said (12.5 px,
+  `text.dim`, 1 px under: "Autoriser Bash : npm install ?" / "Allow Bash:
+  npm install?", a text as it is), cut with an ellipsis. An agent whose
+  tool said nothing (herdr's, a command's) shows its name and since when
+  only; a finished one, since when only. The divider (2 px from what is
+  around it), "N au travail · M au repos" (12.5 px, `text.faint`) and, on
+  its right, "Sources", which opens the Sources popover in the briefing's
+  place (4.0's, its top 62 px under the bar's). It is laid out again when
+  the agents change, and at the clock's minute while it is open.
+- **A line goes to its agent** as its row does (4.3): the briefing closes
+  and the compositor is asked `go-to-agent ID OUTPUT X Y W H` with the
+  line's rectangle in the bar's frame, so the streak runs from the line's
+  left edge. `Tab` and the arrows go through the lines and "Sources",
+  `Enter` or `Space` acts, `Esc` closes and gives the keyboard to her
+  row, which the bar's `Tab` reaches as its other items.
+- **Measured headless**, the real shell (`tests/agents.rs`): her line and
+  mood calm, waiting and stuck, the row's amber and orange read from the
+  screen, "Sources" no longer beside her; on a GPU, an agent starting to
+  wait makes her move 2.9 to 3.7 s, once, then nothing draws, and the
+  same report again nothing; with reduced motion, nothing moves. The
+  briefing, 320 px, its top on her row: who waits with what it asks (the
+  request kept over its later notification), who is stuck with the
+  failure's message, who is to see, the footer; the shell's log holding
+  neither the command nor the error. A line going to its agent's window
+  on another desktop, the briefing closed; Sources opening from it in
+  4.0's place, the card under her; nothing committed at rest with the
+  briefing open. Unit tests for her line's words, since when, the
+  request's words, the briefing's sections, the note's capping, its
+  reading back and its log, the notes the hooks' documented payloads
+  give, and which note is kept. On the Intel GPU, the screenshots of the
+  pull request.
+- **Not built**: the next meeting and the notifications in the briefing
+  (the calendar, sprint 5); her line about a meeting ("Réunion bientôt");
+  the peek (4.5); the mini form's agents and her place there (4.7); names
+  for screen readers (§11).
