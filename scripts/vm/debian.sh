@@ -158,7 +158,8 @@ copy() {
     scp -q -i "$WORK/key" -P "$SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CARGO_TARGET_DIR:-target}/debug/hocuspanda" \
-        "${CARGO_TARGET_DIR:-target}/debug/hocuspanda-shell" alex@127.0.0.1:bin/
+        "${CARGO_TARGET_DIR:-target}/debug/hocuspanda-shell" \
+        "${CARGO_TARGET_DIR:-target}/debug/hocus" alex@127.0.0.1:bin/
     scp -q -i "$WORK/key" -P "$SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         scripts/vm/in-vm.sh alex@127.0.0.1:hocus-vm

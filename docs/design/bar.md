@@ -11,8 +11,9 @@ sound's (3.4a, issue #361), the Wi-Fi's row and popover (section 4
 group 9, section 5, section 9; 3.5, issue #362), Bluetooth's (3.6,
 issue #363), the brightness's and the battery's popovers (3.7,
 issue #364), the keyboard layout's row (3.8, issue #365), and the
-desktops' tiles of section 4 group 8 and section 5 (3.9, issue #366): see
-[as built](#as-built).
+desktops' tiles of section 4 group 8 and section 5 (3.9, issue #366), and
+the agents' group's header, its sources and the tools plugged in (section 4
+group 3, section 10; 4.0, issue #383): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -32,7 +33,8 @@ The bar is the desktop's one permanent surface. It answers, at a glance:
 
 It never interrupts: what concerns the user is signalled in the bar (the
 halo) and acted on when the user chooses. It does not duplicate the
-agents' tool (herdr): it signals and takes the user there.
+agents' tools (Claude Code, Codex, herdr): it signals and takes the user
+there.
 
 ## 2. Units and placement
 
@@ -97,7 +99,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 |---|---|---|---|
 | 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
 | 2 | Next meeting | Card: 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`. Hidden when nothing remains today | 44 px |
-| 3 | Agents | Header `AGENTS` and total. Three tiles: working, waiting, resting, each with its panda (48 px) and its count. Below, up to 3 lines: agents waiting (oldest first), then stuck ones | 80 px + 18 px a line |
+| 3 | Agents | Header `AGENTS` and, on its right, "Sources" (4.0). Three tiles: working, waiting, resting, each with its panda (48 px) and its count. Below, up to 3 lines: agents waiting (oldest first), then stuck ones. Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 80 px + 18 px a line |
 | 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
 | 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
 | 6 | Spacer | Takes what is left | flexible |
@@ -569,8 +571,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 
 | Data | Source | Notes |
 |---|---|---|
-| Agents and their states | herdr's socket | working, waiting (permission or input), done, failed, idle |
-| Fallback for agents | Claude Code hooks `permission_prompt`, `idle_prompt` | when herdr is not running |
+| Agents and their states | their sources, each its own adapter off the loop: Claude Code's hooks, Codex's hooks and `notify`, herdr's socket when it runs, and `hocus agent NAME STATE` for any other tool ([agents.md](../agents.md)) | working, waiting (a permission or a question), done, failed, idle; the same agent seen by two sources (its process) counted once; its window found above its process (as built, 4.0) |
 | Meetings, events | calendar accounts (CalDAV, Google), local `.ics` | |
 | Tasks | local list, CalDAV VTODO, Google Tasks | |
 | Network | NetworkManager | on the system bus: `WirelessEnabled`, `Connectivity` (2: a sign-in page) and `ConnectivityCheckUri`, the devices (the Wi-Fi one, a wired one, their state), the access points (SSID, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`), the active connections and the saved ones (their SSID); followed by their signals; set with `RequestScan`, `WirelessEnabled`, `ActivateConnection`, `AddAndActivateConnection`, `Update`, `Disconnect` (as built, 3.5) |
@@ -630,8 +631,9 @@ The light and neon themes give their own values for the same tokens.
    it until the agent is handled).
 3. ~~The colour and animation of the clock when the minute changes.~~
    Decided on the 3.2 mockup: white, the odometer (§4.1).
-4. What the bar shows when no agent tool is running at all (hide the
-   agents group, or show "aucun agent").
+4. ~~What the bar shows when no agent tool is running at all.~~ Decided on
+   the 4.0 mockup (variant B): the group does not show, nor after "Ne rien
+   brancher"; "Aucun agent en cours." once a tool is followed.
 
 ## As built
 
@@ -1513,3 +1515,122 @@ The maintainer's answers to 3.9b's questions (issue #479):
   fainter; an application without an icon, its letter tile; a click
   bringing the minimised window back, focused. On the Intel GPU, the
   screenshots of the pull request.
+
+### 4.0, the agents' sources (2026-10-30)
+
+What the approved 4.0 mockup shows, variant B, and the maintainer's
+clarification of "Ne rien brancher" (§4 group 3, §10; issue #383); its
+control panel and its dashed slots are not part of the product. 4.1's
+tiles come under the header later: until then, with agents running and
+nothing to propose, the group is its header alone.
+
+- **The model is the compositor's**, on its loop: each agent's name,
+  state, since when (`CLOCK_MONOTONIC`), sources, processes and window.
+  Its sources run off the loop and hand it what they learn through a
+  channel:
+  - **the control socket**, `<socket>.control` (`HOCUS_SOCKET` for the
+    programs the compositor starts), where `hocus agent NAME STATE` and
+    the tools' hooks (`hocus agent-hook TOOL`) write one line each
+    ([agents.md](../agents.md)); a thread takes the connections and reads
+    the agent's process's ancestry in `/proc`;
+  - **the tools' watcher** (`hocus-agents::watch`): for each place that
+    says a tool is there (`~/.claude`, `$CODEX_HOME` or `~/.codex`, their
+    settings, `claude`, `codex` and `herdr` in each of `PATH`'s
+    directories, herdr's directory), the nearest directory that exists is
+    watched with inotify for that name, so a tool installed later or a
+    settings file changed by hand is seen as it happens; nothing is
+    polled. Plugging in, unplugging and declining, which write files, run
+    there too;
+  - **herdr** (`hocus-agents::herdr`, ported from the first build without
+    its polling): its socket waited for with inotify, `agent.list`, each
+    pane's `pane.process_info`, then `events.subscribe` on a blocking
+    read.
+- **One agent for two sources**: a report joins the agent that has its
+  key, else one of another source that has its process (a Claude Code in
+  a herdr pane is the pane's foreground process); one source's keys stay
+  its own agents. The state that changed last wins; herdr's name wins (the
+  user renames there).
+- **Forgotten** when its session ends (`SessionEnd`, `hocus agent NAME
+  ended`), when its process ends (a pidfd on the loop), or when herdr
+  goes for its own.
+- **Its window**: the topmost window whose client (a Wayland client's
+  credentials, an X11 window's `_NET_WM_PID`) is the nearest process
+  above the agent: the hook's parent above its shells is the agent, its
+  terminal above it. A terminal that serves all its windows from one
+  process (foot's server, gnome-terminal) gives its topmost window, not
+  necessarily the agent's.
+- **To the shell**, two lines (`hocus-link`): `agent-tools` (each tool,
+  its state, the file plugging it in changes) and `agents` (each agent:
+  id, state, since, sources, window, name), sent after the turn of the
+  loop in which they changed: a burst of reports is one line, a report
+  that changes nothing sends none.
+- **Plugging in** (after the consent popover's "Brancher" only): Claude
+  Code's `~/.claude/settings.json` gets one matcher group of ours per
+  event (`SessionStart`, `UserPromptSubmit`, `PreToolUse` of
+  `AskUserQuestion|ExitPlanMode`, `PermissionRequest`, `PostToolUse`,
+  `PostToolUseFailure`, `Notification` of the prompts, `Stop`,
+  `StopFailure`, `SessionEnd`), running `<hocus> agent-hook claude-code`
+  with a 5 s timeout, the user's keys kept in their order; Codex's
+  `config.toml` gets inline `[[hooks.EVENT]]` tables (`SessionStart`,
+  `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`, `Stop`,
+  `Interrupt`, `SessionEnd`) and `notify` when it has none, edited with
+  `toml_edit` so the user's comments and layout stay. The file as it was
+  goes beside it (`….before-hocuspanda`), and what was written is
+  remembered (its hash) in `$XDG_STATE_HOME/hocuspanda/agents.toml`. A
+  link is written through; a file that does not read is never written.
+  **Unplugging** puts the copy back when the file is still as written
+  (removes it when there was none), else takes only our entries out.
+- **"Ne rien brancher"** declines every tool there and not plugged in,
+  herdr's following too (its agents are then not followed: Sources says
+  "En marche · pas suivi"), remembered in the same file; the group goes
+  (variant B). A tool found later that was never declined brings the
+  card, and the group, back for itself. Plugging a declined tool in from
+  Sources clears its refusal.
+- **The group's surface** (`hocus-bar-agents`), under the clock: its top
+  100 px under the bar's (14 px of padding, the clock's 72 px, 14 px),
+  194 px wide and as tall as what it shows plus the keyboard ring's room;
+  one pixel high, taking no pointer, when it shows nothing or in the mini
+  form. Its text is measured as it draws, and a change of height resizes
+  it (layer-shell actions): a change draws only it. The card: "Pour
+  suivre tes agents, branche ton outil :" (13 px on 1.4 lines), a row per
+  tool found (its 18 px mark, its name 14 px, "Brancher" 24 px), "Un
+  autre outil ?" and "Ne rien brancher" (12 px). Manrope's widths do not
+  let "Claude Code" and "Brancher" sit side by side in the card's 152 px
+  (nor the two links): as a browser lays the mockup out, the name goes on
+  two lines (its row 38 px) and the links one under the other. Plugged in
+  with nothing running: "Aucun agent en cours." and "Suivis : …".
+- **The popovers** (§9's mechanics, the kit): 300 px wide as the
+  mockup's, their top 62 px under the bar's (the mockup's), whichever item
+  opened them. Sources: each tool's mark (at 40 % when not there), name,
+  state ("Branché" green, "Trouvé, pas branché", "Pas sur cet
+  ordinateur"; herdr "En marche · suivi tout seul", "En marche · pas
+  suivi", "Ne tourne pas") and "Brancher" or "Débrancher"; the divider,
+  "UN AUTRE OUTIL", the command in Martian Mono with "Copier" (the
+  compositor offers the text as the clipboard's selection, "Copié"
+  after), the states. Its "Brancher" gives way to the consent popover.
+  Consent: the mark and "Brancher <outil>", what it lets the desktop know
+  (for Codex, that it asks to approve the hooks with `/hooks`), "Fichier
+  modifié" and the file in Martian Mono, the copy kept, "Annuler" and
+  "Brancher". `Tab` goes through their buttons, `Enter` or `Space` acts,
+  `Esc` closes.
+- **Measured headless**, the real shell away from the machine's services,
+  in a home of the test's own (`tests/agents.rs`): the card with two
+  tools and Sources' states; "Brancher" writing nothing before the
+  consent's click, then the hooks and the copy; "Débrancher" putting the
+  file back byte for byte; "Ne rien brancher" hiding the group, the
+  surface one pixel high, remembered in a new session; the same with
+  herdr running (a fake herdr), its agent no longer followed; Codex
+  installed later bringing the card back for it alone; no tool, no group,
+  the pointer let through; `hocus agent` reaching the model and the shell
+  (the header alone), `ended` forgetting it; Claude Code's documented
+  payloads through `hocus agent-hook`, and Codex's `notify`; the agent's
+  window found above its process; nothing committed at rest, nor for a
+  report that changes nothing. On the Intel GPU, the screenshots of the
+  pull request.
+- **Not built**: 4.1's tiles and pandas, 4.2–4.7 (lines, going to an
+  agent, the halo); the mini form's agents; Settings → Agents (6.16,
+  #450), where a declined tool is turned back on; `CLAUDE_CONFIG_DIR`
+  (Claude Code's other settings directory); writing Codex's hooks into a
+  `hooks.json` the user already has (Codex warns when a layer has both);
+  telling the agent apart from its terminal's other windows when one
+  process serves them all; names for screen readers (§11).

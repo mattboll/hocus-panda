@@ -126,6 +126,22 @@ first (`cargo build -p hocus-shell`, as CI does). They skip without it,
 and fail when it is older than its sources. The bar's base:
 docs/design/bar.md, "As built".
 
+Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
+docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`
+which Claude Code's and Codex's hooks run once plugged in from the bar.
+It writes to the compositor's control socket, `<socket>.control`
+(`HOCUS_SOCKET` for the programs it starts); `--socket PATH` names one:
+
+```sh
+target/debug/hocus --socket <runtime dir>/hocus-0.control agent build working
+```
+
+The tools are looked for, and plugged in, in the compositor's `HOME`
+(their settings), `PATH` (their programs) and `XDG_CONFIG_HOME` (herdr):
+next to a live session, give the nested compositor a fresh `HOME`, or
+plugging in writes into your real `~/.claude/settings.json`. Tests give
+`Config::agent_places` a home of their own (`tests/agents.rs`).
+
 The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 (QEMU with KVM; the base image is cached in
 `$XDG_CACHE_HOME/hocuspanda-vm`):
@@ -148,7 +164,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex
