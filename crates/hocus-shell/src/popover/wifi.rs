@@ -781,7 +781,7 @@ impl Panel {
                 redraw
             }
             mouse::Event::WheelScrolled { delta } if in_list => {
-                let by = state.wheel.down(delta, NOTCH);
+                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
                 let most = layout.most_scroll();
                 ui(|ui| ui.scroll = (ui.scroll + by).clamp(0.0, most));
                 // What is under the pointer now.

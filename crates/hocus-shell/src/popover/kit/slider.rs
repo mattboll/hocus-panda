@@ -1,5 +1,10 @@
 //! Sliders, and the wheel's notches.
 
+use std::{
+    collections::HashMap,
+    sync::{Mutex, PoisonError},
+};
+
 use iced::{
     Color, Point, Rectangle, Size, mouse,
     widget::canvas::{self, Frame, Path, gradient},
@@ -93,8 +98,58 @@ pub(crate) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Colo
     f.fill(&Path::circle(centre, size / 2.0), TEXT);
 }
 
-/// The wheel: a mouse's notch comes as lines, then as the same scrolling
-/// in pixels, which count for nothing; a touchpad sends pixels.
+/// The bars' screens' scales, by screen, as iced says them.
+static SCALES: Mutex<Option<HashMap<String, f32>>> = Mutex::new(None);
+
+/// Bar `bar`'s screen's scale is now `scale`.
+pub(crate) fn set_scale(bar: &str, scale: f32) {
+    SCALES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_default()
+        .insert(bar.to_owned(), scale);
+}
+
+pub(crate) fn forget_scale(bar: &str) {
+    if let Some(scales) = SCALES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
+    {
+        scales.remove(bar);
+    }
+}
+
+/// The scale of bar `bar`'s screen, which all its surfaces share: 1 until
+/// it is known.
+pub(crate) fn scale(bar: &str) -> f32 {
+    SCALES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(|scales| scales.get(bar).copied())
+        .unwrap_or(1.0)
+}
+
+/// The scale of the open popover's bar's screen.
+pub(crate) fn popover_scale() -> f32 {
+    crate::popover::with(|c| c.open_on().map(|(bar, _)| scale(bar))).unwrap_or(1.0)
+}
+
+/// The notches of a wheel's lines `y`, on a surface at `scale`:
+/// iced_layershell hands them multiplied by it. At least one when it
+/// moved, should the scale be out of date.
+fn lines(y: f32, scale: f32) -> i32 {
+    if y == 0.0 {
+        return 0;
+    }
+    let notches = (y.abs() / scale.max(0.25)).round().max(1.0);
+    (notches * y.signum()) as i32
+}
+
+/// The wheel: a mouse's notches come as lines (a fast spin gives several
+/// at once), then as the same scrolling in pixels, which count for
+/// nothing; a touchpad sends pixels.
 #[derive(Debug, Default)]
 pub(crate) struct Wheel {
     after_notch: bool,
@@ -106,13 +161,14 @@ pub(crate) struct Wheel {
 const NOTCH: f32 = 15.0;
 
 impl Wheel {
-    /// A scroll as notches, up positive: a touchpad's pixels add up.
-    pub(crate) fn notches(&mut self, delta: &mouse::ScrollDelta) -> i32 {
+    /// A scroll on a surface at `scale` as notches, up positive: a
+    /// touchpad's pixels add up.
+    pub(crate) fn notches(&mut self, delta: &mouse::ScrollDelta, scale: f32) -> i32 {
         match delta {
             mouse::ScrollDelta::Lines { y, .. } => {
                 self.after_notch = true;
                 self.pixels = 0.0;
-                y.signum() as i32
+                lines(*y, scale)
             }
             mouse::ScrollDelta::Pixels { .. } if self.after_notch => {
                 self.after_notch = false;
@@ -127,12 +183,13 @@ impl Wheel {
         }
     }
 
-    /// A scroll as pixels down a list, `notch` px a notch.
-    pub(crate) fn down(&mut self, delta: &mouse::ScrollDelta, notch: f32) -> f32 {
+    /// A scroll on a surface at `scale` as pixels down a list, `notch` px
+    /// a notch.
+    pub(crate) fn down(&mut self, delta: &mouse::ScrollDelta, notch: f32, scale: f32) -> f32 {
         match delta {
             mouse::ScrollDelta::Lines { y, .. } => {
                 self.after_notch = true;
-                -y.signum() * notch
+                -(lines(*y, scale) as f32) * notch
             }
             mouse::ScrollDelta::Pixels { .. } if self.after_notch => {
                 self.after_notch = false;
@@ -140,5 +197,30 @@ impl Wheel {
             }
             mouse::ScrollDelta::Pixels { y, .. } => -y,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wheels_lines_count_each_notch_at_any_scale() {
+        let lines = |y: f32, scale: f32| {
+            Wheel::default().notches(&mouse::ScrollDelta::Lines { x: 0.0, y }, scale)
+        };
+        assert_eq!(lines(1.0, 1.0), 1);
+        // A fast spin: several notches in one event.
+        assert_eq!(lines(-2.0, 1.0), -2);
+        assert_eq!(lines(3.0, 1.0), 3);
+        // As iced_layershell hands them on a scaled screen.
+        assert_eq!(lines(2.0, 2.0), 1);
+        assert_eq!(lines(-3.0, 1.5), -2);
+        // A scale out of date: still a notch.
+        assert_eq!(lines(1.0, 2.0), 1);
+        assert_eq!(lines(0.0, 1.0), 0);
+        let mut wheel = Wheel::default();
+        let down = wheel.down(&mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, 10.0, 1.0);
+        assert_eq!(down, 20.0);
     }
 }

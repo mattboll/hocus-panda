@@ -516,7 +516,7 @@ impl Panel {
                 if !at.is_some_and(|at| row.contains(at)) {
                     return None;
                 }
-                let notches = state.wheel.notches(delta);
+                let notches = state.wheel.notches(delta, kit::popover_scale());
                 if notches != 0 {
                     let light =
                         (state.light() + notches as f32 * STEP).clamp(BRIGHTNESS_FLOOR, 100.0);
