@@ -1,10 +1,18 @@
 //! The agents' group's surface, under the clock, as the approved 4.0 and
-//! 4.1 mockups draw it (bar.md §4 group 3): the full form only.
+//! 4.1 mockups draw it (bar.md §4 group 3), and in the mini form its item
+//! (§5, 4.7).
 //!
 //! Its top 14 px under the clock's group, 100 px under the bar's top; as
 //! tall as what the group shows, and one pixel, taking no pointer, when it
-//! shows nothing (hidden, or the mini form). A change of what it shows
-//! resizes it (layer-shell actions) and draws it alone.
+//! shows nothing (hidden). In the mini form it is the item's, 68 px under
+//! the bar's top; while the form switches, it holds both. A change of what
+//! it shows resizes it (layer-shell actions) and draws it alone.
+//!
+//! The mini item (4.7, variant A): her head, her ear in the moment's
+//! colour, a badge with how many agents need the user (none at 0), and how
+//! many work under her; hovering it 150 ms or a click opens her briefing,
+//! with who works and who rests. On the card's place she is alone with a
+//! "+", and opens Sources.
 //!
 //! The secretary heads it (4.6): her head, her ear in the moment's colour,
 //! "AGENTS" and the total over her line; her row tinted amber or orange
@@ -45,10 +53,11 @@ use iced::{
 };
 
 use super::{
-    AGENT_NAME, AGENT_ROW, AGENT_WORD, BUTTON, BUTTON_TEXT, CARD_RADIUS, FOLLOWED, HEAD, HEAD_GAP,
-    HEAD_TOP, HEADER, HEADER_RADIUS, IDLE, INTRO, INTRO_LINE, LABEL, LINK, Layout, Look, MARK,
-    MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MORE_TEXT, MOST_ROWS, Mood, NAME, PANDA,
-    PANDA_GAP, ROW_PAD, ROW_RADIUS, Row, SAYS, Words,
+    AGENT_NAME, AGENT_ROW, AGENT_WORD, BADGE, BADGE_TEXT, BUTTON, BUTTON_TEXT, CARD_RADIUS,
+    FOLLOWED, HEAD, HEAD_GAP, HEAD_TOP, HEADER, HEADER_RADIUS, IDLE, INTRO, INTRO_LINE, LABEL,
+    LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM, MINI_RADIUS,
+    MINI_TEXT, MINI_TOP, MORE_TEXT, MOST_ROWS, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD, ROW_RADIUS,
+    Row, SAYS, Words,
 };
 use crate::{
     clock::motion::bezier,
@@ -58,7 +67,7 @@ use crate::{
 
 /// The surfaces' widths: the bar inside its rim.
 const FULL_WIDTH: u32 = 194;
-const MINI_WIDTH: u32 = 54;
+const MINI_SURFACE: u32 = 54;
 /// Around the group: the keyboard's ring, 2 px out and 3 px wide.
 const ROOM: f32 = 5.0;
 /// The group's top under the bar's: 14 px of padding, the clock's 72 px
@@ -95,6 +104,12 @@ const ROW_OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
 /// Her line's colours: `text.dim` calm, then the rows' words'.
 const SAYS_WAITING: Color = rgb(0xF5C46E);
 const SAYS_STUCK: Color = rgb(0xF7A77A);
+/// The mini item (4.7): its badge's ring, 2 px in the bar's colour, and its
+/// number's ink; "au travail" under how many work.
+const BADGE_RING: f32 = 2.0;
+const BADGE_RING_COLOUR: Color = Color::from_rgba8(14, 17, 28, 0.95);
+const BADGE_INK: Color = rgb(0x1C1406);
+const AT_WORK: Color = rgb(0x7C8698);
 /// Her ear's amber, its rings' colour.
 const EAR_WAITING: Color = rgb(0xF5B44A);
 /// When someone starts waiting, the mockup's keyframes in 1.2 s instead
@@ -124,8 +139,22 @@ struct Place {
     id: window::Id,
     form: Form,
     switching: bool,
-    asked: Option<(u32, u32)>,
+    /// Its size and margins as last asked for: what it draws for.
+    asked: Option<((u32, u32), Margin)>,
     input: Option<bool>,
+}
+
+/// A layer surface's margins: top, right, bottom, left.
+type Margin = (i32, i32, i32, i32);
+
+/// Bar `bar`'s surface's top under the bar's, as last asked for.
+fn top_of(bar: &str) -> f32 {
+    places(|places| {
+        places
+            .get(bar)
+            .and_then(|p| p.asked)
+            .map_or(TOP - ROOM, |(_, margin)| (margin.0 - EDGE) as f32)
+    })
 }
 
 static PLACES: Mutex<Option<HashMap<String, Place>>> = Mutex::new(None);
@@ -156,31 +185,50 @@ fn group_height() -> f32 {
     layout().map_or(0.0, |l| l.height)
 }
 
-/// The surface's size in `form` (the full one while switching).
-fn size_of(form: Form, switching: bool) -> (u32, u32) {
-    let height = group_height();
+/// The surface's top under the bar's in `form`: the group's, or the mini
+/// item's (4.7), less the ring's room; the mini item's while the form
+/// switches, the surface then holding both.
+fn surface_top(form: Form, switching: bool) -> f32 {
     match (switching, form) {
-        _ if height <= 0.0 => (
+        (false, Form::Full) => TOP - ROOM,
+        _ => MINI_TOP - ROOM,
+    }
+}
+
+/// The surface's size in `form` (the full one's width while switching, as
+/// tall as both forms' items).
+fn size_of(form: Form, switching: bool) -> (u32, u32) {
+    let laid = layout();
+    let full = laid.as_ref().map_or(0.0, |l| l.height);
+    let mini = laid
+        .as_ref()
+        .and_then(|l| l.mini.as_ref())
+        .map_or(0.0, |m| m.height);
+    let tall = |height: f32| (height + 2.0 * ROOM).ceil() as u32;
+    match (switching, form) {
+        _ if full <= 0.0 => (
             if form == Form::Mini && !switching {
-                MINI_WIDTH
+                MINI_SURFACE
             } else {
                 FULL_WIDTH
             },
             1,
         ),
-        (false, Form::Mini) => (MINI_WIDTH, 1),
-        _ => (FULL_WIDTH, (height + 2.0 * ROOM).ceil() as u32),
+        (false, Form::Mini) => (MINI_SURFACE, tall(mini)),
+        (false, Form::Full) => (FULL_WIDTH, tall(full)),
+        (true, _) => (FULL_WIDTH, tall((TOP - MINI_TOP + full).max(mini))),
     }
 }
 
-/// Its layer-shell margins: under the clock.
-pub fn margin() -> (i32, i32, i32, i32) {
-    (EDGE + (TOP - ROOM) as i32, EDGE + 1, 0, 0)
+/// Its layer-shell margins in `form`: under the clock.
+fn margin(form: Form, switching: bool) -> (i32, i32, i32, i32) {
+    (EDGE + surface_top(form, switching) as i32, EDGE + 1, 0, 0)
 }
 
 /// Bar `bar`'s surface `id` opens in `form`: its size and margins.
 pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, i32, i32)) {
     let size = size_of(form, false);
+    let margin = margin(form, false);
     places(|places| {
         places.insert(
             bar.to_owned(),
@@ -188,12 +236,12 @@ pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, 
                 id,
                 form,
                 switching: false,
-                asked: Some(size),
+                asked: Some((size, margin)),
                 input: None,
             },
         );
     });
-    (size, margin())
+    (size, margin)
 }
 
 pub fn forget(bar: &str) {
@@ -202,11 +250,12 @@ pub fn forget(bar: &str) {
 
 fn refit(place: &mut Place) -> Option<crate::network::draw::Placed> {
     let size = size_of(place.form, place.switching);
-    if place.asked == Some(size) {
+    let margin = margin(place.form, place.switching);
+    if place.asked == Some((size, margin)) {
         return None;
     }
-    place.asked = Some(size);
-    Some((place.id, size, margin()))
+    place.asked = Some((size, margin));
+    Some((place.id, size, margin))
 }
 
 /// Bar `bar` in `form`, switching or not: the surface's new size, if it
@@ -593,7 +642,9 @@ impl<Message> canvas::Program<Message> for Group {
                 if STALE.swap(false, std::sync::atomic::Ordering::Relaxed) {
                     laid_out(super::lay_out());
                 }
-                let shows = self.full() && group_height() > 0.0;
+                // The full group, or the mini item (always there with the
+                // group).
+                let shows = self.alone().is_some() && group_height() > 0.0;
                 takes_pointer(&self.bar, shows);
                 if let Some(layout) = layout() {
                     let said = super::said();
@@ -662,15 +713,20 @@ impl<Message> canvas::Program<Message> for Group {
         };
         let origin = self.origin(size);
         for &(form, alpha) in &self.forms {
-            if form == Form::Full {
-                self.secretary(&mut frame, &layout, origin, state, alpha);
-                self.group(&mut frame, &layout, origin, state.hover, alpha);
-                self.rows(&mut frame, &layout, origin, state, alpha);
+            match form {
+                Form::Full => {
+                    self.secretary(&mut frame, &layout, origin, state, alpha);
+                    self.group(&mut frame, &layout, origin, state.hover, alpha);
+                    self.rows(&mut frame, &layout, origin, state, alpha);
+                }
+                Form::Mini => self.mini(&mut frame, &layout, self.mini_origin(size), state, alpha),
             }
         }
+        let mini = self.alone() == Some(Form::Mini);
         for (item, rect) in items {
             if popover::with(|c| c.focused(&self.bar, item)) {
                 let radius = match item {
+                    _ if mini => MINI_RADIUS,
                     Item::Plug(_) => BUTTON / 2.0,
                     Item::Agent(_) => ROW_RADIUS,
                     Item::Secretary => HEADER_RADIUS,
@@ -715,33 +771,63 @@ fn log_items(items: &[(Item, Rectangle)]) {
     }
 }
 
+/// The mini form's item's popover: her briefing; Sources on the card,
+/// where it proposes to plug the tools found in.
+fn mini_item(layout: &Layout) -> Item {
+    match layout.shows {
+        super::Shows::Card(_) => Item::Sources,
+        _ => Item::Secretary,
+    }
+}
+
 /// A text from `x` with its line centred on `middle`.
 fn said(text: &str, at: Point, size: f32, colour: Color, align: Alignment) -> canvas::Text {
     kit::text(text.to_owned(), at, size, colour, align)
 }
 
 impl Group {
-    /// Whether the full form shows alone (not switching): the group takes
-    /// the pointer.
-    fn full(&self) -> bool {
-        matches!(self.forms.as_slice(), [(Form::Full, _)])
+    /// The form that shows alone (not switching): its items take the
+    /// pointer.
+    fn alone(&self) -> Option<Form> {
+        match self.forms.as_slice() {
+            [(form, _)] => Some(*form),
+            _ => None,
+        }
     }
 
     /// The group's top left on the surface.
     fn origin(&self, size: Size) -> Point {
         let left = size.width + 2.0 - self.bar_width;
-        Point::new(left + SIDE, ROOM)
+        Point::new(left + SIDE, TOP - top_of(&self.bar))
     }
 
-    /// The group's items and where they are on the surface, in the full
-    /// form alone.
+    /// The mini item's top left on the surface: its button centred in the
+    /// bar as wide as it is drawn now.
+    fn mini_origin(&self, size: Size) -> Point {
+        let centre = size.width + 1.0 - self.bar_width / 2.0;
+        Point::new(centre - MINI_ITEM / 2.0, MINI_TOP - top_of(&self.bar))
+    }
+
+    /// The group's items and where they are on the surface, in a form
+    /// alone: the mini form's is its item (4.7), her briefing's, or Sources'
+    /// on the card.
     fn items(&self, size: Size) -> Vec<(Item, Rectangle)> {
-        if !self.full() {
+        let Some(form) = self.alone() else {
             return Vec::new();
-        }
+        };
         let Some(layout) = layout().filter(|l| l.height > 0.0) else {
             return Vec::new();
         };
+        if form == Form::Mini {
+            let Some(mini) = &layout.mini else {
+                return Vec::new();
+            };
+            if size.height + 0.5 < mini.height + 2.0 * ROOM {
+                return Vec::new();
+            }
+            let rect = Rectangle::new(self.mini_origin(size), Size::new(MINI_ITEM, mini.height));
+            return vec![(mini_item(&layout), rect)];
+        }
         // Not before the surface took the group's new height: a press there
         // would reach what is under it (the resize is the compositor's to
         // apply, a frame or more later).
@@ -766,7 +852,86 @@ impl Group {
 
     /// A point of the surface (`size`) in the bar's frame.
     fn in_bar(&self, at: Point, size: Size) -> Point {
-        Point::new(at.x - size.width - 1.0, TOP - ROOM + at.y)
+        Point::new(at.x - size.width - 1.0, top_of(&self.bar) + at.y)
+    }
+
+    /// The mini form's item (4.7) from `o`: lit under the pointer and while
+    /// its popover is open; her head (hopping, her rings going out of her
+    /// ear, while she radiates), the badge at its bottom right, and how
+    /// many work under her.
+    fn mini(&self, f: &mut Frame, layout: &Layout, o: Point, state: &State, alpha: f32) {
+        let Some(mini) = &layout.mini else {
+            return;
+        };
+        let item = mini_item(layout);
+        let rect = Rectangle::new(o, Size::new(MINI_ITEM, mini.height));
+        let open = popover::with(|c| c.shows(&self.bar, item));
+        let lit = match (open, state.hover == Some(item)) {
+            (true, _) => Some(ROW_OPEN),
+            (false, true) => Some(ROW_HOVER),
+            (false, false) => None,
+        };
+        if let Some(lit) = lit {
+            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit, alpha));
+        }
+        let now = state.now.unwrap_or_else(Instant::now);
+        let (hop, rings) = state.radiating.map_or((0.0, None), |since| {
+            secretary_motion(now.saturating_duration_since(since))
+        });
+        let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
+        let head = at(mini.head);
+        let head = Rectangle::new(Point::new(head.x, head.y + hop), head.size());
+        f.draw_svg(
+            head,
+            svg::Svg::new(secretary(layout.mood).clone()).opacity(alpha),
+        );
+        if let Some(share) = rings {
+            ear_rings(f, head, share, alpha);
+        }
+        if let Some(badge) = &mini.badge {
+            let rect = at(badge.rect);
+            let rect = Rectangle::new(Point::new(rect.x, rect.y + hop), rect.size());
+            let ringed = Rectangle::new(
+                Point::new(rect.x - BADGE_RING, rect.y - BADGE_RING),
+                Size::new(
+                    rect.width + 2.0 * BADGE_RING,
+                    rect.height + 2.0 * BADGE_RING,
+                ),
+            );
+            f.fill(
+                &kit::rounded(ringed, BADGE / 2.0 + BADGE_RING),
+                faded(BADGE_RING_COLOUR, alpha),
+            );
+            f.fill(&kit::rounded(rect, BADGE / 2.0), faded(badge.colour, alpha));
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                said(
+                    &badge.text,
+                    rect.center(),
+                    BADGE_TEXT,
+                    faded(BADGE_INK, alpha),
+                    Alignment::Center,
+                ),
+            ));
+        }
+        if let Some((count, first, second)) = &mini.working {
+            let x = o.x + MINI_ITEM / 2.0;
+            for (text, middle, colour) in [
+                (count.as_str(), *first, DIM),
+                (self.words.at_work(), *second, AT_WORK),
+            ] {
+                f.fill_text(kit::text_in(
+                    kit::MANROPE_SEMIBOLD,
+                    said(
+                        text,
+                        Point::new(x, o.y + middle),
+                        MINI_TEXT,
+                        faded(colour, alpha),
+                        Alignment::Center,
+                    ),
+                ));
+            }
+        }
     }
 
     fn group(&self, f: &mut Frame, layout: &Layout, o: Point, hover: Option<Item>, alpha: f32) {

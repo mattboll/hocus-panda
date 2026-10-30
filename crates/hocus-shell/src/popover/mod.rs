@@ -113,11 +113,13 @@ impl Item {
     }
 
     /// Whether hovering it opens its popover, in `form`: a desktop's list in
-    /// both, the others in the mini form.
+    /// both, the others in the mini form; the agents' mini item (4.7), her
+    /// briefing or Sources on the card, as the others.
     fn hovers(self, form: Form) -> bool {
         match self {
             Self::Desktop(_) => true,
-            Self::Keyboard | Self::Agent(_) | Self::Secretary => false,
+            Self::Keyboard | Self::Agent(_) => false,
+            Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
             _ => form == Form::Mini,
         }
@@ -133,9 +135,9 @@ impl Item {
         }
     }
 
-    /// Its popover's height on `bar`, logical pixels, for what it shows
-    /// now: as it opens (`opening`), or after a change.
-    fn height(self, bar: &str, opening: bool) -> u32 {
+    /// Its popover's height on `bar`, in `form`, logical pixels, for what
+    /// it shows now: as it opens (`opening`), or after a change.
+    fn height(self, bar: &str, form: Form, opening: bool) -> u32 {
         match self {
             Self::Sound => sound::layout(opening).height(),
             Self::Wifi => wifi::height(),
@@ -145,15 +147,16 @@ impl Item {
             Self::Desktop(index) => desktop::height(bar, index),
             Self::Sources | Self::AnotherTool => agents::sources_height(),
             Self::Plug(tool) => agents::consent_height(tool),
-            Self::Secretary => briefing::height(),
+            Self::Secretary => briefing::height(form),
             Self::Keyboard | Self::Decline | Self::Agent(_) => 0,
         }
     }
 
     /// Whether its surface draws it lit while its popover shows: a tile's
-    /// look does not change (it is lit by the pointer already).
+    /// look does not change (it is lit by the pointer already); Sources
+    /// lights the mini form's agents' item, which opens it on the card.
     fn lit_while_open(self) -> bool {
-        !matches!(self, Self::Desktop(_)) && !self.agents()
+        !matches!(self, Self::Desktop(_)) && (!self.agents() || self == Self::Sources)
     }
 
     /// Its popover opens: what it shows starts afresh.
@@ -551,6 +554,14 @@ impl Controller {
         }
     }
 
+    /// The form of the bar whose popover `id` is open.
+    pub fn form_of(&self, id: window::Id) -> Option<Form> {
+        match &self.phase {
+            Phase::Open(open) if open.surface == id => self.bars.get(&open.bar).map(|p| p.form),
+            _ => None,
+        }
+    }
+
     /// Whether `item` of `bar` has its popover open.
     pub fn shows(&self, bar: &str, item: Item) -> bool {
         matches!(&self.phase, Phase::Open(o) if o.bar == bar && o.item == item)
@@ -777,7 +788,7 @@ impl Controller {
             return;
         };
         item.opening();
-        let size = (item.width(), item.height(bar, true));
+        let size = (item.width(), item.height(bar, place.form, true));
         let rect = placed(place, self.anchor(bar, item, from), size, item.on_bottom());
         let margin = margins(place, rect);
         let surface = window::Id::unique();
@@ -815,10 +826,10 @@ impl Controller {
         let Phase::Open(open) = &mut self.phase else {
             return Vec::new();
         };
-        let height = open.item.height(&open.bar, false);
         let Some(place) = self.bars.get(&open.bar).copied() else {
             return Vec::new();
         };
+        let height = open.item.height(&open.bar, place.form, false);
         if open.rect.height.round() as u32 == height {
             return Vec::new();
         }

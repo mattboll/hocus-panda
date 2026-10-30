@@ -10,6 +10,9 @@
 //! - "BLOQUÉ": each agent stuck, since when, and why, from its failure's
 //!   message;
 //! - "À VOIR": each agent finished and not seen yet, and since when;
+//! - in the mini form, where it also opens by hovering her item (4.7):
+//!   "AU TRAVAIL", each agent working and since when, and "AU REPOS", each
+//!   agent resting;
 //! - the divider, how many work and rest, and "Sources", which opens the
 //!   Sources popover in its place.
 //!
@@ -25,7 +28,7 @@
 
 use std::time::Instant;
 
-use hocus_link::Note;
+use hocus_link::{Form, Note};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
@@ -90,6 +93,9 @@ const LINK_PAD: f32 = 6.0;
 const WAITING: Color = rgb(0xF5C46E);
 const STUCK: Color = rgb(0xF7A77A);
 const TO_SEE: Color = rgb(0x7EE0A0);
+/// The mini form's last two (4.7): `text.dim`, and the resting rows' word.
+const AT_WORK: Color = DIM;
+const RESTING: Color = rgb(0x6A7384);
 
 /// What can be clicked in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,21 +155,27 @@ fn minutes(now: u64, since: u64) -> u64 {
     now.saturating_sub(since) / 60_000_000
 }
 
-/// `brief` laid out at `now`, `measure` giving a text's width.
+/// `brief` laid out at `now` for a bar in `form`, `measure` giving a
+/// text's width: in the mini form, who works and who rests too (4.7).
 fn lay_out(
     brief: &Brief,
     words: Words,
     now: u64,
+    form: Form,
     mut measure: impl FnMut(&str, f32, iced::Font) -> f32,
 ) -> Laid {
     let mut y = BORDER + PAD_TOP + HEAD;
     let mut sections = Vec::new();
+    let mini = form == Form::Mini;
     for (look, entries) in [
         (Look::Waiting, &brief.waiting),
         (Look::Stuck, &brief.stuck),
         (Look::ToSee, &brief.to_see),
+        (Look::Working, &brief.working),
+        (Look::Resting, &brief.resting),
     ] {
-        if entries.is_empty() {
+        let shown = mini || !matches!(look, Look::Working | Look::Resting);
+        if entries.is_empty() || !shown {
             continue;
         }
         y += GAP;
@@ -217,14 +229,26 @@ fn line(
     top: f32,
     measure: &mut impl FnMut(&str, f32, iced::Font) -> f32,
 ) -> Line {
-    let when = words.since(minutes(now, entry.since), look == Look::ToSee);
-    let when_width = measure(&when, WHO, MANROPE);
+    // A resting agent's line says only its name.
+    let when = match look {
+        Look::Resting => String::new(),
+        _ => words.since(minutes(now, entry.since), look == Look::ToSee),
+    };
+    let when_width = match look {
+        Look::Resting => -WHEN_GAP,
+        _ => measure(&when, WHO, MANROPE),
+    };
     let who = kit::elide(&entry.name, ROOM - WHEN_GAP - when_width, |t| {
         measure(t, WHO, MANROPE_BOLD)
     });
     let when_x = LEFT + measure(&who, WHO, MANROPE_BOLD) + WHEN_GAP;
-    // A finished agent's line says only since when.
-    let note = entry.note.as_ref().filter(|_| look != Look::ToSee);
+    // Only a waiting or a stuck agent's line says what its tool said; a
+    // finished or a working one's says since when, a resting one's its
+    // name alone.
+    let note = entry
+        .note
+        .as_ref()
+        .filter(|_| matches!(look, Look::Waiting | Look::Stuck));
     let what = note.map(|note| kit::elide(&words.note(note), ROOM, |t| measure(t, WHAT, MANROPE)));
     let height =
         2.0 * LINE_PAD + WHO * LINE + what.as_ref().map_or(0.0, |_| WHAT_GAP + WHAT * LINE);
@@ -266,11 +290,14 @@ impl Laid {
                 let note = line.said.map_or(String::new(), |(kind, n)| {
                     format!(" ({kind}, {n} characters)")
                 });
+                let when = match line.when.as_str() {
+                    "" => String::new(),
+                    when => format!(" {when}"),
+                };
                 said.push(format!(
-                    "{} {} {}{note}",
+                    "{} {}{when}{note}",
                     words.section(section.look),
-                    line.who,
-                    line.when
+                    line.who
                 ));
             }
         }
@@ -279,11 +306,11 @@ impl Laid {
     }
 }
 
-/// Its height as it shows now.
-pub fn height() -> u32 {
+/// Its height as it shows now beside a bar in `form`.
+pub fn height(form: Form) -> u32 {
     let words = Words::new(Lang::of_messages());
     let brief = Brief::of(&agents::said().agents);
-    (lay_out(&brief, words, agents::now_us(), kit::measure).end + PAD_BOTTOM + BORDER).round()
+    (lay_out(&brief, words, agents::now_us(), form, kit::measure).end + PAD_BOTTOM + BORDER).round()
         as u32
 }
 
@@ -300,9 +327,10 @@ pub struct Panel {
 /// What the surface keeps between draws.
 #[derive(Debug, Default)]
 pub struct State {
-    /// The agents as last laid out, and the minute then.
+    /// The agents as last laid out, the minute and the bar's form then.
     said: agents::Said,
     minute: u64,
+    form: Option<Form>,
     laid: Option<Laid>,
     pointer: Pointer<Target>,
     focus: Option<Target>,
@@ -408,7 +436,9 @@ impl Panel {
             let colour = match section.look {
                 Look::Waiting => WAITING,
                 Look::Stuck => STUCK,
-                _ => TO_SEE,
+                Look::ToSee => TO_SEE,
+                Look::Working => AT_WORK,
+                Look::Resting => RESTING,
             };
             label(
                 f,
@@ -483,14 +513,22 @@ impl Panel {
         for pressed in kit::keys(self.id) {
             let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
-        if !super::with(|c| c.is_open(self.id)) {
-            return None;
-        }
+        let form = super::with(|c| c.form_of(self.id))?;
         let said = agents::said();
         let now = agents::now_us();
         let minute = now / 60_000_000;
-        if state.laid.is_none() || said != state.said || minute != state.minute {
-            let laid = lay_out(&Brief::of(&said.agents), self.words, now, kit::measure);
+        if state.laid.is_none()
+            || said != state.said
+            || minute != state.minute
+            || state.form != Some(form)
+        {
+            let laid = lay_out(
+                &Brief::of(&said.agents),
+                self.words,
+                now,
+                form,
+                kit::measure,
+            );
             if state.laid.as_ref() != Some(&laid) {
                 tracing::debug!(briefing = %laid.said(self.words), "the briefing shows it");
                 let items: Vec<String> = laid
@@ -503,6 +541,7 @@ impl Panel {
             state.laid = Some(laid);
             state.said = said;
             state.minute = minute;
+            state.form = Some(form);
             let targets: Vec<Target> = state.targets().into_iter().map(|(t, _)| t).collect();
             if state.focus.is_some_and(|f| !targets.contains(&f)) {
                 state.focus = None;
@@ -619,10 +658,10 @@ mod tests {
                 entry(2, "herdr-agent", None),
             ],
             to_see: vec![entry(3, "api", Some(Note::allow("x", "y")))],
-            working: 2,
+            working: vec![entry(4, "build", None), entry(5, "docs", None)],
             ..Brief::default()
         };
-        let laid = lay_out(&brief, words, 120_000_000, measure);
+        let laid = lay_out(&brief, words, 120_000_000, Form::Full, measure);
         let looks: Vec<Look> = laid.sections.iter().map(|s| s.look).collect();
         assert_eq!(looks, [Look::Waiting, Look::ToSee]);
         let [asks, bare] = &laid.sections[0].lines[..] else {
@@ -664,8 +703,57 @@ mod tests {
         );
         assert!(!said.contains("npm"), "{said}");
         // Nothing to say: the header, the divider and the footer.
-        let calm = lay_out(&Brief::default(), words, 0, measure);
+        let calm = lay_out(&Brief::default(), words, 0, Form::Full, measure);
         assert!(calm.sections.is_empty());
         assert_eq!(calm.rule, BORDER + PAD_TOP + HEAD + GAP + RULE_PAD);
+    }
+
+    #[test]
+    fn in_the_mini_form_it_lists_who_works_and_who_rests_last() {
+        const MIN: u64 = 60_000_000;
+        let measure = |t: &str, size: f32, _font: iced::Font| t.chars().count() as f32 * size * 0.5;
+        let words = Words::new(Lang::English);
+        let brief = Brief {
+            waiting: vec![entry(
+                1,
+                "site-web",
+                Some(Note::allow("Bash", "npm install")),
+            )],
+            working: vec![entry(2, "build", Note::says("Running the tests"))],
+            resting: vec![entry(3, "notes", Note::says("Done"))],
+            ..Brief::default()
+        };
+        let looks = |laid: &Laid| laid.sections.iter().map(|s| s.look).collect::<Vec<_>>();
+        // The full form's briefing counts them in its footer only.
+        let full = lay_out(&brief, words, 8 * MIN, Form::Full, measure);
+        assert_eq!(looks(&full), [Look::Waiting]);
+        let mini = lay_out(&brief, words, 8 * MIN, Form::Mini, measure);
+        assert_eq!(looks(&mini), [Look::Waiting, Look::Working, Look::Resting]);
+        assert_eq!(words.section(Look::Working), "AT WORK");
+        assert_eq!(Words::new(Lang::French).section(Look::Resting), "AU REPOS");
+        // Who works and since when; who rests, its name alone; neither
+        // says what its tool said.
+        let working = &mini.sections[1].lines[0];
+        assert_eq!(
+            (working.when.as_str(), working.what.as_deref()),
+            ("· 8\u{a0}min", None)
+        );
+        let resting = &mini.sections[2].lines[0];
+        assert_eq!((resting.when.as_str(), resting.what.as_deref()), ("", None));
+        assert_eq!(resting.rect.height, working.rect.height);
+        // Each line goes to its agent; "Sources" last; the footer as in
+        // the full form.
+        let targets: Vec<Target> = mini.targets().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(
+            targets,
+            [
+                Target::Agent(1),
+                Target::Agent(2),
+                Target::Agent(3),
+                Target::Sources
+            ]
+        );
+        assert_eq!(mini.footer, full.footer);
+        assert!(mini.end > full.end);
     }
 }

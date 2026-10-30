@@ -6,7 +6,8 @@
 //! most five and a line for the rest. Before any tool is plugged in, the card that proposes to plug in
 //! the tools found; with the tools followed and no agent, "Aucun agent en
 //! cours.". With no tool followed and none to propose, it does not show at
-//! all (variant B).
+//! all (variant B). In the mini form, an item under the clock holds her
+//! head, a badge with how many need the user and how many work (4.7).
 //!
 //! The compositor owns the agents and the tools: it says which tools are
 //! there and what each is (`agent-tools`), and which agents run
@@ -223,14 +224,15 @@ pub enum Mood {
 
 /// What the secretary knows (4.6): who waits (the longest first), who is
 /// stuck, who finished and is not seen yet, each with since when and what
-/// its tool said; how many work and rest.
+/// its tool said; who works and who rests (the mini form's briefing lists
+/// them, 4.7; the full form's counts them).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Brief {
     pub waiting: Vec<Entry>,
     pub stuck: Vec<Entry>,
     pub to_see: Vec<Entry>,
-    pub working: usize,
-    pub resting: usize,
+    pub working: Vec<Entry>,
+    pub resting: Vec<Entry>,
 }
 
 /// An agent in the briefing.
@@ -264,8 +266,8 @@ impl Brief {
                 Look::Waiting => brief.waiting.push(entry()),
                 Look::Stuck => brief.stuck.push(entry()),
                 Look::ToSee => brief.to_see.push(entry()),
-                Look::Working => brief.working += 1,
-                Look::Resting => brief.resting += 1,
+                Look::Working => brief.working.push(entry()),
+                Look::Resting => brief.resting.push(entry()),
             }
         }
         brief
@@ -277,6 +279,12 @@ impl Brief {
             (true, false) => Mood::Stuck,
             (true, true) => Mood::Calm,
         }
+    }
+
+    /// How many agents need the user (waiting, stuck, to see): the mini
+    /// form's badge (4.7).
+    pub fn needs(&self) -> usize {
+        self.waiting.len() + self.stuck.len() + self.to_see.len()
     }
 }
 
@@ -330,6 +338,7 @@ fn change(with: impl FnOnce(&mut Said)) {
         shows = %words.said(&shows),
         secretary = %words.line(&brief),
         mood = ?brief.mood(),
+        mini = %words.mini(&shows, &brief),
         agents = after.agents.len(),
         "the agents group shows it"
     );
@@ -436,7 +445,7 @@ impl Words {
             Mood::Waiting => names(&brief.waiting),
             Mood::Stuck => names(&brief.stuck),
             Mood::Calm => {
-                let working = self.working(brief.working);
+                let working = self.working(brief.working.len());
                 match brief.to_see.len() {
                     0 => working,
                     n if self.fr => format!("{working} · {n} à voir"),
@@ -457,13 +466,13 @@ impl Words {
 
     /// The briefing's footer: "3 au travail · 1 au repos".
     pub fn footer(self, brief: &Brief) -> String {
-        let resting = brief.resting;
+        let resting = brief.resting.len();
         let resting = if self.fr {
             format!("{resting} au repos")
         } else {
             format!("{resting} resting")
         };
-        format!("{} · {resting}", self.working(brief.working))
+        format!("{} · {resting}", self.working(brief.working.len()))
     }
 
     /// The briefing's title.
@@ -471,13 +480,20 @@ impl Words {
         self.pick("Le point", "Briefing")
     }
 
-    /// Its sections' labels.
+    /// Its sections' labels; the last two in the mini form's (4.7).
     pub fn section(self, look: Look) -> &'static str {
         match look {
             Look::Waiting => self.pick("T'ATTEND", "WAITING"),
             Look::Stuck => self.pick("BLOQUÉ", "STUCK"),
-            _ => self.pick("À VOIR", "TO SEE"),
+            Look::ToSee => self.pick("À VOIR", "TO SEE"),
+            Look::Working => self.pick("AU TRAVAIL", "AT WORK"),
+            Look::Resting => self.pick("AU REPOS", "RESTING"),
         }
+    }
+
+    /// The mini form's item, under how many work (4.7).
+    pub fn at_work(self) -> &'static str {
+        self.pick("au travail", "at work")
     }
 
     /// Since when, after a name: "· 2 min" (waiting, stuck), "· il y a
@@ -552,6 +568,22 @@ impl Words {
             format!("Suivis\u{a0}: {list}.")
         } else {
             format!("Following: {list}.")
+        }
+    }
+
+    /// What the mini form's item says (4.7), for the log: its badge and
+    /// its colour, and how many work.
+    pub fn mini(self, shows: &Shows, brief: &Brief) -> String {
+        match shows {
+            Shows::Hidden => "nothing".to_owned(),
+            Shows::Card(_) => "badge + green".to_owned(),
+            Shows::Idle(_) | Shows::Lines(_) => {
+                let working = format!("{} {}", brief.working.len(), self.at_work());
+                match brief.needs() {
+                    0 => working,
+                    n => format!("badge {n} {} · {working}", badge_colour(brief).1),
+                }
+            }
         }
     }
 
@@ -798,6 +830,8 @@ pub struct Layout {
     pub rows: Vec<Row>,
     /// The line for the rest, and its middle.
     pub more: Option<(String, f32)>,
+    /// The mini form's item (4.7): none when the group is hidden.
+    pub mini: Option<Mini>,
 }
 
 /// An agent's row, laid out: its name cut to its room, the word on its
@@ -868,6 +902,11 @@ pub fn layout(
         total: None,
         rows: Vec::new(),
         more: None,
+        mini: match shows {
+            Shows::Hidden => None,
+            Shows::Card(_) => Some(Mini::card(&mut measure)),
+            Shows::Idle(_) | Shows::Lines(_) => Some(Mini::of(brief, &mut measure)),
+        },
     };
     match shows {
         Shows::Hidden => {}
@@ -981,6 +1020,125 @@ pub fn layout(
         }
     }
     out
+}
+
+// --- The mini form's item (4.7, variant A: the secretary), at ×1 ---------------
+
+/// Its top under the bar's: 12 px of padding, the clock's two lines of
+/// 19 px at 1.1 (41.8 px), and the 14 px between the mini form's items.
+pub const MINI_TOP: f32 = 68.0;
+/// A button 48 px wide, radius 10, 4 px in above and 6 px under: her 40 px
+/// head, 4 px over how many work.
+pub const MINI_ITEM: f32 = 48.0;
+pub const MINI_RADIUS: f32 = 10.0;
+pub const MINI_PAD_TOP: f32 = 4.0;
+const MINI_PAD_BOTTOM: f32 = 6.0;
+const MINI_GAP: f32 = 4.0;
+/// "3" over "au travail": Manrope 600, 11 px, line height 1.25.
+pub const MINI_TEXT: f32 = 11.0;
+const MINI_LINE: f32 = 1.25;
+/// The badge, at her head's bottom right (6 px past its right, 3 px under
+/// its bottom): 16 px high and at least as wide, 4 px in, radius 8; its
+/// number Manrope 700, 10 px; a 2 px ring in the bar's colour.
+pub const BADGE: f32 = 16.0;
+const BADGE_OUT: (f32, f32) = (6.0, 3.0);
+const BADGE_PAD: f32 = 4.0;
+pub const BADGE_TEXT: f32 = 10.0;
+/// Its colours: amber when one waits, else orange when one is stuck, else
+/// green (to see, and the card's "+").
+const BADGE_WAITING: Color = rgb(0xF5B44A);
+const BADGE_STUCK: Color = rgb(0xF2945B);
+const BADGE_GREEN: Color = rgb(0x7EE0A0);
+
+/// The badge's colour for `brief`, and its name for the log.
+fn badge_colour(brief: &Brief) -> (Color, &'static str) {
+    match brief.mood() {
+        Mood::Waiting => (BADGE_WAITING, "amber"),
+        Mood::Stuck => (BADGE_STUCK, "orange"),
+        Mood::Calm => (BADGE_GREEN, "green"),
+    }
+}
+
+/// The mini form's item, laid out from its top left (its button's, 48 px
+/// wide).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mini {
+    pub height: f32,
+    /// Her head.
+    pub head: Rectangle,
+    pub badge: Option<Badge>,
+    /// How many work, and its two lines' middles; none on the card, where
+    /// she is alone.
+    pub working: Option<(String, f32, f32)>,
+}
+
+/// The mini item's badge: what it says, its colour, where it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Badge {
+    pub text: String,
+    pub colour: Color,
+    pub rect: Rectangle,
+}
+
+impl Badge {
+    fn new(
+        text: String,
+        colour: Color,
+        head: Rectangle,
+        measure: &mut impl FnMut(&str, f32, Font) -> f32,
+    ) -> Self {
+        let width = (measure(&text, BADGE_TEXT, MANROPE_BOLD) + 2.0 * BADGE_PAD).max(BADGE);
+        let right = head.x + head.width + BADGE_OUT.0;
+        let bottom = head.y + head.height + BADGE_OUT.1;
+        Self {
+            text,
+            colour,
+            rect: Rectangle::new(
+                Point::new(right - width, bottom - BADGE),
+                Size::new(width, BADGE),
+            ),
+        }
+    }
+}
+
+impl Mini {
+    fn head() -> Rectangle {
+        Rectangle::new(
+            Point::new((MINI_ITEM - HEAD) / 2.0, MINI_PAD_TOP),
+            Size::new(HEAD, HEAD),
+        )
+    }
+
+    /// Agents followed: her head, the badge with how many need the user
+    /// (none at 0), and how many work.
+    fn of(brief: &Brief, measure: &mut impl FnMut(&str, f32, Font) -> f32) -> Self {
+        let head = Self::head();
+        let needs = brief.needs();
+        let (colour, _) = badge_colour(brief);
+        let line = MINI_TEXT * MINI_LINE;
+        let first = head.y + head.height + MINI_GAP;
+        Self {
+            height: first + 2.0 * line + MINI_PAD_BOTTOM,
+            head,
+            badge: (needs > 0).then(|| Badge::new(needs.to_string(), colour, head, measure)),
+            working: Some((
+                brief.working.len().to_string(),
+                first + line / 2.0,
+                first + line * 1.5,
+            )),
+        }
+    }
+
+    /// Tools to plug in (the card's place): she is alone, with a "+".
+    fn card(measure: &mut impl FnMut(&str, f32, Font) -> f32) -> Self {
+        let head = Self::head();
+        Self {
+            height: head.y + head.height + MINI_PAD_BOTTOM,
+            head,
+            badge: Some(Badge::new("+".to_owned(), BADGE_GREEN, head, measure)),
+            working: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1264,5 +1422,71 @@ mod tests {
         };
         assert_eq!(fr.word(&working(12)), "12\u{a0}min");
         assert_eq!(fr.word(&working(65)), "1\u{a0}h\u{a0}05");
+    }
+
+    #[test]
+    fn the_mini_item_badges_who_needs_the_user_in_the_first_concerns_colour() {
+        let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.6;
+        let words = Words::new(Lang::French);
+        let mini = |agents: &[AgentShown]| {
+            layout(
+                &words,
+                &Shows::Lines(Lines::of(agents, 0)),
+                &Brief::of(agents),
+                measure,
+            )
+            .mini
+            .expect("an item")
+        };
+        let badge = |agents: &[AgentShown]| mini(agents).badge.map(|b| (b.text, b.colour));
+        let mut agents = vec![shown(1, "working", 0, "a"), shown(2, "idle", 0, "b")];
+        // Nobody needs the user: no badge; one works.
+        let calm = mini(&agents);
+        assert_eq!(calm.badge, None);
+        assert_eq!(calm.working.as_ref().map(|w| w.0.as_str()), Some("1"));
+        // 4 px, her 40 px head, 4 px, two lines of 11 px at 1.25, 6 px.
+        assert!((calm.height - (4.0 + 40.0 + 4.0 + 2.0 * 13.75 + 6.0)).abs() < 0.01);
+        assert_eq!(
+            calm.head,
+            Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 40.0))
+        );
+        // To see: green; stuck: orange; waiting: amber, counting all three.
+        agents.push(shown(3, "done", 0, "c"));
+        assert_eq!(badge(&agents), Some(("1".into(), BADGE_GREEN)));
+        agents.push(shown(4, "failed", 0, "d"));
+        assert_eq!(badge(&agents), Some(("2".into(), BADGE_STUCK)));
+        agents.push(shown(5, "waiting", 0, "e"));
+        let three = mini(&agents);
+        let b = three.badge.expect("a badge");
+        assert_eq!((b.text.as_str(), b.colour), ("3", BADGE_WAITING));
+        // 16 px, its right 6 px past her head's, its bottom 3 px under it.
+        assert_eq!(
+            b.rect,
+            Rectangle::new(Point::new(34.0, 31.0), Size::new(16.0, 16.0))
+        );
+        // Wider with two figures, toward her head.
+        agents.extend((6..=15).map(|i| shown(i, "waiting", 0, "f")));
+        let wide = mini(&agents).badge.expect("a badge").rect;
+        assert_eq!((wide.x + wide.width, wide.width), (50.0, 2.0 * 6.0 + 8.0));
+        // The card: she is alone, with a green "+".
+        let card = layout(
+            &words,
+            &Shows::Card(vec![Tool::Codex]),
+            &Brief::default(),
+            measure,
+        )
+        .mini
+        .expect("an item");
+        assert_eq!(card.working, None);
+        assert_eq!(
+            card.badge.map(|b| (b.text, b.colour)),
+            Some(("+".into(), BADGE_GREEN))
+        );
+        assert_eq!(card.height, 50.0);
+        // Hidden: no item.
+        assert_eq!(
+            layout(&words, &Shows::Hidden, &Brief::default(), measure).mini,
+            None
+        );
     }
 }
