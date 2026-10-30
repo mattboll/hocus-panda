@@ -426,7 +426,9 @@ impl Shell {
                 output,
                 form,
                 since,
+                scale,
             } => {
+                popover::kit::set_scale(&output, scale as f32 / 120.0);
                 let start = (since != 0).then(|| instant_of(since));
                 match self.bars.iter().find(|(_, b)| b.output == output) {
                     Some((id, _)) => self.set_form(*id, form, start),
@@ -449,6 +451,7 @@ impl Shell {
                         bar: bar.output.clone(),
                     });
                     popover::with(|c| c.forget(&bar.output));
+                    popover::kit::forget_scale(&bar.output);
                     network::draw::forget(&bar.output);
                     desktops::draw::forget(&bar.output);
                     Some(Task::batch([

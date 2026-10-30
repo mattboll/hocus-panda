@@ -12,7 +12,7 @@
 //! health's line shown or not; the profiles switched, a missing one greyed
 //! with its line; no battery, the modes alone; the mini form's battery sign
 //! and its bolt; the keyboard; nothing drawn at rest, and a change drawing
-//! only what shows it.
+//! only what shows it; a hand over the rows, an arrow off them.
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 
@@ -28,6 +28,7 @@ use std::{
 use common::{BTN_LEFT, KEY_ESC, KEY_LEFT, KEY_RIGHT, KEY_TAB, WAIT, wait};
 use fakes::{Fakes, Power};
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use smithay::input::pointer::{CursorIcon, CursorImageStatus};
 
 const KEY_ENTER: u32 = 28;
 
@@ -416,6 +417,37 @@ fn the_mini_forms_battery_opens_by_hovering_and_by_a_click() -> anyhow::Result<(
 }
 
 #[test]
+fn the_pointer_is_a_hand_over_the_rows_and_an_arrow_off_them() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start_full(&shell, |_| {})?;
+    // Off the bar, over a row, on the status line under the rows (#468).
+    for (at, hand) in [
+        ((600.0, 500.0), false),
+        (LIGHT_ROW, true),
+        (BATTERY_ROW, true),
+        ((1800.0, f64::from(LEVELS.y + 160)), false),
+        ((600.0, 500.0), false),
+        (LIGHT_ROW, true),
+    ] {
+        bed.hp.pointer_move(at.0 - 1.0, at.1);
+        bed.hp.pointer_move(at.0, at.1);
+        let want = if hand {
+            CursorIcon::Pointer
+        } else {
+            CursorIcon::Default
+        };
+        let shows = bed.hp.dispatch_until(
+            WAIT,
+            |hp| matches!(hp.state().cursor, CursorImageStatus::Named(icon) if icon == want),
+        )?;
+        anyhow::ensure!(shows, "{:?} at {at:?}, not {want:?}", bed.hp.state().cursor);
+    }
+    Ok(())
+}
+
+#[test]
 fn the_slider_the_wheel_and_the_arrows_reach_logind_coalesced_never_below_5() -> anyhow::Result<()>
 {
     let Some(shell) = ready() else {
@@ -473,14 +505,28 @@ fn the_slider_the_wheel_and_the_arrows_reach_logind_coalesced_never_below_5() ->
     bed.hp.pointer_move(x(0.5), y);
     bed.hp.wheel(-1);
     bed.brightness(100)?;
+    // A fast spin, two notches in one event: 10 %.
+    bed.hp.wheel(-2);
+    bed.brightness(200)?;
+    bed.hp.wheel(2);
+    bed.brightness(100)?;
     bed.press(KEY_TAB);
     bed.press(KEY_RIGHT);
     bed.brightness(150)?;
+    // logind answers late: a key from the keyboard changes the backlight
+    // after logind set it and before it answers (#478).
+    let late = Duration::from_millis(400);
+    *bed.fakes
+        .brightness_answer
+        .lock()
+        .map_err(|_| anyhow::anyhow!("poisoned"))? = late;
     bed.press(KEY_LEFT);
     bed.press(KEY_LEFT);
     bed.brightness(50)?;
-    // A key from the keyboard while it is open: the slider follows.
+    // A key from the keyboard while it is open: the slider follows, and
+    // keeps it once logind answers.
     bed.fakes.backlight(600, 1000)?;
+    wait(&mut bed.hp, late * 2)?;
     let knob = (x(55.0 / 95.0) as i32, rect.y + SLIDER_Y);
     bed.until_count(knob, (1, 1), white, (1, 1))?;
     Ok(())

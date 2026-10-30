@@ -4,7 +4,8 @@
 //!
 //! A tile per desktop, its windows sketched as they open, move and close
 //! (a drag told where it lands), the current one ringed in the accent; a
-//! click goes to its desktop, the wheel a desktop a notch without wrapping;
+//! click goes to its desktop, the wheel a desktop a notch without wrapping
+//! (a fast spin's notches each, on a scaled screen too);
 //! six desktops on two rows; the mini form's dots in their three looks; the
 //! keyboard from the sound's row up to the tiles, where Enter goes there;
 //! a desktop's change drawing the desktops' surface alone, nothing at rest.
@@ -49,6 +50,8 @@ const SOUND_ROW: (f64, f64) = (1800.0, (1080 - 8 - 41 - 175 + 57) as f64);
 struct Setup {
     count: usize,
     mini: bool,
+    /// The screen, 1920 × 1080 logical pixels.
+    output: &'static str,
 }
 
 impl Default for Setup {
@@ -56,6 +59,7 @@ impl Default for Setup {
         Self {
             count: 4,
             mini: false,
+            output: "1920x1080",
         }
     }
 }
@@ -114,7 +118,7 @@ fn start(shell: &Path, setup: Setup) -> anyhow::Result<Bed> {
     }
     let hp = Headless::start_with_shell(
         HeadlessConfig {
-            outputs: vec!["1920x1080".parse()?],
+            outputs: vec![setup.output.parse()?],
             renderer: RendererChoice::Pixman,
             ..HeadlessConfig::default()
         },
@@ -518,22 +522,35 @@ fn the_wheel_goes_a_desktop_a_notch_and_stops_at_the_ends() -> anyhow::Result<()
     let Some(shell) = ready() else {
         return Ok(());
     };
-    let mut bed = start(&shell, Setup::default())?;
-    let (x, y) = bed.middle(1);
-    bed.hp.pointer_move(x - 1.0, y);
-    bed.hp.pointer_move(x, y);
-    wait(&mut bed.hp, Duration::from_millis(200))?;
-    // Down, a notch at a time: the next, up to the last, no further.
-    for expected in [1, 2, 3, 3, 3] {
-        bed.hp.wheel(1);
+    // On a scaled screen, iced hands the notches multiplied by its scale.
+    for output in ["1920x1080", "3840x2160@2"] {
+        let mut bed = start(
+            &shell,
+            Setup {
+                output,
+                ..Setup::default()
+            },
+        )?;
+        let (x, y) = bed.middle(1);
+        bed.hp.pointer_move(x - 1.0, y);
+        bed.hp.pointer_move(x, y);
+        wait(&mut bed.hp, Duration::from_millis(200))?;
+        // Down, a notch at a time: the next, up to the last, no further.
+        for expected in [1, 2, 3, 3, 3] {
+            bed.hp.wheel(1);
+            wait(&mut bed.hp, Duration::from_millis(150))?;
+            bed.on(expected)?;
+        }
+        // Up: back to the first, no further.
+        for expected in [2, 1, 0, 0] {
+            bed.hp.wheel(-1);
+            wait(&mut bed.hp, Duration::from_millis(150))?;
+            bed.on(expected)?;
+        }
+        // A fast spin, two notches in one event: two desktops.
+        bed.hp.wheel(2);
         wait(&mut bed.hp, Duration::from_millis(150))?;
-        bed.on(expected)?;
-    }
-    // Up: back to the first, no further.
-    for expected in [2, 1, 0, 0] {
-        bed.hp.wheel(-1);
-        wait(&mut bed.hp, Duration::from_millis(150))?;
-        bed.on(expected)?;
+        bed.on(2)?;
     }
     Ok(())
 }

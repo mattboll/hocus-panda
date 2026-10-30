@@ -239,11 +239,12 @@ impl Profiles {
 }
 
 /// logind's session: `SetBrightness` writes the fake backlight, after
-/// `delay` (a slow logind).
+/// `delay` (a slow logind), and answers `answer` after that.
 struct Session {
     backlights: PathBuf,
     calls: Arc<Mutex<Vec<(String, String, u32)>>>,
     delay: Arc<Mutex<Duration>>,
+    answer: Arc<Mutex<Duration>>,
 }
 
 #[zbus::interface(name = "org.freedesktop.login1.Session")]
@@ -264,7 +265,10 @@ impl Session {
             self.backlights.join(name).join("brightness"),
             format!("{value}\n"),
         )
-        .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+        .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        let answer = *self.answer.lock().unwrap_or_else(PoisonError::into_inner);
+        tokio::time::sleep(answer).await;
+        Ok(())
     }
 }
 
@@ -281,6 +285,8 @@ pub struct Fakes {
     pub brightness_calls: Arc<Mutex<Vec<(String, String, u32)>>>,
     /// How long the fake logind takes to set the brightness.
     pub brightness_delay: Arc<Mutex<Duration>>,
+    /// How long it then takes to answer, the backlight already set.
+    pub brightness_answer: Arc<Mutex<Duration>>,
     pipewire: Option<Child>,
     /// The default sink's follower, WirePlumber's part.
     policy: Option<Child>,
@@ -393,6 +399,7 @@ impl Fakes {
             login: None,
             brightness_calls: Arc::default(),
             brightness_delay: Arc::default(),
+            brightness_answer: Arc::default(),
             pipewire: None,
             policy: None,
             pw_runtime: tempfile::Builder::new().prefix("hp-").tempdir_in("/tmp")?,
@@ -477,6 +484,7 @@ impl Fakes {
             backlights: self.backlights(),
             calls: self.brightness_calls.clone(),
             delay: self.brightness_delay.clone(),
+            answer: self.brightness_answer.clone(),
         };
         self.login = Some(self.serve(
             "org.freedesktop.login1",
