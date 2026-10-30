@@ -1,0 +1,25 @@
+[package]
+name = "hocus-agents"
+description = "The agents' states as Hocuspanda follows them: their sources (Claude Code's and Codex's hooks, herdr, the `hocus agent` command), and plugging a tool in"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The tools' hooks' payloads, and Claude Code's settings, kept in their
+# order when written back.
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+# Codex's config.toml edited without losing the user's comments and
+# layout (MIT or Apache-2.0).
+toml_edit = "0.25.17"
+# inotify (tools appearing, their settings changing, herdr's socket),
+# poll and eventfd for the watcher's thread.
+rustix = { version = "1.1.6", features = ["fs", "event", "process"] }
+tracing = "0.1.44"
+
+[dev-dependencies]
+tempfile = "3.27.0"
