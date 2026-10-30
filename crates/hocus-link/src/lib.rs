@@ -183,10 +183,10 @@ pub enum ToShell {
 /// A screen's desktops as its bar's tiles show them. Written `desktops`,
 /// the screen's name, the count, the current one (from 0), then for each
 /// window, bottom first, its desktop (from 0), its place and size in
-/// [`SHARE`]s of the screen, 1 if it is the focused window of the current
-/// desktop (else 0), its id and its application's id (its icon's; empty
-/// when it has none, its spaces made `_`), commas between: `desktops eDP-1
-/// 4 0 0,20,30,600,940,1,7,org.gnome.Nautilus`.
+/// [`SHARE`]s of the screen, its [`Look`] (0, 1 or 2), its id and its
+/// application's id (its icon's; empty when it has none, its spaces made
+/// `_`), commas between: `desktops eDP-1 4 0
+/// 0,20,30,600,940,1,7,org.gnome.Nautilus`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Desktops {
     pub output: String,
@@ -195,18 +195,50 @@ pub struct Desktops {
     pub windows: Vec<DeskWindow>,
 }
 
-/// A window as its desktop's tile sketches it.
+/// A window as its desktop's tile sketches it and its list lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeskWindow {
     pub desktop: u8,
     /// Left, top, width, height, in [`SHARE`]s of the screen, inside it.
     pub rect: [u16; 4],
-    /// The focused window, on the current desktop: drawn brighter.
-    pub focused: bool,
+    pub look: Look,
     /// The compositor's id for it: what [`ToCompositor::Bring`] names.
     pub id: u64,
     /// Its application's id, for its icon (empty: none).
     pub app: String,
+}
+
+/// How a window shows in its desktop's tile and list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Look {
+    /// Written 0.
+    #[default]
+    Plain,
+    /// The focused window, on the current desktop: drawn brighter. Written
+    /// 1.
+    Focused,
+    /// Minimised: not sketched, listed after the others, greyed (3.9c).
+    /// Written 2.
+    Minimized,
+}
+
+impl Look {
+    fn digit(self) -> u8 {
+        match self {
+            Self::Plain => 0,
+            Self::Focused => 1,
+            Self::Minimized => 2,
+        }
+    }
+
+    fn of(digit: &str) -> Result<Self, BadLine> {
+        match digit {
+            "0" => Ok(Self::Plain),
+            "1" => Ok(Self::Focused),
+            "2" => Ok(Self::Minimized),
+            other => Err(BadLine(format!("no look {other:?}"))),
+        }
+    }
 }
 
 /// A screen's windows' titles, by their ids, in [`Desktops::windows`]'
@@ -531,7 +563,7 @@ impl fmt::Display for ToShell {
                         f,
                         " {},{x},{y},{width},{height},{},{},{}",
                         w.desktop,
-                        u8::from(w.focused),
+                        w.look.digit(),
                         w.id,
                         app_word(&w.app)
                     )?;
@@ -649,7 +681,7 @@ impl FromStr for ToShell {
                     .map(|w| {
                         // The application's id last: it may hold commas.
                         let fields: Vec<&str> = w.splitn(8, ',').collect();
-                        let [desktop, x, y, width, height, focused, id, app] = fields[..] else {
+                        let [desktop, x, y, width, height, look, id, app] = fields[..] else {
                             return Err(BadLine(format!("a window {w:?}")));
                         };
                         let share = |v: &str| {
@@ -661,7 +693,7 @@ impl FromStr for ToShell {
                         Ok(DeskWindow {
                             desktop: number(desktop, "desktop")?,
                             rect: [share(x)?, share(y)?, share(width)?, share(height)?],
-                            focused: flag(Some(focused), "1", "0")?,
+                            look: Look::of(look)?,
                             id: id.parse().map_err(|e| BadLine(format!("an id: {e}")))?,
                             app: app.to_owned(),
                         })
@@ -846,16 +878,23 @@ mod tests {
                     DeskWindow {
                         desktop: 0,
                         rect: [0, 0, SHARE, SHARE],
-                        focused: false,
+                        look: Look::Plain,
                         id: 3,
                         app: String::new(),
                     },
                     DeskWindow {
                         desktop: 8,
                         rect: [20, 30, 600, 940],
-                        focused: true,
+                        look: Look::Focused,
                         id: 12,
                         app: "com.example,odd".into(),
+                    },
+                    DeskWindow {
+                        desktop: 8,
+                        rect: [0, 0, 0, 0],
+                        look: Look::Minimized,
+                        id: 13,
+                        app: "foot".into(),
                     },
                 ],
             }),
@@ -952,7 +991,7 @@ mod tests {
             windows: vec![DeskWindow {
                 desktop: 0,
                 rect: [0, 0, 1, 1],
-                focused: false,
+                look: Look::Plain,
                 id: 1,
                 app: "my app".into(),
             }],

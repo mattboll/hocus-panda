@@ -33,7 +33,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{DESKTOPS_NAMESPACE, DeskWindow, DesktopTo, Desktops, EDGE, Form, SHARE};
+use hocus_link::{DESKTOPS_NAMESPACE, DeskWindow, DesktopTo, Desktops, EDGE, Form, Look, SHARE};
 use iced::{
     Color, Pixels, Point, Rectangle, Renderer, Size, Theme, alignment, keyboard, mouse,
     widget::{
@@ -544,7 +544,7 @@ fn full(
         return;
     }
     for window in windows {
-        let colour = if window.focused {
+        let colour = if window.look == Look::Focused {
             SKETCH_FOCUSED
         } else {
             SKETCH
@@ -605,12 +605,13 @@ fn mini(f: &mut Frame, rect: Rectangle, shown: &Desktops, index: usize, ringed: 
     }
 }
 
-/// Desktop `index`'s windows, bottom first.
+/// Desktop `index`'s windows, bottom first, minimised ones aside: only
+/// its list shows them.
 fn on(shown: &Desktops, index: usize) -> impl Iterator<Item = &DeskWindow> {
     shown
         .windows
         .iter()
-        .filter(move |w| usize::from(w.desktop) == index)
+        .filter(move |w| usize::from(w.desktop) == index && w.look != Look::Minimized)
 }
 
 /// A ring `width` wide inside `rect`'s edge rounded by `radius`, as CSS's
