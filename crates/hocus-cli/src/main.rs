@@ -138,16 +138,22 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
     let Some(said) = hooks::said(tool, &value) else {
         return;
     };
+    let agent = the_agent();
     let report = Report {
         source: tool.source(),
         key: if said.key.is_empty() {
-            format!("pid-{}", the_agent())
+            format!("pid-{agent}")
         } else {
             said.key
         },
         state: said.state,
-        pid: Some(the_agent()),
-        name: said.name,
+        pid: Some(agent),
+        // An event without `cwd`: the agent's own directory, where it
+        // started; never the tool's name.
+        name: said
+            .name
+            .or_else(|| hocus_agents::process::folder_of(agent))
+            .unwrap_or_default(),
     };
     // Not in a Hocuspanda session, or it is not listening: nothing to do.
     let _ = send(socket, &report);

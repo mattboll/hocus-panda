@@ -82,6 +82,13 @@ pub fn agent_above_in(parent: u32, mut look: impl FnMut(u32) -> Option<Process>)
     parent
 }
 
+/// Process `pid`'s working directory's name: an agent's last resort
+/// for one (its project, as it started there).
+pub fn folder_of(pid: u32) -> Option<String> {
+    let cwd = std::fs::read_link(Path::new("/proc").join(pid.to_string()).join("cwd")).ok()?;
+    crate::folder(&cwd.to_string_lossy())
+}
+
 /// A descriptor that becomes readable when process `pid` ends (a pidfd),
 /// for an event loop to forget its agent without polling.
 pub fn exit_of(pid: u32) -> std::io::Result<std::os::fd::OwnedFd> {
@@ -150,5 +157,15 @@ mod tests {
         let mine = ancestry(me);
         assert_eq!(mine.first(), Some(&me));
         assert!(mine.len() >= 2, "{mine:?}");
+    }
+
+    #[test]
+    fn a_process_is_named_by_its_working_directory() {
+        let here = std::env::current_dir().expect("a working directory");
+        assert_eq!(
+            folder_of(std::process::id()),
+            crate::folder(&here.to_string_lossy())
+        );
+        assert_eq!(folder_of(u32::MAX), None);
     }
 }

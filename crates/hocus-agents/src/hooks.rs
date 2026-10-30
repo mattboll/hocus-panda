@@ -66,15 +66,17 @@ impl Tool {
 pub struct Said {
     /// Its session.
     pub key: String,
-    /// Its project's directory's name.
-    pub name: String,
+    /// Its project's directory's name (its `cwd`'s last part), when the
+    /// event carries one.
+    pub name: Option<String>,
     /// Its state; `None`: its session ended.
     pub state: Option<State>,
 }
 
-/// What `payload`, from `tool`'s hook, says; nothing for an event that
-/// changes nothing (a subagent stopping, a compaction).
-pub fn said(tool: Tool, payload: &Value) -> Option<Said> {
+/// What `payload`, from a tool's hook, says; nothing for an event that
+/// changes nothing (a subagent stopping, a compaction). The tools share
+/// their events' names and fields.
+pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
     let text = |key: &str| payload.get(key).and_then(Value::as_str);
     // Codex's `notify`: dashes, and its own type.
     if let Some(kind) = text("type") {
@@ -83,7 +85,7 @@ pub fn said(tool: Tool, payload: &Value) -> Option<Said> {
         }
         return Some(Said {
             key: text("thread-id").unwrap_or_default().to_owned(),
-            name: project(text("cwd"), tool),
+            name: text("cwd").and_then(crate::folder),
             state: Some(State::Done),
         });
     }
@@ -111,17 +113,9 @@ pub fn said(tool: Tool, payload: &Value) -> Option<Said> {
     };
     Some(Said {
         key: text("session_id").unwrap_or_default().to_owned(),
-        name: project(text("cwd"), tool),
+        name: text("cwd").and_then(crate::folder),
         state,
     })
-}
-
-/// An agent's name: its working directory's last part, else its tool's.
-fn project(cwd: Option<&str>, tool: Tool) -> String {
-    cwd.and_then(|cwd| std::path::Path::new(cwd).file_name())
-        .map(|n| n.to_string_lossy().into_owned())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| tool.title().to_owned())
 }
 
 /// What the hook prints on its standard output for `event`: nothing,
@@ -156,7 +150,7 @@ mod tests {
             said(Tool::ClaudeCode, &start),
             Some(Said {
                 key: "abc123".into(),
-                name: "hocus-panda".into(),
+                name: Some("hocus-panda".into()),
                 state: Some(State::Idle),
             })
         );
@@ -217,6 +211,35 @@ mod tests {
     }
 
     #[test]
+    fn claude_codes_events_name_their_project_never_the_tool() {
+        // Every event carries the common fields, `cwd` among them
+        // (code.claude.com/docs/en/hooks, "Common input fields").
+        let common = |event: &str| {
+            json!({ "session_id": "abc123", "prompt_id": "p1",
+                "transcript_path": "/home/alex/.claude/projects/x/abc123.jsonl",
+                "cwd": "/home/alex/hocus-panda", "permission_mode": "default",
+                "hook_event_name": event, "notification_type": "permission_prompt" })
+        };
+        for event in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PermissionRequest",
+            "PostToolUse",
+            "Notification",
+            "Stop",
+            "StopFailure",
+            "SessionEnd",
+        ] {
+            let said = said(Tool::ClaudeCode, &common(event)).expect(event);
+            assert_eq!(said.name.as_deref(), Some("hocus-panda"), "{event}");
+        }
+        let mut bare = common("Stop");
+        bare.as_object_mut().map(|o| o.remove("cwd"));
+        assert_eq!(said(Tool::ClaudeCode, &bare).map(|s| s.name), Some(None));
+    }
+
+    #[test]
     fn codexs_hooks_and_its_notify_program() {
         // The payloads of developers.openai.com/codex/hooks and of the
         // advanced configuration's `notify`.
@@ -241,7 +264,7 @@ mod tests {
             said(Tool::Codex, &notify),
             Some(Said {
                 key: "thr_123".into(),
-                name: "infra".into(),
+                name: Some("infra".into()),
                 state: Some(State::Done),
             })
         );
@@ -249,11 +272,9 @@ mod tests {
             state(Tool::Codex, json!({ "type": "approval-requested" })),
             None
         );
-        // No directory: the tool's name.
+        // No directory: no name, never the tool's (the agent's process's
+        // directory names it, `hocus agent-hook`).
         let bare = json!({ "session_id": "s", "hook_event_name": "Stop" });
-        assert_eq!(
-            said(Tool::Codex, &bare).map(|s| s.name),
-            Some("Codex".into())
-        );
+        assert_eq!(said(Tool::Codex, &bare).map(|s| s.name), Some(None));
     }
 }
