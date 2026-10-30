@@ -16,7 +16,8 @@
 //! it even shown; out of the field, from an empty clipboard, one
 //! without text, or a client that never writes, nothing is pasted and the
 //! field goes on taking keys. A `Tab` pressed in the frame a row unfolds
-//! in goes to its eye (issue #455).
+//! in goes to its eye (issue #455); a row unfolded by the keyboard scrolls
+//! the grown list only as it needs (issue #470).
 //!
 //! Bluetooth's row is there too, under the Wi-Fi's (issue #363): the
 //! connections' surface holds both.
@@ -906,6 +907,48 @@ fn a_tab_in_the_frame_a_row_unfolds_in_goes_to_its_eye() -> anyhow::Result<()> {
         ssid: FREEBOX.to_owned(),
         psk: Some(PASSWORD.to_owned()),
     })?;
+    Ok(())
+}
+
+#[test]
+fn a_row_unfolded_by_the_keyboard_scrolls_only_what_the_grown_list_needs() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: vec![
+            FakeAp::new(FREEBOX, 58, Security::Psk(PASSWORD)),
+            FakeAp::new("iPhone de Alex", 45, Security::Psk("iphone-test")),
+            FakeAp::new("Bbox-55D1", 22, Security::Psk("bbox-test")),
+            FakeAp::new("DIRECT-4B-HP Laser 107w", 15, Security::Psk("printer-test")),
+            FakeAp::new("Maison-5G", 12, Security::Psk("maison-test")),
+        ],
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, false)?;
+    let item = bed.item();
+    bed.click(item);
+    bed.popover_is(Some(popover(height(&[], 5, 0.0))))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // The switch, then the rows down to the third; Enter unfolds it.
+    for _ in 0..4 {
+        bed.press(KEY_TAB);
+    }
+    bed.press(KEY_ENTER);
+    let unfolded = popover(height(&[], 5, FORM));
+    bed.popover_is(Some(unfolded))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // The list grew to its most and scrolls, but the third row's block
+    // shows whole in it unscrolled (#470): the scrollbar's thumb at its
+    // top, beside the rim's padding.
+    let y = unfolded.y + list_top(&[]) as i32 + 3;
+    let thumb = bed.rgb((unfolded.x + 268, y))?;
+    let beside = bed.rgb((unfolded.x + 275, y))?;
+    let light = |(r, g, b): (u8, u8, u8)| u32::from(r) + u32::from(g) + u32::from(b);
+    assert!(
+        light(thumb) > light(beside) + 30,
+        "the list scrolled: {thumb:?} where its thumb starts, {beside:?} beside"
+    );
     Ok(())
 }
 

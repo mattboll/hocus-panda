@@ -605,9 +605,6 @@ impl Panel {
         match &pressed.key {
             Key::Named(Named::Escape) => event(Seen::Escape),
             Key::Named(Named::Tab) => {
-                if order.is_empty() {
-                    return None;
-                }
                 let next = kit::step(&order, focus, pressed.modifiers.shift());
                 ui(|ui| ui.focus = next);
             }

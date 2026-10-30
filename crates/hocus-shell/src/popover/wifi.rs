@@ -953,10 +953,9 @@ impl Panel {
         // The layout as the keys before this one left it, not as last
         // drawn: a row unfolded or the switch turned in the same frame
         // already changes what Tab goes to.
-        let (layout, order) = ui(|ui| {
+        let order = ui(|ui| {
             let layout = Layout::of(&network, ui, &rows, Instant::now());
-            let order = targets(&layout, ui, &rows, &network);
-            (layout, order)
+            targets(&layout, ui, &rows, &network)
         });
         let focus = ui(|ui| ui.focus);
         let typing = focus == Some(Target::Field);
@@ -1027,15 +1026,13 @@ impl Panel {
             }
             _ => return None,
         }
-        self.reveal(state, &layout);
+        self.reveal(state);
         Some(canvas::Action::request_redraw().and_capture())
     }
 
-    /// The list scrolled so that what holds the keyboard shows.
-    fn reveal(&self, state: &mut State, layout: &Layout) {
-        let Some(List { view, .. }) = layout.list() else {
-            return;
-        };
+    /// The list scrolled so that what holds the keyboard shows, as the
+    /// keys left it: its height too, a row unfolded growing it (#470).
+    fn reveal(&self, state: &mut State) {
         let network = state.network.clone();
         let rows = state.rows.clone();
         let focus = ui(|ui| ui.focus);
@@ -1053,7 +1050,7 @@ impl Panel {
         };
         // The new layout (a row unfolded) before scrolling.
         let layout = ui(|ui| Layout::of(&network, ui, &rows, Instant::now()));
-        let Some(&row) = layout.rows.get(i) else {
+        let (Some(&row), Some(List { view, .. })) = (layout.rows.get(i), layout.list()) else {
             return;
         };
         let most = layout.most_scroll();
