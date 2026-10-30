@@ -1,13 +1,14 @@
-//! Applications' icons, for the sound's popover: found by name as the
-//! freedesktop specifications place them, simplified.
+//! Applications' icons, for the sound's popover and the desktops' tiles
+//! and lists (3.9b, by their windows' application ids): found by name as
+//! the freedesktop specifications place them, simplified.
 //!
 //! A name is an icon's own (`application.icon-name`) or a desktop file's
 //! (`<name>.desktop`, whose `Icon` names the icon). Icons are looked for in
 //! the `hicolor` theme, where applications install theirs (the icon theme
 //! specification asks them to), in the sizes the popover draws best first,
 //! then in `pixmaps`; the data directories are `XDG_DATA_HOME` and
-//! `XDG_DATA_DIRS`. Read on the sound's thread, never on the one that
-//! draws, once per application.
+//! `XDG_DATA_DIRS`. Read on the sound's thread (the desktops' icons' for
+//! windows), never on the one that draws, once per application.
 
 use std::path::{Path, PathBuf};
 

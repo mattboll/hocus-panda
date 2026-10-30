@@ -9,6 +9,7 @@
 //! popover lays itself out and keeps its own state, and takes from here
 //! what it shares with the others.
 
+mod app;
 mod input;
 mod list;
 mod slider;
@@ -25,6 +26,7 @@ use iced::{
     },
 };
 
+pub(crate) use app::app_tile;
 pub(crate) use input::{Input, Pointer, awaited, cycle, input, keys, step};
 pub(crate) use list::{
     Aside, Clip, List, SCROLLBAR, Spin, aside, list, name_room, reveal, row_fill, searching, stack,

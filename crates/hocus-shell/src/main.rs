@@ -488,6 +488,10 @@ impl Shell {
                 desktops::set(screen);
                 Task::none()
             }
+            ToShell::Titles(titles) => {
+                desktops::set_titles(titles);
+                Task::none()
+            }
         }
     }
 
@@ -865,8 +869,16 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            // They open none.
-            popover::Item::Keyboard | popover::Item::Desktop(_) => return None,
+            popover::Item::Desktop(_) => canvas(popover::desktop::Panel {
+                id,
+                words: self.words,
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            // It opens none.
+            popover::Item::Keyboard => return None,
         };
         Some(panel)
     }
@@ -1163,6 +1175,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // (resized when their rows change).
                         Ok(ToShell::Desktops(screen)) => {
                             desktops::set(screen);
+                            continue;
+                        }
+                        // Its windows' titles: only an open list draws.
+                        Ok(ToShell::Titles(titles)) => {
+                            desktops::set_titles(titles);
                             continue;
                         }
                         _ => {}

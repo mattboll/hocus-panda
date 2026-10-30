@@ -5,16 +5,20 @@
 //! 6 px apart), 14 px above the connections; radius 6, `rgba(255,255,255,
 //! 0.05)` (0.10 under the pointer). In each, its windows at their places on
 //! the screen, 4 px in, radius 1.5, in stacking order, `rgba(236,239,244,
-//! 0.30)`, the focused window of the current desktop 0.62; the current
-//! desktop ringed 2 px inside in the accent, the others 1 px in
-//! `rgba(255,255,255,0.10)`; an empty one shows its number. Mini form: an
+//! 0.20)`, the focused window of the current desktop 0.40, each with its
+//! application's icon (10 px, centred, ringed 1 px in `rgba(14,17,28,0.6)`)
+//! when it is 12 × 12 px at least (3.9b); the current desktop ringed 2 px
+//! inside in the accent, the others 1 px in `rgba(255,255,255,0.10)`; an
+//! empty one shows its number. Mini form: an
 //! 18 × 13 dot per desktop, two to a row, 4 px apart, the current one
 //! filled with the accent, those with windows `rgba(255,255,255,0.30)`,
 //! the empty ones 0.10 with a 1 px `rgba(255,255,255,0.12)` ring.
 //!
 //! A click goes to that desktop, the wheel over them to the next or the
 //! previous one, a notch a desktop; `Enter` or `Space` on the tile holding
-//! the keyboard goes there. Nothing moves in them but the ring (the accent
+//! the keyboard goes there. Resting on a tile (or a dot) shows the list of
+//! its windows (3.9b, [`crate::popover::desktop`]), which the controller
+//! opens. Nothing moves in them but the ring (the accent
 //! dot), from the desktop left to the one shown, in the strip's 320 ms and
 //! curve; none with reduced motion or on the CPU.
 //!
@@ -70,8 +74,14 @@ const CURRENT_RING: f32 = 2.0;
 const INSET: f32 = 4.0;
 const APART: f32 = 0.5;
 const SKETCH_RADIUS: f32 = 1.5;
-const SKETCH: Color = Color::from_rgba8(236, 239, 244, 0.30);
-const SKETCH_FOCUSED: Color = Color::from_rgba8(236, 239, 244, 0.62);
+const SKETCH: Color = Color::from_rgba8(236, 239, 244, 0.20);
+const SKETCH_FOCUSED: Color = Color::from_rgba8(236, 239, 244, 0.40);
+/// A window's application's icon in its sketch (3.9b): 10 px, ringed 1 px
+/// out, when the sketch is 12 × 12 px at least.
+const ICON: f32 = 10.0;
+const ICON_ROOM: f32 = 12.0;
+const ICON_RADIUS: f32 = 3.0;
+const ICON_RING: Color = Color::from_rgba8(14, 17, 28, 0.6);
 /// An empty desktop's number: 11 px, 600, `text.faint`.
 const NUMBER: f32 = 11.0;
 
@@ -544,7 +554,41 @@ fn full(
             &Path::rounded_rectangle(at.position(), at.size(), SKETCH_RADIUS.into()),
             faded(colour, alpha),
         );
+        if let Some(place) = icon_in(at)
+            && let Some(icon) = super::icons::of(&window.app)
+        {
+            let half = 0.5;
+            f.stroke(
+                &Path::rounded_rectangle(
+                    Point::new(place.x - half, place.y - half),
+                    Size::new(place.width + 1.0, place.height + 1.0),
+                    (ICON_RADIUS + half).into(),
+                ),
+                Stroke {
+                    style: Style::Solid(faded(ICON_RING, alpha)),
+                    width: 1.0,
+                    ..Stroke::default()
+                },
+            );
+            kit::app_tile(f, place, (Some(&icon), ""), (ICON_RADIUS, 0.0), alpha);
+        }
     }
+}
+
+/// Where a window's icon goes in its sketch `at`: in its middle, on whole
+/// pixels; none in a sketch smaller than 12 × 12 px.
+pub fn icon_in(at: Rectangle) -> Option<Rectangle> {
+    if at.width < ICON_ROOM || at.height < ICON_ROOM {
+        return None;
+    }
+    let centre = at.center();
+    Some(Rectangle::new(
+        Point::new(
+            (centre.x - ICON / 2.0).round(),
+            (centre.y - ICON / 2.0).round(),
+        ),
+        Size::new(ICON, ICON),
+    ))
 }
 
 /// A mini form's dot: the accent where it is the current desktop (unless
@@ -830,6 +874,17 @@ mod tests {
             whole.y + whole.height,
             first.y + first.height - INSET - APART
         );
+        // An icon in the left half's middle, on whole pixels; none in a
+        // quarter, 6.5 px wide.
+        assert_eq!(
+            icon_in(left),
+            Some(Rectangle::new(
+                Point::new(18.0, 15.0),
+                Size::new(10.0, 10.0)
+            ))
+        );
+        assert_eq!(icon_in(sketch(first, [0, 0, 250, 1000])), None);
+        assert_eq!(icon_in(sketch(first, [0, 0, 1000, 500])), None);
     }
 
     #[test]

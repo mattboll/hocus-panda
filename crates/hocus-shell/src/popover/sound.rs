@@ -54,7 +54,6 @@ use crate::levels::{
     draw::{
         ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, SOUND, TEXT, VALUE, rgb, ring, stroke,
     },
-    icons::Icon,
     model::{STEP, Sound, Words},
     sound::{App, Ask, Kind, Mixer, Set, Sink},
 };
@@ -107,17 +106,6 @@ const MIC_OFF_HOVER: Color = Color::from_rgba8(229, 121, 63, 0.26);
 const MIC_OFF: Color = rgb(0xF7B98A);
 /// A muted application's tile.
 const TILE_MUTED: f32 = 0.45;
-const LETTER_INK: Color = rgb(0x0B1020);
-/// The letter tiles' colours (the mockup's two first), one per application
-/// by its name.
-const TILES: [Color; 6] = [
-    rgb(0xF5B34A),
-    rgb(0x8FB3FF),
-    rgb(0x7EE0A0),
-    rgb(0xF7B98A),
-    rgb(0xC9A7F5),
-    rgb(0x6FD3D8),
-];
 
 /// A slider shows the volume asked this long at most, until PipeWire says
 /// it.
@@ -939,47 +927,14 @@ impl Panel {
     /// own; faded when muted.
     fn tile(&self, f: &mut Frame, rect: Rectangle, app: &App, muted: bool) {
         let opacity = if muted { TILE_MUTED } else { 1.0 };
-        match &app.icon {
-            Some(Icon::Raster(handle)) => {
-                f.draw_image(rect, canvas::Image::new(handle.clone()).opacity(opacity));
-            }
-            Some(Icon::Vector(handle)) => {
-                f.draw_svg(
-                    rect,
-                    iced::advanced::svg::Svg::new(handle.clone()).opacity(opacity),
-                );
-            }
-            None => {
-                let colour = TILES[tile_colour(&app.name)].scale_alpha(opacity);
-                f.fill(&rounded(rect, BUTTON_RADIUS), colour);
-                let letter = app
-                    .name
-                    .chars()
-                    .find(|c| c.is_alphanumeric())
-                    .map(|c| c.to_uppercase().collect::<String>())
-                    .unwrap_or_default();
-                f.fill_text(kit::text_in(
-                    MANROPE_BOLD,
-                    text(
-                        letter,
-                        rect.center(),
-                        LETTER,
-                        LETTER_INK.scale_alpha(opacity),
-                        Alignment::Center,
-                    ),
-                ));
-            }
-        }
+        kit::app_tile(
+            f,
+            rect,
+            (app.icon.as_ref(), &app.name),
+            (BUTTON_RADIUS, LETTER),
+            opacity,
+        );
     }
-}
-
-/// The colour of an application's letter tile: the same for the same
-/// name.
-fn tile_colour(name: &str) -> usize {
-    let sum = name.bytes().fold(0_usize, |sum, b| {
-        sum.wrapping_mul(31).wrapping_add(usize::from(b))
-    });
-    sum % TILES.len()
 }
 
 /// A slider at `volume`: its track, its fill to the knob (grey when what
@@ -1259,16 +1214,5 @@ mod tests {
         let apps = [app("music", false), app("mpv", true)];
         relist(&mut listed, &apps, true);
         assert_eq!(listed, ["mpv"]);
-    }
-
-    #[test]
-    fn a_letter_tile_keeps_its_colour() {
-        assert_eq!(tile_colour("Musique"), tile_colour("Musique"));
-        let colours: std::collections::HashSet<_> =
-            ["Firefox", "Musique", "mpv", "Spotify", "Zoom"]
-                .iter()
-                .map(|n| tile_colour(n))
-                .collect();
-        assert!(colours.len() > 1);
     }
 }
