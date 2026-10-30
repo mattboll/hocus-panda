@@ -983,7 +983,6 @@ impl Shell {
                 id,
                 words: agents::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-                wall: self.wall.clone(),
             })
             .width(Length::Fill)
             .height(Length::Fill)

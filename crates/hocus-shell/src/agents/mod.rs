@@ -360,7 +360,7 @@ pub fn lay_out() -> Layout {
 /// and they changed, are drawn again (only then: nothing draws for them in
 /// between).
 pub fn minute() {
-    // The briefing's "since when", and its time, if it is open.
+    // The briefing's "since when", if it is open.
     popover::changed(Item::Secretary);
     let Some(laid) = draw::layout() else {
         return;
@@ -421,8 +421,9 @@ impl Words {
         "Sources"
     }
 
-    /// The secretary's line (§7 B, 4.6): who waits, else who is stuck,
-    /// then their names; else how many work, and how many are to see.
+    /// The secretary's line (§7 B, 4.6): the names of who waits (the
+    /// longest first), else of who is stuck, her mood's colour saying
+    /// which (#503); else how many work, and how many are to see.
     pub fn line(self, brief: &Brief) -> String {
         let names = |entries: &[Entry]| {
             entries
@@ -432,24 +433,8 @@ impl Words {
                 .join(", ")
         };
         match brief.mood() {
-            Mood::Waiting => {
-                let who = match (brief.waiting.len(), self.fr) {
-                    (1, true) => "Quelqu'un t'attend".to_owned(),
-                    (1, false) => "Someone is waiting".to_owned(),
-                    (n, true) => format!("{n} t'attendent"),
-                    (n, false) => format!("{n} are waiting"),
-                };
-                format!("{who} · {}", names(&brief.waiting))
-            }
-            Mood::Stuck => {
-                let who = match (brief.stuck.len(), self.fr) {
-                    (1, true) => "Un agent est bloqué".to_owned(),
-                    (1, false) => "An agent is stuck".to_owned(),
-                    (n, true) => format!("{n} agents bloqués"),
-                    (n, false) => format!("{n} agents are stuck"),
-                };
-                format!("{who} · {}", names(&brief.stuck))
-            }
+            Mood::Waiting => names(&brief.waiting),
+            Mood::Stuck => names(&brief.stuck),
             Mood::Calm => {
                 let working = self.working(brief.working);
                 match brief.to_see.len() {
@@ -791,28 +776,6 @@ const MORE_TOP: f32 = 2.0;
 const MORE: f32 = 20.0;
 pub const MORE_TEXT: f32 = 12.5;
 
-/// What separates the parts of a name as herdr gives it: its workspace
-/// and its tab ("hocus-panda · refacto").
-const PARTS: &str = " · ";
-
-/// An agent's name cut to `room` as `width` measures it, with an ellipsis.
-/// A name in parts gives way from its first: two agents of one workspace
-/// keep their tabs apart ("hocus-p… · refacto", "hocus-p… · 2").
-fn elide_name(name: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
-    if width(name) <= room {
-        return name.to_owned();
-    }
-    if let Some((head, tail)) = name.rsplit_once(PARTS) {
-        let tail = format!("{PARTS}{tail}");
-        let head = crate::popover::kit::elide(head, room - width(&tail), &mut width);
-        // At least a letter of the first part, else the whole name cut.
-        if head.chars().count() > 1 {
-            return head + &tail;
-        }
-    }
-    crate::popover::kit::elide(name, room, width)
-}
-
 /// The group, laid out from its top left: what is where.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
@@ -933,7 +896,7 @@ pub fn layout(
                     Row {
                         id: line.id,
                         look: line.look,
-                        name: elide_name(&line.name, room, |t| {
+                        name: crate::popover::kit::elide(&line.name, room, |t| {
                             measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
                         }),
                         word,
@@ -1160,12 +1123,12 @@ mod tests {
         let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.55;
         let words = Words::new(Lang::French);
         let agents: Vec<AgentShown> = (1..=7)
-            .map(|i| shown(i, "working", 0, "hocus-panda · refacto"))
+            .map(|i| shown(i, "working", 0, "refacto-du-panneau-des-agents"))
             .collect();
         let laid = layout(
             &words,
             &Shows::Lines(Lines::of(&agents, 0)),
-            &Brief::of(&[shown(9, "waiting", 0, "hocus-panda · refacto")]),
+            &Brief::of(&[shown(9, "waiting", 0, "refacto-du-panneau-des-agents")]),
             measure,
         );
         assert_eq!(laid.rows.len(), 5);
@@ -1183,31 +1146,15 @@ mod tests {
         assert!(laid.line.ends_with('…'), "{}", laid.line);
         assert!(measure(&laid.line, 12.0, MANROPE) <= WIDTH - 48.0 + 0.01);
         // The name at 13.5 px gives way to the word, at 12.5 px, and the
-        // 30 px panda; its workspace first, its tab kept.
+        // 30 px panda.
         let row = &laid.rows[0];
         let room = WIDTH + 12.0 - 12.0 - 30.0 - 14.0 - measure(&row.word, 12.5, MANROPE);
-        assert!(row.name.ends_with("… · refacto"), "{}", row.name);
+        assert!(
+            row.name.starts_with("refacto-") && row.name.ends_with('…'),
+            "{}",
+            row.name
+        );
         assert!(measure(&row.name, 13.5, MANROPE_SEMIBOLD) <= room + 0.01);
-    }
-
-    #[test]
-    fn a_name_in_parts_gives_way_from_its_first() {
-        let width = |t: &str| t.chars().count() as f32;
-        assert_eq!(
-            elide_name("hocus-panda · refacto", 30.0, width),
-            "hocus-panda · refacto"
-        );
-        assert_eq!(
-            elide_name("hocus-panda · refacto", 16.0, width),
-            "hocus… · refacto"
-        );
-        assert_eq!(elide_name("hocus-panda · 2", 10.0, width), "hocus… · 2");
-        // No room left for the first part: the whole name cut.
-        assert_eq!(
-            elide_name("hocus-panda · une-très-longue-tâche", 12.0, width),
-            "hocus-panda…"
-        );
-        assert_eq!(elide_name("notes-de-version", 6.0, width), "notes…");
     }
 
     #[test]
@@ -1258,25 +1205,23 @@ mod tests {
         assert_eq!(fr.footer(&calm), "2 au travail · 1 au repos");
         // Nothing to see: how many work alone.
         assert_eq!(fr.line(&Brief::of(&agents[..2])), "2 au travail");
-        // Stuck: orange, and who.
+        // Stuck: orange, the stuck ones' names only.
         agents.push(shown(5, "failed", 0, "migration"));
         let stuck = Brief::of(&agents);
         assert_eq!(stuck.mood(), Mood::Stuck);
-        assert_eq!(fr.line(&stuck), "Un agent est bloqué · migration");
+        assert_eq!(fr.line(&stuck), "migration");
         agents.push(shown(6, "failed", 0, "infra"));
-        assert_eq!(
-            en.line(&Brief::of(&agents)),
-            "2 agents are stuck · migration, infra"
-        );
-        // Someone waiting comes first, the longest waiting first.
+        assert_eq!(en.line(&Brief::of(&agents)), "migration, infra");
+        // Someone waiting comes first, amber, the waiting ones' names
+        // only, the longest waiting first.
         agents.push(shown(7, "waiting", 9 * MIN, "site-web"));
         let waiting = Brief::of(&agents);
         assert_eq!(waiting.mood(), Mood::Waiting);
-        assert_eq!(fr.line(&waiting), "Quelqu'un t'attend · site-web");
+        assert_eq!(fr.line(&waiting), "site-web");
         agents.push(shown(8, "waiting", 2 * MIN, "infra-2"));
         let two = Brief::of(&agents);
-        assert_eq!(fr.line(&two), "2 t'attendent · infra-2, site-web");
-        assert_eq!(en.line(&two), "2 are waiting · infra-2, site-web");
+        assert_eq!(fr.line(&two), "infra-2, site-web");
+        assert_eq!(en.line(&two), "infra-2, site-web");
         assert_eq!(two.stuck.len(), 2);
         assert_eq!(two.to_see.len(), 1);
     }

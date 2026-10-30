@@ -43,11 +43,10 @@ The bar names each agent by the best of what its sources know, never by
 its tool ("claude", "Codex"):
 
 1. **herdr's name**, for an agent herdr sees (its own, or a Claude Code or
-   Codex running in one of its panes): as herdr's sidebar shows it by
-   default, its workspace's label, then " · " and its tab's when the
-   workspace has several tabs or the tab was given a name
-   ("hocus-panda · refacto"). Renaming the workspace or the tab in herdr
-   renames the row at once.
+   Codex running in one of its panes): its tab's own name when the tab
+   was given one ("refacto"), else its workspace's label ("hocus-panda";
+   a tab herdr labels with its place, "1", "2", has no name of its own).
+   Renaming the workspace or the tab in herdr renames the row at once.
 2. **Its project's folder**: the last part of the hook's `cwd` (the first
    event's, kept when later events have none or a directory the agent went
    down into), or the command's `NAME`.

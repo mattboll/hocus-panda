@@ -369,11 +369,12 @@ never on battery saver, never with reduced motion.
   The group's header is her 40 px head, then "AGENTS N" (11.5 px 700) over
   her line (12 px, ellipsis); "Sources" moves into her briefing. Her magic
   ear follows the moment: green when calm; amber when someone waits (it
-  radiates twice, two small hops, only at the change); orange when an
-  agent is stuck (no motion). Her line: "N au travail · M à voir" when
-  calm (`text.dim`); "Quelqu'un t'attend" / "N t'attendent" then the
-  names (amber); "Un agent est bloqué" then the names (orange). The
-  header row is lit amber or orange at 8 % / 7 % in those states.
+  radiates twice, two small hops, 1.2 s in all, only at the change);
+  orange when an agent is stuck (no motion). Her line: "N au travail · M
+  à voir" when calm (`text.dim`); only the waiting agents' names when
+  someone waits ("site-web, docs", amber); only the stuck agents' names
+  when one is stuck (orange); cut with an ellipsis (#503). The header row
+  is lit amber or orange at 8 % / 7 % in those states.
   A click on her opens her **briefing** beside the bar (320 px; §9's
   mechanics), in this order: T'ATTEND, each waiting agent, since when,
   and what it asks (the text of the tool's notification, "Autoriser Bash
@@ -1620,10 +1621,10 @@ nothing to propose, the group is its header alone.
   a herdr pane is the pane's foreground process); one source's keys stay
   its own agents. The state that changed last wins; herdr's name wins (the
   user names things there, #497).
-- **Its name** (#497): as herdr's sidebar names it by default, its
-  workspace's label, then " · " and its tab's when the workspace has
-  several tabs or the tab was named ("hocus-panda · refacto"), a rename in
-  herdr showing at once; else its project's folder, the last part of its
+- **Its name** (#497, #503): herdr's, its tab's own name when the user
+  gave it one ("refacto"), else its workspace's label (a tab herdr labels
+  with its place has none), a rename in herdr showing at once; else its
+  project's folder, the last part of its
   hook's first `cwd` (kept when a later event has none, or a directory
   the agent went down into), or the command's `NAME`; else its process's
   working directory's (`/proc/PID/cwd`). Never its tool's name: herdr's
@@ -1729,9 +1730,7 @@ the heads) are display options for later (#491).
   after the spaced word). A row is 34 px high and as wide as the column
   (6 px past the group's sides, 184 px), radius 7, 6 px in: the agent's
   panda (30 px), 7 px, its name (Manrope 600, 13.5 px, `text`, cut with an
-  ellipsis to what the word on its right leaves; a name in parts, herdr's
-  "workspace · tab", gives way from its first so that two agents of one
-  workspace keep their tabs apart: "hocus-p… · refacto"), 7 px, that word
+  ellipsis to what the word on its right leaves), 7 px, that word
   (12.5 px). These are the real sizes (#497): the mockups were shown
   zoomed ×1.5, and their 28 px rows looked small at ×1; the bar's width
   does not change:
@@ -1747,8 +1746,8 @@ the heads) are display options for later (#491).
     its panda asleep at 55 %.
   Under the pointer a row is lit `rgba(255,255,255,0.06)` and the pointer
   is a hand, as the bar's other rows (the mockup's tints, inline, hide its
-  own `:hover`). The name is herdr's for an agent herdr sees (its
-  workspace and its tab, as its sidebar shows them), else the project's
+  own `:hover`). The name is herdr's for an agent herdr sees (its tab's
+  own name, else its workspace's label: #503), else the project's
   folder (a hook's `cwd`) or the command's `NAME`, else the agent's
   process's directory (4.0 as built, "Its name").
 - **Order**: waiting (the longest first), stuck, to see, working,
@@ -2121,18 +2120,19 @@ meeting and the notifications wait for the calendar and sprint 5.
   the group shows and hides as 4.0 built it.
 - **Her mood and her line** come from the agents as the shell is told
   them (4.1): someone waiting first, as in the halo, then someone stuck,
-  else calm. Waiting: "Quelqu'un t'attend · site-web", "2 t'attendent ·
-  infra, site-web" (the longest waiting first), `#F5C46E`. Stuck: "Un
-  agent est bloqué · migration", "2 agents bloqués · …", `#F7A77A`. Calm:
+  else calm. Waiting: only the waiting agents' names, "site-web",
+  "infra, site-web" (the longest waiting first), `#F5C46E`. Stuck: only
+  the stuck agents' names, "migration", `#F7A77A` (#503). Calm:
   "3 au travail", and " · 1 à voir" when a finished agent is not seen yet,
   `text.dim`. Cut with an ellipsis to the 124 px her head leaves.
 - **Her motion**: when an agent starts waiting (one that was not waiting
   as the group last drew; not as the shell starts), her ear sends out two
-  rings twice and she hops twice, the drawing's keyframes: the rings
-  (arcs of 15 and 20 units round the ear, the outer at 60 %) from 0.9 to
-  1.25 times their size and from 90 % to nothing in 1.4 s `ease-out`,
-  twice; the hops 3 px up and down in 1.6 s `ease-in-out`, twice. 3.2 s,
-  once, then she holds still; the same report again does not start her
+  rings twice and she hops twice, the drawing's keyframes in 1.2 s
+  instead of its 3.2 s, each scaled alike (#503): the rings (arcs of 15
+  and 20 units round the ear, the outer at 60 %) from 0.9 to 1.25 times
+  their size and from 90 % to nothing in 525 ms `ease-out`, twice; the
+  hops 3 px up and down in 600 ms `ease-in-out`, twice. 1.2 s, once,
+  then she holds still; the same report again does not start her
   again, another agent starting to wait while she moves starts her over.
   None with reduced motion, nor on the CPU. The rings are
   drawn by the shell over her drawing; the group's surface draws only
@@ -2157,8 +2157,8 @@ meeting and the notifications wait for the calendar and sprint 5.
   and a line that does not read never says it.
 - **Her briefing** (`popover/briefing.rs`, §9's mechanics and the kit):
   320 px, its top on her row's (100 px under the bar's), 12, 14 and 14 px
-  in, its parts 8 px apart. Her head (34 px), "Le point" / "Briefing"
-  (16 px 700) and the time as the clock reads it (12 px, `text.faint`).
+  in, its parts 8 px apart. Her head (34 px) and "Le point" / "Briefing"
+  (16 px 700); no time, the clock is just above (#503).
   Then, each only when an agent is in it, "T'ATTEND" / "WAITING"
   (`#F5C46E`), "BLOQUÉ" / "STUCK" (`#F7A77A`), "À VOIR" / "TO SEE"
   (`#7EE0A0`): 11 px 700, spaced, 4 px more above; a line per agent, 2 px
@@ -2173,7 +2173,8 @@ meeting and the notifications wait for the calendar and sprint 5.
   around it), "N au travail · M au repos" (12.5 px, `text.faint`) and, on
   its right, "Sources", which opens the Sources popover in the briefing's
   place (4.0's, its top 62 px under the bar's). It is laid out again when
-  the agents change, and at the clock's minute while it is open.
+  the agents change, and at the clock's minute while it is open (its
+  "since when").
 - **A line goes to its agent** as its row does (4.3): the briefing closes
   and the compositor is asked `go-to-agent ID OUTPUT X Y W H` with the
   line's rectangle in the bar's frame, so the streak runs from the line's
@@ -2181,17 +2182,19 @@ meeting and the notifications wait for the calendar and sprint 5.
   `Enter` or `Space` acts, `Esc` closes and gives the keyboard to her
   row, which the bar's `Tab` reaches as its other items.
 - **Measured headless**, the real shell (`tests/agents.rs`): her line and
-  mood calm, waiting and stuck, the row's amber and orange read from the
-  screen, "Sources" no longer beside her; on a GPU, an agent starting to
-  wait makes her move 2.9 to 3.7 s, once, then nothing draws, and the
-  same report again nothing; with reduced motion, nothing moves. The
-  briefing, 320 px, its top on her row: who waits with what it asks (the
-  request kept over its later notification), who is stuck with the
-  failure's message, who is to see, the footer; the shell's log holding
-  neither the command nor the error. A line going to its agent's window
+  mood calm, waiting and stuck (the names alone), the row's amber and
+  orange read from the screen, "Sources" no longer beside her; on a GPU,
+  an agent starting to wait makes her move 1.0 to 1.5 s, once, then
+  nothing draws, and the same report again nothing; with reduced motion,
+  nothing moves. The briefing, 320 px, its top on her row: who waits with
+  what it asks (the request kept over its later notification), who is
+  stuck with the failure's message, who is to see, the footer, nothing
+  drawn right of its title; the shell's log holding neither the command
+  nor the error. A line going to its agent's window
   on another desktop, the briefing closed; Sources opening from it in
   4.0's place, the card under her; nothing committed at rest with the
-  briefing open. Unit tests for her line's words, since when, the
+  briefing open. Unit tests for her line's words, her motion's
+  keyframes, since when, the
   request's words, the briefing's sections, the note's capping, its
   reading back and its log, the notes the hooks' documented payloads
   give, and which note is kept. On the Intel GPU, the screenshots of the

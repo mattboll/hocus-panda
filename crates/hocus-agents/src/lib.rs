@@ -269,9 +269,9 @@ pub fn folder(path: &str) -> Option<String> {
 }
 
 /// The name an agent shows under (docs/agents.md), from the best of what
-/// its sources know: herdr's, as its sidebar shows it; else its project's
-/// folder (a hook's `cwd`, or the command's name); else its process's
-/// working directory's. Never its tool's name: herdr's agent kind
+/// its sources know: herdr's (its tab's own name, else its workspace's
+/// label); else its project's folder (a hook's `cwd`, or the command's
+/// name); else its process's working directory's. Never its tool's name: herdr's agent kind
 /// ("claude") named every agent alike (#497).
 pub fn agent_name(
     herdr: Option<&str>,
@@ -405,12 +405,8 @@ mod tests {
     #[test]
     fn an_agent_is_named_by_herdr_else_its_folder_else_its_process_never_its_tool() {
         assert_eq!(
-            agent_name(
-                Some("hocus-panda · refacto"),
-                Some("hocus-panda"),
-                Some("x")
-            ),
-            Some("hocus-panda · refacto".into())
+            agent_name(Some("refacto"), Some("hocus-panda"), Some("x")),
+            Some("refacto".into())
         );
         assert_eq!(
             agent_name(None, Some("infra"), Some("home")),
