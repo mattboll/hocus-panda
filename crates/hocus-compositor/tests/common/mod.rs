@@ -171,6 +171,8 @@ pub enum Command {
     Copy(Clip),
     /// Closes its window, as an application quitting.
     Close,
+    /// Titles its window, without drawing (a terminal's prompt does so).
+    Title(&'static str),
 }
 
 /// What a client puts on the clipboard: its types, and the text it writes
@@ -357,6 +359,8 @@ fn run_client(
                 (Command::Fullscreen(_), None) => {}
                 (Command::Copy(clip), _) => client.copy(conn, &qh, clip),
                 (Command::Close, _) => client.window = None,
+                (Command::Title(title), Some(window)) => window.set_title(title),
+                (Command::Title(_), None) => {}
             }
         }
         queue.flush()?;

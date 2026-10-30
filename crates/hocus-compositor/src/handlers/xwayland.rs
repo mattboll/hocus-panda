@@ -25,7 +25,7 @@ use smithay::{
     },
     xwayland::{
         X11Surface, X11Wm, XwmHandler,
-        xwm::{Reorder, ResizeEdge, XwmId},
+        xwm::{Reorder, ResizeEdge, WmWindowProperty, XwmId},
     },
 };
 
@@ -202,6 +202,14 @@ impl XwmHandler for State {
         }
     }
 
+    /// Its title or its class (its application's id): the bar's desktops
+    /// show them.
+    fn property_notify(&mut self, _xwm: XwmId, _surface: X11Surface, property: WmWindowProperty) {
+        if matches!(property, WmWindowProperty::Title | WmWindowProperty::Class) {
+            self.desktops_soon();
+        }
+    }
+
     fn allow_selection_access(&mut self, _xwm: XwmId, _selection: SelectionTarget) -> bool {
         true
     }
@@ -331,6 +339,9 @@ impl XwmHandler for App {
     }
     fn minimize_request(&mut self, xwm: XwmId, window: X11Surface) {
         self.state.minimize_request(xwm, window);
+    }
+    fn property_notify(&mut self, xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
+        self.state.property_notify(xwm, window, property);
     }
     fn move_request(&mut self, xwm: XwmId, window: X11Surface, button: u32) {
         self.state.move_request(xwm, window, button);

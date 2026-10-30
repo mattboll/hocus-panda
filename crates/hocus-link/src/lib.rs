@@ -11,9 +11,10 @@
 //! presses outside the shell's surfaces while a popover shows, the
 //! names of the screens besides the built-in one, the keyboard's layouts
 //! and which one is active, and the bars' screens' desktops with a sketch
-//! of their windows; the shell draws the bars and their popovers, keeps
-//! the levels, and says when it draws on the CPU, when a popover closes,
-//! and when the user asks for the next layout or another desktop. Neither
+//! of their windows, their applications and their titles; the shell draws
+//! the bars and their popovers, keeps the levels, and says when it draws
+//! on the CPU, when a popover closes, and when the user asks for the next
+//! layout, another desktop or a window. Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
 //!
@@ -169,14 +170,23 @@ pub enum ToShell {
     /// A bar's screen's desktops: sent as the shell connects, and when they
     /// change, at most once a frame (bar.md, 3.9).
     Desktops(Desktops),
+    /// The titles of a bar's screen's windows, for the list a desktop's
+    /// tile opens on hover (3.9b): apart from [`ToShell::Desktops`], so
+    /// that a title that changes often (a terminal's) draws only an open
+    /// list, never the tiles. Sent as the shell connects, and when one
+    /// changes, at most once a frame. Written `titles`, the screen's name,
+    /// then for each window a tab, its id, a tab, its title (on one line,
+    /// without tabs, [`TITLE_MAX`] characters at most).
+    Titles(Titles),
 }
 
 /// A screen's desktops as its bar's tiles show them. Written `desktops`,
 /// the screen's name, the count, the current one (from 0), then for each
 /// window, bottom first, its desktop (from 0), its place and size in
-/// [`SHARE`]s of the screen, and 1 if it is the focused window of the
-/// current desktop (else 0), commas between: `desktops eDP-1 4 0
-/// 0,20,30,600,940,1`.
+/// [`SHARE`]s of the screen, 1 if it is the focused window of the current
+/// desktop (else 0), its id and its application's id (its icon's; empty
+/// when it has none, its spaces made `_`), commas between: `desktops eDP-1
+/// 4 0 0,20,30,600,940,1,7,org.gnome.Nautilus`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Desktops {
     pub output: String,
@@ -186,13 +196,54 @@ pub struct Desktops {
 }
 
 /// A window as its desktop's tile sketches it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeskWindow {
     pub desktop: u8,
     /// Left, top, width, height, in [`SHARE`]s of the screen, inside it.
     pub rect: [u16; 4],
     /// The focused window, on the current desktop: drawn brighter.
     pub focused: bool,
+    /// The compositor's id for it: what [`ToCompositor::Bring`] names.
+    pub id: u64,
+    /// Its application's id, for its icon (empty: none).
+    pub app: String,
+}
+
+/// A screen's windows' titles, by their ids, in [`Desktops::windows`]'
+/// order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Titles {
+    pub output: String,
+    pub titles: Vec<(u64, String)>,
+}
+
+/// The characters of a title a [`ToShell::Titles`] line carries at most:
+/// the list cuts titles to its 190 px long before that.
+pub const TITLE_MAX: usize = 200;
+
+/// A title as a [`ToShell::Titles`] line carries it: on one line, without
+/// tabs, trimmed, [`TITLE_MAX`] characters at most.
+pub fn title_text(title: &str) -> String {
+    let title: String = title
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(TITLE_MAX)
+        .collect();
+    title.trim().to_owned()
+}
+
+/// An application's id as a [`ToShell::Desktops`] line carries it: its
+/// spaces and control characters made `_`, which an id has none of.
+fn app_word(app: &str) -> String {
+    app.chars()
+        .map(|c| {
+            if c.is_whitespace() || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 /// A whole screen, in the units of [`DeskWindow::rect`]: a thousandth of it
@@ -391,6 +442,10 @@ pub enum ToCompositor {
     /// `desktop OUTPUT N`, `desktop OUTPUT next` or `desktop OUTPUT
     /// previous`.
     Desktop { output: String, to: DesktopTo },
+    /// The user asks for window `id` (a row of a desktop's list, 3.9b):
+    /// the compositor goes to its desktop, sliding, and focuses it.
+    /// Written `bring ID`.
+    Bring(u64),
 }
 
 /// A screen's name as a [`ToShell::Screens`] line carries it: on one
@@ -474,10 +529,19 @@ impl fmt::Display for ToShell {
                     let [x, y, width, height] = w.rect;
                     write!(
                         f,
-                        " {},{x},{y},{width},{height},{}",
+                        " {},{x},{y},{width},{height},{},{},{}",
                         w.desktop,
-                        u8::from(w.focused)
+                        u8::from(w.focused),
+                        w.id,
+                        app_word(&w.app)
                     )?;
+                }
+                Ok(())
+            }
+            Self::Titles(titles) => {
+                write!(f, "titles {}", titles.output)?;
+                for (id, title) in &titles.titles {
+                    write!(f, "\t{id}\t{}", title_text(title))?;
                 }
                 Ok(())
             }
@@ -528,6 +592,29 @@ impl FromStr for ToShell {
                     .collect(),
             ));
         }
+        if let Some(fields) = line.strip_prefix("titles ") {
+            let mut fields = fields.split('\t');
+            let output = fields.next().unwrap_or_default();
+            if output.is_empty() || output.contains(' ') {
+                return Err(BadLine(format!("titles of what screen: {line:?}")));
+            }
+            let fields: Vec<&str> = fields.collect();
+            let (pairs, rest) = fields.as_chunks::<2>();
+            if !rest.is_empty() {
+                return Err(BadLine(format!("a window without its title: {line:?}")));
+            }
+            let titles = pairs
+                .iter()
+                .map(|[id, title]| {
+                    let id = id.parse().map_err(|e| BadLine(format!("an id: {e}")))?;
+                    Ok((id, (*title).to_owned()))
+                })
+                .collect::<Result<_, BadLine>>()?;
+            return Ok(Self::Titles(Titles {
+                output: output.to_owned(),
+                titles,
+            }));
+        }
         let mut words = line.split_whitespace();
         match words.next() {
             Some("look") => Ok(Self::Look {
@@ -560,8 +647,9 @@ impl FromStr for ToShell {
                 let current = number(word(&mut words, "current")?, "current")?;
                 let windows = words
                     .map(|w| {
-                        let fields: Vec<&str> = w.split(',').collect();
-                        let [desktop, x, y, width, height, focused] = fields[..] else {
+                        // The application's id last: it may hold commas.
+                        let fields: Vec<&str> = w.splitn(8, ',').collect();
+                        let [desktop, x, y, width, height, focused, id, app] = fields[..] else {
                             return Err(BadLine(format!("a window {w:?}")));
                         };
                         let share = |v: &str| {
@@ -574,6 +662,8 @@ impl FromStr for ToShell {
                             desktop: number(desktop, "desktop")?,
                             rect: [share(x)?, share(y)?, share(width)?, share(height)?],
                             focused: flag(Some(focused), "1", "0")?,
+                            id: id.parse().map_err(|e| BadLine(format!("an id: {e}")))?,
+                            app: app.to_owned(),
                         })
                     })
                     .collect::<Result<_, _>>()?;
@@ -616,6 +706,7 @@ impl fmt::Display for ToCompositor {
                 DesktopTo::Next => write!(f, "desktop {output} next"),
                 DesktopTo::Previous => write!(f, "desktop {output} previous"),
             },
+            Self::Bring(id) => write!(f, "bring {id}"),
         }
     }
 }
@@ -643,6 +734,11 @@ impl FromStr for ToCompositor {
                 };
                 Ok(Self::Desktop { output, to })
             }
+            Some("bring") => Ok(Self::Bring(
+                word(&mut words, "window")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("window: {e}")))?,
+            )),
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
     }
@@ -751,13 +847,25 @@ mod tests {
                         desktop: 0,
                         rect: [0, 0, SHARE, SHARE],
                         focused: false,
+                        id: 3,
+                        app: String::new(),
                     },
                     DeskWindow {
                         desktop: 8,
                         rect: [20, 30, 600, 940],
                         focused: true,
+                        id: 12,
+                        app: "com.example,odd".into(),
                     },
                 ],
+            }),
+            ToShell::Titles(Titles {
+                output: "eDP-1".into(),
+                titles: Vec::new(),
+            }),
+            ToShell::Titles(Titles {
+                output: "eDP-1".into(),
+                titles: vec![(3, "~/hocus — fish".into()), (12, String::new())],
             }),
         ];
         for message in to_shell
@@ -788,6 +896,7 @@ mod tests {
                 output: "eDP-1".into(),
                 to: DesktopTo::Previous,
             },
+            ToCompositor::Bring(42),
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
@@ -814,9 +923,44 @@ mod tests {
             "desktops eDP-1 4 0 0,1,2,3,4",
             "desktops eDP-1 4 0 0,1,2,3,1001,0",
             "desktops eDP-1 4 0 0,1,2,3,4,yes",
+            "desktops eDP-1 4 0 0,1,2,3,4,1",
+            "desktops eDP-1 4 0 0,1,2,3,4,1,x,foot",
+            "titles",
+            "titles eDP-1\t3",
+            "titles eDP-1\tthree\tfish",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_title_and_an_app_id_stay_on_their_line() {
+        let line = ToShell::Titles(Titles {
+            output: "eDP-1".into(),
+            titles: vec![(1, " a\tb\nc ".into()), (2, "é".repeat(TITLE_MAX + 5))],
+        })
+        .to_string();
+        let Ok(ToShell::Titles(read)) = line.parse::<ToShell>() else {
+            panic!("{line:?}");
+        };
+        assert_eq!(read.titles[0], (1, "a b c".to_owned()));
+        assert_eq!(read.titles[1].1.chars().count(), TITLE_MAX);
+        let desktops = ToShell::Desktops(Desktops {
+            output: "eDP-1".into(),
+            count: 1,
+            current: 0,
+            windows: vec![DeskWindow {
+                desktop: 0,
+                rect: [0, 0, 1, 1],
+                focused: false,
+                id: 1,
+                app: "my app".into(),
+            }],
+        });
+        let Ok(ToShell::Desktops(read)) = desktops.to_string().parse::<ToShell>() else {
+            panic!();
+        };
+        assert_eq!(read.windows[0].app, "my_app");
     }
 
     #[test]

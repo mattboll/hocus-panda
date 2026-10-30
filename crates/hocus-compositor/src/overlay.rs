@@ -22,7 +22,6 @@ use smithay::{
         channel::{self, Event},
     },
     utils::{Logical, Point, Rectangle, Size},
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
 };
 
 use crate::{
@@ -314,29 +313,6 @@ fn text(
     Some((buffer(&pixels, w, h), (w, h)))
 }
 
-/// A window's title, as its client gives it.
-fn title_of(state: &State, id: WindowId) -> String {
-    let Some(managed) = state.windows.get(&id) else {
-        return String::new();
-    };
-    if let Some(x11) = managed.window.x11_surface() {
-        return x11.title();
-    }
-    let Some(toplevel) = managed.window.toplevel() else {
-        return String::new();
-    };
-    let title = with_states(toplevel.wl_surface(), |states| {
-        states
-            .data_map
-            .get::<XdgToplevelSurfaceData>()
-            .and_then(|d| d.lock().ok().and_then(|d| d.title.clone()))
-    });
-    title
-        .filter(|t| !t.trim().is_empty())
-        .or_else(|| crate::windows::app_id(&managed.window))
-        .unwrap_or_default()
-}
-
 fn rect(area: Area) -> Rectangle<f64, Logical> {
     Rectangle::new((area.x, area.y).into(), (area.w, area.h).into())
 }
@@ -463,7 +439,7 @@ impl State {
             };
             let label = place(p.label);
             let width = (label.size.w * scale).floor() as i32;
-            let title = title_of(self, id);
+            let title = crate::windows::title_of(self, id);
             if let Some((texture, (w, h))) = self.overlay.label(&title, &suffix, scale, width) {
                 let size = Size::<f64, Logical>::from((f64::from(w) / scale, f64::from(h) / scale));
                 let at = Point::<f64, Logical>::from((
