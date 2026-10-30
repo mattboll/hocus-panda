@@ -791,8 +791,12 @@ impl State {
         if id != self.model.focused() {
             self.end_popup_grab();
         }
+        let before = self.model.focused();
         self.model.focus(id);
         let focused = self.model.focused();
+        if focused != before {
+            self.agents_focus_changed();
+        }
         self.sync_activated();
         if let Some(id) = focused
             && let Some(managed) = self.windows.get_mut(&id)

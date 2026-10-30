@@ -328,6 +328,7 @@ impl State {
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
+            ToCompositor::GoToAgent(id) => self.go_to_agent(id),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
                 Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),
                 None => tracing::warn!(tool, "the shell plugs in a tool that is not one"),

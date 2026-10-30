@@ -18,6 +18,13 @@
 //! above it. The shell is told the tools and the agents in a line each,
 //! after the turn of the loop in which they changed: a burst of reports is
 //! one line, and a report that changes nothing sends none.
+//!
+//! A finished agent stays "not seen yet" (`done` to the shell) until the
+//! user has seen it (4.1): its window gets the keyboard after it finished
+//! (or has it as it finishes), or its row in the bar is clicked; it is then
+//! `seen`, until it finishes again. herdr's own agents are seen as herdr
+//! says (it turns `done` into `idle` once its pane is looked at): their
+//! window is herdr's terminal, shared by all its panes.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -49,6 +56,9 @@ use smithay::{
 };
 
 use crate::{App, State as Compositor, model::WindowId};
+
+/// A finished agent's state once seen, as the shell is told it.
+const SEEN: &str = "seen";
 
 /// What a reporting connection may hold, lines, and how long it is read.
 const MOST_LINES: usize = 64;
@@ -108,6 +118,9 @@ pub struct Agents {
     dirty: bool,
     told_tools: Option<Vec<AgentTool>>,
     pub told: Option<Vec<AgentShown>>,
+    /// The finished agents seen, by id: since when they were finished
+    /// when seen (finished again later, they are not seen yet).
+    seen: HashMap<u64, u64>,
     /// Commits of the agents' surfaces, for tests: none at rest.
     pub commits: u64,
 }
@@ -500,7 +513,63 @@ impl Compositor {
             }
         }
         shown.sort_by_key(|a| a.id);
+        self.mark_seen(&mut shown);
         shown
+    }
+
+    /// The finished agents among `shown` whose window has the keyboard are
+    /// seen; those seen say so (`seen`). herdr's own are seen as herdr
+    /// says.
+    fn mark_seen(&mut self, shown: &mut [AgentShown]) {
+        let focused = self.model.focused().map(|w| w.0);
+        let seen = &mut self.agents.seen;
+        seen.retain(|id, _| shown.iter().any(|a| a.id == *id));
+        for agent in shown.iter_mut().filter(|a| a.state == State::Done.name()) {
+            let own_window = agent.window != 0 && agent.source != Source::Herdr.name();
+            if own_window && focused == Some(agent.window) {
+                seen.insert(agent.id, agent.since);
+            }
+            if seen.get(&agent.id) == Some(&agent.since) {
+                SEEN.clone_into(&mut agent.state);
+            }
+        }
+    }
+
+    /// The user goes to agent `id` (its row): its window, if it has one,
+    /// on its desktop with the keyboard; finished, it is seen.
+    pub fn go_to_agent(&mut self, id: u64) {
+        let Some(agent) = self.agents_shown().into_iter().find(|a| a.id == id) else {
+            tracing::debug!(id, "the shell goes to an agent that is gone");
+            return;
+        };
+        tracing::debug!(id, name = agent.name, window = agent.window, "to an agent");
+        if agent.state == State::Done.name() {
+            self.agents.seen.insert(id, agent.since);
+        }
+        if agent.window != 0 {
+            self.window_asked(agent.window);
+        }
+        self.agents.dirty = true;
+    }
+
+    /// The keyboard went to another window: a finished agent's may be
+    /// seen now.
+    pub fn agents_focus_changed(&mut self) {
+        if !self.agents.list.is_empty() || !self.agents.herdr.agents.is_empty() {
+            self.agents.dirty = true;
+        }
+    }
+
+    /// For tests: as if every agent had been in its state `by` longer.
+    pub fn backdate_agents(&mut self, by: Duration) {
+        let by = crate::panel::micros(by);
+        for agent in &mut self.agents.list {
+            agent.since = agent.since.saturating_sub(by);
+        }
+        for (_, since) in &mut self.agents.herdr.agents {
+            *since = since.saturating_sub(by);
+        }
+        self.agents.dirty = true;
     }
 
     /// The mapped windows by their client's process: the topmost one of
