@@ -129,6 +129,10 @@
 # take-to-desktop-7 = "Super+Ctrl+Shift+7"
 # take-to-desktop-8 = "Super+Ctrl+Shift+8"
 # take-to-desktop-9 = "Super+Ctrl+Shift+9"
+# Takes the focused window to the desktop on the left or the right of its
+# screen, going there with it; it stays past the first or the last.
+# take-to-desktop-left = "Super+Ctrl+Shift+Left"
+# take-to-desktop-right = "Super+Ctrl+Shift+Right"
 # The bar's other form, on the screen under the pointer.
 # toggle-bar = "Super+B"
 # The keyboard's sound and brightness keys: 5 % a press, stepping on while

@@ -43,6 +43,9 @@ pub enum Action {
     SendToDesktop(usize),
     /// And goes there with it.
     TakeToDesktop(usize),
+    /// Takes the focused window to the desktop on that side of its
+    /// screen, going there with it.
+    TakeToDesktopBy(i32),
     /// The bar's other form, on the screen under the pointer.
     ToggleBar,
     /// Volume, mute or brightness: to the shell, which keeps them.
@@ -214,6 +217,8 @@ shortcuts! {
     take_to_desktop_7: ["Super+Ctrl+Shift+7"] => Action::TakeToDesktop(6),
     take_to_desktop_8: ["Super+Ctrl+Shift+8"] => Action::TakeToDesktop(7),
     take_to_desktop_9: ["Super+Ctrl+Shift+9"] => Action::TakeToDesktop(8),
+    take_to_desktop_left: ["Super+Ctrl+Shift+Left"] => Action::TakeToDesktopBy(-1),
+    take_to_desktop_right: ["Super+Ctrl+Shift+Right"] => Action::TakeToDesktopBy(1),
     toggle_bar: ["Super+B"] => Action::ToggleBar,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
     volume_down: ["XF86AudioLowerVolume"] => Action::Level(LevelKey::VolumeDown),
@@ -326,6 +331,7 @@ impl State {
             Action::Desktop(to) => self.switch_desktop_to(to),
             Action::SendToDesktop(to) => self.send_to_desktop(to, false),
             Action::TakeToDesktop(to) => self.send_to_desktop(to, true),
+            Action::TakeToDesktopBy(delta) => self.take_to_desktop_by(delta),
             Action::ToggleBar => {
                 if let Some(output) = self.output_under_pointer() {
                     self.toggle_bar(&output.name());
@@ -430,6 +436,10 @@ mod tests {
         assert_eq!(
             action(mods(true, true, true, false), Keysym::_2),
             Some(Action::TakeToDesktop(1))
+        );
+        assert_eq!(
+            action(mods(true, true, true, false), Keysym::Left),
+            Some(Action::TakeToDesktopBy(-1))
         );
         assert_eq!(
             action(mods(false, false, false, true), Keysym::Tab),
