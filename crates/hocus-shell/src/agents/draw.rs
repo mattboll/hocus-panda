@@ -345,6 +345,12 @@ impl Group {
         let Some(layout) = layout().filter(|l| l.height > 0.0) else {
             return Vec::new();
         };
+        // Not before the surface took the group's new height: a press there
+        // would reach what is under it (the resize is the compositor's to
+        // apply, a frame or more later).
+        if size.height + 0.5 < layout.height + 2.0 * ROOM {
+            return Vec::new();
+        }
         let o = self.origin(size);
         let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
         let mut items = vec![(Item::Sources, at(layout.sources))];
