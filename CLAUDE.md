@@ -120,8 +120,11 @@ bar; the compositor starts it from beside its own binary (or `--shell
 PATH`), restarts it when it ends, and talks to it over a private socket
 (`crates/hocus-link`). `--no-shell` keeps it off (the bar's space is kept
 all the same); the in-process harness starts none unless asked
-(`Headless::start_with_shell`). The bar's base: docs/design/bar.md, "As
-built".
+(`Headless::start_with_shell`). The compositor's tests that ask run the
+shell built beside them, which a test binary does not build: build it
+first (`cargo build -p hocus-shell`, as CI does). They skip without it,
+and fail when it is older than its sources. The bar's base:
+docs/design/bar.md, "As built".
 
 The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 (QEMU with KVM; the base image is cached in
