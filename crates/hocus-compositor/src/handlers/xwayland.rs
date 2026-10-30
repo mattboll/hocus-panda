@@ -240,10 +240,10 @@ impl XwmHandler for State {
         let state = &*self;
         match selection {
             SelectionTarget::Clipboard => {
-                set_data_device_selection(&state.display_handle, &state.seat, mime_types, ());
+                set_data_device_selection(&state.display_handle, &state.seat, mime_types, None);
             }
             SelectionTarget::Primary => {
-                set_primary_selection(&state.display_handle, &state.seat, mime_types, ());
+                set_primary_selection(&state.display_handle, &state.seat, mime_types, None);
             }
         }
     }

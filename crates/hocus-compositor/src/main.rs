@@ -125,6 +125,13 @@ fn main() -> ExitCode {
     }
     config.cursor_env = CursorEnv::from_process();
     config.state_dir = Config::default_state_dir();
+    // The hooks run the `hocus` beside this program, else the one in PATH.
+    let hocus = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("hocus")))
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| PathBuf::from("hocus"));
+    config.agent_places = hocus_agents::tools::Places::from_env(hocus, config.state_dir.clone());
     let shell = (!args.no_shell).then(|| {
         args.shell.unwrap_or_else(|| {
             std::env::current_exe()

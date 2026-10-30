@@ -464,7 +464,8 @@ impl State {
                     hocus_link::CLOCK_NAMESPACE
                     | hocus_link::LEVELS_NAMESPACE
                     | hocus_link::CONNECTIONS_NAMESPACE
-                    | hocus_link::DESKTOPS_NAMESPACE => bar,
+                    | hocus_link::DESKTOPS_NAMESPACE
+                    | hocus_link::AGENTS_NAMESPACE => bar,
                     _ => None,
                 };
                 if let Some(clip) = cut.filter(|_| self.shell.software) {

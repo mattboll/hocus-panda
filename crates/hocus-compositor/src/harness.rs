@@ -256,6 +256,36 @@ impl Headless {
     }
 
     /// Commits of the desktops' surfaces so far.
+    /// Commits of the agents' group's surfaces: none at rest.
+    pub fn agents_commits(&self) -> u64 {
+        self.app.state.agents.commits
+    }
+
+    /// The agents as the shell is told them.
+    pub fn agents(&mut self) -> Vec<hocus_link::AgentShown> {
+        self.app.state.agents_shown()
+    }
+
+    /// The agents as the shell was last told them.
+    pub fn agents_peek(&self) -> Vec<hocus_link::AgentShown> {
+        self.app.state.agents.told.clone().unwrap_or_default()
+    }
+
+    /// The agents' tools as the shell is told them.
+    pub fn agent_tools(&self) -> Vec<hocus_link::AgentTool> {
+        self.app.state.agent_tools()
+    }
+
+    /// The control socket `hocus agent` writes to.
+    pub fn control_socket(&self) -> Option<&Path> {
+        self.app.state.agents.socket.as_deref()
+    }
+
+    /// The agents' group's surfaces: their output and where they are.
+    pub fn agents_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::AGENTS_NAMESPACE)
+    }
+
     pub fn desktops_commits(&self) -> u64 {
         self.app.state.panel.desktops_commits
     }

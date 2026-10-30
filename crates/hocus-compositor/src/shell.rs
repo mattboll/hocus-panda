@@ -299,6 +299,7 @@ impl State {
         self.tell_screens(true);
         self.tell_layouts();
         self.tell_desktops();
+        self.tell_agents();
         self.hand_kept_levels();
     }
 
@@ -327,6 +328,16 @@ impl State {
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
+            ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
+                Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),
+                None => tracing::warn!(tool, "the shell plugs in a tool that is not one"),
+            },
+            ToCompositor::Unplug(tool) => match crate::agents::tool(&tool) {
+                Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Unplug(tool)),
+                None => tracing::warn!(tool, "the shell unplugs a tool that is not one"),
+            },
+            ToCompositor::Decline => self.agent_tools_asked(hocus_agents::watch::Ask::Decline),
+            ToCompositor::Copy(text) => self.copy_text(text),
         }
     }
 
