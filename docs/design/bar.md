@@ -1582,7 +1582,9 @@ nothing to propose, the group is its header alone.
   (removes it when there was none), else takes only our entries out.
 - **"Ne rien brancher"** declines every tool there and not plugged in,
   herdr's following too (its agents are then not followed: Sources says
-  "En marche · pas suivi"), remembered in the same file; the group goes
+  "En marche · pas suivi" / "Running · not followed", with "Suivre" /
+  "Follow", in "Brancher"'s style, to follow it again), remembered in the
+  same file; the group goes
   (variant B). A tool found later that was never declined brings the
   card, and the group, back for itself. Plugging a declined tool in from
   Sources clears its refusal.

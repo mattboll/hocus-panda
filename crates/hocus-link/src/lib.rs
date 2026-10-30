@@ -591,6 +591,9 @@ pub enum ToCompositor {
     /// "Plug nothing in": every tool there and not plugged in is declined,
     /// herdr's following too. Written `decline`.
     Decline,
+    /// The user follows herdr again, declined before (Sources' "Suivre").
+    /// Written `follow herdr`.
+    Follow(String),
     /// The clipboard takes `text` (the command the Sources popover shows),
     /// which the compositor offers: the shell's surfaces take no serial to
     /// set it themselves. Written `copy TEXT`, the text on one line.
@@ -932,6 +935,7 @@ impl fmt::Display for ToCompositor {
             Self::Plug(tool) => write!(f, "plug {tool}"),
             Self::Unplug(tool) => write!(f, "unplug {tool}"),
             Self::Decline => f.write_str("decline"),
+            Self::Follow(tool) => write!(f, "follow {tool}"),
             Self::Copy(text) => write!(f, "copy {}", screen_name(text)),
         }
     }
@@ -950,6 +954,7 @@ impl FromStr for ToCompositor {
             Some("plug") => Ok(Self::Plug(word(&mut words, "tool")?.to_owned())),
             Some("unplug") => Ok(Self::Unplug(word(&mut words, "tool")?.to_owned())),
             Some("decline") => Ok(Self::Decline),
+            Some("follow") => Ok(Self::Follow(word(&mut words, "tool")?.to_owned())),
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
@@ -1141,6 +1146,7 @@ mod tests {
             ToCompositor::Plug("claude-code".into()),
             ToCompositor::Unplug("codex".into()),
             ToCompositor::Decline,
+            ToCompositor::Follow("herdr".into()),
             ToCompositor::Copy("hocus agent my-agent waiting".into()),
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));

@@ -337,6 +337,12 @@ impl State {
                 None => tracing::warn!(tool, "the shell unplugs a tool that is not one"),
             },
             ToCompositor::Decline => self.agent_tools_asked(hocus_agents::watch::Ask::Decline),
+            ToCompositor::Follow(tool) if tool == "herdr" => {
+                self.agent_tools_asked(hocus_agents::watch::Ask::FollowHerdr);
+            }
+            ToCompositor::Follow(tool) => {
+                tracing::warn!(tool, "the shell follows a tool that is not herdr");
+            }
             ToCompositor::Copy(text) => self.copy_text(text),
         }
     }

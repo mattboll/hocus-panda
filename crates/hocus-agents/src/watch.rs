@@ -67,6 +67,8 @@ pub enum Ask {
     /// "Plug nothing in": every tool there and not plugged in is declined,
     /// herdr's following too.
     Decline,
+    /// herdr, declined before, followed again (Sources' "Suivre").
+    FollowHerdr,
 }
 
 /// The watcher's thread: it ends when this is dropped.
@@ -224,6 +226,12 @@ fn carry_out(ask: Ask, places: &Places, memory: &mut Memory) {
                 memory.declined.insert("herdr".to_owned());
             }
             tracing::info!(declined = ?memory.declined, "plug nothing in");
+            memory.save(places);
+            Ok(())
+        }
+        Ask::FollowHerdr => {
+            memory.declined.remove("herdr");
+            tracing::info!("herdr followed again");
             memory.save(places);
             Ok(())
         }

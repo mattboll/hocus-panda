@@ -337,6 +337,8 @@ pub enum Effect {
     Unplug(crate::agents::Tool),
     /// The compositor declines the tools listed ("Ne rien brancher").
     Decline,
+    /// The compositor follows herdr again.
+    FollowHerdr,
     /// The clipboard takes this text.
     Copy(String),
 }
@@ -1281,6 +1283,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Decline => {
             tell(ToCompositor::Decline);
+            Vec::new()
+        }
+        Effect::FollowHerdr => {
+            tell(ToCompositor::Follow("herdr".to_owned()));
             Vec::new()
         }
         Effect::Copy(text) => {

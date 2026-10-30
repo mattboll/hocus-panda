@@ -583,6 +583,56 @@ fn plugging_nothing_in_with_herdr_running_hides_the_group_too() -> anyhow::Resul
 }
 
 #[test]
+fn a_declined_herdr_is_followed_again_from_sources() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            claude: true,
+            codex: true,
+            herdr: true,
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    // Claude Code plugged in, then the rest declined, herdr with it.
+    let plug = bed.item("Plug(ClaudeCode)")?;
+    bed.click(plug);
+    let popover = bed.popover()?;
+    bed.click((
+        f64::from(popover.x + popover.width - 21),
+        f64::from(popover.y + popover.height - 30),
+    ));
+    bed.tool_becomes("claude-code", ToolState::Plugged)?;
+    bed.settle()?;
+    let decline = bed.item("Decline")?;
+    bed.click(decline);
+    bed.tool_becomes("herdr", ToolState::Ignored)?;
+    bed.logged("shows=Aucun agent en cours. Suivis\u{a0}: Claude Code.")?;
+    bed.settle()?;
+    // Sources: herdr's row, the third, says so and offers "Suivre".
+    let sources = bed.item("Sources")?;
+    bed.click(sources);
+    let popover = bed.popover()?;
+    bed.logged("En marche · pas suivi")?;
+    bed.click((
+        f64::from(popover.x + 270),
+        f64::from(popover.y + 51 + 2 * 46 + 20),
+    ));
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    bed.logged("En marche · suivi tout seul")?;
+    let done = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.agents_peek()
+            .iter()
+            .any(|a| a.name == "refacto" && a.source == "herdr")
+    })?;
+    anyhow::ensure!(done, "herdr's agent not followed: {:?}", bed.hp.agents());
+    Ok(())
+}
+
+#[test]
 fn a_tool_installed_later_brings_the_card_back_for_it_alone() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
