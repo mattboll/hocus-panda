@@ -3,7 +3,7 @@
 # library dependencies are the ones dpkg-shlibdeps finds on this system, so
 # the package installs on this release and later ones.
 #
-#   cargo build --release --locked -p hocus-compositor -p hocus-shell
+#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli
 #   packaging/deb/build.sh [OUTDIR]     (default: CARGO_TARGET_DIR/packages)
 #
 # Needs dpkg-dev; the binaries are read from CARGO_TARGET_DIR/release. Prints
@@ -54,7 +54,7 @@ mkdir -p "$root/DEBIAN"
 printf 'Source: hocuspanda\n\nPackage: hocuspanda\nArchitecture: any\n' \
     > "$work/src/debian/control"
 (cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda \
-    debian/hocuspanda/usr/bin/hocuspanda-shell) > "$work/shlibs"
+    debian/hocuspanda/usr/bin/hocuspanda-shell debian/hocuspanda/usr/bin/hocus) > "$work/shlibs"
 depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 
 # Recommends: Mesa's drivers (the shell draws with Vulkan, or on the CPU

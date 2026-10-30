@@ -49,8 +49,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Shell
-        # The compositor's tests start the real shell from beside them: a
-        # test binary does not build it, and those tests skip without it.
-        run: cargo build -p hocus-shell
+        # The compositor's tests start the real shell, and run `hocus`,
+        # from beside them: a test binary does not build them, and those
+        # tests skip without them.
+        run: cargo build -p hocus-shell -p hocus-cli
       - name: Tests
         run: cargo nextest run --workspace

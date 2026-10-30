@@ -8,6 +8,7 @@ What the package of Hocuspanda holds, and how it is built.
 |---|---|---|
 | `hocuspanda` | `/usr/bin` | The compositor |
 | `hocuspanda-shell` | `/usr/bin` | The shell (the bar), which the compositor starts and restarts |
+| `hocus` | `/usr/bin` | What agents' hooks and scripts run to tell the bar their state ([docs/agents.md](../docs/agents.md)) |
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
 | [`config.toml`](config.toml) | `/usr/share/doc/hocuspanda` | Every setting with its default, to copy to `~/.config/hocuspanda/` |
@@ -20,7 +21,7 @@ The binary keeps its symbols, for backtraces.
 On Debian or Ubuntu, with `dpkg-dev` and the build dependencies of the CI:
 
 ```sh
-cargo build --release --locked -p hocus-compositor
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli
 packaging/deb/build.sh                  # target/packages/hocuspanda_<version>-1_<arch>.deb
 sudo apt install ./target/packages/hocuspanda_<version>-1_<arch>.deb
 ```
