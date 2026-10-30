@@ -15,6 +15,9 @@
 //! desktop, told as the slide starts, so that the tiles' ring moves with
 //! it.
 //!
+//! Minimised windows are told too, for that list only (3.9c): the tiles
+//! leave them out.
+//!
 //! The windows' titles, for the list a tile opens on hover (3.9b), are told
 //! on a line of their own, compared on their own: a terminal retitles at
 //! every command, which must draw an open list but never the tiles. A
@@ -25,7 +28,7 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use hocus_link::{DeskWindow, DesktopTo, Desktops, SHARE, Titles, ToShell};
+use hocus_link::{DeskWindow, DesktopTo, Desktops, Look, SHARE, Titles, ToShell};
 use smithay::{
     output::Output,
     reexports::calloop::timer::{TimeoutAction, Timer},
@@ -459,7 +462,8 @@ impl Told {
 
 impl crate::State {
     /// `output`'s desktops as its bar's tiles show them: the windows on it,
-    /// minimised ones aside, bottom first.
+    /// bottom first, minimised ones too, which only their desktop's list
+    /// shows (3.9c).
     pub fn desktops_view(&self, output: &Output) -> Option<Desktops> {
         let screen = rect_of(self.space.output_geometry(output)?);
         let strip = self.strip(output);
@@ -468,13 +472,28 @@ impl crate::State {
         let windows = self
             .windows_on(output)
             .into_iter()
-            .filter(|id| !self.model.is_minimized(*id))
             .filter_map(|id| {
                 let desktop = self.model.desktop(id);
+                let minimized = self.model.is_minimized(id);
+                let rect = self.home_rect(id).and_then(|r| share(r, screen));
+                // A minimised window is not sketched: where it was does
+                // not matter.
+                let rect = if minimized {
+                    rect.unwrap_or_default()
+                } else {
+                    rect?
+                };
+                let look = if minimized {
+                    Look::Minimized
+                } else if focused == Some(id) && desktop == current {
+                    Look::Focused
+                } else {
+                    Look::Plain
+                };
                 Some(DeskWindow {
                     desktop: u8::try_from(desktop).ok()?,
-                    rect: share(self.home_rect(id)?, screen)?,
-                    focused: focused == Some(id) && desktop == current,
+                    rect,
+                    look,
                     id: id.0,
                     app: self
                         .windows
@@ -497,7 +516,6 @@ impl crate::State {
         let titles = self
             .windows_on(output)
             .into_iter()
-            .filter(|id| !self.model.is_minimized(*id))
             .map(|id| (id.0, crate::windows::title_of(self, id)))
             .collect();
         Titles {
@@ -1078,7 +1096,7 @@ mod tests {
             windows: vec![DeskWindow {
                 desktop: 0,
                 rect: [x, 0, 500, 500],
-                focused: true,
+                look: Look::Focused,
                 id: 1,
                 app: "foot".into(),
             }],

@@ -84,6 +84,12 @@ impl List {
 
     /// Its thumb, at `scroll`, when it scrolls.
     pub(crate) fn scrollbar(self, f: &mut Frame, scroll: f32) {
+        self.scrollbar_at(f, scroll, RIGHT);
+    }
+
+    /// Its thumb, at `scroll`, from `left`: on a popover narrower than
+    /// the others, its content's right.
+    pub(crate) fn scrollbar_at(self, f: &mut Frame, scroll: f32, left: f32) {
         if !self.scrolls() {
             return;
         }
@@ -92,7 +98,7 @@ impl List {
         let travel = view.height - height;
         let share = scroll / self.most_scroll().max(1.0);
         let thumb = Rectangle::new(
-            Point::new(RIGHT, view.y + travel * share),
+            Point::new(left, view.y + travel * share),
             Size::new(SCROLLBAR, height),
         );
         f.fill(

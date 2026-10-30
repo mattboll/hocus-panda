@@ -16,6 +16,11 @@
 //! the list alone; nothing at rest while it shows. The icons come from a
 //! theme of the test's own (`XDG_DATA_DIRS`), red squares.
 //!
+//! And 3.9c (issue #479): past 8 windows the list scrolls, by the wheel and
+//! to the row the keyboard holds; minimised windows are listed last,
+//! greyed, and a click brings one back; an application without an icon
+//! shows its letter on a colour.
+//!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI.
 
@@ -29,8 +34,8 @@ use std::{
 };
 
 use common::{
-    BTN_LEFT, ClientHandle, Command, KEY_2, KEY_ESC, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_TAB, WAIT,
-    chord, wait,
+    BTN_LEFT, ClientHandle, Command, KEY_2, KEY_ESC, KEY_H, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_TAB,
+    KEY_UP, WAIT, chord, wait,
 };
 use fakes::Fakes;
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
@@ -888,6 +893,170 @@ fn resting_on_a_mini_dot_lists_its_windows() -> anyhow::Result<()> {
     // 8 px left of the 56 px bar, its top on the dots'.
     assert_eq!(list.x + list.width, 1920 - 8 - 56 - 8);
     assert_eq!(list.y, bed.tile(0).y);
+    Ok(())
+}
+
+/// The list's rows' viewport at `list`, 8 rows of 32 px 2 px apart under
+/// its header, and whether its scrollbar's thumb reaches its bottom (the
+/// list scrolled to its end): lighter than the rim's padding beside it.
+fn thumb_at_bottom(bed: &mut Bed, list: Rect) -> anyhow::Result<bool> {
+    let y = list.y + 41 + 8 * 34 - 2 - 3;
+    let light = |[r, g, b]: [u8; 3]| u32::from(r) + u32::from(g) + u32::from(b);
+    let thumb = light(bed.pixel(list.x + 230, y)?);
+    let beside = light(bed.pixel(list.x + 236, y)?);
+    Ok(thumb > beside + 30)
+}
+
+#[test]
+fn past_eight_windows_the_list_scrolls_by_the_wheel_and_to_the_keyboards_row() -> anyhow::Result<()>
+{
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let windows = [
+        ("test.w1", "One"),
+        ("test.w2", "Two"),
+        ("test.w3", "Three"),
+        ("test.w4", "Four"),
+        ("test.w5", "Five"),
+        ("test.w6", "Six"),
+        ("test.w7", "Seven"),
+        ("test.w8", "Eight"),
+        ("test.w9", "Nine"),
+        ("test.w10", "Ten"),
+    ];
+    let mut clients = Vec::new();
+    for (app, title) in windows {
+        clients.push(bed.open_titled(app, title, (400, 300))?);
+    }
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let mark = bed.mark();
+    bed.rest_on(0);
+    let list = bed.list()?;
+    bed.logged_after(
+        mark,
+        "count=10 fenêtres empty=None rows=[\"Ten\", \"Nine\", \"Eight\", \"Seven\", \
+         \"Six\", \"Five\", \"Four\", \"Three\", \"Two\", \"One\"]",
+    )?;
+    // 8 rows show (#479).
+    assert_eq!(list.height, 1 + 10 + 26 + 4 + 8 * 32 + 7 * 2 + 12 + 1);
+    let (x, y) = Bed::row(list, 0);
+    bed.hp.pointer_move(x, y);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(
+        !thumb_at_bottom(&mut bed, list)?,
+        "scrolled before the wheel"
+    );
+    // A notch: two rows, the end.
+    bed.hp.wheel(1);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(thumb_at_bottom(&mut bed, list)?, "the wheel did not scroll");
+    // Clicked into, off the rows: the keyboard. Tab holds the first row,
+    // which scrolls back into view; Up, round to the last, scrolls to it.
+    bed.click((f64::from(list.x + 120), f64::from(list.y + 20)));
+    let held = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some(hocus_link::POPOVER_NAMESPACE)
+    })?;
+    assert!(held, "the keyboard is on {:?}", bed.hp.keyboard_layer());
+    bed.press(KEY_TAB);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(
+        !thumb_at_bottom(&mut bed, list)?,
+        "the first row is out of view"
+    );
+    bed.press(KEY_UP);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(
+        thumb_at_bottom(&mut bed, list)?,
+        "the last row is out of view"
+    );
+    // Enter: the last one, the window at the back.
+    bed.press(KEY_ENTER);
+    let focused = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.focused && w.app_id.as_deref() == Some("test.w1"))
+    })?;
+    assert!(focused, "{:?}", bed.hp.windows());
+    Ok(())
+}
+
+#[test]
+fn a_minimised_window_is_listed_last_greyed_and_a_click_brings_it_back() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let focus = |hp: &mut Headless, app: &str| {
+        hp.dispatch_until(WAIT, |hp| {
+            hp.windows()
+                .iter()
+                .any(|w| w.focused && w.app_id.as_deref() == Some(app))
+        })
+    };
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    // Beta, focused as it opens, minimised.
+    let _beta = bed.open_titled("test.small", "Beta", (600, 400))?;
+    anyhow::ensure!(focus(&mut bed.hp, "test.small")?, "Beta not focused");
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_H]);
+    let gone = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some("test.small"))
+    })?;
+    assert!(gone, "Beta still shows");
+    // An application the theme has no icon for: its letter on a colour.
+    let _gamma = bed.open_titled("test.lettered", "Gamma", (500, 300))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let mark = bed.mark();
+    bed.rest_on(0);
+    let list = bed.list()?;
+    // After the others, front to back; counted.
+    bed.logged_after(
+        mark,
+        "count=3 fenêtres empty=None rows=[\"Gamma\", \"Alpha\", \"Beta\"] minimized=1",
+    )?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // Its icon at half: the theme's red no longer red; its title fainter.
+    let icon = |i: usize| {
+        let (_, y) = Bed::row(list, i);
+        Rect::new(list.x + 13, y as i32 - 8, 16, 16)
+    };
+    assert!(bed.count(icon(1), red)? > 100, "Alpha's icon");
+    assert_eq!(bed.count(icon(2), red)?, 0, "Beta's icon at full");
+    let brightest = |bed: &mut Bed, i: usize| -> anyhow::Result<u32> {
+        let (_, y) = Bed::row(list, i);
+        let band = Rect::new(list.x + 38, y as i32 - 5, 60, 10);
+        let mut most = 0;
+        for y in band.y..band.y + band.height {
+            for x in band.x..band.x + band.width {
+                let [r, g, b] = bed.pixel(x, y)?;
+                most = most.max(u32::from(r) + u32::from(g) + u32::from(b));
+            }
+        }
+        Ok(most)
+    };
+    let (alpha, beta) = (brightest(&mut bed, 1)?, brightest(&mut bed, 2)?);
+    assert!(
+        beta + 150 < alpha,
+        "Beta's title not greyed: {beta}, Alpha's {alpha}"
+    );
+    // Gamma's letter tile: light pixels in its icon's place.
+    let lettered = bed.count(icon(0), |[r, g, b]| {
+        u32::from(r) + u32::from(g) + u32::from(b) > 400
+    })?;
+    assert!(lettered > 100, "no letter tile: {lettered}");
+    // A click on Beta: back, focused, the list gone.
+    let (x, y) = Bed::row(list, 2);
+    bed.click((x, y));
+    anyhow::ensure!(focus(&mut bed.hp, "test.small")?, "{:?}", bed.hp.windows());
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    assert!(closed, "the list stays");
     Ok(())
 }
 

@@ -21,7 +21,7 @@ use std::{
     sync::{Mutex, PoisonError},
 };
 
-use hocus_link::{DESKTOPS_NAMESPACE, Desktops, Titles};
+use hocus_link::{DESKTOPS_NAMESPACE, Desktops, Look, Titles};
 
 use crate::popover::{self, Item};
 
@@ -111,10 +111,13 @@ pub struct Row {
     pub id: u64,
     pub app: String,
     pub title: String,
+    /// Minimised: greyed, after the others.
+    pub minimized: bool,
 }
 
-/// Desktop `index`'s windows on bar `bar`'s screen, front to back, with
-/// their titles (their application's id until the compositor says one).
+/// Desktop `index`'s windows on bar `bar`'s screen, front to back, then
+/// its minimised ones, with their titles (their application's id until
+/// the compositor says one).
 pub fn rows(bar: &str, index: usize) -> Vec<Row> {
     let Some(desktops) = snapshot(bar) else {
         return Vec::new();
@@ -125,7 +128,7 @@ pub fn rows(bar: &str, index: usize) -> Vec<Row> {
 }
 
 fn rows_of(desktops: &Desktops, titles: Option<&Titles>, index: usize) -> Vec<Row> {
-    desktops
+    let mut rows: Vec<Row> = desktops
         .windows
         .iter()
         .rev()
@@ -140,9 +143,13 @@ fn rows_of(desktops: &Desktops, titles: Option<&Titles>, index: usize) -> Vec<Ro
                 id: w.id,
                 app: w.app.clone(),
                 title,
+                minimized: w.look == Look::Minimized,
             }
         })
-        .collect()
+        .collect();
+    // Stable: each part keeps its order, front to back.
+    rows.sort_by_key(|r| r.minimized);
+    rows
 }
 
 #[cfg(test)]
@@ -156,7 +163,7 @@ mod tests {
         let window = |desktop, id, app: &str| DeskWindow {
             desktop,
             rect: [0, 0, 500, 500],
-            focused: false,
+            look: Look::Plain,
             id,
             app: app.into(),
         };
@@ -182,5 +189,18 @@ mod tests {
         );
         assert_eq!(rows[1].id, 1);
         assert!(rows_of(&desktops, None, 2).is_empty());
+        // Minimised ones after the others, front to back too.
+        let mut desktops = desktops;
+        let minimized = |id, app| DeskWindow {
+            look: Look::Minimized,
+            ..window(0, id, app)
+        };
+        desktops.windows.insert(0, minimized(4, "a"));
+        desktops.windows.push(minimized(5, "b"));
+        let rows = rows_of(&desktops, None, 0);
+        assert_eq!(
+            rows.iter().map(|r| (r.id, r.minimized)).collect::<Vec<_>>(),
+            [(3, false), (1, false), (5, true), (4, true)]
+        );
     }
 }

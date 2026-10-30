@@ -248,7 +248,12 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   fenêtre." / "No window.". A click on a row goes to that desktop and
   focuses that window. A click on a tile opens no list (it goes to the
   desktop). The list follows windows opening, closing and retitling while
-  it shows.
+  it shows. Past 8 windows, it scrolls, as the Wi-Fi's list (the wheel, a
+  touchpad, the row holding the keyboard kept in view); minimised windows
+  come after the others, greyed (`text.faint`, their icon at 50 %), and a
+  click on one brings it back on its desktop and goes there (3.9c,
+  answered 2026-10-30, issue #479). `Enter` on a tile holding the keyboard
+  goes to its desktop; it opens no list.
 - **Motion**: the sketch follows the windows as they open, close, move and
   resize, and nothing draws at rest; nothing moves in the tiles but the
   ring, from the desktop left to the one shown (none with reduced motion).
@@ -576,7 +581,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Keyboard's backlight | UPower's `org.freedesktop.UPower.KbdBacklight` | `GetMaxBrightness`, `GetBrightness`, `SetBrightness`; followed by `BrightnessChanged` and `BrightnessChangedWithSource`; none: no row (as built, 3.7) |
 | Other screens | the compositor | their EDID's model, else their connector's name, on the `screens` line of `hocus-link` (as built, 3.7) |
 | Phone | KDE Connect (D-Bus) | |
-| Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, whether it is the focused one, its id and its application's id, on the `desktops` line of `hocus-link`; the windows' titles on the `titles` line; a desktop asked with `desktop`, a window with `bring` (as built, 3.9, 3.9b) |
+| Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, whether it is the focused one or minimised, its id and its application's id, on the `desktops` line of `hocus-link`; the windows' titles on the `titles` line; a desktop asked with `desktop`, a window with `bring` (as built, 3.9, 3.9b, 3.9c) |
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications, clipboard | the desktop's own servers | |
 
@@ -1475,5 +1480,36 @@ What the approved mockup of 3.9b shows, variant A + B (§4.4, §5; issue
   committing; the mini form's dot; nothing committing at rest while the
   list shows. On the Intel GPU, the screenshots of the pull request.
 - **Not built**: a list longer than the bar (a desktop with more than about
-  25 windows; the list does not scroll); previews of a desktop under the
-  pointer; dragging a window onto a tile or a row.
+  25 windows; the list did not scroll: it does since 3.9c); previews of a
+  desktop under the pointer; dragging a window onto a tile or a row.
+
+### 3.9c, the list's long desktops and minimised windows (2026-10-30)
+
+The maintainer's answers to 3.9b's questions (issue #479):
+
+- **Past 8 windows the list scrolls**: 8 rows show (324 px), the others
+  under them, as the Wi-Fi's list does (the kit's `List`, its scrollbar
+  beside the rows, which then end 2 px short of the content's right): the
+  wheel two rows a notch, a touchpad by its pixels, and the row holding
+  the keyboard scrolled into view (`kit::reveal`). On the CPU, a title
+  shows only whole in the viewport. Another desktop's list starts at its
+  top.
+- **Minimised windows** are on the `desktops` line too: each window's
+  look is `0`, `1` (the focused one of the current desktop) or `2`
+  (minimised). The tiles and the dots leave them out, as before; the list
+  shows them after the others, front to back, their title in
+  `text.faint` and their icon at 50 %, and counts them in "M fenêtres". A
+  click (or `Enter`, `Space`) sends `bring ID`, which already slid to the
+  window's desktop, unminimised it and focused it.
+- **`Enter` on a tile** holding the keyboard goes to its desktop, as in
+  3.9; it opens no list.
+- **An application without an icon** shows its letter on a colour in the
+  list, as built in 3.9b (`kit::app_tile`).
+- **Measured headless** (`tests/bar_desktops.rs`): ten windows, 8 rows
+  shown; a notch scrolls to the end (the scrollbar's thumb at the bottom);
+  clicked into, `Tab` scrolls back to the first row and `Up`, round to
+  the last, to it; `Enter` brings that window. A minimised window listed
+  last and counted, its icon no longer at full colour and its title
+  fainter; an application without an icon, its letter tile; a click
+  bringing the minimised window back, focused. On the Intel GPU, the
+  screenshots of the pull request.

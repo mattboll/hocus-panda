@@ -876,6 +876,7 @@ impl Shell {
                 id,
                 words: self.words,
                 glass: self.look.glass,
+                software: self.software,
             })
             .width(Length::Fill)
             .height(Length::Fill)

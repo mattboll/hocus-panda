@@ -1,15 +1,18 @@
 //! A desktop's list of windows (bar.md §4.4, §9; the 3.9b mockup), opened
 //! by resting on its tile (or its dot) for 150 ms: "Bureau N" and "M
 //! fenêtres" on the right; one 32 px row per window, front to back, its
-//! application's icon and its title cut with an ellipsis; "Aucune
+//! application's icon (else its letter on a colour) and its title cut
+//! with an ellipsis; then the minimised ones, greyed (3.9c); "Aucune
 //! fenêtre." on an empty desktop. 240 px wide, its top on the tiles'.
+//! Past 8 rows it scrolls, as the Wi-Fi's list: the wheel, a touchpad,
+//! the row holding the keyboard kept in view.
 //!
 //! A click on a row (or `Enter`, `Space` on the one holding the keyboard)
-//! goes to that desktop and focuses that window, and the list closes.
-//! `Tab`, `Shift+Tab` and the arrows go through the rows once it holds the
-//! keyboard (clicked); `Esc` closes it. It follows windows opening,
-//! closing and retitling while it shows: the compositor's lines draw this
-//! surface alone ([`crate::desktops`]).
+//! goes to that desktop and focuses that window, back from minimised, and
+//! the list closes. `Tab`, `Shift+Tab` and the arrows go through the rows
+//! once it holds the keyboard (clicked); `Esc` closes it. It follows
+//! windows opening, closing and retitling while it shows: the
+//! compositor's lines draw this surface alone ([`crate::desktops`]).
 
 use std::time::Instant;
 
@@ -24,7 +27,7 @@ use iced::{
 
 use super::{
     Effect, Event as Seen, Item, Pressed, event,
-    kit::{self, FILL, Input, Pointer, SMALL_RADIUS, text, text_in},
+    kit::{self, Clip, FILL, Input, List, Pointer, SMALL_RADIUS, Wheel, text, text_in},
 };
 use crate::{
     desktops::{self, Row},
@@ -71,12 +74,46 @@ const NAME: f32 = 13.5;
 const LETTER: f32 = 9.0;
 /// The room a title has: from after the icon to the row's padding.
 const TITLE_ROOM: f32 = RIGHT + ROW_OUT - ROW_PAD - (LEFT - ROW_OUT + ROW_PAD + ICON + ICON_GAP);
+/// A minimised window's icon (3.9c).
+const MINIMIZED_ICON: f32 = 0.5;
+/// The rows shown at most; past them, the list scrolls (3.9c).
+const MOST: usize = 8;
+/// A notch of a mouse's wheel scrolls two rows, as the Wi-Fi's.
+const NOTCH: f32 = 2.0 * (ROW + ROW_GAP);
+/// A scrolled list's rows end this far left of the content's right, the
+/// scrollbar beside them, as the Wi-Fi's.
+const SCROLLED_END: f32 = 2.0;
 
-/// Where its content ends, `rows` windows long.
+/// The rows' height, `rows` long.
+fn rows_height(rows: usize) -> f32 {
+    (rows as f32 * (ROW + ROW_GAP) - ROW_GAP).max(0.0)
+}
+
+/// Where its content ends, `rows` windows long: 8 rows at most show.
 fn end(rows: usize) -> f32 {
     match rows {
         0 => CONTENT_TOP + EMPTY_PAD + EMPTY * LINE + EMPTY_PAD + GAP,
-        n => CONTENT_TOP + n as f32 * ROW + (n - 1) as f32 * ROW_GAP,
+        n => CONTENT_TOP + rows_height(n.min(MOST)),
+    }
+}
+
+/// The list of `rows` windows: its viewport and its rows' height.
+fn list_of(rows: usize) -> List {
+    List {
+        view: Rectangle::new(
+            Point::new(LEFT - ROW_OUT, CONTENT_TOP),
+            Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, rows_height(rows.min(MOST))),
+        ),
+        content: rows_height(rows),
+    }
+}
+
+/// The room a title has in a list that scrolls or not.
+fn title_room(scrolls: bool) -> f32 {
+    if scrolls {
+        TITLE_ROOM - ROW_OUT - SCROLLED_END
+    } else {
+        TITLE_ROOM
     }
 }
 
@@ -90,11 +127,23 @@ pub fn height(bar: &str, index: u8) -> u32 {
     height_of(desktops::rows(bar, usize::from(index)).len())
 }
 
-/// Row `i`'s place.
-fn row_rect(i: usize) -> Rectangle {
+/// Row `i`'s top in the list's content.
+fn row_top(i: usize) -> f32 {
+    i as f32 * (ROW + ROW_GAP)
+}
+
+/// Row `i`'s place in `list`, scrolled by `scroll`: short of the
+/// scrollbar when the list scrolls.
+fn row_rect(list: List, i: usize, scroll: f32) -> Rectangle {
+    let right = if list.scrolls() {
+        RIGHT - SCROLLED_END
+    } else {
+        RIGHT + ROW_OUT
+    };
+    let view = list.view;
     Rectangle::new(
-        Point::new(LEFT - ROW_OUT, CONTENT_TOP + i as f32 * (ROW + ROW_GAP)),
-        Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, ROW),
+        Point::new(view.x, view.y + row_top(i) - scroll),
+        Size::new(right - view.x, ROW),
     )
 }
 
@@ -106,6 +155,8 @@ pub struct Panel {
     pub words: Words,
     /// On the compositor's glass (else opaque).
     pub glass: bool,
+    /// The shell draws on the CPU.
+    pub software: bool,
 }
 
 /// What it shows: whose, its rows and their titles as cut.
@@ -124,6 +175,9 @@ pub struct State {
     /// The windows' ids under the pointer and pressed.
     pointer: Pointer<u64>,
     focus: Option<u64>,
+    /// How far the list is scrolled.
+    scroll: f32,
+    wheel: Wheel,
 }
 
 impl State {
@@ -133,9 +187,43 @@ impl State {
             .map_or_else(Vec::new, |s| s.rows.iter().map(|r| r.id).collect())
     }
 
+    fn list(&self) -> List {
+        list_of(self.ids().len())
+    }
+
     fn rect_of(&self, id: u64) -> Option<Rectangle> {
         let i = self.ids().iter().position(|i| *i == id)?;
-        Some(row_rect(i))
+        Some(row_rect(self.list(), i, self.scroll))
+    }
+
+    /// The row under `at`, inside the list's viewport.
+    fn row_at(&self, at: Point) -> Option<u64> {
+        let list = self.list();
+        if !list.view.contains(at) {
+            return None;
+        }
+        self.ids()
+            .into_iter()
+            .enumerate()
+            .find(|(i, _)| row_rect(list, *i, self.scroll).contains(at))
+            .map(|(_, id)| id)
+    }
+
+    /// The list scrolled so that the row holding the keyboard shows.
+    fn reveal(&mut self) {
+        let Some(i) = self
+            .focus
+            .and_then(|f| self.ids().iter().position(|id| *id == f))
+        else {
+            return;
+        };
+        let list = self.list();
+        self.scroll = kit::reveal(
+            (row_top(i), ROW),
+            list.view.height,
+            self.scroll,
+            list.most_scroll(),
+        );
     }
 }
 
@@ -199,10 +287,18 @@ impl<Message> canvas::Program<Message> for Panel {
                 Alignment::Left,
             ));
         }
+        // The rows in their viewport, cut to it (on the CPU, text shows
+        // only whole).
+        let shown_list = state.list();
+        let mut rows = Frame::with_bounds(renderer, shown_list.view);
+        let clip = Clip::new(self.software, Some(shown_list.view));
         for (i, (row, title)) in shown.rows.iter().zip(&shown.titles).enumerate() {
-            let rect = row_rect(i);
+            let rect = row_rect(shown_list, i, state.scroll);
+            if !rect.intersects(&shown_list.view) {
+                continue;
+            }
             if state.pointer.hover == Some(row.id) {
-                f.fill(&kit::rounded(rect, SMALL_RADIUS), FILL);
+                rows.fill(&kit::rounded(rect, SMALL_RADIUS), FILL);
             }
             let icon = Rectangle::new(
                 Point::new(rect.x + ROW_PAD, rect.center_y() - ICON / 2.0),
@@ -214,19 +310,35 @@ impl<Message> canvas::Program<Message> for Panel {
             } else {
                 letter_of(&row.app)
             };
-            kit::app_tile(f, icon, (found.as_ref(), name), (ICON_RADIUS, LETTER), 1.0);
-            f.fill_text(text(
-                title.clone(),
-                Point::new(icon.x + ICON + ICON_GAP, rect.center_y()),
-                NAME,
-                TEXT,
-                Alignment::Left,
-            ));
+            // Minimised: greyed, its icon at half.
+            let (opacity, colour) = if row.minimized {
+                (MINIMIZED_ICON, FAINT)
+            } else {
+                (1.0, TEXT)
+            };
+            kit::app_tile(
+                &mut rows,
+                icon,
+                (found.as_ref(), name),
+                (ICON_RADIUS, LETTER),
+                opacity,
+            );
+            clip.fill(
+                &mut rows,
+                text(
+                    title.clone(),
+                    Point::new(icon.x + ICON + ICON_GAP, rect.center_y()),
+                    NAME,
+                    colour,
+                    Alignment::Left,
+                ),
+            );
         }
+        shown_list.scrollbar_at(f, state.scroll, RIGHT);
         if let Some(rect) = state.focus.and_then(|id| state.rect_of(id)) {
             ring(f, rect, SMALL_RADIUS);
         }
-        vec![frame.into_geometry()]
+        vec![frame.into_geometry(), rows.into_geometry()]
     }
 
     fn mouse_interaction(
@@ -274,11 +386,12 @@ impl Panel {
         if same {
             return None;
         }
+        let room = title_room(list_of(rows.len()).scrolls());
         let titles = match iced::advanced::graphics::text::font_system().write() {
             Ok(mut system) => rows
                 .iter()
                 .map(|r| {
-                    kit::elide(&r.title, TITLE_ROOM, |t| {
+                    kit::elide(&r.title, room, |t| {
                         kit::measure_in(system.raw(), t, NAME, MANROPE)
                     })
                 })
@@ -291,8 +404,14 @@ impl Panel {
             count = %self.words.windows(rows.len()).unwrap_or_default(),
             empty = ?rows.is_empty().then(|| self.words.no_window()),
             rows = ?titles,
+            minimized = rows.iter().filter(|r| r.minimized).count(),
             "the desktop's list shows it"
         );
+        // Another desktop's list starts at its top.
+        let another = state
+            .shown
+            .as_ref()
+            .is_none_or(|s| s.bar != bar || s.index != index);
         state.shown = Some(Shown {
             bar,
             index,
@@ -303,6 +422,8 @@ impl Panel {
         if state.focus.is_some_and(|f| !state.ids().contains(&f)) {
             state.focus = None;
         }
+        let most = state.list().most_scroll();
+        state.scroll = if another { 0.0 } else { state.scroll.min(most) };
         // A change of size reaches the controller, which resizes the
         // surface (without waking it again).
         super::refit(Item::Desktop(index));
@@ -322,14 +443,7 @@ impl Panel {
         seen: &mouse::Event,
         at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| {
-            state
-                .ids()
-                .into_iter()
-                .enumerate()
-                .find(|(i, _)| row_rect(*i).contains(at))
-                .map(|(_, id)| id)
-        });
+        let target = at.and_then(|at| state.row_at(at));
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
@@ -349,6 +463,18 @@ impl Panel {
                 if let Some(id) = state.pointer.release(target) {
                     Self::bring(id);
                 }
+                redraw
+            }
+            // The wheel or a touchpad over a list that scrolls.
+            mouse::Event::WheelScrolled { delta } => {
+                let list = state.list();
+                if !list.scrolls() || !at.is_some_and(|at| list.view.contains(at)) {
+                    return None;
+                }
+                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
+                state.scroll = (state.scroll + by).clamp(0.0, list.most_scroll());
+                // What is under the pointer now.
+                state.pointer.hover = at.and_then(|at| state.row_at(at));
                 redraw
             }
             _ => None,
@@ -384,6 +510,7 @@ impl Panel {
             }
             _ => return None,
         }
+        state.reveal();
         Some(canvas::Action::request_redraw().and_capture())
     }
 }
@@ -401,5 +528,9 @@ mod tests {
         // Empty: its line, and the rows' empty place under it.
         assert_eq!(height_of(0), 80);
         assert_eq!(TITLE_ROOM, 189.0);
+        // Past 8 rows, 8 show and the rest scrolls.
+        assert_eq!(height_of(12), height_of(8));
+        assert!(!list_of(8).scrolls());
+        assert_eq!(list_of(12).most_scroll(), 4.0 * (ROW + ROW_GAP));
     }
 }
