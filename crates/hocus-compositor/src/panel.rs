@@ -246,10 +246,12 @@ impl State {
             self.panel
                 .bars
                 .insert(name.clone(), Bar { form, switch: None });
+            let scale = self.bar_scale(&name);
             self.tell_shell(ToShell::Bar {
                 output: name,
                 form,
                 since: 0,
+                scale,
             });
             changed = true;
         }
@@ -313,6 +315,17 @@ impl State {
             .map(Output::name)
     }
 
+    /// Screen `name`'s scale in 120ths, as its surfaces' fractional scale
+    /// says it.
+    pub fn bar_scale(&self, name: &str) -> u32 {
+        self.space
+            .outputs()
+            .find(|o| o.name() == name)
+            .map_or(120, |o| {
+                (o.current_scale().fractional_scale() * 120.0).round() as u32
+            })
+    }
+
     /// The bar on screen `name` takes its other form (a click on its edge,
     /// `Super+B`); the windows beside it follow.
     pub fn toggle_bar(&mut self, name: &str) {
@@ -340,6 +353,7 @@ impl State {
             output: name.to_owned(),
             form,
             since: if reduced { 0 } else { micros(now) },
+            scale: self.bar_scale(name),
         });
         if let (Some(before), Some(after)) = (before, self.work_area(&output)) {
             let motion = (!reduced).then(|| Tween::new(now, hocus_link::SWITCH, Bezier::SPRING));

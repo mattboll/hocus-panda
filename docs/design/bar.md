@@ -377,7 +377,8 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   the screen's bottom. One at a time.
 - **Opened by a click** on its item (in the full form, the whole row of a
   level, lit `rgba(255,255,255,0.06)` under the pointer and `0.08` while
-  its popover is open): it stays open until a click outside it, `Esc`, or
+  its popover is open; the pointer a hand over it, as over the
+  connections' rows and the desktops' tiles): it stays open until a click outside it, `Esc`, or
   another click on the item; it does not close when the pointer leaves.
 - **Opened by hovering** an item of the mini form for 150 ms: it closes
   300 ms after the pointer has really left the item and the popover, and
@@ -1330,10 +1331,20 @@ What issue #465 changes under the five popovers, nothing on screen.
   its own sizes where the mockups differ (the sound's and the battery's
   label lines, the Wi-Fi's rows ending 2 px short of an unscrolled list,
   the brightness's 8 px between its slot, its slider and its value).
+- **The wheel's notches** count each, a fast spin's several in one event
+  too (#472): in the desktops' tiles, the brightness's slider and the
+  lists. iced_layershell hands them multiplied by the surface's scale, so
+  the compositor tells each bar's screen's scale with the bar (`bar OUTPUT
+  FORM SINCE SCALE`, in 120ths), which all of a bar's surfaces share, and
+  the shell divides by it.
 - **Bluetooth's keys** lay the popover out from what it shows now, as the
   Wi-Fi's do since #455, not as last drawn: an arrow in the frame where
   `Enter` cleared a row's failure scrolls with the rows' new heights
   (#462).
+- **`Tab` stays in a popover** even when nothing in it can hold the
+  keyboard, in each of them as in the Wi-Fi's (the battery's and
+  Bluetooth's let it go); and a row the keyboard unfolds in the Wi-Fi's
+  list scrolls by what the list, grown with it, needs (#470).
 - **Measured** before and after, headless, on the Intel GPU and on the
   CPU, at ×1 and ×2: every popover in its main states (open, hovered, the
   keyboard's ring, muted, a row unfolded, a password refused, a failure, a
