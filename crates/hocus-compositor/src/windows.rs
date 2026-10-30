@@ -43,11 +43,11 @@ pub struct Managed {
     /// Whether it shows as focused, and since when it changes to that.
     pub focused: bool,
     pub focus_change: Option<Tween>,
-    /// Opened without the focus: its rim pulses once.
-    pub pulse: Option<Tween>,
-    /// Gone to from an agent's row: its rim pulses as the streak lands,
-    /// the ring growing around it when going moves (4.3).
-    pub landing: Option<(Tween, bool)>,
+    /// Its rim pulses once: opened without the focus, asking for it
+    /// without a token, or gone to from an agent's row as the streak lands
+    /// (4.3). The ring grows around it when going to an agent moves
+    /// (`State::going_moves`); otherwise the rim only lights and fades.
+    pub pulse: Option<(Tween, bool)>,
     /// Going to a new place: drawn from this rectangle (global) to where
     /// it is now.
     pub settle: Option<(Rectangle<f64, Logical>, Tween)>,
@@ -158,7 +158,6 @@ impl Managed {
             focused: false,
             focus_change: None,
             pulse: None,
-            landing: None,
             settle: None,
             requested: None,
             resizing: None,
@@ -177,19 +176,11 @@ impl Managed {
         if self.focused { t } else { 1.0 - t }
     }
 
-    /// Its rim's pulse at `now` as an agent's streak lands on it.
-    pub fn landing_look(&self, now: Duration) -> crate::going::Pulse {
-        self.landing
+    /// Its rim's pulse at `now`.
+    pub fn pulse_look(&self, now: Duration) -> crate::going::Pulse {
+        self.pulse
             .map(|(t, ring)| crate::going::pulse(&t, now, ring))
             .unwrap_or_default()
-    }
-
-    /// The pulse's strength at `now`: up and back down, once.
-    pub fn pulse_look(&self, now: Duration) -> f32 {
-        self.pulse.map_or(0.0, |t| {
-            let p = t.linear(now);
-            (std::f64::consts::PI * p).sin().powi(2) as f32
-        })
     }
 }
 
@@ -509,7 +500,10 @@ impl State {
         };
         managed.opening = Some(Tween::new(now, duration, Bezier::SPRING));
         if !takes_focus {
-            managed.pulse = Some(Tween::new(now, motion::PULSE, Bezier::LINEAR));
+            managed.pulse = Some((
+                Tween::new(now, motion::PULSE, Bezier::LINEAR),
+                self.going_moves(),
+            ));
         }
         let rect = Rect::new(x, y, size.w, size.h);
         let geometry = window.geometry().size;
@@ -809,7 +803,10 @@ impl State {
             self.agents_focus_changed();
         }
         self.sync_activated();
-        if let Some(id) = focused
+        // A window noticed: its pulse ends as it gets the focus. Focused
+        // again (an agent's window gone to), the pulse set since stays.
+        if focused != before
+            && let Some(id) = focused
             && let Some(managed) = self.windows.get_mut(&id)
         {
             managed.pulse = None;
@@ -1196,11 +1193,7 @@ impl State {
         let mut next: Option<Duration> = None;
         let mut wake = |at: Duration| next = Some(next.map_or(at, |n: Duration| n.min(at)));
         for managed in self.windows.values_mut() {
-            for tween in [
-                &mut managed.opening,
-                &mut managed.focus_change,
-                &mut managed.pulse,
-            ] {
+            for tween in [&mut managed.opening, &mut managed.focus_change] {
                 if let Some(t) = tween {
                     if t.done(now) {
                         *tween = None;
@@ -1209,9 +1202,9 @@ impl State {
                     }
                 }
             }
-            if let Some((t, _)) = managed.landing {
+            if let Some((t, _)) = managed.pulse {
                 if t.done(now) {
-                    managed.landing = None;
+                    managed.pulse = None;
                 } else {
                     moving = true;
                 }
@@ -1428,8 +1421,9 @@ impl State {
             self.bring(id);
         } else if self.model.focused() != Some(id) {
             let now = self.now();
+            let ring = self.going_moves();
             if let Some(managed) = self.windows.get_mut(&id) {
-                managed.pulse = Some(Tween::new(now, motion::PULSE, Bezier::LINEAR));
+                managed.pulse = Some((Tween::new(now, motion::PULSE, Bezier::LINEAR), ring));
             }
             self.redraw = true;
         }
