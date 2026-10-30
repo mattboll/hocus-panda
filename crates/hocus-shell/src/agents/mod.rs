@@ -579,6 +579,28 @@ const MORE_TOP: f32 = 2.0;
 const MORE: f32 = 20.0;
 pub const MORE_TEXT: f32 = 12.5;
 
+/// What separates the parts of a name as herdr gives it: its workspace
+/// and its tab ("hocus-panda · refacto").
+const PARTS: &str = " · ";
+
+/// An agent's name cut to `room` as `width` measures it, with an ellipsis.
+/// A name in parts gives way from its first: two agents of one workspace
+/// keep their tabs apart ("hocus-p… · refacto", "hocus-p… · 2").
+fn elide_name(name: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
+    if width(name) <= room {
+        return name.to_owned();
+    }
+    if let Some((head, tail)) = name.rsplit_once(PARTS) {
+        let tail = format!("{PARTS}{tail}");
+        let head = crate::popover::kit::elide(head, room - width(&tail), &mut width);
+        // At least a letter of the first part, else the whole name cut.
+        if head.chars().count() > 1 {
+            return head + &tail;
+        }
+    }
+    crate::popover::kit::elide(name, room, width)
+}
+
 /// The group, laid out from its top left: what is where.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
@@ -681,7 +703,7 @@ pub fn layout(
                     Row {
                         id: line.id,
                         look: line.look,
-                        name: crate::popover::kit::elide(&line.name, room, |t| {
+                        name: elide_name(&line.name, room, |t| {
                             measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
                         }),
                         word,
@@ -902,11 +924,31 @@ mod tests {
         }
         assert_eq!(laid.height, 26.0 + 5.0 * 34.0 + 20.0);
         // The name at 13.5 px gives way to the word, at 12.5 px, and the
-        // 30 px panda.
+        // 30 px panda; its workspace first, its tab kept.
         let row = &laid.rows[0];
         let room = WIDTH + 12.0 - 12.0 - 30.0 - 14.0 - measure(&row.word, 12.5, MANROPE);
-        assert!(row.name.ends_with('…'), "{}", row.name);
+        assert!(row.name.ends_with("… · refacto"), "{}", row.name);
         assert!(measure(&row.name, 13.5, MANROPE_SEMIBOLD) <= room + 0.01);
+    }
+
+    #[test]
+    fn a_name_in_parts_gives_way_from_its_first() {
+        let width = |t: &str| t.chars().count() as f32;
+        assert_eq!(
+            elide_name("hocus-panda · refacto", 30.0, width),
+            "hocus-panda · refacto"
+        );
+        assert_eq!(
+            elide_name("hocus-panda · refacto", 16.0, width),
+            "hocus… · refacto"
+        );
+        assert_eq!(elide_name("hocus-panda · 2", 10.0, width), "hocus… · 2");
+        // No room left for the first part: the whole name cut.
+        assert_eq!(
+            elide_name("hocus-panda · une-très-longue-tâche", 12.0, width),
+            "hocus-panda…"
+        );
+        assert_eq!(elide_name("notes-de-version", 6.0, width), "notes…");
     }
 
     #[test]

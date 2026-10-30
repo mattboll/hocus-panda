@@ -1689,7 +1689,9 @@ the heads) are display options for later (#491).
   after the spaced word). A row is 34 px high and as wide as the column
   (6 px past the group's sides, 184 px), radius 7, 6 px in: the agent's
   panda (30 px), 7 px, its name (Manrope 600, 13.5 px, `text`, cut with an
-  ellipsis to what the word on its right leaves), 7 px, that word
+  ellipsis to what the word on its right leaves; a name in parts, herdr's
+  "workspace · tab", gives way from its first so that two agents of one
+  workspace keep their tabs apart: "hocus-p… · refacto"), 7 px, that word
   (12.5 px). These are the real sizes (#497): the mockups were shown
   zoomed ×1.5, and their 28 px rows looked small at ×1; the bar's width
   does not change:
