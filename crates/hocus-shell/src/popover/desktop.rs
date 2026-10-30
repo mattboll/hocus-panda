@@ -471,7 +471,7 @@ impl Panel {
                 if !list.scrolls() || !at.is_some_and(|at| list.view.contains(at)) {
                     return None;
                 }
-                let by = state.wheel.down(delta, NOTCH);
+                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
                 state.scroll = (state.scroll + by).clamp(0.0, list.most_scroll());
                 // What is under the pointer now.
                 state.pointer.hover = at.and_then(|at| state.row_at(at));
