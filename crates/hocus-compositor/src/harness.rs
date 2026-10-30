@@ -255,7 +255,6 @@ impl Headless {
         self.app.state.panel.connections_commits
     }
 
-    /// Commits of the desktops' surfaces so far.
     /// Commits of the agents' group's surfaces: none at rest.
     pub fn agents_commits(&self) -> u64 {
         self.app.state.agents.commits
@@ -328,6 +327,7 @@ impl Headless {
         self.layer_rects(hocus_link::AGENTS_NAMESPACE)
     }
 
+    /// Commits of the desktops' surfaces so far.
     pub fn desktops_commits(&self) -> u64 {
         self.app.state.panel.desktops_commits
     }

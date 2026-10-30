@@ -11,8 +11,10 @@
 //! the agent's window found above its process; nothing drawn at rest. The
 //! agents' rows (4.1), and going to an agent from its row (4.3): the
 //! streak, the rim's pulse, herdr's pane; the streak's start fading to
-//! nothing at its row, and a second click replacing it (4.3b). The halo (4.4): its wave and its
-//! glow, its reminder, its priorities, its end.
+//! nothing at its row, and a second click replacing it (4.3b); herdr's
+//! terminal brought for its agents, the processes in a `/proc` of the
+//! test's own (4.3c, #500). The halo (4.4): its wave and its glow, its
+//! reminder, its priorities, its end.
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of motion and of the streak run on a GPU when the
@@ -48,6 +50,8 @@ struct Machine {
     /// What its herdr holds (default: one agent, `refacto`, alone in its
     /// workspace).
     herdr_holds: Option<fn() -> FakeHerdr>,
+    /// Its panes' foreground process (default: this test's).
+    pane_pid: Option<u32>,
     /// The time the shell's clock reads as it starts (`HOCUS_CLOCK_AT`).
     clock_at: Option<&'static str>,
     /// The compositor on this render node, the shell on its GPU (else
@@ -138,6 +142,8 @@ fn places(home: &Path, hocus: &Path) -> Places {
         codex_home: home.join(".codex"),
         path: vec![home.join("bin")],
         herdr_socket: home.join(".config/herdr/herdr.sock"),
+        // herdr's clients are looked for there, never in the machine's.
+        processes: home.join("proc"),
         hocus: hocus.to_path_buf(),
         state_dir: Some(home.join("state")),
     }
@@ -230,7 +236,7 @@ fn start(shell: &Path, hocus: &Path, machine: &Machine) -> anyhow::Result<Bed> {
         Some((
             fake_herdr(
                 &home.join(".config/herdr/herdr.sock"),
-                std::process::id(),
+                machine.pane_pid.unwrap_or_else(std::process::id),
                 held.clone(),
                 heard.clone(),
             )?,
@@ -239,6 +245,11 @@ fn start(shell: &Path, hocus: &Path, machine: &Machine) -> anyhow::Result<Bed> {
     } else {
         None
     };
+    // This test's process in the test's own `/proc`: its working
+    // directory, the fake herdr's panes' (their process is this one).
+    let mine = home.join("proc").join(std::process::id().to_string());
+    std::fs::create_dir_all(&mine)?;
+    std::os::unix::fs::symlink(std::env::current_dir()?, mine.join("cwd"))?;
     let mut bed = start_in(dir, shell, hocus, herdr, machine)?;
     bed.herdr = held;
     Ok(bed)
@@ -2121,6 +2132,205 @@ fn an_agent_is_never_named_by_its_tool() -> anyhow::Result<()> {
         .unwrap_or_default();
     bed.agent_becomes(&folder, Some("working"))?;
     bed.no_tool_names()?;
+    Ok(())
+}
+
+// --- 4.3c: herdr's terminal (#500) -------------------------------------------------
+
+/// The processes of the test's own `/proc`, above the kernel's largest pid
+/// (`PID_MAX_LIMIT`, 2^22): none is the machine's.
+const SERVER: u32 = 4_200_001;
+const PANE_SHELL: u32 = 4_200_002;
+const CLAUDE: u32 = 4_200_003;
+const SHELL: u32 = 4_200_004;
+const CLIENT: u32 = 4_200_005;
+
+impl Bed {
+    /// Process `pid` in the test's own `/proc`: its `stat` and its
+    /// `cmdline`.
+    fn process(&self, pid: u32, name: &str, parent: u32, argv: &[&str]) -> anyhow::Result<()> {
+        let dir = self.home().join("proc").join(pid.to_string());
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(
+            dir.join("stat"),
+            format!("{pid} ({name}) S {parent} {pid} {pid} 0 -1"),
+        )?;
+        let mut cmdline = Vec::new();
+        for arg in argv {
+            cmdline.extend_from_slice(arg.as_bytes());
+            cmdline.push(0);
+        }
+        std::fs::write(dir.join("cmdline"), cmdline)?;
+        Ok(())
+    }
+
+    /// The maintainer's tree, from `ps`: herdr's server a daemon, its
+    /// pane's Claude Code under it; herdr's client in a shell of the
+    /// terminal's, this test's process, whose windows are the test's.
+    fn herdr_tree(&self) -> anyhow::Result<()> {
+        let terminal = std::process::id();
+        self.process(
+            SERVER,
+            "herdr",
+            1,
+            &["/home/alex/.local/bin/herdr", "server"],
+        )?;
+        self.process(PANE_SHELL, "zsh", SERVER, &["/usr/bin/zsh"])?;
+        self.process(CLAUDE, "claude", PANE_SHELL, &["claude"])?;
+        self.process(terminal, "kitty", 1, &["kitty"])?;
+        self.process(SHELL, "zsh", terminal, &["/usr/bin/zsh"])?;
+        self.process(CLIENT, "herdr", SHELL, &["herdr"])
+    }
+
+    /// The window of `app_id`'s id.
+    fn window_of(&self, app_id: &str) -> anyhow::Result<u64> {
+        self.hp
+            .windows()
+            .iter()
+            .find(|w| w.app_id.as_deref() == Some(app_id))
+            .map(|w| w.id.0)
+            .ok_or_else(|| anyhow::anyhow!("no {app_id}"))
+    }
+
+    /// Waits until the fake herdr was asked to focus `pane`.
+    fn herdr_focuses(&mut self, pane: &str) -> anyhow::Result<()> {
+        let heard = self.herdr_heard.clone();
+        let wanted = format!(r#"pane.focus {{"pane_id":"{pane}"}}"#);
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |_| heard.lock().is_ok_and(|h| h.contains(&wanted)))?;
+        anyhow::ensure!(
+            done,
+            "herdr was asked {:?}",
+            self.herdr_heard.lock().map(|h| h.clone())
+        );
+        Ok(())
+    }
+}
+
+/// The cause of #500, the maintainer's tree: the agents run under herdr's
+/// server, a daemon, and herdr's client attached in the terminal after
+/// herdr's agents were listed (the compositor started, herdr's server long
+/// running, then the terminal and its herdr). Its row brings that
+/// terminal's window from another desktop, with the keyboard, and herdr
+/// focuses the agent's pane; a command's agent in that pane, whose own
+/// processes reach no window, has the same window.
+#[test]
+fn a_herdr_agents_row_brings_the_terminal_running_herdrs_client() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            herdr: true,
+            pane_pid: Some(CLAUDE),
+            ..Machine::default()
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    bed.agent_becomes("refacto", Some("working"))?;
+    // Listed: then the terminal opens and herdr's client attaches in it.
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    bed.herdr_tree()?;
+    let terminal = bed.window_of("test.terminal")?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.settle()?;
+    let row = bed.row("refacto")?;
+    bed.click(row);
+    bed.keyboard_goes_to("test.terminal")?;
+    assert_eq!(bed.hp.desktop(), (0, 0.0));
+    bed.herdr_focuses("w1:p1")?;
+    // `hocus agent` for the pane's process: one agent, herdr's terminal's
+    // window.
+    let pid = CLAUDE.to_string();
+    bed.hocus(&["agent", "build", "waiting", "--pid", &pid], None)?;
+    bed.agent_becomes("refacto", Some("waiting"))?;
+    let agents = bed.hp.agents();
+    assert_eq!(agents.len(), 1, "{agents:?}");
+    assert_eq!(agents[0].source, "herdr+command");
+    assert_eq!(agents[0].window, terminal, "{agents:?}");
+    Ok(())
+}
+
+/// Two finished agents in two tabs of herdr, the second's shown: two of
+/// the terminal's windows, the one titled herdr behind.
+fn two_finished() -> FakeHerdr {
+    let mut herdr = FakeHerdr::with("panda", &["refacto", "revue"], None);
+    herdr.tabs[0]["focused"] = false.into();
+    herdr.tabs[1]["focused"] = true.into();
+    let first = herdr.agents[0].clone();
+    let mut second = first.clone();
+    second["pane_id"] = "w1:p2".into();
+    second["tab_id"] = "w1:t2".into();
+    herdr.agents = vec![first, second];
+    for agent in &mut herdr.agents {
+        agent["agent_status"] = "done".into();
+        // Each the pane focused in its tab.
+        agent["focused"] = true.into();
+    }
+    herdr
+}
+
+/// One terminal process, two windows (kitty's): the one titled herdr is
+/// herdr's, though the other is on top and was focused last. Its getting
+/// the keyboard shows the agent of the pane herdr shows, not the other.
+#[test]
+fn of_the_terminals_windows_the_one_titled_herdr_is_gone_to() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            herdr: true,
+            herdr_holds: Some(two_finished),
+            pane_pid: Some(CLAUDE),
+            ..Machine::default()
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    bed.agent_becomes("panda · refacto", Some("done"))?;
+    bed.agent_becomes("panda · revue", Some("done"))?;
+    // Side by side, to be clicked.
+    let (_, herdr) = common::open_with(&mut bed.hp, "test.herdr", (600, 400), false)?;
+    herdr.commands.send(common::Command::Title("herdr"))?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_LEFT]);
+    let (_, other) = common::open_with(&mut bed.hp, "test.shell", (600, 400), false)?;
+    other
+        .commands
+        .send(common::Command::Title("zsh: ~/notes"))?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_RIGHT]);
+    let apart = bed.hp.dispatch_until(WAIT, |hp| {
+        match (
+            common::rect_of(hp, "test.herdr"),
+            common::rect_of(hp, "test.shell"),
+        ) {
+            (Some(a), Some(b)) => a.x + a.width <= b.x,
+            _ => false,
+        }
+    })?;
+    anyhow::ensure!(apart, "{:?}", bed.hp.windows());
+    bed.herdr_tree()?;
+    bed.keyboard_goes_to("test.shell")?;
+    // herdr's window with the keyboard: the pane it shows is seen.
+    bed.click(bed.centre("test.herdr")?);
+    bed.keyboard_goes_to("test.herdr")?;
+    bed.agent_becomes("panda · revue", Some("seen"))?;
+    bed.agent_becomes("panda · refacto", Some("done"))?;
+    // The other window focused last, then the row of the pane not shown.
+    bed.click(bed.centre("test.shell")?);
+    bed.keyboard_goes_to("test.shell")?;
+    bed.settle()?;
+    let row = bed.row("panda · refacto")?;
+    bed.click(row);
+    bed.keyboard_goes_to("test.herdr")?;
+    bed.herdr_focuses("w1:p1")?;
+    bed.agent_becomes("panda · refacto", Some("seen"))?;
     Ok(())
 }
 

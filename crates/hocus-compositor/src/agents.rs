@@ -17,16 +17,21 @@
 //! working directory ([`hocus_agents::agent_name`]); never by its tool. An agent is forgotten when its
 //! session ends, or when its process does (a pidfd on the loop, no
 //! polling). Its window is the one whose client is the nearest process
-//! above it. The shell is told the tools and the agents in a line each,
-//! after the turn of the loop in which they changed: a burst of reports is
-//! one line, and a report that changes nothing sends none.
+//! above it; for an agent herdr sees whose own processes reach no window
+//! (they run under herdr's server, a daemon), herdr's terminal's: the
+//! window of the terminal running herdr's client, its clients looked for
+//! again off the loop as the user goes to it (#500). The shell is told
+//! the tools and the agents in a line each, after the turn of the loop in
+//! which they changed: a burst of reports is one line, and a report that
+//! changes nothing sends none.
 //!
 //! A finished agent stays "not seen yet" (`done` to the shell) until the
 //! user has seen it (4.1): its window gets the keyboard after it finished
 //! (or has it as it finishes), or its row in the bar is clicked; it is then
-//! `seen`, until it finishes again. herdr's own agents are seen as herdr
-//! says (it turns `done` into `idle` once its pane is looked at): their
-//! window is herdr's terminal, shared by all its panes.
+//! `seen`, until it finishes again. herdr's terminal's window is shared by
+//! all its panes: its getting the keyboard shows only the agent of the
+//! pane herdr has focused (herdr also turns `done` into `idle` once a pane
+//! is looked at).
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -73,6 +78,62 @@ pub enum Heard {
     Report(Report, Vec<u32>),
     Tools(Snapshot),
     Herdr(News),
+    /// herdr's clients looked for again ([`herdr::terminal_processes`]),
+    /// and the go-to that waited for them.
+    Terminals(Vec<Vec<u32>>, Option<GoingTo>),
+}
+
+/// A go-to waiting for herdr's terminal to be found: the agent, its row,
+/// and its row's colour as the click found it.
+#[derive(Debug)]
+pub struct GoingTo {
+    id: u64,
+    row: Option<Row>,
+    colour: [u8; 3],
+}
+
+/// How an agent's window was found, as the journal says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum How {
+    /// Above its own process.
+    Own,
+    /// herdr's terminal's, the terminal running herdr's client.
+    Herdr(Pick),
+    /// No window: why.
+    None(&'static str),
+}
+
+/// Which of herdr's terminal's windows (a terminal process may have
+/// several, as kitty's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    Only,
+    /// The one whose title names herdr.
+    Titled,
+    /// None named herdr: the most recently focused.
+    Recent,
+}
+
+impl How {
+    fn says(self) -> &'static str {
+        match self {
+            Self::Own => "above its process",
+            Self::Herdr(Pick::Only) => "herdr's terminal, its only window",
+            Self::Herdr(Pick::Titled) => "herdr's terminal, its window titled herdr",
+            Self::Herdr(Pick::Recent) => "herdr's terminal, its most recently focused window",
+            Self::None(why) => why,
+        }
+    }
+}
+
+/// An agent as the shell is told it, how its window was found, and
+/// whether that window getting the keyboard shows it (herdr's terminal
+/// shows only herdr's focused pane).
+#[derive(Debug)]
+struct Listed {
+    shown: AgentShown,
+    how: How,
+    looks: bool,
 }
 
 /// An agent a hook or a command told about.
@@ -102,8 +163,9 @@ struct Herdr {
     running: bool,
     /// Its agents, by pane: their state, since when.
     agents: Vec<(herdr::Agent, u64)>,
-    /// The processes its clients run under (its terminal's).
-    terminals: Vec<u32>,
+    /// For each of its clients, the processes it runs under (its
+    /// terminal's), nearest first.
+    terminals: Vec<Vec<u32>>,
     /// Ids for its panes' agents.
     ids: HashMap<String, u64>,
 }
@@ -130,6 +192,8 @@ pub struct Agents {
     seen: HashMap<u64, u64>,
     /// Commits of the agents' surfaces, for tests: none at rest.
     pub commits: u64,
+    /// For the threads that look for herdr's clients.
+    sender: Option<channel::Sender<Heard>>,
 }
 
 /// Starts the sources: the control socket always (`hocus agent` works in
@@ -145,6 +209,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
         })
         .map_err(|err| err.error)
         .context("could not hear the agents")?;
+    state.agents.sender = Some(sender.clone());
     let path = hocus_agents::socket_path(&state.socket_path);
     if path.exists() {
         std::fs::remove_file(&path)
@@ -168,9 +233,11 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
             Err(err) => tracing::warn!(%err, "cannot watch for the agents' tools"),
         }
         let herdr = sender;
-        if let Err(err) = herdr::start(places.herdr_socket.clone(), move |news| {
-            herdr.send(Heard::Herdr(news)).is_ok()
-        }) {
+        if let Err(err) = herdr::start(
+            places.herdr_socket.clone(),
+            places.processes.clone(),
+            move |news| herdr.send(Heard::Herdr(news)).is_ok(),
+        ) {
             tracing::warn!(%err, "cannot follow herdr");
         }
         state.agents.places = Some(places);
@@ -223,6 +290,7 @@ impl Compositor {
                 self.agents.tools = Some(seen);
             }
             Heard::Herdr(news) => self.herdr_said(news),
+            Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
         }
         self.agents.dirty = true;
     }
@@ -397,6 +465,11 @@ impl Compositor {
                     *since = now;
                 }
             }
+            News::Focused(pane) => {
+                for (agent, _) in &mut herdr.agents {
+                    agent.focused = agent.pane == pane;
+                }
+            }
             News::Gone => {
                 herdr.running = false;
                 herdr.agents.clear();
@@ -454,15 +527,27 @@ impl Compositor {
     /// and herdr's when it is followed, one agent where they share a
     /// process; the most recent state wins.
     pub fn agents_shown(&mut self) -> Vec<AgentShown> {
+        self.agents_listed().into_iter().map(|l| l.shown).collect()
+    }
+
+    /// The same, with how each one's window was found.
+    fn agents_listed(&mut self) -> Vec<Listed> {
         let windows = self.windows_by_pid();
-        let window_of = |ancestry: &[u32]| {
+        let own = |ancestry: &[u32]| {
             ancestry
                 .iter()
-                .find_map(|pid| windows.get(pid).copied())
-                .map_or(0, |w: WindowId| w.0)
+                .find_map(|pid| windows.get(pid).and_then(|w| w.last()).copied())
+        };
+        let (herdr_window, herdr_how) = self.herdr_window(&windows);
+        // An agent in one of herdr's panes whose own processes reach no
+        // window: herdr's terminal's, which shows it when its pane is
+        // the one focused.
+        let in_herdr = |focused: bool| match herdr_window {
+            Some(w) => (w.0, herdr_how, focused),
+            None => (0, herdr_how, false),
         };
         let followed = self.herdr_followed();
-        let mut shown: Vec<AgentShown> = Vec::new();
+        let mut shown: Vec<Listed> = Vec::new();
         let mut merged: Vec<String> = Vec::new();
         for agent in &self.agents.list {
             let mut sources: Vec<Source> = agent.keys.iter().map(|(s, _)| *s).collect();
@@ -470,6 +555,7 @@ impl Compositor {
             // The hook's note, while its state is the one shown.
             let mut note = agent.note.clone();
             let (mut herdr_name, mut herdr_folder) = (None, None);
+            let mut pane_focused = None;
             if followed {
                 for (pane, herdr_since) in &self.agents.herdr.agents {
                     if pane.pids.iter().any(|p| agent.pids.contains(p)) {
@@ -477,6 +563,7 @@ impl Compositor {
                         sources.push(Source::Herdr);
                         herdr_name = pane.name.as_deref();
                         herdr_folder = pane.folder.as_deref();
+                        pane_focused = Some(pane.focused);
                         if let Some(herdr_state) = pane.state
                             && *herdr_since > since
                         {
@@ -493,20 +580,27 @@ impl Compositor {
             let name = hocus_agents::agent_name(herdr_name, Some(&agent.name), herdr_folder)
                 .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
                 .unwrap_or_default();
-            shown.push(AgentShown {
-                id: agent.id,
-                state: state.name().to_owned(),
-                since,
-                source: source.join("+"),
-                window: window_of(&agent.ancestry),
-                name,
-                note,
+            let (window, how, looks) = match (own(&agent.ancestry), pane_focused) {
+                (Some(w), _) => (w.0, How::Own, true),
+                (None, Some(focused)) => in_herdr(focused),
+                (None, None) => (0, How::None("no window above its process"), false),
+            };
+            shown.push(Listed {
+                shown: AgentShown {
+                    id: agent.id,
+                    state: state.name().to_owned(),
+                    since,
+                    source: source.join("+"),
+                    window,
+                    name,
+                    note,
+                },
+                how,
+                looks,
             });
         }
         if followed {
-            let terminals = self.agents.herdr.terminals.clone();
-            let window = window_of(&terminals);
-            let pending: Vec<(String, String, State, u64)> = self
+            let pending: Vec<(String, String, State, u64, bool)> = self
                 .agents
                 .herdr
                 .agents
@@ -516,10 +610,16 @@ impl Compositor {
                     let name =
                         hocus_agents::agent_name(a.name.as_deref(), a.folder.as_deref(), None)
                             .unwrap_or_else(|| a.pane.clone());
-                    (a.pane.clone(), name, a.state.unwrap_or(State::Idle), *since)
+                    (
+                        a.pane.clone(),
+                        name,
+                        a.state.unwrap_or(State::Idle),
+                        *since,
+                        a.focused,
+                    )
                 })
                 .collect();
-            for (pane, name, state, since) in pending {
+            for (pane, name, state, since, focused) in pending {
                 let id = match self.agents.herdr.ids.get(&pane) {
                     Some(id) => *id,
                     None => {
@@ -528,51 +628,92 @@ impl Compositor {
                         self.agents.next_id
                     }
                 };
-                shown.push(AgentShown {
-                    id,
-                    state: state.name().to_owned(),
-                    since,
-                    source: Source::Herdr.name().to_owned(),
-                    window,
-                    name,
-                    // herdr says no more than its state.
-                    note: None,
+                let (window, how, looks) = in_herdr(focused);
+                shown.push(Listed {
+                    shown: AgentShown {
+                        id,
+                        state: state.name().to_owned(),
+                        since,
+                        source: Source::Herdr.name().to_owned(),
+                        window,
+                        name,
+                        // herdr says no more than its state.
+                        note: None,
+                    },
+                    how,
+                    looks,
                 });
             }
         }
-        shown.sort_by_key(|a| a.id);
+        shown.sort_by_key(|a| a.shown.id);
         self.mark_seen(&mut shown);
         shown
     }
 
-    /// The agents as the halo sees them (4.4): an agent is looked at when
-    /// its own window has the keyboard, as a finished one is seen (herdr's
-    /// own share herdr's terminal, which says nothing of their pane).
-    fn halo_seen(&self, shown: &[AgentShown]) -> Vec<crate::halo::Seen> {
-        let focused = self.model.focused().map(|w| w.0);
-        shown
+    /// herdr's terminal's window, and how it was found: of the windows of
+    /// the nearest process above each of herdr's clients that has some,
+    /// the one whose title names herdr, else the most recently focused.
+    fn herdr_window(&self, windows: &BTreeMap<u32, Vec<WindowId>>) -> (Option<WindowId>, How) {
+        let terminals = &self.agents.herdr.terminals;
+        if terminals.is_empty() {
+            return (None, How::None("no herdr client found"));
+        }
+        let theirs: Vec<WindowId> = terminals
             .iter()
-            .map(|agent| crate::halo::Seen {
-                id: agent.id,
-                concern: crate::halo::Concern::of_agent(&agent.state),
-                since: Duration::from_micros(agent.since),
-                looked_at: agent.window != 0
-                    && agent.source != Source::Herdr.name()
-                    && focused == Some(agent.window),
-            })
+            .filter_map(|above| above.iter().find_map(|pid| windows.get(pid)))
+            .flatten()
+            .copied()
+            .collect();
+        let candidates: Vec<(WindowId, bool)> = self
+            .model
+            .stack()
+            .iter()
+            .filter(|w| theirs.contains(w))
+            .map(|w| (*w, names_herdr(&crate::windows::title_of(self, *w))))
+            .collect();
+        match pick(&candidates, self.model.recent()) {
+            Some((window, how)) => (Some(window), How::Herdr(how)),
+            None => (None, How::None("no window above herdr's clients")),
+        }
+    }
+
+    /// The agents as the halo sees them (4.4): an agent is looked at when
+    /// its window has the keyboard and shows it, as a finished one is seen
+    /// (herdr's terminal shows only herdr's focused pane).
+    fn halo_seen(&self, listed: &[Listed]) -> Vec<crate::halo::Seen> {
+        let focused = self.model.focused().map(|w| w.0);
+        listed
+            .iter()
+            .map(
+                |Listed {
+                     shown: agent,
+                     looks,
+                     ..
+                 }| crate::halo::Seen {
+                    id: agent.id,
+                    concern: crate::halo::Concern::of_agent(&agent.state),
+                    since: Duration::from_micros(agent.since),
+                    looked_at: agent.window != 0 && *looks && focused == Some(agent.window),
+                },
+            )
             .collect()
     }
 
-    /// The finished agents among `shown` whose window has the keyboard are
-    /// seen; those seen say so (`seen`). herdr's own are seen as herdr
-    /// says.
-    fn mark_seen(&mut self, shown: &mut [AgentShown]) {
+    /// The finished agents among `listed` whose window has the keyboard
+    /// and shows them are seen; those seen say so (`seen`).
+    fn mark_seen(&mut self, listed: &mut [Listed]) {
         let focused = self.model.focused().map(|w| w.0);
         let seen = &mut self.agents.seen;
-        seen.retain(|id, _| shown.iter().any(|a| a.id == *id));
-        for agent in shown.iter_mut().filter(|a| a.state == State::Done.name()) {
-            let own_window = agent.window != 0 && agent.source != Source::Herdr.name();
-            if own_window && focused == Some(agent.window) {
+        seen.retain(|id, _| listed.iter().any(|a| a.shown.id == *id));
+        for Listed {
+            shown: agent,
+            looks,
+            ..
+        } in listed
+            .iter_mut()
+            .filter(|a| a.shown.state == State::Done.name())
+        {
+            if agent.window != 0 && *looks && focused == Some(agent.window) {
                 seen.insert(agent.id, agent.since);
             }
             if seen.get(&agent.id) == Some(&agent.since) {
@@ -586,25 +727,100 @@ impl Compositor {
     /// row to it in the row's colour (4.3); herdr's pane selected when it
     /// is herdr's; finished, it is seen.
     pub fn go_to_agent(&mut self, id: u64, row: Option<Row>) {
-        let Some(agent) = self.agents_shown().into_iter().find(|a| a.id == id) else {
+        let Some(listed) = self.agents_listed().into_iter().find(|a| a.shown.id == id) else {
             tracing::debug!(id, "the shell goes to an agent that is gone");
             return;
         };
-        tracing::debug!(id, name = agent.name, window = agent.window, "to an agent");
+        let agent = &listed.shown;
         if agent.state == State::Done.name() {
             self.agents.seen.insert(id, agent.since);
         }
         // Its halo ends (§8 step 5), whatever it waits for or failed at.
         self.halo.acknowledge(id);
-        if let Some(pane) = self.herdr_pane(id) {
-            self.select_herdr_pane(pane);
-        }
-        let window = WindowId(agent.window);
-        if agent.window != 0 && self.windows.contains_key(&window) {
-            let from = row.and_then(|row| self.row_start(&row));
-            self.go_to(window, from, crate::going::colour(&agent.state));
+        let going = GoingTo {
+            id,
+            row,
+            colour: crate::going::colour(&agent.state),
+        };
+        match self.herdr_pane(id) {
+            Some(pane) if listed.how != How::Own => {
+                self.select_herdr_pane(pane);
+                // Its window is herdr's terminal's: its clients are looked
+                // for again, as one may have attached since its agents
+                // were listed (herdr's server outlives them).
+                self.look_for_herdr_terminals(Some(going));
+            }
+            pane => {
+                if let Some(pane) = pane {
+                    self.select_herdr_pane(pane);
+                }
+                self.go_to_agent_window(&listed, going);
+            }
         }
         self.agents.dirty = true;
+    }
+
+    /// The go-to's window, if the agent has one, with the keyboard and
+    /// the streak; said in the journal either way (never the agent's
+    /// name: its text is the user's).
+    fn go_to_agent_window(&mut self, listed: &Listed, going: GoingTo) {
+        let agent = &listed.shown;
+        let window = WindowId(agent.window);
+        if agent.window != 0 && self.windows.contains_key(&window) {
+            tracing::info!(
+                id = agent.id,
+                source = agent.source,
+                window = agent.window,
+                how = listed.how.says(),
+                "going to an agent's window"
+            );
+            let from = going.row.and_then(|row| self.row_start(&row));
+            self.go_to(window, from, going.colour);
+        } else {
+            tracing::info!(
+                id = agent.id,
+                source = agent.source,
+                why = listed.how.says(),
+                "going to an agent: no window"
+            );
+        }
+    }
+
+    /// herdr's clients looked for on a thread (it reads every process),
+    /// then `going` goes on.
+    fn look_for_herdr_terminals(&mut self, going: Option<GoingTo>) {
+        let (Some(sender), Some(proc)) = (
+            self.agents.sender.clone(),
+            self.agents.places.as_ref().map(|p| p.processes.clone()),
+        ) else {
+            if let Some(going) = going {
+                self.herdr_terminals(self.agents.herdr.terminals.clone(), Some(going));
+            }
+            return;
+        };
+        crate::programs::on_a_thread("herdr's clients".to_owned(), move || {
+            let terminals = herdr::terminal_processes(&proc);
+            let _ = sender.send(Heard::Terminals(terminals, going));
+        });
+    }
+
+    /// herdr's clients as just found; the go-to that waited for them goes
+    /// to their terminal's window.
+    fn herdr_terminals(&mut self, terminals: Vec<Vec<u32>>, going: Option<GoingTo>) {
+        if self.agents.herdr.running {
+            self.agents.herdr.terminals = terminals;
+        }
+        let Some(going) = going else {
+            return;
+        };
+        match self
+            .agents_listed()
+            .into_iter()
+            .find(|a| a.shown.id == going.id)
+        {
+            Some(listed) => self.go_to_agent_window(&listed, going),
+            None => tracing::debug!(id = going.id, "the agent gone to is gone"),
+        }
     }
 
     /// Where the streak starts from `row`, global: its left edge, at its
@@ -654,10 +870,14 @@ impl Compositor {
     }
 
     /// The keyboard went to another window: a finished agent's may be
-    /// seen now.
+    /// seen now. herdr's clients are looked for again (off the loop): the
+    /// window may be a terminal herdr attached to since.
     pub fn agents_focus_changed(&mut self) {
         if !self.agents.list.is_empty() || !self.agents.herdr.agents.is_empty() {
             self.agents.dirty = true;
+        }
+        if self.herdr_followed() && !self.agents.herdr.agents.is_empty() {
+            self.look_for_herdr_terminals(None);
         }
     }
 
@@ -673,10 +893,10 @@ impl Compositor {
         self.agents.dirty = true;
     }
 
-    /// The mapped windows by their client's process: the topmost one of
-    /// each process.
-    fn windows_by_pid(&self) -> BTreeMap<u32, WindowId> {
-        let mut out = BTreeMap::new();
+    /// The mapped windows by their client's process, bottom first: the
+    /// last one of each process is its topmost.
+    fn windows_by_pid(&self) -> BTreeMap<u32, Vec<WindowId>> {
+        let mut out: BTreeMap<u32, Vec<WindowId>> = BTreeMap::new();
         for id in self.model.stack() {
             let Some(managed) = self.windows.get(id) else {
                 continue;
@@ -690,8 +910,7 @@ impl Compositor {
                 }),
             };
             if let Some(pid) = pid {
-                // Bottom first: the last one is on top.
-                out.insert(pid, *id);
+                out.entry(pid).or_default().push(*id);
             }
         }
         out
@@ -704,8 +923,9 @@ impl Compositor {
             return;
         }
         self.agents.dirty = false;
-        let agents = self.agents_shown();
-        let seen = self.halo_seen(&agents);
+        let listed = self.agents_listed();
+        let seen = self.halo_seen(&listed);
+        let agents: Vec<AgentShown> = listed.into_iter().map(|l| l.shown).collect();
         self.halo_agents(&seen);
         if !self.shell_linked() {
             // Told everything once it connects (`tell_agents`).
@@ -770,4 +990,83 @@ impl Compositor {
 /// A tool by the shell's word for it.
 pub fn tool(word: &str) -> Option<Tool> {
     Tool::from_word(word)
+}
+
+/// Whether a window's title names herdr: its first word, as the shell
+/// titles a terminal with the command it runs ("herdr", "herdr session
+/// attach work"); not a file of that name being edited.
+fn names_herdr(title: &str) -> bool {
+    title
+        .split_whitespace()
+        .next()
+        .is_some_and(|word| word.eq_ignore_ascii_case("herdr"))
+}
+
+/// Among herdr's terminal's windows (`candidates`, bottom first, with
+/// whether each one's title names herdr), the one to go to: the only one;
+/// else, of those named herdr if any, the most recently focused
+/// (`recent`, the most recent first), the topmost of those never focused.
+fn pick(candidates: &[(WindowId, bool)], recent: &[WindowId]) -> Option<(WindowId, Pick)> {
+    let titled: Vec<WindowId> = candidates
+        .iter()
+        .filter(|(_, titled)| *titled)
+        .map(|(w, _)| *w)
+        .collect();
+    let all: Vec<WindowId> = candidates.iter().map(|(w, _)| *w).collect();
+    let (among, how) = match (all.len(), titled.len()) {
+        (0, _) => return None,
+        (1, _) => (all, Pick::Only),
+        (_, 0) => (all, Pick::Recent),
+        _ => (titled, Pick::Titled),
+    };
+    let rank = |w: &WindowId| recent.iter().position(|r| r == w).unwrap_or(usize::MAX);
+    // The first of equals: the topmost.
+    among
+        .iter()
+        .rev()
+        .min_by_key(|w| rank(w))
+        .map(|w| (*w, how))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_title_names_herdr_by_its_first_word() {
+        assert!(names_herdr("herdr"));
+        assert!(names_herdr("  HERDR session attach work"));
+        assert!(!names_herdr("vim herdr.rs"));
+        assert!(!names_herdr("herdr.rs"));
+        assert!(!names_herdr("zsh"));
+        assert!(!names_herdr(""));
+    }
+
+    #[test]
+    fn herdrs_window_is_the_one_titled_herdr_else_the_last_focused() {
+        let w = WindowId;
+        // Two of kitty's windows: the one titled herdr, though behind and
+        // focused longer ago.
+        assert_eq!(
+            pick(&[(w(1), true), (w(2), false)], &[w(2), w(1)]),
+            Some((w(1), Pick::Titled))
+        );
+        // None titled: the most recently focused, not the topmost.
+        assert_eq!(
+            pick(&[(w(1), false), (w(2), false)], &[w(1), w(2)]),
+            Some((w(1), Pick::Recent))
+        );
+        // Never focused: the topmost.
+        assert_eq!(
+            pick(&[(w(1), false), (w(2), false), (w(3), false)], &[]),
+            Some((w(3), Pick::Recent))
+        );
+        // Two titled (two terminals attached): the last focused of them.
+        assert_eq!(
+            pick(&[(w(1), true), (w(2), false), (w(3), true)], &[w(2), w(1)]),
+            Some((w(1), Pick::Titled))
+        );
+        assert_eq!(pick(&[(w(4), false)], &[]), Some((w(4), Pick::Only)));
+        assert_eq!(pick(&[], &[w(1)]), None);
+    }
 }

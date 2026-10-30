@@ -4,8 +4,14 @@
 //!
 //! A hook runs as a child of its agent, often through `sh -c`: the agent
 //! is the nearest process above the hook that is not a shell.
+//!
+//! The processes are read in a `/proc` given ([`PROC`] on the machine), so
+//! that a test sees the processes of its own table, not the machine's.
 
 use std::path::Path;
+
+/// The machine's processes.
+pub const PROC: &str = "/proc";
 
 /// The shells a hook or a script may run through, by their process name.
 const SHELLS: [&str; 8] = [
@@ -39,8 +45,12 @@ pub fn parse_stat(stat: &str) -> Option<Process> {
 
 /// Process `pid` on this machine.
 pub fn read(pid: u32) -> Option<Process> {
-    let stat =
-        std::fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat")).ok()?;
+    read_in(Path::new(PROC), pid)
+}
+
+/// Process `pid` as `proc` (a `/proc`) shows it.
+pub fn read_in(proc: &Path, pid: u32) -> Option<Process> {
+    let stat = std::fs::read_to_string(proc.join(pid.to_string()).join("stat")).ok()?;
     parse_stat(&stat)
 }
 
@@ -85,7 +95,12 @@ pub fn agent_above_in(parent: u32, mut look: impl FnMut(u32) -> Option<Process>)
 /// Process `pid`'s working directory's name: an agent's last resort
 /// for one (its project, as it started there).
 pub fn folder_of(pid: u32) -> Option<String> {
-    let cwd = std::fs::read_link(Path::new("/proc").join(pid.to_string()).join("cwd")).ok()?;
+    folder_in(Path::new(PROC), pid)
+}
+
+/// The same, as `proc` (a `/proc`) shows it.
+pub fn folder_in(proc: &Path, pid: u32) -> Option<String> {
+    let cwd = std::fs::read_link(proc.join(pid.to_string()).join("cwd")).ok()?;
     crate::folder(&cwd.to_string_lossy())
 }
 
