@@ -323,6 +323,10 @@ pub struct Halo {
     timer: Option<(Duration, RegistrationToken)>,
     /// Each screen's glow as last drawn, kept while it does not change.
     kept: RefCell<HashMap<String, (Key, ShaderElement)>>,
+    /// What just began, for the peek (4.5): an agent that starts waiting
+    /// or finishes, unless the user looks at it, and a waiting agent's
+    /// reminder; taken by [`Halo::take_news`].
+    news: Vec<(u64, Concern)>,
 }
 
 impl Halo {
@@ -355,6 +359,9 @@ impl Halo {
                     if concern == Concern::Waiting && !agent.looked_at {
                         wave = Some(concern);
                     }
+                    if matches!(concern, Concern::Waiting | Concern::ToSee) && !agent.looked_at {
+                        self.news.push((agent.id, concern));
+                    }
                     Episode {
                         concern,
                         since: agent.since,
@@ -366,6 +373,20 @@ impl Halo {
             self.episodes.insert(agent.id, episode);
         }
         self.show(now, motion, wave)
+    }
+
+    /// What began since last taken, in order: the agents that started
+    /// waiting or finished, and the reminders.
+    pub fn take_news(&mut self) -> Vec<(u64, Concern)> {
+        std::mem::take(&mut self.news)
+    }
+
+    /// Whether agent `id` still concerns the user as `concern`: in it, and
+    /// not acted on.
+    pub fn counts(&self, id: u64, concern: Concern) -> bool {
+        self.episodes
+            .get(&id)
+            .is_some_and(|e| e.concern == concern && !e.acknowledged)
     }
 
     /// The user went to agent `id`: it no longer counts.
@@ -402,7 +423,7 @@ impl Halo {
         // A timer may fire a hair early.
         let by = now + Duration::from_millis(1);
         let mut due = false;
-        for episode in self.episodes.values_mut() {
+        for (id, episode) in &mut self.episodes {
             if episode.concern == Concern::Waiting
                 && !episode.acknowledged
                 && !episode.reminded
@@ -410,6 +431,7 @@ impl Halo {
             {
                 episode.reminded = true;
                 due = true;
+                self.news.push((*id, Concern::Waiting));
             }
         }
         due && self.show(now, motion, Some(Concern::Waiting))
@@ -542,6 +564,8 @@ impl State {
             self.redraw = true;
         }
         self.arm_reminder();
+        // Its panda peeks out once more (4.5).
+        self.peek_news();
     }
 
     /// The halo moves on; whether it still does.
@@ -1071,6 +1095,36 @@ mod tests {
         );
         assert_eq!(halo.waves, 3);
         assert_eq!(halo.next_reminder(), Some(again - ms(1000) + REMINDER));
+    }
+
+    #[test]
+    fn what_begins_is_news_for_the_peek() {
+        let mut halo = Halo::default();
+        let agents = [
+            agent(1, "waiting", ms(0)),
+            agent(2, "done", ms(0)),
+            agent(3, "failed", ms(0)),
+            Seen {
+                looked_at: true,
+                ..agent(4, "waiting", ms(0))
+            },
+        ];
+        halo.agents(&agents, ms(0), Motion::Still);
+        // Waiting and finished, not stuck, not looked at.
+        assert_eq!(
+            halo.take_news(),
+            vec![(1, Concern::Waiting), (2, Concern::ToSee)]
+        );
+        assert!(halo.counts(1, Concern::Waiting) && halo.counts(2, Concern::ToSee));
+        assert!(!halo.counts(4, Concern::Waiting) && !halo.counts(1, Concern::ToSee));
+        // The same again: nothing new; the reminder is.
+        halo.agents(&agents, ms(1000), Motion::Still);
+        assert_eq!(halo.take_news(), vec![]);
+        halo.remind(REMINDER, Motion::Still);
+        assert_eq!(halo.take_news(), vec![(1, Concern::Waiting)]);
+        // Gone to: it no longer counts.
+        halo.acknowledge(1);
+        assert!(!halo.counts(1, Concern::Waiting));
     }
 
     #[test]

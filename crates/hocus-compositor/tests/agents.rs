@@ -14,7 +14,10 @@
 //! nothing at its row, and a second click replacing it (4.3b); herdr's
 //! terminal brought for its agents, the processes in a `/proc` of the
 //! test's own (4.3c, #500). The halo (4.4): its wave and its glow, its
-//! reminder, its priorities, its end.
+//! reminder, its priorities, its end. The panda peeking out (4.5): out
+//! and back, for a finished agent, again at the reminder, a click on it,
+//! the latest replacing it, in place without motion, and where it takes
+//! the pointer.
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of motion and of the streak run on a GPU when the
@@ -38,8 +41,9 @@ use hocus_compositor::{
     going::Streak,
     halo::{Concern, Shown},
     model::Rect,
+    peek::Look,
 };
-use hocus_link::ToolState;
+use hocus_link::{PeekKind, ToolState};
 
 /// What the test's machine has.
 #[derive(Default)]
@@ -2374,8 +2378,18 @@ impl Bed {
         Ok(out)
     }
 
-    /// Nothing draws but the clock's seconds for 2 s.
+    /// Nothing draws but the clock's seconds for 2 s, once the panda that
+    /// peeks out with a waiting or finished agent (4.5), if one does, is
+    /// out and still: a busy machine's shell may draw it late.
     fn rests(&mut self) -> anyhow::Result<()> {
+        let still = Some(Look {
+            alpha: 1.0,
+            shift: 0.0,
+        });
+        let peeked = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.peek_out().is_none() || hp.peek() == still)?;
+        anyhow::ensure!(peeked, "the peek moves: {:?}", self.hp.peek());
         let frames = self.hp.frames();
         wait(&mut self.hp, Duration::from_secs(2))?;
         let drawn = self.hp.frames() - frames;
@@ -2684,6 +2698,473 @@ fn with_reduced_motion_no_wave_and_the_glow_fades_in_quickly() -> anyhow::Result
     );
     assert_eq!(bed.hp.halo_waves(), 0);
     bed.rests()?;
+    Ok(())
+}
+
+// --- 4.5: the panda peeking out -------------------------------------------------
+
+/// The peek at a frame.
+#[derive(Debug, Clone, Copy)]
+struct Peeked {
+    /// Since the sampling's start.
+    at: Duration,
+    look: Option<Look>,
+}
+
+/// A rectangle, global and logical: left, top, width, height.
+type Area = (f64, f64, f64, f64);
+
+fn middle_of((x, y, w, h): Area) -> (f64, f64) {
+    (x + w / 2.0, y + h / 2.0)
+}
+
+impl Bed {
+    /// The peek at each frame drawn until `time` after `start`.
+    fn peek_until(&mut self, start: Instant, time: Duration) -> anyhow::Result<Vec<Peeked>> {
+        let mut frames = self.hp.frames();
+        let mut out = Vec::new();
+        while start.elapsed() < time {
+            self.hp.dispatch(Duration::from_millis(2))?;
+            let now = self.hp.frames();
+            if now != frames {
+                frames = now;
+                out.push(Peeked {
+                    at: start.elapsed(),
+                    look: self.hp.peek(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// The peek's surface, once drawn and where the shell put it.
+    fn peek_surface(&mut self) -> anyhow::Result<Rect> {
+        let shown = self.hp.dispatch_until(WAIT, |hp| {
+            hp.peek_commits() > 0 && hp.peek_surfaces().len() == 1 && hp.peek().is_some()
+        })?;
+        anyhow::ensure!(shown, "no peek: {:?}", self.hp.peek_surfaces());
+        Ok(self.hp.peek_surfaces()[0].1)
+    }
+
+    /// Waits until the peek's surfaces are gone.
+    fn peek_gone(&mut self) -> anyhow::Result<()> {
+        let gone = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.peek_surfaces().is_empty())?;
+        anyhow::ensure!(gone, "the peek stays: {:?}", self.hp.peek_surfaces());
+        Ok(())
+    }
+
+    /// Where the bubble and the panda's box are on the peek's `surface`:
+    /// on a GPU with room for their shadows round them (45 px left, 14 px
+    /// above, 24 px right), on the CPU a card 8 px longer than the panda.
+    fn peek_parts(&self, surface: Rect) -> (Area, Area) {
+        let (left, top, right) = if self.hp.shell_on_cpu() {
+            (0.0, 0.0, 8.0)
+        } else {
+            (45.0, 14.0, 24.0)
+        };
+        let (x, y) = (f64::from(surface.x), f64::from(surface.y));
+        let panda = (
+            x + f64::from(surface.width) - right - 96.0,
+            y + top,
+            96.0,
+            96.0,
+        );
+        let bubble_height = 13.0 * 1.366 + 18.0;
+        let bubble = (
+            x + left,
+            y + top + (96.0 - bubble_height) / 2.0,
+            panda.0 - 8.0 - x - left,
+            bubble_height,
+        );
+        (bubble, panda)
+    }
+
+    /// Waits until the peek shows whole and still.
+    fn peek_out_still(&mut self) -> anyhow::Result<()> {
+        let still = Look {
+            alpha: 1.0,
+            shift: 0.0,
+        };
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.peek() == Some(still))?;
+        anyhow::ensure!(done, "the peek is {:?}", self.hp.peek());
+        Ok(())
+    }
+}
+
+/// A bed on the GPU when the machine has one, where the peek slides; on
+/// Pixman otherwise, the shell on the CPU, where it fades in place. Its
+/// clock far from a minute's change: the clock's odometer would draw
+/// while nothing else should.
+fn peek_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(None);
+    };
+    let bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            gpu: render_node(),
+            reduced_motion,
+            clock_at: Some("10:00:05"),
+            ..Machine::default()
+        },
+    )?;
+    Ok(Some(bed))
+}
+
+/// The full bar's left edge on the test's 1920 px screen.
+const BAR_LEFT: f64 = 1920.0 - 8.0 - 196.0;
+
+/// An agent starting to wait: its panda (96 px) comes out of the bar's
+/// edge at its row, 18 px from the bar, with its bubble; on a GPU sliding
+/// out from under the bar in some 320 ms with a slight overshoot, fading
+/// in; then still, and back after 8 s on the clock; then its surfaces go
+/// and nothing draws.
+#[test]
+fn a_waiting_agents_panda_peeks_out_at_its_row_then_goes_back_after_8_s() -> anyhow::Result<()> {
+    let Some(mut bed) = peek_bed(false)? else {
+        return Ok(());
+    };
+    let slides = bed.hp.renderer() == "gles" && !bed.hp.shell_on_cpu();
+    bed.agent_is("build", "working")?;
+    bed.agent_is("api", "working")?;
+    bed.settle()?;
+    assert_eq!(bed.hp.peeks_told(), 0);
+    assert!(bed.hp.peek_surfaces().is_empty());
+    let start = Instant::now();
+    bed.hocus(&["agent", "build", "waiting"], None)?;
+    let samples = bed.peek_until(start, Duration::from_millis(1500))?;
+    let shown: Vec<(Duration, Look)> = samples
+        .iter()
+        .filter_map(|s| s.look.map(|l| (s.at, l)))
+        .collect();
+    let Some(&(first, look)) = shown.first() else {
+        anyhow::bail!("no peek: {samples:?}");
+    };
+    let whole = shown
+        .iter()
+        .find(|(_, l)| l.alpha == 1.0 && l.shift == 0.0)
+        .map(|(at, _)| *at - first)
+        .ok_or_else(|| anyhow::anyhow!("never still: {shown:?}"))?;
+    if slides {
+        // From under the bar, quickly out, past its place a little, then
+        // still at some 320 ms.
+        assert!(look.shift > 75.0 && look.alpha < 0.6, "{shown:?}");
+        assert!(shown.iter().any(|(_, l)| l.shift < -1.0), "{shown:?}");
+        assert!(
+            (Duration::from_millis(250)..Duration::from_millis(450)).contains(&whole),
+            "{whole:?}: {shown:?}"
+        );
+    } else {
+        // On the CPU, it fades in where it stays.
+        assert!(shown.iter().all(|(_, l)| l.shift == 0.0), "{shown:?}");
+        assert!(look.alpha < 1.0, "{shown:?}");
+        assert!(whole < Duration::from_millis(350), "{whole:?}: {shown:?}");
+    }
+    // At its row, 18 px from the bar, saying who waits.
+    let surface = bed.peek_surface()?;
+    let (bubble, panda) = bed.peek_parts(surface);
+    let row = bed.row("build")?;
+    assert!(
+        (panda.0 + panda.2 - (BAR_LEFT - 18.0)).abs() < 0.5,
+        "{panda:?}"
+    );
+    assert!(
+        (middle_of(panda).1 - row.1).abs() <= 1.0,
+        "{panda:?} for {row:?}"
+    );
+    bed.logged("said=build t'attend · à l'instant")?;
+    // The bubble's colour in its padding, warm on the blue background.
+    let inside = (bubble.0 + 5.0, middle_of(bubble).1);
+    let drawn = pixel(&mut bed.hp, inside)?;
+    if bed.hp.shell_on_cpu() {
+        assert!(
+            drawn
+                .iter()
+                .zip([28, 24, 17])
+                .all(|(a, b)| (a - b).abs() <= 3),
+            "{drawn:?}"
+        );
+    } else {
+        assert!(drawn[0] > drawn[2] && drawn[0] < 60, "{drawn:?}");
+    }
+    // Still out at 7.5 s; back from 8 s on.
+    wait(
+        &mut bed.hp,
+        (start + Duration::from_millis(7500)).saturating_duration_since(Instant::now()),
+    )?;
+    let out = bed.hp.peek_out();
+    assert!(
+        matches!(out, Some((_, PeekKind::Waiting, false))),
+        "{out:?}"
+    );
+    let samples = bed.peek_until(start, Duration::from_millis(9500))?;
+    let back = samples
+        .iter()
+        .find(|s| s.look.is_none_or(|l| l.alpha < 1.0 || l.shift > 0.0))
+        .map(|s| s.at.saturating_sub(first))
+        .ok_or_else(|| anyhow::anyhow!("never back: {samples:?}"))?;
+    assert!(
+        (Duration::from_millis(7900)..Duration::from_millis(8500)).contains(&back),
+        "{back:?}"
+    );
+    if slides {
+        assert!(
+            samples
+                .iter()
+                .any(|s| s.look.is_some_and(|l| l.shift > 20.0)),
+            "{samples:?}"
+        );
+    }
+    bed.peek_gone()?;
+    assert!(bed.hp.peek_out().is_none());
+    let away = pixel(&mut bed.hp, inside)?;
+    assert!(away[2] > away[0], "{away:?}");
+    // Then nothing draws for it.
+    let commits = bed.hp.peek_commits();
+    bed.rests()?;
+    assert_eq!(bed.hp.peek_commits(), commits);
+    assert_eq!(bed.hp.peeks_told(), 1);
+    Ok(())
+}
+
+/// A finished agent's panda peeks out too, its arms up, "a fini"; a stuck
+/// agent's does not (its row and the halo show it).
+#[test]
+fn a_finished_agents_panda_peeks_out_but_not_a_stuck_ones() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    bed.agent_is("api-paiements", "working")?;
+    bed.agent_is("migration", "working")?;
+    bed.settle()?;
+    bed.agent_is("migration", "failed")?;
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    assert_eq!(bed.hp.peeks_told(), 0);
+    assert!(bed.hp.peek_surfaces().is_empty());
+    bed.agent_is("api-paiements", "done")?;
+    let surface = bed.peek_surface()?;
+    let id = bed.id_of("api-paiements")?;
+    assert_eq!(bed.hp.peek_out(), Some((id, PeekKind::Done, false)));
+    bed.logged("said=api-paiements a fini")?;
+    // Beside its row: stuck first, then to see.
+    let (_, panda) = bed.peek_parts(surface);
+    let row = bed.row("api-paiements")?;
+    assert!(
+        (middle_of(panda).1 - row.1).abs() <= 1.0,
+        "{panda:?} for {row:?}"
+    );
+    Ok(())
+}
+
+/// Still waiting at its fifth minute, the agent's panda comes out once
+/// more, by the halo's reminder: "· 5 min"; then never again.
+#[test]
+fn the_reminder_brings_the_panda_out_once_more() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    bed.agent_is("build", "waiting")?;
+    bed.peek_surface()?;
+    assert_eq!(bed.hp.peeks_told(), 1);
+    let from = bed.mark();
+    // As if it had waited 4 min 59 s by now.
+    let since = Duration::from_micros(bed.hp.agents_peek()[0].since);
+    let waited = bed.hp.state().now().saturating_sub(since);
+    bed.hp
+        .backdate_agents(Duration::from_secs(299).saturating_sub(waited));
+    let again = bed
+        .hp
+        .dispatch_until(Duration::from_secs(3), |hp| hp.peeks_told() == 2)?;
+    anyhow::ensure!(again, "no reminder");
+    bed.logged_after(from, &["said=build t'attend · 5\u{a0}min"])?;
+    // An hour later, still waiting: no more.
+    bed.hp.backdate_agents(Duration::from_secs(3600));
+    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    assert_eq!(bed.hp.peeks_told(), 2);
+    Ok(())
+}
+
+/// A click on the panda goes to the agent (its window, on another
+/// desktop, gets the keyboard; on a GPU the streak runs from the panda)
+/// and the panda goes back at once; a click on the bubble does too (a
+/// finished agent is then seen).
+#[test]
+fn a_click_on_the_peek_goes_to_the_agent_and_sends_it_back() -> anyhow::Result<()> {
+    let Some(mut bed) = peek_bed(false)? else {
+        return Ok(());
+    };
+    let streaks = bed.hp.renderer() == "gles";
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    // On another desktop: its agent is not looked at.
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    bed.agent_is("build", "waiting")?;
+    let surface = bed.peek_surface()?;
+    bed.peek_out_still()?;
+    let (_, panda) = bed.peek_parts(surface);
+    bed.click(middle_of(panda));
+    let back = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.peek_out().is_none_or(|(_, _, back)| back))?;
+    anyhow::ensure!(back, "still out: {:?}", bed.hp.peek_out());
+    if streaks {
+        let streak = bed.hp.dispatch_until(WAIT, |hp| hp.streak().is_some())?;
+        anyhow::ensure!(streak, "no streak");
+        let from = bed.hp.streak().map(|s| s.from).unwrap_or_default();
+        assert!(
+            near(from, (panda.0, middle_of(panda).1), 1.0),
+            "{from:?} for {panda:?}"
+        );
+    }
+    bed.keyboard_goes_to("test.terminal")?;
+    assert_eq!(bed.hp.halo_concern(), None);
+    bed.peek_gone()?;
+    // A finished one, by its bubble: gone to, seen, back.
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.agent_is("api", "done")?;
+    let surface = bed.peek_surface()?;
+    bed.peek_out_still()?;
+    let (bubble, _) = bed.peek_parts(surface);
+    bed.click(middle_of(bubble));
+    bed.agent_becomes("api", Some("seen"))?;
+    bed.peek_gone()?;
+    Ok(())
+}
+
+/// The latest replaces the one out: one surface, its words and its row.
+#[test]
+fn a_newer_peek_replaces_the_one_out() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    bed.agent_is("build", "working")?;
+    bed.agent_is("api", "working")?;
+    bed.settle()?;
+    bed.agent_is("build", "waiting")?;
+    let first = bed.peek_surface()?;
+    let from = bed.mark();
+    bed.agent_is("api", "done")?;
+    bed.logged_after(from, &["said=api a fini"])?;
+    let id = bed.id_of("api")?;
+    let moved = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.peek_surfaces()
+            .first()
+            .is_some_and(|(_, r)| r.y != first.y)
+    })?;
+    anyhow::ensure!(moved, "{:?}", bed.hp.peek_surfaces());
+    assert_eq!(bed.hp.peek_surfaces().len(), 1);
+    assert_eq!(bed.hp.peek_out(), Some((id, PeekKind::Done, false)));
+    // Beside its row, under the waiting one's.
+    let (_, panda) = bed.peek_parts(bed.hp.peek_surfaces()[0].1);
+    let row = bed.row("api")?;
+    assert!(
+        (middle_of(panda).1 - row.1).abs() <= 1.0,
+        "{panda:?} for {row:?}"
+    );
+    assert_eq!(bed.hp.peeks_told(), 2);
+    Ok(())
+}
+
+/// With reduced motion on a GPU, and with a shell on the CPU: the panda
+/// fades in and out where it stays, without sliding.
+#[test]
+fn with_reduced_motion_or_on_the_cpu_the_peek_fades_in_place() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut machines = vec![Machine::default()];
+    if let Some(node) = render_node() {
+        machines.push(Machine {
+            gpu: Some(node),
+            reduced_motion: true,
+            ..Machine::default()
+        });
+    }
+    for machine in machines {
+        let mut bed = start(&shell, &hocus, &machine)?;
+        let how = bed.hp.renderer();
+        bed.agent_is("build", "working")?;
+        bed.settle()?;
+        let start = Instant::now();
+        bed.hocus(&["agent", "build", "waiting"], None)?;
+        let coming = bed.peek_until(start, Duration::from_millis(1200))?;
+        let shown: Vec<Look> = coming.iter().filter_map(|s| s.look).collect();
+        assert!(shown.iter().all(|l| l.shift == 0.0), "{how}: {shown:?}");
+        assert!(
+            shown.iter().any(|l| l.alpha > 0.0 && l.alpha < 1.0),
+            "{how}: {shown:?}"
+        );
+        assert!(
+            shown.last().is_some_and(|l| l.alpha == 1.0),
+            "{how}: {shown:?}"
+        );
+        let surface = bed.peek_surface()?;
+        let (bubble, _) = bed.peek_parts(surface);
+        bed.click(middle_of(bubble));
+        let start = Instant::now();
+        let going = bed.peek_until(start, Duration::from_millis(600))?;
+        let shown: Vec<Look> = going.iter().filter_map(|s| s.look).collect();
+        assert!(shown.iter().all(|l| l.shift == 0.0), "{how}: {shown:?}");
+        assert!(
+            shown.windows(2).all(|p| p[1].alpha <= p[0].alpha),
+            "{how}: {shown:?}"
+        );
+        bed.peek_gone()?;
+    }
+    Ok(())
+}
+
+/// The peek takes the pointer on its bubble and its panda only: on a GPU
+/// not in the room round them for their shadows, nor between them; and
+/// nothing once it is back.
+#[test]
+fn the_peek_takes_the_pointer_only_where_it_draws() -> anyhow::Result<()> {
+    let Some(mut bed) = peek_bed(false)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "waiting")?;
+    let surface = bed.peek_surface()?;
+    bed.peek_out_still()?;
+    let (bubble, panda) = bed.peek_parts(surface);
+    let peek = Some(hocus_link::PEEK_NAMESPACE.to_owned());
+    let on = |bed: &mut Bed, (x, y): (f64, f64)| {
+        bed.hp.pointer_move(x, y);
+        bed.hp.pointer_layer()
+    };
+    for at in [
+        middle_of(bubble),
+        middle_of(panda),
+        (bubble.0 + 2.0, bubble.1 + 2.0),
+    ] {
+        assert_eq!(on(&mut bed, at), peek, "{at:?}");
+    }
+    let mut off = vec![(bubble.0 - 3.0, middle_of(bubble).1)];
+    if !bed.hp.shell_on_cpu() {
+        // The shadows' room, and the gap between the bubble and the panda.
+        off.push((f64::from(surface.x) + 3.0, f64::from(surface.y) + 3.0));
+        off.push((bubble.0 + bubble.2 + 4.0, middle_of(bubble).1));
+        off.push((middle_of(panda).0, panda.1 + panda.3 + 10.0));
+    }
+    for at in off {
+        assert_ne!(on(&mut bed, at), peek, "{at:?}");
+    }
+    let target = middle_of(bubble);
+    bed.click(target);
+    bed.peek_gone()?;
+    assert_ne!(on(&mut bed, target), peek);
     Ok(())
 }
 

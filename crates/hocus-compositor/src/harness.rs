@@ -289,6 +289,36 @@ impl Headless {
         state.halo_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
+    /// The panda peeking out (4.5) as the last frame drew it: how opaque,
+    /// and how far toward the bar; `None` when it showed none.
+    pub fn peek(&self) -> Option<crate::peek::Look> {
+        let state = &self.app.state;
+        state.peek_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+    }
+
+    /// Which agent's panda is out, and why, drawn or not; and whether it
+    /// is going back.
+    pub fn peek_out(&self) -> Option<(u64, hocus_link::PeekKind, bool)> {
+        let peek = &self.app.state.peek;
+        peek.out().map(|(id, kind)| (id, kind, peek.going_back()))
+    }
+
+    /// The peeks told the shell so far.
+    pub fn peeks_told(&self) -> u64 {
+        self.app.state.peek.told
+    }
+
+    /// Commits of the peek's surfaces so far.
+    pub fn peek_commits(&self) -> u64 {
+        self.app.state.panel.peek_commits
+    }
+
+    /// The peek's surfaces as the shell placed them: their screen, and
+    /// where they are (global).
+    pub fn peek_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::PEEK_NAMESPACE)
+    }
+
     /// What concerns the user most, as the halo has it, drawn or not.
     pub fn halo_concern(&self) -> Option<crate::halo::Concern> {
         self.app.state.halo.concern()

@@ -1247,6 +1247,7 @@ impl State {
         }
         moving |= self.tick_going(now);
         moving |= self.tick_halo(now);
+        moving |= self.tick_peek(now);
         let popover_motion = self.popover_motion();
         moving |= self.panel.tick(now, popover_motion);
         moving |= self.tick_switcher(now, &mut wake);

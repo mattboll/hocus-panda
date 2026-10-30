@@ -727,6 +727,8 @@ impl Compositor {
     /// row to it in the row's colour (4.3); herdr's pane selected when it
     /// is herdr's; finished, it is seen.
     pub fn go_to_agent(&mut self, id: u64, row: Option<Row>) {
+        // Its panda goes back at once, gone or not (§8 step 5, 4.5).
+        self.peek_gone_to(id);
         let Some(listed) = self.agents_listed().into_iter().find(|a| a.shown.id == id) else {
             tracing::debug!(id, "the shell goes to an agent that is gone");
             return;
@@ -928,7 +930,9 @@ impl Compositor {
         let agents: Vec<AgentShown> = listed.into_iter().map(|l| l.shown).collect();
         self.halo_agents(&seen);
         if !self.shell_linked() {
-            // Told everything once it connects (`tell_agents`).
+            // Told everything once it connects (`tell_agents`); nothing
+            // peeks out meanwhile.
+            self.halo.take_news();
             return;
         }
         let tools = self.agent_tools();
@@ -941,6 +945,10 @@ impl Compositor {
             self.agents.told = Some(agents.clone());
             self.tell_shell(ToShell::Agents(agents));
         }
+        // The panda peeking out (4.5), after the agents' line: its agent is
+        // there.
+        self.peek_follows();
+        self.peek_news();
     }
 
     /// The shell connected: it is told everything again.

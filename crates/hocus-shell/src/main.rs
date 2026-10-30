@@ -22,7 +22,8 @@
 //! presents a surface whole, so that only its region is drawn again. The
 //! levels have theirs, for the same reason, the connections and the
 //! desktops theirs, and so has a popover beside the bar ([`popover`]),
-//! opened from an item.
+//! opened from an item, and the panda peeking out of the bar's edge
+//! ([`agents::peek`]).
 
 mod agents;
 mod bluetooth;
@@ -331,6 +332,7 @@ impl Shell {
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
         };
         popover::with(|c| c.motion = shell.look.motion);
+        agents::peek::set_software(software);
         // Alone: one full bar where the compositor puts it.
         let task = if socket.is_none() {
             shell.open_bar(OutputOption::Active, ALONE.to_owned(), Form::Full)
@@ -458,6 +460,7 @@ impl Shell {
                     network::draw::forget(&bar.output);
                     desktops::draw::forget(&bar.output);
                     agents::draw::forget(&bar.output);
+                    agents::peek::forget(&bar.output);
                     Some(Task::batch([
                         Task::done(Message::RemoveWindow(bar.agents)),
                         Task::done(Message::RemoveWindow(bar.desktops)),
@@ -506,6 +509,14 @@ impl Shell {
             }
             ToShell::Agents(list) => {
                 agents::set_agents(list);
+                Task::none()
+            }
+            ToShell::Peek(peek) => {
+                agents::peek::peek(peek);
+                Task::none()
+            }
+            ToShell::NoPeek => {
+                agents::peek::back();
                 Task::none()
             }
         }
@@ -686,7 +697,9 @@ impl Shell {
             _ => None,
         };
         bar.form = form;
+        let output = bar.output.clone();
         self.place_popovers(id);
+        agents::peek::form(&output, form);
         self.fit(id)
     }
 
@@ -888,6 +901,17 @@ impl Shell {
         )
     }
 
+    /// The panda peeking out (4.5), if its surface is `id`.
+    fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = agents::peek::bar_of(id)?;
+        Some(
+            canvas(agents::peek::View { bar })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
     /// The popover whose surface is `id`.
     fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let item = popover::with(|c| c.item_of(id))?;
@@ -980,6 +1004,7 @@ impl Shell {
                 .or_else(|| self.connections_view(id))
                 .or_else(|| self.desktops_view(id))
                 .or_else(|| self.agents_view(id))
+                .or_else(|| self.peek_view(id))
                 .or_else(|| self.popover_view(id))
                 .unwrap_or_else(|| Space::new().into());
         };
@@ -1281,6 +1306,15 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Agents(list)) => {
                             agents::set_agents(list);
+                            continue;
+                        }
+                        // The panda peeking out: its own surfaces only.
+                        Ok(ToShell::Peek(peek)) => {
+                            agents::peek::peek(peek);
+                            continue;
+                        }
+                        Ok(ToShell::NoPeek) => {
+                            agents::peek::back();
                             continue;
                         }
                         _ => {}

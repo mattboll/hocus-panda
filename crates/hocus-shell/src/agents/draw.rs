@@ -388,7 +388,7 @@ fn colours(look: Look) -> (Color, Color) {
 }
 
 /// The panda for `look`: the validated drawings, one still mood each.
-fn panda(look: Look) -> &'static svg::Handle {
+pub(super) fn panda(look: Look) -> &'static svg::Handle {
     static PANDAS: OnceLock<[svg::Handle; 5]> = OnceLock::new();
     let pandas = PANDAS.get_or_init(|| {
         [

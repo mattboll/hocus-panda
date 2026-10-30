@@ -18,7 +18,8 @@ their pandas (section 4 group 3, section 7 A, section 8 in part; 4.1,
 issue #384), and going to an agent from its row, its streak, its rim's
 pulse and herdr's pane (section 8; 4.3, issue #386), herdr's terminal
 brought for its agents (4.3c, issue #500), and the agents' halo
-(section 6; 4.4, issue #387), and the secretary at the agents' group's
+(section 6; 4.4, issue #387), the panda peeking out of the bar's edge
+(section 7 C; 4.5, issue #388), and the secretary at the agents' group's
 head and her briefing (section 7 B; 4.6, issue #389): see
 [as built](#as-built).
 
@@ -383,11 +384,33 @@ never on battery saver, never with reduced motion.
   footer "N au travail · M au repos", and "Sources" (the Sources
   popover). Each line acts like its row: it goes to the agent (§8). She
   never opens by herself.
-- **C, the peek**: when an agent starts waiting, its panda (96 px) slides
-  out from the bar's edge, 18 px from the bar, with a label "**name**
-  t'attend · 1 min". In 320 ms, `cubic-bezier(0.2, 0.9, 0.25, 1.15)`,
-  fading in over 260 ms. It retracts after **8 s** into its tile, and peeks
-  again with the 5-minute reminder. A click on it goes to the agent.
+- **C, the peek** (approved 2026-10-30, issue #388: 8 s, and also when an
+  agent finishes):
+  - **When**: an agent starts waiting (its panda holding out its hat), or
+    an agent finishes (its panda with arms up). Once per change, and once
+    more with the 5-minute reminder of a waiting agent (§6). Never for a
+    stuck agent: the orange line and glow show it.
+  - **Where**: the 96 px panda comes out of the bar's edge at the agent's
+    row's height, 18 px from the bar, from under the bar's surface. Beside
+    it, 8 px before it, a bubble: Manrope 13 px, 8 px and 12 px in,
+    `rgba(30,26,18,0.92)` (`rgba(40,32,18,0.96)` under the pointer), radius
+    12, a 1 px border in the state's colour at 45 % (amber waiting, green
+    finished), `box-shadow: 0 10px 30px rgba(0,0,0,0.35)`; the panda's
+    `drop-shadow(0 8px 16px rgba(0,0,0,0.4))`. "**site-web** t'attend · à
+    l'instant" / "**site-web** is waiting · just now" (the word `#F5C46E`,
+    since when `text.faint`), "**api-paiements** a fini" / "**api-paiements**
+    is done" (`#7EE0A0`).
+  - **Motion**: out in 320 ms, `cubic-bezier(0.2, 0.9, 0.25, 1.15)`, from
+    150 px under the bar, fading in over 260 ms (`ease-out`); still while
+    out; back into the bar after **8 s**, in 260 ms (`cubic-bezier(0.5, 0,
+    0.75, 0.3)`), fading out over 220 ms (`ease-in`). With reduced motion,
+    or a shell on the CPU: it fades in and out in place, without sliding.
+  - **A click** on it (panda or bubble) goes to the agent (§8), the streak
+    from the panda, and it goes back at once.
+  - Several at once: the latest replaces the one out; it never stacks.
+  - Nothing is drawn at rest: it is a surface of the shell's above the
+    windows, beside each bar, taking the pointer only where it draws, and
+    gone once back.
 
 ## 8. Going to an agent
 
@@ -672,8 +695,8 @@ The light and neon themes give their own values for the same tokens.
 
 1. ~~The secretary's pencil drawing (section 7, B).~~ Decided on the 4.6
    mockup: the pencil rests behind her ear.
-2. Whether the peek's 8 s before it retracts is right (the prototype keeps
-   it until the agent is handled).
+2. ~~Whether the peek's 8 s before it retracts is right.~~ Decided on the
+   4.5 mockup: 8 s, and it also comes out when an agent finishes.
 3. ~~The colour and animation of the clock when the minute changes.~~
    Decided on the 3.2 mockup: white, the odometer (§4.1).
 4. ~~What the bar shows when no agent tool is running at all.~~ Decided on
@@ -1999,6 +2022,80 @@ finished agent not seen yet), with the maintainer's spec (§6; issue
 - **Not built**: the meetings' states (the calendar, "Your day"); the
   secretary's ear in the halo's colour (4.6); the peek (4.5); the halo on
   the CPU; the mini form's agents (4.7).
+
+### 4.5, the panda peeking out (2026-10-30)
+
+What the approved 4.5 mockup shows, with the maintainer's spec (§7 C;
+issue #388): it stays out 8 s, and also comes out when an agent finishes.
+
+- **What brings it out** is the halo's model (4.4): an agent that starts
+  waiting, or finishes, unless the user is looking at it (its own window
+  has the keyboard: no halo, no peek), and a waiting agent's reminder at
+  its fifth minute, the halo's timer of the loop: nothing polls. A stuck
+  agent does not. Of several in one turn of the loop, the latest.
+- **The line**: the compositor tells the shell `peek ID waiting|done SINCE
+  NAME`, after the `agents` line, and `no-peek` once the panda is back in.
+- **The shell draws it once**, on a layer surface of its own
+  (`hocus-bar-peek`) beside each bar, anchored to the screen's top right:
+  the panda's box 18 px from the bar, its middle on the agent's row's
+  middle as the group lays the rows out (the secretary's middle when the
+  agent has no row shown: under "+ N", or in the mini form, which has no
+  rows yet). On a GPU the surface is transparent and holds the shadows:
+  the bubble's `box-shadow`, a blur outside its box only (as CSS draws
+  it), and the panda's `drop-shadow` round its drawing, are SVG filters
+  that resvg draws as it draws the pandas; their room is 45 px left of the
+  bubble, 14 px above, 24 px right of the panda, 30 px below. The surface
+  takes the pointer on the bubble and on the panda's box only (its input
+  region), the pointer a hand there; the bubble is lit under it. A newer
+  peek resizes and moves the surfaces of the one out: there is never a
+  second one.
+- **The compositor moves it**, as it does the popovers: from the surface's
+  first frame, closed-form curves on the frame clock. It slides out from
+  150 px under the bar, cut at the bar's edge as drawn (it is drawn under
+  the bar's surfaces and its halo, over the windows and the streak), and
+  back the same way. Two timers of the loop: 8 s after its first frame it
+  goes back; 260 ms later the shell is told `no-peek` and removes its
+  surfaces. Frames only while it moves: none while it is out and still,
+  none at rest.
+- **It goes back at once** when the user goes to its agent: a click on it
+  (panda or bubble) asks `go-to-agent ID OUTPUT X Y W H` with the panda's
+  box, so the streak starts at the panda's left edge; its row or the
+  briefing's line does too (§8 step 5). Clicked on its way out, it goes
+  back from where it is. It also goes back at once when its agent is dealt
+  with otherwise (answered, working again; a finished one seen; its window
+  getting the keyboard), as the halo ends: the bubble would say something
+  no longer true.
+- **The latest replaces the one out**: while that one is out and still,
+  the new one takes its place there (its words, its row) for 8 s more;
+  while it goes back, the new one comes out afresh.
+- **Reduced motion, or a shell on the CPU**: no slide; it fades in over
+  260 ms (`ease-out`) and out over 220 ms (`ease-in`) in place. On the CPU
+  the shell's buffers have no alpha: the bubble's card holds the panda
+  too (96 px high, the bubble's colour, made opaque, and its border round
+  both, 8 px after the panda), without shadows, and the compositor cuts
+  its rounded corners.
+- **A long name** is cut with an ellipsis at 280 px, so that the bubble
+  stays beside the bar.
+- **Measured headless**, the real shell (`tests/agents.rs`): an agent
+  starting to wait brings its panda out at its row, 18 px from the bar,
+  saying "build t'attend · à l'instant"; on a GPU it slides out from
+  under the bar, past its place a little, still within 250 to 450 ms (on
+  the CPU it fades in place); still out at 7.5 s, back between 7.9 and
+  8.5 s, its surfaces gone, nothing drawn after. A finished agent's comes
+  out ("a fini"), a stuck agent's does not. The reminder brings it out once
+  more ("· 5 min"), and no more an hour later. A click on the panda goes to
+  the agent's window on another desktop, the streak from the panda's left
+  edge on a GPU, the halo ending, the panda going back at once; on the
+  bubble, a finished agent is seen. A newer one replaces it: one surface,
+  at the new agent's row. With reduced motion on a GPU, and on the CPU, it
+  fades in and out without moving. It takes the pointer on its bubble and
+  its panda, not in the room round them nor between them, and nothing once
+  back. Unit tests for the motion's curves, the placing, the words, the
+  panda's shadow and the halo's news. On the Intel GPU, the screenshots of
+  the pull request.
+- **Not built**: the keyboard (the bar's `Tab` does not reach the peek)
+  and names for screen readers (§11); the mini form's agents (4.7), whose
+  rows the peek will come out beside.
 
 ### 4.6, the secretary and her briefing (2026-10-30)
 
