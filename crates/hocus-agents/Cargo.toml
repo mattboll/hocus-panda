@@ -10,6 +10,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# The note an agent's tool gives (what it asks for, why it failed), the
+# same on the control socket's line as on the shell's.
+hocus-link = { path = "../hocus-link", version = "0.2.0" }
 # The tools' hooks' payloads, and Claude Code's settings, kept in their
 # order when written back.
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

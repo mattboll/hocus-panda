@@ -1,7 +1,8 @@
 //! Popovers beside the bar (bar.md §9): what opens them, what closes them,
 //! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]),
 //! Bluetooth's ([`bluetooth`]), the brightness's ([`brightness`]), the
-//! battery's ([`battery`]) and a desktop's list of windows ([`desktop`]),
+//! battery's ([`battery`]), a desktop's list of windows ([`desktop`]), the
+//! agents' tools' ([`agents`]) and the secretary's briefing ([`briefing`]),
 //! drawn and handled with the pieces of [`kit`].
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
@@ -36,6 +37,7 @@
 pub mod agents;
 pub mod battery;
 pub mod bluetooth;
+pub mod briefing;
 pub mod brightness;
 pub mod desktop;
 pub mod kit;
@@ -77,8 +79,8 @@ pub enum Item {
     /// holds the keyboard, goes to that desktop (3.9); hovered, it shows
     /// the list of its windows (3.9b).
     Desktop(u8),
-    /// The agents' group's "Sources", and the card's "Un autre outil ?":
-    /// the Sources popover (4.0).
+    /// The Sources popover (4.0): from the secretary's briefing, which it
+    /// replaces (4.6), and the card's "Un autre outil ?".
     Sources,
     AnotherTool,
     /// A card's "Brancher": the consent popover for that tool.
@@ -88,6 +90,9 @@ pub enum Item {
     /// An agent's row (4.1), by the compositor's id: a click, or `Enter`
     /// while it holds the keyboard, goes to the agent.
     Agent(u64),
+    /// The secretary, at the head of the agents' group (4.6): her
+    /// briefing, from which Sources opens.
+    Secretary,
 }
 
 impl Item {
@@ -112,7 +117,7 @@ impl Item {
     fn hovers(self, form: Form) -> bool {
         match self {
             Self::Desktop(_) => true,
-            Self::Keyboard | Self::Agent(_) => false,
+            Self::Keyboard | Self::Agent(_) | Self::Secretary => false,
             item if item.agents() => false,
             _ => form == Form::Mini,
         }
@@ -122,6 +127,7 @@ impl Item {
     fn width(self) -> u32 {
         match self {
             Self::Desktop(_) => desktop::WIDTH,
+            Self::Secretary => briefing::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -139,6 +145,7 @@ impl Item {
             Self::Desktop(index) => desktop::height(bar, index),
             Self::Sources | Self::AnotherTool => agents::sources_height(),
             Self::Plug(tool) => agents::consent_height(tool),
+            Self::Secretary => briefing::height(),
             Self::Keyboard | Self::Decline | Self::Agent(_) => 0,
         }
     }
@@ -157,7 +164,7 @@ impl Item {
             Self::Bluetooth => bluetooth::opening(),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
-            Self::Keyboard | Self::Desktop(_) | Self::Agent(_) => {}
+            Self::Keyboard | Self::Desktop(_) | Self::Agent(_) | Self::Secretary => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
         }
     }
@@ -174,7 +181,8 @@ impl Item {
             | Self::AnotherTool
             | Self::Plug(_)
             | Self::Decline
-            | Self::Agent(_) => {}
+            | Self::Agent(_)
+            | Self::Secretary => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
         }
@@ -193,7 +201,12 @@ impl Item {
             }
             (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
             (
-                Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline | Self::Agent(_),
+                Self::Sources
+                | Self::AnotherTool
+                | Self::Plug(_)
+                | Self::Decline
+                | Self::Agent(_)
+                | Self::Secretary,
                 _,
             ) => AGENTS_NAMESPACE,
         }
@@ -204,7 +217,7 @@ impl Item {
     /// brightness's and the battery's (else its top is on the item's,
     /// pushed up to stay inside the bar: a desktop's list's on the tiles').
     fn on_bottom(self) -> bool {
-        !matches!(self, Self::Sound | Self::Desktop(_)) && !self.agents()
+        !matches!(self, Self::Sound | Self::Desktop(_) | Self::Secretary) && !self.agents()
     }
 
     /// Its surface on the bar at `place`, which holds the keyboard after
@@ -296,8 +309,15 @@ pub enum Event {
     /// it closes.
     Chosen,
     /// The popover gives way to `item`'s, beside the same item (Sources'
-    /// "Brancher": the consent popover).
+    /// "Brancher": the consent popover; the briefing's "Sources").
     Replace(Item),
+    /// A line of the popover names agent `id` (the briefing's): it closes,
+    /// and the compositor goes to the agent, the streak from the line, at
+    /// `row` in the popover.
+    GoTo {
+        id: u64,
+        row: Rectangle,
+    },
 }
 
 /// What the controller asks for.
@@ -668,6 +688,14 @@ impl Controller {
                     self.open(&bar, item, from, Opened::Click, &mut effects);
                 }
             }
+            Event::GoTo { id, row } => {
+                if let Phase::Open(open) = &self.phase {
+                    let (bar, at) = (open.bar.clone(), open.rect.position());
+                    let row = Rectangle::new(Point::new(at.x + row.x, at.y + row.y), row.size());
+                    self.close(now, &mut effects);
+                    effects.push(Effect::GoToAgent { id, bar, row });
+                }
+            }
             Event::BarChanged { bar } => {
                 let on_it = match &self.phase {
                     Phase::Open(open) => open.bar == bar,
@@ -905,7 +933,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Battery
         | Item::Sources
         | Item::AnotherTool
-        | Item::Plug(_) => None,
+        | Item::Plug(_)
+        | Item::Secretary => None,
     }
 }
 

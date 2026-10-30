@@ -1,8 +1,9 @@
-//! The agents' group in the bar (bar.md §4 group 3; 4.0, 4.1): its header
-//! ("AGENTS" and how many run, "Sources" on its right), and under it one
-//! row per agent (4.1): its panda, its name, and what it is doing, in the
-//! order of what concerns the user first, at most five and a line for the
-//! rest. Before any tool is plugged in, the card that proposes to plug in
+//! The agents' group in the bar (bar.md §4 group 3; 4.0, 4.1, 4.6): at its
+//! head the secretary (§7 B), her ear in the moment's colour, "AGENTS" and
+//! how many run over her line; a click on her opens her briefing, where
+//! "Sources" is. Under her one row per agent (4.1): its panda, its name,
+//! and what it is doing, in the order of what concerns the user first, at
+//! most five and a line for the rest. Before any tool is plugged in, the card that proposes to plug in
 //! the tools found; with the tools followed and no agent, "Aucun agent en
 //! cours.". With no tool followed and none to propose, it does not show at
 //! all (variant B).
@@ -12,15 +13,15 @@
 //! (`agents`), as the shell connects and when they change. The link keeps
 //! them here without a message, lays the group out (its text measured
 //! once), resizes its surface if its height changed and wakes it
-//! ([`draw`]); an open Sources or consent popover draws again for them. A
-//! working agent's minutes go on with the clock's minute ([`minute`]):
-//! nothing draws for them in between.
+//! ([`draw`]); an open briefing, Sources or consent popover draws again
+//! for them. A working agent's minutes, and the briefing's, go on with the
+//! clock's minute ([`minute`]): nothing draws for them in between.
 
 pub mod draw;
 
 use std::sync::{Mutex, PoisonError};
 
-use hocus_link::{AGENTS_NAMESPACE, AgentShown, AgentTool, ToolState};
+use hocus_link::{AGENTS_NAMESPACE, AgentShown, AgentTool, Note, ToolState};
 use iced::{Color, Font, Point, Rectangle, Size};
 
 use crate::{
@@ -207,6 +208,77 @@ impl Lines {
     }
 }
 
+/// The secretary's mood (§7 B): what her ear and her line say. Someone
+/// waiting comes first, as in the halo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mood {
+    /// Nothing waits, nothing is stuck: green.
+    Calm,
+    /// An agent waits for the user: amber.
+    Waiting,
+    /// An agent failed: orange.
+    Stuck,
+}
+
+/// What the secretary knows (4.6): who waits (the longest first), who is
+/// stuck, who finished and is not seen yet, each with since when and what
+/// its tool said; how many work and rest.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Brief {
+    pub waiting: Vec<Entry>,
+    pub stuck: Vec<Entry>,
+    pub to_see: Vec<Entry>,
+    pub working: usize,
+    pub resting: usize,
+}
+
+/// An agent in the briefing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    pub id: u64,
+    pub name: String,
+    /// Since when, microseconds of `CLOCK_MONOTONIC`.
+    pub since: u64,
+    pub note: Option<Note>,
+}
+
+impl Brief {
+    /// `agents` as the secretary sees them, in their rows' order.
+    pub fn of(agents: &[AgentShown]) -> Self {
+        let mut ordered: Vec<(Look, &AgentShown)> =
+            agents.iter().map(|a| (Look::of(&a.state), a)).collect();
+        ordered.sort_by_key(|(look, a)| {
+            let waited = if *look == Look::Waiting { a.since } else { 0 };
+            (*look, waited, a.id)
+        });
+        let mut brief = Self::default();
+        for (look, a) in ordered {
+            let entry = || Entry {
+                id: a.id,
+                name: a.name.clone(),
+                since: a.since,
+                note: a.note.clone(),
+            };
+            match look {
+                Look::Waiting => brief.waiting.push(entry()),
+                Look::Stuck => brief.stuck.push(entry()),
+                Look::ToSee => brief.to_see.push(entry()),
+                Look::Working => brief.working += 1,
+                Look::Resting => brief.resting += 1,
+            }
+        }
+        brief
+    }
+
+    pub fn mood(&self) -> Mood {
+        match (self.waiting.is_empty(), self.stuck.is_empty()) {
+            (false, _) => Mood::Waiting,
+            (true, false) => Mood::Stuck,
+            (true, true) => Mood::Calm,
+        }
+    }
+}
+
 /// Now, in microseconds of `CLOCK_MONOTONIC`: the clock of the agents'
 /// `since`.
 pub fn now_us() -> u64 {
@@ -252,14 +324,18 @@ fn change(with: impl FnOnce(&mut Said)) {
         return;
     }
     let shows = after.shows(now_us());
+    let brief = Brief::of(&after.agents);
     tracing::debug!(
         shows = %words.said(&shows),
+        secretary = %words.line(&brief),
+        mood = ?brief.mood(),
         agents = after.agents.len(),
         "the agents group shows it"
     );
     draw::stale();
     popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
     popover::changed(Item::Sources);
+    popover::changed(Item::Secretary);
     for tool in Tool::ALL {
         popover::changed(Item::Plug(tool));
     }
@@ -268,15 +344,23 @@ fn change(with: impl FnOnce(&mut Said)) {
 /// The group laid out for what was last said, its text measured with the
 /// shell's fonts (as it draws: they are loaded by then).
 pub fn lay_out() -> Layout {
-    let shows = said().shows(now_us());
+    let said = said();
+    let shows = said.shows(now_us());
     let words = Words::new(Lang::of_messages());
-    layout(&words, &shows, crate::popover::kit::measure)
+    layout(
+        &words,
+        &shows,
+        &Brief::of(&said.agents),
+        crate::popover::kit::measure,
+    )
 }
 
 /// The clock's minute changed: the working agents' minutes, if one shows
 /// and they changed, are drawn again (only then: nothing draws for them in
 /// between).
 pub fn minute() {
+    // The briefing's "since when", and its time, if it is open.
+    popover::changed(Item::Secretary);
     let Some(laid) = draw::layout() else {
         return;
     };
@@ -334,6 +418,115 @@ impl Words {
 
     pub fn sources(self) -> &'static str {
         "Sources"
+    }
+
+    /// The secretary's line (§7 B, 4.6): who waits, else who is stuck,
+    /// then their names; else how many work, and how many are to see.
+    pub fn line(self, brief: &Brief) -> String {
+        let names = |entries: &[Entry]| {
+            entries
+                .iter()
+                .map(|e| e.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match brief.mood() {
+            Mood::Waiting => {
+                let who = match (brief.waiting.len(), self.fr) {
+                    (1, true) => "Quelqu'un t'attend".to_owned(),
+                    (1, false) => "Someone is waiting".to_owned(),
+                    (n, true) => format!("{n} t'attendent"),
+                    (n, false) => format!("{n} are waiting"),
+                };
+                format!("{who} · {}", names(&brief.waiting))
+            }
+            Mood::Stuck => {
+                let who = match (brief.stuck.len(), self.fr) {
+                    (1, true) => "Un agent est bloqué".to_owned(),
+                    (1, false) => "An agent is stuck".to_owned(),
+                    (n, true) => format!("{n} agents bloqués"),
+                    (n, false) => format!("{n} agents are stuck"),
+                };
+                format!("{who} · {}", names(&brief.stuck))
+            }
+            Mood::Calm => {
+                let working = self.working(brief.working);
+                match brief.to_see.len() {
+                    0 => working,
+                    n if self.fr => format!("{working} · {n} à voir"),
+                    n => format!("{working} · {n} to see"),
+                }
+            }
+        }
+    }
+
+    /// "3 au travail".
+    pub fn working(self, n: usize) -> String {
+        if self.fr {
+            format!("{n} au travail")
+        } else {
+            format!("{n} working")
+        }
+    }
+
+    /// The briefing's footer: "3 au travail · 1 au repos".
+    pub fn footer(self, brief: &Brief) -> String {
+        let resting = brief.resting;
+        let resting = if self.fr {
+            format!("{resting} au repos")
+        } else {
+            format!("{resting} resting")
+        };
+        format!("{} · {resting}", self.working(brief.working))
+    }
+
+    /// The briefing's title.
+    pub fn briefing(self) -> &'static str {
+        self.pick("Le point", "Briefing")
+    }
+
+    /// Its sections' labels.
+    pub fn section(self, look: Look) -> &'static str {
+        match look {
+            Look::Waiting => self.pick("T'ATTEND", "WAITING"),
+            Look::Stuck => self.pick("BLOQUÉ", "STUCK"),
+            _ => self.pick("À VOIR", "TO SEE"),
+        }
+    }
+
+    /// Since when, after a name: "· 2 min" (waiting, stuck), "· il y a
+    /// 4 min" for a finished one (`ago`); "· à l'instant" within the
+    /// minute; "1 h 05" from an hour.
+    pub fn since(self, minutes: u64, ago: bool) -> String {
+        if minutes == 0 {
+            return format!("· {}", self.pick("à l'instant", "just now"));
+        }
+        let time = if minutes >= 60 {
+            format!("{}\u{a0}h\u{a0}{:02}", minutes / 60, minutes % 60)
+        } else {
+            format!("{minutes}\u{a0}min")
+        };
+        match (ago, self.fr) {
+            (false, _) => format!("· {time}"),
+            (true, true) => format!("· il y a {time}"),
+            (true, false) => format!("· {time} ago"),
+        }
+    }
+
+    /// What a waiting or stuck agent's tool said, as the briefing words
+    /// it: a request "Autoriser Bash : npm install ?", a text as it is.
+    pub fn note(self, note: &Note) -> String {
+        match (note, self.fr) {
+            (Note::Says(text), _) => text.clone(),
+            (Note::Allow { tool, what }, true) if what.is_empty() => {
+                format!("Autoriser {tool}\u{a0}?")
+            }
+            (Note::Allow { tool, what }, true) => {
+                format!("Autoriser {tool}\u{a0}: {what}\u{a0}?")
+            }
+            (Note::Allow { tool, what }, false) if what.is_empty() => format!("Allow {tool}?"),
+            (Note::Allow { tool, what }, false) => format!("Allow {tool}: {what}?"),
+        }
     }
 
     pub fn intro(self) -> &'static str {
@@ -529,12 +722,22 @@ impl Words {
 
 /// The group's width, inside the bar's padding.
 pub const WIDTH: f32 = 172.0;
-/// The header: "AGENTS" 11.5 px 700 `text.dim`, "Sources" 12 px `text.faint`.
-pub const HEADER: f32 = 18.0;
+/// The header, the secretary (4.6, variant B): a row as wide as the
+/// agents' (6 px past the group's sides), 2 px above and under her 40 px
+/// head, radius 9; 8 px after her head, "AGENTS" 11.5 px 700 `text.dim`
+/// and the total, over her line (12 px), 1 px apart.
+pub const HEADER: f32 = 44.0;
+pub const HEAD: f32 = 40.0;
+pub const HEAD_TOP: f32 = 2.0;
+pub const HEAD_GAP: f32 = 8.0;
+pub const HEADER_RADIUS: f32 = 9.0;
 pub const LABEL: f32 = 11.5;
 pub const LINK: f32 = 12.0;
+/// Her line, 1 px under "AGENTS".
+pub const SAYS: f32 = 12.0;
+const SAYS_GAP: f32 = 1.0;
 /// Under the header.
-const GAP: f32 = 8.0;
+const GAP: f32 = 6.0;
 /// The card: 10 px in, radius 10, its parts 6 px apart.
 const CARD_PAD: f32 = 10.0;
 pub const CARD_RADIUS: f32 = 10.0;
@@ -558,8 +761,8 @@ const FOOT_PAD: f32 = 2.0;
 pub const IDLE: f32 = 13.5;
 const IDLE_GAP: f32 = 4.0;
 pub const FOLLOWED: f32 = 12.0;
-/// The total, 4 px after "AGENTS" (spaced 0.08 em), Manrope 600.
-const TOTAL_GAP: f32 = 4.0;
+/// The total, 3 px after "AGENTS" (spaced 0.08 em), Manrope 600.
+const TOTAL_GAP: f32 = 3.0;
 const LABEL_SPACING: f32 = 0.08 * LABEL;
 /// An agent's row (4.1, at real size since #497: the mockups were shown
 /// at ×1.5): 34 px, as wide as the column (6 px past the group's sides),
@@ -607,8 +810,13 @@ pub struct Layout {
     pub shows: Shows,
     /// Its height; 0 when hidden.
     pub height: f32,
-    /// "Sources", in the header.
-    pub sources: Rectangle,
+    /// The secretary's row, at its head; her mood, and her line cut to
+    /// its room. "AGENTS"'s middle, and her line's.
+    pub secretary: Rectangle,
+    pub mood: Mood,
+    pub line: String,
+    pub label_middle: f32,
+    pub line_middle: f32,
     pub card: Option<Card>,
     /// The idle lines' middles, and the second's text.
     pub idle: Option<(f32, f32, String)>,
@@ -660,19 +868,29 @@ pub struct CardRow {
 pub fn layout(
     words: &Words,
     shows: &Shows,
+    brief: &Brief,
     mut measure: impl FnMut(&str, f32, Font) -> f32,
 ) -> Layout {
-    let sources_width = measure(words.sources(), LINK, MANROPE);
     let link_height = LINK * LINE;
-    let sources = Rectangle::new(
-        Point::new(WIDTH - sources_width, (HEADER - link_height) / 2.0),
-        Size::new(sources_width, link_height),
+    let secretary = Rectangle::new(
+        Point::new(-ROW_OUT, 0.0),
+        Size::new(WIDTH + 2.0 * ROW_OUT, HEADER),
     );
+    let column = LABEL * LINE + SAYS_GAP + SAYS * LINE;
+    let label_middle = (HEADER - column) / 2.0 + LABEL * LINE / 2.0;
+    let line_middle = label_middle + LABEL * LINE / 2.0 + SAYS_GAP + SAYS * LINE / 2.0;
+    let line = crate::popover::kit::elide(&words.line(brief), WIDTH - HEAD - HEAD_GAP, |t| {
+        measure(t, SAYS, MANROPE)
+    });
     let top = HEADER + GAP;
     let mut out = Layout {
         shows: shows.clone(),
         height: 0.0,
-        sources,
+        secretary,
+        mood: brief.mood(),
+        line,
+        label_middle,
+        line_middle,
         card: None,
         idle: None,
         total: None,
@@ -687,7 +905,10 @@ pub fn layout(
                 .chars()
                 .map(|ch| measure(&ch.to_string(), LABEL, MANROPE_BOLD) + LABEL_SPACING)
                 .sum();
-            out.total = Some((lines.total.to_string(), agents + TOTAL_GAP));
+            out.total = Some((
+                lines.total.to_string(),
+                HEAD + HEAD_GAP + agents + TOTAL_GAP,
+            ));
             let width = WIDTH + 2.0 * ROW_OUT;
             out.rows = lines
                 .rows
@@ -814,6 +1035,7 @@ mod tests {
             source: "command".into(),
             window: 0,
             name: name.into(),
+            note: None,
         }
     }
 
@@ -870,6 +1092,7 @@ mod tests {
         let two = layout(
             &words,
             &Shows::Card(vec![Tool::ClaudeCode, Tool::Codex]),
+            &Brief::default(),
             measure,
         );
         let card = two.card.expect("a card");
@@ -882,8 +1105,9 @@ mod tests {
             "{}",
             card.rect.height
         );
-        assert_eq!(card.rect.y, 26.0);
-        assert!((two.height - (26.0 + expected)).abs() < 0.01);
+        // Under the secretary's 44 px and 6 px.
+        assert_eq!(card.rect.y, 50.0);
+        assert!((two.height - (50.0 + expected)).abs() < 0.01);
         // The buttons on the card's right, 10 px in; the links on its last line.
         let row = &card.rows[1];
         assert_eq!(row.button.x + row.button.width, WIDTH - 10.0);
@@ -893,36 +1117,62 @@ mod tests {
         // Manrope's widths: "Claude Code" on two lines beside its button,
         // the links one under the other, as a browser lays the mockup out.
         let wide = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.55;
-        let card = layout(&words, &Shows::Card(vec![Tool::ClaudeCode]), wide)
-            .card
-            .expect("a card");
+        let card = layout(
+            &words,
+            &Shows::Card(vec![Tool::ClaudeCode]),
+            &Brief::default(),
+            wide,
+        )
+        .card
+        .expect("a card");
         assert_eq!(card.rows[0].name, ["Claude", "Code"]);
         assert!((card.rows[0].height - 2.0 * 14.0 * LINE).abs() < 0.01);
         assert!((card.decline.y - card.another.y - 12.0 * LINE).abs() < 0.01);
-        let idle = layout(&words, &Shows::Idle(vec!["Claude Code"]), measure);
+        let idle = layout(
+            &words,
+            &Shows::Idle(vec!["Claude Code"]),
+            &Brief::default(),
+            measure,
+        );
         assert_eq!(
             idle.idle.map(|(_, _, t)| t),
             Some("Suivis\u{a0}: Claude Code.".into())
         );
-        assert_eq!(layout(&words, &Shows::Hidden, measure).height, 0.0);
+        assert_eq!(
+            layout(&words, &Shows::Hidden, &Brief::default(), measure).height,
+            0.0
+        );
     }
 
     #[test]
     fn the_rows_are_at_real_size() {
-        // #497: 34 px rows, the "+ N" line 20 px, the width unchanged.
+        // #497: 34 px rows, the "+ N" line 20 px, the width unchanged;
+        // under the secretary (4.6), 44 px and 6 px.
         let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.55;
         let words = Words::new(Lang::French);
         let agents: Vec<AgentShown> = (1..=7)
             .map(|i| shown(i, "working", 0, "hocus-panda · refacto"))
             .collect();
-        let laid = layout(&words, &Shows::Lines(Lines::of(&agents, 0)), measure);
+        let laid = layout(
+            &words,
+            &Shows::Lines(Lines::of(&agents, 0)),
+            &Brief::of(&[shown(9, "waiting", 0, "hocus-panda · refacto")]),
+            measure,
+        );
         assert_eq!(laid.rows.len(), 5);
         for (i, row) in laid.rows.iter().enumerate() {
-            assert_eq!(row.rect.y, 26.0 + i as f32 * 34.0);
+            assert_eq!(row.rect.y, 50.0 + i as f32 * 34.0);
             assert_eq!(row.rect.height, 34.0);
             assert_eq!(row.rect.width, WIDTH + 12.0);
         }
-        assert_eq!(laid.height, 26.0 + 5.0 * 34.0 + 20.0);
+        assert_eq!(laid.height, 50.0 + 5.0 * 34.0 + 20.0);
+        // Her line cut to what her head leaves.
+        assert_eq!(
+            laid.secretary,
+            Rectangle::new(Point::new(-6.0, 0.0), Size::new(184.0, 44.0))
+        );
+        assert!(laid.line.ends_with('…'), "{}", laid.line);
+        assert!(measure(&laid.line, 12.0, MANROPE) <= WIDTH - 48.0 + 0.01);
         // The name at 13.5 px gives way to the word, at 12.5 px, and the
         // 30 px panda; its workspace first, its tab kept.
         let row = &laid.rows[0];
@@ -979,6 +1229,64 @@ mod tests {
         assert_eq!(lines.rows[4].minutes, 12);
         // The two resting ones, the lowest, are not shown.
         assert_eq!((lines.total, lines.hidden, lines.hidden_rest), (7, 2, true));
+    }
+
+    #[test]
+    fn the_secretary_says_who_waits_else_who_is_stuck_else_how_many_work() {
+        const MIN: u64 = 60_000_000;
+        let fr = Words::new(Lang::French);
+        let en = Words::new(Lang::English);
+        let mut agents = vec![
+            shown(1, "working", 0, "build"),
+            shown(2, "working", 0, "docs"),
+            shown(3, "done", 0, "api"),
+            shown(4, "idle", 0, "notes"),
+        ];
+        let calm = Brief::of(&agents);
+        assert_eq!(calm.mood(), Mood::Calm);
+        assert_eq!(fr.line(&calm), "2 au travail · 1 à voir");
+        assert_eq!(en.line(&calm), "2 working · 1 to see");
+        assert_eq!(fr.footer(&calm), "2 au travail · 1 au repos");
+        // Nothing to see: how many work alone.
+        assert_eq!(fr.line(&Brief::of(&agents[..2])), "2 au travail");
+        // Stuck: orange, and who.
+        agents.push(shown(5, "failed", 0, "migration"));
+        let stuck = Brief::of(&agents);
+        assert_eq!(stuck.mood(), Mood::Stuck);
+        assert_eq!(fr.line(&stuck), "Un agent est bloqué · migration");
+        agents.push(shown(6, "failed", 0, "infra"));
+        assert_eq!(
+            en.line(&Brief::of(&agents)),
+            "2 agents are stuck · migration, infra"
+        );
+        // Someone waiting comes first, the longest waiting first.
+        agents.push(shown(7, "waiting", 9 * MIN, "site-web"));
+        let waiting = Brief::of(&agents);
+        assert_eq!(waiting.mood(), Mood::Waiting);
+        assert_eq!(fr.line(&waiting), "Quelqu'un t'attend · site-web");
+        agents.push(shown(8, "waiting", 2 * MIN, "infra-2"));
+        let two = Brief::of(&agents);
+        assert_eq!(fr.line(&two), "2 t'attendent · infra-2, site-web");
+        assert_eq!(en.line(&two), "2 are waiting · infra-2, site-web");
+        assert_eq!(two.stuck.len(), 2);
+        assert_eq!(two.to_see.len(), 1);
+    }
+
+    #[test]
+    fn the_briefing_says_since_when_and_what_is_asked() {
+        let fr = Words::new(Lang::French);
+        let en = Words::new(Lang::English);
+        assert_eq!(fr.since(0, false), "· à l'instant");
+        assert_eq!(fr.since(2, false), "· 2\u{a0}min");
+        assert_eq!(fr.since(4, true), "· il y a 4\u{a0}min");
+        assert_eq!(en.since(65, true), "· 1\u{a0}h\u{a0}05 ago");
+        let asks = Note::allow("Bash", "npm install");
+        assert_eq!(fr.note(&asks), "Autoriser Bash\u{a0}: npm install\u{a0}?");
+        assert_eq!(en.note(&asks), "Allow Bash: npm install?");
+        assert_eq!(
+            fr.note(&Note::allow("apply_patch", "")),
+            "Autoriser apply_patch\u{a0}?"
+        );
     }
 
     #[test]

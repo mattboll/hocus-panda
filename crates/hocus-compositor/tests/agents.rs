@@ -488,6 +488,62 @@ impl Bed {
         Ok(self.hp.popover_surfaces()[0].1)
     }
 
+    /// Where the briefing's `item` is (`Sources`, `Agent(3)`), global, as
+    /// the shell last logged its items' middles in the popover `popover`.
+    fn briefing_item(&mut self, popover: Rect, item: &str) -> anyhow::Result<(f64, f64)> {
+        let wanted = format!("{item}@");
+        let log = self.log.clone();
+        let found = |text: &str| {
+            text.lines()
+                .rev()
+                .find(|l| l.contains("the briefing's items"))
+                .and_then(|l| {
+                    let at = l.split(&wanted).nth(1)?;
+                    let at = at.split_whitespace().next()?;
+                    let (x, y) = at.split_once(',')?;
+                    Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))
+                })
+        };
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |_| found(&plain(&log)).is_some())?;
+        anyhow::ensure!(done, "no {item} in the briefing");
+        let (x, y) = found(&plain(&log)).unwrap_or_default();
+        Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
+    }
+
+    /// The secretary's briefing, opened by a click on her, once it shows.
+    fn open_briefing(&mut self) -> anyhow::Result<Rect> {
+        let secretary = self.item("Secretary")?;
+        self.click(secretary);
+        let shown = self.hp.dispatch_until(WAIT, |hp| {
+            hp.popover_surfaces()
+                .iter()
+                .any(|(_, r)| r.width == 320 && r.height > 0)
+        })?;
+        anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
+        self.logged("the briefing's items")?;
+        let popover = self.hp.popover_surfaces();
+        Ok(popover
+            .iter()
+            .find(|(_, r)| r.width == 320)
+            .map_or(Rect::new(0, 0, 0, 0), |(_, r)| *r))
+    }
+
+    /// The Sources popover, opened from the briefing's "Sources", once it
+    /// shows in the briefing's place.
+    fn open_sources(&mut self) -> anyhow::Result<Rect> {
+        let briefing = self.open_briefing()?;
+        let sources = self.briefing_item(briefing, "Sources")?;
+        self.click(sources);
+        let shown = self.hp.dispatch_until(WAIT, |hp| {
+            let popovers = hp.popover_surfaces();
+            popovers.len() == 1 && popovers[0].1.width == 300 && popovers[0].1.height > 0
+        })?;
+        anyhow::ensure!(shown, "no Sources: {:?}", self.hp.popover_surfaces());
+        Ok(self.hp.popover_surfaces()[0].1)
+    }
+
     /// The tools as the shell is told, once `state` of `tool`.
     fn tool_becomes(&mut self, tool: &str, state: ToolState) -> anyhow::Result<()> {
         let done = self.hp.dispatch_until(WAIT, |hp| {
@@ -559,10 +615,8 @@ fn two_tools_found_show_the_card() -> anyhow::Result<()> {
     let s = bed.surface();
     // Under the clock, 100 px under the bar's top; the full form's width.
     assert_eq!((s.y, s.width), (8 + 95, 194));
-    // Sources says what each is.
-    let sources = bed.item("Sources")?;
-    bed.click(sources);
-    let popover = bed.popover()?;
+    // Sources, from the secretary's briefing, says what each is.
+    let popover = bed.open_sources()?;
     assert_eq!(popover.width, 300);
     assert_eq!(popover.y, 8 + 62);
     bed.logged("Trouvé, pas branché")?;
@@ -642,9 +696,7 @@ fn unplugging_puts_the_file_back_as_it_was() -> anyhow::Result<()> {
     bed.logged("shows=Aucun agent en cours. Suivis\u{a0}: Claude Code.")?;
     bed.settle()?;
     // Sources' first row: "Débrancher".
-    let sources = bed.item("Sources")?;
-    bed.click(sources);
-    let popover = bed.popover()?;
+    let popover = bed.open_sources()?;
     bed.logged("Branché")?;
     bed.click((f64::from(popover.x + 270), f64::from(popover.y + 51 + 20)));
     bed.tool_becomes("claude-code", ToolState::Found)?;
@@ -758,9 +810,7 @@ fn a_declined_herdr_is_followed_again_from_sources() -> anyhow::Result<()> {
     bed.logged("shows=Aucun agent en cours. Suivis\u{a0}: Claude Code.")?;
     bed.settle()?;
     // Sources: herdr's row, the third, says so and offers "Suivre".
-    let sources = bed.item("Sources")?;
-    bed.click(sources);
-    let popover = bed.popover()?;
+    let popover = bed.open_sources()?;
     bed.logged("En marche · pas suivi")?;
     bed.click((
         f64::from(popover.x + 270),
@@ -1116,11 +1166,12 @@ fn more_than_five_agents_fold_into_a_line() -> anyhow::Result<()> {
             "· w5 0\u{a0}min · +\u{a0}2 au repos",
         ],
     )?;
-    // Five rows and the line: 26 + 5 × 34 + 20, and the ring's room.
+    // Under the secretary, five rows and the line: 50 + 5 × 34 + 20, and
+    // the ring's room.
     let tall = bed.hp.dispatch_until(WAIT, |hp| {
         hp.agents_surfaces()
             .first()
-            .is_some_and(|(_, r)| r.height == 26 + 5 * 34 + 20 + 10)
+            .is_some_and(|(_, r)| r.height == 50 + 5 * 34 + 20 + 10)
     })?;
     anyhow::ensure!(tall, "{:?}", bed.surface());
     // One of them works now: not all the hidden ones rest.
@@ -1284,11 +1335,12 @@ fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
             bed.agent_becomes(name, Some("working"))?;
         }
         bed.settle()?;
-        // c waits: to the top, a and b sliding down, c's panda hopping.
+        // c is stuck: to the top, a and b sliding down, c's panda hopping
+        // (stuck, not waiting: the secretary holds still, 4.6).
         let from = bed.mark();
-        bed.hocus(&["agent", "c", "waiting"], None)?;
+        bed.hocus(&["agent", "c", "failed"], None)?;
         let commits = bed.commits_for(Duration::from_secs(2))?;
-        bed.logged_after(from, &["shows=AGENTS 3 · c t'attend · a 0\u{a0}min"])?;
+        bed.logged_after(from, &["shows=AGENTS 3 · c bloqué · a 0\u{a0}min"])?;
         let (frames, span) = motion_of(&commits);
         if moves {
             bed.logged_after(from, &["the agents' rows move"])?;
@@ -2420,6 +2472,8 @@ fn a_waiting_agent_runs_a_wave_then_glows_then_nothing_draws() -> anyhow::Result
         (Duration::from_millis(450)..Duration::from_millis(700)).contains(&rising),
         "{rising:?}: {glimpses:?}"
     );
+    // The secretary radiates for 3.2 s from the start (4.6): then rest.
+    wait(&mut bed.hp, Duration::from_secs(2))?;
     bed.rests()?;
     let rest = bed.hp.halo().map(|s| (s.concern, s.glow, s.wave));
     assert_eq!(rest, Some((Some(Concern::Waiting), full, None)));
@@ -2630,5 +2684,323 @@ fn with_reduced_motion_no_wave_and_the_glow_fades_in_quickly() -> anyhow::Result
     );
     assert_eq!(bed.hp.halo_waves(), 0);
     bed.rests()?;
+    Ok(())
+}
+
+// --- 4.6: the secretary and her briefing -----------------------------------------
+
+impl Bed {
+    /// A Claude Code session `session` in project `project` says `event`,
+    /// with `extra` fields: its hook, as Claude Code runs it.
+    fn claude(&self, session: &str, project: &str, event: &str, extra: &str) -> anyhow::Result<()> {
+        let payload = format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":\"/home/alex/{project}\",\
+             \"hook_event_name\":\"{event}\"{extra}}}"
+        );
+        self.hocus(&["agent-hook", "claude-code"], Some(&payload))
+    }
+
+    /// The group's items as last logged.
+    fn items_logged(&self) -> String {
+        plain(&self.log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the agents group's items"))
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// 3 px into the secretary's row, left of her head: its tint.
+    fn secretary_tint(&mut self) -> anyhow::Result<[i32; 3]> {
+        let (x, y) = self.origin();
+        pixel(&mut self.hp, (x - 3.0, y + 22.0))
+    }
+}
+
+#[test]
+fn the_secretary_heads_the_group_with_her_line_in_the_moments_mood() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let from = bed.mark();
+    for (name, state) in [("build", "working"), ("docs", "working"), ("api", "done")] {
+        bed.agent_is(name, state)?;
+    }
+    // Calm: how many work, how many are to see; her ear green.
+    bed.logged_after(
+        from,
+        &[
+            "secretary=2 au travail · 1 à voir",
+            "mood=Calm",
+            "shows=AGENTS 3",
+        ],
+    )?;
+    bed.settle()?;
+    // She heads the group; "Sources" is in her briefing, not beside her.
+    let items = bed.items_logged();
+    assert!(items.contains("Secretary@"), "{items}");
+    assert!(!items.contains("Sources@"), "{items}");
+    let calm = bed.secretary_tint()?;
+    // Someone waits: amber, and who.
+    let from = bed.mark();
+    bed.agent_is("site-web", "waiting")?;
+    bed.logged_after(
+        from,
+        &["secretary=Quelqu'un t'attend · site-web", "mood=Waiting"],
+    )?;
+    bed.settle()?;
+    let waiting = bed.secretary_tint()?;
+    let lift = |t: [i32; 3]| [t[0] - calm[0], t[1] - calm[1], t[2] - calm[2]];
+    let amber = lift(waiting);
+    assert!(
+        amber[0] > 8 && amber[1] > 5 && amber[0] > amber[2] + 5,
+        "amber: {calm:?} {waiting:?}"
+    );
+    // Answered, and another one stuck: orange, and who.
+    let from = bed.mark();
+    bed.agent_is("site-web", "working")?;
+    bed.agent_is("migration", "failed")?;
+    bed.logged_after(
+        from,
+        &["secretary=Un agent est bloqué · migration", "mood=Stuck"],
+    )?;
+    bed.settle()?;
+    let stuck = bed.secretary_tint()?;
+    let orange = lift(stuck);
+    assert!(
+        orange[0] > 8 && orange[0] > orange[1] + 3,
+        "orange: {calm:?} {stuck:?}"
+    );
+    Ok(())
+}
+
+/// On a GPU: when someone starts waiting, her ear radiates twice and she
+/// hops twice, 3.2 s, once; then nothing moves. With reduced motion, she
+/// holds still. Skipped without a render node.
+#[test]
+fn the_secretary_radiates_once_when_someone_starts_waiting_then_rests() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let Some(node) = render_node() else {
+        return Ok(());
+    };
+    for (reduced_motion, moves) in [(false, true), (true, false)] {
+        let mut bed = start(
+            &shell,
+            &hocus,
+            &Machine {
+                gpu: Some(node.clone()),
+                reduced_motion,
+                ..Machine::default()
+            },
+        )?;
+        if bed.hp.shell_on_cpu() {
+            eprintln!("the shell draws on the CPU here: no motion to see");
+            return Ok(());
+        }
+        bed.agent_is("build", "working")?;
+        bed.settle()?;
+        let from = bed.mark();
+        bed.hocus(&["agent", "build", "waiting"], None)?;
+        let commits = bed.commits_for(Duration::from_secs(5))?;
+        bed.logged_after(from, &["mood=Waiting"])?;
+        let radiated = plain(&bed.log)
+            .get(from..)
+            .unwrap_or_default()
+            .matches("the secretary radiates")
+            .count();
+        let (frames, span) = motion_of(&commits);
+        let last = commits.last().copied().unwrap_or_default();
+        if moves {
+            assert_eq!(radiated, 1, "{commits:?}");
+            assert!(frames >= 60, "{frames} frames of motion: {commits:?}");
+            assert!(
+                (Duration::from_millis(2900)..Duration::from_millis(3700)).contains(&span),
+                "{span:?}: {commits:?}"
+            );
+            assert!(last < Duration::from_millis(4000), "{commits:?}");
+        } else {
+            assert_eq!(radiated, 0);
+            assert_eq!(frames, 0, "{commits:?}");
+            assert!(last < Duration::from_millis(1200), "{commits:?}");
+        }
+        // Still waiting, the same report again: she does not radiate again.
+        let from = bed.mark();
+        bed.hocus(&["agent", "build", "waiting"], None)?;
+        let commits = bed.commits_for(Duration::from_secs(1))?;
+        assert!(commits.is_empty(), "{commits:?}");
+        assert!(
+            !plain(&bed.log)
+                .get(from..)
+                .unwrap_or_default()
+                .contains("the secretary radiates")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn her_briefing_lists_who_waits_and_asks_what_who_is_stuck_and_why_and_who_to_see()
+-> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    bed.claude(
+        "s1",
+        "site-web",
+        "PermissionRequest",
+        ",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm install\",\
+         \"description\":\"Install the dependencies\"}",
+    )?;
+    bed.agent_becomes("site-web", Some("waiting"))?;
+    // Its permission's notification, 6 s later, says less: the request
+    // is kept.
+    bed.claude(
+        "s1",
+        "site-web",
+        "Notification",
+        ",\"message\":\"Claude needs your permission to use Bash\",\
+         \"notification_type\":\"permission_prompt\"",
+    )?;
+    bed.claude(
+        "s2",
+        "migration",
+        "StopFailure",
+        ",\"error\":\"rate_limit\",\"error_details\":\"429 Too Many Requests\",\
+         \"last_assistant_message\":\"API Error: Rate limit reached\"",
+    )?;
+    bed.agent_becomes("migration", Some("failed"))?;
+    bed.claude("s3", "api", "Stop", ",\"stop_hook_active\":false")?;
+    bed.agent_becomes("api", Some("done"))?;
+    // The model has what each tool said.
+    let agents = bed.hp.agents();
+    let note = |name: &str| {
+        agents
+            .iter()
+            .find(|a| a.name == name)
+            .and_then(|a| a.note.clone())
+    };
+    assert_eq!(
+        note("site-web"),
+        Some(hocus_link::Note::allow("Bash", "npm install"))
+    );
+    assert_eq!(
+        note("migration"),
+        hocus_link::Note::says("API Error: Rate limit reached")
+    );
+    assert_eq!(note("api"), None);
+    bed.settle()?;
+    let from = bed.mark();
+    let briefing = bed.open_briefing()?;
+    // 320 px, beside the bar, its top on her row's (100 px under the bar's).
+    assert_eq!((briefing.width, briefing.y), (320, 8 + 100));
+    // Who waits and what it asks (15 characters: "Bash", "npm install"),
+    // who is stuck and why (the failure's 29), who is to see; the footer.
+    bed.logged_after(
+        from,
+        &[
+            "briefing=T'ATTEND site-web · à l'instant (asks, 15 characters) \
+           · BLOQUÉ migration · à l'instant (says, 29 characters) \
+           · À VOIR api · à l'instant · 0 au travail · 0 au repos",
+        ],
+    )?;
+    // What the tools said is drawn, never logged.
+    let log = plain(&bed.log);
+    assert!(!log.contains("npm install"));
+    assert!(!log.contains("Rate limit"));
+    Ok(())
+}
+
+#[test]
+fn a_line_of_her_briefing_goes_to_its_agent() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    // Its terminal, on the first desktop; the user on the second.
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.agent_is("build", "waiting")?;
+    bed.settle()?;
+    let id = bed.id_of("build")?;
+    let briefing = bed.open_briefing()?;
+    let line = bed.briefing_item(briefing, &format!("Agent({id})"))?;
+    bed.click(line);
+    // The briefing closes; its desktop, its window with the keyboard.
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "{:?}", bed.hp.popover_surfaces());
+    let there = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (0, 0.0))?;
+    anyhow::ensure!(there, "{:?}", bed.hp.desktop());
+    let focused = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.focused && w.keyboard && w.app_id.as_deref() == Some("test.terminal"))
+    })?;
+    anyhow::ensure!(focused, "{:?}", bed.keyboard_on());
+    Ok(())
+}
+
+#[test]
+fn sources_opens_from_her_briefing() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            claude: true,
+            ..Machine::default()
+        },
+    )?;
+    // The card under her, as 4.0 built it; she is calm.
+    bed.logged("shows=Pour suivre tes agents, branche ton outil\u{a0}: Claude Code")?;
+    bed.logged("secretary=0 au travail")?;
+    let from = bed.mark();
+    let sources = bed.open_sources()?;
+    // In the briefing's place, where 4.0 opened it.
+    assert_eq!((sources.width, sources.y), (300, 8 + 62));
+    bed.logged_after(from, &["Trouvé, pas branché"])?;
+    Ok(())
+}
+
+#[test]
+fn nothing_commits_at_rest_with_her_briefing_open() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    // No minute changes for the test's while.
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            clock_at: Some("10:00:05"),
+            ..Machine::default()
+        },
+    )?;
+    bed.claude(
+        "s1",
+        "site-web",
+        "PermissionRequest",
+        ",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm install\"}",
+    )?;
+    bed.agent_becomes("site-web", Some("waiting"))?;
+    bed.agent_is("migration", "failed")?;
+    bed.open_briefing()?;
+    bed.settle()?;
+    let before = bed.counts();
+    // The same states again, and time passing: nothing.
+    for _ in 0..5 {
+        bed.hocus(&["agent", "migration", "failed"], None)?;
+    }
+    wait(&mut bed.hp, Duration::from_secs(2))?;
+    assert_eq!(before, bed.counts());
     Ok(())
 }

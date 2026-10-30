@@ -275,8 +275,9 @@ impl FromStr for ToolState {
 /// since when, in microseconds of `CLOCK_MONOTONIC`;
 /// where its state comes from (`claude-code`, `codex`, `herdr`,
 /// `command`; several joined with `+`); its window's id (0: none found);
-/// its name, last (it may hold spaces, never a tab).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// its name, last (it may hold spaces, never a tab). Then a tab and its
+/// [`Note`], empty when it has none.
+#[derive(Clone, PartialEq, Eq)]
 pub struct AgentShown {
     pub id: u64,
     pub state: String,
@@ -284,6 +285,143 @@ pub struct AgentShown {
     pub source: String,
     pub window: u64,
     pub name: String,
+    /// What it asks for, or why it failed, as its tool said it (4.6).
+    pub note: Option<Note>,
+}
+
+// The note may hold code or a secret (a command, a file's path): its
+// length only, as everywhere it is logged.
+impl fmt::Debug for AgentShown {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AgentShown")
+            .field("id", &self.id)
+            .field("state", &self.state)
+            .field("since", &self.since)
+            .field("source", &self.source)
+            .field("window", &self.window)
+            .field("name", &self.name)
+            .field("note", &self.note)
+            .finish()
+    }
+}
+
+/// What an agent waits for, or why it failed, as its tool says it: what
+/// the secretary's briefing shows (bar.md §7 B, 4.6). One short line, cut
+/// to [`NOTE_MAX`] characters. Written `allow TOOL WHAT` or `says TEXT`.
+///
+/// It may hold code or a secret (a command, a file's path): it is never
+/// logged, only its length ([`fmt::Debug`]).
+#[derive(Clone, PartialEq, Eq)]
+pub enum Note {
+    /// It asks to use `tool` (one word) on `what` (its input in one line,
+    /// maybe empty): the shell words it ("Autoriser Bash : npm install ?").
+    Allow { tool: String, what: String },
+    /// What its tool says: a notification, a question, an error.
+    Says(String),
+}
+
+/// The characters a [`Note`]'s text keeps at most: the briefing's line is
+/// cut to its width long before that.
+pub const NOTE_MAX: usize = 120;
+
+/// A note's text as it is kept: on one line, its spaces runs made one,
+/// trimmed, [`NOTE_MAX`] characters at most (the last an ellipsis when it
+/// was longer).
+pub fn note_text(text: &str) -> String {
+    let words: Vec<&str> = text
+        .split(|c: char| c.is_whitespace() || c.is_control())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let line = words.join(" ");
+    if line.chars().count() <= NOTE_MAX {
+        return line;
+    }
+    let mut cut: String = line.chars().take(NOTE_MAX - 1).collect();
+    cut.truncate(cut.trim_end().len());
+    cut.push('…');
+    cut
+}
+
+impl Note {
+    /// A tool's request, its words kept as a note's.
+    pub fn allow(tool: &str, what: &str) -> Self {
+        let tool: String = tool
+            .chars()
+            .map(|c| {
+                if c.is_whitespace() || c.is_control() {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .take(64)
+            .collect();
+        Self::Allow {
+            tool,
+            what: note_text(what),
+        }
+    }
+
+    /// A tool's text, kept as a note's; none when it says nothing.
+    pub fn says(text: &str) -> Option<Self> {
+        Some(Self::Says(note_text(text))).filter(|n| *n != Self::Says(String::new()))
+    }
+
+    /// Its length, in characters: what is logged of it.
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Allow { tool, what } => tool.chars().count() + what.chars().count(),
+            Self::Says(text) => text.chars().count(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl fmt::Debug for Note {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self {
+            Self::Allow { .. } => "allow",
+            Self::Says(_) => "says",
+        };
+        write!(f, "{kind} ({} characters)", self.len())
+    }
+}
+
+impl fmt::Display for Note {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Allow { tool, what } if tool.is_empty() => {
+                write!(f, "allow _ {}", note_text(what))
+            }
+            Self::Allow { tool, what } => write!(f, "allow {tool} {}", note_text(what)),
+            Self::Says(text) => write!(f, "says {}", note_text(text)),
+        }
+    }
+}
+
+impl FromStr for Note {
+    type Err = BadLine;
+
+    // The error never holds the note's text.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (kind, rest) = s.split_once(' ').unwrap_or((s, ""));
+        match kind {
+            "allow" => {
+                let (tool, what) = rest.split_once(' ').unwrap_or((rest, ""));
+                if tool.is_empty() {
+                    return Err(BadLine("a note's request without its tool".to_owned()));
+                }
+                Ok(Self::allow(tool, what))
+            }
+            "says" => {
+                Self::says(rest).ok_or_else(|| BadLine("a note that says nothing".to_owned()))
+            }
+            _ => Err(BadLine("a note of no kind".to_owned())),
+        }
+    }
 }
 
 /// A screen's desktops as its bar's tiles show them. Written `desktops`,
@@ -729,7 +867,7 @@ impl fmt::Display for ToShell {
                 for a in agents {
                     write!(
                         f,
-                        "\t{} {} {} {} {} {}",
+                        "\t{} {} {} {} {} {}\t",
                         a.id,
                         a.state,
                         a.since,
@@ -737,6 +875,9 @@ impl fmt::Display for ToShell {
                         a.window,
                         screen_name(&a.name)
                     )?;
+                    if let Some(note) = &a.note {
+                        write!(f, "{note}")?;
+                    }
                 }
                 Ok(())
             }
@@ -813,10 +954,14 @@ impl FromStr for ToShell {
         if let Some(fields) = line.strip_prefix("agents")
             && (fields.is_empty() || fields.starts_with('\t'))
         {
-            return fields
-                .split('\t')
-                .skip(1)
-                .map(|field| {
+            let fields: Vec<&str> = fields.split('\t').skip(1).collect();
+            let (pairs, rest) = fields.as_chunks::<2>();
+            if !rest.is_empty() {
+                return Err(BadLine("an agent without its note".to_owned()));
+            }
+            return pairs
+                .iter()
+                .map(|[field, note]| {
                     let mut words = field.splitn(6, ' ');
                     let number = |w: &str, what: &str| {
                         w.parse::<u64>()
@@ -829,6 +974,10 @@ impl FromStr for ToShell {
                         source: word(&mut words, "source")?.to_owned(),
                         window: number(word(&mut words, "window")?, "window")?,
                         name: words.next().unwrap_or_default().to_owned(),
+                        note: match *note {
+                            "" => None,
+                            note => Some(note.parse()?),
+                        },
                     })
                 })
                 .collect::<Result<_, BadLine>>()
@@ -1277,8 +1426,89 @@ mod tests {
                 source: "claude-code+herdr".into(),
                 window: 0,
                 name: "hocus panda".into(),
+                note: None,
             }]),
+            ToShell::Agents(vec![
+                AgentShown {
+                    id: 3,
+                    state: "waiting".into(),
+                    since: 1,
+                    source: "claude-code".into(),
+                    window: 7,
+                    name: "site-web".into(),
+                    note: Some(Note::allow("Bash", "npm install")),
+                },
+                AgentShown {
+                    id: 4,
+                    state: "failed".into(),
+                    since: 2,
+                    source: "claude-code".into(),
+                    window: 0,
+                    name: "migration".into(),
+                    note: Note::says("API Error: Rate limit reached"),
+                },
+                AgentShown {
+                    id: 5,
+                    state: "waiting".into(),
+                    since: 2,
+                    source: "codex".into(),
+                    window: 0,
+                    name: "infra".into(),
+                    note: Some(Note::allow("apply_patch", "")),
+                },
+            ]),
         ]
+    }
+
+    #[test]
+    fn a_note_is_one_short_line_and_never_logged() {
+        // Its line breaks, tabs and runs of spaces made one space.
+        assert_eq!(
+            note_text("  npm\tinstall \n --save\r\n"),
+            "npm install --save"
+        );
+        // Cut to its most, the last character an ellipsis.
+        let long = note_text(&"é".repeat(NOTE_MAX + 30));
+        assert_eq!(long.chars().count(), NOTE_MAX);
+        assert!(long.ends_with('…'));
+        assert_eq!(note_text(&"a".repeat(NOTE_MAX)), "a".repeat(NOTE_MAX));
+        // Nothing said: no note.
+        assert_eq!(Note::says(" \n "), None);
+        // A request's tool is one word.
+        assert_eq!(
+            Note::allow("my tool", "x"),
+            Note::Allow {
+                tool: "my_tool".into(),
+                what: "x".into()
+            }
+        );
+        // Read back as written; a text that holds tabs stays on its field.
+        let note = Note::says("a\tb");
+        let line = ToShell::Agents(vec![AgentShown {
+            id: 1,
+            state: "failed".into(),
+            since: 0,
+            source: "command".into(),
+            window: 0,
+            name: "x".into(),
+            note: note.clone(),
+        }])
+        .to_string();
+        assert!(line.ends_with("\tsays a b"), "{line:?}");
+        let Ok(ToShell::Agents(read)) = line.parse::<ToShell>() else {
+            panic!("{line:?}");
+        };
+        assert_eq!(read[0].note, Some(Note::Says("a b".into())));
+        // Its length only, in what is logged.
+        let secret = Note::allow("Bash", "export TOKEN=hunter2");
+        assert_eq!(format!("{secret:?}"), "allow (24 characters)");
+        assert!(!format!("{:?}", read[0]).contains("a b"));
+        assert!("agents\t1 idle 0 command 0 x".parse::<ToShell>().is_err());
+        assert!(
+            "agents\t1 idle 0 command 0 x\tnope"
+                .parse::<ToShell>()
+                .is_err()
+        );
     }
 
     #[test]

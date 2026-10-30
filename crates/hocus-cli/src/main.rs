@@ -88,6 +88,7 @@ fn main() -> ExitCode {
                 state,
                 pid: Some(pid.unwrap_or_else(the_agent)),
                 name,
+                note: None,
             };
             match send(args.socket, &report) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -154,6 +155,8 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
             .name
             .or_else(|| hocus_agents::process::folder_of(agent))
             .unwrap_or_default(),
+        // What it asks for, or why it failed: one short line.
+        note: said.note,
     };
     // Not in a Hocuspanda session, or it is not listening: nothing to do.
     let _ = send(socket, &report);
