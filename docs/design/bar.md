@@ -19,9 +19,9 @@ issue #384), and going to an agent from its row, its streak, its rim's
 pulse and herdr's pane (section 8; 4.3, issue #386), herdr's terminal
 brought for its agents (4.3c, issue #500), and the agents' halo
 (section 6; 4.4, issue #387), the panda peeking out of the bar's edge
-(section 7 C; 4.5, issue #388), and the secretary at the agents' group's
-head and her briefing (section 7 B; 4.6, issue #389): see
-[as built](#as-built).
+(section 7 C; 4.5, issue #388), the secretary at the agents' group's
+head and her briefing (section 7 B; 4.6, issue #389), and the mini form's
+agents' item (section 5; 4.7, issue #390): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -66,7 +66,7 @@ there.
 | Form | Width | Shows without a click |
 |---|---|---|
 | Full | 196 px | everything in section 4 |
-| Mini | 56 px | clock, next meeting mark, agents waiting (panda and count), agents working (count), secretary, battery, keyboard layout, notifications count |
+| Mini | 56 px | clock, next meeting mark, the agents' item (the secretary, how many need the user, how many work; 4.7), battery, keyboard layout, notifications count |
 
 Default form per output: **full** when the output's usable width (logical,
 without the bar) is at least 1600 px, **mini** otherwise. With these
@@ -290,8 +290,25 @@ Clicks:
 Width 56 px, padding 12 px top, 10 px bottom, items centred, 14 px apart:
 clock on two lines, hours over minutes, no seconds (Martian Mono 400,
 19 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
-blue, glowing when under 10 min), waiting tile (44 px, panda 40 px, count
-badge), working count, spacer, secretary (46 px), the desktops (3.9, variant
+blue, glowing when under 10 min), the agents' item (approved 2026-10-30,
+issue #390, variant A: the secretary; it replaces the waiting tile, the
+working count and the secretary further down): a button 48 px wide,
+radius 10, 4 px in above and 6 px under, holding her 40 px head (her ear
+in her mood, §7 B, her motion only on a change) and, at its bottom right
+(6 px past it, 3 px under it), a 16 px badge (Manrope 700, 10 px,
+`#1C1406`, 4 px in, a 2 px ring in the bar's colour) with how many agents
+need the user (waiting, stuck and to see): amber `#F5B44A` when one
+waits, else orange `#F2945B` when one is stuck, else green `#7EE0A0`; no
+badge at 0. Under her, 4 px, how many work: "3" over "au travail" / "at
+work" (Manrope 600, 11 px, line height 1.25; `text.dim`, the second line
+`#7C8698`). Lit `0.06` under the pointer, `0.08` while her briefing is
+open. A hover of 150 ms, or a click, opens her briefing (§7 B) with two
+more sections at its end: "AU TRAVAIL" / "AT WORK" (each name and since
+when) and "AU REPOS" / "RESTING" (each name); each line goes to its
+agent. The group's rules hold: no item when the group is hidden (4.0); in
+the card's place, she is alone with a green "+" badge, and opens Sources.
+The halo and the peek work as in the full form, the peek at her head;
+spacer, the desktops (3.9, variant
 A): a dot per desktop (18 × 13, radius 4), two to a row, 4 px apart, 14 px
 above the connections' buttons: the current one filled with the accent,
 those with windows `rgba(255,255,255,0.30)`, the empty ones
@@ -384,7 +401,9 @@ never on battery saver, never with reduced motion.
   with sprint 5, later (nothing shows of either before it exists); a
   footer "N au travail · M au repos", and "Sources" (the Sources
   popover). Each line acts like its row: it goes to the agent (§8). She
-  never opens by herself.
+  never opens by herself. In the mini form she is the agents' item (§5,
+  4.7), whose hover or click opens her briefing, with who works and who
+  rests at its end.
 - **C, the peek** (approved 2026-10-30, issue #388: 8 s, and also when an
   agent finishes):
   - **When**: an agent starts waiting (its panda holding out its hat), or
@@ -2038,8 +2057,8 @@ issue #388): it stays out 8 s, and also comes out when an agent finishes.
   (`hocus-bar-peek`) beside each bar, anchored to the screen's top right:
   the panda's box 18 px from the bar, its middle on the agent's row's
   middle as the group lays the rows out (the secretary's middle when the
-  agent has no row shown: under "+ N", or in the mini form, which has no
-  rows yet). On a GPU the surface is transparent and holds the shadows:
+  agent has no row shown: under "+ N"; in the mini form, which has no
+  rows, her head's in the mini item since 4.7). On a GPU the surface is transparent and holds the shadows:
   the bubble's `box-shadow`, a blur outside its box only (as CSS draws
   it), and the panda's `drop-shadow` round its drawing, are SVG filters
   that resvg draws as it draws the pandas; their room is 45 px left of the
@@ -2202,4 +2221,74 @@ meeting and the notifications wait for the calendar and sprint 5.
 - **Not built**: the next meeting and the notifications in the briefing
   (the calendar, sprint 5); her line about a meeting ("Réunion bientôt");
   the peek (4.5); the mini form's agents and her place there (4.7); names
+  for screen readers (§11).
+
+### 4.7, the mini form's agents (2026-10-30)
+
+What the approved 4.7 mockup shows, variant A (the secretary), with the
+maintainer's spec (§5; issue #390). The meeting's mark waits for the
+calendar.
+
+- **The item** is the agents' group's surface's, in the mini form: 68 px
+  under the bar's top (12 px of padding, the clock's two lines of 19 px at
+  1.1, 14 px), a button 48 px wide centred in the bar, radius 10: her 40 px
+  head 4 px in, then 4 px under her how many work, "3" over "au travail"
+  / "at work" (Manrope 600, 11 px, line height 1.25; `text.dim`, then
+  `#7C8698`), 6 px under it: 81.5 px. The surface is 54 px wide and as
+  tall as the item and the keyboard ring's room; while the form switches
+  it is the full form's width, from the item's top to the group's bottom,
+  each form drawn where it is and cross-faded as the clock's. It takes the
+  pointer when a form shows alone. "au travail"
+  is some 46 px wide at 11 px: it fits the button.
+- **Her head** is the 4.6 drawing in her mood (green calm, amber when one
+  waits, orange when one is stuck), with her rings and hops when an agent
+  starts waiting (1.2 s, once; none with reduced motion nor on the CPU):
+  the same motion, drawn by the same surface.
+- **The badge**: 16 px high, its right 6 px past her head's, its bottom
+  3 px under it; as wide as its number and 4 px each side, at least 16 px,
+  radius 8; the number in Manrope 700, 10 px, `#1C1406`; a 2 px ring
+  `rgba(14,17,28,0.95)` round it (its outer pixel on the right is cut at
+  the surface's edge, inside the bar's rim). It says how many are waiting,
+  stuck or to see; amber `#F5B44A` if one waits, else orange `#F2945B` if
+  one is stuck, else green `#7EE0A0`; none at 0. It hops with her.
+- **Lit** `rgba(255,255,255,0.06)` under the pointer, `0.08` while her
+  briefing (or Sources, on the card) is open; the pointer a hand.
+- **Her briefing**: a 150 ms hover opens it (the mini form's other items'
+  mechanics, §9: it closes 300 ms after the pointer has left the item and
+  the briefing, and a click keeps it), a click opens it and it stays.
+  Beside the mini bar, 8 px from it, its top on the item's (§9, aligned
+  with its item; the mockup has it 26 px higher). As 4.6 builds it, with,
+  only in the mini form, after "À VOIR": "AU TRAVAIL" / "AT WORK"
+  (`text.dim`), each working agent and since when ("· 8 min", as a
+  waiting one's), and "AU REPOS" / "RESTING" (`#6A7384`), each resting
+  agent's name alone; neither says what its tool said. Each line goes to
+  its agent (4.3, the streak from the line); the footer and "Sources" as
+  in 4.6. The full form's briefing does not change.
+- **The group's rules**: hidden (no tool followed, none to propose), no
+  item and the surface one pixel, the pointer going through; tools to plug
+  in (the card's place), she is alone, calm, with a green "+" badge and no
+  count (50 px), and her hover or click opens Sources (4.0's popover, its
+  top 62 px under the bar's), where "Brancher" is; plugged in with no
+  agent, she and "0 au travail".
+- **The halo** is the compositor's, around whichever form the bar has
+  (4.4): nothing changes. **The peek** comes out at her head's middle
+  (92 px under the bar's top), 18 px from the mini bar.
+- **The keyboard**: the item is one of the bar's items for `Tab`; `Enter`
+  or `Space` opens her briefing, whose `Esc` gives the keyboard back to
+  it (its ring at radius 10).
+- **Measured headless**, the real shell in the mini form
+  (`tests/agents.rs`): her item under the clock in the bar's middle, the
+  surface 54 px wide; her ear and the badge read from the screen, green
+  "1" for one to see, orange "2" once one is stuck, amber "3" once one
+  waits; no badge at 0, how many work following them; a 150 ms hover
+  opening the briefing beside the mini bar on the item's top with "AU
+  TRAVAIL" and "AU REPOS" after who needs the user, leaving closing it, a
+  click keeping it; a working agent's line going to its window on another
+  desktop; no tool, no item and the pointer going through; a tool to plug
+  in, the "+" and Sources from it; the halo's concern and the peek beside
+  the mini bar at her head; nothing committed at rest with her briefing
+  open. Unit tests for the badge's number, colour and place, the card's
+  "+", and the briefing's mini sections. On the Intel GPU, the screenshots
+  of the pull request.
+- **Not built**: the next meeting's mark above her (the calendar); names
   for screen readers (§11).

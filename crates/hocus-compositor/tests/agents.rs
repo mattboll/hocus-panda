@@ -17,7 +17,11 @@
 //! reminder, its priorities, its end. The panda peeking out (4.5): out
 //! and back, for a finished agent, again at the reminder, a click on it,
 //! the latest replacing it, in place without motion, and where it takes
-//! the pointer.
+//! the pointer. The secretary heading the group and her briefing (4.6).
+//! The mini form's item (4.7): her mood, the badge and how many work, her
+//! briefing on a hover or a click with who works and who rests, its lines
+//! going to their agents, the group's rules, the halo and the peek beside
+//! the mini bar, and nothing drawn at rest.
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of motion and of the streak run on a GPU when the
@@ -37,7 +41,7 @@ use std::{
 use common::{BTN_LEFT, WAIT, render_node, wait};
 use hocus_agents::tools::Places;
 use hocus_compositor::{
-    Config, Headless, HeadlessConfig, RendererChoice,
+    Config, FormChoice, Headless, HeadlessConfig, RendererChoice,
     going::Streak,
     halo::{Concern, Shown},
     model::Rect,
@@ -62,6 +66,8 @@ struct Machine {
     /// Pixman, the shell on the CPU).
     gpu: Option<PathBuf>,
     reduced_motion: bool,
+    /// The bar in its mini form (4.7).
+    mini: bool,
 }
 
 struct Bed {
@@ -293,6 +299,9 @@ fn start_in(
         ..Config::default()
     };
     config.appearance.reduced_motion = machine.reduced_motion;
+    if machine.mini {
+        config.panel.form = FormChoice::Mini;
+    }
     let hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],
@@ -3493,6 +3502,341 @@ fn nothing_commits_at_rest_with_her_briefing_open() -> anyhow::Result<()> {
     bed.settle()?;
     let before = bed.counts();
     // The same states again, and time passing: nothing.
+    for _ in 0..5 {
+        bed.hocus(&["agent", "migration", "failed"], None)?;
+    }
+    wait(&mut bed.hp, Duration::from_secs(2))?;
+    assert_eq!(before, bed.counts());
+    Ok(())
+}
+
+// --- 4.7: the mini form's item ---------------------------------------------------
+
+/// The mini bar's right edge, inside, on the test's 1920 px screen; the
+/// item's top under the bar's (12 px, the clock's 41.8 px, 14 px) and its
+/// height with how many work (4 + 40 + 4 + 2 × 13.75 + 6 px).
+const MINI_RIGHT: f64 = 1920.0 - 8.0;
+const MINI_TOP: f64 = 68.0;
+const MINI_HEIGHT: f64 = 81.5;
+
+impl Bed {
+    /// The mini item's top left, global, from where the shell logged it.
+    fn mini_item(&mut self, item: &str) -> anyhow::Result<(f64, f64)> {
+        let (x, y) = self.item(item)?;
+        Ok((x - 24.0, y - MINI_HEIGHT / 2.0))
+    }
+
+    /// The colours of her ear, and of the badge 3 px in from its left at
+    /// its middle (with one figure: 16 px, its right 6 px past her head's).
+    fn mini_colours(&mut self) -> anyhow::Result<([i32; 3], [i32; 3])> {
+        let (x, y) = self.mini_item("Secretary")?;
+        // Her ear, (85, 33) of her drawing's 120, on her 40 px head 4 px
+        // in.
+        let ear = pixel(&mut self.hp, (x + 4.0 + 85.0 / 3.0, y + 4.0 + 11.0))?;
+        let badge = pixel(&mut self.hp, (x + 34.0 + 3.0, y + 4.0 + 40.0 + 3.0 - 8.0))?;
+        Ok((ear, badge))
+    }
+
+    /// The briefing, once a popover 320 px wide shows, and its items
+    /// logged.
+    fn briefing_shows(&mut self, from: usize) -> anyhow::Result<Rect> {
+        let shown = self.hp.dispatch_until(WAIT, |hp| {
+            hp.popover_surfaces()
+                .iter()
+                .any(|(_, r)| r.width == 320 && r.height > 0)
+        })?;
+        anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
+        self.logged_after(from, &["the briefing's items"])?;
+        Ok(self
+            .hp
+            .popover_surfaces()
+            .iter()
+            .find(|(_, r)| r.width == 320)
+            .map_or(Rect::new(0, 0, 0, 0), |(_, r)| *r))
+    }
+}
+
+fn mini_bed(machine: Machine) -> anyhow::Result<Option<Bed>> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(None);
+    };
+    let bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            mini: true,
+            ..machine
+        },
+    )?;
+    Ok(Some(bed))
+}
+
+/// Whether `drawn` is `colour` within a few levels.
+fn close_to(drawn: [i32; 3], colour: u32) -> bool {
+    let want = [
+        (colour >> 16) as i32,
+        ((colour >> 8) & 0xFF) as i32,
+        (colour & 0xFF) as i32,
+    ];
+    drawn.iter().zip(want).all(|(a, b)| (a - b).abs() <= 6)
+}
+
+/// Her item under the clock, her ear in the moment's colour, and the badge
+/// with how many need the user: green for one to see, orange once one is
+/// stuck, amber once one waits.
+#[test]
+fn the_mini_item_shows_her_mood_and_who_needs_the_user_in_its_badge() -> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine::default())? else {
+        return Ok(());
+    };
+    let from = bed.mark();
+    for (name, state) in [("build", "working"), ("docs", "working"), ("api", "done")] {
+        bed.agent_is(name, state)?;
+    }
+    bed.logged_after(from, &["mood=Calm mini=badge 1 green · 2 au travail"])?;
+    bed.settle()?;
+    // Under the clock, in the mini bar's middle; its surface the mini's.
+    let (x, y) = bed.mini_item("Secretary")?;
+    assert!((y - (8.0 + MINI_TOP)).abs() < 0.6, "{y}");
+    assert!((x - (MINI_RIGHT - 52.0)).abs() < 0.6, "{x}");
+    assert_eq!(bed.surface().width, 54);
+    let (ear, badge) = bed.mini_colours()?;
+    assert!(close_to(ear, 0x7BC47F), "green ear: {ear:?}");
+    assert!(close_to(badge, 0x7EE0A0), "green badge: {badge:?}");
+    for (name, state, said, ear_colour, badge_colour) in [
+        (
+            "site",
+            "failed",
+            "mood=Stuck mini=badge 2 orange · 2 au travail",
+            0xF2945B,
+            0xF2945B,
+        ),
+        (
+            "infra",
+            "waiting",
+            "mood=Waiting mini=badge 3 amber · 2 au travail",
+            0xF5B44A,
+            0xF5B44A,
+        ),
+    ] {
+        let from = bed.mark();
+        bed.agent_is(name, state)?;
+        bed.logged_after(from, &[said])?;
+        bed.settle()?;
+        let (ear, badge) = bed.mini_colours()?;
+        assert!(close_to(ear, ear_colour), "{state} ear: {ear:?}");
+        assert!(close_to(badge, badge_colour), "{state} badge: {badge:?}");
+    }
+    Ok(())
+}
+
+/// Nobody needs the user: no badge; under her, how many work, following
+/// them.
+#[test]
+fn the_mini_item_says_how_many_work_without_a_badge_at_zero() -> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine::default())? else {
+        return Ok(());
+    };
+    let from = bed.mark();
+    for (name, state) in [("build", "working"), ("docs", "working"), ("notes", "idle")] {
+        bed.agent_is(name, state)?;
+    }
+    bed.logged_after(from, &["mood=Calm mini=2 au travail agents=3"])?;
+    bed.settle()?;
+    // Where the badge would be, the bar's own colour: as left of her head.
+    let (x, y) = bed.mini_item("Secretary")?;
+    let plain = pixel(&mut bed.hp, (x + 1.0, y + 39.0))?;
+    let (_, badge) = bed.mini_colours()?;
+    assert!(
+        badge.iter().zip(plain).all(|(a, b)| (a - b).abs() <= 3),
+        "a badge: {badge:?} against {plain:?}"
+    );
+    let from = bed.mark();
+    bed.agent_is("docs", "idle")?;
+    bed.logged_after(from, &["mini=1 au travail"])?;
+    Ok(())
+}
+
+/// Resting 150 ms on her item opens her briefing beside the mini bar, its
+/// top on the item's, with who works and who rests after who needs the
+/// user; leaving closes it; a click opens it and it stays.
+#[test]
+fn hovering_or_clicking_the_mini_item_opens_her_briefing_with_who_works_and_rests()
+-> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine::default())? else {
+        return Ok(());
+    };
+    for (name, state) in [
+        ("site-web", "waiting"),
+        ("build", "working"),
+        ("docs", "working"),
+        ("notes", "idle"),
+    ] {
+        bed.agent_is(name, state)?;
+    }
+    bed.settle()?;
+    let (x, y) = bed.mini_item("Secretary")?;
+    let from = bed.mark();
+    let start = Instant::now();
+    bed.hp.pointer_move(x + 23.0, y + 30.0);
+    bed.hp.pointer_move(x + 24.0, y + 30.0);
+    let briefing = bed.briefing_shows(from)?;
+    assert!(start.elapsed() >= Duration::from_millis(150));
+    assert_eq!(
+        (briefing.x, briefing.y),
+        (1920 - 8 - 56 - 8 - 320, 8 + MINI_TOP as i32)
+    );
+    bed.logged_after(
+        from,
+        &["briefing=T'ATTEND site-web · à l'instant \
+           · AU TRAVAIL build · à l'instant · AU TRAVAIL docs · à l'instant \
+           · AU REPOS notes · 2 au travail · 1 au repos"],
+    )?;
+    // Away: it closes.
+    bed.hp.pointer_move(600.0, 500.0);
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "{:?}", bed.hp.popover_surfaces());
+    // A click opens it at once, and it stays away from the pointer.
+    let from = bed.mark();
+    bed.click((x + 24.0, y + 30.0));
+    bed.briefing_shows(from)?;
+    bed.hp.pointer_move(600.0, 500.0);
+    wait(&mut bed.hp, Duration::from_millis(600))?;
+    assert_eq!(bed.hp.popover_surfaces().len(), 1);
+    Ok(())
+}
+
+/// A line of the mini form's briefing, a working agent's, goes to it: its
+/// window on another desktop, with the keyboard.
+#[test]
+fn a_line_of_the_mini_briefing_goes_to_its_agent() -> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine::default())? else {
+        return Ok(());
+    };
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    let id = bed.id_of("build")?;
+    let (x, y) = bed.mini_item("Secretary")?;
+    let from = bed.mark();
+    bed.click((x + 24.0, y + 30.0));
+    let briefing = bed.briefing_shows(from)?;
+    let line = bed.briefing_item(briefing, &format!("Agent({id})"))?;
+    bed.click(line);
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "{:?}", bed.hp.popover_surfaces());
+    let there = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (0, 0.0))?;
+    anyhow::ensure!(there, "{:?}", bed.hp.desktop());
+    bed.keyboard_goes_to("test.terminal")?;
+    Ok(())
+}
+
+/// The group's rules in the mini form: with no tool, no item, the pointer
+/// going through; with a tool to plug in, she is alone with a "+", and her
+/// item opens Sources.
+#[test]
+fn the_mini_item_hides_and_proposes_to_plug_in_as_the_group_does() -> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine::default())? else {
+        return Ok(());
+    };
+    bed.logged("shows=nothing")?;
+    bed.one_pixel()?;
+    bed.hp
+        .pointer_move(MINI_RIGHT - 28.0, 8.0 + MINI_TOP + 20.0);
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    assert_ne!(
+        bed.hp.pointer_layer().as_deref(),
+        Some(hocus_link::AGENTS_NAMESPACE)
+    );
+    drop(bed);
+    let Some(mut bed) = mini_bed(Machine {
+        claude: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.logged("mini=badge + green")?;
+    bed.settle()?;
+    // She alone: 4 + 40 + 6 px.
+    let (x, y) = bed.item("Sources")?;
+    assert!((y - (8.0 + MINI_TOP + 25.0)).abs() < 0.6, "{y}");
+    assert_eq!(bed.surface().height, 60);
+    let from = bed.mark();
+    bed.click((x, y));
+    let shown = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.popover_surfaces()
+            .iter()
+            .any(|(_, r)| r.width == 300 && r.height > 0)
+    })?;
+    anyhow::ensure!(shown, "no Sources: {:?}", bed.hp.popover_surfaces());
+    bed.logged_after(from, &["Trouvé, pas branché"])?;
+    Ok(())
+}
+
+/// The halo and the peek as in the full form: an agent starting to wait
+/// lights the halo, and its panda comes out beside the mini bar, at her
+/// head.
+#[test]
+fn the_halo_and_the_peek_work_in_the_mini_form() -> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine {
+        gpu: render_node(),
+        clock_at: Some("10:00:05"),
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    bed.agent_is("build", "waiting")?;
+    assert_eq!(bed.hp.halo_concern(), Some(Concern::Waiting));
+    if bed.hp.renderer() == "gles" {
+        let lit = bed.hp.dispatch_until(WAIT, |hp| hp.halo().is_some())?;
+        anyhow::ensure!(lit, "no halo");
+    }
+    let surface = bed.peek_surface()?;
+    bed.peek_out_still()?;
+    let (_, panda) = bed.peek_parts(surface);
+    assert!(
+        (panda.0 + panda.2 - (MINI_RIGHT - 56.0 - 18.0)).abs() < 0.5,
+        "{panda:?}"
+    );
+    // Her head's middle: 4 px into the item, 20 px down her head.
+    assert!(
+        (middle_of(panda).1 - (8.0 + MINI_TOP + 24.0)).abs() <= 1.0,
+        "{panda:?}"
+    );
+    bed.logged("said=build t'attend · à l'instant")?;
+    Ok(())
+}
+
+/// Nothing is drawn at rest in the mini form, her briefing open.
+#[test]
+fn nothing_commits_at_rest_in_the_mini_form() -> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine {
+        clock_at: Some("10:00:05"),
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.agent_is("migration", "failed")?;
+    bed.agent_is("notes", "idle")?;
+    let (x, y) = bed.mini_item("Secretary")?;
+    let from = bed.mark();
+    bed.click((x + 24.0, y + 30.0));
+    bed.briefing_shows(from)?;
+    bed.settle()?;
+    let before = bed.counts();
     for _ in 0..5 {
         bed.hocus(&["agent", "migration", "failed"], None)?;
     }

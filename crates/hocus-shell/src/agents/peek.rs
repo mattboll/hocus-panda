@@ -215,10 +215,14 @@ fn out<T>(with: impl FnOnce(&mut Option<Out>) -> T) -> T {
 
 /// The panda's middle, in the bar's frame, for agent `id`: its row's, as
 /// the group lays it out now; the secretary's when it has none shown
-/// (under the "+ N" line, or the mini form, which has no rows yet).
+/// (under the "+ N" line); in the mini form, which has no rows, her head's
+/// in its item (4.7).
 fn middle(id: u64, form: Form) -> f32 {
-    let row = match (form, super::said().shows(now_us())) {
-        (Form::Full, super::Shows::Lines(lines)) => lines.rows.iter().position(|r| r.id == id),
+    if form == Form::Mini {
+        return super::MINI_TOP + super::MINI_PAD_TOP + super::HEAD / 2.0;
+    }
+    let row = match super::said().shows(now_us()) {
+        super::Shows::Lines(lines) => lines.rows.iter().position(|r| r.id == id),
         _ => None,
     };
     let top = super::draw::TOP;
