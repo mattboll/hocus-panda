@@ -377,7 +377,8 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   the screen's bottom. One at a time.
 - **Opened by a click** on its item (in the full form, the whole row of a
   level, lit `rgba(255,255,255,0.06)` under the pointer and `0.08` while
-  its popover is open): it stays open until a click outside it, `Esc`, or
+  its popover is open; the pointer a hand over it, as over the
+  connections' rows and the desktops' tiles): it stays open until a click outside it, `Esc`, or
   another click on the item; it does not close when the pointer leaves.
 - **Opened by hovering** an item of the mini form for 150 ms: it closes
   300 ms after the pointer has really left the item and the popover, and

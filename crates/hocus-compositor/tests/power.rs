@@ -12,7 +12,7 @@
 //! health's line shown or not; the profiles switched, a missing one greyed
 //! with its line; no battery, the modes alone; the mini form's battery sign
 //! and its bolt; the keyboard; nothing drawn at rest, and a change drawing
-//! only what shows it.
+//! only what shows it; a hand over the rows, an arrow off them.
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 
@@ -28,6 +28,7 @@ use std::{
 use common::{BTN_LEFT, KEY_ESC, KEY_LEFT, KEY_RIGHT, KEY_TAB, WAIT, wait};
 use fakes::{Fakes, Power};
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use smithay::input::pointer::{CursorIcon, CursorImageStatus};
 
 const KEY_ENTER: u32 = 28;
 
@@ -412,6 +413,37 @@ fn the_mini_forms_battery_opens_by_hovering_and_by_a_click() -> anyhow::Result<(
     // A tile chosen in it.
     bed.click(at(rect, (TILE_X[2], TILES_TOP + 29.0)));
     bed.asked(|p| p.profile == "performance")?;
+    Ok(())
+}
+
+#[test]
+fn the_pointer_is_a_hand_over_the_rows_and_an_arrow_off_them() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start_full(&shell, |_| {})?;
+    // Off the bar, over a row, on the status line under the rows (#468).
+    for (at, hand) in [
+        ((600.0, 500.0), false),
+        (LIGHT_ROW, true),
+        (BATTERY_ROW, true),
+        ((1800.0, f64::from(LEVELS.y + 160)), false),
+        ((600.0, 500.0), false),
+        (LIGHT_ROW, true),
+    ] {
+        bed.hp.pointer_move(at.0 - 1.0, at.1);
+        bed.hp.pointer_move(at.0, at.1);
+        let want = if hand {
+            CursorIcon::Pointer
+        } else {
+            CursorIcon::Default
+        };
+        let shows = bed.hp.dispatch_until(
+            WAIT,
+            |hp| matches!(hp.state().cursor, CursorImageStatus::Named(icon) if icon == want),
+        )?;
+        anyhow::ensure!(shows, "{:?} at {at:?}, not {want:?}", bed.hp.state().cursor);
+    }
     Ok(())
 }
 
