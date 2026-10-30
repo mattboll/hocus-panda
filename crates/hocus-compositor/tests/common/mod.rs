@@ -71,10 +71,53 @@ pub const KEY_Q: u32 = 16;
 pub const KEY_F4: u32 = 62;
 
 /// The shell's program, built next to the test's when the workspace is.
+///
+/// A test binary does not build it, so it may be older than its sources:
+/// that fails the test rather than testing an old shell (#464).
 pub fn shell_program() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let program = exe.parent()?.parent()?.join("hocuspanda-shell");
-    program.exists().then_some(program)
+    if !program.exists() {
+        return None;
+    }
+    if let Err(why) = shell_is_fresh(&program) {
+        panic!("{why}: build it again (cargo build -p hocus-shell)");
+    }
+    Some(program)
+}
+
+/// Whether `program` was built from this checkout's sources as they are:
+/// cargo's list of its sources (`hocuspanda-shell.d`, beside it) names
+/// only files of this workspace, none of them newer than it.
+fn shell_is_fresh(program: &Path) -> anyhow::Result<()> {
+    let built = std::fs::metadata(program)?.modified()?;
+    let list = program.with_extension("d");
+    let text = std::fs::read_to_string(&list)
+        .with_context(|| format!("{} is not there", list.display()))?;
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .context("no workspace")?;
+    // `target: source source…`, spaces in names escaped.
+    let (_, sources) = text.split_once(": ").context("an unreadable list")?;
+    let sources = sources.trim().replace("\\ ", "\0");
+    for source in sources.split_whitespace() {
+        let source = std::path::PathBuf::from(source.replace('\0', " "));
+        anyhow::ensure!(
+            source.starts_with(workspace),
+            "hocuspanda-shell was built from another checkout ({})",
+            source.display()
+        );
+        let changed = std::fs::metadata(&source)
+            .and_then(|m| m.modified())
+            .with_context(|| format!("hocuspanda-shell's source {} is gone", source.display()))?;
+        anyhow::ensure!(
+            changed <= built,
+            "hocuspanda-shell is older than {}",
+            source.display()
+        );
+    }
+    Ok(())
 }
 
 /// A script in `dir` starting `shell` away from the machine's services:
