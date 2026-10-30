@@ -43,6 +43,21 @@ pub struct Headless {
     _runtime_dir: RuntimeDir,
     /// Milliseconds for input events' times.
     time: u32,
+    /// Last, so dropped once the loop and its connections are.
+    _shell: ShellEnd,
+}
+
+/// Waits, when the harness is dropped, for its shell to end: it does once
+/// its connections close, a moment after the test that started it.
+#[derive(Debug)]
+struct ShellEnd(std::sync::Arc<crate::shell::Running>);
+
+impl Drop for ShellEnd {
+    fn drop(&mut self) {
+        if !self.0.wait_none(Duration::from_secs(5)) {
+            tracing::warn!("the shell still runs 5 s after its compositor stopped");
+        }
+    }
 }
 
 /// What a test can know about a window.
@@ -83,11 +98,13 @@ impl Headless {
             config,
             shell,
         })?;
+        let shell = ShellEnd(started.app.state.shell.running.clone());
         Ok(Self {
             event_loop: started.event_loop,
             app: started.app,
             _runtime_dir: started.runtime_dir,
             time: 0,
+            _shell: shell,
         })
     }
 
