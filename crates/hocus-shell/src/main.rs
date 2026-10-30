@@ -878,6 +878,7 @@ impl Shell {
             words: agents::Words::new(clock::time::Lang::of_messages()),
             backdrop,
             bar: bar.output.clone(),
+            motion: self.look.motion,
         };
         Some(
             canvas(program)
@@ -955,7 +956,9 @@ impl Shell {
                 .into()
             }
             // They open none.
-            popover::Item::Keyboard | popover::Item::Decline => return None,
+            popover::Item::Keyboard | popover::Item::Decline | popover::Item::Agent(_) => {
+                return None;
+            }
         };
         Some(panel)
     }

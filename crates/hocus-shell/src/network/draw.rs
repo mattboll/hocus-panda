@@ -486,7 +486,8 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Sources
                             | Item::AnotherTool
                             | Item::Plug(_)
-                            | Item::Decline,
+                            | Item::Decline
+                            | Item::Agent(_),
                             _,
                         ) => {}
                     }
