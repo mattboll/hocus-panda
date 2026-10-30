@@ -13,7 +13,9 @@ issue #363), the brightness's and the battery's popovers (3.7,
 issue #364), the keyboard layout's row (3.8, issue #365), and the
 desktops' tiles of section 4 group 8 and section 5 (3.9, issue #366), and
 the agents' group's header, its sources and the tools plugged in (section 4
-group 3, section 10; 4.0, issue #383): see [as built](#as-built).
+group 3, section 10; 4.0, issue #383), and its rows, one per agent, with
+their pandas (section 4 group 3, section 7 A, section 8 in part; 4.1,
+issue #384): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -99,7 +101,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 |---|---|---|---|
 | 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
 | 2 | Next meeting | Card: 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`. Hidden when nothing remains today | 44 px |
-| 3 | Agents | Header `AGENTS` and, on its right, "Sources" (4.0). Three tiles: working, waiting, resting, each with its panda (48 px) and its count. Below, up to 3 lines: agents waiting (oldest first), then stuck ones. Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 80 px + 18 px a line |
+| 3 | Agents | Header `AGENTS` and the total, "Sources" on its right (4.0). One 28 px row per agent (4.1, track 4 "the lines"): its panda (24 px, §7 A), its name, and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 28 px a row (+ 18 px for the rest) |
 | 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
 | 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
 | 6 | Spacer | Takes what is left | flexible |
@@ -340,9 +342,10 @@ The pandas are the validated characters (the apprentice magician family).
 They move only when something changes, then hold still; never at rest,
 never on battery saver, never with reduced motion.
 
-- **A, a panda per state** (in the agents tiles): working (at its laptop),
-  waiting (holds out its hat, ear radiating), resting (asleep). A stuck
-  agent shows as an orange line, not a tile.
+- **A, a panda per state** (in the agents' rows, 24 px; 4.1): working (at
+  its laptop), waiting (holds out its hat, ear radiating), finished (arms
+  up), stuck (smoking ears), resting (asleep, at 55 %). On a change, the
+  changed agent's panda hops once (650 ms: 4 px up, down, 2 px up, down).
 - **B, the secretary**: one panda with round glasses, a clipboard, and a
   pencil behind its ear (drawing to fix: the pencil must rest behind the
   ear, not into the head). Its magic ear takes the colour of the bar's
@@ -1636,3 +1639,82 @@ nothing to propose, the group is its header alone.
   `hooks.json` the user already has (Codex warns when a layer has both);
   telling the agent apart from its terminal's other windows when one
   process serves them all; names for screen readers (§11).
+
+### 4.1, the agents' rows (2026-10-30)
+
+What the approved mockup of track 4, "the lines", shows, with the
+maintainer's spec (§4 group 3, §7 A; issue #384, which covers the former
+4.2, who waits and who is stuck). The other tracks (the tribe, the stage,
+the heads) are display options for later (#491).
+
+- **One row per agent**, under the header as 4.0 built it, which now says
+  how many run ("AGENTS 7", the total in `text.faint`, Manrope 600, 4 px
+  after the spaced word). A row is 28 px high and as wide as the column
+  (6 px past the group's sides, 184 px), radius 7, 6 px in: the agent's
+  panda (24 px), 7 px, its name (Manrope 600, 12.5 px, `text`, cut with an
+  ellipsis to what the word on its right leaves), 7 px, that word
+  (11.5 px):
+  - working: how long it has worked, `text.faint` ("12 min"; "1 h 05"
+    from an hour);
+  - waiting: "t'attend" / "waiting", `#F5C46E`, the row on
+    `rgba(245,180,74,0.12)`;
+  - stuck (`failed`): "bloqué" / "stuck", `#F7A77A`, on
+    `rgba(242,148,91,0.10)`;
+  - finished, not seen yet: "à voir" / "to see", `#7EE0A0`, on
+    `rgba(108,194,135,0.10)`;
+  - resting (idle, or finished and seen): "repos" / "resting", `#6A7384`,
+    its panda asleep at 55 %.
+  Under the pointer a row is lit `rgba(255,255,255,0.06)` and the pointer
+  is a hand, as the bar's other rows (the mockup's tints, inline, hide its
+  own `:hover`). The name is the project's folder (a hook's `cwd`), the
+  command's `NAME`, or herdr's pane name.
+- **Order**: waiting (the longest first), stuck, to see, working,
+  resting; in the order they came otherwise. **At most five rows**; the
+  rest, the lowest first, make one line 2 px under them (11.5 px,
+  `text.faint`): "+ N au repos" / "+ N resting" when they all rest, else
+  "+ N autres" / "+ N more". The group is 26 px (the header and the 8 px
+  under it), 28 px a row and 18 px for that line; its surface follows its
+  height, never its width.
+- **The pandas** are the validated drawings, one still mood each, as SVG
+  (`crates/hocus-shell/assets/pandas/`, with a note of their origin),
+  drawn by iced's `svg` (resvg) at the screen's scale: sharp at ×1 and ×2.
+- **Motion**, only when something changes: the rows slide to their new
+  places in 450 ms, `cubic-bezier(0.2, 0.9, 0.25, 1)`; a row going under
+  the "+ N" line slides there and fades out, one coming from it fades in
+  (300 ms); a row's tint changes over 300 ms; the panda of an agent whose
+  state changed, or that came, hops once (650 ms). Then nothing draws.
+  With reduced motion, or a shell on the CPU, the rows change at once.
+- **"Finished, not seen yet"** is the compositor's: a finished agent is
+  told to the shell as `done` until the user has seen it, then `seen`
+  (`hocus-link`), until it finishes again. Seen means its window got the
+  keyboard after it finished, or had it as it finished (as herdr's green
+  dot: the user is looking), or its row was clicked. A report of `done`
+  again (Claude Code's `idle_prompt`, 60 s later) changes nothing. herdr's
+  own agents are seen as herdr says (it turns `done` into `idle` once the
+  pane is looked at): their window is herdr's terminal, shared by every
+  pane.
+- **"12 min"** goes on with the clock: at each of its minute changes, the
+  shell lays the rows out again if a working agent shows and what they say
+  changed, and wakes the group's surface (once for all the bars). Nothing
+  draws the rows in between: no timer of their own, none per agent.
+- **Going to an agent** (§8, its second step without the pulse): a click
+  on a row, or `Enter` on it with the bar's keyboard (`Tab` and the arrows
+  reach the rows from "Sources", as 3.8 and 3.9 go through the bar's
+  items), asks the compositor for the agent (`go-to-agent ID`): its window,
+  when it has one, takes the keyboard, its desktop shown first if it is
+  another (the desktops' list's `bring`); a finished agent is then seen.
+- **Measured headless**, the real shell (`tests/agents.rs`): the five
+  states in their order with their words, 28 px apart, their tints read
+  from the screen; more than five agents folding into "+ 2 au repos", the
+  group 194 px high, then "+ 2 autres" once a hidden one works; a finished
+  agent staying "à voir" while its window is on another desktop, seen once
+  its window has the keyboard, and seen at once when it finishes with it;
+  a row's click switching to the window's desktop and giving it the
+  keyboard; "0 min" becoming "1 min" at the clock's minute with the
+  group's surface drawn once while the clock drew every second; on a GPU,
+  a change moving for 0.5 to 0.9 s then resting, and not moving with
+  reduced motion; nothing committed at rest. On the Intel GPU, the
+  screenshots of the pull request.
+- **Not built**: the streak and the rim's pulse (4.3), the halo (4.4), the
+  peek (4.5), the secretary (4.6); the mini form's agents (4.7); herdr
+  selecting the agent's pane (§8, step 3); names for screen readers (§11).

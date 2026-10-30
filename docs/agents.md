@@ -14,8 +14,9 @@ hocus agent NAME STATE [--pid PID]
 - `NAME`: the name the agent shows under (a project, a task). The same
   name again is the same agent.
 - `STATE`: `working`, `waiting` (it waits for the user: a permission, a
-  question), `done` (its turn ended, nobody looked yet), `failed`, `idle`;
-  or `ended`, to forget it.
+  question), `done` (its turn ended, nobody looked yet: the bar says "à
+  voir" until its window gets the keyboard or its row is clicked, then
+  "repos"), `failed`, `idle`; or `ended`, to forget it.
 - `--pid PID`: the agent's process. By default, the process that ran
   `hocus` (above the shells it ran through). The agent's window is the
   first window found above that process (its terminal, its editor), and
