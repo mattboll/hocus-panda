@@ -16,8 +16,8 @@ the agents' group's header, its sources and the tools plugged in (section 4
 group 3, section 10; 4.0, issue #383), and its rows, one per agent, with
 their pandas (section 4 group 3, section 7 A, section 8 in part; 4.1,
 issue #384), and going to an agent from its row, its streak, its rim's
-pulse and herdr's pane (section 8; 4.3, issue #386): see
-[as built](#as-built).
+pulse and herdr's pane (section 8; 4.3, issue #386), and the agents'
+halo (section 6; 4.4, issue #387): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -316,27 +316,38 @@ pointer moves toward it (section 9).
 
 ## 6. The halo
 
+Approved 2026-10-30 (issue #387), with variant B for finished agents.
+
 The whole bar lights up when something concerns the user. One state shows
 at a time, by priority:
 
 | Priority | State | Colour | Wave | Then | Reminder |
 |---|---|---|---|---|---|
-| 1 | Meeting in 2 min or less | blue `#8FB3FF` | yes | strong glow | — |
-| 2 | An agent waits for the user | amber `#F5B44A` | yes | glow | one wave after 5 min |
-| 3 | Meeting in 10 min or less | blue `#8FB3FF` | yes, softer | glow | wave again at 2 min |
+| 1 | Meeting in 2 min or less | blue `#8FB3FF` | strong (`0.42`) | strong glow | — |
+| 2 | An agent waits for the user | amber `#F5B44A` | yes (`0.38`) | glow | one wave after 5 min |
+| 3 | Meeting in 10 min or less | blue `#8FB3FF` | softer (`0.22`) | glow | wave again at 2 min (priority 1) |
 | 4 | An agent is stuck (failed) | orange `#F2945B` | no | glow | — |
-| 5 | Nothing | none | — | — | — |
+| 5 | A finished agent not seen yet | green `#6CC287` | no | soft glow | — |
+| 6 | Nothing | none | — | — | — |
 
-- **Wave**: a band 40 % of the bar's height, the state's colour at 38 %,
-  runs from top to bottom once in **600 ms**,
+- **Wave**: a band 40 % of the bar's height, the state's colour at the
+  table's alpha in its middle (`linear-gradient` transparent, colour,
+  transparent), runs from top to bottom once in **600 ms**,
   `cubic-bezier(0.3, 0.6, 0.3, 1)`.
 - **Glow**: border in the colour at 85 %, outer glow 34 px at 45 %, inner
-  glow 22 px at 18 %. It fades in over 600 ms and out over 500 ms.
-- Lower states still show where they belong (the tile, the line, the
-  meeting card): only the halo is unique.
-- A reminder is one more wave, never a loop. The user acting (going to the
-  agent, opening the meeting) ends the state at once.
-- With reduced motion: no wave; the glow fades in over 200 ms.
+  glow 22 px at 18 %. The strong glow: outer 44 px at 60 %. The soft glow:
+  border at 45 %, outer 20 px at 25 %, inner 14 px at 10 %. It fades in
+  over 600 ms (`ease-out`) and out over 500 ms (`ease-in`).
+- Lower states still show where they belong (the row, the meeting card):
+  only the halo is unique.
+- A reminder is one more wave, never a loop. The user acting ends the
+  state at once: going to the agent (§8), answering it, seeing the finished
+  one, opening the meeting.
+- With reduced motion: no wave; the glow fades in (and out) over 200 ms.
+- The meetings come with the calendar ("Your day"); 4.4 builds the
+  agents' states and the priorities, ready for them.
+- It costs frames only during the wave and the fades; nothing is drawn at
+  rest.
 
 ## 7. Pandas
 
@@ -1794,3 +1805,86 @@ What the approved 4.3 mockup shows, variant A, with the maintainer's spec
   agent's pane. On the Intel GPU, the screenshots of the pull request.
 - **Not built**: going to an agent from anything else that names it (the
   peek, the secretary's briefing: 4.5, 4.6); the halo ending (4.4).
+
+### 4.4, the halo (2026-10-30)
+
+What the approved 4.4 mockup shows, variant B (a soft green glow for a
+finished agent not seen yet), with the maintainer's spec (§6; issue
+#387). The meetings' states wait for the calendar.
+
+- **The compositor draws it**, around and over the bar, as it draws the
+  bar's glass under it: the outer glow is outside the shell's surfaces,
+  which are the bar itself, and a halo drawn by the shell would redraw its
+  bar's surface at every frame of a wave or a fade. Here the shell draws
+  nothing for it.
+- **Two GLES pixel shaders' elements** (`halo.rs`), one program: what the
+  mockup's CSS draws, as Chrome renders it (its pixels beside the bar
+  match a headless Chrome's to two levels). Outside the bar, its
+  `box-shadow: 0 0 34px` (the bar's rounded box blurred by a Gaussian of
+  deviation 17, written with the error function, exact along the sides and
+  summed over 16 rows near the corners), drawn outside the box only; the
+  1 px border in the colour; inside it, the `inset` shadow (what is outside
+  the padding box, blurred, inside it); over it, the wave's band, cut to
+  the inside of the border. The glow's element is kept while it does not
+  change (same id, same commit): at rest it leaves no damage, and when the
+  clock draws its second, only the clock's region is drawn again, the
+  halo with it. The wave is a new element each frame while it runs, as
+  tall as its band: its damage is where the band was and where it is.
+- **Where**: over every bar's surfaces of the screens that show one, under
+  the popovers beside the bar (the layer surfaces before the bar's), over
+  the glass and outside what the glass blurs: the glass is not blurred
+  again for it. A fullscreen window on top covers it as it covers the bar.
+  During a form switch it follows the bar's width at each frame.
+- **Over the bar's content**: the mockup draws its wave and inner glow
+  under the bar's text; the compositor draws them over the shell's
+  surfaces, which hold the text and the background together. Where the
+  band passes over text (white), the text takes some of its colour for
+  the 600 ms of the wave; the inner glow, strongest at the border, is
+  down to 3 % at the text 12 px in.
+- **The states** come from the agents' model as the shell is told them
+  (4.0, 4.1): waiting, stuck (`failed`), finished not seen yet (`done`).
+  Each agent in one of them is an episode, from the start of its state.
+  The halo shows the most important episode the user has not acted on,
+  and the meetings' slots (an internal call, `State::meeting_near`, for
+  the calendar later: in 10 min or less, in 2 min or less).
+- **It ends when the user acts**: the agent answered (it works again),
+  going to it from its row (`go-to-agent`, 4.3), or its own window getting
+  the keyboard (as a finished agent is seen, 4.1; herdr's own agents share
+  herdr's terminal, so only their row counts); a finished one seen. An
+  agent that starts waiting while its window has the keyboard (the user is
+  looking at it) shows no halo, as a finished one is seen at once. Going
+  to a waiting agent ends its halo while it still waits (§8 step 5).
+- **The waves**: an agent that starts waiting runs one (each agent that
+  starts waiting, as the mockup's "Un agent t'attend" does), its reminder
+  runs one, and a meeting that comes nearer runs its own; a wave runs only
+  when its state is the one shown (no agent's wave under a meeting in
+  2 min).
+- **The reminder** of an agent still waiting at its fifth minute is a
+  timer of the loop, set for the earliest due and moved when that changes:
+  nothing polls. Once per waiting: answered and waiting again, it is a new
+  one.
+- **Fades** from what shows at that moment to the new state: in over
+  600 ms `ease-out`, out over 500 ms `ease-in`; from one state to another,
+  the colour and the glows go from one to the other over 600 ms. As CSS's
+  transition from `0 0 0 transparent` does, the blurs grow with the alpha.
+- **Reduced motion**: no wave, the glow in and out over 200 ms (the
+  mockup's `.reduced` class sets both). **On the CPU** (Pixman, no shaders)
+  there is no halo: the rows' tints still show the states.
+- **Frames**: only during a wave or a fade (the frame clock's closed-form
+  curves; nothing is queued per frame); none at rest.
+- **Measured headless**, the real shell (`tests/agents.rs`): on a GPU, an
+  agent waiting runs one amber wave down the bar for 450 to 650 ms as the
+  glow fades in, the glow then full and amber read beside the bar, and
+  only the clock's seconds drawn after; backdated to 4 min 59 s, its
+  reminder's wave a second later, then no other an hour on; a stuck agent
+  orange without a wave; a finished one not seen soft green without a
+  wave; answering, and going to it from its row (still waiting), fading it
+  out in 350 to 650 ms; with reduced motion, no wave and the glow full
+  within 260 ms. On Pixman, the priorities: to see, then stuck, then
+  waiting, and back as each is dealt with, nothing once the finished one
+  is seen from its row, nothing drawn. Unit tests for the priorities, the
+  looks, the waves, the reminder, the fades. On the Intel GPU, the
+  screenshots of the pull request.
+- **Not built**: the meetings' states (the calendar, "Your day"); the
+  secretary's ear in the halo's colour (4.6); the peek (4.5); the halo on
+  the CPU; the mini form's agents (4.7).

@@ -10,7 +10,8 @@
 //! Claude Code's documented payloads) reaching the model and the shell;
 //! the agent's window found above its process; nothing drawn at rest. The
 //! agents' rows (4.1), and going to an agent from its row (4.3): the
-//! streak, the rim's pulse, herdr's pane.
+//! streak, the rim's pulse, herdr's pane. The halo (4.4): its wave and its
+//! glow, its reminder, its priorities, its end.
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of motion and of the streak run on a GPU when the
@@ -30,7 +31,10 @@ use std::{
 use common::{BTN_LEFT, WAIT, wait};
 use hocus_agents::tools::Places;
 use hocus_compositor::{
-    Config, Headless, HeadlessConfig, RendererChoice, going::Streak, model::Rect,
+    Config, Headless, HeadlessConfig, RendererChoice,
+    going::Streak,
+    halo::{Concern, Shown},
+    model::Rect,
 };
 use hocus_link::ToolState;
 
@@ -1592,5 +1596,356 @@ fn going_to_a_herdr_agent_selects_its_pane() -> anyhow::Result<()> {
         "herdr was asked {:?}",
         bed.herdr_heard.lock().map(|h| h.clone())
     );
+    Ok(())
+}
+
+// --- 4.4: the halo ---------------------------------------------------------------
+
+/// What the halo shows at a frame.
+#[derive(Debug, Clone, Copy)]
+struct Glimpse {
+    /// Since the sampling started.
+    at: Duration,
+    shown: Option<Shown>,
+}
+
+impl Glimpse {
+    fn wave(&self) -> Option<f64> {
+        self.shown.and_then(|s| s.wave).map(|w| w.top)
+    }
+
+    fn border(&self) -> f32 {
+        self.shown.map_or(0.0, |s| s.glow.border)
+    }
+}
+
+impl Bed {
+    /// The halo at each frame drawn for `time`.
+    fn halo_for(&mut self, time: Duration) -> anyhow::Result<Vec<Glimpse>> {
+        let start = Instant::now();
+        let mut frames = self.hp.frames();
+        let mut out = Vec::new();
+        while start.elapsed() < time {
+            self.hp.dispatch(Duration::from_millis(2))?;
+            let now = self.hp.frames();
+            if now != frames {
+                frames = now;
+                out.push(Glimpse {
+                    at: start.elapsed(),
+                    shown: self.hp.halo(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Nothing draws but the clock's seconds for 2 s.
+    fn rests(&mut self) -> anyhow::Result<()> {
+        let frames = self.hp.frames();
+        wait(&mut self.hp, Duration::from_secs(2))?;
+        let drawn = self.hp.frames() - frames;
+        anyhow::ensure!(drawn <= 3, "{drawn} frames drawn at rest");
+        Ok(())
+    }
+
+    /// 3 px left of the bar, at its middle: in its outer glow.
+    fn beside_the_bar(&self) -> (f64, f64) {
+        let width = self.hp.bars().first().map_or(0.0, |b| b.2);
+        (1920.0 - 8.0 - width - 3.0, 540.0)
+    }
+
+    /// Agent `name` becomes `state`, and the shell shows it.
+    fn agent_is(&mut self, name: &str, state: &str) -> anyhow::Result<()> {
+        self.hocus(&["agent", name, state], None)?;
+        self.agent_becomes(name, Some(state))
+    }
+}
+
+/// A bed on the GPU, the compositor drawing with GLES (the halo is its
+/// shaders'); `None`, and the test is skipped, without one.
+fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(None);
+    };
+    let Some(node) = render_node() else {
+        return Ok(None);
+    };
+    let bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            gpu: Some(node),
+            reduced_motion,
+            ..Machine::default()
+        },
+    )?;
+    if bed.hp.renderer() != "gles" {
+        eprintln!("the compositor draws on the CPU here: no halo");
+        return Ok(None);
+    }
+    Ok(Some(bed))
+}
+
+/// From the first glimpse to the last that `shows`, how long.
+fn span(glimpses: &[Glimpse], shows: impl Fn(&Glimpse) -> bool) -> Duration {
+    let shown: Vec<&Glimpse> = glimpses.iter().filter(|g| shows(g)).collect();
+    match (shown.first(), shown.last()) {
+        (Some(a), Some(b)) => b.at - a.at,
+        _ => Duration::ZERO,
+    }
+}
+
+/// On a GPU: an agent waiting runs one wave down the bar, in amber, for
+/// some 600 ms, as the glow fades in; the glow stays, read from the screen
+/// beside the bar, and nothing is drawn at rest.
+#[test]
+fn a_waiting_agent_runs_a_wave_then_glows_then_nothing_draws() -> anyhow::Result<()> {
+    let Some(mut bed) = halo_bed(false)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    assert!(bed.hp.halo().is_none());
+    let beside = bed.beside_the_bar();
+    let before = pixel(&mut bed.hp, beside)?;
+    bed.hocus(&["agent", "build", "waiting"], None)?;
+    let glimpses = bed.halo_for(Duration::from_millis(1500))?;
+    let waving: Vec<(Duration, f64)> = glimpses
+        .iter()
+        .filter_map(|g| g.wave().map(|top| (g.at, top)))
+        .collect();
+    let (Some(first), Some(last)) = (waving.first(), waving.last()) else {
+        anyhow::bail!("no wave: {glimpses:?}");
+    };
+    // Down the bar from above its top to near its bottom, once.
+    assert!(first.1 < 0.3 && last.1 > 0.6, "{waving:?}");
+    assert!(waving.windows(2).all(|p| p[1].1 > p[0].1), "{waving:?}");
+    let wave = glimpses.iter().find_map(|g| g.shown.and_then(|s| s.wave));
+    assert_eq!(
+        wave.map(|w| (w.colour, w.alpha)),
+        Some(([0xF5, 0xB4, 0x4A], 0.38))
+    );
+    let lasted = span(&glimpses, |g| g.wave().is_some());
+    assert!(
+        (Duration::from_millis(450)..Duration::from_millis(650)).contains(&lasted),
+        "{lasted:?}: {waving:?}"
+    );
+    // The glow fades in with it, then stays.
+    let full = Concern::Waiting.glow();
+    let rising = span(&glimpses, |g| g.shown.is_some_and(|s| s.glow != full));
+    assert!(
+        (Duration::from_millis(450)..Duration::from_millis(700)).contains(&rising),
+        "{rising:?}: {glimpses:?}"
+    );
+    bed.rests()?;
+    let rest = bed.hp.halo().map(|s| (s.concern, s.glow, s.wave));
+    assert_eq!(rest, Some((Some(Concern::Waiting), full, None)));
+    assert_eq!(bed.hp.halo_waves(), 1);
+    // Amber beside the bar.
+    let after = pixel(&mut bed.hp, beside)?;
+    assert!(
+        after[0] > before[0] + 25 && after[1] > before[1] + 15 && after[0] > after[2] + 10,
+        "{before:?} then {after:?}"
+    );
+    Ok(())
+}
+
+/// On a GPU: still waiting at its fifth minute (backdated to 4 min 59 s),
+/// the agent's reminder runs one more wave, by the loop's timer a second
+/// later; then never again.
+#[test]
+fn the_reminder_wave_comes_once_after_five_minutes() -> anyhow::Result<()> {
+    let Some(mut bed) = halo_bed(false)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "waiting")?;
+    bed.settle()?;
+    assert_eq!(bed.hp.halo_waves(), 1);
+    // As if it had waited 4 min 59 s by now.
+    let since = Duration::from_micros(bed.hp.agents_peek()[0].since);
+    let waited = bed.hp.state().now().saturating_sub(since);
+    bed.hp
+        .backdate_agents(Duration::from_secs(299).saturating_sub(waited));
+    let glimpses = bed.halo_for(Duration::from_millis(2500))?;
+    let came = glimpses
+        .iter()
+        .find(|g| g.wave().is_some())
+        .map(|g| g.at)
+        .ok_or_else(|| anyhow::anyhow!("no reminder: {glimpses:?}"))?;
+    assert!(
+        (Duration::from_millis(800)..Duration::from_millis(1600)).contains(&came),
+        "{came:?}"
+    );
+    assert_eq!(bed.hp.halo_waves(), 2);
+    // An hour later, still waiting: no more.
+    bed.hp.backdate_agents(Duration::from_secs(3600));
+    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    assert_eq!(bed.hp.halo_waves(), 2);
+    bed.rests()?;
+    Ok(())
+}
+
+/// On a GPU: a stuck agent lights the glow in orange, without a wave.
+#[test]
+fn a_stuck_agent_glows_without_a_wave() -> anyhow::Result<()> {
+    let Some(mut bed) = halo_bed(false)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    let beside = bed.beside_the_bar();
+    let before = pixel(&mut bed.hp, beside)?;
+    bed.hocus(&["agent", "build", "failed"], None)?;
+    let glimpses = bed.halo_for(Duration::from_millis(1200))?;
+    assert!(glimpses.iter().any(|g| g.shown.is_some()), "{glimpses:?}");
+    assert!(glimpses.iter().all(|g| g.wave().is_none()), "{glimpses:?}");
+    bed.rests()?;
+    let rest = bed.hp.halo().map(|s| (s.concern, s.glow));
+    assert_eq!(rest, Some((Some(Concern::Stuck), Concern::Stuck.glow())));
+    assert_eq!(bed.hp.halo_waves(), 0);
+    let after = pixel(&mut bed.hp, beside)?;
+    let lift = [0, 1, 2].map(|i| after[i] - before[i]);
+    assert!(
+        lift[0] > 25 && lift[0] > lift[1] + 8,
+        "{before:?} then {after:?}"
+    );
+    Ok(())
+}
+
+/// On a GPU: a finished agent not seen yet lights a soft green glow,
+/// without a wave (variant B).
+#[test]
+fn a_finished_agent_not_seen_glows_softly_green() -> anyhow::Result<()> {
+    let Some(mut bed) = halo_bed(false)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    let beside = bed.beside_the_bar();
+    let before = pixel(&mut bed.hp, beside)?;
+    bed.hocus(&["agent", "build", "done"], None)?;
+    let glimpses = bed.halo_for(Duration::from_millis(1200))?;
+    assert!(glimpses.iter().all(|g| g.wave().is_none()), "{glimpses:?}");
+    bed.rests()?;
+    let soft = Concern::ToSee.glow();
+    assert_eq!(soft.rgb(), [0x6C, 0xC2, 0x87]);
+    assert_eq!(
+        (soft.border, soft.outer.alpha, soft.inner.alpha),
+        (0.45, 0.25, 0.10)
+    );
+    let rest = bed.hp.halo().map(|s| (s.concern, s.glow));
+    assert_eq!(rest, Some((Some(Concern::ToSee), soft)));
+    let after = pixel(&mut bed.hp, beside)?;
+    let lift = [0, 1, 2].map(|i| after[i] - before[i]);
+    assert!(
+        lift[1] > 8 && lift[1] > lift[0],
+        "{before:?} then {after:?}"
+    );
+    Ok(())
+}
+
+/// One state at a time: waiting over stuck over to see; as each is dealt
+/// with, the next shows; the finished one seen from its row, nothing.
+/// The model's, so on Pixman too, which draws no halo.
+#[test]
+fn waiting_comes_before_stuck_before_to_see() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    for (name, state, concern) in [
+        ("api", "done", Concern::ToSee),
+        ("site", "failed", Concern::Stuck),
+        ("infra", "waiting", Concern::Waiting),
+        ("build", "working", Concern::Waiting),
+    ] {
+        bed.agent_is(name, state)?;
+        assert_eq!(bed.hp.halo_concern(), Some(concern), "{name} {state}");
+    }
+    // Answered, the stuck one shows; working again, the finished one.
+    bed.agent_is("infra", "working")?;
+    assert_eq!(bed.hp.halo_concern(), Some(Concern::Stuck));
+    bed.agent_is("site", "working")?;
+    assert_eq!(bed.hp.halo_concern(), Some(Concern::ToSee));
+    bed.settle()?;
+    let row = bed.row("api")?;
+    bed.click(row);
+    bed.agent_becomes("api", Some("seen"))?;
+    assert_eq!(bed.hp.halo_concern(), None);
+    assert_eq!(bed.hp.renderer(), "pixman");
+    assert!(bed.hp.halo().is_none(), "drawn on the CPU");
+    Ok(())
+}
+
+/// On a GPU: answering the agent ends its halo, which fades out in some
+/// 500 ms; waiting again, going to it from its row does too, while it
+/// still waits. Then nothing is drawn.
+#[test]
+fn acting_ends_the_halo_with_its_fade() -> anyhow::Result<()> {
+    let Some(mut bed) = halo_bed(false)? else {
+        return Ok(());
+    };
+    for way in ["answered", "gone to"] {
+        bed.agent_is("build", "waiting")?;
+        bed.settle()?;
+        assert!(bed.hp.halo().is_some(), "{way}");
+        if way == "answered" {
+            bed.hocus(&["agent", "build", "working"], None)?;
+        } else {
+            let row = bed.row("build")?;
+            bed.click(row);
+        }
+        let glimpses = bed.halo_for(Duration::from_millis(1200))?;
+        let fading: Vec<f32> = glimpses
+            .iter()
+            .filter(|g| g.shown.is_some_and(|s| s.concern.is_none()))
+            .map(Glimpse::border)
+            .collect();
+        assert!(fading.len() >= 10, "{way}: {glimpses:?}");
+        assert!(fading.windows(2).all(|p| p[1] <= p[0]), "{way}: {fading:?}");
+        let faded = span(&glimpses, |g| g.shown.is_some());
+        assert!(
+            (Duration::from_millis(350)..Duration::from_millis(650)).contains(&faded),
+            "{way}: {faded:?}"
+        );
+        assert!(bed.hp.halo().is_none(), "{way}");
+        assert_eq!(bed.hp.halo_concern(), None, "{way}");
+        bed.rests()?;
+        if way == "gone to" {
+            // It still waits; only its halo ended.
+            assert_eq!(bed.hp.agents_peek()[0].state, "waiting");
+        } else {
+            bed.agent_becomes("build", Some("working"))?;
+        }
+    }
+    Ok(())
+}
+
+/// With reduced motion, on a GPU: no wave; the glow is there within some
+/// 200 ms.
+#[test]
+fn with_reduced_motion_no_wave_and_the_glow_fades_in_quickly() -> anyhow::Result<()> {
+    let Some(mut bed) = halo_bed(true)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    bed.hocus(&["agent", "build", "waiting"], None)?;
+    let glimpses = bed.halo_for(Duration::from_millis(1000))?;
+    assert!(glimpses.iter().all(|g| g.wave().is_none()), "{glimpses:?}");
+    let full = Concern::Waiting.glow();
+    assert!(
+        glimpses
+            .iter()
+            .any(|g| g.shown.is_some_and(|s| s.glow == full)),
+        "{glimpses:?}"
+    );
+    let rising = span(&glimpses, |g| g.shown.is_some_and(|s| s.glow != full));
+    assert!(
+        rising < Duration::from_millis(260),
+        "{rising:?}: {glimpses:?}"
+    );
+    assert_eq!(bed.hp.halo_waves(), 0);
+    bed.rests()?;
     Ok(())
 }
