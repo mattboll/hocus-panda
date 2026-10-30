@@ -10,7 +10,8 @@
 //! Claude Code's documented payloads) reaching the model and the shell;
 //! the agent's window found above its process; nothing drawn at rest. The
 //! agents' rows (4.1), and going to an agent from its row (4.3): the
-//! streak, the rim's pulse, herdr's pane. The halo (4.4): its wave and its
+//! streak, the rim's pulse, herdr's pane; the streak's start fading to
+//! nothing at its row, and a second click replacing it (4.3b). The halo (4.4): its wave and its
 //! glow, its reminder, its priorities, its end.
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
@@ -28,7 +29,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, WAIT, wait};
+use common::{BTN_LEFT, WAIT, render_node, wait};
 use hocus_agents::tools::Places;
 use hocus_compositor::{
     Config, Headless, HeadlessConfig, RendererChoice,
@@ -1217,18 +1218,6 @@ fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
 
 // --- 4.3: going to an agent -----------------------------------------------------
 
-/// The render node for the tests that need the compositor on a GPU (the
-/// streak is a shader's); `None`, and the test is skipped, without one.
-fn render_node() -> Option<PathBuf> {
-    let node = PathBuf::from("/dev/dri/renderD128");
-    if node.exists() {
-        Some(node)
-    } else {
-        eprintln!("no render node: the compositor would draw on the CPU, without the streak");
-        None
-    }
-}
-
 /// What going to an agent shows at a frame.
 #[derive(Debug, Clone, Copy)]
 struct Sample {
@@ -1258,7 +1247,7 @@ impl Bed {
                 out.push(Sample {
                     at: start.elapsed(),
                     streak: self.hp.streak(),
-                    landing: self.hp.landing(app_id),
+                    landing: self.hp.pulse(app_id),
                     strip: self.hp.desktop(),
                 });
             }
@@ -1563,6 +1552,153 @@ fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
         anyhow::ensure!(over, "the streak goes on");
         bed.settle()?;
     }
+    Ok(())
+}
+
+/// On a GPU: the streak starts from nothing at its row (issue #495). CSS's
+/// shadow ignores the line's gradient: drawn as it is, its glow ringed the
+/// line's first pixels, still transparent, a dark core. Read from the
+/// screen against what it showed before the click: next to the row, and
+/// behind it, the streak's first pixels leave what is under them; further
+/// along its start, the line is no darker than its glow beside it.
+#[test]
+fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let Some(node) = render_node() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            gpu: Some(node),
+            ..Machine::default()
+        },
+    )?;
+    if bed.hp.renderer() != "gles" {
+        eprintln!("the compositor draws on the CPU here: no streak");
+        return Ok(());
+    }
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.agent_becomes("build", Some("working"))?;
+    let row = bed.row("build")?;
+    // The pointer on the row first: its hover is in both pictures.
+    bed.hp.pointer_move(row.0 - 1.0, row.1);
+    bed.hp.pointer_move(row.0, row.1);
+    bed.settle()?;
+    let (width, _, before) = bed.hp.screenshot(0)?;
+    bed.click(row);
+    // A frame of the streak well on its way, at its full alpha.
+    let mut seen = None;
+    let found = bed.hp.dispatch_until(WAIT, |hp| {
+        seen = hp
+            .streak()
+            .filter(|s| s.alpha == 1.0 && !near(s.from, s.head, 250.0));
+        seen.is_some()
+    })?;
+    anyhow::ensure!(found, "no streak");
+    let Streak { from, head, .. } = seen.unwrap_or_default();
+    let (_, _, after) = bed.hp.screenshot(0)?;
+    let len = ((head.0 - from.0).powi(2) + (head.1 - from.1).powi(2)).sqrt();
+    let u = ((head.0 - from.0) / len, (head.1 - from.1) / len);
+    // How much the streak changed the pixel `along` its line from its
+    // start and `across` it: the most of its channels.
+    let changed = |along: f64, across: f64| -> anyhow::Result<i32> {
+        let x = from.0 + along * u.0 - across * u.1;
+        let y = from.1 + along * u.1 + across * u.0;
+        let at = ((y as i32 * width + x as i32) * 4) as usize;
+        let (a, b) = (
+            before.get(at..at + 3).unwrap_or_default(),
+            after.get(at..at + 3).unwrap_or_default(),
+        );
+        anyhow::ensure!(a.len() == 3 && b.len() == 3, "({x}, {y}) is off the screen");
+        Ok((0..3)
+            .map(|i| (i32::from(a[i]) - i32::from(b[i])).abs())
+            .max()
+            .unwrap_or_default())
+    };
+    for along in [-8.0, -4.0, 0.0, 2.0, 4.0] {
+        for across in [-8.0, -5.0, -3.0, 0.0, 3.0, 5.0, 8.0] {
+            let d = changed(along, across)?;
+            assert!(d <= 3, "{d} levels at {along} along, {across} across");
+        }
+    }
+    for along in [8.0, 16.0, 32.0, 64.0] {
+        let core = changed(along, 0.0)?;
+        for across in [-8.0, -5.0, -3.0, 3.0, 5.0, 8.0] {
+            let glow = changed(along, across)?;
+            assert!(
+                glow <= core + 2,
+                "a dark core {along} along: {core} levels on the line, {glow} {across} across"
+            );
+        }
+    }
+    let over = bed.hp.dispatch_until(WAIT, |hp| hp.streak().is_none())?;
+    anyhow::ensure!(over, "the streak goes on");
+    Ok(())
+}
+
+/// On a GPU: a second row clicked while the first streak runs replaces it
+/// at once: one streak, the second row's, from the second row.
+#[test]
+fn a_second_click_replaces_the_first_streak_at_once() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let Some(node) = render_node() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            gpu: Some(node),
+            ..Machine::default()
+        },
+    )?;
+    if bed.hp.renderer() != "gles" {
+        eprintln!("the compositor draws on the CPU here: no streak");
+        return Ok(());
+    }
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
+    bed.hocus(&["agent", "infra", "waiting"], None)?;
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.agent_becomes("infra", Some("waiting"))?;
+    bed.agent_becomes("build", Some("working"))?;
+    bed.settle()?;
+    let (infra, build) = (bed.row("infra")?, bed.row("build")?);
+    let amber = [0xF5, 0xB4, 0x4A];
+    let accent = [0x6C, 0xC2, 0x87];
+    bed.click(infra);
+    let first = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.streak().is_some_and(|s| s.colour == amber))?;
+    anyhow::ensure!(first, "no streak to infra");
+    bed.click(build);
+    bed.hp.dispatch(Duration::from_millis(2))?;
+    let mut streaks = Vec::new();
+    let start = Instant::now();
+    let mut frames = bed.hp.frames();
+    while start.elapsed() < Duration::from_millis(1200) {
+        bed.hp.dispatch(Duration::from_millis(2))?;
+        if bed.hp.frames() != frames {
+            frames = bed.hp.frames();
+            streaks.extend(bed.hp.streak());
+        }
+    }
+    anyhow::ensure!(!streaks.is_empty(), "no streak to build");
+    // From the second row's left edge, in its colour, from its first frame
+    // on: the first streak is gone.
+    assert!(
+        streaks
+            .iter()
+            .all(|s| s.colour == accent && near(s.from, (build.0 - 92.0, build.1), 1.0)),
+        "rows at {infra:?}, {build:?}: {streaks:?}"
+    );
+    assert!(bed.hp.streak().is_none(), "it ends");
     Ok(())
 }
 

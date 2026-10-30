@@ -144,6 +144,19 @@ pub fn shell_script(
     Ok(script)
 }
 
+/// The render node for the tests that need the compositor on a GPU (its
+/// shaders: the streak, the halo; the rim's ring); `None`, and the test is
+/// skipped or runs on the CPU alone, without one.
+pub fn render_node() -> Option<std::path::PathBuf> {
+    let node = std::path::PathBuf::from("/dev/dri/renderD128");
+    if node.exists() {
+        Some(node)
+    } else {
+        eprintln!("no render node: the compositor would draw on the CPU, without its shaders");
+        None
+    }
+}
+
 pub fn compositor() -> anyhow::Result<Headless> {
     Headless::start(HeadlessConfig {
         // The same pixels on every machine, and no GPU needed.
