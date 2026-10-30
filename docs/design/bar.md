@@ -103,7 +103,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 |---|---|---|---|
 | 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
 | 2 | Next meeting | Card: 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`. Hidden when nothing remains today | 44 px |
-| 3 | Agents | Header `AGENTS` and the total, "Sources" on its right (4.0). One 28 px row per agent (4.1, track 4 "the lines"): its panda (24 px, §7 A), its name, and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 28 px a row (+ 18 px for the rest) |
+| 3 | Agents | Header `AGENTS` and the total, "Sources" on its right (4.0). One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
 | 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
 | 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
 | 6 | Spacer | Takes what is left | flexible |
@@ -355,7 +355,7 @@ The pandas are the validated characters (the apprentice magician family).
 They move only when something changes, then hold still; never at rest,
 never on battery saver, never with reduced motion.
 
-- **A, a panda per state** (in the agents' rows, 24 px; 4.1): working (at
+- **A, a panda per state** (in the agents' rows, 30 px; 4.1): working (at
   its laptop), waiting (holds out its hat, ear radiating), finished (arms
   up), stuck (smoking ears), resting (asleep, at 55 %). On a change, the
   changed agent's panda hops once (650 ms: 4 px up, down, 2 px up, down).
@@ -1574,14 +1574,25 @@ nothing to propose, the group is its header alone.
     polled. Plugging in, unplugging and declining, which write files, run
     there too;
   - **herdr** (`hocus-agents::herdr`, ported from the first build without
-    its polling): its socket waited for with inotify, `agent.list`, each
+    its polling): its socket waited for with inotify, `agent.list`, the
+    workspaces' and tabs' labels (`workspace.list`, `tab.list`), each
     pane's `pane.process_info`, then `events.subscribe` on a blocking
-    read.
+    read, the renames with it (`workspace.renamed`, `workspace.updated`,
+    `tab.renamed`, `tab.created`, `tab.closed`, `tab.moved`).
 - **One agent for two sources**: a report joins the agent that has its
   key, else one of another source that has its process (a Claude Code in
   a herdr pane is the pane's foreground process); one source's keys stay
   its own agents. The state that changed last wins; herdr's name wins (the
-  user renames there).
+  user names things there, #497).
+- **Its name** (#497): as herdr's sidebar names it by default, its
+  workspace's label, then " · " and its tab's when the workspace has
+  several tabs or the tab was named ("hocus-panda · refacto"), a rename in
+  herdr showing at once; else its project's folder, the last part of its
+  hook's first `cwd` (kept when a later event has none, or a directory
+  the agent went down into), or the command's `NAME`; else its process's
+  working directory's (`/proc/PID/cwd`). Never its tool's name: herdr's
+  agent kind ("claude") had named every agent alike, and won over the
+  hook's folder when both saw one.
 - **Forgotten** when its session ends (`SessionEnd`, `hocus agent NAME
   ended`), when its process ends (a pidfd on the loop), or when herdr
   goes for its own.
@@ -1678,11 +1689,15 @@ the heads) are display options for later (#491).
 
 - **One row per agent**, under the header as 4.0 built it, which now says
   how many run ("AGENTS 7", the total in `text.faint`, Manrope 600, 4 px
-  after the spaced word). A row is 28 px high and as wide as the column
+  after the spaced word). A row is 34 px high and as wide as the column
   (6 px past the group's sides, 184 px), radius 7, 6 px in: the agent's
-  panda (24 px), 7 px, its name (Manrope 600, 12.5 px, `text`, cut with an
-  ellipsis to what the word on its right leaves), 7 px, that word
-  (11.5 px):
+  panda (30 px), 7 px, its name (Manrope 600, 13.5 px, `text`, cut with an
+  ellipsis to what the word on its right leaves; a name in parts, herdr's
+  "workspace · tab", gives way from its first so that two agents of one
+  workspace keep their tabs apart: "hocus-p… · refacto"), 7 px, that word
+  (12.5 px). These are the real sizes (#497): the mockups were shown
+  zoomed ×1.5, and their 28 px rows looked small at ×1; the bar's width
+  does not change:
   - working: how long it has worked, `text.faint` ("12 min"; "1 h 05"
     from an hour);
   - waiting: "t'attend" / "waiting", `#F5C46E`, the row on
@@ -1695,14 +1710,16 @@ the heads) are display options for later (#491).
     its panda asleep at 55 %.
   Under the pointer a row is lit `rgba(255,255,255,0.06)` and the pointer
   is a hand, as the bar's other rows (the mockup's tints, inline, hide its
-  own `:hover`). The name is the project's folder (a hook's `cwd`), the
-  command's `NAME`, or herdr's pane name.
+  own `:hover`). The name is herdr's for an agent herdr sees (its
+  workspace and its tab, as its sidebar shows them), else the project's
+  folder (a hook's `cwd`) or the command's `NAME`, else the agent's
+  process's directory (4.0 as built, "Its name").
 - **Order**: waiting (the longest first), stuck, to see, working,
   resting; in the order they came otherwise. **At most five rows**; the
-  rest, the lowest first, make one line 2 px under them (11.5 px,
+  rest, the lowest first, make one line 2 px under them (12.5 px,
   `text.faint`): "+ N au repos" / "+ N resting" when they all rest, else
   "+ N autres" / "+ N more". The group is 26 px (the header and the 8 px
-  under it), 28 px a row and 18 px for that line; its surface follows its
+  under it), 34 px a row and 20 px for that line; its surface follows its
   height, never its width.
 - **The pandas** are the validated drawings, one still mood each, as SVG
   (`crates/hocus-shell/assets/pandas/`, with a note of their origin),
@@ -1734,9 +1751,9 @@ the heads) are display options for later (#491).
   desktop shown first if it is another (the desktops' list's `bring`); a
   finished agent is then seen.
 - **Measured headless**, the real shell (`tests/agents.rs`): the five
-  states in their order with their words, 28 px apart, their tints read
+  states in their order with their words, 34 px apart, their tints read
   from the screen; more than five agents folding into "+ 2 au repos", the
-  group 194 px high, then "+ 2 autres" once a hidden one works; a finished
+  group 226 px high (its surface, with the ring's 10 px), then "+ 2 autres" once a hidden one works; a finished
   agent staying "à voir" while its window is on another desktop, seen once
   its window has the keyboard, and seen at once when it finishes with it;
   a row's click switching to the window's desktop and giving it the

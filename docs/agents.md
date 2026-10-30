@@ -35,6 +35,23 @@ hocus agent build working
 make && hocus agent build done || hocus agent build failed
 ```
 
+## How an agent is named
+
+The bar names each agent by the best of what its sources know, never by
+its tool ("claude", "Codex"):
+
+1. **herdr's name**, for an agent herdr sees (its own, or a Claude Code or
+   Codex running in one of its panes): as herdr's sidebar shows it by
+   default, its workspace's label, then " · " and its tab's when the
+   workspace has several tabs or the tab was given a name
+   ("hocus-panda · refacto"). Renaming the workspace or the tab in herdr
+   renames the row at once.
+2. **Its project's folder**: the last part of the hook's `cwd` (the first
+   event's, kept when later events have none or a directory the agent went
+   down into), or the command's `NAME`.
+3. **Its process's working directory**, when no event of its session
+   carries a `cwd`: the last part of `/proc/PID/cwd`.
+
 ## The line, for tools that write it themselves
 
 One line of text per report on the Unix socket, words separated by
@@ -46,8 +63,9 @@ agent SOURCE KEY STATE PID NAME
 
 `SOURCE` is `command` for any tool (`claude-code` and `codex` are the
 hooks'); `KEY` the agent's own name, one word; `STATE` as above;
-`PID` a process id or `-`; `NAME` the rest of the line. The connection may
-carry several lines; nothing is answered.
+`PID` a process id or `-`; `NAME` the rest of the line (empty for a
+hook's agent whose folder is not known yet; a command's is then its
+`KEY`). The connection may carry several lines; nothing is answered.
 
 ## What the hooks say
 

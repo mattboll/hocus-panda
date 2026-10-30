@@ -788,7 +788,7 @@ impl Group {
             } else {
                 1.0
             };
-            // The drawing's box, 126 × 120.5, 24 px wide in its 24 px
+            // The drawing's box, 126 × 120.5, 30 px wide in its 30 px
             // square (iced scales a drawing to the rectangle given).
             let tall = PANDA * PANDA_BOX.1 / PANDA_BOX.0;
             let place = Rectangle::new(

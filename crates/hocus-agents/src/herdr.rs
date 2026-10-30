@@ -5,11 +5,18 @@
 //! (`v0-first-build`, `hocus-platform/src/herdr.rs`), without its polling.
 //!
 //! One thread: it waits for the socket with inotify, lists the agents
-//! (`agent.list`) and each pane's foreground processes
+//! (`agent.list`), the workspaces' and tabs' labels (`workspace.list`,
+//! `tab.list`) and each pane's foreground processes
 //! (`pane.process_info`: the same agent seen by a hook is the same
-//! process), then follows their status events (`events.subscribe`) on a
-//! blocking read; panes coming or going list them again. When herdr goes,
-//! it says so and waits for the socket again.
+//! process), then follows their status events and the renames
+//! (`events.subscribe`) on a blocking read; panes coming or going list
+//! them again. When herdr goes, it says so and waits for the socket again.
+//!
+//! An agent is named as herdr's sidebar names it by default (its
+//! `ui.sidebar.agents.rows`' first line): its workspace's label, then
+//! " · " and its tab's when the workspace has several tabs or the tab was
+//! named; never by its kind ("claude"), which herdr shows under it and
+//! which named every agent alike (#497).
 //!
 //! Going to one of its agents selects its pane ([`select`], 4.3).
 
@@ -33,7 +40,15 @@ const ANSWER: Duration = Duration::from_secs(2);
 pub struct Agent {
     /// Its pane, which names it in herdr's requests.
     pub pane: String,
-    pub name: String,
+    /// Its workspace and its tab, whose labels name it.
+    pub workspace: String,
+    pub tab: String,
+    /// Its name as herdr's sidebar shows it, when herdr labels its
+    /// workspace.
+    pub name: Option<String>,
+    /// Its directory's name (herdr's `cwd` for it, else its foreground's,
+    /// else its processes'), for when herdr gives no name.
+    pub folder: Option<String>,
     /// What it is doing; `None`: herdr does not know.
     pub state: Option<State>,
     /// Its pane's foreground processes.
@@ -51,6 +66,9 @@ pub enum News {
     },
     /// One agent's state changed.
     State { pane: String, state: Option<State> },
+    /// A workspace or a tab was renamed (or tabs came, went, moved): the
+    /// agents' names now, by pane.
+    Names(Vec<(String, Option<String>)>),
     /// herdr went away.
     Gone,
 }
@@ -154,7 +172,8 @@ fn session(
     connected: &mut bool,
 ) -> Result<bool, String> {
     let listed = call(socket, "agent.list", json!({}))?;
-    let mut agents = parse_agents(&listed);
+    let mut labels = Labels::of(socket);
+    let mut agents = parse_agents(&listed, &labels);
     for agent in &mut agents {
         if let Ok(info) = call(
             socket,
@@ -163,8 +182,27 @@ fn session(
         ) {
             agent.pids = pids(&info);
         }
+        if agent.folder.is_none() {
+            agent.folder = agent
+                .pids
+                .iter()
+                .rev()
+                .find_map(|pid| crate::process::folder_of(*pid));
+        }
     }
     let panes: Vec<String> = agents.iter().map(|a| a.pane.clone()).collect();
+    // Where each is, and its name, for the renames.
+    let mut named: Vec<(String, String, String, Option<String>)> = agents
+        .iter()
+        .map(|a| {
+            (
+                a.pane.clone(),
+                a.workspace.clone(),
+                a.tab.clone(),
+                a.name.clone(),
+            )
+        })
+        .collect();
     *connected = true;
     if !sink(News::Agents {
         agents,
@@ -205,7 +243,33 @@ fn session(
                         }
                     }
                     Some(Event::State { .. } | Event::Panes) => return Ok(true),
-                    None => {}
+                    Some(Event::Workspace { id, label }) => {
+                        labels.workspaces.insert(id, label);
+                    }
+                    Some(Event::Tab { id, label }) => {
+                        if let Some(tab) = labels.tabs.iter_mut().find(|t| t.id == id) {
+                            tab.label = label;
+                        }
+                    }
+                    Some(Event::Tabs) => labels = Labels::of(socket),
+                    None => continue,
+                }
+                let mut changed = false;
+                for (_, workspace, tab, name) in &mut named {
+                    let now = labels.name(workspace, tab);
+                    if *name != now {
+                        *name = now;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let names = named
+                        .iter()
+                        .map(|(pane, _, _, name)| (pane.clone(), name.clone()))
+                        .collect();
+                    if !sink(News::Names(names)) {
+                        return Ok(false);
+                    }
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
@@ -214,14 +278,21 @@ fn session(
     }
 }
 
-/// What the subscription follows: each agent's state, and panes coming
-/// and going (then the agents are listed again).
+/// What the subscription follows: each agent's state, panes coming and
+/// going (then the agents are listed again), and what renames them.
 fn subscriptions(panes: &[String]) -> Vec<Value> {
     let mut all: Vec<Value> = [
         "pane.created",
         "pane.closed",
         "pane.exited",
         "pane.agent_detected",
+        "pane.moved",
+        "workspace.renamed",
+        "workspace.updated",
+        "tab.renamed",
+        "tab.created",
+        "tab.closed",
+        "tab.moved",
     ]
     .iter()
     .map(|t| json!({ "type": t }))
@@ -242,13 +313,44 @@ enum Event {
     },
     /// Panes came, went or got an agent.
     Panes,
+    /// A workspace's label, renamed or updated (herdr's own label follows
+    /// its repository).
+    Workspace {
+        id: String,
+        label: String,
+    },
+    /// A tab's label, renamed.
+    Tab {
+        id: String,
+        label: String,
+    },
+    /// Tabs came, went or moved: whether a tab's label shows, and the
+    /// numbers herdr labels its unnamed ones with, may change.
+    Tabs,
 }
 
 /// An event line, whichever spelling herdr gives its name.
 fn event(value: &Value) -> Option<Event> {
     let name = value.get("event")?.as_str()?.replace('.', "_");
     let data = value.get("data")?;
+    let text = |v: &Value, key: &str| v.get(key)?.as_str().map(str::to_owned);
     match name.as_str() {
+        "workspace_renamed" => Some(Event::Workspace {
+            id: text(data, "workspace_id")?,
+            label: text(data, "label")?,
+        }),
+        "workspace_updated" => {
+            let workspace = data.get("workspace")?;
+            Some(Event::Workspace {
+                id: text(workspace, "workspace_id")?,
+                label: text(workspace, "label")?,
+            })
+        }
+        "tab_renamed" => Some(Event::Tab {
+            id: text(data, "tab_id")?,
+            label: text(data, "label")?,
+        }),
+        "tab_created" | "tab_closed" | "tab_moved" => Some(Event::Tabs),
         "pane_agent_status_changed" => Some(Event::State {
             pane: data.get("pane_id")?.as_str()?.to_owned(),
             state: state(data.get("agent_status")?.as_str()?),
@@ -260,7 +362,85 @@ fn event(value: &Value) -> Option<Event> {
     }
 }
 
-fn parse_agents(result: &Value) -> Vec<Agent> {
+/// herdr's workspaces' and tabs' labels.
+#[derive(Debug, Default, PartialEq)]
+struct Labels {
+    workspaces: HashMap<String, String>,
+    /// In herdr's order, each workspace's tabs first to last.
+    tabs: Vec<Tab>,
+}
+
+#[derive(Debug, PartialEq)]
+struct Tab {
+    id: String,
+    workspace: String,
+    label: String,
+}
+
+impl Labels {
+    /// Asked of herdr; what it does not answer stays unknown (the agents
+    /// are then named by their folder).
+    fn of(socket: &Path) -> Self {
+        let workspaces = call(socket, "workspace.list", json!({})).unwrap_or_default();
+        let tabs = call(socket, "tab.list", json!({})).unwrap_or_default();
+        Self::parse(&workspaces, &tabs)
+    }
+
+    fn parse(workspaces: &Value, tabs: &Value) -> Self {
+        let text = |v: &Value, key: &str| v.get(key)?.as_str().map(str::to_owned);
+        let list = |v: &Value, key: &str| {
+            v.get(key)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        };
+        Self {
+            workspaces: list(workspaces, "workspaces")
+                .iter()
+                .filter_map(|w| Some((text(w, "workspace_id")?, text(w, "label")?)))
+                .collect(),
+            tabs: list(tabs, "tabs")
+                .iter()
+                .filter_map(|t| {
+                    Some(Tab {
+                        id: text(t, "tab_id")?,
+                        workspace: text(t, "workspace_id")?,
+                        label: text(t, "label")?,
+                    })
+                })
+                .collect(),
+        }
+    }
+
+    /// The agent's name in `workspace`'s `tab`, as herdr's sidebar shows
+    /// it: the workspace's label, and the tab's after " · " when the
+    /// workspace has several tabs or the tab was named (herdr labels an
+    /// unnamed tab with its place, from 1).
+    fn name(&self, workspace: &str, tab: &str) -> Option<String> {
+        let label = crate::name_text(self.workspaces.get(workspace)?);
+        if label.is_empty() {
+            return None;
+        }
+        let siblings: Vec<&Tab> = self
+            .tabs
+            .iter()
+            .filter(|t| t.workspace == workspace)
+            .collect();
+        let shown = siblings
+            .iter()
+            .enumerate()
+            .find(|(_, t)| t.id == tab)
+            .filter(|(at, t)| siblings.len() > 1 || t.label != (at + 1).to_string())
+            .map(|(_, t)| crate::name_text(&t.label))
+            .filter(|t| !t.is_empty());
+        Some(match shown {
+            Some(tab) => format!("{label} · {tab}"),
+            None => label,
+        })
+    }
+}
+
+fn parse_agents(result: &Value, labels: &Labels) -> Vec<Agent> {
     let text = |v: &Value, key: &str| {
         v.get(key)
             .and_then(Value::as_str)
@@ -275,13 +455,17 @@ fn parse_agents(result: &Value) -> Vec<Agent> {
         .filter_map(|a| {
             let pane = text(a, "pane_id")?;
             let status = a.get("agent_status")?.as_str()?;
-            let name = text(a, "name")
-                .or_else(|| text(a, "display_agent"))
-                .or_else(|| text(a, "agent"))
-                .unwrap_or_else(|| pane.clone());
+            let workspace = text(a, "workspace_id").unwrap_or_default();
+            let tab = text(a, "tab_id").unwrap_or_default();
+            let folder = text(a, "cwd")
+                .or_else(|| text(a, "foreground_cwd"))
+                .and_then(|cwd| crate::folder(&cwd));
             Some(Agent {
+                name: labels.name(&workspace, &tab),
                 pane,
-                name,
+                workspace,
+                tab,
+                folder,
                 state: state(status),
                 pids: Vec::new(),
             })
@@ -411,32 +595,146 @@ mod tests {
     use super::*;
     use crate::process::Process;
 
+    /// `workspace.list`, `tab.list` and `agent.list` as herdr answers them
+    /// (its API schema, `herdr api schema`, protocol 19): two workspaces,
+    /// the first with two tabs, the second named after its repository
+    /// with one.
+    fn listed() -> (Value, Value, Value) {
+        let workspaces = json!({ "type": "workspace_list", "workspaces": [
+            { "workspace_id": "w1", "number": 1, "label": "hocus-panda", "focused": true,
+              "pane_count": 3, "tab_count": 2, "active_tab_id": "w1:t1", "agent_status": "working" },
+            { "workspace_id": "w2", "number": 2, "label": "infra", "focused": false,
+              "pane_count": 1, "tab_count": 1, "active_tab_id": "w2:t1", "agent_status": "idle" },
+            { "workspace_id": "w3", "number": 3, "label": "site", "focused": false,
+              "pane_count": 1, "tab_count": 1, "active_tab_id": "w3:t2", "agent_status": "idle" },
+        ] });
+        let tabs = json!({ "type": "tab_list", "tabs": [
+            { "tab_id": "w1:t1", "workspace_id": "w1", "number": 1, "label": "refacto",
+              "focused": true, "pane_count": 2, "agent_status": "working" },
+            { "tab_id": "w1:t2", "workspace_id": "w1", "number": 2, "label": "2",
+              "focused": false, "pane_count": 1, "agent_status": "idle" },
+            { "tab_id": "w2:t1", "workspace_id": "w2", "number": 1, "label": "1",
+              "focused": false, "pane_count": 1, "agent_status": "idle" },
+            // Its first tab closed: the one left is labelled "1", its
+            // number 2.
+            { "tab_id": "w3:t2", "workspace_id": "w3", "number": 2, "label": "1",
+              "focused": false, "pane_count": 1, "agent_status": "idle" },
+        ] });
+        let agent = |pane: &str, tab: &str, status: &str, cwd: Value| {
+            let workspace = &tab[..2];
+            json!({ "pane_id": pane, "terminal_id": format!("t-{pane}"), "workspace_id": workspace,
+              "tab_id": tab, "focused": false, "revision": 3, "agent_status": status,
+              "agent": "claude", "display_agent": null, "name": null, "title": "✳ Claude Code",
+              "cwd": cwd, "foreground_cwd": null, "interactive_ready": true,
+              "launch_pending": false, "screen_detection_skipped": false,
+              "state_change_seq": 7, "state_labels": {}, "tokens": {} })
+        };
+        let agents = json!({ "type": "agent_list", "agents": [
+            agent("w1:p1", "w1:t1", "blocked", json!("/home/alex/hocus-panda")),
+            agent("w1:p3", "w1:t2", "working", json!("/home/alex/hocus-panda")),
+            agent("w2:p1", "w2:t1", "idle", json!("/home/alex/infra")),
+            agent("w3:p1", "w3:t2", "done", json!(null)),
+            agent("w9:p1", "w9:t1", "unknown", json!("/home/alex/notes")),
+            { "agent_status": "idle" },
+        ] });
+        (workspaces, tabs, agents)
+    }
+
     #[test]
-    fn agents_are_named_by_their_name_else_their_kind() {
-        let listed = json!({
-            "type": "agent_list",
-            "agents": [
-                { "pane_id": "w1:p1", "terminal_id": "t1", "workspace_id": "w1", "tab_id": "w1:t1",
-                  "focused": false, "revision": 3, "agent_status": "blocked", "name": "refacto",
-                  "agent": "claude" },
-                { "pane_id": "w1:p2", "agent_status": "working", "agent": "codex", "name": null },
-                { "pane_id": "w1:p3", "agent_status": "unknown" },
-                { "agent_status": "idle" },
-            ]
-        });
-        let agents = parse_agents(&listed);
-        let seen: Vec<(&str, &str, Option<State>)> = agents
+    fn agents_are_named_as_herdrs_sidebar_names_them_never_by_their_kind() {
+        let (workspaces, tabs, listed) = listed();
+        let labels = Labels::parse(&workspaces, &tabs);
+        let agents = parse_agents(&listed, &labels);
+        let seen: Vec<_> = agents
             .iter()
-            .map(|a| (a.pane.as_str(), a.name.as_str(), a.state))
+            .map(|a| {
+                (
+                    a.pane.as_str(),
+                    a.name.as_deref(),
+                    a.folder.as_deref(),
+                    a.state,
+                )
+            })
             .collect();
         assert_eq!(
             seen,
             [
-                ("w1:p1", "refacto", Some(State::Waiting)),
-                ("w1:p2", "codex", Some(State::Working)),
-                ("w1:p3", "w1:p3", None),
+                // A named tab, among two.
+                (
+                    "w1:p1",
+                    Some("hocus-panda · refacto"),
+                    Some("hocus-panda"),
+                    Some(State::Waiting)
+                ),
+                // An unnamed one, among two: its number.
+                (
+                    "w1:p3",
+                    Some("hocus-panda · 2"),
+                    Some("hocus-panda"),
+                    Some(State::Working)
+                ),
+                // Alone and unnamed: the workspace's label.
+                ("w2:p1", Some("infra"), Some("infra"), Some(State::Idle)),
+                ("w3:p1", Some("site"), None, Some(State::Done)),
+                // A workspace herdr did not list: no name from herdr, its
+                // folder.
+                ("w9:p1", None, Some("notes"), None),
             ]
         );
+        // An older herdr, without the lists: its folder only.
+        let bare = parse_agents(&listed, &Labels::default());
+        assert!(bare.iter().all(|a| a.name.is_none()), "{bare:?}");
+        assert!(agents.iter().all(|a| a.name.as_deref() != Some("claude")));
+    }
+
+    #[test]
+    fn renames_in_herdr_are_heard() {
+        let (workspaces, tabs, _) = listed();
+        let mut labels = Labels::parse(&workspaces, &tabs);
+        let renamed = json!({ "event": "tab_renamed",
+            "data": { "type": "tab_renamed", "tab_id": "w2:t1", "workspace_id": "w2", "label": "deploy" } });
+        let Some(Event::Tab { id, label }) = event(&renamed) else {
+            panic!("{renamed}");
+        };
+        if let Some(tab) = labels.tabs.iter_mut().find(|t| t.id == id) {
+            tab.label = label;
+        }
+        assert_eq!(
+            labels.name("w2", "w2:t1").as_deref(),
+            Some("infra · deploy")
+        );
+        let workspace = json!({ "event": "workspace.renamed",
+            "data": { "type": "workspace_renamed", "workspace_id": "w2", "label": "ops" } });
+        assert_eq!(
+            event(&workspace),
+            Some(Event::Workspace {
+                id: "w2".into(),
+                label: "ops".into()
+            })
+        );
+        let updated = json!({ "event": "workspace_updated", "data": { "type": "workspace_updated",
+            "workspace": { "workspace_id": "w3", "number": 3, "label": "site-web", "focused": false,
+              "pane_count": 1, "tab_count": 1, "active_tab_id": "w3:t2", "agent_status": "idle" } } });
+        assert_eq!(
+            event(&updated),
+            Some(Event::Workspace {
+                id: "w3".into(),
+                label: "site-web".into()
+            })
+        );
+        for kind in ["tab_created", "tab.closed", "tab_moved"] {
+            let tabs = json!({ "event": kind, "data": { "type": kind } });
+            assert_eq!(event(&tabs), Some(Event::Tabs), "{kind}");
+        }
+        let subscribed = subscriptions(&[]);
+        for kind in [
+            "tab.renamed",
+            "workspace.renamed",
+            "workspace.updated",
+            "tab.created",
+        ] {
+            assert!(subscribed.contains(&json!({ "type": kind })), "{kind}");
+        }
     }
 
     #[test]

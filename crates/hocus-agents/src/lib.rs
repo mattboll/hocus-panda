@@ -128,8 +128,9 @@ pub struct Report {
     /// The agent's process, when known: its window is found above it, and
     /// it is forgotten when it ends.
     pub pid: Option<u32>,
-    /// The name it shows under (its project's directory, or the name the
-    /// command gave).
+    /// The name it shows under: its project's directory (else its
+    /// process's working directory's, empty when neither is known), or the
+    /// name the command gave.
     pub name: String,
 }
 
@@ -210,7 +211,13 @@ impl FromStr for Report {
             ),
         };
         let name = words.next().map(name_text).unwrap_or_default();
-        let name = if name.is_empty() { key.clone() } else { name };
+        // A command's agent is its name; a hook's without one is named
+        // later, never by its key (a session's id).
+        let name = if name.is_empty() && source == Source::Command {
+            key.clone()
+        } else {
+            name
+        };
         Ok(Self {
             source,
             key,
@@ -219,6 +226,32 @@ impl FromStr for Report {
             name,
         })
     }
+}
+
+/// A directory's name as an agent's: its path's last part (none for `/`
+/// or an empty path).
+pub fn folder(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| name_text(&n.to_string_lossy()))
+        .filter(|n| !n.is_empty())
+}
+
+/// The name an agent shows under (docs/agents.md), from the best of what
+/// its sources know: herdr's, as its sidebar shows it; else its project's
+/// folder (a hook's `cwd`, or the command's name); else its process's
+/// working directory's. Never its tool's name: herdr's agent kind
+/// ("claude") named every agent alike (#497).
+pub fn agent_name(
+    herdr: Option<&str>,
+    project: Option<&str>,
+    process: Option<&str>,
+) -> Option<String> {
+    [herdr, project, process]
+        .into_iter()
+        .flatten()
+        .map(name_text)
+        .find(|n| !n.is_empty())
 }
 
 /// A line that does not read.
@@ -278,8 +311,42 @@ mod tests {
         ] {
             assert!(bad.parse::<Report>().is_err(), "{bad:?}");
         }
-        // No name: the key.
+        // No name: a command's is its key; a hook's stays unknown.
         let bare: Report = "agent command build done -".parse().expect("a line");
         assert_eq!(bare.name, "build");
+        let hook: Report = "agent claude-code 7c1f-22 working 42 "
+            .parse()
+            .expect("a line");
+        assert_eq!(hook.name, "");
+        let unnamed = Report {
+            name: String::new(),
+            ..hook.clone()
+        };
+        assert_eq!(unnamed.to_string().parse::<Report>(), Ok(hook));
+    }
+
+    #[test]
+    fn an_agent_is_named_by_herdr_else_its_folder_else_its_process_never_its_tool() {
+        assert_eq!(
+            agent_name(
+                Some("hocus-panda · refacto"),
+                Some("hocus-panda"),
+                Some("x")
+            ),
+            Some("hocus-panda · refacto".into())
+        );
+        assert_eq!(
+            agent_name(None, Some("infra"), Some("home")),
+            Some("infra".into())
+        );
+        assert_eq!(
+            agent_name(Some(" "), Some(""), Some("site")),
+            Some("site".into())
+        );
+        assert_eq!(agent_name(None, None, None), None);
+        assert_eq!(folder("/home/alex/hocus-panda"), Some("hocus-panda".into()));
+        assert_eq!(folder("/home/alex/infra/"), Some("infra".into()));
+        assert_eq!(folder("/"), None);
+        assert_eq!(folder(""), None);
     }
 }

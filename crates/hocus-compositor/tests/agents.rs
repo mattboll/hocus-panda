@@ -45,6 +45,9 @@ struct Machine {
     claude: bool,
     codex: bool,
     herdr: bool,
+    /// What its herdr holds (default: one agent, `refacto`, alone in its
+    /// workspace).
+    herdr_holds: Option<fn() -> FakeHerdr>,
     /// The time the shell's clock reads as it starts (`HOCUS_CLOCK_AT`).
     clock_at: Option<&'static str>,
     /// The compositor on this render node, the shell on its GPU (else
@@ -62,10 +65,56 @@ struct Bed {
     _herdr: Option<std::thread::JoinHandle<()>>,
     /// What it was asked, method and parameters, past its listing.
     herdr_heard: Heard,
+    /// What it holds, and its subscribers.
+    herdr: Herdr,
 }
 
 /// The fake herdr's requests.
 type Heard = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+/// What the fake herdr holds: its workspaces, tabs and agents as its API
+/// lists them (`herdr api schema`), and the connections subscribed to its
+/// events.
+#[derive(Default)]
+struct FakeHerdr {
+    workspaces: Vec<serde_json::Value>,
+    tabs: Vec<serde_json::Value>,
+    agents: Vec<serde_json::Value>,
+    /// An older herdr: no `workspace.list`, no `tab.list`.
+    no_labels: bool,
+    subscribers: Vec<std::os::unix::net::UnixStream>,
+}
+
+type Herdr = std::sync::Arc<std::sync::Mutex<FakeHerdr>>;
+
+impl FakeHerdr {
+    /// One workspace, `workspace`, with tabs labelled `tabs` (an unnamed
+    /// one is labelled with its place), a Claude Code working in the
+    /// first: pane w1:p1, its directory `cwd`.
+    fn with(workspace: &str, tabs: &[&str], cwd: Option<&str>) -> Self {
+        let tab = |i: usize, label: &str| {
+            serde_json::json!({ "tab_id": format!("w1:t{}", i + 1), "workspace_id": "w1",
+                "number": i + 1, "label": label, "focused": i == 0, "pane_count": 1,
+                "agent_status": "idle" })
+        };
+        Self {
+            workspaces: vec![serde_json::json!({ "workspace_id": "w1", "number": 1,
+                "label": workspace, "focused": true, "pane_count": tabs.len(),
+                "tab_count": tabs.len(), "active_tab_id": "w1:t1", "agent_status": "working" })],
+            tabs: tabs.iter().enumerate().map(|(i, l)| tab(i, l)).collect(),
+            agents: vec![
+                serde_json::json!({ "pane_id": "w1:p1", "terminal_id": "w1:term1",
+                "workspace_id": "w1", "tab_id": "w1:t1", "focused": false, "revision": 1,
+                "agent_status": "working", "agent": "claude", "display_agent": null,
+                "name": null, "title": "✳ Claude Code", "cwd": cwd, "foreground_cwd": null,
+                "interactive_ready": true, "launch_pending": false,
+                "screen_detection_skipped": false, "state_change_seq": 1,
+                "state_labels": {}, "tokens": {} }),
+            ],
+            ..Self::default()
+        }
+    }
+}
 
 /// The programs this test needs, built beside it.
 fn ready() -> Option<(PathBuf, PathBuf)> {
@@ -94,12 +143,13 @@ fn places(home: &Path, hocus: &Path) -> Places {
     }
 }
 
-/// A fake herdr on `socket`: one agent, `refacto`, working in pane w1:p1,
-/// whose foreground process is `pid`. What it is asked besides listing and
-/// subscribing goes into `heard`.
+/// A fake herdr on `socket`, holding `herdr`; each pane's foreground
+/// process is `pid`. What it is asked besides listing and subscribing
+/// goes into `heard`.
 fn fake_herdr(
     socket: &Path,
     pid: u32,
+    herdr: Herdr,
     heard: Heard,
 ) -> anyhow::Result<std::thread::JoinHandle<()>> {
     std::fs::create_dir_all(socket.parent().unwrap_or(Path::new("/")))?;
@@ -115,12 +165,22 @@ fn fake_herdr(
                 continue;
             };
             let id = request["id"].clone();
-            let result = match request["method"].as_str() {
-                Some("agent.list") => serde_json::json!({ "type": "agent_list", "agents": [
-                    { "pane_id": "w1:p1", "agent_status": "working", "name": "refacto", "agent": "claude" }
-                ] }),
+            let Ok(mut held) = herdr.lock() else {
+                return;
+            };
+            let method = request["method"].as_str();
+            let result = match method {
+                Some("agent.list") => {
+                    serde_json::json!({ "type": "agent_list", "agents": held.agents })
+                }
+                Some("workspace.list" | "tab.list") if held.no_labels => serde_json::Value::Null,
+                Some("workspace.list") => {
+                    serde_json::json!({ "type": "workspace_list", "workspaces": held.workspaces })
+                }
+                Some("tab.list") => serde_json::json!({ "type": "tab_list", "tabs": held.tabs }),
                 Some("pane.process_info") => {
-                    serde_json::json!({ "shell_pid": 1, "foreground": [ { "pid": pid, "name": "claude" } ] })
+                    serde_json::json!({ "type": "pane_process_info", "shell": { "pid": 1 },
+                        "foreground": [ { "pid": pid, "name": "claude" } ] })
                 }
                 Some("events.subscribe") => serde_json::json!({ "type": "subscription_started" }),
                 method => {
@@ -130,8 +190,19 @@ fn fake_herdr(
                     serde_json::json!({ "type": "ok" })
                 }
             };
-            let answer = serde_json::json!({ "id": id, "result": result });
+            let answer = if result.is_null() {
+                serde_json::json!({ "id": id, "error": { "code": "unknown_method",
+                    "message": format!("unknown method {}", method.unwrap_or("")) } })
+            } else {
+                serde_json::json!({ "id": id, "result": result })
+            };
             let _ = (&stream).write_all(format!("{answer}\n").as_bytes());
+            if method == Some("events.subscribe")
+                && let Ok(subscriber) = stream.try_clone()
+            {
+                held.subscribers.push(subscriber);
+            }
+            drop(held);
             // The subscription stays open.
             kept.push(stream);
         }
@@ -150,11 +221,17 @@ fn start(shell: &Path, hocus: &Path, machine: &Machine) -> anyhow::Result<Bed> {
         std::fs::create_dir_all(home.join(".codex"))?;
     }
     let heard = Heard::default();
+    let held: Herdr = std::sync::Arc::new(std::sync::Mutex::new(
+        machine
+            .herdr_holds
+            .map_or_else(|| FakeHerdr::with("refacto", &["1"], None), |holds| holds()),
+    ));
     let herdr = if machine.herdr {
         Some((
             fake_herdr(
                 &home.join(".config/herdr/herdr.sock"),
                 std::process::id(),
+                held.clone(),
                 heard.clone(),
             )?,
             heard,
@@ -162,7 +239,9 @@ fn start(shell: &Path, hocus: &Path, machine: &Machine) -> anyhow::Result<Bed> {
     } else {
         None
     };
-    start_in(dir, shell, hocus, herdr, machine)
+    let mut bed = start_in(dir, shell, hocus, herdr, machine)?;
+    bed.herdr = held;
+    Ok(bed)
 }
 
 fn start_in(
@@ -220,6 +299,7 @@ fn start_in(
         hocus: hocus.to_path_buf(),
         _herdr: herdr,
         herdr_heard,
+        herdr: Herdr::default(),
     };
     let drawn = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
         hp.agents_surfaces().len() == 1 && hp.agents_commits() > 0
@@ -970,8 +1050,8 @@ fn the_rows_say_each_agent_in_order_with_its_colour() -> anyhow::Result<()> {
         .collect::<anyhow::Result<_>>()?;
     assert!(
         rows.windows(2)
-            .all(|p| (p[1].1 - p[0].1 - 28.0).abs() < 0.6),
-        "28 px apart: {rows:?}"
+            .all(|p| (p[1].1 - p[0].1 - 34.0).abs() < 0.6),
+        "34 px apart: {rows:?}"
     );
     bed.settle()?;
     // Each row's tint, 3 px into it (left of its panda), against the
@@ -1025,11 +1105,11 @@ fn more_than_five_agents_fold_into_a_line() -> anyhow::Result<()> {
             "· w5 0\u{a0}min · +\u{a0}2 au repos",
         ],
     )?;
-    // Five rows and the line: 26 + 5 × 28 + 18, and the ring's room.
+    // Five rows and the line: 26 + 5 × 34 + 20, and the ring's room.
     let tall = bed.hp.dispatch_until(WAIT, |hp| {
         hp.agents_surfaces()
             .first()
-            .is_some_and(|(_, r)| r.height == 26 + 5 * 28 + 18 + 10)
+            .is_some_and(|(_, r)| r.height == 26 + 5 * 34 + 20 + 10)
     })?;
     anyhow::ensure!(tall, "{:?}", bed.surface());
     // One of them works now: not all the hidden ones rest.
@@ -1732,6 +1812,263 @@ fn going_to_a_herdr_agent_selects_its_pane() -> anyhow::Result<()> {
         "herdr was asked {:?}",
         bed.herdr_heard.lock().map(|h| h.clone())
     );
+    Ok(())
+}
+
+// --- 4.1b: agents named as herdr names them (#497) ---------------------------------
+
+impl Bed {
+    /// The fake herdr changes what it holds, then tells its subscribers
+    /// `event` with `data`.
+    fn herdr_says(
+        &mut self,
+        change: impl FnOnce(&mut FakeHerdr),
+        event: &str,
+        data: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let mut held = self
+            .herdr
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the fake herdr panicked"))?;
+        change(&mut held);
+        let line = serde_json::json!({ "event": event, "data": data });
+        anyhow::ensure!(!held.subscribers.is_empty(), "nobody follows herdr");
+        for subscriber in &held.subscribers {
+            (&*subscriber).write_all(format!("{line}\n").as_bytes())?;
+        }
+        Ok(())
+    }
+
+    /// No agent is named by its tool, or by its kind as herdr says it.
+    fn no_tool_names(&self) -> anyhow::Result<()> {
+        let agents = self.hp.agents_peek();
+        let tools = ["claude", "Claude Code", "codex", "Codex", "claude-code"];
+        anyhow::ensure!(
+            !agents.iter().any(|a| tools.contains(&a.name.as_str())),
+            "an agent named by its tool: {agents:?}"
+        );
+        Ok(())
+    }
+}
+
+/// A Claude Code in herdr's first tab, named, of two, in workspace
+/// "hocus-panda".
+fn two_tabs() -> FakeHerdr {
+    FakeHerdr::with(
+        "hocus-panda",
+        &["refacto", "2"],
+        Some("/home/alex/hocus-panda"),
+    )
+}
+
+/// The cause of #497: herdr's agent shows as herdr's sidebar names it, its
+/// workspace's label and its tab's, not as its kind ("claude").
+#[test]
+fn a_herdr_agent_is_named_as_herdrs_sidebar_names_it() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            herdr: true,
+            herdr_holds: Some(two_tabs),
+            ..Machine::default()
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    bed.agent_becomes("hocus-panda · refacto", Some("working"))?;
+    // Followed as the shell started.
+    bed.logged("shows=AGENTS 1 · hocus-panda · refacto 0\u{a0}min")?;
+    bed.no_tool_names()?;
+    Ok(())
+}
+
+/// A rename in herdr, its tab's then its workspace's, shows at once.
+#[test]
+fn a_rename_in_herdr_shows_at_once() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            herdr: true,
+            herdr_holds: Some(two_tabs),
+            ..Machine::default()
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    bed.agent_becomes("hocus-panda · refacto", Some("working"))?;
+    let from = bed.mark();
+    bed.herdr_says(
+        |h| h.tabs[0]["label"] = "revue".into(),
+        "tab_renamed",
+        serde_json::json!({ "type": "tab_renamed", "tab_id": "w1:t1",
+            "workspace_id": "w1", "label": "revue" }),
+    )?;
+    bed.agent_becomes("hocus-panda · revue", Some("working"))?;
+    bed.logged_after(from, &["shows=AGENTS 1 · hocus-panda · revue"])?;
+    bed.herdr_says(
+        |h| h.workspaces[0]["label"] = "panda".into(),
+        "workspace_renamed",
+        serde_json::json!({ "type": "workspace_renamed", "workspace_id": "w1",
+            "label": "panda" }),
+    )?;
+    bed.agent_becomes("panda · revue", Some("working"))?;
+    // Its other tab closed: an unnamed tab alone would not show, a named
+    // one still does.
+    bed.herdr_says(
+        |h| {
+            h.tabs.pop();
+        },
+        "tab_closed",
+        serde_json::json!({ "type": "tab_closed", "tab_id": "w1:t2", "workspace_id": "w1" }),
+    )?;
+    bed.agent_becomes("panda · revue", Some("working"))?;
+    bed.herdr_says(
+        |h| h.tabs[0]["label"] = "1".into(),
+        "tab_renamed",
+        serde_json::json!({ "type": "tab_renamed", "tab_id": "w1:t1",
+            "workspace_id": "w1", "label": "1" }),
+    )?;
+    bed.agent_becomes("panda", Some("working"))?;
+    bed.no_tool_names()?;
+    Ok(())
+}
+
+/// A Claude Code plugged in, running in a herdr pane: one agent, seen by
+/// both, named as herdr names it rather than by its folder.
+#[test]
+fn a_claude_code_agent_in_a_herdr_pane_takes_herdrs_name() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            herdr: true,
+            herdr_holds: Some(|| FakeHerdr::with("panda", &["refacto", "2"], None)),
+            ..Machine::default()
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    bed.agent_becomes("panda · refacto", Some("working"))?;
+    // Its hooks, as Claude Code sends them: `hocus agent-hook` runs as
+    // this process's child, the pane's foreground process.
+    let hook = |event: &str| {
+        format!(
+            "{{\"session_id\":\"abc123\",\"transcript_path\":\"/x.jsonl\",\
+             \"cwd\":\"/home/alex/hocus-panda\",\"permission_mode\":\"default\",\
+             \"hook_event_name\":\"{event}\",\"tool_name\":\"Bash\",\
+             \"tool_input\":{{\"command\":\"cargo test\"}}}}"
+        )
+    };
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook("PermissionRequest")),
+    )?;
+    bed.agent_becomes("panda · refacto", Some("waiting"))?;
+    let agents = bed.hp.agents();
+    assert_eq!(agents.len(), 1, "{agents:?}");
+    assert_eq!(agents[0].source, "claude-code+herdr");
+    // Renamed in herdr: the hook's agent too.
+    bed.herdr_says(
+        |h| h.tabs[0]["label"] = "revue".into(),
+        "tab.renamed",
+        serde_json::json!({ "type": "tab_renamed", "tab_id": "w1:t1",
+            "workspace_id": "w1", "label": "revue" }),
+    )?;
+    bed.agent_becomes("panda · revue", Some("waiting"))?;
+    bed.no_tool_names()?;
+    Ok(())
+}
+
+/// A Claude Code outside herdr: its project's folder, from its first
+/// event's `cwd`, kept when later events have none or another; a session
+/// whose events never say: its process's working directory.
+#[test]
+fn a_hook_agent_outside_herdr_takes_its_folder() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let hook = |session: &str, event: &str, cwd: Option<&str>| {
+        let cwd = cwd.map_or(String::new(), |c| format!(",\"cwd\":\"{c}\""));
+        format!(
+            "{{\"session_id\":\"{session}\",\"transcript_path\":\"/x.jsonl\"{cwd},\
+             \"hook_event_name\":\"{event}\",\"prompt\":\"go\"}}"
+        )
+    };
+    let from = bed.mark();
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook("s1", "SessionStart", Some("/home/alex/hocus-panda"))),
+    )?;
+    bed.agent_becomes("hocus-panda", Some("idle"))?;
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook("s1", "UserPromptSubmit", None)),
+    )?;
+    bed.agent_becomes("hocus-panda", Some("working"))?;
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook(
+            "s1",
+            "PermissionRequest",
+            Some("/home/alex/hocus-panda/crates"),
+        )),
+    )?;
+    bed.agent_becomes("hocus-panda", Some("waiting"))?;
+    bed.logged_after(from, &["shows=AGENTS 1 · hocus-panda t'attend"])?;
+    // Another session whose events have no `cwd`: where its process runs
+    // (this test's directory, as `hocus agent-hook` runs under it).
+    let here = std::env::current_dir()?;
+    let folder = here
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook("s2", "UserPromptSubmit", None)),
+    )?;
+    bed.agent_becomes(&folder, Some("working"))?;
+    assert_eq!(bed.hp.agents().len(), 2, "{:?}", bed.hp.agents());
+    bed.no_tool_names()?;
+    Ok(())
+}
+
+/// Never the tool's name: an older herdr without its labels names its
+/// agent by its folder, then by its process's directory, not "claude".
+#[test]
+fn an_agent_is_never_named_by_its_tool() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            herdr: true,
+            herdr_holds: Some(|| {
+                let mut herdr = FakeHerdr::with("panda", &["1"], None);
+                herdr.no_labels = true;
+                herdr
+            }),
+            ..Machine::default()
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    let here = std::env::current_dir()?;
+    let folder = here
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    bed.agent_becomes(&folder, Some("working"))?;
+    bed.no_tool_names()?;
     Ok(())
 }
 

@@ -12,7 +12,9 @@
 //! - **herdr** ([`hocus_agents::herdr`]), when it runs and is not declined.
 //!
 //! The same agent seen by two sources (a Claude Code in a herdr pane) is
-//! one: its process is among the pane's. An agent is forgotten when its
+//! one: its process is among the pane's. An agent is named as herdr's
+//! sidebar names it, else by its project's folder, else by its process's
+//! working directory ([`hocus_agents::agent_name`]); never by its tool. An agent is forgotten when its
 //! session ends, or when its process does (a pidfd on the loop, no
 //! polling). Its window is the one whose client is the nearest process
 //! above it. The shell is told the tools and the agents in a line each,
@@ -83,6 +85,8 @@ struct Agent {
     pids: Vec<u32>,
     /// Above its process, where its window is looked for.
     ancestry: Vec<u32>,
+    /// Its project's folder (a hook's first `cwd`, else its process's
+    /// working directory), or the command's name; empty while unknown.
     name: String,
     state: State,
     /// Since when, in microseconds of `CLOCK_MONOTONIC` (the shell's).
@@ -280,7 +284,9 @@ impl Compositor {
             agent.state = state;
             agent.since = now;
         }
-        if !report.name.is_empty() {
+        // A hook's agent keeps the folder it was first named by: a later
+        // event's `cwd` may be a directory the agent went down into.
+        if !report.name.is_empty() && (agent.name.is_empty() || report.source == Source::Command) {
             agent.name = report.name;
         }
         if !ancestry.is_empty() {
@@ -370,6 +376,13 @@ impl Compositor {
                     .collect();
                 herdr.terminals = terminals;
             }
+            News::Names(names) => {
+                for (agent, _) in &mut herdr.agents {
+                    if let Some((_, name)) = names.iter().find(|(pane, _)| *pane == agent.pane) {
+                        agent.name.clone_from(name);
+                    }
+                }
+            }
             News::State { pane, state } => {
                 if let Some((agent, since)) = herdr.agents.iter_mut().find(|(a, _)| a.pane == pane)
                     && agent.state != state
@@ -447,13 +460,15 @@ impl Compositor {
         let mut merged: Vec<String> = Vec::new();
         for agent in &self.agents.list {
             let mut sources: Vec<Source> = agent.keys.iter().map(|(s, _)| *s).collect();
-            let (mut state, mut since, mut name) = (agent.state, agent.since, agent.name.clone());
+            let (mut state, mut since) = (agent.state, agent.since);
+            let (mut herdr_name, mut herdr_folder) = (None, None);
             if followed {
                 for (pane, herdr_since) in &self.agents.herdr.agents {
                     if pane.pids.iter().any(|p| agent.pids.contains(p)) {
                         merged.push(pane.pane.clone());
                         sources.push(Source::Herdr);
-                        name.clone_from(&pane.name);
+                        herdr_name = pane.name.as_deref();
+                        herdr_folder = pane.folder.as_deref();
                         if let Some(herdr_state) = pane.state
                             && *herdr_since > since
                         {
@@ -466,6 +481,9 @@ impl Compositor {
             sources.sort_unstable();
             sources.dedup();
             let source: Vec<&str> = sources.iter().map(|s| s.name()).collect();
+            let name = hocus_agents::agent_name(herdr_name, Some(&agent.name), herdr_folder)
+                .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
+                .unwrap_or_default();
             shown.push(AgentShown {
                 id: agent.id,
                 state: state.name().to_owned(),
@@ -485,12 +503,10 @@ impl Compositor {
                 .iter()
                 .filter(|(a, _)| !merged.contains(&a.pane))
                 .map(|(a, since)| {
-                    (
-                        a.pane.clone(),
-                        a.name.clone(),
-                        a.state.unwrap_or(State::Idle),
-                        *since,
-                    )
+                    let name =
+                        hocus_agents::agent_name(a.name.as_deref(), a.folder.as_deref(), None)
+                            .unwrap_or_else(|| a.pane.clone());
+                    (a.pane.clone(), name, a.state.unwrap_or(State::Idle), *since)
                 })
                 .collect();
             for (pane, name, state, since) in pending {
