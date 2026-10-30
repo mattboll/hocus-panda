@@ -6,7 +6,14 @@
 //! shows nothing (hidden, or the mini form). A change of what it shows
 //! resizes it (layer-shell actions) and draws it alone.
 //!
-//! "Sources" and "Un autre outil ?" open the Sources popover, a row's
+//! The secretary heads it (4.6): her head, her ear in the moment's colour,
+//! "AGENTS" and the total over her line; her row tinted amber or orange
+//! when someone waits or is stuck. A click on her opens her briefing,
+//! where "Sources" is. When an agent starts waiting, her ear radiates
+//! twice and she hops twice (3.2 s), once; then she holds still. None of it
+//! with reduced motion or on the CPU.
+//!
+//! "Un autre outil ?" opens the Sources popover, a row's
 //! "Brancher" the consent popover, "Ne rien brancher" declines the tools
 //! listed ([`crate::popover`]).
 //!
@@ -38,9 +45,10 @@ use iced::{
 };
 
 use super::{
-    AGENT_NAME, AGENT_ROW, AGENT_WORD, BUTTON, BUTTON_TEXT, CARD_RADIUS, FOLLOWED, HEADER, IDLE,
-    INTRO, INTRO_LINE, LABEL, LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER,
-    MARK_RADIUS, MORE_TEXT, MOST_ROWS, NAME, PANDA, PANDA_GAP, ROW_PAD, ROW_RADIUS, Row, Words,
+    AGENT_NAME, AGENT_ROW, AGENT_WORD, BUTTON, BUTTON_TEXT, CARD_RADIUS, FOLLOWED, HEAD, HEAD_GAP,
+    HEAD_TOP, HEADER, HEADER_RADIUS, IDLE, INTRO, INTRO_LINE, LABEL, LINK, Layout, Look, MARK,
+    MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MORE_TEXT, MOST_ROWS, Mood, NAME, PANDA,
+    PANDA_GAP, ROW_PAD, ROW_RADIUS, Row, SAYS, Words,
 };
 use crate::{
     clock::motion::bezier,
@@ -79,6 +87,34 @@ const EASE_OUT: (f32, f32, f32, f32) = (0.0, 0.0, 0.58, 1.0);
 const HOP_KEYS: [(f32, f32); 5] = [(0.0, 0.0), (0.3, -4.0), (0.6, 0.0), (0.8, -2.0), (1.0, 0.0)];
 const PLUG: Color = Color::from_rgba8(108, 194, 135, 0.18);
 const PLUG_HOVER: Color = Color::from_rgba8(108, 194, 135, 0.28);
+/// The secretary's row (4.6): lit amber at 8 % when someone waits, orange
+/// at 7 % when an agent is stuck; `0.08` while her briefing is open.
+const SECRETARY_WAITING: Color = Color::from_rgba8(245, 180, 74, 0.08);
+const SECRETARY_STUCK: Color = Color::from_rgba8(242, 148, 91, 0.07);
+const ROW_OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
+/// Her line's colours: `text.dim` calm, then the rows' words'.
+const SAYS_WAITING: Color = rgb(0xF5C46E);
+const SAYS_STUCK: Color = rgb(0xF7A77A);
+/// Her ear's amber, its rings' colour.
+const EAR_WAITING: Color = rgb(0xF5B44A);
+/// When someone starts waiting, as the mockup's keyframes: two rings out
+/// of her ear (`hpRing`, 1.4 s `ease-out`, twice: from 90 % to nothing,
+/// from 0.9 to 1.25 times their size), and two hops (`hpBob`, 1.6 s
+/// `ease-in-out`, twice: 3 px up at its middle).
+const RING: Duration = Duration::from_millis(1400);
+const BOB: Duration = Duration::from_millis(1600);
+const TWICE: u32 = 2;
+const BOB_UP: f32 = 3.0;
+const EASE_IN_OUT: (f32, f32, f32, f32) = (0.42, 0.0, 0.58, 1.0);
+/// Her drawing's view box, its ear's middle, and its rings: arcs of
+/// radius 15 and 20 round the ear, from 199.9° turning 200° (the
+/// drawing's `A15 15 0 1 1` paths), 2.2 units wide, the outer at 60 %.
+const VIEW: f32 = 120.0;
+const EAR: (f32, f32) = (85.0, 33.0);
+const RINGS: [(f32, f32); 2] = [(15.0, 1.0), (20.0, 0.6)];
+const RING_FROM: f32 = 199.88;
+const RING_TURN: f32 = 200.0;
+const RING_WIDTH: f32 = 2.2;
 
 // --- Where the surface goes ------------------------------------------------------
 
@@ -249,6 +285,36 @@ pub struct State {
     moving: HashMap<u64, Moving>,
     leaving: Vec<(Row, Moving)>,
     now: Option<Instant>,
+    /// The agents waiting as last drawn (none known before the first
+    /// draw), and since when the secretary radiates for one that started.
+    waiting: Option<HashSet<u64>>,
+    radiating: Option<Instant>,
+}
+
+/// The secretary's motion at `t` since someone started waiting: her hop
+/// (px, up negative) and her rings' share of their way (0 to 1), while
+/// they run.
+fn secretary_motion(t: Duration) -> (f32, Option<f32>) {
+    let hop = if t < BOB * TWICE {
+        let share = (t.as_secs_f32() / BOB.as_secs_f32()).fract();
+        // Up over its first half, down over its second, each eased.
+        let up = if share < 0.5 {
+            bezier(EASE_IN_OUT, share * 2.0)
+        } else {
+            1.0 - bezier(EASE_IN_OUT, (share - 0.5) * 2.0)
+        };
+        -BOB_UP * up
+    } else {
+        0.0
+    };
+    let rings = (t < RING * TWICE)
+        .then(|| bezier(EASE_OUT, (t.as_secs_f32() / RING.as_secs_f32()).fract()));
+    (hop, rings)
+}
+
+/// How long the secretary moves.
+fn secretary_moves(since: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(since) < (BOB * TWICE).max(RING * TWICE)
 }
 
 /// A row's motion: from where it was, its tint and opacity then, since
@@ -335,6 +401,49 @@ fn panda(look: Look) -> &'static svg::Handle {
         .map(svg::Handle::from_memory)
     });
     &pandas[look as usize]
+}
+
+/// The secretary in `mood`: her ear, and the dot on her clipboard, in its
+/// colour.
+pub fn secretary(mood: Mood) -> &'static svg::Handle {
+    static SECRETARY: OnceLock<[svg::Handle; 3]> = OnceLock::new();
+    let drawings = SECRETARY.get_or_init(|| {
+        [
+            include_bytes!("../../assets/pandas/secretary-calm.svg").as_slice(),
+            include_bytes!("../../assets/pandas/secretary-waiting.svg").as_slice(),
+            include_bytes!("../../assets/pandas/secretary-stuck.svg").as_slice(),
+        ]
+        .map(svg::Handle::from_memory)
+    });
+    &drawings[mood as usize]
+}
+
+/// Her ear's two rings over her head drawn at `head`, `share` of their
+/// way out: growing round the ear and fading.
+fn ear_rings(f: &mut Frame, head: Rectangle, share: f32, alpha: f32) {
+    let unit = head.width / VIEW;
+    let scale = 0.9 + 0.35 * share;
+    let shown = 0.9 * (1.0 - share) * alpha;
+    let centre = Point::new(head.x + EAR.0 * unit, head.y + EAR.1 * unit);
+    for (radius, opacity) in RINGS {
+        let ring = Path::new(|p| {
+            p.arc(canvas::path::Arc {
+                center: centre,
+                radius: radius * scale * unit,
+                start_angle: iced::Radians(RING_FROM.to_radians()),
+                end_angle: iced::Radians((RING_FROM + RING_TURN).to_radians()),
+            });
+        });
+        f.stroke(
+            &ring,
+            canvas::Stroke {
+                style: canvas::Style::Solid(faded(EAR_WAITING, shown * opacity)),
+                width: RING_WIDTH * scale * unit,
+                line_cap: canvas::LineCap::Round,
+                ..canvas::Stroke::default()
+            },
+        );
+    }
 }
 
 /// Where a row hidden under the "+ N" line is: the place of the sixth.
@@ -440,11 +549,31 @@ impl State {
         }
     }
 
+    /// The agents waiting are `waiting` at `now`: when one started (not
+    /// as the group first draws), the secretary radiates, if `motion`.
+    fn saw_waiting(&mut self, waiting: HashSet<u64>, now: Instant, motion: bool) {
+        let started = self
+            .waiting
+            .as_ref()
+            .is_some_and(|before| waiting.iter().any(|id| !before.contains(id)));
+        if started && motion {
+            tracing::debug!(waiting = waiting.len(), "the secretary radiates");
+            self.radiating = Some(now);
+        }
+        self.waiting = Some(waiting);
+    }
+
     /// The motions over by `now` end; whether one goes on.
     fn tick(&mut self, now: Instant) -> bool {
         self.moving.retain(|_, m| !m.done(now));
         self.leaving.retain(|(_, m)| !m.done(now));
-        !self.moving.is_empty() || !self.leaving.is_empty()
+        if self
+            .radiating
+            .is_some_and(|since| !secretary_moves(since, now))
+        {
+            self.radiating = None;
+        }
+        !self.moving.is_empty() || !self.leaving.is_empty() || self.radiating.is_some()
     }
 }
 
@@ -466,9 +595,19 @@ impl<Message> canvas::Program<Message> for Group {
                 let shows = self.full() && group_height() > 0.0;
                 takes_pointer(&self.bar, shows);
                 if let Some(layout) = layout() {
-                    let agents: HashSet<u64> = super::said().agents.iter().map(|a| a.id).collect();
+                    let said = super::said();
+                    let agents: HashSet<u64> = said.agents.iter().map(|a| a.id).collect();
                     if layout.rows != state.rows || agents != state.agents {
                         state.follow(&layout, agents, *now, self.motion);
+                    }
+                    let waiting: HashSet<u64> = said
+                        .agents
+                        .iter()
+                        .filter(|a| Look::of(&a.state) == Look::Waiting)
+                        .map(|a| a.id)
+                        .collect();
+                    if state.waiting.as_ref() != Some(&waiting) {
+                        state.saw_waiting(waiting, *now, self.motion && layout.height > 0.0);
                     }
                 }
                 if state
@@ -523,6 +662,7 @@ impl<Message> canvas::Program<Message> for Group {
         let origin = self.origin(size);
         for &(form, alpha) in &self.forms {
             if form == Form::Full {
+                self.secretary(&mut frame, &layout, origin, state, alpha);
                 self.group(&mut frame, &layout, origin, state.hover, alpha);
                 self.rows(&mut frame, &layout, origin, state, alpha);
             }
@@ -532,6 +672,7 @@ impl<Message> canvas::Program<Message> for Group {
                 let radius = match item {
                     Item::Plug(_) => BUTTON / 2.0,
                     Item::Agent(_) => ROW_RADIUS,
+                    Item::Secretary => HEADER_RADIUS,
                     _ => 4.0,
                 };
                 ring(&mut frame, rect, radius);
@@ -608,7 +749,7 @@ impl Group {
         }
         let o = self.origin(size);
         let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
-        let mut items = vec![(Item::Sources, at(layout.sources))];
+        let mut items = vec![(Item::Secretary, at(layout.secretary))];
         if let Some(card) = &layout.card {
             for row in &card.rows {
                 items.push((Item::Plug(row.tool), at(row.button)));
@@ -629,41 +770,6 @@ impl Group {
 
     fn group(&self, f: &mut Frame, layout: &Layout, o: Point, hover: Option<Item>, alpha: f32) {
         let lit = |item: Item, normal: Color| if hover == Some(item) { TEXT } else { normal };
-        // The header: AGENTS, spaced; Sources on its right.
-        for (ch, x) in kit::spaced(self.words.header(), |ch| {
-            kit::measure(ch, LABEL, MANROPE_BOLD)
-        }) {
-            f.fill_text(kit::text_in(
-                MANROPE_BOLD,
-                said(
-                    &ch.to_string(),
-                    Point::new(o.x + x - kit::LEFT, o.y + HEADER / 2.0),
-                    LABEL,
-                    faded(DIM, alpha),
-                    Alignment::Left,
-                ),
-            ));
-        }
-        if let Some((total, x)) = &layout.total {
-            f.fill_text(kit::text_in(
-                kit::MANROPE_SEMIBOLD,
-                said(
-                    total,
-                    Point::new(o.x + x, o.y + HEADER / 2.0),
-                    LABEL,
-                    faded(FAINT, alpha),
-                    Alignment::Left,
-                ),
-            ));
-        }
-        let sources = layout.sources;
-        f.fill_text(said(
-            self.words.sources(),
-            Point::new(o.x + sources.x, o.y + sources.center_y()),
-            LINK,
-            faded(lit(Item::Sources, FAINT), alpha),
-            Alignment::Left,
-        ));
         if let Some(card) = &layout.card {
             let rect = Rectangle::new(
                 Point::new(o.x + card.rect.x, o.y + card.rect.y),
@@ -755,6 +861,79 @@ impl Group {
                 Alignment::Left,
             ));
         }
+    }
+
+    /// The secretary at the group's head (4.6): her row's tint, her head
+    /// (hopping, her rings going out of her ear, while she radiates),
+    /// "AGENTS" and the total over her line.
+    fn secretary(&self, f: &mut Frame, layout: &Layout, o: Point, state: &State, alpha: f32) {
+        let rect = Rectangle::new(
+            Point::new(o.x + layout.secretary.x, o.y + layout.secretary.y),
+            layout.secretary.size(),
+        );
+        let (tint, says) = match layout.mood {
+            Mood::Calm => (Color::TRANSPARENT, DIM),
+            Mood::Waiting => (SECRETARY_WAITING, SAYS_WAITING),
+            Mood::Stuck => (SECRETARY_STUCK, SAYS_STUCK),
+        };
+        if tint.a > 0.0 {
+            f.fill(&kit::rounded(rect, HEADER_RADIUS), faded(tint, alpha));
+        }
+        let open = popover::with(|c| c.shows(&self.bar, Item::Secretary));
+        let lit = match (open, state.hover == Some(Item::Secretary)) {
+            (true, _) => Some(ROW_OPEN),
+            (false, true) => Some(ROW_HOVER),
+            (false, false) => None,
+        };
+        if let Some(lit) = lit {
+            f.fill(&kit::rounded(rect, HEADER_RADIUS), faded(lit, alpha));
+        }
+        let now = state.now.unwrap_or_else(Instant::now);
+        let (hop, rings) = state.radiating.map_or((0.0, None), |since| {
+            secretary_motion(now.saturating_duration_since(since))
+        });
+        let head = Rectangle::new(Point::new(o.x, o.y + HEAD_TOP + hop), Size::new(HEAD, HEAD));
+        f.draw_svg(
+            head,
+            svg::Svg::new(secretary(layout.mood).clone()).opacity(alpha),
+        );
+        if let Some(share) = rings {
+            ear_rings(f, head, share, alpha);
+        }
+        let x = o.x + HEAD + HEAD_GAP;
+        for (ch, at) in kit::spaced(self.words.header(), |ch| {
+            kit::measure(ch, LABEL, MANROPE_BOLD)
+        }) {
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                said(
+                    &ch.to_string(),
+                    Point::new(x + at - kit::LEFT, o.y + layout.label_middle),
+                    LABEL,
+                    faded(DIM, alpha),
+                    Alignment::Left,
+                ),
+            ));
+        }
+        if let Some((total, at)) = &layout.total {
+            f.fill_text(kit::text_in(
+                kit::MANROPE_SEMIBOLD,
+                said(
+                    total,
+                    Point::new(o.x + at, o.y + layout.label_middle),
+                    LABEL,
+                    faded(FAINT, alpha),
+                    Alignment::Left,
+                ),
+            ));
+        }
+        f.fill_text(said(
+            &layout.line,
+            Point::new(x, o.y + layout.line_middle),
+            SAYS,
+            faded(says, alpha),
+            Alignment::Left,
+        ));
     }
 
     /// The agents' rows, where they are now (moving or not), and the line

@@ -67,6 +67,12 @@ hooks'); `KEY` the agent's own name, one word; `STATE` as above;
 hook's agent whose folder is not known yet; a command's is then its
 `KEY`). The connection may carry several lines; nothing is answered.
 
+The line may end with a tab and what the agent asks for, or why it
+failed, which the secretary's briefing shows (bar.md §7 B): `allow TOOL
+WHAT` (it asks to use `TOOL`, one word, on `WHAT`) or `says TEXT`. One
+line, cut to 120 characters. It may hold a command or a path: the desktop
+never logs it.
+
 ## What the hooks say
 
 `hocus agent-hook TOOL` is what Claude Code's and Codex's hooks run once
@@ -86,6 +92,12 @@ an answer, and always succeeds.
 | `StopFailure` | yes | | failed |
 | `Interrupt` | | yes | idle |
 | `SessionEnd` | yes | yes | forgotten |
+
+The hooks also say what a waiting agent asks and why a failed one
+stopped: a `PermissionRequest`'s tool and its input in one line (the
+command it runs, the file it writes, by its name), the question of
+`AskUserQuestion`, a waiting `Notification`'s `message`, a
+`StopFailure`'s error message.
 
 Plugging in writes these hooks into `~/.claude/settings.json` (or
 `~/.codex/config.toml`, with `notify` when there is none), after the

@@ -955,6 +955,15 @@ impl Shell {
                 .height(Length::Fill)
                 .into()
             }
+            popover::Item::Secretary => canvas(popover::briefing::Panel {
+                id,
+                words: agents::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+                wall: self.wall.clone(),
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             // They open none.
             popover::Item::Keyboard | popover::Item::Decline | popover::Item::Agent(_) => {
                 return None;

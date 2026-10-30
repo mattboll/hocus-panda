@@ -2,7 +2,8 @@
 //! 300 px wide, their top 62 px under the bar's (the mockup's, whichever
 //! item opened them):
 //!
-//! - **Sources** ("Sources", "Un autre outil ?"): "Sources des agents";
+//! - **Sources** (the secretary's briefing's "Sources", the card's "Un
+//!   autre outil ?"): "Sources des agents";
 //!   a row per tool (its mark, its name over its state, "Brancher" or
 //!   "Débrancher"); the divider, "UN AUTRE OUTIL", the generic command in
 //!   a box with "Copier", and the states it takes.

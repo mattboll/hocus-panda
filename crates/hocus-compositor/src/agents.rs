@@ -91,6 +91,9 @@ struct Agent {
     state: State,
     /// Since when, in microseconds of `CLOCK_MONOTONIC` (the shell's).
     since: u64,
+    /// What it asks for, or why it failed, as its tool said it in this
+    /// state (4.6); never logged but its length.
+    note: Option<hocus_agents::Note>,
 }
 
 /// herdr, as last heard.
@@ -272,6 +275,7 @@ impl Compositor {
                     name: report.name.clone(),
                     state,
                     since: now,
+                    note: None,
                 });
                 agents.list.len() - 1
             }
@@ -280,10 +284,12 @@ impl Compositor {
         if !agent.keys.contains(&key) {
             agent.keys.push(key);
         }
+        let changed = agent.state != state;
         if agent.state != state {
             agent.state = state;
             agent.since = now;
         }
+        agent.note = hocus_agents::next_note(agent.note.take(), changed, report.note);
         // A hook's agent keeps the folder it was first named by: a later
         // event's `cwd` may be a directory the agent went down into.
         if !report.name.is_empty() && (agent.name.is_empty() || report.source == Source::Command) {
@@ -461,6 +467,8 @@ impl Compositor {
         for agent in &self.agents.list {
             let mut sources: Vec<Source> = agent.keys.iter().map(|(s, _)| *s).collect();
             let (mut state, mut since) = (agent.state, agent.since);
+            // The hook's note, while its state is the one shown.
+            let mut note = agent.note.clone();
             let (mut herdr_name, mut herdr_folder) = (None, None);
             if followed {
                 for (pane, herdr_since) in &self.agents.herdr.agents {
@@ -474,6 +482,7 @@ impl Compositor {
                         {
                             state = herdr_state;
                             since = *herdr_since;
+                            note = None;
                         }
                     }
                 }
@@ -491,6 +500,7 @@ impl Compositor {
                 source: source.join("+"),
                 window: window_of(&agent.ancestry),
                 name,
+                note,
             });
         }
         if followed {
@@ -525,6 +535,8 @@ impl Compositor {
                     source: Source::Herdr.name().to_owned(),
                     window,
                     name,
+                    // herdr says no more than its state.
+                    note: None,
                 });
             }
         }
