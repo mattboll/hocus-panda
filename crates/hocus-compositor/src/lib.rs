@@ -15,6 +15,7 @@ mod decoration;
 pub mod desktops;
 mod focus;
 mod glass;
+pub mod going;
 mod grabs;
 mod handlers;
 mod harness;

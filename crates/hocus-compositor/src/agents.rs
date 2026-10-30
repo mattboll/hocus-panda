@@ -42,7 +42,7 @@ use hocus_agents::{
     tools::{Places, Tool},
     watch::{Ask, Snapshot, ToolState as Seen, Watcher},
 };
-use hocus_link::{AgentShown, AgentTool, ToShell, ToolState};
+use hocus_link::{AgentShown, AgentTool, Row, ToShell, ToolState};
 use smithay::{
     reexports::{
         calloop::{
@@ -535,9 +535,11 @@ impl Compositor {
         }
     }
 
-    /// The user goes to agent `id` (its row): its window, if it has one,
-    /// on its desktop with the keyboard; finished, it is seen.
-    pub fn go_to_agent(&mut self, id: u64) {
+    /// The user goes to agent `id` from its `row`: its window, if it has
+    /// one, on its desktop with the keyboard, the streak running from the
+    /// row to it in the row's colour (4.3); herdr's pane selected when it
+    /// is herdr's; finished, it is seen.
+    pub fn go_to_agent(&mut self, id: u64, row: Option<Row>) {
         let Some(agent) = self.agents_shown().into_iter().find(|a| a.id == id) else {
             tracing::debug!(id, "the shell goes to an agent that is gone");
             return;
@@ -546,10 +548,61 @@ impl Compositor {
         if agent.state == State::Done.name() {
             self.agents.seen.insert(id, agent.since);
         }
-        if agent.window != 0 {
-            self.window_asked(agent.window);
+        if let Some(pane) = self.herdr_pane(id) {
+            self.select_herdr_pane(pane);
+        }
+        let window = WindowId(agent.window);
+        if agent.window != 0 && self.windows.contains_key(&window) {
+            let from = row.and_then(|row| self.row_start(&row));
+            self.go_to(window, from, crate::going::colour(&agent.state));
         }
         self.agents.dirty = true;
+    }
+
+    /// Where the streak starts from `row`, global: its left edge, at its
+    /// middle. The shell knows where the row is in its bar, the compositor
+    /// where the bar is.
+    fn row_start(&self, row: &Row) -> Option<(f64, f64)> {
+        let output = self.space.outputs().find(|o| o.name() == row.output)?;
+        let screen = self.space.output_geometry(output)?;
+        let edge = hocus_link::EDGE;
+        Some((
+            f64::from(screen.loc.x + screen.size.w - edge + row.x),
+            f64::from(screen.loc.y + edge + row.y) + f64::from(row.height) / 2.0,
+        ))
+    }
+
+    /// Agent `id`'s pane in herdr, when it is herdr's (its own, or a hook's
+    /// agent in one of its panes) and herdr is followed.
+    fn herdr_pane(&self, id: u64) -> Option<String> {
+        if !self.herdr_followed() {
+            return None;
+        }
+        let herdr = &self.agents.herdr;
+        let listed = |pane: &String| herdr.agents.iter().any(|(a, _)| a.pane == *pane);
+        if let Some((pane, _)) = herdr.ids.iter().find(|(p, i)| **i == id && listed(p)) {
+            return Some(pane.clone());
+        }
+        let agent = self.agents.list.iter().find(|a| a.id == id)?;
+        herdr
+            .agents
+            .iter()
+            .find(|(pane, _)| pane.pids.iter().any(|p| agent.pids.contains(p)))
+            .map(|(pane, _)| pane.pane.clone())
+    }
+
+    /// herdr selects `pane` (§8 step 3), on a thread: its socket is no
+    /// work for the loop.
+    fn select_herdr_pane(&self, pane: String) {
+        let Some(socket) = self.agents.places.as_ref().map(|p| p.herdr_socket.clone()) else {
+            return;
+        };
+        tracing::debug!(pane, "herdr selects the agent's pane");
+        crate::programs::on_a_thread("herdr's pane".to_owned(), move || {
+            if let Err(err) = herdr::select(&socket, &pane) {
+                tracing::warn!(pane, %err, "herdr did not select the agent's pane");
+            }
+        });
     }
 
     /// The keyboard went to another window: a finished agent's may be

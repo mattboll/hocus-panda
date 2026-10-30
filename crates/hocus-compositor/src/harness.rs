@@ -277,6 +277,24 @@ impl Headless {
         self.app.state.agents.told.clone().unwrap_or_default()
     }
 
+    /// Going to an agent (4.3): its streak as the last frame drew it.
+    pub fn streak(&self) -> Option<crate::going::Streak> {
+        let state = &self.app.state;
+        state.streak_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+    }
+
+    /// The rim's pulse of the window of `app_id` gone to from an agent's
+    /// row, as the last frame drew it: its 2 px rim's alpha, and the ring's
+    /// width when it grows around it. `None` without one.
+    pub fn landing(&self, app_id: &str) -> Option<(f32, Option<f64>)> {
+        let state = &self.app.state;
+        let managed = state.windows.values().find(|m| {
+            m.landing.is_some() && crate::windows::app_id(&m.window).as_deref() == Some(app_id)
+        })?;
+        let pulse = managed.landing_look(state.drawn_at.get().unwrap_or_else(|| state.now()));
+        Some((pulse.rim, pulse.ring.map(|(width, _)| width)))
+    }
+
     /// The agents' tools as the shell is told them.
     pub fn agent_tools(&self) -> Vec<hocus_link::AgentTool> {
         self.app.state.agent_tools()

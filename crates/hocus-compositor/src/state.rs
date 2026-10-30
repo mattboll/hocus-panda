@@ -165,6 +165,8 @@ pub struct State {
     pub redraw: bool,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
+    /// Going to an agent, its streak under way (bar.md §8, 4.3).
+    pub going: Option<crate::going::Going>,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -336,6 +338,7 @@ impl State {
             cursor_images,
             redraw: true,
             strips: HashMap::new(),
+            going: None,
             swiping: None,
             switcher: None,
             switcher_out: None,
