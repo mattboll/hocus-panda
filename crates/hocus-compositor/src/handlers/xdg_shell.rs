@@ -57,6 +57,15 @@ impl XdgShellHandler for State {
         self.unmapped.push(Window::new_wayland_window(surface));
     }
 
+    /// The bar's desktops' list shows titles, and the tiles icons.
+    fn title_changed(&mut self, _surface: ToplevelSurface) {
+        self.desktops_soon();
+    }
+
+    fn app_id_changed(&mut self, _surface: ToplevelSurface) {
+        self.desktops_soon();
+    }
+
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
             self.unmap_window(&window);

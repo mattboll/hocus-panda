@@ -283,6 +283,7 @@ impl State {
             ToCompositor::Closing(namespace) => self.popovers_closing(&namespace),
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
+            ToCompositor::Bring(id) => self.window_asked(id),
         }
     }
 

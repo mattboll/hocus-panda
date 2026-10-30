@@ -261,6 +261,29 @@ pub fn app_id(window: &Window) -> Option<String> {
     })
 }
 
+/// A window's title, as its client gives it; else its application's id.
+pub fn title_of(state: &State, id: WindowId) -> String {
+    let Some(managed) = state.windows.get(&id) else {
+        return String::new();
+    };
+    if let Some(x11) = managed.window.x11_surface() {
+        return x11.title();
+    }
+    let Some(toplevel) = managed.window.toplevel() else {
+        return String::new();
+    };
+    let title = with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().ok().and_then(|d| d.title.clone()))
+    });
+    title
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| app_id(&managed.window))
+        .unwrap_or_default()
+}
+
 /// The smallest and largest sizes a window's client takes (0: none).
 pub fn size_limits(window: &Window) -> ((i32, i32), (i32, i32)) {
     if let Some(x11) = window.x11_surface() {

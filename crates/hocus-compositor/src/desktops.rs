@@ -14,11 +14,22 @@
 //! or two in them. The strip's slide changes nothing but the current
 //! desktop, told as the slide starts, so that the tiles' ring moves with
 //! it.
+//!
+//! The windows' titles, for the list a tile opens on hover (3.9b), are told
+//! on a line of their own, compared on their own: a terminal retitles at
+//! every command, which must draw an open list but never the tiles. A
+//! client may retitle without drawing (its window out of sight, on another
+//! desktop): a change of title or of application asks for a look one frame
+//! later, whatever is drawn, so that the coalescing stays at most once a
+//! frame and nothing runs at rest.
 
 use std::{collections::HashMap, time::Duration};
 
-use hocus_link::{DeskWindow, DesktopTo, Desktops, SHARE, ToShell};
-use smithay::output::Output;
+use hocus_link::{DeskWindow, DesktopTo, Desktops, SHARE, Titles, ToShell};
+use smithay::{
+    output::Output,
+    reexports::calloop::timer::{TimeoutAction, Timer},
+};
 
 use crate::{
     model::{Rect, WindowId},
@@ -398,30 +409,51 @@ pub fn share(rect: Rect, screen: Rect) -> Option<[u16; 4]> {
     ])
 }
 
-/// What each bar's tiles were last told, by screen.
+/// A look at the desktops after a change of title or application id: one
+/// frame later.
+const SOON: Duration = Duration::from_millis(16);
+
+/// What each bar's tiles and list were last told, by screen.
 #[derive(Debug, Default)]
-pub struct Told(HashMap<String, Desktops>);
+pub struct Told {
+    desktops: HashMap<String, Desktops>,
+    titles: HashMap<String, Titles>,
+    /// The look asked after a change of title, until it runs.
+    soon: Option<smithay::reexports::calloop::RegistrationToken>,
+}
 
 impl Told {
     /// The screen's desktops are `now`: what to tell, if they changed since
     /// they were told. Nothing while a window is dragged or resized
     /// (`held`): where it lands is told once the grab ends.
     pub fn offer(&mut self, now: Desktops, held: bool) -> Option<Desktops> {
-        if held || self.0.get(&now.output) == Some(&now) {
+        if held || self.desktops.get(&now.output) == Some(&now) {
             return None;
         }
-        self.0.insert(now.output.clone(), now.clone());
+        self.desktops.insert(now.output.clone(), now.clone());
+        Some(now)
+    }
+
+    /// The screen's windows' titles are `now`: what to tell, if they
+    /// changed since they were told.
+    pub fn offer_titles(&mut self, now: Titles) -> Option<Titles> {
+        if self.titles.get(&now.output) == Some(&now) {
+            return None;
+        }
+        self.titles.insert(now.output.clone(), now.clone());
         Some(now)
     }
 
     /// Nothing told: a shell that connects is told everything.
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.desktops.clear();
+        self.titles.clear();
     }
 
     /// The screen has no bar any more.
     pub fn forget(&mut self, output: &str) {
-        self.0.remove(output);
+        self.desktops.remove(output);
+        self.titles.remove(output);
     }
 }
 
@@ -443,6 +475,12 @@ impl crate::State {
                     desktop: u8::try_from(desktop).ok()?,
                     rect: share(self.home_rect(id)?, screen)?,
                     focused: focused == Some(id) && desktop == current,
+                    id: id.0,
+                    app: self
+                        .windows
+                        .get(&id)
+                        .and_then(|m| crate::windows::app_id(&m.window))
+                        .unwrap_or_default(),
                 })
             })
             .collect();
@@ -454,8 +492,23 @@ impl crate::State {
         })
     }
 
+    /// `output`'s windows' titles, in [`Self::desktops_view`]'s order.
+    pub fn titles_view(&self, output: &Output) -> Titles {
+        let titles = self
+            .windows_on(output)
+            .into_iter()
+            .filter(|id| !self.model.is_minimized(*id))
+            .map(|id| (id.0, crate::windows::title_of(self, id)))
+            .collect();
+        Titles {
+            output: output.name(),
+            titles,
+        }
+    }
+
     /// A frame of `output` was drawn: its bar's tiles are told its desktops
-    /// if they changed (see the module's documentation).
+    /// if they changed, and its list its titles (see the module's
+    /// documentation).
     pub fn desktops_drawn(&mut self, output: &Output) {
         if !self.shell_linked() {
             return;
@@ -474,23 +527,60 @@ impl crate::State {
         {
             self.tell_shell(ToShell::Desktops(told));
         }
+        let titles = self.titles_view(output);
+        if let Some(told) = self.shell.desktops.offer_titles(titles) {
+            self.tell_shell(ToShell::Titles(told));
+        }
     }
 
-    /// The shell connected: every bar's tiles are told their desktops.
-    pub fn tell_desktops(&mut self) {
-        self.shell.desktops.clear();
-        let outputs: Vec<Output> = self
-            .space
+    /// The bars' screens, as the shell knows them.
+    fn bars_outputs(&self) -> Vec<Output> {
+        self.space
             .outputs()
             .filter(|o| self.panel.bars.contains_key(&o.name()))
             .cloned()
-            .collect();
-        for output in outputs {
-            if let Some(view) = self.desktops_view(&output)
-                && let Some(told) = self.shell.desktops.offer(view, false)
-            {
-                self.tell_shell(ToShell::Desktops(told));
-            }
+            .collect()
+    }
+
+    /// The shell connected: every bar's tiles are told their desktops, and
+    /// their list the titles.
+    pub fn tell_desktops(&mut self) {
+        self.shell.desktops.clear();
+        for output in self.bars_outputs() {
+            self.desktops_drawn(&output);
+        }
+    }
+
+    /// A window's title or application changed: the bars are told one
+    /// frame later, if that changed what they show, without drawing a frame
+    /// (a client may retitle without drawing). Changes in that frame go
+    /// together.
+    pub fn desktops_soon(&mut self) {
+        if !self.shell_linked() || self.shell.desktops.soon.is_some() {
+            return;
+        }
+        let inserted = self
+            .loop_handle
+            .insert_source(Timer::from_duration(SOON), |_, _, app| {
+                let state = &mut app.state;
+                state.shell.desktops.soon = None;
+                for output in state.bars_outputs() {
+                    state.desktops_drawn(&output);
+                }
+                TimeoutAction::Drop
+            });
+        match inserted {
+            Ok(token) => self.shell.desktops.soon = Some(token),
+            Err(err) => tracing::warn!(%err.error, "could not look at the titles again"),
+        }
+    }
+
+    /// The shell asks for window `id` (a row of a desktop's list): its
+    /// desktop, sliding, and the focus on it.
+    pub fn window_asked(&mut self, id: u64) {
+        let id = WindowId(id);
+        if self.windows.contains_key(&id) {
+            self.bring(id);
         }
     }
 
@@ -989,6 +1079,8 @@ mod tests {
                 desktop: 0,
                 rect: [x, 0, 500, 500],
                 focused: true,
+                id: 1,
+                app: "foot".into(),
             }],
         };
         let mut told = Told::default();
@@ -1009,6 +1101,15 @@ mod tests {
         assert_eq!(told.offer(view(2, 300), false), Some(view(2, 300)));
         told.forget("eDP-1");
         assert!(told.offer(view(2, 300), false).is_some());
+        // Titles apart: a retitle is told alone, the desktops not again.
+        let titles = |title: &str| Titles {
+            output: "eDP-1".into(),
+            titles: vec![(1, title.into())],
+        };
+        assert_eq!(told.offer_titles(titles("~")), Some(titles("~")));
+        assert_eq!(told.offer_titles(titles("~")), None);
+        assert_eq!(told.offer_titles(titles("~/src")), Some(titles("~/src")));
+        assert_eq!(told.offer(view(2, 300), false), None);
     }
 
     #[test]
