@@ -269,8 +269,10 @@ impl FromStr for ToolState {
 }
 
 /// An agent as the bar shows it. Written `ID STATE SINCE SOURCE WINDOW
-/// NAME`: the compositor's id for it; `working`, `waiting`, `done`,
-/// `failed` or `idle`; since when, in microseconds of `CLOCK_MONOTONIC`;
+/// NAME`: the compositor's id for it; `working`, `waiting`, `done`
+/// (finished, not seen yet), `seen` (finished and seen since: its window
+/// got the keyboard, or its row was clicked; 4.1), `failed` or `idle`;
+/// since when, in microseconds of `CLOCK_MONOTONIC`;
 /// where its state comes from (`claude-code`, `codex`, `herdr`,
 /// `command`; several joined with `+`); its window's id (0: none found);
 /// its name, last (it may hold spaces, never a tab).
@@ -582,6 +584,10 @@ pub enum ToCompositor {
     /// the compositor goes to its desktop, sliding, and focuses it.
     /// Written `bring ID`.
     Bring(u64),
+    /// The user goes to agent `id` (its row in the agents' group, 4.1):
+    /// the compositor brings its window, if it has one, and a finished
+    /// agent is seen. Written `go-to-agent ID`.
+    GoToAgent(u64),
     /// The user plugs an agents' tool in (`claude-code`, `codex`), having
     /// read what it changes: the compositor writes its hooks, off its
     /// loop, then says [`ToShell::AgentTools`]. Written `plug TOOL`.
@@ -932,6 +938,7 @@ impl fmt::Display for ToCompositor {
                 DesktopTo::Previous => write!(f, "desktop {output} previous"),
             },
             Self::Bring(id) => write!(f, "bring {id}"),
+            Self::GoToAgent(id) => write!(f, "go-to-agent {id}"),
             Self::Plug(tool) => write!(f, "plug {tool}"),
             Self::Unplug(tool) => write!(f, "unplug {tool}"),
             Self::Decline => f.write_str("decline"),
@@ -975,6 +982,11 @@ impl FromStr for ToCompositor {
                 word(&mut words, "window")?
                     .parse()
                     .map_err(|e| BadLine(format!("window: {e}")))?,
+            )),
+            Some("go-to-agent") => Ok(Self::GoToAgent(
+                word(&mut words, "agent")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("agent: {e}")))?,
             )),
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
@@ -1143,6 +1155,7 @@ mod tests {
                 to: DesktopTo::Previous,
             },
             ToCompositor::Bring(42),
+            ToCompositor::GoToAgent(7),
             ToCompositor::Plug("claude-code".into()),
             ToCompositor::Unplug("codex".into()),
             ToCompositor::Decline,
