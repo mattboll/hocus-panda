@@ -132,11 +132,14 @@ pub enum ToShell {
     /// and whether they move (else reduced motion).
     Look { glass: bool, motion: bool },
     /// A bar on `output`, in `form`; `since`: when it switched to it, in
-    /// microseconds of `CLOCK_MONOTONIC` (0: it shows in that form at once).
+    /// microseconds of `CLOCK_MONOTONIC` (0: it shows in that form at once);
+    /// `scale`: its screen's, in 120ths as its surfaces' fractional scale
+    /// says it (iced hands the wheel's notches multiplied by it).
     Bar {
         output: String,
         form: Form,
         since: u64,
+        scale: u32,
     },
     /// No bar on `output` any more.
     NoBar { output: String },
@@ -495,7 +498,8 @@ impl fmt::Display for ToShell {
                 output,
                 form,
                 since,
-            } => write!(f, "bar {output} {} {since}", form.name()),
+                scale,
+            } => write!(f, "bar {output} {} {since} {scale}", form.name()),
             Self::NoBar { output } => write!(f, "nobar {output}"),
             Self::Level(key) => write!(f, "level {}", key.name()),
             Self::Outside => f.write_str("outside"),
@@ -627,6 +631,9 @@ impl FromStr for ToShell {
                 since: word(&mut words, "start")?
                     .parse()
                     .map_err(|e| BadLine(format!("start: {e}")))?,
+                scale: word(&mut words, "scale")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("scale: {e}")))?,
             }),
             Some("nobar") => Ok(Self::NoBar {
                 output: word(&mut words, "output")?.to_owned(),
@@ -795,6 +802,7 @@ mod tests {
                 output: "eDP-1".into(),
                 form: Form::Mini,
                 since: 123_456_789,
+                scale: 180,
             },
             ToShell::NoBar {
                 output: "DP-2".into(),

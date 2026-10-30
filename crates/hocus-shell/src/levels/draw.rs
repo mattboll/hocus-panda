@@ -403,6 +403,20 @@ impl<Message> canvas::Program<Message> for Levels {
         });
         vec![frame.into_geometry()]
     }
+
+    /// A hand over the items, which a click acts on (#468).
+    fn mouse_interaction(
+        &self,
+        state: &State,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if state.hover.is_some() {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
 }
 
 impl Levels {

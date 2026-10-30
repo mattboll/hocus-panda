@@ -527,7 +527,7 @@ impl Panel {
                 redraw
             }
             mouse::Event::WheelScrolled { delta } if in_list => {
-                let by = state.wheel.down(delta, NOTCH);
+                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
                 let most = layout.most_scroll();
                 ui(|ui| ui.scroll = (ui.scroll + by).clamp(0.0, most));
                 state.pointer.hover = at.and_then(|at| self.target_at(state, &layout, at));
@@ -605,9 +605,6 @@ impl Panel {
         match &pressed.key {
             Key::Named(Named::Escape) => event(Seen::Escape),
             Key::Named(Named::Tab) => {
-                if order.is_empty() {
-                    return None;
-                }
                 let next = kit::step(&order, focus, pressed.modifiers.shift());
                 ui(|ui| ui.focus = next);
             }

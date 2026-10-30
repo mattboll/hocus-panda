@@ -805,7 +805,7 @@ impl Tiles {
                 if !at.is_some_and(|at| group.contains(at)) {
                     return None;
                 }
-                let notches = state.wheel.notches(delta);
+                let notches = state.wheel.notches(delta, kit::scale(&self.bar));
                 let to = if notches > 0 {
                     DesktopTo::Previous
                 } else {

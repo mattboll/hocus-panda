@@ -290,6 +290,7 @@ impl State {
                 output: output.clone(),
                 form: bar.form,
                 since: 0,
+                scale: self.bar_scale(output),
             })
             .collect();
         for bar in bars {

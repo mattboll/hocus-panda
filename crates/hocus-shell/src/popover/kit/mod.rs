@@ -31,7 +31,7 @@ pub(crate) use input::{Input, Pointer, awaited, cycle, input, keys, step};
 pub(crate) use list::{
     Aside, Clip, List, SCROLLBAR, Spin, aside, list, name_room, reveal, row_fill, searching, stack,
 };
-pub(crate) use slider::{Track, Wheel, slider};
+pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
 pub(crate) use text::{Widths, elide, measure, measure_in, wrap, wrapped, zero};
 
 use crate::levels::{
