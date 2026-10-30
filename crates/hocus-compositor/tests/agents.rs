@@ -209,16 +209,29 @@ impl Bed {
         self.dir.path().join("home")
     }
 
+    /// The commits of every surface of the shell's but the clock's.
+    fn counts(&self) -> [u64; 6] {
+        [
+            self.hp.bar_commits(),
+            self.hp.levels_commits(),
+            self.hp.connections_commits(),
+            self.hp.desktops_commits(),
+            self.hp.agents_commits(),
+            self.hp.popover_commits(),
+        ]
+    }
+
+    /// Waits until none of the shell's surfaces (the clock aside) commits
+    /// for a second: a slow machine's shell may still be starting.
     fn settle(&mut self) -> anyhow::Result<()> {
         let start = Instant::now();
         loop {
-            let before = (self.hp.agents_commits(), self.hp.popover_commits());
-            wait(&mut self.hp, Duration::from_millis(600))?;
-            if (self.hp.agents_commits(), self.hp.popover_commits()) == before
-                || start.elapsed() > WAIT
-            {
+            let before = self.counts();
+            wait(&mut self.hp, Duration::from_secs(1))?;
+            if self.counts() == before {
                 return Ok(());
             }
+            anyhow::ensure!(start.elapsed() < 3 * WAIT, "the shell never rests");
         }
     }
 
@@ -290,7 +303,20 @@ impl Bed {
         anyhow::ensure!(done, "no {item} in the group");
         let (x, y) = found(&plain(&log)).unwrap_or_default();
         let right = f64::from(self.hp.outputs()[0].1.width) - 8.0;
-        Ok((right + x, 8.0 + y))
+        let at = (right + x, 8.0 + y);
+        // The surface as the compositor has it reaches there: the shell
+        // logs as it draws, before the compositor takes its commit.
+        let inside = |r: &Rect| {
+            at.0 >= f64::from(r.x)
+                && at.1 >= f64::from(r.y)
+                && at.0 < f64::from(r.x + r.width)
+                && at.1 < f64::from(r.y + r.height)
+        };
+        let reached = self.hp.dispatch_until(WAIT, |hp| {
+            hp.agents_surfaces().first().is_some_and(|(_, r)| inside(r))
+        })?;
+        anyhow::ensure!(reached, "{item} at {at:?} is off {:?}", self.surface());
+        Ok(at)
     }
 
     /// Waits until the group's surface is one pixel high: it shows
@@ -738,24 +764,18 @@ fn nothing_commits_at_rest() -> anyhow::Result<()> {
             herdr: false,
         },
     )?;
+    let from = bed.mark();
     bed.hocus(&["agent", "build", "working"], None)?;
     bed.agent_becomes("build", Some("working"))?;
+    // The shell has it, and is done drawing it.
+    bed.logged_after(from, &["shows=Pour suivre", "agents=1"])?;
     bed.settle()?;
-    let before = (
-        bed.hp.agents_commits(),
-        bed.hp.bar_commits(),
-        bed.hp.levels_commits(),
-    );
+    let before = bed.counts();
     // The same state again, and time passing: nothing.
     for _ in 0..5 {
         bed.hocus(&["agent", "build", "working"], None)?;
     }
     wait(&mut bed.hp, Duration::from_secs(2))?;
-    let after = (
-        bed.hp.agents_commits(),
-        bed.hp.bar_commits(),
-        bed.hp.levels_commits(),
-    );
-    assert_eq!(before, after);
+    assert_eq!(before, bed.counts());
     Ok(())
 }
