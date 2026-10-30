@@ -45,7 +45,7 @@ use crate::{
         self, FramePiece, Keyed, Outside, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element,
         handle_element, preview_elements, rim_elements, shadow_elements,
     },
-    going::{StreakElement, Streaks},
+    going::{ShaderElement, Shaders},
     model::{Mode, WindowId},
     motion::lerp,
     wobble::{Bend, BentElement, Picture},
@@ -60,7 +60,7 @@ pub type WindowSurface<R> =
     Rounded<RelocateRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<R>>>>;
 
 render_elements! {
-    pub OutputElements<R> where R: ImportAll + ImportMem + Bend + Streaks;
+    pub OutputElements<R> where R: ImportAll + ImportMem + Bend + Shaders;
     Cursor = CursorElement<R>,
     /// Layer surfaces.
     Surface = WaylandSurfaceRenderElement<R>,
@@ -77,8 +77,9 @@ render_elements! {
     Thumbnail = Keyed<WindowSurface<R>>,
     /// The desktop's background.
     Backdrop = MemoryRenderBufferRenderElement<R>,
-    /// Going to an agent: the streak from its row to its window.
-    Streak = StreakElement,
+    /// The compositor's own shaders: going to an agent's streak (4.3),
+    /// the halo (4.4).
+    Shader = ShaderElement,
 }
 
 /// What an output shows, element by element.
@@ -201,7 +202,7 @@ impl State {
         scale: f64,
         out: &mut Vec<OutputElement<R>>,
     ) where
-        R: Renderer + ImportAll + ImportMem + Bend + Streaks,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let Some(managed) = self.windows.get(&id) else {
@@ -299,7 +300,7 @@ impl State {
         scale: f64,
         out: &mut Vec<OutputElement<R>>,
     ) where
-        R: Renderer + ImportAll + ImportMem + Bend + Streaks,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let Some(managed) = self.windows.get(&id) else {
@@ -376,7 +377,7 @@ impl State {
         scale: f64,
     ) -> Option<BentElement>
     where
-        R: Renderer + ImportAll + ImportMem + Bend + Streaks,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let (wid, jelly) = self.wobble.as_ref()?;
@@ -414,7 +415,7 @@ impl State {
         cursor: bool,
     ) -> Vec<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem + Bend + Streaks + crate::glass::Glass,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         self.grabber.ready(renderer);
@@ -434,7 +435,9 @@ impl State {
                     .map(OutputElements::Cursor),
             );
         }
+        // Where the bar's first surface is drawn among `out`, if it is.
         let layers = |renderer: &mut R, which: Layer, out: &mut Vec<OutputElement<R>>| {
+            let mut bar_at = None;
             let map = layer_map_for_output(output);
             let on: Vec<_> = map.layers_on(which).rev().cloned().collect();
             let bar = map
@@ -465,6 +468,9 @@ impl State {
                 let loc = geometry.loc.to_physical_precise_round(scale);
                 let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                     AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, alpha);
+                if bar_at.is_none() && in_the_bar(layer.namespace()) {
+                    bar_at = Some(out.len());
+                }
                 // The CPU renderer's buffers have no alpha: what the bar
                 // leaves out at its corners would show black. The clock's,
                 // the levels', the connections' and the desktops' surfaces
@@ -508,6 +514,7 @@ impl State {
                     );
                 }
             }
+            bar_at
         };
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
@@ -576,14 +583,21 @@ impl State {
         if fullscreen_on_top {
             elements.append(&mut windows);
         }
-        layers(renderer, Layer::Top, &mut elements);
+        // The halo over the bar's surfaces and around them, under the
+        // popovers beside it (4.4).
+        if let Some(at) = layers(renderer, Layer::Top, &mut elements)
+            && let Some(bar) = self.bar_rect(output, now)
+        {
+            let halo = self.halo_elements(renderer, output, bar, now);
+            elements.splice(at..at, halo.into_iter().map(OutputElements::Shader));
+        }
         // Going to an agent: the streak over the windows, under the bar.
         // Over its glass too, which it does not blur again at each of its
         // frames: it is transparent where it starts, on its row.
         if let Some(streak) = self.streak_at(now)
             && let Some(element) = renderer.streak_element(&streak, origin, scale)
         {
-            elements.push(OutputElements::Streak(element));
+            elements.push(OutputElements::Shader(element));
         }
         // The bar's glass goes right under the layers above the windows,
         // over everything after them.
@@ -663,7 +677,7 @@ impl State {
     /// The desktop's background on `output`, stretched over it.
     fn backdrop_element<R>(&self, renderer: &mut R, output: &Output) -> Option<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem + Bend + Streaks,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         if self.config.plain_background {
@@ -714,7 +728,7 @@ impl State {
         behind: &[OutputElement<R>],
     ) -> Option<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem + Bend + Streaks + crate::glass::Glass,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         if !self.glass_on() {
@@ -768,7 +782,7 @@ impl State {
         behind: &[OutputElement<R>],
     ) -> Vec<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem + Bend + Streaks + crate::glass::Glass,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         if !self.glass_on() {
@@ -823,6 +837,20 @@ impl State {
     }
 }
 
+/// Whether a layer surface of the shell's is one of the bar's: the halo
+/// goes over them, not over the popovers.
+fn in_the_bar(namespace: &str) -> bool {
+    matches!(
+        namespace,
+        hocus_link::NAMESPACE
+            | hocus_link::CLOCK_NAMESPACE
+            | hocus_link::LEVELS_NAMESPACE
+            | hocus_link::CONNECTIONS_NAMESPACE
+            | hocus_link::DESKTOPS_NAMESPACE
+            | hocus_link::AGENTS_NAMESPACE
+    )
+}
+
 /// The part of `blurred` over `pane` (physical, output-local), cut to the
 /// bar's rounded corners, `alpha` opaque.
 fn glass_piece<R>(
@@ -833,7 +861,7 @@ fn glass_piece<R>(
     alpha: f32,
 ) -> Option<OutputElement<R>>
 where
-    R: Renderer + ImportAll + ImportMem + Bend + Streaks,
+    R: Renderer + ImportAll + ImportMem + Bend + Shaders,
     R::TextureId: Send + Clone + Texture + 'static,
 {
     let inside = pane.intersection(blurred.region)?;

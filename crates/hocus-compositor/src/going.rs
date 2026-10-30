@@ -211,8 +211,9 @@ impl State {
 
 // --- Drawing the streak -------------------------------------------------------
 
-/// Renderers that can draw the streak; the CPU's draws none.
-pub trait Streaks: Renderer + Sized {
+/// Renderers that can draw the compositor's own shaders, the streak and
+/// the halo (4.4); the CPU's draws neither.
+pub trait Shaders: Renderer + Sized {
     /// The streak's element on an output whose top left is `origin`
     /// (global, logical) at `scale`. `None`: not drawn.
     fn streak_element(
@@ -220,11 +221,14 @@ pub trait Streaks: Renderer + Sized {
         streak: &Streak,
         origin: Point<f64, Logical>,
         scale: f64,
-    ) -> Option<StreakElement>;
+    ) -> Option<ShaderElement>;
 
-    fn draw_streak(
+    /// The halo's program (`crate::halo`), compiled once; `None`: no halo.
+    fn halo_program(&mut self) -> Option<GlesPixelProgram>;
+
+    fn draw_shader(
         frame: &mut Self::Frame<'_, '_>,
-        element: &StreakElement,
+        element: &ShaderElement,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -232,24 +236,29 @@ pub trait Streaks: Renderer + Sized {
     ) -> Result<(), Self::Error>;
 }
 
-/// The streak drawn by its shader; a new one each frame, so that the
-/// damage is where it was and where it is.
+/// One of the compositor's shaders drawn: the streak, a new one each frame
+/// so that the damage is where it was and where it is; the halo's glow,
+/// kept while it does not change, so that it leaves no damage at rest.
 #[derive(Debug, Clone)]
-pub struct StreakElement(PixelShaderElement);
+pub struct ShaderElement(pub(crate) PixelShaderElement);
 
-impl Streaks for PixmanRenderer {
+impl Shaders for PixmanRenderer {
     fn streak_element(
         &mut self,
         _streak: &Streak,
         _origin: Point<f64, Logical>,
         _scale: f64,
-    ) -> Option<StreakElement> {
+    ) -> Option<ShaderElement> {
         None
     }
 
-    fn draw_streak(
+    fn halo_program(&mut self) -> Option<GlesPixelProgram> {
+        None
+    }
+
+    fn draw_shader(
         _frame: &mut Self::Frame<'_, '_>,
-        _element: &StreakElement,
+        _element: &ShaderElement,
         _src: Rectangle<f64, BufferCoords>,
         _dst: Rectangle<i32, Physical>,
         _damage: &[Rectangle<i32, Physical>],
@@ -354,13 +363,13 @@ pub fn streak_area(streak: &Streak, origin: Point<f64, Logical>) -> Rectangle<i3
     )
 }
 
-impl Streaks for GlesRenderer {
+impl Shaders for GlesRenderer {
     fn streak_element(
         &mut self,
         streak: &Streak,
         origin: Point<f64, Logical>,
         scale: f64,
-    ) -> Option<StreakElement> {
+    ) -> Option<ShaderElement> {
         if self.egl_context().user_data().get::<Program>().is_none() {
             let program = compile(self);
             self.egl_context()
@@ -390,7 +399,7 @@ impl Streaks for GlesRenderer {
             Uniform::new("sigma", (GLOW / 2.0) as f32),
             Uniform::new("pixel", (1.0 / scale) as f32),
         ];
-        Some(StreakElement(PixelShaderElement::new(
+        Some(ShaderElement(PixelShaderElement::new(
             program,
             area,
             None,
@@ -400,9 +409,13 @@ impl Streaks for GlesRenderer {
         )))
     }
 
-    fn draw_streak(
+    fn halo_program(&mut self) -> Option<GlesPixelProgram> {
+        crate::halo::program(self)
+    }
+
+    fn draw_shader(
         frame: &mut GlesFrame<'_, '_>,
-        element: &StreakElement,
+        element: &ShaderElement,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -412,7 +425,7 @@ impl Streaks for GlesRenderer {
     }
 }
 
-impl Element for StreakElement {
+impl Element for ShaderElement {
     fn id(&self) -> &Id {
         self.0.id()
     }
@@ -458,7 +471,7 @@ impl Element for StreakElement {
     }
 }
 
-impl<R: Streaks> RenderElement<R> for StreakElement {
+impl<R: Shaders> RenderElement<R> for ShaderElement {
     fn draw(
         &self,
         frame: &mut R::Frame<'_, '_>,
@@ -467,7 +480,7 @@ impl<R: Streaks> RenderElement<R> for StreakElement {
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
-        R::draw_streak(frame, self, src, dst, damage, opaque_regions)
+        R::draw_shader(frame, self, src, dst, damage, opaque_regions)
     }
 
     fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
