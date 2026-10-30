@@ -3,7 +3,7 @@
 //! it when it ends.
 //!
 //! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5),
-//! its desktops (§4 group 8, §5), its connections (§4 group 9, §5) and its
+//! its agents' group under it (§4 group 3, [`agents`]), its desktops (§4 group 8, §5), its connections (§4 group 9, §5) and its
 //! levels (§4 group 10, §5): a glass tint and a rim against the right edge
 //! of each output the compositor names, in its full or its mini form, the
 //! time at its top, the screen's desktops ([`desktops`]) over the Wi-Fi
@@ -24,6 +24,7 @@
 //! desktops theirs, and so has a popover beside the bar ([`popover`]),
 //! opened from an item.
 
+mod agents;
 mod bluetooth;
 mod clock;
 mod desktops;
@@ -42,8 +43,8 @@ use std::{
 };
 
 use hocus_link::{
-    CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, ClockLook, DESKTOPS_NAMESPACE, EDGE, Form,
-    LEVELS_NAMESPACE, NAMESPACE, RADIUS, ToCompositor, ToShell,
+    AGENTS_NAMESPACE, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, ClockLook, DESKTOPS_NAMESPACE, EDGE,
+    Form, LEVELS_NAMESPACE, NAMESPACE, RADIUS, ToCompositor, ToShell,
 };
 use iced::{
     Background, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme,
@@ -203,6 +204,8 @@ struct Bar {
     connections: window::Id,
     /// Its desktops' surface (placed by [`desktops::draw`]).
     desktops: window::Id,
+    /// Its agents' group's surface (placed by [`agents::draw`]).
+    agents: window::Id,
 }
 
 impl Bar {
@@ -454,7 +457,9 @@ impl Shell {
                     popover::kit::forget_scale(&bar.output);
                     network::draw::forget(&bar.output);
                     desktops::draw::forget(&bar.output);
+                    agents::draw::forget(&bar.output);
                     Some(Task::batch([
+                        Task::done(Message::RemoveWindow(bar.agents)),
                         Task::done(Message::RemoveWindow(bar.desktops)),
                         Task::done(Message::RemoveWindow(bar.connections)),
                         Task::done(Message::RemoveWindow(bar.levels)),
@@ -495,6 +500,14 @@ impl Shell {
                 desktops::set_titles(titles);
                 Task::none()
             }
+            ToShell::AgentTools(tools) => {
+                agents::set_tools(tools);
+                Task::none()
+            }
+            ToShell::Agents(list) => {
+                agents::set_agents(list);
+                Task::none()
+            }
         }
     }
 
@@ -515,6 +528,7 @@ impl Shell {
             levels_surface: (0, 0),
             connections: window::Id::unique(),
             desktops: window::Id::unique(),
+            agents: window::Id::unique(),
         };
         bar.surface = bar.surface_width();
         bar.clock_surface = bar.clock_size();
@@ -601,6 +615,25 @@ impl Shell {
             id: desktops_id,
         });
         bar.desktops = desktops_id;
+        // Under the clock: the agents' group.
+        let agents_id = window::Id::unique();
+        let (size, margin) = agents::draw::opened(&bar.output, agents_id, form);
+        let agents = NewLayerShellSettings {
+            size: Some(size),
+            layer: Layer::Top,
+            anchor: Anchor::Right | Anchor::Top,
+            exclusive_zone: Some(0),
+            margin: Some(margin),
+            keyboard_interactivity: KeyboardInteractivity::None,
+            output_option: option.clone(),
+            events_transparent: false,
+            namespace: Some(AGENTS_NAMESPACE.to_owned()),
+        };
+        let open_agents = Task::done(Message::NewLayerShell {
+            settings: agents,
+            id: agents_id,
+        });
+        bar.agents = agents_id;
         self.bars.insert(id, bar);
         BARS.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -610,6 +643,7 @@ impl Shell {
             .chain(open_levels)
             .chain(open_connections)
             .chain(open_desktops)
+            .chain(open_agents)
     }
 
     /// Where bar `id` is, for the popovers.
@@ -622,7 +656,7 @@ impl Shell {
                 &bar.output,
                 bar.form,
                 id,
-                (bar.levels, bar.connections, bar.desktops),
+                (bar.levels, bar.connections, bar.desktops, bar.agents),
             );
         });
     }
@@ -691,6 +725,7 @@ impl Shell {
         for (id, size, margin) in [
             network::draw::form(&bar.output, bar.form, switching),
             desktops::draw::form(&bar.output, bar.form, switching),
+            agents::draw::form(&bar.output, bar.form, switching),
         ]
         .into_iter()
         .flatten()
@@ -824,6 +859,34 @@ impl Shell {
         )
     }
 
+    /// The agents' group of the bar whose agents' surface is `id`.
+    fn agents_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self.bars.values().find(|b| b.agents == id)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = agents::draw::TOP + 40.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = agents::draw::Group {
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            words: agents::Words::new(clock::time::Lang::of_messages()),
+            backdrop,
+            bar: bar.output.clone(),
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
     /// The popover whose surface is `id`.
     fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let item = popover::with(|c| c.item_of(id))?;
@@ -881,8 +944,18 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            // It opens none.
-            popover::Item::Keyboard => return None,
+            popover::Item::Sources | popover::Item::AnotherTool | popover::Item::Plug(_) => {
+                canvas(popover::agents::Panel {
+                    id,
+                    words: agents::Words::new(clock::time::Lang::of_messages()),
+                    glass: self.look.glass,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            }
+            // They open none.
+            popover::Item::Keyboard | popover::Item::Decline => return None,
         };
         Some(panel)
     }
@@ -894,6 +967,7 @@ impl Shell {
                 .or_else(|| self.levels_view(id))
                 .or_else(|| self.connections_view(id))
                 .or_else(|| self.desktops_view(id))
+                .or_else(|| self.agents_view(id))
                 .or_else(|| self.popover_view(id))
                 .unwrap_or_else(|| Space::new().into());
         };
@@ -1184,6 +1258,17 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // Its windows' titles: only an open list draws.
                         Ok(ToShell::Titles(titles)) => {
                             desktops::set_titles(titles);
+                            continue;
+                        }
+                        // The agents' tools and the agents: only their
+                        // group draws (resized when its height changes),
+                        // and an open Sources or consent popover.
+                        Ok(ToShell::AgentTools(tools)) => {
+                            agents::set_tools(tools);
+                            continue;
+                        }
+                        Ok(ToShell::Agents(list)) => {
+                            agents::set_agents(list);
                             continue;
                         }
                         _ => {}

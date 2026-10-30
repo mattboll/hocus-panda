@@ -33,6 +33,7 @@
 //! and out, blurs behind it and draws its shadow; it tells the shell about
 //! presses on none of its surfaces (`outside`).
 
+pub mod agents;
 pub mod battery;
 pub mod bluetooth;
 pub mod brightness;
@@ -48,8 +49,8 @@ use std::{
 };
 
 use hocus_link::{
-    CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, Form, LEVELS_NAMESPACE,
-    POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
+    AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, Form,
+    LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -76,12 +77,28 @@ pub enum Item {
     /// holds the keyboard, goes to that desktop (3.9); hovered, it shows
     /// the list of its windows (3.9b).
     Desktop(u8),
+    /// The agents' group's "Sources", and the card's "Un autre outil ?":
+    /// the Sources popover (4.0).
+    Sources,
+    AnotherTool,
+    /// A card's "Brancher": the consent popover for that tool.
+    Plug(crate::agents::Tool),
+    /// The card's "Ne rien brancher": a click declines the tools listed.
+    Decline,
 }
 
 impl Item {
     /// Whether a click (or `Enter`) opens its popover; else it acts.
     fn clicks(self) -> bool {
-        !matches!(self, Self::Keyboard | Self::Desktop(_))
+        !matches!(self, Self::Keyboard | Self::Desktop(_) | Self::Decline)
+    }
+
+    /// Whether it is the agents' group's.
+    fn agents(self) -> bool {
+        matches!(
+            self,
+            Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline
+        )
     }
 
     /// Whether hovering it opens its popover, in `form`: a desktop's list in
@@ -90,6 +107,7 @@ impl Item {
         match self {
             Self::Desktop(_) => true,
             Self::Keyboard => false,
+            item if item.agents() => false,
             _ => form == Form::Mini,
         }
     }
@@ -98,6 +116,7 @@ impl Item {
     fn width(self) -> u32 {
         match self {
             Self::Desktop(_) => desktop::WIDTH,
+            item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
     }
@@ -112,14 +131,16 @@ impl Item {
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
             Self::Desktop(index) => desktop::height(bar, index),
-            Self::Keyboard => 0,
+            Self::Sources | Self::AnotherTool => agents::sources_height(),
+            Self::Plug(tool) => agents::consent_height(tool),
+            Self::Keyboard | Self::Decline => 0,
         }
     }
 
     /// Whether its surface draws it lit while its popover shows: a tile's
     /// look does not change (it is lit by the pointer already).
     fn lit_while_open(self) -> bool {
-        !matches!(self, Self::Desktop(_))
+        !matches!(self, Self::Desktop(_)) && !self.agents()
     }
 
     /// Its popover opens: what it shows starts afresh.
@@ -131,13 +152,22 @@ impl Item {
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
             Self::Keyboard | Self::Desktop(_) => {}
+            Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
         }
     }
 
     /// Its popover closes: what it kept goes (a password typed).
     fn closing(self) {
         match self {
-            Self::Sound | Self::Brightness | Self::Battery | Self::Keyboard | Self::Desktop(_) => {}
+            Self::Sound
+            | Self::Brightness
+            | Self::Battery
+            | Self::Keyboard
+            | Self::Desktop(_)
+            | Self::Sources
+            | Self::AnotherTool
+            | Self::Plug(_)
+            | Self::Decline => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
         }
@@ -155,6 +185,9 @@ impl Item {
                 CONNECTIONS_NAMESPACE
             }
             (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
+            (Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline, _) => {
+                AGENTS_NAMESPACE
+            }
         }
     }
 
@@ -163,7 +196,7 @@ impl Item {
     /// brightness's and the battery's (else its top is on the item's,
     /// pushed up to stay inside the bar: a desktop's list's on the tiles').
     fn on_bottom(self) -> bool {
-        !matches!(self, Self::Sound | Self::Desktop(_))
+        !matches!(self, Self::Sound | Self::Desktop(_)) && !self.agents()
     }
 
     /// Its surface on the bar at `place`, which holds the keyboard after
@@ -172,6 +205,7 @@ impl Item {
         match self.namespace(place.form) {
             LEVELS_NAMESPACE => place.levels,
             DESKTOPS_NAMESPACE => place.desktops,
+            AGENTS_NAMESPACE => place.agents,
             _ => place.connections,
         }
     }
@@ -194,6 +228,7 @@ pub struct Place {
     pub levels: window::Id,
     pub connections: window::Id,
     pub desktops: window::Id,
+    pub agents: window::Id,
     /// The bar's own surface, whose size gives its height.
     pub surface: window::Id,
 }
@@ -252,6 +287,9 @@ pub enum Event {
     /// What the popover offered was chosen (a window of a desktop's list):
     /// it closes.
     Chosen,
+    /// The popover gives way to `item`'s, beside the same item (Sources'
+    /// "Brancher": the consent popover).
+    Replace(Item),
 }
 
 /// What the controller asks for.
@@ -294,6 +332,13 @@ pub enum Effect {
     },
     /// The compositor is asked for a window: its desktop, and the focus.
     Bring(u64),
+    /// The compositor plugs a tool in, or unplugs it (4.0).
+    Plug(crate::agents::Tool),
+    Unplug(crate::agents::Tool),
+    /// The compositor declines the tools listed ("Ne rien brancher").
+    Decline,
+    /// The clipboard takes this text.
+    Copy(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -358,13 +403,13 @@ impl Default for Controller {
 
 impl Controller {
     /// Bar `bar` in `form`, its surfaces `surface`, `levels`,
-    /// `connections` and `desktops`; its height stays as known.
+    /// `connections`, `desktops` and `agents`; its height stays as known.
     pub fn place(
         &mut self,
         bar: &str,
         form: Form,
         surface: window::Id,
-        (levels, connections, desktops): (window::Id, window::Id, window::Id),
+        (levels, connections, desktops, agents): (window::Id, window::Id, window::Id, window::Id),
     ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
         let place = Place {
@@ -373,6 +418,7 @@ impl Controller {
             levels,
             connections,
             desktops,
+            agents,
             surface,
         };
         self.bars.insert(bar.to_owned(), place);
@@ -596,6 +642,13 @@ impl Controller {
             Event::ItemStep { back } => self.step(back, &mut effects),
             Event::ItemRelease => self.unfocus(&mut effects),
             Event::Chosen => self.close(now, &mut effects),
+            Event::Replace(item) => {
+                if let Phase::Open(open) = &self.phase {
+                    let (bar, from) = (open.bar.clone(), open.from);
+                    self.close(now, &mut effects);
+                    self.open(&bar, item, from, Opened::Click, &mut effects);
+                }
+            }
             Event::BarChanged { bar } => {
                 let on_it = match &self.phase {
                     Phase::Open(open) => open.bar == bar,
@@ -798,6 +851,13 @@ fn anchor(
     item: Item,
     from: Rectangle,
 ) -> Rectangle {
+    // The agents' popovers' top where the mockup has it.
+    if item.agents() {
+        return Rectangle {
+            y: agents::TOP,
+            ..from
+        };
+    }
     if !matches!(item, Item::Desktop(_)) {
         return from;
     }
@@ -817,7 +877,15 @@ fn acts(bar: String, item: Item) -> Option<Effect> {
             bar,
             to: DesktopTo::At(index),
         }),
-        Item::Sound | Item::Wifi | Item::Bluetooth | Item::Brightness | Item::Battery => None,
+        Item::Decline => Some(Effect::Decline),
+        Item::Sound
+        | Item::Wifi
+        | Item::Bluetooth
+        | Item::Brightness
+        | Item::Battery
+        | Item::Sources
+        | Item::AnotherTool
+        | Item::Plug(_) => None,
     }
 }
 
@@ -1203,6 +1271,22 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             tell(ToCompositor::Bring(id));
             Vec::new()
         }
+        Effect::Plug(tool) => {
+            tell(ToCompositor::Plug(tool.word().to_owned()));
+            Vec::new()
+        }
+        Effect::Unplug(tool) => {
+            tell(ToCompositor::Unplug(tool.word().to_owned()));
+            Vec::new()
+        }
+        Effect::Decline => {
+            tell(ToCompositor::Decline);
+            Vec::new()
+        }
+        Effect::Copy(text) => {
+            tell(ToCompositor::Copy(text));
+            Vec::new()
+        }
     }
 }
 
@@ -1220,7 +1304,12 @@ mod tests {
             BAR,
             form,
             window::Id::unique(),
-            (levels, window::Id::unique(), window::Id::unique()),
+            (
+                levels,
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+            ),
         );
         (c, levels)
     }
@@ -1463,7 +1552,12 @@ mod tests {
             BAR,
             Form::Mini,
             window::Id::unique(),
-            (levels, connections, window::Id::unique()),
+            (
+                levels,
+                connections,
+                window::Id::unique(),
+                window::Id::unique(),
+            ),
         );
         c.motion = false;
         let t = Instant::now();
@@ -1554,6 +1648,7 @@ mod tests {
             levels: window::Id::unique(),
             connections: window::Id::unique(),
             desktops: window::Id::unique(),
+            agents: window::Id::unique(),
             surface: window::Id::unique(),
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
@@ -1578,6 +1673,7 @@ mod tests {
             levels: window::Id::unique(),
             connections: window::Id::unique(),
             desktops: window::Id::unique(),
+            agents: window::Id::unique(),
             surface: window::Id::unique(),
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -1594,6 +1690,7 @@ mod tests {
             Form::Full,
             window::Id::unique(),
             (
+                window::Id::unique(),
                 window::Id::unique(),
                 window::Id::unique(),
                 window::Id::unique(),
@@ -1765,7 +1862,7 @@ mod tests {
             BAR,
             Form::Full,
             window::Id::unique(),
-            (levels, connections, desktops),
+            (levels, connections, desktops, window::Id::unique()),
         );
         c.motion = false;
         let t = Instant::now();
