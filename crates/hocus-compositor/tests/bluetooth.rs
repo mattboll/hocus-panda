@@ -730,24 +730,26 @@ fn past_four_devices_around_the_list_scrolls() -> anyhow::Result<()> {
         FakeDevice::around("Enceinte 4", "audio-card", -55),
         FakeDevice::around("Enceinte 5", "audio-card", -60),
         FakeDevice::around("Enceinte 6", "audio-card", -65),
+        FakeDevice::around("Enceinte 7", "audio-card", -70),
+        FakeDevice::around("Enceinte 8", "audio-card", -75),
     ];
     let mut bed = start(&shell, Some(setup(mine(), later)), true)?;
     let shape = Shape::new(&[BATTERY], 3);
     let item = bed.item();
     bed.click(item);
-    let rect = popover(shape.height(6, 0.0));
+    let rect = popover(shape.height(8, 0.0));
     bed.popover_is(Some(rect))?;
     assert_eq!(rect.height, shape.height(4, 2.0), "four rows and a peek");
     wait(&mut bed.hp, Duration::from_millis(300))?;
-    // The wheel brings the last one; a click pairs it.
+    // The wheel brings the last one, two notches in one event (a fast
+    // spin) the four rows past the list's end; a click pairs it.
     let first = shape.nearby_row(rect, 0);
     bed.hp.pointer_move(first.0, first.1);
-    bed.hp.wheel(1);
-    bed.hp.wheel(1);
+    bed.hp.wheel(2);
     wait(&mut bed.hp, Duration::from_millis(300))?;
     let bottom = f64::from(rect.y) + shape.nearby_top() + LIST;
     bed.click((first.0, bottom - ROW / 2.0));
-    bed.asked(&Call::Pair("Enceinte 6".to_owned()))?;
+    bed.asked(&Call::Pair("Enceinte 8".to_owned()))?;
     Ok(())
 }
 

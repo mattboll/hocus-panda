@@ -1330,6 +1330,12 @@ What issue #465 changes under the five popovers, nothing on screen.
   its own sizes where the mockups differ (the sound's and the battery's
   label lines, the Wi-Fi's rows ending 2 px short of an unscrolled list,
   the brightness's 8 px between its slot, its slider and its value).
+- **The wheel's notches** count each, a fast spin's several in one event
+  too (#472): in the desktops' tiles, the brightness's slider and the
+  lists. iced_layershell hands them multiplied by the surface's scale, so
+  the compositor tells each bar's screen's scale with the bar (`bar OUTPUT
+  FORM SINCE SCALE`, in 120ths), which all of a bar's surfaces share, and
+  the shell divides by it.
 - **Bluetooth's keys** lay the popover out from what it shows now, as the
   Wi-Fi's do since #455, not as last drawn: an arrow in the frame where
   `Enter` cleared a row's failure scrolls with the rows' new heights

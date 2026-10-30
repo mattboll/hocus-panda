@@ -473,6 +473,11 @@ fn the_slider_the_wheel_and_the_arrows_reach_logind_coalesced_never_below_5() ->
     bed.hp.pointer_move(x(0.5), y);
     bed.hp.wheel(-1);
     bed.brightness(100)?;
+    // A fast spin, two notches in one event: 10 %.
+    bed.hp.wheel(-2);
+    bed.brightness(200)?;
+    bed.hp.wheel(2);
+    bed.brightness(100)?;
     bed.press(KEY_TAB);
     bed.press(KEY_RIGHT);
     bed.brightness(150)?;
