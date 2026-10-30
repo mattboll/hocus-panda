@@ -17,6 +17,7 @@ mod focus;
 mod glass;
 pub mod going;
 mod grabs;
+pub mod halo;
 mod handlers;
 mod harness;
 mod input;

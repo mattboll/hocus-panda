@@ -167,6 +167,8 @@ pub struct State {
     pub strips: HashMap<String, Strip>,
     /// Going to an agent, its streak under way (bar.md §8, 4.3).
     pub going: Option<crate::going::Going>,
+    /// The halo around and over the bars (bar.md §6, 4.4).
+    pub halo: crate::halo::Halo,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -339,6 +341,7 @@ impl State {
             redraw: true,
             strips: HashMap::new(),
             going: None,
+            halo: crate::halo::Halo::default(),
             swiping: None,
             switcher: None,
             switcher_out: None,

@@ -517,6 +517,24 @@ impl Compositor {
         shown
     }
 
+    /// The agents as the halo sees them (4.4): an agent is looked at when
+    /// its own window has the keyboard, as a finished one is seen (herdr's
+    /// own share herdr's terminal, which says nothing of their pane).
+    fn halo_seen(&self, shown: &[AgentShown]) -> Vec<crate::halo::Seen> {
+        let focused = self.model.focused().map(|w| w.0);
+        shown
+            .iter()
+            .map(|agent| crate::halo::Seen {
+                id: agent.id,
+                concern: crate::halo::Concern::of_agent(&agent.state),
+                since: Duration::from_micros(agent.since),
+                looked_at: agent.window != 0
+                    && agent.source != Source::Herdr.name()
+                    && focused == Some(agent.window),
+            })
+            .collect()
+    }
+
     /// The finished agents among `shown` whose window has the keyboard are
     /// seen; those seen say so (`seen`). herdr's own are seen as herdr
     /// says.
@@ -548,6 +566,8 @@ impl Compositor {
         if agent.state == State::Done.name() {
             self.agents.seen.insert(id, agent.since);
         }
+        // Its halo ends (§8 step 5), whatever it waits for or failed at.
+        self.halo.acknowledge(id);
         if let Some(pane) = self.herdr_pane(id) {
             self.select_herdr_pane(pane);
         }
@@ -649,18 +669,25 @@ impl Compositor {
         out
     }
 
-    /// The shell is told what changed, once per turn of the loop.
+    /// The halo and the shell are told what changed, once per turn of the
+    /// loop.
     pub fn flush_agents(&mut self) {
-        if !self.agents.dirty || !self.shell_linked() {
+        if !self.agents.dirty {
             return;
         }
         self.agents.dirty = false;
+        let agents = self.agents_shown();
+        let seen = self.halo_seen(&agents);
+        self.halo_agents(&seen);
+        if !self.shell_linked() {
+            // Told everything once it connects (`tell_agents`).
+            return;
+        }
         let tools = self.agent_tools();
         if self.agents.told_tools.as_ref() != Some(&tools) {
             self.agents.told_tools = Some(tools.clone());
             self.tell_shell(ToShell::AgentTools(tools));
         }
-        let agents = self.agents_shown();
         if self.agents.told.as_ref() != Some(&agents) {
             tracing::debug!(?agents, "the agents");
             self.agents.told = Some(agents.clone());

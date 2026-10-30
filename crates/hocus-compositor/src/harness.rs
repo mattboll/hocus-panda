@@ -283,6 +283,23 @@ impl Headless {
         state.streak_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
+    /// The halo (4.4) as the last frame drew it: `None` when it showed
+    /// nothing (or is not drawn: on Pixman, without a bar).
+    pub fn halo(&self) -> Option<crate::halo::Shown> {
+        let state = &self.app.state;
+        state.halo_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+    }
+
+    /// What concerns the user most, as the halo has it, drawn or not.
+    pub fn halo_concern(&self) -> Option<crate::halo::Concern> {
+        self.app.state.halo.concern()
+    }
+
+    /// The halo's waves started so far.
+    pub fn halo_waves(&self) -> u64 {
+        self.app.state.halo.waves
+    }
+
     /// The rim's pulse of the window of `app_id` gone to from an agent's
     /// row, as the last frame drew it: its 2 px rim's alpha, and the ring's
     /// width when it grows around it. `None` without one.
