@@ -2,7 +2,8 @@
 //! bar, a streak of the row's colour runs to the centre of the agent's
 //! window, over the windows and under the bar, and the window's rim pulses
 //! once as it lands. When the window is on another desktop, the strip
-//! slides there first and the streak starts once it has.
+//! slides there first and the streak starts once it has. The same pulse
+//! marks a window that opens without the keyboard (windows.md §4).
 //!
 //! Everything is a start time and closed-form curves on the frame clock,
 //! as the rest of the motion ([`crate::motion`]): the go-to is set once,
@@ -118,7 +119,8 @@ impl Going {
 }
 
 /// The rim's pulse at a moment: the 2 px rim's alpha, and the ring's width
-/// (logical pixels) and alpha.
+/// (logical pixels) and alpha. As the streak lands, and on a window that
+/// opens without the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Pulse {
     pub rim: f32,
@@ -179,7 +181,7 @@ impl State {
         });
         let lands = self.going.as_ref().map_or(now, Going::lands);
         if let Some(managed) = self.windows.get_mut(&id) {
-            managed.landing = Some((Tween::new(lands, motion::PULSE, Bezier::LINEAR), moves));
+            managed.pulse = Some((Tween::new(lands, motion::PULSE, Bezier::LINEAR), moves));
         }
         self.redraw = true;
     }
@@ -277,8 +279,13 @@ struct Program(Option<GlesPixelProgram>);
 /// round ends, transparent at the start and full at the head (CSS's
 /// `linear-gradient(90deg, transparent, colour)`); around it, outside
 /// only, the glow of its box blurred (CSS's `box-shadow: 0 0 12px`), a
-/// Gaussian written with the error function. Positions are logical pixels
-/// from the element's corner.
+/// Gaussian written with the error function. CSS's shadow ignores the
+/// gradient, so near the start a bright glow would ring a line still
+/// transparent, a dark core (issue #495): there the glow is held to the
+/// line's alpha beside it, which its edge then matches, and the streak
+/// starts from nothing at its row. Further on, where the line is brighter
+/// than the glow at its edge, the glow is the shadow's. Positions are
+/// logical pixels from the element's corner.
 const SHADER: &str = r"
 precision highp float;
 varying vec2 v_coords;
@@ -323,6 +330,9 @@ void main() {
     float cover = clamp(0.5 - edge / pixel, 0.0, 1.0);
     float grade = len > 0.0 ? clamp(along / len, 0.0, 1.0) : 0.0;
     float glow = blurred(across, -half_width, half_width) * blurred(along, 0.0, len);
+    // The glow's strongest, at the line's edge: no brighter than the line.
+    float rim = blurred(half_width, -half_width, half_width);
+    glow *= min(grade / rim, 1.0);
     float a = cover * grade + glow * (1.0 - cover);
     gl_FragColor = vec4(colour, 1.0) * a * alpha;
 #ifdef DEBUG_FLAGS
