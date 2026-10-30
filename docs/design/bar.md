@@ -15,7 +15,9 @@ desktops' tiles of section 4 group 8 and section 5 (3.9, issue #366), and
 the agents' group's header, its sources and the tools plugged in (section 4
 group 3, section 10; 4.0, issue #383), and its rows, one per agent, with
 their pandas (section 4 group 3, section 7 A, section 8 in part; 4.1,
-issue #384): see [as built](#as-built).
+issue #384), and going to an agent from its row, its streak, its rim's
+pulse and herdr's pane (section 8; 4.3, issue #386): see
+[as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -366,15 +368,28 @@ never on battery saver, never with reduced motion.
 
 ## 8. Going to an agent
 
-A click on anything that names an agent:
+A click on anything that names an agent (approved for its row in 4.3,
+2026-10-30, variant A):
 
-1. A 4 px light streak, amber, runs from the bar to the agent's window in
-   **300 ms**, then fades.
-2. The agent's window takes the focus (on its output, switching desktop if
-   needed); its rim pulses once in the accent (600 ms).
-3. herdr selects the agent's pane (herdr's API).
-4. The halo and the peek end; the secretary returns to calm unless
+1. When the agent's window is on another desktop, the strip slides there
+   first, as the shortcuts do (320 ms, §12 of windows.md).
+2. A streak runs from the row's left edge to the centre of the agent's
+   window in **300 ms**, `cubic-bezier(0.3, 0.7, 0.2, 1)`, then fades out
+   in 220 ms (`ease-in`): a 4 px line with round ends, transparent at the
+   row and full at its head, and a 12 px glow of its colour. **Its colour
+   is the row's state**: waiting `#F5B44A`, stuck `#F2945B`, to see
+   `#7EE0A0`, working `#6CC287`, resting `#A9B2C2`. It is drawn by the
+   compositor over every window and under the bar, and costs frames only
+   while it runs.
+3. The agent's window has the keyboard (on its output); as the streak
+   lands, its rim pulses once in the accent (600 ms): a 2 px rim, and a
+   ring growing from 4 px to 14 px while both fade.
+4. herdr selects the agent's pane (herdr's API).
+5. The halo and the peek end; the secretary returns to calm unless
    another agent waits.
+
+With reduced motion, or a compositor on the CPU: no slide and no streak;
+the rim lights and fades out.
 
 ## 9. Popovers
 
@@ -1697,12 +1712,13 @@ the heads) are display options for later (#491).
   shell lays the rows out again if a working agent shows and what they say
   changed, and wakes the group's surface (once for all the bars). Nothing
   draws the rows in between: no timer of their own, none per agent.
-- **Going to an agent** (§8, its second step without the pulse): a click
-  on a row, or `Enter` on it with the bar's keyboard (`Tab` and the arrows
-  reach the rows from "Sources", as 3.8 and 3.9 go through the bar's
-  items), asks the compositor for the agent (`go-to-agent ID`): its window,
-  when it has one, takes the keyboard, its desktop shown first if it is
-  another (the desktops' list's `bring`); a finished agent is then seen.
+- **Going to an agent** (§8, the window and its keyboard, without the
+  streak and the pulse): a click on a row, or `Enter` on it with the bar's
+  keyboard (`Tab` and the arrows reach the rows from "Sources", as 3.8 and
+  3.9 go through the bar's items), asks the compositor for the agent
+  (`go-to-agent ID`): its window, when it has one, takes the keyboard, its
+  desktop shown first if it is another (the desktops' list's `bring`); a
+  finished agent is then seen.
 - **Measured headless**, the real shell (`tests/agents.rs`): the five
   states in their order with their words, 28 px apart, their tints read
   from the screen; more than five agents folding into "+ 2 au repos", the
@@ -1717,4 +1733,64 @@ the heads) are display options for later (#491).
   screenshots of the pull request.
 - **Not built**: the streak and the rim's pulse (4.3), the halo (4.4), the
   peek (4.5), the secretary (4.6); the mini form's agents (4.7); herdr
-  selecting the agent's pane (§8, step 3); names for screen readers (§11).
+  selecting the agent's pane (§8); names for screen readers (§11).
+
+### 4.3, going to an agent (2026-10-30)
+
+What the approved 4.3 mockup shows, variant A, with the maintainer's spec
+(§8; issue #386).
+
+- **The line**: the shell's `go-to-agent ID` (4.1) carries the row:
+  `go-to-agent ID OUTPUT X Y W H`, its rectangle in the bar's frame (from
+  the bar's right edge, its top). The shell knows where the row is in its
+  bar, which moves as the rows slide; the compositor knows where the bar
+  is on its screen. Without a row (a line of 4.1's form), the window is
+  gone to without a streak, its rim pulsing.
+- **The streak** is a GLES pixel shader of the compositor's
+  (`going.rs`), drawn each frame from closed-form curves on the frame
+  clock: its head at `cubic-bezier(0.3, 0.7, 0.2, 1)` of 300 ms toward the
+  window's centre as drawn, then its alpha down along `ease-in` over
+  220 ms. The shader draws what the mockup's CSS does, as Chrome renders
+  it: the 4 px box with round ends, its `linear-gradient` from transparent
+  at the row to full at the head, and its `box-shadow: 0 0 12px` (the box
+  blurred, a Gaussian of deviation 6 written with the error function)
+  outside the box only. It is drawn over the windows and under the bar's
+  surfaces, over the bar's glass rather than under it: under it, the
+  glass would be blurred again at each of its frames, for a line that is
+  transparent where it starts, on its row. Where the strip slides first,
+  the streak starts once it has (320 ms). A new element each frame: the
+  damage is where it was and where it is. With two screens, each draws its
+  part.
+- **The pulse**: the mockup's keyframes, each step easing out: in 150 ms
+  the 2 px rim at 95 % and a ring of 4 px at 55 % (the accent), then the
+  ring grows to 14 px as both fade, by 600 ms. Both are the window's
+  rims, outside its content as its other rims are, in whole pixels (a
+  texture per width, not per frame). Its start is set with the go-to, at
+  the streak's landing: nothing is queued.
+- **The keyboard goes to the window at the click**, as 4.1 built it, not
+  as the streak lands: keys typed during the 300 to 620 ms of the motion
+  would otherwise reach the window that had the keyboard, another agent's
+  prompt maybe. Only the pulse waits for the landing.
+- **Reduced motion, or a compositor on the CPU** (Pixman: no shaders): no
+  slide (the desktops cross-fade as with reduced motion) and no streak;
+  the 2 px rim lights and fades out over the same 600 ms, without its
+  ring.
+- **herdr**: an agent of herdr's (its own, or a hook's agent in one of its
+  panes) has its pane selected, `pane.focus` with its `pane_id` (the API
+  schema herdr bundles, `herdr api schema`), on a thread, at the click.
+- **The colour** is the state the shell is told, before the click marks a
+  finished agent seen: "to see" stays green for the streak that goes to
+  it.
+- **Measured headless** (`tests/agents.rs`): on a GPU, a row's click on
+  the same desktop runs the streak from the row's left edge to the
+  window's centre in the working accent for 420 to 650 ms, the rim
+  lighting 250 ms or more after it starts with the ring growing past
+  8 px, the keyboard on the window, nothing moving after 1.1 s and only
+  the clock's seconds drawn after; on another desktop, the strip slides
+  and the streak runs only once it is still; the streak's colour read from
+  the screen, amber to a waiting agent and the accent to a working one;
+  with reduced motion on a GPU, and on Pixman, no slide, no streak, the
+  rim lit without its ring; herdr (a fake one) asked `pane.focus` for its
+  agent's pane. On the Intel GPU, the screenshots of the pull request.
+- **Not built**: going to an agent from anything else that names it (the
+  peek, the secretary's briefing: 4.5, 4.6); the halo ending (4.4).
