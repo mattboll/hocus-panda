@@ -1,7 +1,8 @@
 //! Popovers beside the bar (bar.md §9): what opens them, what closes them,
 //! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]),
-//! Bluetooth's ([`bluetooth`]), the brightness's ([`brightness`]) and the
-//! battery's ([`battery`]), drawn and handled with the pieces of [`kit`].
+//! Bluetooth's ([`bluetooth`]), the brightness's ([`brightness`]), the
+//! battery's ([`battery`]) and a desktop's list of windows ([`desktop`]),
+//! drawn and handled with the pieces of [`kit`].
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -17,6 +18,9 @@
 //!   while the pointer moves toward it, within the cone from where the
 //!   pointer was to the popover's near corners. A click on the item then
 //!   keeps it open, as a click would have opened it.
+//! - **A desktop's tile** (or dot) opens its list by hovering only, in both
+//!   forms; a click on it goes to its desktop and closes the list. The
+//!   list open, another tile hovered shows that one's at once.
 //!
 //! The popover is a layer surface of its own, beside the bar, aligned with
 //! its item and kept 8 px from the screen's bottom. Nothing here goes
@@ -32,6 +36,7 @@
 pub mod battery;
 pub mod bluetooth;
 pub mod brightness;
+pub mod desktop;
 pub mod kit;
 pub mod sound;
 pub mod wifi;
@@ -54,8 +59,7 @@ pub const HOVER_OPEN: Duration = Duration::from_millis(150);
 /// A popover opened by hovering closes this long after the pointer left.
 pub const LEAVE_CLOSE: Duration = Duration::from_millis(300);
 
-/// What opens a popover, and the keyboard layout's item and the desktops'
-/// tiles, which open none.
+/// What opens a popover, and the keyboard layout's item, which opens none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Item {
     Sound,
@@ -69,27 +73,53 @@ pub enum Item {
     /// keyboard, asks for the next one (3.8).
     Keyboard,
     /// A desktop's tile (or dot), from 0: a click, or `Enter` while it
-    /// holds the keyboard, goes to that desktop (3.9).
+    /// holds the keyboard, goes to that desktop (3.9); hovered, it shows
+    /// the list of its windows (3.9b).
     Desktop(u8),
 }
 
 impl Item {
-    /// Whether it opens a popover.
-    fn has_popover(self) -> bool {
+    /// Whether a click (or `Enter`) opens its popover; else it acts.
+    fn clicks(self) -> bool {
         !matches!(self, Self::Keyboard | Self::Desktop(_))
     }
 
-    /// Its popover's height, logical pixels, for what it shows now: as it
-    /// opens (`opening`), or after a change.
-    fn height(self, opening: bool) -> u32 {
+    /// Whether hovering it opens its popover, in `form`: a desktop's list in
+    /// both, the others in the mini form.
+    fn hovers(self, form: Form) -> bool {
+        match self {
+            Self::Desktop(_) => true,
+            Self::Keyboard => false,
+            _ => form == Form::Mini,
+        }
+    }
+
+    /// Its popover's width, logical pixels.
+    fn width(self) -> u32 {
+        match self {
+            Self::Desktop(_) => desktop::WIDTH,
+            _ => POPOVER_WIDTH.unsigned_abs(),
+        }
+    }
+
+    /// Its popover's height on `bar`, logical pixels, for what it shows
+    /// now: as it opens (`opening`), or after a change.
+    fn height(self, bar: &str, opening: bool) -> u32 {
         match self {
             Self::Sound => sound::layout(opening).height(),
             Self::Wifi => wifi::height(),
             Self::Bluetooth => bluetooth::height(),
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
-            Self::Keyboard | Self::Desktop(_) => 0,
+            Self::Desktop(index) => desktop::height(bar, index),
+            Self::Keyboard => 0,
         }
+    }
+
+    /// Whether its surface draws it lit while its popover shows: a tile's
+    /// look does not change (it is lit by the pointer already).
+    fn lit_while_open(self) -> bool {
+        !matches!(self, Self::Desktop(_))
     }
 
     /// Its popover opens: what it shows starts afresh.
@@ -131,9 +161,9 @@ impl Item {
     /// Whether its popover's bottom sits on the bar's whatever its height,
     /// as the 3.5, 3.6 and 3.7 mockups draw the Wi-Fi's, Bluetooth's, the
     /// brightness's and the battery's (else its top is on the item's,
-    /// pushed up to stay inside the bar).
+    /// pushed up to stay inside the bar: a desktop's list's on the tiles').
     fn on_bottom(self) -> bool {
-        !matches!(self, Self::Sound)
+        !matches!(self, Self::Sound | Self::Desktop(_))
     }
 
     /// Its surface on the bar at `place`, which holds the keyboard after
@@ -219,6 +249,9 @@ pub enum Event {
     BarChanged {
         bar: String,
     },
+    /// What the popover offered was chosen (a window of a desktop's list):
+    /// it closes.
+    Chosen,
 }
 
 /// What the controller asks for.
@@ -259,6 +292,8 @@ pub enum Effect {
         bar: String,
         to: DesktopTo,
     },
+    /// The compositor is asked for a window: its desktop, and the focus.
+    Bring(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -402,6 +437,14 @@ impl Controller {
         }
     }
 
+    /// The bar and the item whose popover is open, if one is.
+    pub fn open_on(&self) -> Option<(&str, Item)> {
+        match &self.phase {
+            Phase::Open(open) => Some((&open.bar, open.item)),
+            _ => None,
+        }
+    }
+
     /// Whether `item` of `bar` has its popover open.
     pub fn shows(&self, bar: &str, item: Item) -> bool {
         matches!(&self.phase, Phase::Open(o) if o.bar == bar && o.item == item)
@@ -430,10 +473,7 @@ impl Controller {
         let mut effects = Vec::new();
         match event {
             Event::ItemEnter { bar, item, rect } => match &mut self.phase {
-                Phase::Closed
-                    if item.has_popover()
-                        && self.bars.get(&bar).map(|p| p.form) == Some(Form::Mini) =>
-                {
+                Phase::Closed if self.bars.get(&bar).is_some_and(|p| item.hovers(p.form)) => {
                     self.phase = Phase::Hovering {
                         bar,
                         item,
@@ -444,6 +484,20 @@ impl Controller {
                 Phase::Open(open) if open.bar == bar && open.item == item => {
                     open.inside = true;
                     open.leave = None;
+                }
+                // A desktop's list shows: another tile's, at once.
+                Phase::Open(open)
+                    if open.bar == bar
+                        && open.how == Opened::Hover
+                        && matches!((open.item, item), (Item::Desktop(_), Item::Desktop(_))) =>
+                {
+                    tracing::debug!(?item, "the list shows another desktop");
+                    open.item = item;
+                    open.from = rect;
+                    open.inside = true;
+                    open.leave = None;
+                    effects.extend(self.refit());
+                    effects.push(Effect::Wake(POPOVER_NAMESPACE));
                 }
                 _ => {}
             },
@@ -474,7 +528,7 @@ impl Controller {
                     open.seen(at, now);
                 }
             }
-            Event::ItemPress { bar, item, .. } if !item.has_popover() => {
+            Event::ItemPress { bar, item, .. } if !item.clicks() => {
                 self.unfocus(&mut effects);
                 self.close(now, &mut effects);
                 effects.extend(acts(bar, item));
@@ -532,7 +586,7 @@ impl Controller {
                 }
             }
             Event::ItemActivate => match self.focused.clone() {
-                Some((bar, item, _)) if !item.has_popover() => effects.extend(acts(bar, item)),
+                Some((bar, item, _)) if !item.clicks() => effects.extend(acts(bar, item)),
                 Some((bar, item, from)) => {
                     self.unfocus(&mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
@@ -541,6 +595,7 @@ impl Controller {
             },
             Event::ItemStep { back } => self.step(back, &mut effects),
             Event::ItemRelease => self.unfocus(&mut effects),
+            Event::Chosen => self.close(now, &mut effects),
             Event::BarChanged { bar } => {
                 let on_it = match &self.phase {
                     Phase::Open(open) => open.bar == bar,
@@ -599,8 +654,8 @@ impl Controller {
             return;
         };
         item.opening();
-        let size = (POPOVER_WIDTH.unsigned_abs(), item.height(true));
-        let rect = placed(place, from, size, item.on_bottom());
+        let size = (item.width(), item.height(bar, true));
+        let rect = placed(place, self.anchor(bar, item, from), size, item.on_bottom());
         let margin = margins(place, rect);
         let surface = window::Id::unique();
         tracing::debug!(?item, ?how, bar, "a popover opens");
@@ -615,7 +670,9 @@ impl Controller {
                 Opened::Hover => KeyboardInteractivity::OnDemand,
             },
         });
-        effects.push(Effect::Wake(item.namespace(place.form)));
+        if item.lit_while_open() {
+            effects.push(Effect::Wake(item.namespace(place.form)));
+        }
         self.phase = Phase::Open(Open {
             bar: bar.to_owned(),
             item,
@@ -635,16 +692,17 @@ impl Controller {
         let Phase::Open(open) = &mut self.phase else {
             return Vec::new();
         };
-        let height = open.item.height(false);
+        let height = open.item.height(&open.bar, false);
         let Some(place) = self.bars.get(&open.bar).copied() else {
             return Vec::new();
         };
         if open.rect.height.round() as u32 == height {
             return Vec::new();
         }
-        let size = (POPOVER_WIDTH.unsigned_abs(), height);
+        let size = (open.item.width(), height);
         let before = margins(place, open.rect);
-        open.rect = placed(place, open.from, size, open.item.on_bottom());
+        let anchor = anchor(&self.items, &open.bar, open.item, open.from);
+        open.rect = placed(place, anchor, size, open.item.on_bottom());
         let margin = margins(place, open.rect);
         tracing::debug!(height, "the popover's size changes");
         vec![Effect::Resize {
@@ -671,7 +729,14 @@ impl Controller {
             effects.push(Effect::Remove(open.surface));
         }
         let form = self.bars.get(&open.bar).map_or(Form::Full, |p| p.form);
-        effects.push(Effect::Wake(open.item.namespace(form)));
+        if open.item.lit_while_open() {
+            effects.push(Effect::Wake(open.item.namespace(form)));
+        }
+    }
+
+    /// What a popover of `item` opened from `from` on `bar` lines up with.
+    fn anchor(&self, bar: &str, item: Item, from: Rectangle) -> Rectangle {
+        anchor(&self.items, bar, item, from)
     }
 
     fn unfocus(&mut self, effects: &mut Vec<Effect>) {
@@ -725,8 +790,26 @@ impl Controller {
     }
 }
 
-/// What an item without a popover does when clicked, or on `Enter`: the
-/// next layout, or the tile's desktop.
+/// What a popover of `item` opened from `from` on `bar` lines up with:
+/// the item, or for a desktop's list the tiles' top (their first row).
+fn anchor(
+    items: &HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
+    bar: &str,
+    item: Item,
+    from: Rectangle,
+) -> Rectangle {
+    if !matches!(item, Item::Desktop(_)) {
+        return from;
+    }
+    let top = items
+        .get(&(bar.to_owned(), DESKTOPS_NAMESPACE))
+        .and_then(|tiles| tiles.iter().map(|(_, r)| r.y).reduce(f32::min))
+        .unwrap_or(from.y);
+    Rectangle { y: top, ..from }
+}
+
+/// What an item does when clicked, or on `Enter`, when that opens no
+/// popover: the next layout, or the tile's desktop.
 fn acts(bar: String, item: Item) -> Option<Effect> {
     match item {
         Item::Keyboard => Some(Effect::NextLayout),
@@ -1114,6 +1197,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Desktop { bar, to } => {
             tell(ToCompositor::Desktop { output: bar, to });
+            Vec::new()
+        }
+        Effect::Bring(id) => {
+            tell(ToCompositor::Bring(id));
             Vec::new()
         }
     }
@@ -1587,6 +1674,83 @@ mod tests {
         // In the full form the layout's row is the connections'.
         assert_eq!(Item::Keyboard.namespace(Form::Full), CONNECTIONS_NAMESPACE);
         assert_eq!(Item::Keyboard.namespace(Form::Mini), LEVELS_NAMESPACE);
+    }
+
+    #[test]
+    fn resting_on_a_tile_shows_its_list_and_another_tile_shows_its_own_at_once() {
+        let (mut c, _) = controller(Form::Full);
+        c.motion = false;
+        let t = Instant::now();
+        let tile = |i: u8| {
+            Rectangle::new(
+                Point::new(
+                    -185.0 + 44.0 * f32::from(i % 4),
+                    700.0 + 36.0 * f32::from(i / 4),
+                ),
+                Size::new(38.0, 30.0),
+            )
+        };
+        c.set_items(
+            BAR,
+            DESKTOPS_NAMESPACE,
+            (0..6).map(|i| (Item::Desktop(i), tile(i))).collect(),
+        );
+        let enter = |i: u8| Event::ItemEnter {
+            bar: BAR.to_owned(),
+            item: Item::Desktop(i),
+            rect: tile(i),
+        };
+        // In the full form too, 150 ms after; its top on the tiles' first
+        // row, even from the second; the tiles not drawn for it.
+        c.handle(enter(5), t);
+        assert!(c.tick(t + MS(149)).is_empty());
+        let effects = c.tick(t + MS(150));
+        let (id, keyboard) = opened(&effects).expect("opened");
+        assert_eq!(keyboard, KeyboardInteractivity::OnDemand);
+        assert!(!effects.contains(&Effect::Wake(DESKTOPS_NAMESPACE)));
+        let rect = match &c.phase {
+            Phase::Open(open) => open.rect,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((rect.y, rect.width), (700.0, 240.0));
+        // Another tile: its list at once, on the same surface.
+        c.handle(
+            Event::ItemLeave {
+                at: Point::new(-60.0, 750.0),
+            },
+            t + MS(200),
+        );
+        let effects = c.handle(enter(4), t + MS(220));
+        assert!(effects.contains(&Effect::Wake(POPOVER_NAMESPACE)));
+        assert!(c.shows(BAR, Item::Desktop(4)));
+        assert!(c.is_open(id));
+        assert_eq!(c.deadline(), None);
+        // A row chosen: it closes.
+        assert_eq!(
+            c.handle(Event::Chosen, t + MS(300)),
+            vec![Effect::Remove(id)]
+        );
+        // A click on a tile goes there and closes the list.
+        c.handle(enter(1), t + MS(400));
+        let (id, _) = opened(&c.tick(t + MS(550))).expect("opened");
+        let effects = c.handle(
+            Event::ItemPress {
+                bar: BAR.to_owned(),
+                item: Item::Desktop(1),
+                rect: tile(1),
+            },
+            t + MS(600),
+        );
+        assert_eq!(
+            effects,
+            vec![
+                Effect::Remove(id),
+                Effect::Desktop {
+                    bar: BAR.to_owned(),
+                    to: DesktopTo::At(1),
+                }
+            ]
+        );
     }
 
     #[test]

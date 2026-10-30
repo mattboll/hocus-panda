@@ -419,6 +419,35 @@ impl Words {
         }
     }
 
+    /// A desktop's list's title (3.9b).
+    pub fn desktop_title(self, number: usize) -> String {
+        if self.fr() {
+            format!("Bureau {number}")
+        } else {
+            format!("Desktop {number}")
+        }
+    }
+
+    /// A desktop's list's count, on its header's right; none when empty.
+    pub fn windows(self, windows: usize) -> Option<String> {
+        match (self.fr(), windows) {
+            (_, 0) => None,
+            (true, 1) => Some("1 fenêtre".to_owned()),
+            (true, n) => Some(format!("{n} fenêtres")),
+            (false, 1) => Some("1 window".to_owned()),
+            (false, n) => Some(format!("{n} windows")),
+        }
+    }
+
+    /// An empty desktop's list.
+    pub fn no_window(self) -> &'static str {
+        if self.fr() {
+            "Aucune fenêtre."
+        } else {
+            "No window."
+        }
+    }
+
     /// The battery's popover's line under its level.
     pub fn battery_line(self, battery: &Battery) -> String {
         let fr = self.fr();
