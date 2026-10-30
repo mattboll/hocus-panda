@@ -476,11 +476,20 @@ fn the_slider_the_wheel_and_the_arrows_reach_logind_coalesced_never_below_5() ->
     bed.press(KEY_TAB);
     bed.press(KEY_RIGHT);
     bed.brightness(150)?;
+    // logind answers late: a key from the keyboard changes the backlight
+    // after logind set it and before it answers (#478).
+    let late = Duration::from_millis(400);
+    *bed.fakes
+        .brightness_answer
+        .lock()
+        .map_err(|_| anyhow::anyhow!("poisoned"))? = late;
     bed.press(KEY_LEFT);
     bed.press(KEY_LEFT);
     bed.brightness(50)?;
-    // A key from the keyboard while it is open: the slider follows.
+    // A key from the keyboard while it is open: the slider follows, and
+    // keeps it once logind answers.
     bed.fakes.backlight(600, 1000)?;
+    wait(&mut bed.hp, late * 2)?;
     let knob = (x(55.0 / 95.0) as i32, rect.y + SLIDER_Y);
     bed.until_count(knob, (1, 1), white, (1, 1))?;
     Ok(())
