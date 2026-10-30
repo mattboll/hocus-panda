@@ -10,11 +10,13 @@
 //! the clock's settings, the level keys (volume, brightness) pressed, the
 //! presses outside the shell's surfaces while a popover shows, the
 //! names of the screens besides the built-in one, the keyboard's layouts
-//! and which one is active, and the bars' screens' desktops with a sketch
-//! of their windows, their applications and their titles; the shell draws
-//! the bars and their popovers, keeps the levels, and says when it draws
-//! on the CPU, when a popover closes, and when the user asks for the next
-//! layout, another desktop or a window. Neither
+//! and which one is active, the bars' screens' desktops with a sketch of
+//! their windows, their applications and their titles, and the agents'
+//! tools and the agents; the shell draws the bars and their popovers,
+//! keeps the levels, and says when it draws on the CPU, when a popover
+//! closes, and when the user asks for the next layout, another desktop or
+//! a window, plugs a tool in or out, declines them, or copies a text.
+//! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
 //!
@@ -46,6 +48,9 @@ pub const CONNECTIONS_NAMESPACE: &str = "hocus-bar-connections";
 /// the mini form), above the connections: a desktop's change draws only
 /// that region, and nothing else's draws it.
 pub const DESKTOPS_NAMESPACE: &str = "hocus-bar-desktops";
+/// The namespace of the agents' group's surface, under the clock (bar.md
+/// §4 group 3, 4.0): the agents' changes draw only that region.
+pub const AGENTS_NAMESPACE: &str = "hocus-bar-agents";
 /// The namespace of a popover's layer surface, beside the bar (bar.md §9):
 /// one at a time. The compositor blurs behind it as behind the bar, draws
 /// its shadow, and moves it in and out ([`POPOVER_OPEN`], [`POPOVER_CLOSE`]).
@@ -181,6 +186,102 @@ pub enum ToShell {
     /// then for each window a tab, its id, a tab, its title (on one line,
     /// without tabs, [`TITLE_MAX`] characters at most).
     Titles(Titles),
+    /// The agents' tools on this computer and what each is to the desktop
+    /// (4.0): sent as the shell connects and when they change. Written
+    /// `agent-tools`, then for each a tab, its name, a space, its state, a
+    /// space and the file plugging it in changes (as the user knows it,
+    /// `~/.claude/settings.json`; none for herdr).
+    AgentTools(Vec<AgentTool>),
+    /// The agents followed, and what each is doing: sent as the shell
+    /// connects and when they change, the changes of a turn of the
+    /// compositor's loop together (4.0). Written `agents`, then for each a
+    /// tab and its [`AgentShown`] fields.
+    Agents(Vec<AgentShown>),
+}
+
+/// An agents' tool, as the bar shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTool {
+    /// `claude-code`, `codex` or `herdr`.
+    pub tool: String,
+    pub state: ToolState,
+    /// The file plugging it in changes, as the user knows it.
+    pub file: String,
+}
+
+/// What an agents' tool is to the desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolState {
+    /// Not on this computer.
+    Absent,
+    /// There, not plugged in: the card proposes it.
+    Found,
+    /// There, not plugged in, and the user said to plug nothing in.
+    Declined,
+    /// Plugged in: its agents are followed.
+    Plugged,
+    /// herdr runs, and is followed.
+    Running,
+    /// herdr runs, and the user said to plug nothing in.
+    Ignored,
+    /// herdr does not run.
+    Stopped,
+}
+
+impl ToolState {
+    pub const ALL: [Self; 7] = [
+        Self::Absent,
+        Self::Found,
+        Self::Declined,
+        Self::Plugged,
+        Self::Running,
+        Self::Ignored,
+        Self::Stopped,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Absent => "absent",
+            Self::Found => "found",
+            Self::Declined => "declined",
+            Self::Plugged => "plugged",
+            Self::Running => "running",
+            Self::Ignored => "ignored",
+            Self::Stopped => "stopped",
+        }
+    }
+
+    /// Whether its agents are followed.
+    pub const fn followed(self) -> bool {
+        matches!(self, Self::Plugged | Self::Running)
+    }
+}
+
+impl FromStr for ToolState {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|t| t.name() == s)
+            .ok_or_else(|| BadLine(format!("no tool state {s:?}")))
+    }
+}
+
+/// An agent as the bar shows it. Written `ID STATE SINCE SOURCE WINDOW
+/// NAME`: the compositor's id for it; `working`, `waiting`, `done`,
+/// `failed` or `idle`; since when, in microseconds of `CLOCK_MONOTONIC`;
+/// where its state comes from (`claude-code`, `codex`, `herdr`,
+/// `command`; several joined with `+`); its window's id (0: none found);
+/// its name, last (it may hold spaces, never a tab).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentShown {
+    pub id: u64,
+    pub state: String,
+    pub since: u64,
+    pub source: String,
+    pub window: u64,
+    pub name: String,
 }
 
 /// A screen's desktops as its bar's tiles show them. Written `desktops`,
@@ -481,6 +582,19 @@ pub enum ToCompositor {
     /// the compositor goes to its desktop, sliding, and focuses it.
     /// Written `bring ID`.
     Bring(u64),
+    /// The user plugs an agents' tool in (`claude-code`, `codex`), having
+    /// read what it changes: the compositor writes its hooks, off its
+    /// loop, then says [`ToShell::AgentTools`]. Written `plug TOOL`.
+    Plug(String),
+    /// The user unplugs it. Written `unplug TOOL`.
+    Unplug(String),
+    /// "Plug nothing in": every tool there and not plugged in is declined,
+    /// herdr's following too. Written `decline`.
+    Decline,
+    /// The clipboard takes `text` (the command the Sources popover shows),
+    /// which the compositor offers: the shell's surfaces take no serial to
+    /// set it themselves. Written `copy TEXT`, the text on one line.
+    Copy(String),
 }
 
 /// A screen's name as a [`ToShell::Screens`] line carries it: on one
@@ -574,6 +688,35 @@ impl fmt::Display for ToShell {
                 }
                 Ok(())
             }
+            Self::AgentTools(tools) => {
+                f.write_str("agent-tools")?;
+                for tool in tools {
+                    write!(
+                        f,
+                        "\t{} {} {}",
+                        tool.tool,
+                        tool.state.name(),
+                        screen_name(&tool.file)
+                    )?;
+                }
+                Ok(())
+            }
+            Self::Agents(agents) => {
+                f.write_str("agents")?;
+                for a in agents {
+                    write!(
+                        f,
+                        "\t{} {} {} {} {} {}",
+                        a.id,
+                        a.state,
+                        a.since,
+                        a.source,
+                        a.window,
+                        screen_name(&a.name)
+                    )?;
+                }
+                Ok(())
+            }
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -627,6 +770,46 @@ impl FromStr for ToShell {
                     })
                     .collect(),
             ));
+        }
+        if let Some(fields) = line.strip_prefix("agent-tools")
+            && (fields.is_empty() || fields.starts_with('\t'))
+        {
+            return fields
+                .split('\t')
+                .skip(1)
+                .map(|field| {
+                    let mut words = field.splitn(3, ' ');
+                    let tool = word(&mut words, "tool")?.to_owned();
+                    let state = word(&mut words, "tool state")?.parse()?;
+                    let file = words.next().unwrap_or_default().to_owned();
+                    Ok(AgentTool { tool, state, file })
+                })
+                .collect::<Result<_, BadLine>>()
+                .map(Self::AgentTools);
+        }
+        if let Some(fields) = line.strip_prefix("agents")
+            && (fields.is_empty() || fields.starts_with('\t'))
+        {
+            return fields
+                .split('\t')
+                .skip(1)
+                .map(|field| {
+                    let mut words = field.splitn(6, ' ');
+                    let number = |w: &str, what: &str| {
+                        w.parse::<u64>()
+                            .map_err(|e| BadLine(format!("{what}: {e}")))
+                    };
+                    Ok(AgentShown {
+                        id: number(word(&mut words, "agent")?, "agent")?,
+                        state: word(&mut words, "state")?.to_owned(),
+                        since: number(word(&mut words, "since")?, "since")?,
+                        source: word(&mut words, "source")?.to_owned(),
+                        window: number(word(&mut words, "window")?, "window")?,
+                        name: words.next().unwrap_or_default().to_owned(),
+                    })
+                })
+                .collect::<Result<_, BadLine>>()
+                .map(Self::Agents);
         }
         if let Some(fields) = line.strip_prefix("titles ") {
             let mut fields = fields.split('\t');
@@ -746,6 +929,10 @@ impl fmt::Display for ToCompositor {
                 DesktopTo::Previous => write!(f, "desktop {output} previous"),
             },
             Self::Bring(id) => write!(f, "bring {id}"),
+            Self::Plug(tool) => write!(f, "plug {tool}"),
+            Self::Unplug(tool) => write!(f, "unplug {tool}"),
+            Self::Decline => f.write_str("decline"),
+            Self::Copy(text) => write!(f, "copy {}", screen_name(text)),
         }
     }
 }
@@ -754,9 +941,15 @@ impl FromStr for ToCompositor {
     type Err = BadLine;
 
     fn from_str(line: &str) -> Result<Self, Self::Err> {
+        if let Some(text) = line.strip_prefix("copy ") {
+            return Ok(Self::Copy(text.to_owned()));
+        }
         let mut words = line.split_whitespace();
         match words.next() {
             Some("software") => Ok(Self::Software),
+            Some("plug") => Ok(Self::Plug(word(&mut words, "tool")?.to_owned())),
+            Some("unplug") => Ok(Self::Unplug(word(&mut words, "tool")?.to_owned())),
+            Some("decline") => Ok(Self::Decline),
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
@@ -922,6 +1115,7 @@ mod tests {
             .chain(screens)
             .chain(layouts)
             .chain(desktops)
+            .chain(agents())
         {
             assert_eq!(message.to_string().parse::<ToShell>(), Ok(message));
         }
@@ -944,6 +1138,10 @@ mod tests {
                 to: DesktopTo::Previous,
             },
             ToCompositor::Bring(42),
+            ToCompositor::Plug("claude-code".into()),
+            ToCompositor::Unplug("codex".into()),
+            ToCompositor::Decline,
+            ToCompositor::Copy("hocus agent my-agent waiting".into()),
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
@@ -978,6 +1176,38 @@ mod tests {
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }
+    }
+
+    fn agents() -> Vec<ToShell> {
+        vec![
+            ToShell::AgentTools(Vec::new()),
+            ToShell::AgentTools(vec![
+                AgentTool {
+                    tool: "claude-code".into(),
+                    state: ToolState::Found,
+                    file: "~/.claude/settings.json".into(),
+                },
+                AgentTool {
+                    tool: "codex".into(),
+                    state: ToolState::Plugged,
+                    file: "/opt/my codex/config.toml".into(),
+                },
+                AgentTool {
+                    tool: "herdr".into(),
+                    state: ToolState::Ignored,
+                    file: String::new(),
+                },
+            ]),
+            ToShell::Agents(Vec::new()),
+            ToShell::Agents(vec![AgentShown {
+                id: 3,
+                state: "waiting".into(),
+                since: 123_456,
+                source: "claude-code+herdr".into(),
+                window: 0,
+                name: "hocus panda".into(),
+            }]),
+        ]
     }
 
     #[test]
