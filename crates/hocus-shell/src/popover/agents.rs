@@ -95,6 +95,8 @@ const ROWS: [Row; 3] = [
 enum Target {
     Plug(Tool),
     Unplug(Tool),
+    /// herdr, declined, followed again.
+    Follow,
     Copy,
     Cancel,
     Confirm,
@@ -162,6 +164,16 @@ fn sources_layout(said: &agents::Said, words: Words, copied: bool) -> SourcesLay
                     }
                     _ => None,
                 },
+                Row::Herdr if said.state("herdr") == ToolState::Ignored => {
+                    let w = button_width(words.follow(), 12.5, true, 10.0);
+                    Some((
+                        Target::Follow,
+                        Rectangle::new(
+                            Point::new(RIGHT - w, rect.center_y() - 13.0),
+                            Size::new(w, 26.0),
+                        ),
+                    ))
+                }
                 Row::Herdr => None,
             };
             (row, rect, target)
@@ -436,9 +448,14 @@ impl Panel {
                 Alignment::Left,
             ));
             match target {
-                Some((t @ Target::Plug(_), rect)) => {
+                Some((t @ (Target::Plug(_) | Target::Follow), rect)) => {
                     let fill = if hover == Some(*t) { PLUG_HOVER } else { PLUG };
-                    button(f, *rect, words.plug(), (12.5, true), (fill, ACCENT), 13.0);
+                    let word = if *t == Target::Follow {
+                        words.follow()
+                    } else {
+                        words.plug()
+                    };
+                    button(f, *rect, word, (12.5, true), (fill, ACCENT), 13.0);
                 }
                 Some((t @ Target::Unplug(_), rect)) => {
                     let lit = hover == Some(*t);
@@ -571,6 +588,7 @@ impl Panel {
         match target {
             Target::Plug(tool) => event(Seen::Replace(Item::Plug(tool))),
             Target::Unplug(tool) => super::send(vec![Effect::Unplug(tool)]),
+            Target::Follow => super::send(vec![Effect::FollowHerdr]),
             Target::Copy => {
                 state.copied = true;
                 super::send(vec![

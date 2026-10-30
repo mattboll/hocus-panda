@@ -333,6 +333,11 @@ impl Words {
         }
     }
 
+    /// Sources' button for a herdr declined.
+    pub fn follow(self) -> &'static str {
+        self.pick("Suivre", "Follow")
+    }
+
     pub fn unplug(self) -> &'static str {
         self.pick("Débrancher", "Unplug")
     }
