@@ -8,10 +8,13 @@
 //! running too; a tool installed later bringing the card back for it
 //! alone; no tool, no group; `hocus agent` and `hocus agent-hook` (with
 //! Claude Code's documented payloads) reaching the model and the shell;
-//! the agent's window found above its process; nothing drawn at rest.
+//! the agent's window found above its process; nothing drawn at rest. The
+//! agents' rows (4.1), and going to an agent from its row (4.3): the
+//! streak, the rim's pulse, herdr's pane.
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
-//! as in CI. The shell runs away from the machine's services (no session
+//! as in CI. The tests of motion and of the streak run on a GPU when the
+//! machine has one, and are skipped otherwise. The shell runs away from the machine's services (no session
 //! bus, no system bus, no PipeWire).
 
 mod common;
@@ -26,7 +29,9 @@ use std::{
 
 use common::{BTN_LEFT, WAIT, wait};
 use hocus_agents::tools::Places;
-use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, RendererChoice, going::Streak, model::Rect,
+};
 use hocus_link::ToolState;
 
 /// What the test's machine has.
@@ -50,7 +55,12 @@ struct Bed {
     hocus: PathBuf,
     /// The fake herdr's thread runs while the test does.
     _herdr: Option<std::thread::JoinHandle<()>>,
+    /// What it was asked, method and parameters, past its listing.
+    herdr_heard: Heard,
 }
+
+/// The fake herdr's requests.
+type Heard = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
 
 /// The programs this test needs, built beside it.
 fn ready() -> Option<(PathBuf, PathBuf)> {
@@ -80,8 +90,13 @@ fn places(home: &Path, hocus: &Path) -> Places {
 }
 
 /// A fake herdr on `socket`: one agent, `refacto`, working in pane w1:p1,
-/// whose foreground process is `pid`.
-fn fake_herdr(socket: &Path, pid: u32) -> anyhow::Result<std::thread::JoinHandle<()>> {
+/// whose foreground process is `pid`. What it is asked besides listing and
+/// subscribing goes into `heard`.
+fn fake_herdr(
+    socket: &Path,
+    pid: u32,
+    heard: Heard,
+) -> anyhow::Result<std::thread::JoinHandle<()>> {
     std::fs::create_dir_all(socket.parent().unwrap_or(Path::new("/")))?;
     let listener = UnixListener::bind(socket)?;
     Ok(std::thread::spawn(move || {
@@ -102,7 +117,13 @@ fn fake_herdr(socket: &Path, pid: u32) -> anyhow::Result<std::thread::JoinHandle
                 Some("pane.process_info") => {
                     serde_json::json!({ "shell_pid": 1, "foreground": [ { "pid": pid, "name": "claude" } ] })
                 }
-                _ => serde_json::json!({ "type": "subscription_started" }),
+                Some("events.subscribe") => serde_json::json!({ "type": "subscription_started" }),
+                method => {
+                    if let Ok(mut heard) = heard.lock() {
+                        heard.push(format!("{} {}", method.unwrap_or(""), request["params"]));
+                    }
+                    serde_json::json!({ "type": "ok" })
+                }
             };
             let answer = serde_json::json!({ "id": id, "result": result });
             let _ = (&stream).write_all(format!("{answer}\n").as_bytes());
@@ -123,11 +144,16 @@ fn start(shell: &Path, hocus: &Path, machine: &Machine) -> anyhow::Result<Bed> {
     if machine.codex {
         std::fs::create_dir_all(home.join(".codex"))?;
     }
+    let heard = Heard::default();
     let herdr = if machine.herdr {
-        Some(fake_herdr(
-            &home.join(".config/herdr/herdr.sock"),
-            std::process::id(),
-        )?)
+        Some((
+            fake_herdr(
+                &home.join(".config/herdr/herdr.sock"),
+                std::process::id(),
+                heard.clone(),
+            )?,
+            heard,
+        ))
     } else {
         None
     };
@@ -138,7 +164,7 @@ fn start_in(
     dir: tempfile::TempDir,
     shell: &Path,
     hocus: &Path,
-    herdr: Option<std::thread::JoinHandle<()>>,
+    herdr: Option<(std::thread::JoinHandle<()>, Heard)>,
     machine: &Machine,
 ) -> anyhow::Result<Bed> {
     let home = dir.path().join("home");
@@ -180,12 +206,15 @@ fn start_in(
         config,
         Some(script),
     )?;
+    let (herdr, herdr_heard) =
+        herdr.map_or((None, Heard::default()), |(h, heard)| (Some(h), heard));
     let mut bed = Bed {
         dir,
         hp,
         log,
         hocus: hocus.to_path_buf(),
         _herdr: herdr,
+        herdr_heard,
     };
     let drawn = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
         hp.agents_surfaces().len() == 1 && hp.agents_commits() > 0
@@ -1179,5 +1208,389 @@ fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
         let last = commits.last().copied().unwrap_or_default();
         assert!(last < Duration::from_millis(1200), "{commits:?}");
     }
+    Ok(())
+}
+
+// --- 4.3: going to an agent -----------------------------------------------------
+
+/// The render node for the tests that need the compositor on a GPU (the
+/// streak is a shader's); `None`, and the test is skipped, without one.
+fn render_node() -> Option<PathBuf> {
+    let node = PathBuf::from("/dev/dri/renderD128");
+    if node.exists() {
+        Some(node)
+    } else {
+        eprintln!("no render node: the compositor would draw on the CPU, without the streak");
+        None
+    }
+}
+
+/// What going to an agent shows at a frame.
+#[derive(Debug, Clone, Copy)]
+struct Sample {
+    /// Since the click.
+    at: Duration,
+    streak: Option<Streak>,
+    /// The window's rim and ring, as they pulse.
+    landing: Option<(f32, Option<f64>)>,
+    /// The desktop shown, and where the strip is.
+    strip: (usize, f64),
+}
+
+impl Bed {
+    /// Clicks agent `name`'s row, then samples each frame for `time`, the
+    /// pulse being `app_id`'s.
+    fn go_to(&mut self, name: &str, app_id: &str, time: Duration) -> anyhow::Result<Vec<Sample>> {
+        let row = self.row(name)?;
+        let start = Instant::now();
+        self.click(row);
+        let mut frames = self.hp.frames();
+        let mut out = Vec::new();
+        while start.elapsed() < time {
+            self.hp.dispatch(Duration::from_millis(2))?;
+            let now = self.hp.frames();
+            if now != frames {
+                frames = now;
+                out.push(Sample {
+                    at: start.elapsed(),
+                    streak: self.hp.streak(),
+                    landing: self.hp.landing(app_id),
+                    strip: self.hp.desktop(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// The centre of the window of `app_id`, global.
+    fn centre(&self, app_id: &str) -> anyhow::Result<(f64, f64)> {
+        let rect = self
+            .hp
+            .windows()
+            .into_iter()
+            .find(|w| w.app_id.as_deref() == Some(app_id))
+            .map(|w| w.rect)
+            .ok_or_else(|| anyhow::anyhow!("no {app_id}"))?;
+        Ok((
+            f64::from(rect.x) + f64::from(rect.width) / 2.0,
+            f64::from(rect.y) + f64::from(rect.height) / 2.0,
+        ))
+    }
+
+    /// Waits until the window of `app_id` has the keyboard.
+    fn keyboard_goes_to(&mut self, app_id: &str) -> anyhow::Result<()> {
+        let done = self.hp.dispatch_until(WAIT, |hp| {
+            hp.windows()
+                .iter()
+                .any(|w| w.focused && w.keyboard && w.app_id.as_deref() == Some(app_id))
+        })?;
+        anyhow::ensure!(done, "the keyboard is on {:?}", self.keyboard_on());
+        Ok(())
+    }
+}
+
+/// The streak's samples, the time it showed (from its first frame to its
+/// last), and the pulse's.
+fn streaked(samples: &[Sample]) -> (Vec<Sample>, Duration) {
+    let shown: Vec<Sample> = samples
+        .iter()
+        .filter(|s| s.streak.is_some())
+        .copied()
+        .collect();
+    let span = match (shown.first(), shown.last()) {
+        (Some(a), Some(b)) => b.at - a.at,
+        _ => Duration::ZERO,
+    };
+    (shown, span)
+}
+
+fn near((x0, y0): (f64, f64), (x1, y1): (f64, f64), by: f64) -> bool {
+    (x0 - x1).abs() <= by && (y0 - y1).abs() <= by
+}
+
+/// On a GPU: a row's click on the same desktop runs the streak from the
+/// row's left edge to the window's centre in the row's colour, for some
+/// 520 ms; the window has the keyboard, and its rim pulses with the ring
+/// as the streak lands; then nothing is drawn.
+#[test]
+fn going_to_an_agent_runs_the_streak_then_pulses_its_rim_then_rests() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let Some(node) = render_node() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            gpu: Some(node),
+            ..Machine::default()
+        },
+    )?;
+    if bed.hp.renderer() != "gles" {
+        eprintln!("the compositor draws on the CPU here: no streak");
+        return Ok(());
+    }
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.agent_becomes("build", Some("working"))?;
+    bed.settle()?;
+    let row = bed.row("build")?;
+    let centre = bed.centre("test.terminal")?;
+    let samples = bed.go_to("build", "test.terminal", Duration::from_millis(1600))?;
+    let (shown, span) = streaked(&samples);
+    let (Some(first), Some(last)) = (shown.first(), shown.last()) else {
+        anyhow::bail!("no streak: {samples:?}");
+    };
+    let (first_streak, last_streak) = (
+        first.streak.unwrap_or_default(),
+        last.streak.unwrap_or_default(),
+    );
+    let (from, head, colour) = (first_streak.from, first_streak.head, first_streak.colour);
+    let landed = last_streak.head;
+    // From the row's left edge (184 px wide), at its middle; the working
+    // row's colour, the accent; to the window's centre.
+    assert!(
+        near(from, (row.0 - 92.0, row.1), 1.0),
+        "{from:?} for {row:?}"
+    );
+    assert_eq!(colour, [0x6C, 0xC2, 0x87]);
+    assert!(
+        near(head, from, 300.0) && !near(head, centre, 10.0),
+        "{head:?}"
+    );
+    assert!(near(landed, centre, 0.5), "{landed:?} for {centre:?}");
+    assert!(
+        (Duration::from_millis(420)..Duration::from_millis(650)).contains(&span),
+        "{span:?}: {shown:?}"
+    );
+    // The rim lights once the streak is there, the ring growing.
+    let pulsing: Vec<&Sample> = samples
+        .iter()
+        .filter(|s| s.landing.is_some_and(|(rim, _)| rim > 0.0))
+        .collect();
+    let lit = pulsing.first().map_or(Duration::MAX, |s| s.at);
+    assert!(lit >= first.at + Duration::from_millis(250), "{samples:?}");
+    let widest = pulsing
+        .iter()
+        .filter_map(|s| s.landing.and_then(|(_, ring)| ring))
+        .fold(0.0, f64::max);
+    assert!(widest > 8.0 && widest <= 14.0, "{widest}");
+    bed.keyboard_goes_to("test.terminal")?;
+    // Then nothing moves by the pulse's end; what draws after is the
+    // clock's second, once a second.
+    let end = samples
+        .iter()
+        .rfind(|s| s.streak.is_some() || s.landing.is_some())
+        .map_or(Duration::ZERO, |s| s.at);
+    assert!(
+        end < first.at + Duration::from_millis(1100),
+        "moving until {end:?}: {samples:?}"
+    );
+    let frames = bed.hp.frames();
+    wait(&mut bed.hp, Duration::from_secs(2))?;
+    assert!(bed.hp.frames() - frames <= 3, "drawn at rest");
+    assert!(bed.hp.streak().is_none());
+    Ok(())
+}
+
+/// On a GPU: the window on another desktop, the strip slides there first;
+/// the streak runs once it has.
+#[test]
+fn going_to_an_agent_on_another_desktop_slides_there_first() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let Some(node) = render_node() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            gpu: Some(node),
+            ..Machine::default()
+        },
+    )?;
+    if bed.hp.renderer() != "gles" {
+        eprintln!("the compositor draws on the CPU here: no streak");
+        return Ok(());
+    }
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.agent_becomes("build", Some("working"))?;
+    bed.settle()?;
+    let samples = bed.go_to("build", "test.terminal", Duration::from_millis(1600))?;
+    let sliding: Vec<&Sample> = samples
+        .iter()
+        .filter(|s| s.strip.1 > 0.0 && s.strip.1 < 1.0)
+        .collect();
+    anyhow::ensure!(sliding.len() >= 5, "no slide: {samples:?}");
+    let (shown, span) = streaked(&samples);
+    anyhow::ensure!(!shown.is_empty(), "no streak: {samples:?}");
+    // Never while the strip moves; once it is still.
+    assert!(shown.iter().all(|s| s.strip == (0, 0.0)), "{shown:?}");
+    let slid = sliding.first().map_or(Duration::ZERO, |s| s.at);
+    assert!(
+        shown[0].at >= slid + Duration::from_millis(250),
+        "{samples:?}"
+    );
+    assert!(span >= Duration::from_millis(420), "{span:?}");
+    bed.keyboard_goes_to("test.terminal")?;
+    Ok(())
+}
+
+/// With reduced motion (on a GPU), or a compositor on the CPU: no slide
+/// and no streak; the rim lights and fades, without its ring.
+#[test]
+fn with_reduced_motion_or_on_the_cpu_only_the_rim_lights() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let machines = [
+        render_node().map(|node| Machine {
+            gpu: Some(node),
+            reduced_motion: true,
+            ..Machine::default()
+        }),
+        Some(Machine::default()),
+    ];
+    for machine in machines.into_iter().flatten() {
+        let mut bed = start(&shell, &hocus, &machine)?;
+        let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+        common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+        let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop().0 == 1)?;
+        anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+        bed.hocus(&["agent", "build", "waiting"], None)?;
+        bed.agent_becomes("build", Some("waiting"))?;
+        bed.settle()?;
+        let samples = bed.go_to("build", "test.terminal", Duration::from_millis(1000))?;
+        let renderer = bed.hp.renderer();
+        assert!(
+            samples.iter().all(|s| s.streak.is_none()),
+            "{renderer}: {samples:?}"
+        );
+        assert!(
+            samples.iter().all(|s| s.strip.1 == 0.0 || s.strip.1 == 1.0),
+            "{renderer}, slid: {samples:?}"
+        );
+        let lit: Vec<(f32, Option<f64>)> = samples.iter().filter_map(|s| s.landing).collect();
+        assert!(
+            lit.iter().any(|(rim, _)| *rim > 0.5),
+            "{renderer}: {samples:?}"
+        );
+        assert!(lit.iter().all(|(_, ring)| ring.is_none()), "{lit:?}");
+        bed.keyboard_goes_to("test.terminal")?;
+    }
+    Ok(())
+}
+
+/// On a GPU: the streak takes its row's colour, read from the screen:
+/// amber to an agent that waits, the accent to one that works.
+#[test]
+fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let Some(node) = render_node() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            gpu: Some(node),
+            ..Machine::default()
+        },
+    )?;
+    if bed.hp.renderer() != "gles" {
+        eprintln!("the compositor draws on the CPU here: no streak");
+        return Ok(());
+    }
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
+    bed.hocus(&["agent", "infra", "waiting"], None)?;
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.agent_becomes("infra", Some("waiting"))?;
+    bed.agent_becomes("build", Some("working"))?;
+    bed.settle()?;
+    for (name, colour) in [("infra", [0xF5, 0xB4, 0x4A]), ("build", [0x6C, 0xC2, 0x87])] {
+        let row = bed.row(name)?;
+        bed.click(row);
+        // A frame of the streak well on its way: three quarters along it,
+        // the line is that much of its colour.
+        let mut seen = None;
+        let found = bed.hp.dispatch_until(WAIT, |hp| {
+            seen = hp
+                .streak()
+                .filter(|s| s.alpha == 1.0 && !near(s.from, s.head, 250.0));
+            seen.is_some()
+        })?;
+        anyhow::ensure!(found, "no streak to {name}");
+        let Streak {
+            from,
+            head,
+            colour: told,
+            ..
+        } = seen.unwrap_or_default();
+        assert_eq!(told, colour, "{name}");
+        let at = (
+            from.0 + 0.7 * (head.0 - from.0),
+            from.1 + 0.7 * (head.1 - from.1),
+        );
+        let [r, g, b] = pixel(&mut bed.hp, at)?;
+        if name == "infra" {
+            assert!(
+                r > 110 && r > g + 15 && g > b + 15,
+                "amber: {:?}",
+                [r, g, b]
+            );
+        } else {
+            assert!(
+                g > 100 && g > r + 20 && g > b + 10,
+                "green: {:?}",
+                [r, g, b]
+            );
+        }
+        let over = bed.hp.dispatch_until(WAIT, |hp| hp.streak().is_none())?;
+        anyhow::ensure!(over, "the streak goes on");
+        bed.settle()?;
+    }
+    Ok(())
+}
+
+/// A herdr agent's row selects its pane in herdr (a fake one).
+#[test]
+fn going_to_a_herdr_agent_selects_its_pane() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            herdr: true,
+            ..Machine::default()
+        },
+    )?;
+    bed.tool_becomes("herdr", ToolState::Running)?;
+    bed.agent_becomes("refacto", Some("working"))?;
+    bed.settle()?;
+    let row = bed.row("refacto")?;
+    bed.click(row);
+    let heard = bed.herdr_heard.clone();
+    let selected = bed.hp.dispatch_until(WAIT, |_| {
+        heard
+            .lock()
+            .is_ok_and(|h| h.iter().any(|r| r == r#"pane.focus {"pane_id":"w1:p1"}"#))
+    })?;
+    anyhow::ensure!(
+        selected,
+        "herdr was asked {:?}",
+        bed.herdr_heard.lock().map(|h| h.clone())
+    );
     Ok(())
 }
