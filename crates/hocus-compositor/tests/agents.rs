@@ -35,6 +35,12 @@ struct Machine {
     claude: bool,
     codex: bool,
     herdr: bool,
+    /// The time the shell's clock reads as it starts (`HOCUS_CLOCK_AT`).
+    clock_at: Option<&'static str>,
+    /// The compositor on this render node, the shell on its GPU (else
+    /// Pixman, the shell on the CPU).
+    gpu: Option<PathBuf>,
+    reduced_motion: bool,
 }
 
 struct Bed {
@@ -125,7 +131,7 @@ fn start(shell: &Path, hocus: &Path, machine: &Machine) -> anyhow::Result<Bed> {
     } else {
         None
     };
-    start_in(dir, shell, hocus, herdr)
+    start_in(dir, shell, hocus, herdr, machine)
 }
 
 fn start_in(
@@ -133,6 +139,7 @@ fn start_in(
     shell: &Path,
     hocus: &Path,
     herdr: Option<std::thread::JoinHandle<()>>,
+    machine: &Machine,
 ) -> anyhow::Result<Bed> {
     let home = dir.path().join("home");
     let log = dir
@@ -145,23 +152,30 @@ fn start_in(
             "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
              export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
              PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
-             LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' \
+             LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' {}\
              RUST_LOG=warn,hocuspanda_shell=debug\nexec '{}' \"$@\" 2>>'{}'\n",
             home.display(),
+            machine
+                .clock_at
+                .map_or(String::new(), |at| format!("HOCUS_CLOCK_AT='{at}' ")),
             shell.display(),
             log.display()
         ),
     )?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
-    let config = Config {
+    let mut config = Config {
         agent_places: Some(places(&home, hocus)),
         ..Config::default()
     };
+    config.appearance.reduced_motion = machine.reduced_motion;
     let hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],
-            renderer: RendererChoice::Pixman,
-            ..HeadlessConfig::default()
+            renderer: match machine.gpu {
+                Some(_) => RendererChoice::Gles,
+                None => RendererChoice::Pixman,
+            },
+            render_node: machine.gpu.clone(),
         },
         config,
         Some(script),
@@ -413,6 +427,7 @@ fn two_tools_found_show_the_card() -> anyhow::Result<()> {
             claude: true,
             codex: true,
             herdr: false,
+            ..Machine::default()
         },
     )?;
     bed.logged("shows=Pour suivre tes agents, branche ton outil\u{a0}: Claude Code, Codex")?;
@@ -441,6 +456,7 @@ fn plugging_in_writes_the_hooks_after_the_click_and_keeps_a_copy() -> anyhow::Re
             claude: true,
             codex: true,
             herdr: false,
+            ..Machine::default()
         },
     )?;
     let settings = bed.home().join(".claude/settings.json");
@@ -485,6 +501,7 @@ fn unplugging_puts_the_file_back_as_it_was() -> anyhow::Result<()> {
             claude: true,
             codex: false,
             herdr: false,
+            ..Machine::default()
         },
     )?;
     let settings = bed.home().join(".claude/settings.json");
@@ -527,6 +544,7 @@ fn plugging_nothing_in_hides_the_group_and_is_remembered() -> anyhow::Result<()>
             claude: true,
             codex: true,
             herdr: false,
+            ..Machine::default()
         },
     )?;
     let from = bed.mark();
@@ -544,7 +562,7 @@ fn plugging_nothing_in_hides_the_group_and_is_remembered() -> anyhow::Result<()>
     // A new session: still hidden.
     let Bed { dir, hp, .. } = bed;
     drop(hp);
-    let mut again = start_in(dir, &shell, &hocus, None)?;
+    let mut again = start_in(dir, &shell, &hocus, None, &Machine::default())?;
     again.tool_becomes("claude-code", ToolState::Declined)?;
     again.one_pixel()?;
     Ok(())
@@ -562,6 +580,7 @@ fn plugging_nothing_in_with_herdr_running_hides_the_group_too() -> anyhow::Resul
             claude: true,
             codex: false,
             herdr: true,
+            ..Machine::default()
         },
     )?;
     bed.tool_becomes("herdr", ToolState::Running)?;
@@ -594,6 +613,7 @@ fn a_declined_herdr_is_followed_again_from_sources() -> anyhow::Result<()> {
             claude: true,
             codex: true,
             herdr: true,
+            ..Machine::default()
         },
     )?;
     bed.tool_becomes("herdr", ToolState::Running)?;
@@ -644,6 +664,7 @@ fn a_tool_installed_later_brings_the_card_back_for_it_alone() -> anyhow::Result<
             claude: true,
             codex: false,
             herdr: false,
+            ..Machine::default()
         },
     )?;
     let decline = bed.item("Decline")?;
@@ -690,8 +711,8 @@ fn the_commands_states_reach_the_model_and_the_shell() -> anyhow::Result<()> {
     let from = bed.mark();
     bed.hocus(&["agent", "build", "working"], None)?;
     bed.agent_becomes("build", Some("working"))?;
-    // An agent runs: the group's header, until 4.1's tiles.
-    bed.logged_after(from, &["shows=AGENTS", "agents=1"])?;
+    // An agent runs: its row.
+    bed.logged_after(from, &["shows=AGENTS 1 · build 0\u{a0}min", "agents=1"])?;
     bed.hocus(&["agent", "build", "waiting"], None)?;
     bed.agent_becomes("build", Some("waiting"))?;
     bed.hocus(&["agent", "build", "ended"], None)?;
@@ -812,6 +833,7 @@ fn nothing_commits_at_rest() -> anyhow::Result<()> {
             claude: true,
             codex: true,
             herdr: false,
+            ..Machine::default()
         },
     )?;
     let from = bed.mark();
@@ -827,5 +849,335 @@ fn nothing_commits_at_rest() -> anyhow::Result<()> {
     }
     wait(&mut bed.hp, Duration::from_secs(2))?;
     assert_eq!(before, bed.counts());
+    Ok(())
+}
+
+// --- 4.1: one row per agent ----------------------------------------------------
+
+impl Bed {
+    /// The id the compositor gives agent `name`.
+    fn id_of(&self, name: &str) -> anyhow::Result<u64> {
+        self.hp
+            .agents_peek()
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.id)
+            .ok_or_else(|| anyhow::anyhow!("no agent {name}: {:?}", self.hp.agents_peek()))
+    }
+
+    /// The middle of agent `name`'s row, global.
+    fn row(&mut self, name: &str) -> anyhow::Result<(f64, f64)> {
+        let id = self.id_of(name)?;
+        self.item(&format!("Agent({id})"))
+    }
+
+    /// The window with the keyboard, by its app id.
+    fn keyboard_on(&self) -> Option<String> {
+        self.hp
+            .windows()
+            .into_iter()
+            .find(|w| w.focused && w.keyboard)
+            .and_then(|w| w.app_id)
+    }
+
+    /// The agents' surface's commits, and when each came, for `time`.
+    fn commits_for(&mut self, time: Duration) -> anyhow::Result<Vec<Duration>> {
+        let start = Instant::now();
+        let mut seen = self.hp.agents_commits();
+        let mut at = Vec::new();
+        while start.elapsed() < time {
+            self.hp.dispatch(Duration::from_millis(2))?;
+            let now = self.hp.agents_commits();
+            if now != seen {
+                seen = now;
+                at.push(start.elapsed());
+            }
+        }
+        Ok(at)
+    }
+}
+
+/// The pixel at (`x`, `y`) of output 0, as R, G, B.
+fn pixel(hp: &mut Headless, (x, y): (f64, f64)) -> anyhow::Result<[i32; 3]> {
+    let (width, _, bytes) = hp.screenshot(0)?;
+    let at = ((y as i32 * width + x as i32) * 4) as usize;
+    let p = bytes
+        .get(at..at + 4)
+        .ok_or_else(|| anyhow::anyhow!("({x}, {y}) is off the screen"))?;
+    Ok([i32::from(p[2]), i32::from(p[1]), i32::from(p[0])])
+}
+
+#[test]
+fn the_rows_say_each_agent_in_order_with_its_colour() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let from = bed.mark();
+    for (name, state) in [
+        ("build", "working"),
+        ("notes", "idle"),
+        ("site", "failed"),
+        ("api", "done"),
+        ("infra", "waiting"),
+    ] {
+        bed.hocus(&["agent", name, state], None)?;
+        bed.agent_becomes(name, Some(state))?;
+    }
+    // What concerns the user first: waiting, stuck, to see, working,
+    // resting.
+    bed.logged_after(
+        from,
+        &["shows=AGENTS 5 · infra t'attend · site bloqué · api à voir · build 0\u{a0}min · notes repos"],
+    )?;
+    let rows: Vec<(f64, f64)> = ["infra", "site", "api", "build", "notes"]
+        .into_iter()
+        .map(|name| bed.row(name))
+        .collect::<anyhow::Result<_>>()?;
+    assert!(
+        rows.windows(2)
+            .all(|p| (p[1].1 - p[0].1 - 28.0).abs() < 0.6),
+        "28 px apart: {rows:?}"
+    );
+    bed.settle()?;
+    // Each row's tint, 3 px into it (left of its panda), against the
+    // working one's, which has none.
+    let tints: Vec<[i32; 3]> = rows
+        .iter()
+        .map(|&(x, y)| pixel(&mut bed.hp, (x - 92.0 + 3.0, y)))
+        .collect::<anyhow::Result<_>>()?;
+    let plain = tints[3];
+    let lift = |t: [i32; 3]| [t[0] - plain[0], t[1] - plain[1], t[2] - plain[2]];
+    let [waiting, stuck, to_see, resting] = [
+        lift(tints[0]),
+        lift(tints[1]),
+        lift(tints[2]),
+        lift(tints[4]),
+    ];
+    assert!(waiting[0] > 12 && waiting[1] > 8, "amber: {tints:?}");
+    assert!(
+        stuck[0] > 12 && stuck[0] > stuck[1] + 5,
+        "orange: {tints:?}"
+    );
+    assert!(to_see[1] > 8 && to_see[1] > to_see[0], "green: {tints:?}");
+    assert!(resting.iter().all(|d| d.abs() <= 2), "none: {tints:?}");
+    Ok(())
+}
+
+#[test]
+fn more_than_five_agents_fold_into_a_line() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let from = bed.mark();
+    for (name, state) in [
+        ("w1", "working"),
+        ("w2", "working"),
+        ("w3", "working"),
+        ("w4", "working"),
+        ("w5", "working"),
+        ("r1", "idle"),
+        ("r2", "idle"),
+    ] {
+        bed.hocus(&["agent", name, state], None)?;
+        bed.agent_becomes(name, Some(state))?;
+    }
+    // The two resting ones under the line.
+    bed.logged_after(
+        from,
+        &[
+            "shows=AGENTS 7 · w1 ",
+            "· w5 0\u{a0}min · +\u{a0}2 au repos",
+        ],
+    )?;
+    // Five rows and the line: 26 + 5 × 28 + 18, and the ring's room.
+    let tall = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.agents_surfaces()
+            .first()
+            .is_some_and(|(_, r)| r.height == 26 + 5 * 28 + 18 + 10)
+    })?;
+    anyhow::ensure!(tall, "{:?}", bed.surface());
+    // One of them works now: not all the hidden ones rest.
+    let from = bed.mark();
+    bed.hocus(&["agent", "r1", "working"], None)?;
+    bed.logged_after(from, &["· +\u{a0}2 autres"])?;
+    Ok(())
+}
+
+#[test]
+fn a_finished_agent_stays_to_see_until_its_window_gets_the_keyboard() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    // Its terminal: a window of this process's, which runs `hocus`.
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    // On another desktop, empty: no window has the keyboard.
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.hocus(&["agent", "build", "done"], None)?;
+    bed.agent_becomes("build", Some("done"))?;
+    assert_ne!(bed.hp.agents_peek()[0].window, 0);
+    bed.logged("build à voir")?;
+    // It stays so.
+    wait(&mut bed.hp, Duration::from_secs(1))?;
+    assert_eq!(bed.hp.agents_peek()[0].state, "done");
+    // Back on its desktop, its window has the keyboard: seen, it rests.
+    let from = bed.mark();
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_1]);
+    bed.agent_becomes("build", Some("seen"))?;
+    assert_eq!(bed.keyboard_on().as_deref(), Some("test.terminal"));
+    bed.logged_after(from, &["shows=AGENTS 1 · build repos"])?;
+    // Finishing again while its window has the keyboard: seen at once.
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.agent_becomes("build", Some("working"))?;
+    bed.hocus(&["agent", "build", "done"], None)?;
+    bed.agent_becomes("build", Some("seen"))?;
+    Ok(())
+}
+
+#[test]
+fn a_rows_click_goes_to_the_agents_window_on_its_desktop() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.hocus(&["agent", "build", "done"], None)?;
+    bed.agent_becomes("build", Some("done"))?;
+    bed.settle()?;
+    let row = bed.row("build")?;
+    bed.click(row);
+    // Its desktop, its window with the keyboard, and it is seen.
+    let there = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (0, 0.0))?;
+    anyhow::ensure!(there, "{:?}", bed.hp.desktop());
+    let focused = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.focused && w.keyboard && w.app_id.as_deref() == Some("test.terminal"))
+    })?;
+    anyhow::ensure!(focused, "{:?}", bed.keyboard_on());
+    bed.agent_becomes("build", Some("seen"))?;
+    Ok(())
+}
+
+#[test]
+fn a_working_agents_minutes_go_on_with_the_clock_and_nothing_draws_in_between() -> anyhow::Result<()>
+{
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    // The shell's clock reaches 10:00 some 15 s after it starts.
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            clock_at: Some("09:59:45"),
+            ..Machine::default()
+        },
+    )?;
+    bed.hocus(&["agent", "build", "working"], None)?;
+    bed.agent_becomes("build", Some("working"))?;
+    // As if it had worked 57 s: "0 min" until the clock's next minute,
+    // when it has worked more than a minute.
+    let from = bed.mark();
+    bed.hp.backdate_agents(Duration::from_secs(57));
+    bed.logged_after(from, &["shows=AGENTS 1 · build 0\u{a0}min"])?;
+    bed.settle()?;
+    let (agents, clock) = (bed.hp.agents_commits(), bed.hp.clock_commits());
+    let from = bed.mark();
+    let log = bed.log.clone();
+    let went_on = bed.hp.dispatch_until(Duration::from_secs(25), |_| {
+        plain(&log).get(from..).is_some_and(|l| {
+            l.lines()
+                .any(|l| l.contains("the agents' minutes go on") && l.contains("build 1\u{a0}min"))
+        })
+    })?;
+    anyhow::ensure!(went_on, "the minutes never went on");
+    wait(&mut bed.hp, Duration::from_secs(1))?;
+    // The clock drew every second; the row once, for its new minute.
+    let ticks = bed.hp.clock_commits() - clock;
+    let drawn = bed.hp.agents_commits() - agents;
+    assert!(ticks >= 3, "{ticks} clock commits");
+    assert!(
+        (1..=2).contains(&drawn),
+        "{drawn} commits of the agents for {ticks} seconds"
+    );
+    Ok(())
+}
+
+/// The commits closer together than a second's ticks: the motion's
+/// frames, and how long they last.
+fn motion_of(commits: &[Duration]) -> (usize, Duration) {
+    let close: Vec<Duration> = commits
+        .windows(2)
+        .filter(|p| p[1] - p[0] < Duration::from_millis(100))
+        .map(|p| p[1])
+        .collect();
+    let span = match (close.first(), close.last()) {
+        (Some(a), Some(b)) => *b - *a,
+        _ => Duration::ZERO,
+    };
+    (close.len(), span)
+}
+
+/// On a GPU: a change slides the rows and hops the changed agent's panda,
+/// for 650 ms, then nothing moves; with reduced motion, it changes at
+/// once. Skipped without a render node.
+#[test]
+fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let node = PathBuf::from("/dev/dri/renderD128");
+    if !node.exists() {
+        eprintln!("no render node: the shell would draw on the CPU, without motion");
+        return Ok(());
+    }
+    for (reduced_motion, moves) in [(false, true), (true, false)] {
+        let mut bed = start(
+            &shell,
+            &hocus,
+            &Machine {
+                gpu: Some(node.clone()),
+                reduced_motion,
+                ..Machine::default()
+            },
+        )?;
+        if bed.hp.shell_on_cpu() {
+            eprintln!("the shell draws on the CPU here: no motion to see");
+            return Ok(());
+        }
+        for name in ["a", "b", "c"] {
+            bed.hocus(&["agent", name, "working"], None)?;
+            bed.agent_becomes(name, Some("working"))?;
+        }
+        bed.settle()?;
+        // c waits: to the top, a and b sliding down, c's panda hopping.
+        let from = bed.mark();
+        bed.hocus(&["agent", "c", "waiting"], None)?;
+        let commits = bed.commits_for(Duration::from_secs(2))?;
+        bed.logged_after(from, &["shows=AGENTS 3 · c t'attend · a 0\u{a0}min"])?;
+        let (frames, span) = motion_of(&commits);
+        if moves {
+            bed.logged_after(from, &["the agents' rows move"])?;
+            assert!(frames >= 10, "{frames} frames of motion: {commits:?}");
+            assert!(
+                (Duration::from_millis(500)..Duration::from_millis(900)).contains(&span),
+                "{span:?}: {commits:?}"
+            );
+        } else {
+            assert_eq!(frames, 0, "{commits:?}");
+        }
+        // Then it rests.
+        let last = commits.last().copied().unwrap_or_default();
+        assert!(last < Duration::from_millis(1200), "{commits:?}");
+    }
     Ok(())
 }
