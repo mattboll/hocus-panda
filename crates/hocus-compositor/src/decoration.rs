@@ -330,7 +330,6 @@ pub struct FrameIds {
     rim: [Id; 8],
     accent: [Id; 8],
     pulse: [Id; 8],
-    landing: [Id; 8],
     ring: [Id; 8],
     shadow: [Id; 9],
     grip: Id,
@@ -342,7 +341,6 @@ impl Default for FrameIds {
             rim: std::array::from_fn(|_| Id::new()),
             accent: std::array::from_fn(|_| Id::new()),
             pulse: std::array::from_fn(|_| Id::new()),
-            landing: std::array::from_fn(|_| Id::new()),
             ring: std::array::from_fn(|_| Id::new()),
             shadow: std::array::from_fn(|_| Id::new()),
             grip: Id::new(),
@@ -357,11 +355,10 @@ pub enum RimKind {
     Plain,
     /// The focused window's.
     Accent,
-    /// A new window that did not take the focus, once.
+    /// Its pulse, once (`crate::going::pulse`): a new window that did not
+    /// take the focus, or one gone to from an agent's row (4.3). Its 2 px
+    /// rim, and the ring growing around it.
     Pulse,
-    /// Gone to from an agent's row (4.3): its 2 px rim, and the ring
-    /// growing around it.
-    Landing,
     Ring,
 }
 
@@ -884,7 +881,6 @@ where
         RimKind::Plain => (RIM, &ids.rim),
         RimKind::Accent => (ACCENT, &ids.accent),
         RimKind::Pulse => (ACCENT, &ids.pulse),
-        RimKind::Landing => (ACCENT, &ids.landing),
         RimKind::Ring => (ACCENT, &ids.ring),
     };
     let piece = Piece::Rim(rgba, (width * 1000.0).round() as u32);

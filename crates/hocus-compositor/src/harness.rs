@@ -300,15 +300,16 @@ impl Headless {
         self.app.state.halo.waves
     }
 
-    /// The rim's pulse of the window of `app_id` gone to from an agent's
-    /// row, as the last frame drew it: its 2 px rim's alpha, and the ring's
-    /// width when it grows around it. `None` without one.
-    pub fn landing(&self, app_id: &str) -> Option<(f32, Option<f64>)> {
+    /// The rim's pulse of the window of `app_id` (gone to from an agent's
+    /// row, or opened without the keyboard), as the last frame drew it: its
+    /// 2 px rim's alpha, and the ring's width when it grows around it.
+    /// `None` without one.
+    pub fn pulse(&self, app_id: &str) -> Option<(f32, Option<f64>)> {
         let state = &self.app.state;
         let managed = state.windows.values().find(|m| {
-            m.landing.is_some() && crate::windows::app_id(&m.window).as_deref() == Some(app_id)
+            m.pulse.is_some() && crate::windows::app_id(&m.window).as_deref() == Some(app_id)
         })?;
-        let pulse = managed.landing_look(state.drawn_at.get().unwrap_or_else(|| state.now()));
+        let pulse = managed.pulse_look(state.drawn_at.get().unwrap_or_else(|| state.now()));
         Some((pulse.rim, pulse.ring.map(|(width, _)| width)))
     }
 

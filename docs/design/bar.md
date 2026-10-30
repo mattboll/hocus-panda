@@ -387,14 +387,17 @@ A click on anything that names an agent (approved for its row in 4.3,
 2. A streak runs from the row's left edge to the centre of the agent's
    window in **300 ms**, `cubic-bezier(0.3, 0.7, 0.2, 1)`, then fades out
    in 220 ms (`ease-in`): a 4 px line with round ends, transparent at the
-   row and full at its head, and a 12 px glow of its colour. **Its colour
+   row and full at its head, and a 12 px glow of its colour; the glow
+   fades in with the line, so the streak starts from nothing at the row
+   (no dark core near its tail; issue #495). **Its colour
    is the row's state**: waiting `#F5B44A`, stuck `#F2945B`, to see
    `#7EE0A0`, working `#6CC287`, resting `#A9B2C2`. It is drawn by the
    compositor over every window and under the bar, and costs frames only
    while it runs.
 3. The agent's window has the keyboard (on its output); as the streak
    lands, its rim pulses once in the accent (600 ms): a 2 px rim, and a
-   ring growing from 4 px to 14 px while both fade.
+   ring growing from 4 px to 14 px while both fade. A window that opens
+   without the keyboard pulses the same way (windows.md §4).
 4. herdr selects the agent's pane (herdr's API).
 5. The halo and the peek end; the secretary returns to calm unless
    another agent waits.
@@ -1782,7 +1785,13 @@ What the approved 4.3 mockup shows, variant A, with the maintainer's spec
   it: the 4 px box with round ends, its `linear-gradient` from transparent
   at the row to full at the head, and its `box-shadow: 0 0 12px` (the box
   blurred, a Gaussian of deviation 6 written with the error function)
-  outside the box only. It is drawn over the windows and under the bar's
+  outside the box only, but no brighter than the line beside it (4.3b,
+  issue #495): CSS's shadow ignores the gradient, and near the row it
+  ringed a line still transparent with its glow, a dark core. Where the
+  line's alpha is below the glow's at its edge (a quarter, over the
+  line's first quarter), the glow is scaled down to it, so the streak
+  starts from nothing at its row; further on, and at its head, the glow
+  is the shadow's. It is drawn over the windows and under the bar's
   surfaces, over the bar's glass rather than under it: under it, the
   glass would be blurred again at each of its frames, for a line that is
   transparent where it starts, on its row. Where the strip slides first,
@@ -1794,7 +1803,11 @@ What the approved 4.3 mockup shows, variant A, with the maintainer's spec
   ring grows to 14 px as both fade, by 600 ms. Both are the window's
   rims, outside its content as its other rims are, in whole pixels (a
   texture per width, not per frame). Its start is set with the go-to, at
-  the streak's landing: nothing is queued.
+  the streak's landing: nothing is queued. It is the window's one pulse
+  (4.3b, issue #495): a window that opens without the keyboard, or asks
+  for it without a token, pulses the same way at once (windows.md §4).
+- **A second click** on another row while a go-to runs replaces it at
+  once: its streak and its pulse (the maintainer's answer on #495).
 - **The keyboard goes to the window at the click**, as 4.1 built it, not
   as the streak lands: keys typed during the 300 to 620 ms of the motion
   would otherwise reach the window that had the keyboard, another agent's
@@ -1820,6 +1833,15 @@ What the approved 4.3 mockup shows, variant A, with the maintainer's spec
   with reduced motion on a GPU, and on Pixman, no slide, no streak, the
   rim lit without its ring; herdr (a fake one) asked `pane.focus` for its
   agent's pane. On the Intel GPU, the screenshots of the pull request.
+  4.3b: on a GPU, the screen against what it showed before the click: the
+  streak's first pixels next to its row, and behind it, change nothing
+  (3 levels at most), and along its start the line is no darker than its
+  glow beside it; a second row clicked while a streak runs leaves only
+  its own streak, from its first frame. A window opened in the background
+  (`tests/windows.rs`, another program's window having the keyboard)
+  stays behind without the keyboard and pulses once, its ring growing
+  past 8 px on a GPU, without its ring with reduced motion and on Pixman,
+  over within 700 ms, and then nothing is drawn.
 - **Not built**: going to an agent from anything else that names it (the
   peek, the secretary's briefing: 4.5, 4.6); the halo ending (4.4).
 

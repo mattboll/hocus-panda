@@ -110,9 +110,9 @@ pub(crate) struct Look {
     pub visual: Rectangle<f64, Logical>,
     pub alpha: f32,
     focus: f32,
-    pulse: f32,
-    /// Gone to from an agent's row (4.3).
-    landing: crate::going::Pulse,
+    /// Its rim's pulse: gone to from an agent's row (4.3), or opened
+    /// without the keyboard.
+    pulse: crate::going::Pulse,
     grip: f32,
     decorated: bool,
     shadow: ShadowStyle,
@@ -129,8 +129,7 @@ impl Look {
             visual,
             alpha,
             focus: 0.0,
-            pulse: 0.0,
-            landing: crate::going::Pulse::default(),
+            pulse: crate::going::Pulse::default(),
             grip: 0.0,
             decorated: true,
             shadow: ShadowStyle::UNFOCUSED,
@@ -181,7 +180,6 @@ impl State {
             alpha,
             focus,
             pulse: managed.pulse_look(now),
-            landing: managed.landing_look(now),
             grip,
             decorated,
             shadow,
@@ -322,13 +320,12 @@ impl State {
             };
             // The ring in whole pixels: a texture for each of its widths,
             // not one for each frame.
-            let ring = look.landing.ring.map_or((1.0, 0.0), |(width, alpha)| {
+            let ring = look.pulse.ring.map_or((1.0, 0.0), |(width, alpha)| {
                 ((width * scale).round().max(1.0) / scale, alpha)
             });
             for (kind, width, alpha) in [
-                (RimKind::Landing, crate::going::RIM_WIDTH, look.landing.rim),
+                (RimKind::Pulse, crate::going::RIM_WIDTH, look.pulse.rim),
                 (RimKind::Ring, ring.0, ring.1),
-                (RimKind::Pulse, 1.0, look.pulse),
                 (RimKind::Accent, focused_width, look.focus),
                 (RimKind::Plain, 1.0, 1.0 - look.focus),
             ] {

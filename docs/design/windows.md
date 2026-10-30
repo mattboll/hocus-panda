@@ -44,7 +44,12 @@ open on), agents' badges on windows (slice 3).
 - A new window takes the focus when the user started it (an activation
   token from the user's last key or click). Otherwise it does not steal
   the focus: it opens behind the focused window, and its rim pulses once
-  in the accent (600 ms) so it is noticed.
+  in the accent so it is noticed, as a window gone to from an agent's row
+  does (bar.md §8; issue #495): in 150 ms a 2 px rim at 95 % and a 4 px
+  ring at 55 %, then the ring grows to 14 px as both fade, by 600 ms.
+  With reduced motion, or a compositor on the CPU, the 2 px rim lights
+  and fades without its ring. A window asking for the focus without a
+  token pulses the same way. Its pulse ends when it gets the focus.
 - Focus moves with Alt+Tab (section 11) and the pointer. Focusing the
   window on a side is an action of `[shortcuts]` (`focus-left`,
   `focus-right`, `focus-up`, `focus-down`) with no default key:
