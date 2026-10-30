@@ -18,6 +18,7 @@ use std::{
     io::{ErrorKind, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
+    sync::{Arc, Condvar, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -56,6 +57,45 @@ pub struct Shell {
     /// Ends in a row that came quickly.
     quick_ends: u32,
     ended: Option<Sender<Duration>>,
+    /// The shells started and not ended yet.
+    pub running: Arc<Running>,
+}
+
+/// How many shells run: the in-process harness waits for none to, so that
+/// a test's shell does not outlive it (#467).
+#[derive(Debug, Default)]
+pub struct Running {
+    count: Mutex<usize>,
+    changed: Condvar,
+}
+
+/// One shell, from before its thread starts until it ended (or its thread
+/// never started).
+struct Runs(Arc<Running>);
+
+impl Running {
+    fn start(this: &Arc<Self>) -> Runs {
+        *this.count.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        Runs(this.clone())
+    }
+
+    /// Waits until no shell runs, `timeout` at most: whether none does.
+    pub fn wait_none(&self, timeout: Duration) -> bool {
+        let count = self.count.lock().unwrap_or_else(PoisonError::into_inner);
+        let (count, _) = self
+            .changed
+            .wait_timeout_while(count, timeout, |n| *n > 0)
+            .unwrap_or_else(PoisonError::into_inner);
+        *count == 0
+    }
+}
+
+impl Drop for Runs {
+    fn drop(&mut self) {
+        let mut count = self.0.count.lock().unwrap_or_else(PoisonError::into_inner);
+        *count = count.saturating_sub(1);
+        self.0.changed.notify_all();
+    }
 }
 
 /// The shell's connection.
@@ -130,7 +170,9 @@ impl State {
         };
         let env = programs::Env::of(self);
         let gpu = self.gpu;
+        let runs = Running::start(&self.shell.running);
         programs::on_a_thread("shell".to_owned(), move || {
+            let _runs = runs;
             let started = Instant::now();
             let mut command = env.command(&program);
             command.env(hocus_link::SOCKET_ENV, &socket);
