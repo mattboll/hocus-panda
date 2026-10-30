@@ -18,7 +18,13 @@
 //! named; never by its kind ("claude"), which herdr shows under it and
 //! which named every agent alike (#497).
 //!
-//! Going to one of its agents selects its pane ([`select`], 4.3).
+//! Going to one of its agents selects its pane ([`select`], 4.3). Its
+//! window is the terminal's that runs herdr's client: herdr's server is a
+//! daemon, its agents run under it and no terminal, and it outlives its
+//! clients; a client attached later is found by looking again
+//! ([`terminal_processes`]), not only when the agents are listed (#500).
+//! Which of herdr's panes is focused is followed too: herdr's window
+//! getting the keyboard shows that pane's agent, not every other.
 
 use std::{
     collections::HashMap,
@@ -53,19 +59,25 @@ pub struct Agent {
     pub state: Option<State>,
     /// Its pane's foreground processes.
     pub pids: Vec<u32>,
+    /// Its pane is the one herdr shows focused: its window getting the
+    /// keyboard shows this agent.
+    pub focused: bool,
 }
 
 /// What the thread learns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum News {
-    /// herdr runs: every agent, and the processes its clients run under
-    /// (where its terminal's window is), nearest first.
+    /// herdr runs: every agent, and for each of its clients the
+    /// processes it runs under (where its terminal's window is), nearest
+    /// first ([`terminal_processes`]).
     Agents {
         agents: Vec<Agent>,
-        terminals: Vec<u32>,
+        terminals: Vec<Vec<u32>>,
     },
     /// One agent's state changed.
     State { pane: String, state: Option<State> },
+    /// herdr focused this pane.
+    Focused(String),
     /// A workspace or a tab was renamed (or tabs came, went, moved): the
     /// agents' names now, by pane.
     Names(Vec<(String, Option<String>)>),
@@ -84,19 +96,24 @@ pub fn state(status: &str) -> Option<State> {
     }
 }
 
-/// Follows herdr behind `socket` on a thread of its own, telling `sink`;
-/// it ends when `sink` says `false`.
-pub fn start(socket: PathBuf, sink: impl Fn(News) -> bool + Send + 'static) -> std::io::Result<()> {
+/// Follows herdr behind `socket` on a thread of its own, its clients
+/// among the processes `proc` shows (`/proc`), telling `sink`; it ends
+/// when `sink` says `false`.
+pub fn start(
+    socket: PathBuf,
+    proc: PathBuf,
+    sink: impl Fn(News) -> bool + Send + 'static,
+) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("herdr".to_owned())
-        .spawn(move || follow(&socket, &sink))
+        .spawn(move || follow(&socket, &proc, &sink))
         .map(drop)
 }
 
-fn follow(socket: &Path, sink: &dyn Fn(News) -> bool) {
+fn follow(socket: &Path, proc: &Path, sink: &dyn Fn(News) -> bool) {
     let mut connected = false;
     loop {
-        match session(socket, sink, &mut connected) {
+        match session(socket, proc, sink, &mut connected) {
             // Panes came or went: listed again.
             Ok(true) => continue,
             Ok(false) => return,
@@ -168,6 +185,7 @@ fn wait_for(socket: &Path) -> bool {
 /// `Ok(false)` when told to stop, `Err` when the connection ends.
 fn session(
     socket: &Path,
+    proc: &Path,
     sink: &dyn Fn(News) -> bool,
     connected: &mut bool,
 ) -> Result<bool, String> {
@@ -187,7 +205,7 @@ fn session(
                 .pids
                 .iter()
                 .rev()
-                .find_map(|pid| crate::process::folder_of(*pid));
+                .find_map(|pid| crate::process::folder_in(proc, *pid));
         }
     }
     let panes: Vec<String> = agents.iter().map(|a| a.pane.clone()).collect();
@@ -206,7 +224,7 @@ fn session(
     *connected = true;
     if !sink(News::Agents {
         agents,
-        terminals: terminal_processes(),
+        terminals: terminal_processes(proc),
     }) {
         return Ok(false);
     }
@@ -243,6 +261,12 @@ fn session(
                         }
                     }
                     Some(Event::State { .. } | Event::Panes) => return Ok(true),
+                    Some(Event::Focused(pane)) => {
+                        if !sink(News::Focused(pane)) {
+                            return Ok(false);
+                        }
+                        continue;
+                    }
                     Some(Event::Workspace { id, label }) => {
                         labels.workspaces.insert(id, label);
                     }
@@ -279,7 +303,8 @@ fn session(
 }
 
 /// What the subscription follows: each agent's state, panes coming and
-/// going (then the agents are listed again), and what renames them.
+/// going and the focus moving to another tab or workspace (then the
+/// agents are listed again), the pane focused, and what renames them.
 fn subscriptions(panes: &[String]) -> Vec<Value> {
     let mut all: Vec<Value> = [
         "pane.created",
@@ -287,6 +312,9 @@ fn subscriptions(panes: &[String]) -> Vec<Value> {
         "pane.exited",
         "pane.agent_detected",
         "pane.moved",
+        "pane.focused",
+        "tab.focused",
+        "workspace.focused",
         "workspace.renamed",
         "workspace.updated",
         "tab.renamed",
@@ -311,8 +339,11 @@ enum Event {
         pane: String,
         state: Option<State>,
     },
-    /// Panes came, went or got an agent.
+    /// Panes came, went or got an agent, or another tab or workspace
+    /// was focused (its pane focused with it).
     Panes,
+    /// herdr focused a pane.
+    Focused(String),
     /// A workspace's label, renamed or updated (herdr's own label follows
     /// its repository).
     Workspace {
@@ -355,19 +386,26 @@ fn event(value: &Value) -> Option<Event> {
             pane: data.get("pane_id")?.as_str()?.to_owned(),
             state: state(data.get("agent_status")?.as_str()?),
         }),
-        "pane_created" | "pane_closed" | "pane_exited" | "pane_agent_detected" | "pane_moved" => {
-            Some(Event::Panes)
-        }
+        "pane_focused" => Some(Event::Focused(text(data, "pane_id")?)),
+        "pane_created"
+        | "pane_closed"
+        | "pane_exited"
+        | "pane_agent_detected"
+        | "pane_moved"
+        | "tab_focused"
+        | "workspace_focused" => Some(Event::Panes),
         _ => None,
     }
 }
 
-/// herdr's workspaces' and tabs' labels.
+/// herdr's workspaces' and tabs' labels, and which are focused.
 #[derive(Debug, Default, PartialEq)]
 struct Labels {
     workspaces: HashMap<String, String>,
     /// In herdr's order, each workspace's tabs first to last.
     tabs: Vec<Tab>,
+    /// The workspace focused, when herdr lists them.
+    focused: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -375,6 +413,7 @@ struct Tab {
     id: String,
     workspace: String,
     label: String,
+    focused: bool,
 }
 
 impl Labels {
@@ -394,8 +433,14 @@ impl Labels {
                 .cloned()
                 .unwrap_or_default()
         };
+        let focused = |v: &Value| v.get("focused").and_then(Value::as_bool) == Some(true);
+        let workspaces = list(workspaces, "workspaces");
         Self {
-            workspaces: list(workspaces, "workspaces")
+            focused: workspaces
+                .iter()
+                .find(|w| focused(w))
+                .and_then(|w| text(w, "workspace_id")),
+            workspaces: workspaces
                 .iter()
                 .filter_map(|w| Some((text(w, "workspace_id")?, text(w, "label")?)))
                 .collect(),
@@ -406,10 +451,23 @@ impl Labels {
                         id: text(t, "tab_id")?,
                         workspace: text(t, "workspace_id")?,
                         label: text(t, "label")?,
+                        focused: focused(t),
                     })
                 })
                 .collect(),
         }
+    }
+
+    /// Whether `workspace`'s `tab` shows, as far as herdr says: a pane
+    /// focused in a tab out of sight is not the one looked at.
+    fn shows(&self, workspace: &str, tab: &str) -> bool {
+        let workspace_shows = self.focused.as_deref().is_none_or(|w| w == workspace);
+        let tab_shows = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab)
+            .is_none_or(|t| t.focused);
+        workspace_shows && tab_shows
     }
 
     /// The agent's name in `workspace`'s `tab`, as herdr's sidebar shows
@@ -460,8 +518,11 @@ fn parse_agents(result: &Value, labels: &Labels) -> Vec<Agent> {
             let folder = text(a, "cwd")
                 .or_else(|| text(a, "foreground_cwd"))
                 .and_then(|cwd| crate::folder(&cwd));
+            let focused = a.get("focused").and_then(Value::as_bool) == Some(true)
+                && labels.shows(&workspace, &tab);
             Some(Agent {
                 name: labels.name(&workspace, &tab),
+                focused,
                 pane,
                 workspace,
                 tab,
@@ -544,30 +605,34 @@ fn call(socket: &Path, method: &str, params: Value) -> Result<Value, String> {
     }
 }
 
-/// The processes herdr's clients run under, nearest first: a terminal's
-/// window among them shows herdr. Its server, started apart, is left out.
-fn ancestors_of_clients(table: &HashMap<u32, (crate::process::Process, bool)>) -> Vec<u32> {
+/// For each of herdr's clients, the processes it runs under, nearest
+/// first: a terminal's window among them shows herdr. Its server, started
+/// apart, is left out, and a client run by another (`herdr` commands in a
+/// pane, under the server) leads to no terminal.
+fn ancestors_of_clients(table: &HashMap<u32, (crate::process::Process, bool)>) -> Vec<Vec<u32>> {
     let mut clients: Vec<u32> = table
         .iter()
         .filter(|(_, (p, server))| p.name == "herdr" && !server)
         .map(|(pid, _)| *pid)
         .collect();
     clients.sort_unstable();
-    let mut out = Vec::new();
-    for client in clients {
-        let above =
-            crate::process::ancestry_in(client, |pid| table.get(&pid).map(|(p, _)| p.clone()));
-        for pid in above.into_iter().skip(1) {
-            if !out.contains(&pid) {
-                out.push(pid);
-            }
-        }
-    }
-    out
+    clients
+        .into_iter()
+        .map(|client| {
+            crate::process::ancestry_in(client, |pid| table.get(&pid).map(|(p, _)| p.clone()))
+                .into_iter()
+                .skip(1)
+                .collect::<Vec<u32>>()
+        })
+        .filter(|above| !above.is_empty())
+        .collect()
 }
 
-fn terminal_processes() -> Vec<u32> {
-    let Ok(dir) = std::fs::read_dir("/proc") else {
+/// herdr's clients among the processes `proc` shows (`/proc`), each with
+/// the processes above it ([`News::Agents`]'s `terminals`). It reads every
+/// process: for a thread, not an event loop.
+pub fn terminal_processes(proc: &Path) -> Vec<Vec<u32>> {
+    let Ok(dir) = std::fs::read_dir(proc) else {
         return Vec::new();
     };
     let mut table = HashMap::new();
@@ -579,7 +644,7 @@ fn terminal_processes() -> Vec<u32> {
         else {
             continue;
         };
-        let Some(process) = crate::process::read(pid) else {
+        let Some(process) = crate::process::read_in(proc, pid) else {
             continue;
         };
         let server = process.name == "herdr"
@@ -620,10 +685,12 @@ mod tests {
             { "tab_id": "w3:t2", "workspace_id": "w3", "number": 2, "label": "1",
               "focused": false, "pane_count": 1, "agent_status": "idle" },
         ] });
+        // herdr's focused pane in each tab; the one shown, w1:p1.
         let agent = |pane: &str, tab: &str, status: &str, cwd: Value| {
             let workspace = &tab[..2];
+            let focused = ["w1:p1", "w1:p3", "w2:p1"].contains(&pane);
             json!({ "pane_id": pane, "terminal_id": format!("t-{pane}"), "workspace_id": workspace,
-              "tab_id": tab, "focused": false, "revision": 3, "agent_status": status,
+              "tab_id": tab, "focused": focused, "revision": 3, "agent_status": status,
               "agent": "claude", "display_agent": null, "name": null, "title": "✳ Claude Code",
               "cwd": cwd, "foreground_cwd": null, "interactive_ready": true,
               "launch_pending": false, "screen_detection_skipped": false,
@@ -681,9 +748,19 @@ mod tests {
                 ("w9:p1", None, Some("notes"), None),
             ]
         );
-        // An older herdr, without the lists: its folder only.
+        // The pane looked at: focused in the tab and the workspace shown,
+        // not in a tab or a workspace out of sight.
+        let focused: Vec<&str> = agents
+            .iter()
+            .filter(|a| a.focused)
+            .map(|a| a.pane.as_str())
+            .collect();
+        assert_eq!(focused, ["w1:p1"]);
+        // An older herdr, without the lists: its folder only, and herdr's
+        // focus as it says it.
         let bare = parse_agents(&listed, &Labels::default());
         assert!(bare.iter().all(|a| a.name.is_none()), "{bare:?}");
+        assert_eq!(bare.iter().filter(|a| a.focused).count(), 3);
         assert!(agents.iter().all(|a| a.name.as_deref() != Some("claude")));
     }
 
@@ -750,7 +827,18 @@ mod tests {
         );
         let closed = json!({ "event": "pane_closed", "data": { "pane_id": "w1:p2" } });
         assert_eq!(event(&closed), Some(Event::Panes));
-        assert_eq!(event(&json!({ "event": "tab_focused", "data": {} })), None);
+        // The focus: a pane's said, another tab's or workspace's listed
+        // again (the pane focused there is herdr's to say).
+        let focused = json!({ "event": "pane.focused",
+            "data": { "type": "pane_focused", "pane_id": "w1:p3", "workspace_id": "w1" } });
+        assert_eq!(event(&focused), Some(Event::Focused("w1:p3".into())));
+        let tab = json!({ "event": "tab_focused",
+            "data": { "type": "tab_focused", "tab_id": "w1:t2", "workspace_id": "w1" } });
+        assert_eq!(event(&tab), Some(Event::Panes));
+        assert_eq!(
+            event(&json!({ "event": "layout_updated", "data": {} })),
+            None
+        );
         let info = json!({ "type": "pane_process_info", "shell": { "pid": 300 },
             "foreground_pgid": 400,
             "foreground": [ { "pid": 400, "name": "claude", "argv": ["claude"] } ] });
@@ -763,19 +851,60 @@ mod tests {
         );
     }
 
+    /// The maintainer's tree (#500): the agents under herdr's server, a
+    /// daemon; herdr's client in a shell of the terminal's.
     #[test]
     fn a_terminal_is_found_above_herdrs_client_not_its_server() {
         let p = |name: &str, parent| Process {
             name: name.into(),
             parent,
         };
-        let table = HashMap::from([
+        let mut table = HashMap::from([
             (100, (p("kitty", 1), false)),
             (200, (p("zsh", 100), false)),
             (300, (p("herdr", 200), false)),
             (400, (p("herdr", 1), true)),
-            (500, (p("claude", 400), false)),
+            (410, (p("zsh", 400), false)),
+            (500, (p("claude", 410), false)),
+            // A `herdr` command an agent runs in its pane: under the
+            // server, no terminal.
+            (510, (p("herdr", 500), false)),
         ]);
-        assert_eq!(ancestors_of_clients(&table), vec![200, 100]);
+        assert_eq!(
+            ancestors_of_clients(&table),
+            vec![vec![200, 100], vec![500, 410, 400]]
+        );
+        // A second client, in another terminal: each its own.
+        table.insert(700, (p("foot", 1), false));
+        table.insert(800, (p("herdr", 700), false));
+        assert_eq!(ancestors_of_clients(&table)[2], vec![700]);
+        // Its server alone, before any client attached: none.
+        let server = HashMap::from([(400, (p("herdr", 1), true))]);
+        assert!(ancestors_of_clients(&server).is_empty());
+    }
+
+    /// The table read from a `/proc` of the test's own: its server known
+    /// by its command line, never the machine's processes (#494).
+    #[test]
+    fn herdrs_clients_are_read_in_the_proc_given() -> std::io::Result<()> {
+        let proc = tempfile::tempdir()?;
+        let process = |pid: u32, stat: &str, cmdline: &[u8]| -> std::io::Result<()> {
+            let dir = proc.path().join(pid.to_string());
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(dir.join("stat"), stat)?;
+            std::fs::write(dir.join("cmdline"), cmdline)
+        };
+        process(100, "100 (kitty) S 1 100 100 0", b"kitty\0")?;
+        process(200, "200 (zsh) S 100 200 200 0", b"/usr/bin/zsh\0")?;
+        process(300, "300 (herdr) S 200 300 200 0", b"herdr\0")?;
+        process(
+            400,
+            "400 (herdr) S 1 400 400 0",
+            b"/home/alex/.local/bin/herdr\0server\0",
+        )?;
+        process(500, "500 (claude) S 400 500 400 0", b"claude\0")?;
+        assert_eq!(terminal_processes(proc.path()), vec![vec![200, 100]]);
+        assert!(terminal_processes(&proc.path().join("none")).is_empty());
+        Ok(())
     }
 }

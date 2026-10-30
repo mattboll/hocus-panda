@@ -50,6 +50,9 @@ pub struct Places {
     pub path: Vec<PathBuf>,
     /// herdr's socket: `$HERDR_SOCKET_PATH`, else in its directory.
     pub herdr_socket: PathBuf,
+    /// Where herdr's clients are looked for, the processes: `/proc` (a
+    /// test's table of its own).
+    pub processes: PathBuf,
     /// The `hocus` program the hooks run.
     pub hocus: PathBuf,
     /// Where what was written and what was declined are remembered; none:
@@ -78,6 +81,7 @@ impl Places {
         Some(Self {
             herdr_socket: absolute("HERDR_SOCKET_PATH")
                 .unwrap_or_else(|| config_home.join("herdr/herdr.sock")),
+            processes: PathBuf::from(crate::process::PROC),
             config_home,
             codex_home: absolute("CODEX_HOME").unwrap_or_else(|| home.join(".codex")),
             home,
@@ -769,6 +773,7 @@ mod tests {
             codex_home: dir.join(".codex"),
             path: vec![dir.join("bin")],
             herdr_socket: dir.join(".config/herdr/herdr.sock"),
+            processes: dir.join("proc"),
             hocus: PathBuf::from("/usr/bin/hocus"),
             state_dir: Some(dir.join("state")),
         }

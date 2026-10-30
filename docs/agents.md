@@ -19,8 +19,10 @@ hocus agent NAME STATE [--pid PID]
   "repos"), `failed`, `idle`; or `ended`, to forget it.
 - `--pid PID`: the agent's process. By default, the process that ran
   `hocus` (above the shells it ran through). The agent's window is the
-  first window found above that process (its terminal, its editor), and
-  the agent is forgotten when that process ends.
+  first window found above that process (its terminal, its editor); for a
+  process in one of herdr's panes, which runs under herdr's server, the
+  window of the terminal running herdr's client. The agent is forgotten
+  when that process ends.
 
 It writes one line to the desktop's control socket and returns at once;
 outside a Hocuspanda session it fails with a message and exit status 1, a

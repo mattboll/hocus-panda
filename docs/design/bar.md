@@ -16,7 +16,8 @@ the agents' group's header, its sources and the tools plugged in (section 4
 group 3, section 10; 4.0, issue #383), and its rows, one per agent, with
 their pandas (section 4 group 3, section 7 A, section 8 in part; 4.1,
 issue #384), and going to an agent from its row, its streak, its rim's
-pulse and herdr's pane (section 8; 4.3, issue #386), and the agents'
+pulse and herdr's pane (section 8; 4.3, issue #386), herdr's terminal
+brought for its agents (4.3c, issue #500), and the agents'
 halo (section 6; 4.4, issue #387): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
@@ -1601,7 +1602,8 @@ nothing to propose, the group is its header alone.
   above the agent: the hook's parent above its shells is the agent, its
   terminal above it. A terminal that serves all its windows from one
   process (foot's server, gnome-terminal) gives its topmost window, not
-  necessarily the agent's.
+  necessarily the agent's. An agent herdr sees whose processes reach no
+  window (they run under herdr's server) has herdr's terminal's (4.3c).
 - **To the shell**, two lines (`hocus-link`): `agent-tools` (each tool,
   its state, the file plugging it in changes) and `agents` (each agent:
   id, state, since, sources, window, name), sent after the turn of the
@@ -1736,9 +1738,9 @@ the heads) are display options for later (#491).
   keyboard after it finished, or had it as it finished (as herdr's green
   dot: the user is looking), or its row was clicked. A report of `done`
   again (Claude Code's `idle_prompt`, 60 s later) changes nothing. herdr's
-  own agents are seen as herdr says (it turns `done` into `idle` once the
-  pane is looked at): their window is herdr's terminal, shared by every
-  pane.
+  agents are also seen as herdr says (it turns `done` into `idle` once the
+  pane is looked at); their window is herdr's terminal, shared by every
+  pane, whose getting the keyboard sees only the pane herdr shows (4.3c).
 - **"12 min"** goes on with the clock: at each of its minute changes, the
   shell lays the rows out again if a working agent shows and what they say
   changed, and wakes the group's surface (once for all the bars). Nothing
@@ -1845,6 +1847,64 @@ What the approved 4.3 mockup shows, variant A, with the maintainer's spec
 - **Not built**: going to an agent from anything else that names it (the
   peek, the secretary's briefing: 4.5, 4.6); the halo ending (4.4).
 
+### 4.3c, herdr's terminal (2026-10-30)
+
+What the maintainer found on the laptop (issue #500): with herdr's
+terminal not in front, a herdr agent's row did not bring it.
+
+- **The cause**: herdr's server is a daemon (`herdr server`, its parent
+  init), its agents run under it and under no terminal; the terminal shows
+  herdr through a client (`herdr` under the terminal's shell). The
+  compositor looked for herdr's clients in `/proc` only as herdr's agents
+  were listed, when it connected to herdr and when panes came or went.
+  herdr's server had run for days; the compositor started, listed its
+  agents, and only then the terminal opened and herdr's client attached
+  in it: no client was ever found, the agent had no window, and its row
+  only selected its pane. A Claude Code agent in a herdr pane looked for
+  its window above its own processes only, which reach herdr's server and
+  no terminal. Reproduced headless with that tree in a `/proc` of the
+  test's own, the client written after the listing: the keyboard never
+  reached the terminal.
+- **Its window** is the terminal's that runs herdr's client: for each of
+  herdr's clients (a process named `herdr` that is not its server, known
+  by its command line's `server`), the nearest process above it that has
+  windows. herdr's clients are looked for again, on a thread (it reads
+  every process), as a row is clicked, the go-to going on once they are
+  found; and as the keyboard goes to another window while herdr has
+  agents. An agent herdr sees whose own processes reach no window (a
+  hook's or a command's agent in one of its panes) has the same window.
+- **A terminal process with several windows** (kitty's): the one whose
+  title's first word is `herdr`, as the shell titles a terminal with the
+  command it runs ("herdr", "herdr session attach work"; not "vim
+  herdr.rs"); else the most recently focused of them; never focused, the
+  topmost. herdr's API does not say its client's window title: its
+  `client_window_title` is only the answer to `client.window_title.set`
+  and `.clear`, which change it, and its panes' `terminal_title` is what
+  each pane's program sets (Claude Code's "✳ Claude Code", in a terminal
+  of its own as well), not the window's.
+- **Seen**: herdr's terminal getting the keyboard shows only the pane
+  herdr shows: an agent's pane focused in its tab, its tab and its
+  workspace the focused ones (`agent.list`, `tab.list`,
+  `workspace.list`), then `pane.focused` events; another tab or
+  workspace focused lists the agents again. The halo counts it the same
+  way.
+- **The journal** says each go-to at the `info` level: the agent's id and
+  sources, and its window and how it was found ("above its process",
+  "herdr's terminal, its window titled herdr", "… its only window", "…
+  its most recently focused window"), or why there is none ("no herdr
+  client found", "no window above herdr's clients"); never the agent's
+  name or a window's title.
+- **Tests**: herdr's clients are read in a `/proc` given
+  (`Places::processes`, `/proc` in a session), so the tests never see the
+  machine's own herdr (#494). Headless (`tests/agents.rs`), the
+  maintainer's tree: the terminal on another desktop, its client attached
+  after the listing, the row's click brings it with the keyboard and herdr
+  focuses the pane; `hocus agent --pid` of the pane's process has that
+  window too. Two windows of one terminal process side by side, the other
+  focused last: herdr's window getting the keyboard sees the agent of the
+  pane herdr shows, not the other's; the other's row then goes to the
+  window titled herdr.
+
 ### 4.4, the halo (2026-10-30)
 
 What the approved 4.4 mockup shows, variant B (a soft green glow for a
@@ -1888,8 +1948,8 @@ finished agent not seen yet), with the maintainer's spec (§6; issue
   the calendar later: in 10 min or less, in 2 min or less).
 - **It ends when the user acts**: the agent answered (it works again),
   going to it from its row (`go-to-agent`, 4.3), or its own window getting
-  the keyboard (as a finished agent is seen, 4.1; herdr's own agents share
-  herdr's terminal, so only their row counts); a finished one seen. An
+  the keyboard (as a finished agent is seen, 4.1; herdr's terminal counts
+  only for the pane herdr shows, 4.3c); a finished one seen. An
   agent that starts waiting while its window has the keyboard (the user is
   looking at it) shows no halo, as a finished one is seen at once. Going
   to a waiting agent ends its halo while it still waits (§8 step 5).
