@@ -1,28 +1,32 @@
-//! The agents' group in the bar (bar.md §4 group 3; 4.0): its header
-//! ("AGENTS", and "Sources" on its right), and under it the card that
-//! proposes to plug in the tools found, or "Aucun agent en cours." with the
-//! tools followed. 4.1's tiles come under the header later; until then,
-//! with agents running, the group is its header alone. With no tool
-//! followed and none to propose, it does not show at all (variant B).
+//! The agents' group in the bar (bar.md §4 group 3; 4.0, 4.1): its header
+//! ("AGENTS" and how many run, "Sources" on its right), and under it one
+//! row per agent (4.1): its panda, its name, and what it is doing, in the
+//! order of what concerns the user first, at most five and a line for the
+//! rest. Before any tool is plugged in, the card that proposes to plug in
+//! the tools found; with the tools followed and no agent, "Aucun agent en
+//! cours.". With no tool followed and none to propose, it does not show at
+//! all (variant B).
 //!
 //! The compositor owns the agents and the tools: it says which tools are
 //! there and what each is (`agent-tools`), and which agents run
 //! (`agents`), as the shell connects and when they change. The link keeps
 //! them here without a message, lays the group out (its text measured
 //! once), resizes its surface if its height changed and wakes it
-//! ([`draw`]); an open Sources or consent popover draws again for them.
+//! ([`draw`]); an open Sources or consent popover draws again for them. A
+//! working agent's minutes go on with the clock's minute ([`minute`]):
+//! nothing draws for them in between.
 
 pub mod draw;
 
 use std::sync::{Mutex, PoisonError};
 
 use hocus_link::{AGENTS_NAMESPACE, AgentShown, AgentTool, ToolState};
-use iced::{Color, Point, Rectangle, Size};
+use iced::{Color, Font, Point, Rectangle, Size};
 
 use crate::{
     clock::time::Lang,
-    levels::draw::{LINE, rgb},
-    popover::{self, Item},
+    levels::draw::{LINE, MANROPE, MANROPE_BOLD, rgb},
+    popover::{self, Item, kit::MANROPE_SEMIBOLD},
 };
 
 /// A tool that hooks plug in.
@@ -89,8 +93,9 @@ impl Said {
             .unwrap_or_default()
     }
 
-    /// What the group shows.
-    pub fn shows(&self) -> Shows {
+    /// What the group shows at `now` (microseconds of `CLOCK_MONOTONIC`,
+    /// the agents' `since`'s clock).
+    pub fn shows(&self, now: u64) -> Shows {
         let to_plug: Vec<Tool> = Tool::ALL
             .into_iter()
             .filter(|t| self.state(t.word()) == ToolState::Found)
@@ -111,9 +116,104 @@ impl Said {
             (false, _, _) => Shows::Card(to_plug),
             (true, true, true) => Shows::Hidden,
             (true, false, true) => Shows::Idle(followed),
-            (true, _, false) => Shows::Header,
+            (true, _, false) => Shows::Lines(Lines::of(&self.agents, now)),
         }
     }
+}
+
+/// What an agent's row says (4.1), from its state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Look {
+    /// It waits for the user: "t'attend", amber.
+    Waiting,
+    /// It failed: "bloqué", orange.
+    Stuck,
+    /// It finished and the user has not seen it yet: "à voir", green.
+    ToSee,
+    /// It works: for how long.
+    Working,
+    /// Idle, or finished and seen: "repos", its panda asleep.
+    Resting,
+}
+
+impl Look {
+    /// The compositor's word for the state (bar.md §10, `hocus-link`).
+    pub fn of(state: &str) -> Self {
+        match state {
+            "waiting" => Self::Waiting,
+            "failed" => Self::Stuck,
+            "done" => Self::ToSee,
+            "working" => Self::Working,
+            _ => Self::Resting,
+        }
+    }
+}
+
+/// The rows shown, at most.
+pub const MOST_ROWS: usize = 5;
+
+/// The agents' rows, as the group shows them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lines {
+    /// How many agents run, in the header.
+    pub total: usize,
+    /// The rows shown, from the top.
+    pub rows: Vec<Line>,
+    /// How many are not shown, and whether they all rest.
+    pub hidden: usize,
+    pub hidden_rest: bool,
+}
+
+/// An agent's row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line {
+    pub id: u64,
+    pub look: Look,
+    pub name: String,
+    /// How long it has worked, whole minutes (working only).
+    pub minutes: u64,
+}
+
+impl Lines {
+    /// `agents` in their rows' order at `now`: waiting (the longest first),
+    /// stuck, to see, working, resting, in the order they came otherwise;
+    /// the first five shown.
+    pub fn of(agents: &[AgentShown], now: u64) -> Self {
+        let mut ordered: Vec<(Look, &AgentShown)> =
+            agents.iter().map(|a| (Look::of(&a.state), a)).collect();
+        ordered.sort_by_key(|(look, a)| {
+            let waited = if *look == Look::Waiting { a.since } else { 0 };
+            (*look, waited, a.id)
+        });
+        let hidden = &ordered[ordered.len().min(MOST_ROWS)..];
+        Self {
+            total: agents.len(),
+            hidden: hidden.len(),
+            hidden_rest: hidden.iter().all(|(look, _)| *look == Look::Resting),
+            rows: ordered
+                .iter()
+                .take(MOST_ROWS)
+                .map(|(look, a)| Line {
+                    id: a.id,
+                    look: *look,
+                    name: a.name.clone(),
+                    minutes: match look {
+                        Look::Working => now.saturating_sub(a.since) / 60_000_000,
+                        _ => 0,
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Now, in microseconds of `CLOCK_MONOTONIC`: the clock of the agents'
+/// `since`.
+pub fn now_us() -> u64 {
+    let clock = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+    (clock.tv_sec as u64)
+        .saturating_mul(1_000_000)
+        .saturating_add(clock.tv_nsec as u64 / 1_000)
 }
 
 /// What the agents' group shows.
@@ -125,8 +225,8 @@ pub enum Shows {
     Card(Vec<Tool>),
     /// No agent running: the tools followed.
     Idle(Vec<&'static str>),
-    /// Agents run: the header, until 4.1's tiles.
-    Header,
+    /// Agents run: a row for each (4.1).
+    Lines(Lines),
 }
 
 static SAID: Mutex<Option<Said>> = Mutex::new(None);
@@ -151,7 +251,7 @@ fn change(with: impl FnOnce(&mut Said)) {
     if before == after {
         return;
     }
-    let shows = after.shows();
+    let shows = after.shows(now_us());
     tracing::debug!(
         shows = %words.said(&shows),
         agents = after.agents.len(),
@@ -168,19 +268,35 @@ fn change(with: impl FnOnce(&mut Said)) {
 /// The group laid out for what was last said, its text measured with the
 /// shell's fonts (as it draws: they are loaded by then).
 pub fn lay_out() -> Layout {
-    let shows = said().shows();
+    let shows = said().shows(now_us());
     let words = Words::new(Lang::of_messages());
-    layout(&words, &shows, |text, size, bold| {
-        crate::popover::kit::measure(
-            text,
-            size,
-            if bold {
-                crate::levels::draw::MANROPE_BOLD
-            } else {
-                crate::levels::draw::MANROPE
-            },
-        )
-    })
+    layout(&words, &shows, crate::popover::kit::measure)
+}
+
+/// The clock's minute changed: the working agents' minutes, if one shows
+/// and they changed, are drawn again (only then: nothing draws for them in
+/// between).
+pub fn minute() {
+    let Some(laid) = draw::layout() else {
+        return;
+    };
+    let Shows::Lines(before) = &laid.shows else {
+        return;
+    };
+    if !before.rows.iter().any(|r| r.look == Look::Working) {
+        return;
+    }
+    let now = said().shows(now_us());
+    // Once for every bar's clock.
+    static WOKEN: Mutex<Option<Shows>> = Mutex::new(None);
+    let mut woken = WOKEN.lock().unwrap_or_else(PoisonError::into_inner);
+    if now != laid.shows && woken.as_ref() != Some(&now) {
+        let words = Words::new(Lang::of_messages());
+        tracing::debug!(shows = %words.said(&now), "the agents' minutes go on");
+        *woken = Some(now);
+        draw::stale();
+        popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
+    }
 }
 
 /// The compositor says the tools.
@@ -262,8 +378,45 @@ impl Words {
                 format!("{} {}", self.intro(), names.join(", "))
             }
             Shows::Idle(names) => format!("{} {}", self.no_agent(), self.followed(names)),
-            Shows::Header => self.header().to_owned(),
+            Shows::Lines(lines) => {
+                let mut said = vec![format!("{} {}", self.header(), lines.total)];
+                said.extend(
+                    lines
+                        .rows
+                        .iter()
+                        .map(|line| format!("{} {}", line.name, self.word(line))),
+                );
+                if lines.hidden > 0 {
+                    said.push(self.more(lines.hidden, lines.hidden_rest));
+                }
+                said.join(" · ")
+            }
         }
+    }
+
+    /// What an agent's row says on its right.
+    pub fn word(self, line: &Line) -> String {
+        match line.look {
+            Look::Waiting => self.pick("t'attend", "waiting").to_owned(),
+            Look::Stuck => self.pick("bloqué", "stuck").to_owned(),
+            Look::ToSee => self.pick("à voir", "to see").to_owned(),
+            Look::Resting => self.pick("repos", "resting").to_owned(),
+            // "1 h 05" from an hour.
+            Look::Working if line.minutes >= 60 => {
+                format!("{}\u{a0}h\u{a0}{:02}", line.minutes / 60, line.minutes % 60)
+            }
+            Look::Working => format!("{}\u{a0}min", line.minutes),
+        }
+    }
+
+    /// The line for the agents not shown: "+ 2 au repos" when they all
+    /// rest, else "+ 2 autres".
+    pub fn more(self, hidden: usize, rest: bool) -> String {
+        let what = match rest {
+            true => self.pick("au repos", "resting"),
+            false => self.pick("autres", "more"),
+        };
+        format!("+\u{a0}{hidden} {what}")
     }
 
     pub fn plug_title(self, tool: Tool) -> String {
@@ -405,6 +558,26 @@ const FOOT_PAD: f32 = 2.0;
 pub const IDLE: f32 = 13.5;
 const IDLE_GAP: f32 = 4.0;
 pub const FOLLOWED: f32 = 12.0;
+/// The total, 4 px after "AGENTS" (spaced 0.08 em), Manrope 600.
+const TOTAL_GAP: f32 = 4.0;
+const LABEL_SPACING: f32 = 0.08 * LABEL;
+/// An agent's row (4.1): 28 px, as wide as the column (6 px past the
+/// group's sides), radius 7, 6 px in; its panda 24 px, 7 px before its
+/// name (Manrope 600, 12.5 px), which ends 7 px before the word on its
+/// right (11.5 px).
+pub const AGENT_ROW: f32 = 28.0;
+pub const ROW_OUT: f32 = 6.0;
+pub const ROW_RADIUS: f32 = 7.0;
+pub const ROW_PAD: f32 = 6.0;
+pub const PANDA: f32 = 24.0;
+pub const PANDA_GAP: f32 = 7.0;
+pub const AGENT_NAME: f32 = 12.5;
+pub const AGENT_WORD: f32 = 11.5;
+/// The line for the rest, 2 px under the rows (11.5 px, `text.faint`); the
+/// group 18 px taller with it.
+const MORE_TOP: f32 = 2.0;
+const MORE: f32 = 18.0;
+pub const MORE_TEXT: f32 = 11.5;
 
 /// The group, laid out from its top left: what is where.
 #[derive(Debug, Clone, PartialEq)]
@@ -417,6 +590,23 @@ pub struct Layout {
     pub card: Option<Card>,
     /// The idle lines' middles, and the second's text.
     pub idle: Option<(f32, f32, String)>,
+    /// The total in the header, and where it starts.
+    pub total: Option<(String, f32)>,
+    /// The agents' rows (4.1), from the top.
+    pub rows: Vec<Row>,
+    /// The line for the rest, and its middle.
+    pub more: Option<(String, f32)>,
+}
+
+/// An agent's row, laid out: its name cut to its room, the word on its
+/// right, where it is in the group (6 px past its sides).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    pub id: u64,
+    pub look: Look,
+    pub name: String,
+    pub word: String,
+    pub rect: Rectangle,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -443,14 +633,14 @@ pub struct CardRow {
     pub button: Rectangle,
 }
 
-/// The group for `shows`, `measure` giving a text's width at a size (bold
-/// or not).
+/// The group for `shows`, `measure` giving a text's width at a size in a
+/// font.
 pub fn layout(
     words: &Words,
     shows: &Shows,
-    mut measure: impl FnMut(&str, f32, bool) -> f32,
+    mut measure: impl FnMut(&str, f32, Font) -> f32,
 ) -> Layout {
-    let sources_width = measure(words.sources(), LINK, false);
+    let sources_width = measure(words.sources(), LINK, MANROPE);
     let link_height = LINK * LINE;
     let sources = Rectangle::new(
         Point::new(WIDTH - sources_width, (HEADER - link_height) / 2.0),
@@ -463,10 +653,53 @@ pub fn layout(
         sources,
         card: None,
         idle: None,
+        total: None,
+        rows: Vec::new(),
+        more: None,
     };
     match shows {
         Shows::Hidden => {}
-        Shows::Header => out.height = HEADER,
+        Shows::Lines(lines) => {
+            let agents: f32 = words
+                .header()
+                .chars()
+                .map(|ch| measure(&ch.to_string(), LABEL, MANROPE_BOLD) + LABEL_SPACING)
+                .sum();
+            out.total = Some((lines.total.to_string(), agents + TOTAL_GAP));
+            let width = WIDTH + 2.0 * ROW_OUT;
+            out.rows = lines
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(i, line)| {
+                    let word = words.word(line);
+                    let room = width
+                        - 2.0 * ROW_PAD
+                        - PANDA
+                        - 2.0 * PANDA_GAP
+                        - measure(&word, AGENT_WORD, MANROPE);
+                    Row {
+                        id: line.id,
+                        look: line.look,
+                        name: crate::popover::kit::elide(&line.name, room, |t| {
+                            measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
+                        }),
+                        word,
+                        rect: Rectangle::new(
+                            Point::new(-ROW_OUT, top + i as f32 * AGENT_ROW),
+                            Size::new(width, AGENT_ROW),
+                        ),
+                    }
+                })
+                .collect();
+            let end = top + lines.rows.len() as f32 * AGENT_ROW;
+            out.height = end;
+            if lines.hidden > 0 {
+                let middle = end + MORE_TOP + MORE_TEXT * LINE / 2.0;
+                out.more = Some((words.more(lines.hidden, lines.hidden_rest), middle));
+                out.height = end + MORE;
+            }
+        }
         Shows::Idle(names) => {
             let first = top + IDLE * LINE / 2.0;
             let second = top + IDLE * LINE + IDLE_GAP + FOLLOWED * LINE / 2.0;
@@ -476,16 +709,16 @@ pub fn layout(
         Shows::Card(tools) => {
             let inner = WIDTH - 2.0 * CARD_PAD;
             let intro =
-                crate::popover::kit::wrap(words.intro(), inner, |t| measure(t, INTRO, false));
+                crate::popover::kit::wrap(words.intro(), inner, |t| measure(t, INTRO, MANROPE));
             let intro_top = top + CARD_PAD;
             let mut y = intro_top + intro.len() as f32 * INTRO * INTRO_LINE + CARD_GAP;
-            let button_width = measure(words.plug(), BUTTON_TEXT, true) + 2.0 * BUTTON_PAD;
+            let button_width = measure(words.plug(), BUTTON_TEXT, MANROPE_BOLD) + 2.0 * BUTTON_PAD;
             let name_room = inner - MARK - MARK_GAP - MARK_GAP - button_width;
             let rows = tools
                 .iter()
                 .map(|tool| {
                     let name = crate::popover::kit::wrap(tool.title(), name_room, |t| {
-                        measure(t, NAME, false)
+                        measure(t, NAME, MANROPE)
                     });
                     let height = ROW.max(name.len() as f32 * NAME * LINE);
                     let row = CardRow {
@@ -508,8 +741,8 @@ pub fn layout(
             // Its two links on its last line, or one under the other when
             // they do not fit side by side.
             let foot = y + FOOT_PAD;
-            let another_width = measure(words.another(), LINK, false);
-            let decline_width = measure(words.decline(), LINK, false);
+            let another_width = measure(words.another(), LINK, MANROPE);
+            let decline_width = measure(words.decline(), LINK, MANROPE);
             let apart = another_width + MARK_GAP + decline_width <= inner;
             let another = Rectangle::new(
                 Point::new(CARD_PAD, foot),
@@ -548,19 +781,23 @@ mod tests {
     }
 
     fn agent() -> AgentShown {
+        shown(1, "working", 0, "build")
+    }
+
+    fn shown(id: u64, state: &str, since: u64, name: &str) -> AgentShown {
         AgentShown {
-            id: 1,
-            state: "working".into(),
-            since: 0,
+            id,
+            state: state.into(),
+            since,
             source: "command".into(),
             window: 0,
-            name: "build".into(),
+            name: name.into(),
         }
     }
 
     #[test]
     fn the_group_proposes_follows_or_hides() {
-        let said = |tools: Vec<AgentTool>, agents: Vec<AgentShown>| Said { tools, agents }.shows();
+        let said = |tools: Vec<AgentTool>, agents: Vec<AgentShown>| Said { tools, agents }.shows(0);
         // Both found: the card for both.
         assert_eq!(
             said(
@@ -596,17 +833,17 @@ mod tests {
             Shows::Hidden
         );
         assert_eq!(said(vec![], vec![]), Shows::Hidden);
-        // Agents run: the header, until the tiles.
-        assert_eq!(
+        // Agents run: their rows.
+        assert!(matches!(
             said(vec![tool("claude-code", ToolState::Plugged)], vec![agent()]),
-            Shows::Header
-        );
+            Shows::Lines(lines) if lines.total == 1
+        ));
     }
 
     #[test]
     fn the_card_is_as_tall_as_the_mockups() {
         // A narrow font: each row and the links on one line.
-        let measure = |t: &str, size: f32, _bold: bool| t.chars().count() as f32 * size * 0.35;
+        let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.35;
         let words = Words::new(Lang::French);
         let two = layout(
             &words,
@@ -633,7 +870,7 @@ mod tests {
         assert_eq!(card.another.x, 10.0);
         // Manrope's widths: "Claude Code" on two lines beside its button,
         // the links one under the other, as a browser lays the mockup out.
-        let wide = |t: &str, size: f32, _bold: bool| t.chars().count() as f32 * size * 0.55;
+        let wide = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.55;
         let card = layout(&words, &Shows::Card(vec![Tool::ClaudeCode]), wide)
             .card
             .expect("a card");
@@ -646,6 +883,58 @@ mod tests {
             Some("Suivis\u{a0}: Claude Code.".into())
         );
         assert_eq!(layout(&words, &Shows::Hidden, measure).height, 0.0);
-        assert_eq!(layout(&words, &Shows::Header, measure).height, HEADER);
+    }
+
+    #[test]
+    fn the_rows_put_what_concerns_the_user_first() {
+        const MIN: u64 = 60_000_000;
+        let agents = vec![
+            shown(1, "working", 100 * MIN - 12 * MIN, "hocus-panda"),
+            shown(2, "idle", 0, "notes"),
+            shown(3, "waiting", 99 * MIN, "infra"),
+            shown(4, "seen", 0, "site-web"),
+            shown(5, "done", 0, "api"),
+            shown(6, "failed", 0, "migration"),
+            // Waiting longer: above infra.
+            shown(7, "waiting", 90 * MIN, "docs"),
+        ];
+        let lines = Lines::of(&agents, 100 * MIN);
+        let rows: Vec<(u64, Look)> = lines.rows.iter().map(|l| (l.id, l.look)).collect();
+        assert_eq!(
+            rows,
+            [
+                (7, Look::Waiting),
+                (3, Look::Waiting),
+                (6, Look::Stuck),
+                (5, Look::ToSee),
+                (1, Look::Working),
+            ]
+        );
+        assert_eq!(lines.rows[4].minutes, 12);
+        // The two resting ones, the lowest, are not shown.
+        assert_eq!((lines.total, lines.hidden, lines.hidden_rest), (7, 2, true));
+    }
+
+    #[test]
+    fn the_rest_is_said_resting_only_when_it_all_rests() {
+        let fr = Words::new(Lang::French);
+        let en = Words::new(Lang::English);
+        assert_eq!(fr.more(3, true), "+\u{a0}3 au repos");
+        assert_eq!(fr.more(2, false), "+\u{a0}2 autres");
+        assert_eq!(en.more(3, true), "+\u{a0}3 resting");
+        assert_eq!(en.more(2, false), "+\u{a0}2 more");
+        // Six working, one resting: what is hidden does not all rest.
+        let mut agents: Vec<AgentShown> = (1..=6).map(|i| shown(i, "working", 0, "a")).collect();
+        agents.push(shown(7, "idle", 0, "b"));
+        let lines = Lines::of(&agents, 0);
+        assert_eq!((lines.hidden, lines.hidden_rest), (2, false));
+        let working = |minutes| Line {
+            id: 1,
+            look: Look::Working,
+            name: String::new(),
+            minutes,
+        };
+        assert_eq!(fr.word(&working(12)), "12\u{a0}min");
+        assert_eq!(fr.word(&working(65)), "1\u{a0}h\u{a0}05");
     }
 }

@@ -243,6 +243,14 @@ impl<Message> canvas::Program<Message> for Clock {
         state.motion = state
             .motion
             .after(state.shown.as_ref(), &shown, now, transition);
+        // The agents' minutes go on with the clock's (4.1).
+        if state
+            .shown
+            .as_ref()
+            .is_some_and(|before| before.hm != shown.hm)
+        {
+            crate::agents::minute();
+        }
         state.shown = Some(shown);
         state.at = Some(now);
         for (font, size, line) in [

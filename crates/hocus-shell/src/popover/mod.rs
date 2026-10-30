@@ -85,12 +85,18 @@ pub enum Item {
     Plug(crate::agents::Tool),
     /// The card's "Ne rien brancher": a click declines the tools listed.
     Decline,
+    /// An agent's row (4.1), by the compositor's id: a click, or `Enter`
+    /// while it holds the keyboard, goes to the agent.
+    Agent(u64),
 }
 
 impl Item {
     /// Whether a click (or `Enter`) opens its popover; else it acts.
     fn clicks(self) -> bool {
-        !matches!(self, Self::Keyboard | Self::Desktop(_) | Self::Decline)
+        !matches!(
+            self,
+            Self::Keyboard | Self::Desktop(_) | Self::Decline | Self::Agent(_)
+        )
     }
 
     /// Whether it is the agents' group's.
@@ -106,7 +112,7 @@ impl Item {
     fn hovers(self, form: Form) -> bool {
         match self {
             Self::Desktop(_) => true,
-            Self::Keyboard => false,
+            Self::Keyboard | Self::Agent(_) => false,
             item if item.agents() => false,
             _ => form == Form::Mini,
         }
@@ -133,7 +139,7 @@ impl Item {
             Self::Desktop(index) => desktop::height(bar, index),
             Self::Sources | Self::AnotherTool => agents::sources_height(),
             Self::Plug(tool) => agents::consent_height(tool),
-            Self::Keyboard | Self::Decline => 0,
+            Self::Keyboard | Self::Decline | Self::Agent(_) => 0,
         }
     }
 
@@ -151,7 +157,7 @@ impl Item {
             Self::Bluetooth => bluetooth::opening(),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
-            Self::Keyboard | Self::Desktop(_) => {}
+            Self::Keyboard | Self::Desktop(_) | Self::Agent(_) => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
         }
     }
@@ -167,7 +173,8 @@ impl Item {
             | Self::Sources
             | Self::AnotherTool
             | Self::Plug(_)
-            | Self::Decline => {}
+            | Self::Decline
+            | Self::Agent(_) => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
         }
@@ -185,9 +192,10 @@ impl Item {
                 CONNECTIONS_NAMESPACE
             }
             (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
-            (Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline, _) => {
-                AGENTS_NAMESPACE
-            }
+            (
+                Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline | Self::Agent(_),
+                _,
+            ) => AGENTS_NAMESPACE,
         }
     }
 
@@ -332,6 +340,8 @@ pub enum Effect {
     },
     /// The compositor is asked for a window: its desktop, and the focus.
     Bring(u64),
+    /// The compositor is asked for an agent: its window, and it is seen.
+    GoToAgent(u64),
     /// The compositor plugs a tool in, or unplugs it (4.0).
     Plug(crate::agents::Tool),
     Unplug(crate::agents::Tool),
@@ -880,6 +890,7 @@ fn acts(bar: String, item: Item) -> Option<Effect> {
             to: DesktopTo::At(index),
         }),
         Item::Decline => Some(Effect::Decline),
+        Item::Agent(id) => Some(Effect::GoToAgent(id)),
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1271,6 +1282,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Bring(id) => {
             tell(ToCompositor::Bring(id));
+            Vec::new()
+        }
+        Effect::GoToAgent(id) => {
+            tell(ToCompositor::GoToAgent(id));
             Vec::new()
         }
         Effect::Plug(tool) => {
@@ -1854,6 +1869,62 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn an_agents_row_goes_to_the_agent_on_a_click_or_enter() {
+        let mut c = Controller::default();
+        let agents = window::Id::unique();
+        c.place(
+            BAR,
+            Form::Full,
+            window::Id::unique(),
+            (
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+                agents,
+            ),
+        );
+        c.motion = false;
+        let t = Instant::now();
+        let sources = Rectangle::new(Point::new(-60.0, 100.0), Size::new(45.0, 16.0));
+        let row =
+            |i: f32| Rectangle::new(Point::new(-190.0, 126.0 + 28.0 * i), Size::new(184.0, 28.0));
+        c.set_items(
+            BAR,
+            AGENTS_NAMESPACE,
+            vec![
+                (Item::Sources, sources),
+                (Item::Agent(3), row(0.0)),
+                (Item::Agent(5), row(1.0)),
+            ],
+        );
+        // A click: to the agent, no popover.
+        let effects = c.handle(
+            Event::ItemPress {
+                bar: BAR.to_owned(),
+                item: Item::Agent(5),
+                rect: row(1.0),
+            },
+            t,
+        );
+        assert_eq!(effects, vec![Effect::GoToAgent(5)]);
+        assert_eq!(c.open_item(), None);
+        // The keyboard on Sources (Esc in its popover), down to the first
+        // row, Enter: to that agent.
+        c.handle(
+            Event::ItemPress {
+                bar: BAR.to_owned(),
+                item: Item::Sources,
+                rect: sources,
+            },
+            t,
+        );
+        c.handle(Event::Escape, t);
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Agent(3)));
+        assert_eq!(c.handle(Event::ItemActivate, t), vec![Effect::GoToAgent(3)]);
     }
 
     #[test]
