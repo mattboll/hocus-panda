@@ -124,7 +124,8 @@ impl<T: Copy + PartialEq> Pointer<T> {
 
 /// What holds the keyboard after `focus` in `order` (`back`: before it),
 /// round its ends; from nothing, the first (the last). Nothing when `order`
-/// is empty.
+/// is empty: every popover keeps `Tab` all the same, as the keyboard stays
+/// in it until it closes (#470).
 pub(crate) fn step<T: Copy + PartialEq>(order: &[T], focus: Option<T>, back: bool) -> Option<T> {
     let n = order.len() as isize;
     if n == 0 {

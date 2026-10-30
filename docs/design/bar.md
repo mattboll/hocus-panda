@@ -1340,6 +1340,10 @@ What issue #465 changes under the five popovers, nothing on screen.
   Wi-Fi's do since #455, not as last drawn: an arrow in the frame where
   `Enter` cleared a row's failure scrolls with the rows' new heights
   (#462).
+- **`Tab` stays in a popover** even when nothing in it can hold the
+  keyboard, in each of them as in the Wi-Fi's (the battery's and
+  Bluetooth's let it go); and a row the keyboard unfolds in the Wi-Fi's
+  list scrolls by what the list, grown with it, needs (#470).
 - **Measured** before and after, headless, on the Intel GPU and on the
   CPU, at ×1 and ×2: every popover in its main states (open, hovered, the
   keyboard's ring, muted, a row unfolded, a password refused, a failure, a

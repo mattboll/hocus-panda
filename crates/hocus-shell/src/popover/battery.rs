@@ -495,9 +495,6 @@ impl Panel {
                 return Some(canvas::Action::capture());
             }
             Key::Named(Named::Tab) => {
-                if order.is_empty() {
-                    return None;
-                }
                 state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
             }
             Key::Named(Named::Enter | Named::Space) => {
