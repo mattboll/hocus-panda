@@ -102,7 +102,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
 | 6 | Spacer | Takes what is left | flexible |
 | 7 | Secretary | Section 7. Panda 62 px, title, one line | 74 px |
-| 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows; the current one ringed in the accent | 30 px a row, 6 px apart |
+| 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
 | 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
@@ -226,14 +226,29 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
   second or a third row, filled from the left), 30 px high, radius 6,
   `rgba(255,255,255,0.05)` (`0.10` under the pointer). In each, a sketch of
   its windows at their places and sizes on the screen, in stacking order:
-  4 px in, radius 1.5, `rgba(236,239,244,0.30)`, the focused window of the
-  current desktop `0.62`. The current desktop ringed 2 px inside in the
+  4 px in, radius 1.5, `rgba(236,239,244,0.20)`, the focused window of the
+  current desktop `0.40` (3.9b; `0.30` and `0.62` before the icons). Each
+  window's rectangle carries its application's icon (from the icon theme,
+  as the sound's applications find theirs, §9), 10 × 10 px, centred, with a
+  1 px `rgba(14,17,28,0.6)` ring, when the rectangle is 12 × 12 px at least
+  (else the rectangle alone). The current desktop ringed 2 px inside in the
   accent; the others a 1 px `rgba(255,255,255,0.10)` ring. An empty desktop
   shows its number (11 px, 600, `text.faint`).
 - **A click** on a tile goes to that desktop, the strip sliding as with the
   shortcuts (windows.md §12). **The wheel** over the tiles goes to the next
   or the previous desktop, a notch a desktop, no further than the last or
   the first.
+- **The list** (approved 2026-10-30, issue #473, variant A + B): resting
+  150 ms on a tile (or a mini form's dot) opens a 240 px popover beside the
+  bar (§9's hover mechanics: it closes 300 ms after the pointer leaves both,
+  and stays while it moves toward it), its top on the tiles': "Bureau N"
+  (14 px, 700) and "M fenêtres" / "M windows" on the right (12 px,
+  `text.faint`); one 32 px row per window, front to back: its icon (16 px),
+  its title (13.5 px, cut with an ellipsis). An empty desktop: "Aucune
+  fenêtre." / "No window.". A click on a row goes to that desktop and
+  focuses that window. A click on a tile opens no list (it goes to the
+  desktop). The list follows windows opening, closing and retitling while
+  it shows.
 - **Motion**: the sketch follows the windows as they open, close, move and
   resize, and nothing draws at rest; nothing moves in the tiles but the
   ring, from the desktop left to the one shown (none with reduced motion).
@@ -266,7 +281,9 @@ A): a dot per desktop (18 × 13, radius 4), two to a row, 4 px apart, 14 px
 above the connections' buttons: the current one filled with the accent,
 those with windows `rgba(255,255,255,0.30)`, the empty ones
 `rgba(255,255,255,0.10)` with a 1 px `rgba(255,255,255,0.12)` ring; a click
-goes to that desktop, the wheel as in the full form; the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
+goes to that desktop, the wheel as in the full form; resting 150 ms on a
+dot opens its desktop's list (§4.4, 3.9b; the dots are too small for
+icons); the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
 icon in the row's states, the sign-in page's dot 9 px from its right and
 7 px from its top), the sound's gauge
 (vertical, 8 × 48 px, filled from the bottom, grey when muted), Bluetooth's
@@ -558,7 +575,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Keyboard's backlight | UPower's `org.freedesktop.UPower.KbdBacklight` | `GetMaxBrightness`, `GetBrightness`, `SetBrightness`; followed by `BrightnessChanged` and `BrightnessChangedWithSource`; none: no row (as built, 3.7) |
 | Other screens | the compositor | their EDID's model, else their connector's name, on the `screens` line of `hocus-link` (as built, 3.7) |
 | Phone | KDE Connect (D-Bus) | |
-| Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, and whether it is the focused one, on the `desktops` line of `hocus-link`; a desktop asked with `desktop` (as built, 3.9) |
+| Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, whether it is the focused one, its id and its application's id, on the `desktops` line of `hocus-link`; the windows' titles on the `titles` line; a desktop asked with `desktop`, a window with `bring` (as built, 3.9, 3.9b) |
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications, clipboard | the desktop's own servers | |
 
@@ -1396,3 +1413,56 @@ dashed slots are not part of the product.
 - **Not built**: names of desktops (6.14); a window dragged onto a tile;
   previews of a desktop under the pointer; other screens' desktops in a
   bar (sprint 8); names for screen readers (§11).
+
+### 3.9b, desktops that say what is on them (2026-10-30)
+
+What the approved mockup of 3.9b shows, variant A + B (§4.4, §5; issue
+#473); its coloured squares stand for the applications' icons.
+
+- **What the compositor tells.** The `desktops` line gives each window its
+  id and its application's id (xdg-shell's `app_id`, X11's class); the
+  titles go on a line of their own, `titles`, each window's (its
+  application's id when it has none, 200 characters at most), compared and
+  sent apart, at most once a frame as the desktops are. A terminal
+  retitles at every command: on the `desktops` line, each retitle would
+  draw the tiles, which show no title, and send every window's place
+  again; on its own line it draws an open list and nothing else (the shell
+  keeps it without a message, and wakes the popover only when the rows it
+  shows changed). A client may retitle without drawing, its window out of
+  sight: a change of title or of application id (xdg-shell's
+  `title_changed`, `app_id_changed`; X11's `WM_NAME`, `WM_CLASS`) asks for
+  a look 16 ms later, whatever is drawn, which takes the changes of that
+  frame together; nothing runs at rest.
+- **Icons.** Found from the application's id by the sound's lookup
+  (`levels::icons`, 3.4b), by the id, its lower case and its last part
+  (`org.gnome.Nautilus`, `nautilus`), on a thread of the desktops' own,
+  once per id, kept for the session; ids found together wake the tiles
+  once. In a tile, none for an application without an icon (the
+  rectangle alone); in the list, its letter on a colour of its own, as the
+  sound's applications (the tile is shared, `kit::app_tile`). Each icon on
+  whole pixels at ×1.
+- **The list** is a popover of the controller's (§9, 3.4a), opened by
+  hovering only, in both forms: 240 px wide, its top on the tiles' first
+  row (the dots' in the mini form) whichever tile opened it, pushed up to
+  stay inside the bar. While it shows, resting on another tile shows that
+  desktop's at once, on the same surface (no 150 ms again, no fade). A
+  click on a tile closes it and goes there; opening or closing it draws
+  nothing of the tiles (a tile is lit by the pointer, not by its list).
+- **A row** sends `bring ID`: the compositor slides to the window's
+  desktop and focuses it, as the switcher does; the list closes. Clicked
+  into, the list takes the keyboard (`on-demand`): `Tab`, `Shift+Tab` and
+  the arrows go through the rows, `Enter` or `Space` brings the window,
+  `Esc` closes it and gives the keyboard to the tile.
+- **Measured headless**, the real shell against the fakes, icons from a
+  theme of the test's own (`tests/bar_desktops.rs`): an icon in a 16 ×
+  14 px sketch, none in a 5 × 4 px one; resting on a tile, nothing at
+  100 ms, then the list 240 px wide beside the bar, its top on the tiles',
+  its rows front to back; gone once the pointer leaves; no list after a
+  click on a tile; an empty desktop's line and 80 px; a row bringing its
+  window from the second desktop, focused; a retitle without drawing,
+  told and cut with an ellipsis in the open list, the tiles' surface not
+  committing; the mini form's dot; nothing committing at rest while the
+  list shows. On the Intel GPU, the screenshots of the pull request.
+- **Not built**: a list longer than the bar (a desktop with more than about
+  25 windows; the list does not scroll); previews of a desktop under the
+  pointer; dragging a window onto a tile or a row.

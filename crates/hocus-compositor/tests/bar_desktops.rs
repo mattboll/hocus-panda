@@ -9,6 +9,12 @@
 //! keyboard from the sound's row up to the tiles, where Enter goes there;
 //! a desktop's change drawing the desktops' surface alone, nothing at rest.
 //!
+//! And 3.9b (issue #473): the windows' icons in the sketches with room for
+//! them; resting on a tile (or a dot) opens the list of its windows front
+//! to back, or says it is empty; a row brings its window; a retitle draws
+//! the list alone; nothing at rest while it shows. The icons come from a
+//! theme of the test's own (`XDG_DATA_DIRS`), red squares.
+//!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI.
 
@@ -68,10 +74,33 @@ fn ready() -> Option<PathBuf> {
     Some(shell)
 }
 
+/// The applications whose icon the test's theme has: a red square.
+const RED: [&str; 2] = ["test.red", "test.small"];
+
+/// The test's own icon theme, in place of the system's.
+fn icons(dir: &Path) -> anyhow::Result<PathBuf> {
+    let data = dir.join("data");
+    let apps = data.join("icons/hicolor/scalable/apps");
+    std::fs::create_dir_all(&apps)?;
+    for app in RED {
+        std::fs::write(
+            apps.join(format!("{app}.svg")),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\">\
+             <rect width=\"16\" height=\"16\" fill=\"#ff0000\"/></svg>",
+        )?;
+    }
+    Ok(data)
+}
+
 fn start(shell: &Path, setup: Setup) -> anyhow::Result<Bed> {
     let fakes = Fakes::start()?;
     let log = fakes.dir.path().join("shell.log");
-    let env = [("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned())];
+    let data = icons(fakes.dir.path())?.display().to_string();
+    let env = [
+        ("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned()),
+        ("XDG_DATA_HOME", data.clone()),
+        ("XDG_DATA_DIRS", data),
+    ];
     let script = fakes.shell_with(shell, "fr_FR.UTF-8", &env, Some(&log))?;
     let mut config = Config::default();
     config.desktops.count = setup.count;
@@ -192,7 +221,18 @@ impl Bed {
         let done = self.hp.dispatch_until(WAIT, |_| {
             plain(&log).get(from..).is_some_and(|l| l.contains(text))
         })?;
-        anyhow::ensure!(done, "the shell never logged {text:?}");
+        let lines: Vec<String> = plain(&log)
+            .get(from..)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("desktop") || l.contains("popover") || l.contains("icon"))
+            .map(str::to_owned)
+            .collect();
+        anyhow::ensure!(
+            done,
+            "the shell never logged {text:?}; it logged:\n{}",
+            lines.join("\n")
+        );
         Ok(())
     }
 
@@ -290,6 +330,45 @@ impl Bed {
     ) -> anyhow::Result<(Rect, ClientHandle)> {
         common::open_with(&mut self.hp, app_id, size, false)
     }
+
+    /// Opens a window titled `title`.
+    fn open_titled(
+        &mut self,
+        app_id: &'static str,
+        title: &'static str,
+        size: (u32, u32),
+    ) -> anyhow::Result<ClientHandle> {
+        let (_, client) = self.open(app_id, size)?;
+        client.commands.send(Command::Title(title))?;
+        Ok(client)
+    }
+
+    /// The pointer comes to rest on desktop `index`'s tile.
+    fn rest_on(&mut self, index: usize) {
+        let (x, y) = self.middle(index);
+        self.hp.pointer_move(x - 1.0, y);
+        self.hp.pointer_move(x, y);
+    }
+
+    /// The list, once it shows.
+    fn list(&mut self) -> anyhow::Result<Rect> {
+        let shown = self.hp.dispatch_until(WAIT, |hp| {
+            hp.popover_surfaces()
+                .first()
+                .is_some_and(|(_, r)| r.height > 0)
+                && hp.popover_commits() > 0
+        })?;
+        anyhow::ensure!(shown, "no list");
+        Ok(self.hp.popover_surfaces()[0].1)
+    }
+
+    /// Row `i` of the list at `list`: its middle.
+    fn row(list: Rect, i: usize) -> (f64, f64) {
+        (
+            f64::from(list.x + 120),
+            f64::from(list.y + 41 + 34 * i as i32 + 16),
+        )
+    }
 }
 
 /// The accent, `#6CC287`, more or less blended.
@@ -347,7 +426,7 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     bed.settle()?;
     let drawn = bed.sketch(0, window);
     let (x, y) = centre(drawn);
-    assert!(light(bed.pixel(x, y)?) > 120, "{:?}", bed.pixel(x, y)?);
+    assert!(light(bed.pixel(x, y)?) > 95, "{:?}", bed.pixel(x, y)?);
     // Dragged with Super: nothing told on the way, where it lands at the
     // end.
     let commits = bed.hp.desktops_commits();
@@ -379,7 +458,7 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     bed.settle()?;
     let now = bed.sketch(0, moved);
     let (nx, ny) = centre(now);
-    assert!(light(bed.pixel(nx, ny)?) > 120, "not where it went");
+    assert!(light(bed.pixel(nx, ny)?) > 95, "not where it went");
     let left = (drawn.x + 1, drawn.y + drawn.height / 2);
     assert!(left.0 + 2 < now.x, "{drawn:?} {now:?}");
     assert!(light(bed.pixel(left.0, left.1)?) < 60, "still where it was");
@@ -608,5 +687,207 @@ fn nothing_draws_at_rest() -> anyhow::Result<()> {
     bed.on(1)?;
     bed.hp.pointer_move(600.0, 500.0);
     assert_eq!(bed.at_rest()?, [0; 5], "at rest");
+    Ok(())
+}
+
+/// The test theme's red, more or less blended.
+fn red([r, g, b]: [u8; 3]) -> bool {
+    r > 160 && g < 90 && b < 90
+}
+
+#[test]
+fn a_sketch_with_room_for_it_shows_its_windows_icon() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    // A small window, sent to the second desktop: 300 × 200 px is 5 × 4 px
+    // in a tile, no room for its icon.
+    let (_, _small) = bed.open("test.small", (300, 200))?;
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_2]);
+    // A large one on the first: 16 × 14 px, its icon in its middle.
+    let (window, _large) = bed.open("test.red", (1000, 700))?;
+    bed.logged("app=test.red found=true")?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let sketch = bed.sketch(0, window);
+    let (x, y) = centre(sketch);
+    let icon = Rect::new(x - 5, y - 5, 10, 10);
+    assert!(bed.count(icon, red)? > 50, "no icon in {sketch:?}");
+    let second = bed.tile(1);
+    assert_eq!(bed.count(second, red)?, 0, "an icon in a 5 px sketch");
+    Ok(())
+}
+
+#[test]
+fn resting_on_a_tile_lists_its_windows_front_to_back_after_150_ms() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    let _beta = bed.open_titled("test.small", "Beta", (600, 400))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    // Passing over a tile shows nothing; resting on it 150 ms does.
+    let mark = bed.mark();
+    bed.rest_on(0);
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    assert!(bed.hp.popover_surfaces().is_empty(), "shown before 150 ms");
+    let list = bed.list()?;
+    bed.logged_after(
+        mark,
+        "title=Bureau 1 count=2 fenêtres empty=None rows=[\"Beta\", \"Alpha\"]",
+    )?;
+    // 240 px wide, 8 px left of the bar, its top on the tiles'.
+    assert_eq!(
+        (list.width, list.height),
+        (240, 1 + 10 + 26 + 4 + 66 + 12 + 1)
+    );
+    assert_eq!(list.x + list.width, 1920 - 8 - 196 - 8);
+    assert_eq!(list.y, bed.tile(0).y);
+    // The pointer goes away: it closes; a click on a tile goes there and
+    // opens nothing.
+    bed.hp.pointer_move(600.0, 500.0);
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    assert!(closed, "the list stays");
+    let third = bed.middle(2);
+    bed.click(third);
+    bed.on(2)?;
+    wait(&mut bed.hp, Duration::from_millis(400))?;
+    assert!(bed.hp.popover_surfaces().is_empty(), "a list after a click");
+    Ok(())
+}
+
+#[test]
+fn an_empty_desktops_list_says_so() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let mark = bed.mark();
+    bed.rest_on(2);
+    let list = bed.list()?;
+    bed.logged_after(
+        mark,
+        "title=Bureau 3 count= empty=Some(\"Aucune fenêtre.\") rows=[]",
+    )?;
+    assert_eq!(list.height, 80);
+    Ok(())
+}
+
+#[test]
+fn a_row_goes_to_its_desktop_and_focuses_its_window() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    // Two windows sent to the second desktop, one left on the first.
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_2]);
+    let _beta = bed.open_titled("test.small", "Beta", (600, 400))?;
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_2]);
+    let (_, _here) = bed.open("test.here", (500, 300))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let mark = bed.mark();
+    bed.rest_on(1);
+    let list = bed.list()?;
+    bed.logged_after(mark, "rows=[\"Beta\", \"Alpha\"]")?;
+    // Into the list, on its second row, Alpha's: a click.
+    let (x, y) = Bed::row(list, 1);
+    bed.click((x, y));
+    bed.on(1)?;
+    let focused = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.focused && w.app_id.as_deref() == Some("test.red"))
+    })?;
+    assert!(focused, "{:?}", bed.hp.windows());
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    assert!(closed, "the list stays");
+    Ok(())
+}
+
+#[test]
+fn a_retitle_draws_the_open_list_and_not_the_tiles() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let mark = bed.mark();
+    bed.rest_on(0);
+    let list = bed.list()?;
+    bed.logged_after(mark, "rows=[\"Alpha\"]")?;
+    // The pointer rests in the list, off its row.
+    bed.hp
+        .pointer_move(f64::from(list.x + 120), f64::from(list.y + 20));
+    bed.settle()?;
+    let before = bed.counts();
+    let mark = bed.mark();
+    // Retitled, without drawing: the list says it, the tiles do not draw.
+    alpha.commands.send(Command::Title(
+        "Gamma — a title long enough to be cut short in the list",
+    ))?;
+    bed.logged_after(mark, "rows=[\"Gamma — a title")?;
+    bed.logged_after(mark, "…\"]")?;
+    bed.settle()?;
+    let after = bed.counts();
+    assert!(after[3] > before[3], "the list did not draw");
+    assert_eq!(after[4], before[4], "the tiles drew");
+    assert_eq!(after[..3], before[..3], "{before:?} {after:?}");
+    Ok(())
+}
+
+#[test]
+fn resting_on_a_mini_dot_lists_its_windows() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        Setup {
+            mini: true,
+            ..Setup::default()
+        },
+    )?;
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let mark = bed.mark();
+    bed.rest_on(0);
+    let list = bed.list()?;
+    bed.logged_after(
+        mark,
+        "title=Bureau 1 count=1 fenêtre empty=None rows=[\"Alpha\"]",
+    )?;
+    // 8 px left of the 56 px bar, its top on the dots'.
+    assert_eq!(list.x + list.width, 1920 - 8 - 56 - 8);
+    assert_eq!(list.y, bed.tile(0).y);
+    Ok(())
+}
+
+#[test]
+fn nothing_draws_at_rest_while_the_list_shows() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    bed.rest_on(0);
+    let list = bed.list()?;
+    let (x, y) = Bed::row(list, 0);
+    bed.hp.pointer_move(x, y);
+    assert_eq!(bed.at_rest()?, [0; 5], "at rest");
+    assert!(!bed.hp.popover_surfaces().is_empty(), "the list closed");
     Ok(())
 }
