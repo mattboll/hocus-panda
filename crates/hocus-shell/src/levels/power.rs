@@ -526,7 +526,9 @@ async fn carry_out(connection: &Connection, batch: &[Ask]) {
 }
 
 /// The backlight where the keys' steps and the slider end, from what it
-/// is: one call to logind, then shown at once (udev tells it again).
+/// is: one call to logind, then shown at once (udev tells it again), unless
+/// the backlight said another brightness meanwhile: changed from elsewhere
+/// after logind set it, it is newer than what was asked (#478).
 async fn set_brightness(connection: &Connection, batch: &[Ask]) {
     let Some(device) = backlight::device(&backlight::dir()) else {
         return;
@@ -542,6 +544,7 @@ async fn set_brightness(connection: &Connection, batch: &[Ask]) {
     if value == raw {
         return;
     }
+    let before = super::snapshot().brightness;
     let set = connection
         .call_method(
             Some(LOGIN),
@@ -552,7 +555,11 @@ async fn set_brightness(connection: &Connection, batch: &[Ask]) {
         )
         .await;
     match set {
-        Ok(_) => publish(|levels| levels.brightness = Some(value as f32 * 100.0 / max as f32)),
+        Ok(_) => publish(|levels| {
+            if levels.brightness == before {
+                levels.brightness = Some(value as f32 * 100.0 / max as f32);
+            }
+        }),
         Err(err) => tracing::warn!(%err, device = device.name, "logind did not set the brightness"),
     }
 }
