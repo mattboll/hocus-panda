@@ -12,11 +12,10 @@
 //! (`events.subscribe`) on a blocking read; panes coming or going list
 //! them again. When herdr goes, it says so and waits for the socket again.
 //!
-//! An agent is named as herdr's sidebar names it by default (its
-//! `ui.sidebar.agents.rows`' first line): its workspace's label, then
-//! " · " and its tab's when the workspace has several tabs or the tab was
-//! named; never by its kind ("claude"), which herdr shows under it and
-//! which named every agent alike (#497).
+//! An agent is named by its tab's own name when the user gave it one
+//! ("refacto"), else by its workspace's label (#503); never by its kind
+//! ("claude"), which herdr shows under it and which named every agent
+//! alike (#497).
 //!
 //! Going to one of its agents selects its pane ([`select`], 4.3). Its
 //! window is the terminal's that runs herdr's client: herdr's server is a
@@ -49,8 +48,8 @@ pub struct Agent {
     /// Its workspace and its tab, whose labels name it.
     pub workspace: String,
     pub tab: String,
-    /// Its name as herdr's sidebar shows it, when herdr labels its
-    /// workspace.
+    /// Its tab's own name, else its workspace's label, when herdr gives
+    /// one.
     pub name: Option<String>,
     /// Its directory's name (herdr's `cwd` for it, else its foreground's,
     /// else its processes'), for when herdr gives no name.
@@ -470,30 +469,21 @@ impl Labels {
         workspace_shows && tab_shows
     }
 
-    /// The agent's name in `workspace`'s `tab`, as herdr's sidebar shows
-    /// it: the workspace's label, and the tab's after " · " when the
-    /// workspace has several tabs or the tab was named (herdr labels an
-    /// unnamed tab with its place, from 1).
+    /// The agent's name in `workspace`'s `tab`: the tab's own name when
+    /// it was given one, else the workspace's label (#503). herdr labels
+    /// an unnamed tab with its place in its workspace, from 1.
     fn name(&self, workspace: &str, tab: &str) -> Option<String> {
-        let label = crate::name_text(self.workspaces.get(workspace)?);
-        if label.is_empty() {
-            return None;
-        }
-        let siblings: Vec<&Tab> = self
+        let own = self
             .tabs
             .iter()
             .filter(|t| t.workspace == workspace)
-            .collect();
-        let shown = siblings
-            .iter()
             .enumerate()
             .find(|(_, t)| t.id == tab)
-            .filter(|(at, t)| siblings.len() > 1 || t.label != (at + 1).to_string())
+            .filter(|(at, t)| t.label != (at + 1).to_string())
             .map(|(_, t)| crate::name_text(&t.label))
             .filter(|t| !t.is_empty());
-        Some(match shown {
-            Some(tab) => format!("{label} · {tab}"),
-            None => label,
+        own.or_else(|| {
+            Some(crate::name_text(self.workspaces.get(workspace)?)).filter(|w| !w.is_empty())
         })
     }
 }
@@ -708,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn agents_are_named_as_herdrs_sidebar_names_them_never_by_their_kind() {
+    fn agents_are_named_by_their_tab_else_their_workspace_never_by_their_kind() {
         let (workspaces, tabs, listed) = listed();
         let labels = Labels::parse(&workspaces, &tabs);
         let agents = parse_agents(&listed, &labels);
@@ -726,22 +716,23 @@ mod tests {
         assert_eq!(
             seen,
             [
-                // A named tab, among two.
+                // A named tab: its name only.
                 (
                     "w1:p1",
-                    Some("hocus-panda · refacto"),
+                    Some("refacto"),
                     Some("hocus-panda"),
                     Some(State::Waiting)
                 ),
-                // An unnamed one, among two: its number.
+                // An unnamed one, among two: the workspace's label.
                 (
                     "w1:p3",
-                    Some("hocus-panda · 2"),
+                    Some("hocus-panda"),
                     Some("hocus-panda"),
                     Some(State::Working)
                 ),
                 // Alone and unnamed: the workspace's label.
                 ("w2:p1", Some("infra"), Some("infra"), Some(State::Idle)),
+                // Unnamed, labelled by its place, not its number.
                 ("w3:p1", Some("site"), None, Some(State::Done)),
                 // A workspace herdr did not list: no name from herdr, its
                 // folder.
@@ -776,10 +767,7 @@ mod tests {
         if let Some(tab) = labels.tabs.iter_mut().find(|t| t.id == id) {
             tab.label = label;
         }
-        assert_eq!(
-            labels.name("w2", "w2:t1").as_deref(),
-            Some("infra · deploy")
-        );
+        assert_eq!(labels.name("w2", "w2:t1").as_deref(), Some("deploy"));
         let workspace = json!({ "event": "workspace.renamed",
             "data": { "type": "workspace_renamed", "workspace_id": "w2", "label": "ops" } });
         assert_eq!(

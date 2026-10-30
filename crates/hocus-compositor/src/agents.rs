@@ -12,15 +12,16 @@
 //! - **herdr** ([`hocus_agents::herdr`]), when it runs and is not declined.
 //!
 //! The same agent seen by two sources (a Claude Code in a herdr pane) is
-//! one: its process is among the pane's. An agent is named as herdr's
-//! sidebar names it, else by its project's folder, else by its process's
-//! working directory ([`hocus_agents::agent_name`]); never by its tool. An agent is forgotten when its
-//! session ends, or when its process does (a pidfd on the loop, no
-//! polling). Its window is the one whose client is the nearest process
-//! above it; for an agent herdr sees whose own processes reach no window
-//! (they run under herdr's server, a daemon), herdr's terminal's: the
-//! window of the terminal running herdr's client, its clients looked for
-//! again off the loop as the user goes to it (#500). The shell is told
+//! one: its process is among the pane's. An agent is named by herdr (its
+//! tab's own name, else its workspace's label), else by its project's
+//! folder, else by its process's working directory
+//! ([`hocus_agents::agent_name`]); never by its tool. An agent is
+//! forgotten when its session ends, or when its process does (a pidfd on
+//! the loop, no polling). Its window is the one whose client is the
+//! nearest process above it; for an agent herdr sees whose own processes
+//! reach no window (they run under herdr's server, a daemon), herdr's
+//! terminal's: the window of the terminal running herdr's client, its
+//! clients looked for again off the loop as the user goes to it (#500). The shell is told
 //! the tools and the agents in a line each, after the turn of the loop in
 //! which they changed: a burst of reports is one line, and a report that
 //! changes nothing sends none.

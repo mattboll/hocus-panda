@@ -1924,10 +1924,10 @@ fn two_tabs() -> FakeHerdr {
     )
 }
 
-/// The cause of #497: herdr's agent shows as herdr's sidebar names it, its
-/// workspace's label and its tab's, not as its kind ("claude").
+/// The cause of #497, then #503: herdr's agent shows under its tab's own
+/// name alone, not as its kind ("claude").
 #[test]
-fn a_herdr_agent_is_named_as_herdrs_sidebar_names_it() -> anyhow::Result<()> {
+fn a_herdr_agent_is_named_by_its_tab() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
@@ -1941,14 +1941,15 @@ fn a_herdr_agent_is_named_as_herdrs_sidebar_names_it() -> anyhow::Result<()> {
         },
     )?;
     bed.tool_becomes("herdr", ToolState::Running)?;
-    bed.agent_becomes("hocus-panda · refacto", Some("working"))?;
+    bed.agent_becomes("refacto", Some("working"))?;
     // Followed as the shell started.
-    bed.logged("shows=AGENTS 1 · hocus-panda · refacto 0\u{a0}min")?;
+    bed.logged("shows=AGENTS 1 · refacto 0\u{a0}min")?;
     bed.no_tool_names()?;
     Ok(())
 }
 
-/// A rename in herdr, its tab's then its workspace's, shows at once.
+/// A rename in herdr, its tab's then its workspace's, shows at once; a
+/// tab without a name of its own shows its workspace's label.
 #[test]
 fn a_rename_in_herdr_shows_at_once() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
@@ -1964,7 +1965,7 @@ fn a_rename_in_herdr_shows_at_once() -> anyhow::Result<()> {
         },
     )?;
     bed.tool_becomes("herdr", ToolState::Running)?;
-    bed.agent_becomes("hocus-panda · refacto", Some("working"))?;
+    bed.agent_becomes("refacto", Some("working"))?;
     let from = bed.mark();
     bed.herdr_says(
         |h| h.tabs[0]["label"] = "revue".into(),
@@ -1972,30 +1973,22 @@ fn a_rename_in_herdr_shows_at_once() -> anyhow::Result<()> {
         serde_json::json!({ "type": "tab_renamed", "tab_id": "w1:t1",
             "workspace_id": "w1", "label": "revue" }),
     )?;
-    bed.agent_becomes("hocus-panda · revue", Some("working"))?;
-    bed.logged_after(from, &["shows=AGENTS 1 · hocus-panda · revue"])?;
-    bed.herdr_says(
-        |h| h.workspaces[0]["label"] = "panda".into(),
-        "workspace_renamed",
-        serde_json::json!({ "type": "workspace_renamed", "workspace_id": "w1",
-            "label": "panda" }),
-    )?;
-    bed.agent_becomes("panda · revue", Some("working"))?;
-    // Its other tab closed: an unnamed tab alone would not show, a named
-    // one still does.
-    bed.herdr_says(
-        |h| {
-            h.tabs.pop();
-        },
-        "tab_closed",
-        serde_json::json!({ "type": "tab_closed", "tab_id": "w1:t2", "workspace_id": "w1" }),
-    )?;
-    bed.agent_becomes("panda · revue", Some("working"))?;
+    bed.agent_becomes("revue", Some("working"))?;
+    bed.logged_after(from, &["shows=AGENTS 1 · revue"])?;
+    // Its name taken away (herdr labels it with its place again): its
+    // workspace's label.
     bed.herdr_says(
         |h| h.tabs[0]["label"] = "1".into(),
         "tab_renamed",
         serde_json::json!({ "type": "tab_renamed", "tab_id": "w1:t1",
             "workspace_id": "w1", "label": "1" }),
+    )?;
+    bed.agent_becomes("hocus-panda", Some("working"))?;
+    bed.herdr_says(
+        |h| h.workspaces[0]["label"] = "panda".into(),
+        "workspace_renamed",
+        serde_json::json!({ "type": "workspace_renamed", "workspace_id": "w1",
+            "label": "panda" }),
     )?;
     bed.agent_becomes("panda", Some("working"))?;
     bed.no_tool_names()?;
@@ -2019,7 +2012,7 @@ fn a_claude_code_agent_in_a_herdr_pane_takes_herdrs_name() -> anyhow::Result<()>
         },
     )?;
     bed.tool_becomes("herdr", ToolState::Running)?;
-    bed.agent_becomes("panda · refacto", Some("working"))?;
+    bed.agent_becomes("refacto", Some("working"))?;
     // Its hooks, as Claude Code sends them: `hocus agent-hook` runs as
     // this process's child, the pane's foreground process.
     let hook = |event: &str| {
@@ -2034,7 +2027,7 @@ fn a_claude_code_agent_in_a_herdr_pane_takes_herdrs_name() -> anyhow::Result<()>
         &["agent-hook", "claude-code"],
         Some(&hook("PermissionRequest")),
     )?;
-    bed.agent_becomes("panda · refacto", Some("waiting"))?;
+    bed.agent_becomes("refacto", Some("waiting"))?;
     let agents = bed.hp.agents();
     assert_eq!(agents.len(), 1, "{agents:?}");
     assert_eq!(agents[0].source, "claude-code+herdr");
@@ -2045,7 +2038,7 @@ fn a_claude_code_agent_in_a_herdr_pane_takes_herdrs_name() -> anyhow::Result<()>
         serde_json::json!({ "type": "tab_renamed", "tab_id": "w1:t1",
             "workspace_id": "w1", "label": "revue" }),
     )?;
-    bed.agent_becomes("panda · revue", Some("waiting"))?;
+    bed.agent_becomes("revue", Some("waiting"))?;
     bed.no_tool_names()?;
     Ok(())
 }
@@ -2294,8 +2287,8 @@ fn of_the_terminals_windows_the_one_titled_herdr_is_gone_to() -> anyhow::Result<
         },
     )?;
     bed.tool_becomes("herdr", ToolState::Running)?;
-    bed.agent_becomes("panda · refacto", Some("done"))?;
-    bed.agent_becomes("panda · revue", Some("done"))?;
+    bed.agent_becomes("refacto", Some("done"))?;
+    bed.agent_becomes("revue", Some("done"))?;
     // Side by side, to be clicked.
     let (_, herdr) = common::open_with(&mut bed.hp, "test.herdr", (600, 400), false)?;
     herdr.commands.send(common::Command::Title("herdr"))?;
@@ -2320,17 +2313,17 @@ fn of_the_terminals_windows_the_one_titled_herdr_is_gone_to() -> anyhow::Result<
     // herdr's window with the keyboard: the pane it shows is seen.
     bed.click(bed.centre("test.herdr")?);
     bed.keyboard_goes_to("test.herdr")?;
-    bed.agent_becomes("panda · revue", Some("seen"))?;
-    bed.agent_becomes("panda · refacto", Some("done"))?;
+    bed.agent_becomes("revue", Some("seen"))?;
+    bed.agent_becomes("refacto", Some("done"))?;
     // The other window focused last, then the row of the pane not shown.
     bed.click(bed.centre("test.shell")?);
     bed.keyboard_goes_to("test.shell")?;
     bed.settle()?;
-    let row = bed.row("panda · refacto")?;
+    let row = bed.row("refacto")?;
     bed.click(row);
     bed.keyboard_goes_to("test.herdr")?;
     bed.herdr_focuses("w1:p1")?;
-    bed.agent_becomes("panda · refacto", Some("seen"))?;
+    bed.agent_becomes("refacto", Some("seen"))?;
     Ok(())
 }
 
@@ -2472,7 +2465,7 @@ fn a_waiting_agent_runs_a_wave_then_glows_then_nothing_draws() -> anyhow::Result
         (Duration::from_millis(450)..Duration::from_millis(700)).contains(&rising),
         "{rising:?}: {glimpses:?}"
     );
-    // The secretary radiates for 3.2 s from the start (4.6): then rest.
+    // The secretary radiates for 1.2 s from the start (4.6): then rest.
     wait(&mut bed.hp, Duration::from_secs(2))?;
     bed.rests()?;
     let rest = bed.hp.halo().map(|s| (s.concern, s.glow, s.wave));
@@ -2742,13 +2735,10 @@ fn the_secretary_heads_the_group_with_her_line_in_the_moments_mood() -> anyhow::
     assert!(items.contains("Secretary@"), "{items}");
     assert!(!items.contains("Sources@"), "{items}");
     let calm = bed.secretary_tint()?;
-    // Someone waits: amber, and who.
+    // Someone waits: amber, and only who.
     let from = bed.mark();
     bed.agent_is("site-web", "waiting")?;
-    bed.logged_after(
-        from,
-        &["secretary=Quelqu'un t'attend · site-web", "mood=Waiting"],
-    )?;
+    bed.logged_after(from, &["secretary=site-web mood=Waiting"])?;
     bed.settle()?;
     let waiting = bed.secretary_tint()?;
     let lift = |t: [i32; 3]| [t[0] - calm[0], t[1] - calm[1], t[2] - calm[2]];
@@ -2757,14 +2747,11 @@ fn the_secretary_heads_the_group_with_her_line_in_the_moments_mood() -> anyhow::
         amber[0] > 8 && amber[1] > 5 && amber[0] > amber[2] + 5,
         "amber: {calm:?} {waiting:?}"
     );
-    // Answered, and another one stuck: orange, and who.
+    // Answered, and another one stuck: orange, and only who.
     let from = bed.mark();
     bed.agent_is("site-web", "working")?;
     bed.agent_is("migration", "failed")?;
-    bed.logged_after(
-        from,
-        &["secretary=Un agent est bloqué · migration", "mood=Stuck"],
-    )?;
+    bed.logged_after(from, &["secretary=migration mood=Stuck"])?;
     bed.settle()?;
     let stuck = bed.secretary_tint()?;
     let orange = lift(stuck);
@@ -2776,7 +2763,7 @@ fn the_secretary_heads_the_group_with_her_line_in_the_moments_mood() -> anyhow::
 }
 
 /// On a GPU: when someone starts waiting, her ear radiates twice and she
-/// hops twice, 3.2 s, once; then nothing moves. With reduced motion, she
+/// hops twice, 1.2 s, once; then nothing moves. With reduced motion, she
 /// holds still. Skipped without a render node.
 #[test]
 fn the_secretary_radiates_once_when_someone_starts_waiting_then_rests() -> anyhow::Result<()> {
@@ -2815,12 +2802,12 @@ fn the_secretary_radiates_once_when_someone_starts_waiting_then_rests() -> anyho
         let last = commits.last().copied().unwrap_or_default();
         if moves {
             assert_eq!(radiated, 1, "{commits:?}");
-            assert!(frames >= 60, "{frames} frames of motion: {commits:?}");
+            assert!(frames >= 30, "{frames} frames of motion: {commits:?}");
             assert!(
-                (Duration::from_millis(2900)..Duration::from_millis(3700)).contains(&span),
+                (Duration::from_millis(1000)..Duration::from_millis(1500)).contains(&span),
                 "{span:?}: {commits:?}"
             );
-            assert!(last < Duration::from_millis(4000), "{commits:?}");
+            assert!(last < Duration::from_millis(1800), "{commits:?}");
         } else {
             assert_eq!(radiated, 0);
             assert_eq!(frames, 0, "{commits:?}");
@@ -2911,6 +2898,34 @@ fn her_briefing_lists_who_waits_and_asks_what_who_is_stuck_and_why_and_who_to_se
     let log = plain(&bed.log);
     assert!(!log.contains("npm install"));
     assert!(!log.contains("Rate limit"));
+    // No time in her header, right of "Le point" (the clock is just
+    // above, #503): its right end is the panel's background alone.
+    bed.settle()?;
+    let (width, _, bytes) = bed.hp.screenshot(0)?;
+    let mut seen: Vec<[u8; 3]> = Vec::new();
+    for y in briefing.y + 16..briefing.y + 44 {
+        for x in briefing.x + 220..briefing.x + 304 {
+            let at = ((y * width + x) * 4) as usize;
+            let p = bytes.get(at..at + 3).unwrap_or_default();
+            if let [b, g, r] = *p {
+                seen.push([r, g, b]);
+            }
+        }
+    }
+    anyhow::ensure!(
+        !seen.is_empty(),
+        "the briefing is off the screen: {briefing:?}"
+    );
+    let spread = (0..3)
+        .map(|c| {
+            let (lo, hi) = seen
+                .iter()
+                .fold((u8::MAX, 0), |(lo, hi), p| (lo.min(p[c]), hi.max(p[c])));
+            hi - lo
+        })
+        .max()
+        .unwrap_or_default();
+    assert!(spread < 12, "something drawn right of her title: {spread}");
     Ok(())
 }
 

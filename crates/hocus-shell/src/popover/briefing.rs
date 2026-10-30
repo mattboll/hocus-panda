@@ -2,7 +2,7 @@
 //! at the head of the agents' group, beside the bar, 320 px wide, its top
 //! on her row's; it never opens by itself. In this order:
 //!
-//! - her head, "Le point" and the time;
+//! - her head and "Le point" (the clock is just above: no time, #503);
 //! - "T'ATTEND": each agent waiting, since when, and what it asks, as its
 //!   tool said it (a request "Autoriser Bash : npm install ?", a question,
 //!   a notification's text); one whose tool says nothing (herdr's) shows
@@ -43,7 +43,7 @@ use super::{
 };
 use crate::{
     agents::{self, Brief, Entry, Look, Words},
-    clock::time::{Lang, Shown, Wall},
+    clock::time::Lang,
     levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring},
 };
 
@@ -60,12 +60,10 @@ const RIGHT: f32 = WIDTH as f32 - BORDER - PAD_SIDE;
 const ROOM: f32 = RIGHT - LEFT;
 /// Its parts 8 px apart.
 const GAP: f32 = 8.0;
-/// The header: her head 34 px, 10 px before the title (16 px, 700); the
-/// time on its right (12 px, `text.faint`).
+/// The header: her head 34 px, 10 px before the title (16 px, 700).
 const HEAD: f32 = 34.0;
 const HEAD_GAP: f32 = 10.0;
 const TITLE: f32 = 16.0;
-const TIME: f32 = 12.0;
 /// A section's label: 11 px, 700, spaced 0.08 em, in its colour, 4 px
 /// more above; its lines 2 px apart.
 const LABEL: f32 = 11.0;
@@ -297,8 +295,6 @@ pub struct Panel {
     pub id: window::Id,
     pub words: Words,
     pub glass: bool,
-    /// The time in its header, as the clock reads it.
-    pub wall: Wall,
 }
 
 /// What the surface keeps between draws.
@@ -407,17 +403,6 @@ impl Panel {
                 TEXT,
                 Alignment::Left,
             ),
-        ));
-        let hm: String = Shown::at(&self.wall.now(), Lang::of_messages())
-            .hm
-            .iter()
-            .collect();
-        f.fill_text(text(
-            hm,
-            Point::new(RIGHT, middle),
-            TIME,
-            FAINT,
-            Alignment::Right,
         ));
         for section in &laid.sections {
             let colour = match section.look {

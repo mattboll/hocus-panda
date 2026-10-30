@@ -10,7 +10,7 @@
 //! "AGENTS" and the total over her line; her row tinted amber or orange
 //! when someone waits or is stuck. A click on her opens her briefing,
 //! where "Sources" is. When an agent starts waiting, her ear radiates
-//! twice and she hops twice (3.2 s), once; then she holds still. None of it
+//! twice and she hops twice (1.2 s), once; then she holds still. None of it
 //! with reduced motion or on the CPU.
 //!
 //! "Un autre outil ?" opens the Sources popover, a row's
@@ -97,12 +97,13 @@ const SAYS_WAITING: Color = rgb(0xF5C46E);
 const SAYS_STUCK: Color = rgb(0xF7A77A);
 /// Her ear's amber, its rings' colour.
 const EAR_WAITING: Color = rgb(0xF5B44A);
-/// When someone starts waiting, as the mockup's keyframes: two rings out
-/// of her ear (`hpRing`, 1.4 s `ease-out`, twice: from 90 % to nothing,
-/// from 0.9 to 1.25 times their size), and two hops (`hpBob`, 1.6 s
-/// `ease-in-out`, twice: 3 px up at its middle).
-const RING: Duration = Duration::from_millis(1400);
-const BOB: Duration = Duration::from_millis(1600);
+/// When someone starts waiting, the mockup's keyframes in 1.2 s instead
+/// of its 3.2 s (#503), each scaled alike: two rings out of her ear
+/// (`hpRing`, 525 ms `ease-out`, twice: from 90 % to nothing, from 0.9 to
+/// 1.25 times their size), and two hops (`hpBob`, 600 ms `ease-in-out`,
+/// twice: 3 px up at its middle).
+const RING: Duration = Duration::from_millis(525);
+const BOB: Duration = Duration::from_millis(600);
 const TWICE: u32 = 2;
 const BOB_UP: f32 = 3.0;
 const EASE_IN_OUT: (f32, f32, f32, f32) = (0.42, 0.0, 0.58, 1.0);
@@ -1092,4 +1093,29 @@ pub fn mark(
             Alignment::Center,
         ),
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_secretary_moves_for_1_2_s_in_the_mockups_shape() {
+        let at = Duration::from_millis;
+        let start = Instant::now();
+        // 1.2 s in all, once.
+        assert!(secretary_moves(start, start + at(1199)));
+        assert!(!secretary_moves(start, start + at(1200)));
+        assert_eq!(secretary_motion(at(1200)), (0.0, None));
+        // Two hops, 3 px up at their middles, down between them.
+        for top in [300, 900] {
+            assert!((secretary_motion(at(top)).0 + BOB_UP).abs() < 0.01);
+        }
+        assert!(secretary_motion(at(600)).0.abs() < 0.01);
+        // Two rings, each from its start, over by 1.05 s.
+        assert!(secretary_motion(at(0)).1.is_some_and(|r| r < 0.01));
+        assert!(secretary_motion(at(524)).1.is_some_and(|r| r > 0.99));
+        assert!(secretary_motion(at(526)).1.is_some_and(|r| r < 0.05));
+        assert_eq!(secretary_motion(at(1050)).1, None);
+    }
 }
