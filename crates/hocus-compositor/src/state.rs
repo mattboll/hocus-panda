@@ -187,6 +187,8 @@ pub struct State {
     pub panel: crate::panel::Panel,
     /// The shell drawing them.
     pub shell: crate::shell::Shell,
+    /// The agents and their sources (4.0).
+    pub agents: crate::agents::Agents,
     /// The render node of the GPU the compositor draws with, which the
     /// shell draws with too; `None` without one.
     pub gpu: Option<crate::backend::DevId>,
@@ -343,6 +345,7 @@ impl State {
             programs: Programs::default(),
             panel,
             shell: crate::shell::Shell::default(),
+            agents: crate::agents::Agents::default(),
             gpu: None,
             blur: false,
             panes: std::cell::RefCell::default(),

@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 hocus-link = { path = "../hocus-link", version = "0.2.0" }
+hocus-agents = { path = "../hocus-agents", version = "0.2.0" }
 anyhow = "1.0.104"
 # The same as smithay's, with signals: SIGTERM and SIGINT stop the loop.
 calloop = { version = "0.14.5", features = ["signals"] }

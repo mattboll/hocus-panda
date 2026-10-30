@@ -6,6 +6,7 @@
 //! backend, together in [`App`]); nothing else holds a reference to it.
 //! Work that could block (starting programs) runs on threads of its own.
 
+mod agents;
 mod backdrop;
 mod backend;
 mod config;
@@ -170,6 +171,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     socket::insert(&event_loop.handle(), socket, display)?;
     state.shell.program = options.shell;
     shell::listen(&event_loop.handle(), &mut state)?;
+    agents::start(&event_loop.handle(), &mut state)?;
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
     if options.xwayland {
@@ -225,6 +227,7 @@ fn remove_sockets(state: &State) {
     lock.push(".lock");
     let mut files = vec![state.socket_path.clone(), PathBuf::from(lock)];
     files.extend(state.shell.socket.clone());
+    files.extend(state.agents.socket.clone());
     if let Some(n) = state.xdisplay {
         files.push(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));
         files.push(PathBuf::from(format!("/tmp/.X{n}-lock")));
@@ -262,6 +265,8 @@ impl App {
         let Self { state, backend } = self;
         // Motions under way ask for the next frame.
         state.tick();
+        // The agents' changes of this turn, in one line.
+        state.flush_agents();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

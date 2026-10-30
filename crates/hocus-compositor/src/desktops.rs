@@ -544,6 +544,7 @@ impl crate::State {
             && let Some(told) = self.shell.desktops.offer(view, held)
         {
             self.tell_shell(ToShell::Desktops(told));
+            self.agents_windows_changed();
         }
         let titles = self.titles_view(output);
         if let Some(told) = self.shell.desktops.offer_titles(titles) {

@@ -58,9 +58,10 @@ impl SeatHandler for State {
 delegate_seat!(State);
 
 impl SelectionHandler for State {
-    /// The compositor offers nothing of its own: only X11 clients'
-    /// selections, which XWayland's window manager reads.
-    type SelectionUserData = ();
+    /// What the compositor offers itself (a text the shell copies), or
+    /// `None`: an X11 client's selection, which XWayland's window manager
+    /// reads.
+    type SelectionUserData = Option<std::sync::Arc<str>>;
 
     /// A Wayland client took a selection: X11 clients see it offered.
     fn new_selection(
@@ -83,8 +84,19 @@ impl SelectionHandler for State {
         mime_type: String,
         fd: OwnedFd,
         _seat: Seat<Self>,
-        _user_data: &(),
+        user_data: &Option<std::sync::Arc<str>>,
     ) {
+        if let Some(text) = user_data {
+            // Written on a thread: the reader may be slow, or never read.
+            let text = text.clone();
+            crate::programs::on_a_thread("write the clipboard".to_owned(), move || {
+                let mut file = std::fs::File::from(fd);
+                if let Err(err) = std::io::Write::write_all(&mut file, text.as_bytes()) {
+                    tracing::debug!(%err, "could not write the clipboard");
+                }
+            });
+            return;
+        }
         if let Some(xwm) = self.xwm.as_mut()
             && let Err(err) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone())
         {

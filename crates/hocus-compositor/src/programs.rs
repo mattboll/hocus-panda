@@ -65,6 +65,10 @@ impl Env {
             .env("XDG_RUNTIME_DIR", &self.runtime_dir)
             .env("WAYLAND_DISPLAY", self.wayland_display())
             .env("XDG_SESSION_TYPE", "wayland")
+            .env(
+                hocus_agents::SOCKET_ENV,
+                hocus_agents::socket_path(&self.socket),
+            )
             .env("XDG_CURRENT_DESKTOP", "Hocuspanda")
             .env("XCURSOR_THEME", &self.cursor.theme)
             .env("XCURSOR_SIZE", self.cursor.size.to_string())

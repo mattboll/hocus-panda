@@ -38,6 +38,12 @@ pub struct Config {
     /// of the file; `None` remembers nothing (tests).
     #[serde(skip)]
     pub state_dir: Option<PathBuf>,
+    /// Where the agents' tools are (their settings, their programs) and
+    /// the `hocus` program their hooks run. Not part of the file: the
+    /// program reads them from its environment; `None` looks for no tool
+    /// (tests, unless they give a home of their own).
+    #[serde(skip)]
+    pub agent_places: Option<hocus_agents::tools::Places>,
     /// A flat background instead of the default gradient, for tests that
     /// look through translucent pixels. Not part of the file.
     #[serde(skip)]
