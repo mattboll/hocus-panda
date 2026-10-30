@@ -11,8 +11,9 @@
 //! presses outside the shell's surfaces while a popover shows, the
 //! names of the screens besides the built-in one, the keyboard's layouts
 //! and which one is active, the bars' screens' desktops with a sketch of
-//! their windows, their applications and their titles, and the agents'
-//! tools and the agents; the shell draws the bars and their popovers,
+//! their windows, their applications and their titles, the agents'
+//! tools and the agents, and the agent whose panda peeks out of the bar;
+//! the shell draws the bars, their popovers and the peek,
 //! keeps the levels, and says when it draws on the CPU, when a popover
 //! closes, and when the user asks for the next layout, another desktop or
 //! a window, plugs a tool in or out, declines them, or copies a text.
@@ -55,6 +56,10 @@ pub const AGENTS_NAMESPACE: &str = "hocus-bar-agents";
 /// one at a time. The compositor blurs behind it as behind the bar, draws
 /// its shadow, and moves it in and out ([`POPOVER_OPEN`], [`POPOVER_CLOSE`]).
 pub const POPOVER_NAMESPACE: &str = "hocus-bar-popover";
+/// The namespace of the panda peeking out of the bar's edge (bar.md §7 C,
+/// 4.5): one surface beside each bar while it is out, none at rest. The
+/// shell draws it once; the compositor moves it out and back.
+pub const PEEK_NAMESPACE: &str = "hocus-bar-peek";
 
 /// A popover's width, its distance from the bar, and how far it slides from
 /// the bar as it opens and closes (logical pixels). Its corners are the
@@ -197,6 +202,52 @@ pub enum ToShell {
     /// compositor's loop together (4.0). Written `agents`, then for each a
     /// tab and its [`AgentShown`] fields.
     Agents(Vec<AgentShown>),
+    /// An agent's panda peeks out of the bar's edge (4.5): it started
+    /// waiting, finished, or waits still at its reminder. Sent after the
+    /// [`ToShell::Agents`] line that says so; the latest replaces the one
+    /// out. Written `peek ID waiting|done SINCE NAME`.
+    Peek(Peek),
+    /// The panda is back in the bar: its surfaces go. Written `no-peek`.
+    NoPeek,
+}
+
+/// The panda peeking out (4.5): the agent, why, since when (microseconds
+/// of `CLOCK_MONOTONIC`, as [`AgentShown::since`]) and its name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Peek {
+    pub id: u64,
+    pub kind: PeekKind,
+    pub since: u64,
+    pub name: String,
+}
+
+/// Why the panda peeks out: its agent waits for the user (it holds out its
+/// hat), or finished (its arms up).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeekKind {
+    Waiting,
+    Done,
+}
+
+impl PeekKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting",
+            Self::Done => "done",
+        }
+    }
+}
+
+impl FromStr for PeekKind {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "waiting" => Ok(Self::Waiting),
+            "done" => Ok(Self::Done),
+            _ => Err(BadLine(format!("no peek {s:?}"))),
+        }
+    }
 }
 
 /// An agents' tool, as the bar shows it.
@@ -881,6 +932,15 @@ impl fmt::Display for ToShell {
                 }
                 Ok(())
             }
+            Self::Peek(peek) => write!(
+                f,
+                "peek {} {} {} {}",
+                peek.id,
+                peek.kind.name(),
+                peek.since,
+                screen_name(&peek.name)
+            ),
+            Self::NoPeek => f.write_str("no-peek"),
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -1027,6 +1087,21 @@ impl FromStr for ToShell {
             }),
             Some("level") => Ok(Self::Level(word(&mut words, "level key")?.parse()?)),
             Some("outside") => Ok(Self::Outside),
+            Some("peek") => {
+                // The name last: it may hold spaces.
+                let mut fields = line.splitn(5, ' ').skip(1);
+                let number = |w: &str, what: &str| {
+                    w.parse::<u64>()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                Ok(Self::Peek(Peek {
+                    id: number(word(&mut fields, "agent")?, "agent")?,
+                    kind: word(&mut fields, "peek")?.parse()?,
+                    since: number(word(&mut fields, "since")?, "since")?,
+                    name: fields.next().unwrap_or_default().to_owned(),
+                }))
+            }
+            Some("no-peek") => Ok(Self::NoPeek),
             Some("layout") => Ok(Self::Layout(
                 word(&mut words, "layout")?
                     .parse()
@@ -1457,6 +1532,19 @@ mod tests {
                     note: Some(Note::allow("apply_patch", "")),
                 },
             ]),
+            ToShell::Peek(Peek {
+                id: 3,
+                kind: PeekKind::Waiting,
+                since: 123_456,
+                name: "hocus panda · refacto".into(),
+            }),
+            ToShell::Peek(Peek {
+                id: 4,
+                kind: PeekKind::Done,
+                since: 0,
+                name: "api-paiements".into(),
+            }),
+            ToShell::NoPeek,
         ]
     }
 

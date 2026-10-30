@@ -29,6 +29,7 @@ pub mod motion;
 mod output_spec;
 mod overlay;
 mod panel;
+pub mod peek;
 mod popover;
 mod popups;
 mod programs;

@@ -448,6 +448,10 @@ impl State {
                     )
                 });
             for layer in on {
+                // The peek goes under the bar's surfaces (`peek_elements`).
+                if layer.namespace() == hocus_link::PEEK_NAMESPACE {
+                    continue;
+                }
                 let Some(mut geometry) = map.layer_geometry(&layer) else {
                     continue;
                 };
@@ -588,6 +592,9 @@ impl State {
             let halo = self.halo_elements(renderer, output, bar, now);
             elements.splice(at..at, halo.into_iter().map(OutputElements::Shader));
         }
+        // The panda peeking out (4.5): over the windows, under the bar's
+        // surfaces and its halo, out of whose edge it comes.
+        self.peek_elements(renderer, output, now, &mut elements);
         // Going to an agent: the streak over the windows, under the bar.
         // Over its glass too, which it does not blur again at each of its
         // frames: it is transparent where it starts, on its row.
@@ -669,6 +676,64 @@ impl State {
             elements.insert(glass_at, pane);
         }
         elements
+    }
+
+    /// The shell's peek surfaces on `output` at `now` (4.5), where their
+    /// motion has them, cut at the bar's edge: under the bar, nothing of
+    /// them shows. On the CPU, whose buffers have no alpha, cut to their
+    /// card's rounded corners too.
+    fn peek_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        now: Duration,
+        out: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let scale = output.current_scale().fractional_scale();
+        let edge = self
+            .bar_rect(output, now)
+            .map_or(i32::MAX, |bar| (bar.loc.x * scale).round() as i32);
+        let map = layer_map_for_output(output);
+        for layer in map
+            .layers()
+            .filter(|l| l.namespace() == hocus_link::PEEK_NAMESPACE)
+        {
+            let (Some(look), Some(geometry)) =
+                (self.peek_look(layer, now), map.layer_geometry(layer))
+            else {
+                continue;
+            };
+            let mut at = geometry.loc.to_f64();
+            at.x += look.shift;
+            let loc: Point<i32, Physical> = at.to_physical_precise_round(scale);
+            let size = geometry.size.to_physical_precise_round(scale);
+            let width = (edge - loc.x).min(size.w);
+            if width <= 0 {
+                continue;
+            }
+            let clip = Rectangle::new(loc, (width, size.h).into());
+            let radius = if self.shell.software {
+                (crate::peek::CARD_RADIUS * scale).round() as i32
+            } else {
+                0
+            };
+            let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
+                AsRenderElements::<R>::render_elements(
+                    layer,
+                    renderer,
+                    loc,
+                    Scale::from(scale),
+                    look.alpha,
+                );
+            out.extend(
+                surfaces
+                    .into_iter()
+                    .map(|e| OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))),
+            );
+        }
     }
 
     /// The desktop's background on `output`, stretched over it.

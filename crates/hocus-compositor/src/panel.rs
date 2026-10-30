@@ -100,6 +100,8 @@ pub struct Panel {
     pub desktops_commits: u64,
     /// Commits of the popovers' surfaces, for tests: none at rest.
     pub popover_commits: u64,
+    /// Commits of the peek's surfaces, for tests: none at rest.
+    pub peek_commits: u64,
     /// The shell's popovers beside the bars, and their motion.
     pub popovers: crate::popover::Popovers,
     /// The other screens' names, as last told to the shell.

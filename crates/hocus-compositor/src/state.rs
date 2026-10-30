@@ -169,6 +169,8 @@ pub struct State {
     pub going: Option<crate::going::Going>,
     /// The halo around and over the bars (bar.md §6, 4.4).
     pub halo: crate::halo::Halo,
+    /// The panda peeking out of the bar's edge (bar.md §7 C, 4.5).
+    pub peek: crate::peek::Peeks,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -342,6 +344,7 @@ impl State {
             strips: HashMap::new(),
             going: None,
             halo: crate::halo::Halo::default(),
+            peek: crate::peek::Peeks::default(),
             swiping: None,
             switcher: None,
             switcher_out: None,

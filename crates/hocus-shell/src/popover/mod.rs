@@ -376,6 +376,21 @@ pub enum Effect {
     FollowHerdr,
     /// The clipboard takes this text.
     Copy(String),
+    /// A layer surface of the shell's beside `bar`, of `namespace` (the
+    /// peek, 4.5): `size`, its margins from the screen's top right (top,
+    /// right, bottom, left); it takes no keyboard.
+    Layer {
+        id: window::Id,
+        bar: String,
+        namespace: &'static str,
+        size: (u32, u32),
+        margin: (i32, i32, i32, i32),
+    },
+    /// Surface `id` takes the pointer in `rects` only (its own pixels).
+    Region {
+        id: window::Id,
+        rects: Vec<Rectangle>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -476,6 +491,14 @@ impl Controller {
     pub fn forget(&mut self, bar: &str) {
         self.bars.remove(bar);
         self.items.retain(|(b, _), _| b != bar);
+    }
+
+    /// The bars, by their screen's name, and their forms.
+    pub fn bar_forms(&self) -> Vec<(String, Form)> {
+        self.bars
+            .iter()
+            .map(|(bar, place)| (bar.clone(), place.form))
+            .collect()
     }
 
     /// The forms the bars are in.
@@ -1350,6 +1373,49 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         Effect::Copy(text) => {
             tell(ToCompositor::Copy(text));
             Vec::new()
+        }
+        Effect::Layer {
+            id,
+            bar,
+            namespace,
+            size,
+            margin,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Top,
+                anchor: Anchor::Right | Anchor::Top,
+                exclusive_zone: Some(0),
+                margin: Some(margin),
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: if bar == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(bar)
+                },
+                events_transparent: false,
+                namespace: Some(namespace.to_owned()),
+            },
+            id,
+        }],
+        Effect::Region { id, rects } => {
+            let rects: Vec<(i32, i32, i32, i32)> = rects
+                .iter()
+                .map(|r| {
+                    let (x, y) = (r.x.floor() as i32, r.y.floor() as i32);
+                    let right = (r.x + r.width).ceil() as i32;
+                    let bottom = (r.y + r.height).ceil() as i32;
+                    (x, y, right - x, bottom - y)
+                })
+                .collect();
+            let callback =
+                iced_layershell::actions::ActionCallback::new(move |region: &WlRegion| {
+                    region.subtract(-EVERYWHERE, -EVERYWHERE, 2 * EVERYWHERE, 2 * EVERYWHERE);
+                    for &(x, y, w, h) in &rects {
+                        region.add(x, y, w, h);
+                    }
+                });
+            vec![Message::SetInputRegion { id, callback }]
         }
     }
 }

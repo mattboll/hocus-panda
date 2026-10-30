@@ -309,6 +309,7 @@ impl State {
             self.loop_handle.remove(link.token);
             tracing::info!("the shell is gone; its bars' space stays");
         }
+        self.peek_shell_gone();
         if self.shell.software {
             self.shell.software = false;
             self.redraw = true;

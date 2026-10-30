@@ -18,6 +18,7 @@
 //! clock's minute ([`minute`]): nothing draws for them in between.
 
 pub mod draw;
+pub mod peek;
 
 use std::sync::{Mutex, PoisonError};
 
@@ -510,6 +511,14 @@ impl Words {
             (false, _) => format!("· {time}"),
             (true, true) => format!("· il y a {time}"),
             (true, false) => format!("· {time} ago"),
+        }
+    }
+
+    /// What the peek's bubble says after the agent's name (4.5).
+    pub fn peek(self, kind: hocus_link::PeekKind) -> &'static str {
+        match kind {
+            hocus_link::PeekKind::Waiting => self.pick("t'attend", "is waiting"),
+            hocus_link::PeekKind::Done => self.pick("a fini", "is done"),
         }
     }
 

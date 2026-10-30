@@ -68,6 +68,7 @@ impl WlrLayerShellHandler for State {
                 map.unmap_layer(&layer);
                 drop(map);
                 self.popover_gone(&layer);
+                self.peek_gone(&layer);
                 self.layer_keyboard();
                 self.redraw = true;
             }
@@ -104,6 +105,10 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             hocus_link::POPOVER_NAMESPACE => {
                 state.panel.popover_commits += 1;
                 state.popover_committed(&layer);
+            }
+            hocus_link::PEEK_NAMESPACE => {
+                state.panel.peek_commits += 1;
+                state.peek_committed(&layer);
             }
             _ => {}
         }
