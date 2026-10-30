@@ -326,7 +326,7 @@ impl State {
         now: Duration,
         out: &mut Vec<OutputElement<R>>,
     ) where
-        R: Renderer + ImportAll + ImportMem + Bend,
+        R: Renderer + ImportAll + ImportMem + Bend + crate::going::Streaks,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         self.dots_elements(renderer, output, now, out);
@@ -342,7 +342,7 @@ impl State {
         now: Duration,
         out: &mut Vec<OutputElement<R>>,
     ) where
-        R: Renderer + ImportAll + ImportMem + Bend,
+        R: Renderer + ImportAll + ImportMem + Bend + crate::going::Streaks,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let strip: Strip = self.strip(output);
@@ -393,7 +393,7 @@ impl State {
         now: Duration,
         out: &mut Vec<OutputElement<R>>,
     ) where
-        R: Renderer + ImportAll + ImportMem + Bend,
+        R: Renderer + ImportAll + ImportMem + Bend + crate::going::Streaks,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let reduced = self.reduced_motion();

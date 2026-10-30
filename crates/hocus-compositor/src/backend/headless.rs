@@ -219,6 +219,7 @@ where
         + Offscreen<T>
         + Bind<T>
         + crate::wobble::Bend
+        + crate::going::Streaks
         + crate::glass::Glass,
     R::TextureId: Send + Clone + Texture + 'static,
     R::Error: Send + Sync + 'static,

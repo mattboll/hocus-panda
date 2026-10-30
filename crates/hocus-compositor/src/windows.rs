@@ -45,6 +45,9 @@ pub struct Managed {
     pub focus_change: Option<Tween>,
     /// Opened without the focus: its rim pulses once.
     pub pulse: Option<Tween>,
+    /// Gone to from an agent's row: its rim pulses as the streak lands,
+    /// the ring growing around it when going moves (4.3).
+    pub landing: Option<(Tween, bool)>,
     /// Going to a new place: drawn from this rectangle (global) to where
     /// it is now.
     pub settle: Option<(Rectangle<f64, Logical>, Tween)>,
@@ -155,6 +158,7 @@ impl Managed {
             focused: false,
             focus_change: None,
             pulse: None,
+            landing: None,
             settle: None,
             requested: None,
             resizing: None,
@@ -171,6 +175,13 @@ impl Managed {
     pub fn focus_look(&self, now: Duration) -> f32 {
         let t = self.focus_change.map_or(1.0, |t| t.at(now)) as f32;
         if self.focused { t } else { 1.0 - t }
+    }
+
+    /// Its rim's pulse at `now` as an agent's streak lands on it.
+    pub fn landing_look(&self, now: Duration) -> crate::going::Pulse {
+        self.landing
+            .map(|(t, ring)| crate::going::pulse(&t, now, ring))
+            .unwrap_or_default()
     }
 
     /// The pulse's strength at `now`: up and back down, once.
@@ -1198,6 +1209,13 @@ impl State {
                     }
                 }
             }
+            if let Some((t, _)) = managed.landing {
+                if t.done(now) {
+                    managed.landing = None;
+                } else {
+                    moving = true;
+                }
+            }
             if let Some((_, t)) = managed.settle {
                 if t.done(now) {
                     managed.settle = None;
@@ -1234,6 +1252,7 @@ impl State {
         for strip in self.strips.values_mut() {
             moving |= strip.tick(now);
         }
+        moving |= self.tick_going(now);
         let popover_motion = self.popover_motion();
         moving |= self.panel.tick(now, popover_motion);
         moving |= self.tick_switcher(now, &mut wake);

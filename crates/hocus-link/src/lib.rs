@@ -586,8 +586,10 @@ pub enum ToCompositor {
     Bring(u64),
     /// The user goes to agent `id` (its row in the agents' group, 4.1):
     /// the compositor brings its window, if it has one, and a finished
-    /// agent is seen. Written `go-to-agent ID`.
-    GoToAgent(u64),
+    /// agent is seen. From a row (4.3), the streak runs from it to the
+    /// window. Written `go-to-agent ID`, or `go-to-agent ID OUTPUT X Y W
+    /// H` with the row.
+    GoToAgent { id: u64, row: Option<Row> },
     /// The user plugs an agents' tool in (`claude-code`, `codex`), having
     /// read what it changes: the compositor writes its hooks, off its
     /// loop, then says [`ToShell::AgentTools`]. Written `plug TOOL`.
@@ -604,6 +606,18 @@ pub enum ToCompositor {
     /// which the compositor offers: the shell's surfaces take no serial to
     /// set it themselves. Written `copy TEXT`, the text on one line.
     Copy(String),
+}
+
+/// Where something the user clicked is on a bar: its screen's name and
+/// its rectangle in the bar's frame, logical pixels, `x` from the bar's
+/// right edge (negative, inside it) and `y` from its top.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub output: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 /// A screen's name as a [`ToShell::Screens`] line carries it: on one
@@ -938,7 +952,12 @@ impl fmt::Display for ToCompositor {
                 DesktopTo::Previous => write!(f, "desktop {output} previous"),
             },
             Self::Bring(id) => write!(f, "bring {id}"),
-            Self::GoToAgent(id) => write!(f, "go-to-agent {id}"),
+            Self::GoToAgent { id, row: None } => write!(f, "go-to-agent {id}"),
+            Self::GoToAgent { id, row: Some(r) } => write!(
+                f,
+                "go-to-agent {id} {} {} {} {} {}",
+                r.output, r.x, r.y, r.width, r.height
+            ),
             Self::Plug(tool) => write!(f, "plug {tool}"),
             Self::Unplug(tool) => write!(f, "unplug {tool}"),
             Self::Decline => f.write_str("decline"),
@@ -983,11 +1002,29 @@ impl FromStr for ToCompositor {
                     .parse()
                     .map_err(|e| BadLine(format!("window: {e}")))?,
             )),
-            Some("go-to-agent") => Ok(Self::GoToAgent(
-                word(&mut words, "agent")?
+            Some("go-to-agent") => {
+                let id = word(&mut words, "agent")?
                     .parse()
-                    .map_err(|e| BadLine(format!("agent: {e}")))?,
-            )),
+                    .map_err(|e| BadLine(format!("agent: {e}")))?;
+                let row = match words.next() {
+                    None => None,
+                    Some(output) => {
+                        let mut number = |what: &str| -> Result<i32, BadLine> {
+                            word(&mut words, what)?
+                                .parse()
+                                .map_err(|e| BadLine(format!("{what}: {e}")))
+                        };
+                        Some(Row {
+                            output: output.to_owned(),
+                            x: number("x")?,
+                            y: number("y")?,
+                            width: number("width")?,
+                            height: number("height")?,
+                        })
+                    }
+                };
+                Ok(Self::GoToAgent { id, row })
+            }
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
     }
@@ -1155,7 +1192,17 @@ mod tests {
                 to: DesktopTo::Previous,
             },
             ToCompositor::Bring(42),
-            ToCompositor::GoToAgent(7),
+            ToCompositor::GoToAgent { id: 7, row: None },
+            ToCompositor::GoToAgent {
+                id: 7,
+                row: Some(Row {
+                    output: "eDP-1".into(),
+                    x: -190,
+                    y: 126,
+                    width: 184,
+                    height: 28,
+                }),
+            },
             ToCompositor::Plug("claude-code".into()),
             ToCompositor::Unplug("codex".into()),
             ToCompositor::Decline,
@@ -1168,6 +1215,11 @@ mod tests {
         assert!("closing".parse::<ToCompositor>().is_err());
         assert!("desktop eDP-1".parse::<ToCompositor>().is_err());
         assert!("desktop eDP-1 last".parse::<ToCompositor>().is_err());
+        assert!(
+            "go-to-agent 7 eDP-1 -190 126 184"
+                .parse::<ToCompositor>()
+                .is_err()
+        );
         for bad in [
             "",
             "bar eDP-1",

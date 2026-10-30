@@ -10,6 +10,8 @@
 //! process), then follows their status events (`events.subscribe`) on a
 //! blocking read; panes coming or going list them again. When herdr goes,
 //! it says so and waits for the socket again.
+//!
+//! Going to one of its agents selects its pane ([`select`], 4.3).
 
 use std::{
     collections::HashMap,
@@ -310,6 +312,12 @@ fn pids(info: &Value) -> Vec<u32> {
         }
     }
     out
+}
+
+/// herdr behind `socket` selects `pane` (`pane.focus`, in the API schema
+/// herdr bundles: `herdr api schema`). Blocking, for a thread of its own.
+pub fn select(socket: &Path, pane: &str) -> Result<(), String> {
+    call(socket, "pane.focus", json!({ "pane_id": pane })).map(drop)
 }
 
 /// One request on a connection of its own: its result.

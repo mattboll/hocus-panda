@@ -340,8 +340,13 @@ pub enum Effect {
     },
     /// The compositor is asked for a window: its desktop, and the focus.
     Bring(u64),
-    /// The compositor is asked for an agent: its window, and it is seen.
-    GoToAgent(u64),
+    /// The compositor is asked for an agent: its window, and it is seen;
+    /// the streak runs from its row (`row`, in `bar`'s frame).
+    GoToAgent {
+        id: u64,
+        bar: String,
+        row: Rectangle,
+    },
     /// The compositor plugs a tool in, or unplugs it (4.0).
     Plug(crate::agents::Tool),
     Unplug(crate::agents::Tool),
@@ -586,10 +591,10 @@ impl Controller {
                     open.seen(at, now);
                 }
             }
-            Event::ItemPress { bar, item, .. } if !item.clicks() => {
+            Event::ItemPress { bar, item, rect } if !item.clicks() => {
                 self.unfocus(&mut effects);
                 self.close(now, &mut effects);
-                effects.extend(acts(bar, item));
+                effects.extend(acts(bar, item, rect));
             }
             Event::ItemPress { bar, item, rect } => {
                 self.unfocus(&mut effects);
@@ -644,7 +649,9 @@ impl Controller {
                 }
             }
             Event::ItemActivate => match self.focused.clone() {
-                Some((bar, item, _)) if !item.clicks() => effects.extend(acts(bar, item)),
+                Some((bar, item, from)) if !item.clicks() => {
+                    effects.extend(acts(bar, item, from));
+                }
                 Some((bar, item, from)) => {
                     self.unfocus(&mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
@@ -880,9 +887,9 @@ fn anchor(
     Rectangle { y: top, ..from }
 }
 
-/// What an item does when clicked, or on `Enter`, when that opens no
-/// popover: the next layout, or the tile's desktop.
-fn acts(bar: String, item: Item) -> Option<Effect> {
+/// What an item at `rect` does when clicked, or on `Enter`, when that
+/// opens no popover: the next layout, the tile's desktop, the row's agent.
+fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
     match item {
         Item::Keyboard => Some(Effect::NextLayout),
         Item::Desktop(index) => Some(Effect::Desktop {
@@ -890,7 +897,7 @@ fn acts(bar: String, item: Item) -> Option<Effect> {
             to: DesktopTo::At(index),
         }),
         Item::Decline => Some(Effect::Decline),
-        Item::Agent(id) => Some(Effect::GoToAgent(id)),
+        Item::Agent(id) => Some(Effect::GoToAgent { id, bar, row: rect }),
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1284,8 +1291,15 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             tell(ToCompositor::Bring(id));
             Vec::new()
         }
-        Effect::GoToAgent(id) => {
-            tell(ToCompositor::GoToAgent(id));
+        Effect::GoToAgent { id, bar, row } => {
+            let row = (bar != crate::ALONE).then(|| hocus_link::Row {
+                output: bar,
+                x: row.x.round() as i32,
+                y: row.y.round() as i32,
+                width: row.width.round() as i32,
+                height: row.height.round() as i32,
+            });
+            tell(ToCompositor::GoToAgent { id, row });
             Vec::new()
         }
         Effect::Plug(tool) => {
@@ -1909,7 +1923,14 @@ mod tests {
             },
             t,
         );
-        assert_eq!(effects, vec![Effect::GoToAgent(5)]);
+        assert_eq!(
+            effects,
+            vec![Effect::GoToAgent {
+                id: 5,
+                bar: BAR.to_owned(),
+                row: row(1.0)
+            }]
+        );
         assert_eq!(c.open_item(), None);
         // The keyboard on Sources (Esc in its popover), down to the first
         // row, Enter: to that agent.
@@ -1924,7 +1945,14 @@ mod tests {
         c.handle(Event::Escape, t);
         c.handle(Event::ItemStep { back: false }, t);
         assert!(c.focused(BAR, Item::Agent(3)));
-        assert_eq!(c.handle(Event::ItemActivate, t), vec![Effect::GoToAgent(3)]);
+        assert_eq!(
+            c.handle(Event::ItemActivate, t),
+            vec![Effect::GoToAgent {
+                id: 3,
+                bar: BAR.to_owned(),
+                row: row(0.0)
+            }]
+        );
     }
 
     #[test]

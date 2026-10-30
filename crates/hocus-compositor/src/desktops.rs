@@ -725,8 +725,18 @@ impl crate::State {
     /// `output` shows its desktop `to` (from 0), sliding; `carried` goes
     /// with it, staying where it is on the screen.
     pub fn switch_desktop(&mut self, output: &Output, to: usize, carried: Option<WindowId>) {
+        self.switch_desktop_reduced(output, to, carried, self.reduced_motion());
+    }
+
+    /// The same, cross-fading instead of sliding when `reduced`.
+    fn switch_desktop_reduced(
+        &mut self,
+        output: &Output,
+        to: usize,
+        carried: Option<WindowId>,
+        reduced: bool,
+    ) {
         let now = self.now();
-        let reduced = self.reduced_motion();
         let mut strip = self.strip(output);
         let to = to.min(strip.count() - 1);
         let changed = strip.switch(to, now, reduced);
@@ -889,10 +899,16 @@ impl crate::State {
 
     /// Brings `id` forward: to its desktop, back from minimised, focused.
     pub fn bring(&mut self, id: WindowId) {
+        self.bring_moving(id, !self.reduced_motion());
+    }
+
+    /// The same; its desktop slides in when `moves`, else cross-fades
+    /// (going to an agent from a compositor on the CPU, 4.3).
+    pub fn bring_moving(&mut self, id: WindowId, moves: bool) {
         if let Some(output) = self.output_of(id) {
             let desktop = self.model.desktop(id);
             if self.strip(&output).current() != desktop {
-                self.switch_desktop(&output, desktop, None);
+                self.switch_desktop_reduced(&output, desktop, None, !moves);
             }
         }
         self.unminimize(id);
