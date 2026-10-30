@@ -1,7 +1,8 @@
 //! Windows on screen, headless (docs/design/windows.md §4–§10): snapping by
 //! the keys and by dragging, resizing from the frame, a snapped pair's
 //! shared edge resizing one and its handle both, fullscreen and back, minimising, menus that grab
-//! the keyboard, and no frame drawn once nothing moves.
+//! the keyboard, a window opened in the background pulsing once, and no
+//! frame drawn once nothing moves.
 
 mod common;
 
@@ -13,7 +14,7 @@ use common::{
     open_with, rect_of, wait, wait_for_rect,
 };
 use hocus_compositor::{
-    Headless,
+    Headless, HeadlessConfig, RendererChoice,
     model::{GAP, Mode, Rect, WindowId, Zone},
 };
 use smithay::input::pointer::CursorIcon;
@@ -497,5 +498,147 @@ fn a_terminal_resized_by_its_left_edge_keeps_its_cells_and_stays_where_it_is_mov
     open(&mut hp, "test.other", (200, 150))?;
     wait(&mut hp, Duration::from_millis(300))?;
     assert_eq!(rect_of(&hp, "test.cells"), Some(moved));
+    Ok(())
+}
+
+// --- A window opening without the keyboard (§4; issue #495) -------------------
+
+/// Run by the test below as a process of its own, given the compositor's
+/// socket in `HOCUS_TEST_FOREIGN`: a window of another program, until the
+/// compositor goes. Run alone, it does nothing.
+#[test]
+fn a_window_of_another_program() -> anyhow::Result<()> {
+    let Some(socket) = std::env::var_os("HOCUS_TEST_FOREIGN") else {
+        return Ok(());
+    };
+    let shows = Shows::Window {
+        app_id: "test.foreign",
+        size: (500, 400),
+        popup: false,
+    };
+    let client = common::client(std::path::Path::new(&socket), Some(shows))?;
+    // Its events end with its connection, as the compositor goes.
+    while client.events.recv().is_ok() {}
+    Ok(())
+}
+
+/// The other program, stopped by its own PID when the test ends.
+struct Foreign(std::process::Child);
+
+impl Drop for Foreign {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Starts the other program's window, and waits until it has the keyboard.
+fn foreign_window(hp: &mut Headless) -> anyhow::Result<Foreign> {
+    let child = std::process::Command::new(std::env::current_exe()?)
+        .args(["--exact", "a_window_of_another_program", "--nocapture"])
+        .env("HOCUS_TEST_FOREIGN", hp.socket())
+        .stdout(std::process::Stdio::null())
+        .spawn()?;
+    let foreign = Foreign(child);
+    let shown = hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some("test.foreign") && w.keyboard)
+    })?;
+    anyhow::ensure!(shown, "the other program's window: {:?}", hp.windows());
+    Ok(foreign)
+}
+
+/// A window of this program opening while the user works in another's:
+/// it opens behind without the keyboard, and its rim pulses once as a
+/// window gone to from an agent's row does (bar.md §8): on a GPU, the
+/// 2 px rim and the ring growing to 14 px in 600 ms; with reduced motion,
+/// or on the CPU, the rim lights and fades without its ring. Then nothing
+/// is drawn.
+#[test]
+fn a_window_opened_in_the_background_pulses_once_then_nothing_draws() -> anyhow::Result<()> {
+    let machines = [
+        common::render_node().map(|node| (Some(node), false)),
+        common::render_node().map(|node| (Some(node), true)),
+        Some((None, false)),
+    ];
+    for (gpu, reduced_motion) in machines.into_iter().flatten() {
+        let mut config = hocus_compositor::Config::default();
+        config.appearance.reduced_motion = reduced_motion;
+        let mut hp = Headless::start_with(
+            HeadlessConfig {
+                renderer: if gpu.is_some() {
+                    RendererChoice::Gles
+                } else {
+                    RendererChoice::Pixman
+                },
+                render_node: gpu,
+                ..HeadlessConfig::default()
+            },
+            config,
+        )?;
+        let ring = hp.renderer() == "gles" && !reduced_motion;
+        let machine = format!("{}, reduced motion {reduced_motion}", hp.renderer());
+        let _foreign = foreign_window(&mut hp)?;
+        wait(&mut hp, Duration::from_millis(500))?;
+        let (_, _client) = open_with(&mut hp, "test.behind", (400, 300), false)?;
+        let start = std::time::Instant::now();
+        let mut frames = hp.frames();
+        let mut samples = Vec::new();
+        while start.elapsed() < Duration::from_millis(1200) {
+            hp.dispatch(Duration::from_millis(2))?;
+            if hp.frames() != frames {
+                frames = hp.frames();
+                samples.push((start.elapsed(), hp.pulse("test.behind")));
+            }
+        }
+        // Behind, the keyboard where it was.
+        let windows = hp.windows();
+        let at = |app: &str| {
+            windows
+                .iter()
+                .position(|w| w.app_id.as_deref() == Some(app))
+        };
+        assert!(
+            at("test.behind") < at("test.foreign"),
+            "{machine}: {windows:?}"
+        );
+        assert!(
+            windows
+                .iter()
+                .any(|w| w.app_id.as_deref() == Some("test.foreign") && w.keyboard),
+            "{machine}: {windows:?}"
+        );
+        // Its rim lights, once: up to its peak, then only down.
+        let rims: Vec<f32> = samples
+            .iter()
+            .map(|(_, p)| p.map_or(0.0, |(rim, _)| rim))
+            .collect();
+        let peak = rims.iter().copied().fold(0.0, f32::max);
+        assert!(peak > 0.8, "{machine}: {samples:?}");
+        let top = rims.iter().position(|r| *r == peak).unwrap_or_default();
+        assert!(
+            rims[top..].windows(2).all(|w| w[1] <= w[0]),
+            "{machine}, more than once: {samples:?}"
+        );
+        let widest = samples
+            .iter()
+            .filter_map(|(_, p)| p.and_then(|(_, ring)| ring))
+            .fold(0.0, f64::max);
+        if ring {
+            assert!(widest > 8.0 && widest <= 14.0, "{machine}: {samples:?}");
+        } else {
+            assert_eq!(widest, 0.0, "{machine}: {samples:?}");
+        }
+        // Over by its 600 ms, and nothing drawn after.
+        let end = samples
+            .iter()
+            .rfind(|(_, p)| p.is_some())
+            .map_or(Duration::ZERO, |(at, _)| *at);
+        assert!(end < Duration::from_millis(700), "{machine}: {samples:?}");
+        let frames = hp.frames();
+        wait(&mut hp, Duration::from_millis(500))?;
+        assert_eq!(hp.frames(), frames, "{machine}: drawn at rest");
+    }
     Ok(())
 }
