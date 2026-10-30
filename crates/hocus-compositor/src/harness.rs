@@ -266,6 +266,12 @@ impl Headless {
         self.app.state.agents_shown()
     }
 
+    /// As if every agent had been in its state `by` longer (its "12 min"
+    /// without waiting for them): the shell is told.
+    pub fn backdate_agents(&mut self, by: Duration) {
+        self.app.state.backdate_agents(by);
+    }
+
     /// The agents as the shell was last told them.
     pub fn agents_peek(&self) -> Vec<hocus_link::AgentShown> {
         self.app.state.agents.told.clone().unwrap_or_default()
