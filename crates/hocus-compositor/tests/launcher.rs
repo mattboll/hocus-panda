@@ -20,6 +20,9 @@
 //! whatever is selected; an answer lists no application. The browser is a program of the test's, the shell's only
 //! `xdg-open` (its `PATH` is the test's own directory).
 //!
+//! Then the launcher larger (issue #518): the sizes × 1.5 throughout, and
+//! fewer columns on a screen too narrow for eight.
+//!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
 mod common;
@@ -180,6 +183,11 @@ fn entry(
 
 impl Bed {
     fn start(extra_apps: usize) -> anyhow::Result<Option<Self>> {
+        Self::start_on(extra_apps, "1920x1080")
+    }
+
+    /// On a screen `output` (`WxH[@SCALE]`).
+    fn start_on(extra_apps: usize, output: &str) -> anyhow::Result<Option<Self>> {
         let Some(shell) = common::shell_program() else {
             eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
             return Ok(None);
@@ -273,7 +281,7 @@ impl Bed {
         config.keyboard.layouts = vec!["us".to_owned()];
         let hp = Headless::start_with_shell(
             HeadlessConfig {
-                outputs: vec!["1920x1080".parse()?],
+                outputs: vec![output.parse()?],
                 renderer: RendererChoice::Pixman,
                 ..HeadlessConfig::default()
             },
@@ -409,11 +417,16 @@ impl Bed {
     }
 }
 
-/// On the 1920 × 1080 screen: the panel 760 px wide from x 580, its grid's
-/// area from y 130; tile `column` of the row whose top is `top`, its
-/// middle.
+/// On the 1920 × 1080 screen, the 5.1 mockup's sizes × 1.5 (#518): the
+/// panel 1140 px wide from x 390, its grid's area from y 195, its headings
+/// 36 px, its rows of tiles 168, a tile 138 × 159 and 18 px in.
+const AREA_TOP: f64 = 195.0;
+const HEAD: f64 = 36.0;
+const ROW: f64 = 168.0;
+
+/// Tile `column` of the row whose top is `top`, its middle.
 fn tile_middle(column: usize, top: f64) -> (f64, f64) {
-    (580.0 + 12.0 + 92.0 * column as f64 + 46.0, top + 53.0)
+    (390.0 + 18.0 + 138.0 * column as f64 + 69.0, top + 79.5)
 }
 
 /// The cards of what the launcher says it shows, top first.
@@ -458,10 +471,21 @@ fn super_space_opens_it_full_screen_with_the_keyboard_and_escape_closes_it() -> 
         "{surfaces:?}"
     );
     assert_eq!(bed.hp.keyboard_layer().as_deref(), Some("hocus-launcher"));
-    // Dark behind: on the CPU, as here, the shell's surface is opaque and
-    // draws the dimmed desktop's colour itself.
-    let [r, g, b] = bed.pixel(100, 1000)?;
-    assert!(r < 20 && g < 22 && b < 30, "{:?}", [r, g, b]);
+    // The bar's dark blue behind: on the CPU, as here, the shell's surface
+    // is opaque and draws it itself, #161B2A at the top to #0E111C at the
+    // bottom.
+    let [r, g, b] = bed.pixel(100, 10)?;
+    assert!(
+        r.abs_diff(22) <= 2 && g.abs_diff(27) <= 2 && b.abs_diff(42) <= 2,
+        "{:?}",
+        [r, g, b]
+    );
+    let [r, g, b] = bed.pixel(100, 1070)?;
+    assert!(
+        r.abs_diff(14) <= 2 && g.abs_diff(17) <= 2 && b.abs_diff(28) <= 2,
+        "{:?}",
+        [r, g, b]
+    );
     bed.press(KEY_ESC);
     assert!(bed.closed()?, "Escape did not close it");
     assert_eq!(bed.hp.keyboard_layer(), None);
@@ -478,7 +502,7 @@ fn super_space_opens_it_full_screen_with_the_keyboard_and_escape_closes_it() -> 
     assert_eq!(bed.hp.bars(), bars);
     // A click in the field does not.
     bed.open()?;
-    bed.click((960.0, 81.0))?;
+    bed.click((960.0, 120.0))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     assert_eq!(bed.hp.launcher_surfaces().len(), 1);
     Ok(())
@@ -491,7 +515,7 @@ fn the_empty_field_shows_the_frequent_row_then_all_from_a_to_z() -> anyhow::Resu
     };
     let shows = bed.open()?;
     assert!(
-        shows.contains(r#"heads=["FRÉQUENTES@130", "TOUTES LES APPLICATIONS@266"]"#),
+        shows.contains(r#"heads=["FRÉQUENTES@195", "TOUTES LES APPLICATIONS@399"]"#),
         "{shows}"
     );
     let rows = tiles(&shows);
@@ -503,8 +527,8 @@ fn the_empty_field_shows_the_frequent_row_then_all_from_a_to_z() -> anyhow::Resu
     );
     assert!(
         rows[1].starts_with(
-            "Calculatrice[letter], Chromium[icon], Éditeur de / texte[icon], Fichiers[icon], \
-             Firefox[icon], Gestionnaire / de mises à jou…[icon], kitty[icon], \
+            "Calculatrice[letter], Chromium[icon], Éditeur de texte[icon], Fichiers[icon], \
+             Firefox[icon], Gestionnaire de / mises à jour d…[icon], kitty[icon], \
              Obsidian[letter]"
         ),
         "{shows}"
@@ -515,6 +539,46 @@ fn the_empty_field_shows_the_frequent_row_then_all_from_a_to_z() -> anyhow::Resu
         "{shows}"
     );
     assert!(shows.contains("mark=false"), "{shows}");
+    Ok(())
+}
+
+#[test]
+fn a_narrow_screen_has_fewer_columns_of_tiles_their_size_kept() -> anyhow::Result<()> {
+    let count = |row: &str| row.matches("[icon]").count() + row.matches("[letter]").count();
+    let row_of = |shows: &str, tile: &str| {
+        tiles(shows)
+            .into_iter()
+            .find(|row| row.contains(tile))
+            .unwrap_or_default()
+    };
+    // 1366 × 768 at scale 1: the eight columns fit (1140 px).
+    let Some(mut bed) = Bed::start_on(0, "1366x768")? else {
+        return Ok(());
+    };
+    let shows = bed.open()?;
+    assert_eq!(count(&row_of(&shows, "Calculatrice")), 8, "{shows}");
+    drop(bed);
+    // At 1.25, it is 1093 logical pixels wide: seven columns. From kitty,
+    // down to Calculatrice, the first from A to Z, in a row of seven…
+    let Some(mut bed) = Bed::start_on(0, "1366x768@1.25")? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let from = bed.mark();
+    bed.press(KEY_DOWN);
+    let shows = bed.shows_after(from, "*Calculatrice")?;
+    let row = row_of(&shows, "*Calculatrice");
+    assert_eq!(count(&row), 7, "{shows}");
+    assert!(row.ends_with("kitty[icon]"), "{shows}");
+    // …then to Obsidian under it, the eighth, in a row of three.
+    let from = bed.mark();
+    bed.press(KEY_DOWN);
+    let shows = bed.shows_after(from, "*Obsidian")?;
+    let row = row_of(&shows, "*Obsidian");
+    assert_eq!(
+        row, "*Obsidian[letter], Paramètres[icon], Thunderbird[icon]",
+        "{shows}"
+    );
     Ok(())
 }
 
@@ -544,7 +608,7 @@ fn typing_filters_the_grid_best_first_and_says_when_nothing_matches() -> anyhow:
     let from = bed.mark();
     bed.type_text("editeur")?;
     let shows = bed.shows_after(from, "query=\"editeur\"")?;
-    assert_eq!(tiles(&shows)[0], "*Éditeur de / texte[icon]", "{shows}");
+    assert_eq!(tiles(&shows)[0], "*Éditeur de texte[icon]", "{shows}");
     for _ in 0..7 {
         bed.press(KEY_BACKSPACE);
     }
@@ -594,7 +658,7 @@ fn the_arrows_move_the_selection_and_enter_starts_it() -> anyhow::Result<()> {
     );
     // And a click on a tile starts its application too.
     bed.open()?;
-    bed.click(tile_middle(1, 130.0 + 24.0))?;
+    bed.click(tile_middle(1, AREA_TOP + HEAD))?;
     let launched = bed.root().join("launched/org.mozilla.firefox");
     let done = bed.hp.dispatch_until(WAIT, |_| launched.exists())?;
     anyhow::ensure!(done, "Firefox was not started by its tile");
@@ -616,7 +680,7 @@ fn the_wheel_scrolls_the_grid_by_rows() -> anyhow::Result<()> {
     let shows = bed.shows_after(from, "offset=1 ")?;
     // A row up: the frequent row's heading out of sight, its tiles first.
     assert!(
-        shows.contains(r#"heads=["TOUTES LES APPLICATIONS@242"]"#),
+        shows.contains(r#"heads=["TOUTES LES APPLICATIONS@363"]"#),
         "{shows}"
     );
     let from = bed.mark();
@@ -652,16 +716,16 @@ fn a_long_name_takes_two_lines_ends_with_an_ellipsis_and_shows_whole_on_hover() 
     let from = bed.mark();
     bed.type_text("gest")?;
     let shows = bed.shows_after(from, "query=\"gest\"")?;
-    // "Gestionnaire de" is wider than a tile's 84 px: the name goes over
-    // two lines, the second cut.
+    // "Gestionnaire de mises" is wider than a tile's 126 px: the name goes
+    // over two lines, the second cut.
     assert_eq!(
         tiles(&shows),
-        ["*Gestionnaire / de mises à jou…[icon], Fichiers[icon]"],
+        ["*Gestionnaire de / mises à jour d…[icon], Fichiers[icon]"],
         "{shows}"
     );
     // Rested on, its full name shows.
     let from = bed.mark();
-    let (x, y) = tile_middle(0, 130.0);
+    let (x, y) = tile_middle(0, AREA_TOP);
     bed.hp.pointer_move(x - 1.0, y);
     bed.hp.pointer_move(x, y);
     bed.shows_after(from, "tooltip=\"Gestionnaire de mises à jour du système\"")?;
@@ -693,7 +757,7 @@ fn an_application_installed_while_it_runs_shows_up() -> anyhow::Result<()> {
     // It shows in the open launcher, in its place from A to Z.
     let shows = bed.shows_after(from, "Inkscape[icon]")?;
     assert!(
-        tiles(&shows)[1].contains("Gestionnaire / de mises à jou…[icon], Inkscape[icon]"),
+        tiles(&shows)[1].contains("Gestionnaire de / mises à jour d…[icon], Inkscape[icon]"),
         "{shows}"
     );
     Ok(())
@@ -706,11 +770,11 @@ fn an_application_without_an_icon_shows_its_letter_on_a_neutral_square() -> anyh
     };
     bed.open()?;
     // The first row of A to Z: Calculatrice (no icon), then Chromium
-    // (blue). Their icons' middles, 9 px into the tiles, 48 px wide.
-    let top = 130.0 + 24.0 + 112.0 + 24.0;
+    // (blue). Their icons' middles, 13.5 px into the tiles, 72 px wide.
+    let top = AREA_TOP + HEAD + ROW + HEAD;
     let icon_middle = |column: usize| {
         let (x, _) = tile_middle(column, top);
-        (x as i32, (top + 9.0 + 24.0) as i32)
+        (x as i32, (top + 13.5 + 36.0) as i32)
     };
     let (x, y) = icon_middle(1);
     let [r, g, b] = bed.pixel(x, y)?;
@@ -721,7 +785,7 @@ fn an_application_without_an_icon_shows_its_letter_on_a_neutral_square() -> anyh
     );
     // The neutral square, grey: near its corner, away from the letter.
     let (x, y) = icon_middle(0);
-    let [r, g, b] = bed.pixel(x - 18, y - 18)?;
+    let [r, g, b] = bed.pixel(x - 27, y - 27)?;
     let grey = r.abs_diff(g) < 25 && g.abs_diff(b) < 30 && r > 50 && r < 170;
     assert!(grey, "Calculatrice's neutral square: {:?}", [r, g, b]);
     Ok(())
@@ -760,8 +824,9 @@ fn a_calculation_shows_in_a_card_and_enter_copies_it_with_a_toast() -> anyhow::R
     let since = Instant::now();
     let (output, rect) = bed.hp.launcher_toast_surfaces()[0].clone();
     assert_eq!(output, "HEADLESS-1");
-    assert_eq!(rect.y + rect.height, 1080 - 40, "{rect:?}");
-    assert!(rect.height >= 36 && rect.height <= 44, "{rect:?}");
+    // 60 px up, 19.5 px text 15 px from its top and bottom (× 1.5).
+    assert_eq!(rect.y + rect.height, 1080 - 60, "{rect:?}");
+    assert!(rect.height >= 54 && rect.height <= 64, "{rect:?}");
     assert!((rect.x + rect.width / 2 - 960).abs() <= 48, "{rect:?}");
     // For about 1.8 s.
     let gone = bed

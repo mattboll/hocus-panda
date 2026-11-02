@@ -59,22 +59,36 @@ impl Dir {
         }
     }
 
-    /// How far its icons are from `size` at `scale`, in pixels.
-    fn distance(&self, size: u32, scale: u32) -> u32 {
-        let wanted = size * scale;
-        let (low, high) = match self.kind {
+    /// The sizes of its icons, in pixels: the least and the most.
+    fn pixels(&self) -> (u32, u32) {
+        match self.kind {
             Kind::Fixed => (self.size * self.scale, self.size * self.scale),
             Kind::Scalable => (self.min * self.scale, self.max * self.scale),
             Kind::Threshold => (
                 self.size.saturating_sub(self.threshold) * self.scale,
                 (self.size + self.threshold) * self.scale,
             ),
-        };
+        }
+    }
+
+    /// How far its icons are from `size` at `scale`, in pixels.
+    fn distance(&self, size: u32, scale: u32) -> u32 {
+        let wanted = size * scale;
+        let (low, high) = self.pixels();
         if wanted < low {
             low - wanted
         } else {
             wanted.saturating_sub(high)
         }
+    }
+
+    /// How good its icons are for `size` at `scale` when none is that
+    /// size, the best least: larger ones first, scaled down they stay
+    /// crisp (a 72 px tile takes 128 px icons before 64 px ones, #518),
+    /// then the closest.
+    fn rank(&self, size: u32, scale: u32) -> (bool, u32) {
+        let smaller = self.pixels().1 < size * scale;
+        (smaller, self.distance(size, scale))
     }
 
     /// One from a directory's name alone: `48x48` (or `48`), `48x48@2`,
@@ -340,8 +354,9 @@ impl Themes {
     }
 
     /// Icon `name`'s file for `size` at `scale`: in the first theme that
-    /// has it, a directory of that size first, else the closest; else in
-    /// `pixmaps`. An absolute path is its own file.
+    /// has it, a directory of that size first, else the closest larger,
+    /// else the closest smaller; else in `pixmaps`. An absolute path is
+    /// its own file.
     pub fn find(&mut self, name: &str, size: u32, scale: u32) -> Option<PathBuf> {
         let path = Path::new(name);
         if path.is_absolute() {
@@ -359,10 +374,10 @@ impl Themes {
         let chain = self.chain.clone();
         let roots = self.roots.clone();
         for (theme, found) in &chain {
-            let mut closest: Option<(u32, PathBuf)> = None;
+            let mut closest: Option<((bool, u32), PathBuf)> = None;
             for dir in &found.dirs {
                 let exact = dir.matches(size, scale);
-                let distance = dir.distance(size, scale);
+                let distance = dir.rank(size, scale);
                 if !exact && closest.as_ref().is_some_and(|(d, _)| *d <= distance) {
                     continue;
                 }
@@ -446,7 +461,13 @@ pub fn load(file: &Path, px: u32) -> Option<image::Handle> {
                     ((w as f32 * k).round() as u32).max(1),
                     ((h as f32 * k).round() as u32).max(1),
                 );
-                ::image::imageops::resize(&decoded, nw, nh, ::image::imageops::FilterType::Triangle)
+                // Catmull-Rom: a larger icon scaled down stays sharp.
+                ::image::imageops::resize(
+                    &decoded,
+                    nw,
+                    nh,
+                    ::image::imageops::FilterType::CatmullRom,
+                )
             }
         }
         _ => return None,
@@ -622,6 +643,8 @@ mod tests {
         put("hicolor/48x48/apps/browser.png")?;
         put("hicolor/256x256/apps/music.png")?;
         put("hicolor/32x32/apps/music.png")?;
+        put("hicolor/64x64/apps/photos.png")?;
+        put("hicolor/128x128/apps/photos.png")?;
         let mut themes = Themes {
             roots: vec![icons.clone()],
             pixmaps: vec![dir.path().join("pixmaps")],
@@ -644,10 +667,20 @@ mod tests {
             themes.find("browser", 48, 1),
             Some(icons.join("hicolor/48x48/apps/browser.png"))
         );
-        // The closest size: 32 is 16 from 48; 256, 208.
+        // None of the size: a larger one, scaled down, before a closer
+        // smaller one scaled up (#518): 256 for 48, 128 for 72.
         assert_eq!(
             themes.find("music", 48, 1),
-            Some(icons.join("hicolor/32x32/apps/music.png"))
+            Some(icons.join("hicolor/256x256/apps/music.png"))
+        );
+        assert_eq!(
+            themes.find("photos", 72, 1),
+            Some(icons.join("hicolor/128x128/apps/photos.png"))
+        );
+        // Larger than any: the largest.
+        assert_eq!(
+            themes.find("photos", 192, 1),
+            Some(icons.join("hicolor/128x128/apps/photos.png"))
         );
         assert_eq!(themes.find("nothing", 48, 1), None);
         assert_eq!(themes.find("../editor", 48, 1), None);

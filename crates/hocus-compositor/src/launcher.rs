@@ -5,7 +5,8 @@
 //! pointer, or to close it ([`ToShell::Launcher`]). The shell draws its
 //! field and its grid and takes the keyboard; the compositor draws what is
 //! under and around them, as it does for the bar and its popovers: the
-//! desktop behind it blurred (with glass) and darkened, the bar too, and
+//! desktop behind it blurred (with glass) and tinted in the bar's dark
+//! blue ([`LAUNCHER_TINT`]), the bar too, and
 //! its motion: it fades in over 160 ms from its first frame, its panel
 //! growing from 0.97 of its size, and back out over 120 ms once the shell
 //! says it closes (`closing`), the shell removing it after that. With
@@ -24,17 +25,16 @@
 //!
 //! [`ToCompositor::Launch`]: hocus_link::ToCompositor::Launch
 
-use std::{cell::RefCell, collections::HashMap, time::Duration};
+use std::{cell::OnceCell, time::Duration};
 
 use hocus_link::{
-    LAUNCHER_CLOSE, LAUNCHER_NAMESPACE, LAUNCHER_OPEN, LAUNCHER_SCALE, LAUNCHER_TOAST,
-    LAUNCHER_TOAST_NAMESPACE, Launch, ToShell,
+    LAUNCHER_CLOSE, LAUNCHER_NAMESPACE, LAUNCHER_OPEN, LAUNCHER_SCALE, LAUNCHER_TINT,
+    LAUNCHER_TOAST, LAUNCHER_TOAST_NAMESPACE, LAUNCHER_ZOOM, Launch, ToShell,
 };
 use smithay::{
-    backend::renderer::{element::solid::SolidColorBuffer, utils::with_renderer_surface_state},
+    backend::renderer::{element::memory::MemoryRenderBuffer, utils::with_renderer_surface_state},
     desktop::{LayerSurface, layer_map_for_output},
     output::Output,
-    utils::{Logical, Size},
 };
 
 use crate::{
@@ -46,21 +46,23 @@ use crate::{
 /// The mockup's `cubic-bezier(.2, .8, .2, 1)`, the panel growing in.
 const GROW: Bezier = Bezier(0.2, 0.8, 0.2, 1.0);
 /// The toast's `toast-in` over its 1.8 s: in over its first 12 %, rising
-/// 8 px; out over its last 15 %, each `ease-out`.
+/// 8 px (× the launcher's zoom); out over its last 15 %, each `ease-out`.
 const TOAST_IN: Duration = Duration::from_millis(216);
 const TOAST_OUT: Duration = Duration::from_millis(270);
-const TOAST_RISE: f64 = 8.0;
+const TOAST_RISE: f64 = 8.0 * LAUNCHER_ZOOM;
 /// Its corners, which the compositor cuts on the CPU.
-pub const TOAST_RADIUS: f64 = 12.0;
+pub const TOAST_RADIUS: f64 = 12.0 * LAUNCHER_ZOOM;
+/// The tint's rows: drawn stretched over the screen, its gradient smooth.
+pub const TINT_ROWS: usize = 64;
 
 /// The launchers shown (one, but one closing may still fade out as
 /// another opens), with their motion.
 #[derive(Debug, Default)]
 pub struct Launchers {
     shown: Vec<Shown>,
-    /// What darkens each screen behind it, by screen: the same pixels
-    /// from one frame to the next, for the damage.
-    dims: RefCell<HashMap<String, SolidColorBuffer>>,
+    /// What tints the screen behind it, made once and stretched over each
+    /// screen: the same pixels from one frame to the next, for the damage.
+    tint: OnceCell<MemoryRenderBuffer>,
     /// The toasts shown, from their first frame.
     toasts: Vec<(LayerSurface, Duration)>,
 }
@@ -185,19 +187,35 @@ impl Launchers {
         self.shown.iter().any(|s| s.closing.is_none())
     }
 
-    /// What darkens screen `output`, `size` large, behind it.
-    pub fn dim(&self, output: &str, size: Size<i32, Logical>) -> SolidColorBuffer {
-        let ([r, g, b], a) = hocus_link::LAUNCHER_DIM;
-        let channel = |c: u8| f32::from(c) / 255.0 * a;
-        // Premultiplied, as the renderers blend.
-        let colour = [channel(r), channel(g), channel(b), a];
-        let mut dims = self.dims.borrow_mut();
-        let dim = dims
-            .entry(output.to_owned())
-            .or_insert_with(|| SolidColorBuffer::new(size, colour));
-        dim.update(size, colour);
-        dim.clone()
+    /// What tints the screen behind it: a column of [`TINT_ROWS`] pixels,
+    /// to be stretched over the screen.
+    pub fn tint(&self) -> MemoryRenderBuffer {
+        self.tint
+            .get_or_init(|| crate::decoration::buffer(&tint_pixels(), 1, TINT_ROWS as i32))
+            .clone()
     }
+}
+
+/// The tint's column, top to bottom: the bar's dark blue going from
+/// [`LAUNCHER_TINT`]'s first colour to its second, premultiplied, as the
+/// renderers blend, in `Argb8888`'s bytes (blue first).
+fn tint_pixels() -> Vec<u8> {
+    let [(top, top_alpha), (bottom, bottom_alpha)] = LAUNCHER_TINT;
+    (0..TINT_ROWS)
+        .flat_map(|row| {
+            let t = (row as f32 + 0.5) / TINT_ROWS as f32;
+            let mix = |a: f32, b: f32| a + (b - a) * t;
+            let alpha = mix(top_alpha, bottom_alpha);
+            let channel =
+                |i: usize| (mix(f32::from(top[i]), f32::from(bottom[i])) * alpha).round() as u8;
+            [
+                channel(2),
+                channel(1),
+                channel(0),
+                (alpha * 255.0).round() as u8,
+            ]
+        })
+        .collect()
 }
 
 impl State {
@@ -363,6 +381,27 @@ mod tests {
         assert!(out.alpha > 0.0 && out.alpha < 1.0, "{out:?}");
         assert_eq!(toast_look(ms(1000), ms(2800), true).alpha, 0.0);
         assert_eq!(toast_look(ms(1000), ms(1100), false).drop, 0.0);
+    }
+
+    #[test]
+    fn the_tint_is_the_bars_dark_blue_about_85_percent_opaque() {
+        let pixels = tint_pixels();
+        assert_eq!(pixels.len(), TINT_ROWS * 4);
+        let row = |i: usize| -> [u8; 4] {
+            let p = &pixels[i * 4..i * 4 + 4];
+            [p[0], p[1], p[2], p[3]]
+        };
+        // Blue, green, red, alpha; premultiplied. The top nearly
+        // rgba(22,27,42,0.82), the bottom rgba(14,17,28,0.88).
+        let [b, g, r, a] = row(0);
+        assert_eq!(a, 209);
+        assert_eq!([r, g, b], [18, 22, 34]);
+        let [b, g, r, a] = row(TINT_ROWS - 1);
+        assert_eq!(a, 224);
+        assert_eq!([r, g, b], [12, 15, 25]);
+        // About 85 % halfway.
+        let [.., a] = row(TINT_ROWS / 2);
+        assert!((215..=219).contains(&a), "{a}");
     }
 
     #[test]
