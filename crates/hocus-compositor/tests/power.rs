@@ -42,7 +42,7 @@ const STATUS: (f64, f64) = (1850.0, (LEVELS.y + 175 - 20 - 9) as f64);
 /// The battery's icon in its row.
 const BATTERY_ICON: (i32, i32) = (LEVELS.x + 11, LEVELS.y + 117 - 9);
 /// The mini form's levels' surface, its battery's item, and its sign.
-const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 128, 54, 128);
+const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 176, 54, 176);
 const MINI_BATTERY: (f64, f64) = ((MINI.x + 27) as f64, (MINI.y + 99) as f64);
 const MINI_SIGN: (i32, i32) = (MINI.x + 14, MINI.y + 80);
 

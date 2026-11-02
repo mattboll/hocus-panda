@@ -445,17 +445,16 @@ impl Bed {
         anyhow::bail!("the shell did not log {what:?}:\n{}", self.log())
     }
 
-    /// The bell's button's centre, on the bar.
+    /// The bell's button's centre, on the bar: the full form's footer's
+    /// second button (5.5), 40 × 34, 11 px and 6 px into its surface, the
+    /// buttons 4 px apart.
     fn bell(&mut self) -> anyhow::Result<(f64, f64)> {
         let shown = self
             .hp
             .dispatch_until(Duration::from_secs(10), |hp| hp.bell_surfaces().len() == 1)?;
         anyhow::ensure!(shown, "no bell");
         let (_, at) = self.hp.bell_surfaces()[0];
-        Ok((
-            f64::from(at.x + at.width / 2),
-            f64::from(at.y + at.height / 2),
-        ))
+        Ok((f64::from(at.x + 11 + 44 + 20), f64::from(at.y + 6 + 17)))
     }
 
     /// Opens the history with a click on the bell: what it shows, as
@@ -655,9 +654,11 @@ fn a_low_one_goes_to_the_history_and_the_bar_counts_it() -> anyhow::Result<()> {
     })?;
     bed.logged("unread=1")?;
     // The bell, on the bar at its bottom, counts it.
-    bed.bell()?;
-    let (_, at) = bed.hp.bell_surfaces()[0];
-    assert!(at.x > 1920 - 8 - 196 && at.y > 1080 - 60, "{at:?}");
+    let (x, y) = bed.bell()?;
+    assert!(
+        x > f64::from(1920 - 8 - 196) && y > f64::from(1080 - 60),
+        "{x}, {y}"
+    );
     bed.idle(Duration::from_millis(500))?;
     assert!(bed.bubbles().is_empty(), "{:?}", bed.bubbles());
     Ok(())
@@ -1024,6 +1025,25 @@ fn the_badge_counts_what_was_not_seen_and_opening_the_history_resets_it() -> any
         ..Notice::default()
     })?;
     bed.logged_since(mark, "the bell unread=2")?;
+    // The footer's bell wears it (5.5): its blue badge at the button's top
+    // right, 15 px, its right 2 px inside the button's.
+    let (_, footer) = bed.hp.bell_surfaces()[0];
+    let at = (footer.x + 11 + 44 + 40 - 2 - 3, footer.y + 6 + 1 + 7);
+    let mut badge = [0; 3];
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(5) {
+        let (width, _, bytes) = bed.hp.screenshot(0)?;
+        let i = usize::try_from(at.1 * width + at.0)? * 4;
+        badge = [bytes[i + 2], bytes[i + 1], bytes[i]];
+        if badge[2] > 220 && (110..180).contains(&badge[0]) {
+            break;
+        }
+        bed.idle(Duration::from_millis(50))?;
+    }
+    assert!(
+        badge[2] > 220 && (110..180).contains(&badge[0]),
+        "the badge: {badge:?}"
+    );
     // Opened: 0; what it lists is seen once it closes.
     let mark = bed.mark();
     let shows = bed.open_history()?;
