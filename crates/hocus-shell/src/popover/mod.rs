@@ -398,6 +398,14 @@ pub enum Effect {
         id: window::Id,
         rects: Vec<Rectangle>,
     },
+    /// The launcher's surface on `output` (5.1): over all of it, the bar
+    /// too, holding the keyboard.
+    Launcher {
+        id: window::Id,
+        output: String,
+    },
+    /// A line to the compositor.
+    Tell(ToCompositor),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1108,6 +1116,9 @@ pub fn key(
     text: Option<&str>,
 ) -> bool {
     use iced::keyboard::{Key, key::Named};
+    if crate::launcher::key(key, modifiers, text) {
+        return true;
+    }
     let (menu, focused) = with(|c| {
         let menu = matches!(&c.phase, Phase::Open(open) if open.how == Opened::Click);
         (menu, c.focused.is_some())
@@ -1260,6 +1271,10 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
         *EFFECTS.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
         loop {
             let deadline = with(|c| c.deadline());
+            let deadline = match (deadline, crate::launcher::deadline()) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
             let effects = match deadline {
                 Some(at) => {
                     use iced::futures::future::{Either, select};
@@ -1267,7 +1282,12 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                     let next = std::pin::pin!(receiver.recv());
                     match select(next, due).await {
                         Either::Left((effects, _)) => effects,
-                        Either::Right(((), _)) => Some(with(|c| c.tick(Instant::now()))),
+                        Either::Right(((), _)) => {
+                            let now = Instant::now();
+                            let mut due = with(|c| c.tick(now));
+                            due.extend(crate::launcher::tick(now));
+                            Some(due)
+                        }
                     }
                 }
                 None => receiver.recv().await,
@@ -1441,6 +1461,29 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                     }
                 });
             vec![Message::SetInputRegion { id, callback }]
+        }
+        Effect::Launcher { id, output } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                // All of the screen: anchored to its four edges.
+                size: Some((0, 0)),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+                exclusive_zone: Some(-1),
+                margin: Some((0, 0, 0, 0)),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::LAUNCHER_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::Tell(message) => {
+            tell(message);
+            Vec::new()
         }
     }
 }
