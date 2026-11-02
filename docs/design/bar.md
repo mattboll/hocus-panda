@@ -654,7 +654,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
-  file, ring), clipboard history (5.5 shows what it holds until 5.6),
+  file, ring), clipboard history (5.6, as built),
   notifications (clear all), menu (apps,
   settings, session). The keyboard layouts have none: their row goes to the
   next layout (§4.3, 3.8).
@@ -677,7 +677,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, whether it is the focused one or minimised, its id and its application's id, on the `desktops` line of `hocus-link`; the windows' titles on the `titles` line; a desktop asked with `desktop`, a window with `bring` (as built, 3.9, 3.9b, 3.9c) |
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications | the desktop's own server, `org.freedesktop.Notifications` on the session bus, in the shell ([notifications.md](notifications.md), 5.3); their history kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications` (5.4) | the bell's badge counts what was not seen; do not disturb holds the bubbles |
-| Clipboard | the desktop's own server | |
+| Clipboard | the compositor, which sees every selection | what clients copy (their text, else their PNG image), read off its loop, never what is marked secret, on the `copied` line of `hocus-link`; kept by the shell, sealed, in `$XDG_STATE_HOME/hocuspanda/clipboard` (as built, 5.6) |
 
 Every source is read off the event loop and pushes changes; nothing is
 polled from the loop.
@@ -2370,18 +2370,9 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   after the pointer leaves unless a click opened them (§9). Their bottom
   is on the bar's. The menu opens the launcher (5.1) on the bar's screen
   on a click, or `Enter`, only: never by hovering.
-- **The clipboard's popover**, until 5.6 replaces it: 280 wide, the
-  popovers' header, "Presse-papiers" / "Clipboard", and a 44 px row: a
-  28 px tile "T" (radius 8, `rgba(255,255,255,0.08)`) and the clipboard's
-  text on one line (its line breaks and tabs made spaces, Manrope 600,
-  13 px, cut with an ellipsis), or "Rien de copié." / "Nothing copied.".
-  The shell reads the clipboard as a client does: the compositor offers it
-  the clipboard when one of its surfaces holds the keyboard. It is read
-  off the loop as the popover opens, and again 150 ms and 400 ms later,
-  once a click has given the popover the keyboard; no text is said only
-  after the last reading. Opened by hovering, the popover holds no
-  keyboard and shows what the shell last saw (5.6's source, the
-  compositor's, does away with that). Nothing in it acts.
+- **The clipboard's popover**: its history since 5.6 (below). Until
+  then, a 280 wide popover showed what the clipboard held, read by the
+  shell as a client.
 - **The user's popover**, until the session's menu (7.4): 280 wide, the
   user's name as the title, and one 44 px row, a log-out glyph in its
   tile and "Se déconnecter" / "Log out" (lit `0.06` under the pointer).
@@ -2406,7 +2397,7 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   `Space` acts.
 - **Measured headless** (`crates/hocus-compositor/tests/footer.rs`), the
   real shell on the CPU: the full form's footer at its place, its four
-  buttons drawn in a row, their names in order; the clipboard's popover
+  buttons drawn in a row, their names in order; the clipboard's history
   saying "nothing", then the text a window copied; the bell opening the
   history, the menu the launcher over the whole screen, the user's
   popover with "Alex" and "Se déconnecter", a click asking to confirm,
@@ -2418,8 +2409,129 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   avatar's hover opening the user's popover beside the mini bar. The
   badge drawn on the footer's bell (`tests/notifications.rs`). Unit tests
   for the places, the names, the user's name from an entry and its
-  initial, and the clipboard's readings. On the Intel GPU, the
-  screenshots of the pull request.
-- **Not built**: the clipboard's history (5.6) and `Super+V`; the
-  session's menu (7.4), the account's picture from AccountsService; names
-  for screen readers (§11: the names are said in the log only).
+  initial. On the Intel GPU, the screenshots of the pull request.
+- **Not built**: the session's menu (7.4), the account's picture from
+  AccountsService; names for screen readers (§11: the names are said in
+  the log only).
+
+### 5.6, the clipboard's history (2026-11-02)
+
+What the approved 5.6 mockup shows, variant A (from the bar), with the
+maintainer's spec (issue #396).
+
+- **Opening**: `Super+V` (`[shortcuts] clipboard`) opens it on the bar of
+  the focused window's screen (else the pointer's; a screen without a bar:
+  the first bar's), its search holding the keyboard at once; again, it
+  closes, and opened by hovering it takes the keyboard. The footer's
+  clipboard opens it too: by a 150 ms hover without the keyboard, by a
+  click with it, and a click in a hovered history gives it the keyboard
+  (§9's `Hold`). Opened by `Super+V`, `Esc` gives the keyboard back to the
+  window that had it, not to the footer's button.
+- **The popover**: 360 wide, 556 tall whatever it lists (its bottom on the
+  bar's, so that typing never moves the field), 12 px inside, radius 14,
+  its tint the mockup's (`rgba(22,27,42,0.96)` to `rgba(14,17,28,0.98)`,
+  opaque without glass), its parts 8 px apart. The header (26 px):
+  "Presse-papiers" / "Clipboard", Manrope 700, 15 px, and "Tout effacer" /
+  "Clear all", a ghost button (12 px 600 `#A9B2C2`, 9 px in, radius 8,
+  `rgba(255,255,255,0.10)` under the pointer). The search: 36 px, radius
+  10, `rgba(255,255,255,0.05)` in its green border
+  (`rgba(108,194,135,0.45)`), a 15 px magnifier 10 px in, 8 px before
+  what is typed (Manrope 13.5 px) or "Chercher dans ce que tu as copié" /
+  "Search what you copied" (`#7C8698`); the caret while it holds the
+  keyboard; a query too long for it shows its end. The list: 430 px; the
+  keys under it: "Entrée colle · Maj+Entrée copie · Suppr retire" /
+  "Enter pastes · Shift+Enter copies · Delete removes" (10.5 px,
+  `#6A7384`).
+- **The list**: "ÉPINGLÉS" / "PINNED" when there are pinned items, then
+  "RÉCENTS" / "RECENT" (22 px labels, 10.5 px bold spaced 0.08 em,
+  `#7C8698`, 6 px in), each newest first, everything 2 px apart. A row:
+  44 px, radius 10; its 30 px tile (`rgba(255,255,255,0.07)`, radius 8)
+  9 px in: `>_` for a command or code, `↗` for a link, `Aa` for text, `/`
+  for a path (11 px bold, `#A9B2C2`), a colour's swatch or an image's
+  thumbnail 3 px inside it (radius 6); 10 px after it its content on one
+  line, its white space made spaces, cut with an ellipsis (Martian Mono
+  11.5 px for code, paths and colours, else Manrope 600 13 px), over "App
+  · il y a 4 min" (10.5 px, `#7C8698`; the application's name from its
+  desktop entry, else its id; "maintenant", "il y a 2 h", "hier", "il y a
+  6 jours", as the notifications' history says them). An image's line is
+  "Image · 1280 × 800". The selected row (the first one as it opens, as
+  the query changes and when the one selected goes): the green border
+  (`rgba(108,194,135,0.55)`) and tint (`0.13`), and on its right, 5 px
+  in, its pin and ✕ (24 px, 2 px apart, radius 6, lit `0.10` under the
+  pointer), the pin `#8C96A8`, amber (`#F5C46E`) and filled when pinned.
+  The pointer selects the row it is over. The wheel scrolls a row a notch
+  (a 6 px thumb on the right); the arrows move the selection, the list
+  following it. Nothing listed: "Rien de copié pour l’instant." / "Nothing
+  copied yet.", or "Rien pour « kitty »" / "Nothing for “kitty”" (13 px,
+  `#8C96A8`, 30 px down), from the mockup.
+- **Kinds**, told from the text alone: a colour (`#6CC287`, `#fff`,
+  `rgb(…)`, `rgba(…)`; `#123`, more likely an issue's number, is text), a
+  link (`http://`, `https://`, `ftp://`, `mailto:`, one word), a path
+  (`/`, `~/`, `./`, `../`, `file://`, one line without a command's
+  flags), code (a line starting with a usual command, `git`, `cargo`,
+  `ssh`, `sudo`…, or `$ `, or holding a pipe, `&&`, `--`, `$(`, or
+  source's marks), else text.
+- **The search**: a substring of an item's text and its application's
+  name, accents and case ignored (the launcher's folding).
+- **Actions**: `Enter`, or a click on a row, makes the item the clipboard
+  (`clip paste`: the compositor offers it to Wayland and X11 clients),
+  closes the history and lets the keyboard go (its surface asks for none
+  first, so that the window has it back at once), and the compositor
+  sends the window that had the keyboard `Ctrl+V`, or `Ctrl+Shift+V` when
+  its desktop entry (by its application's id, as is or in lower case, in
+  the data directories' `applications`) says `TerminalEmulator`: the keys
+  of the active layout (the one typing `v`), as the keyboard's own, once
+  the window holds the keyboard again, 1 s at most. `Shift+Enter` only
+  copies (`clip copy`), and closes. Either way the item moves to the top.
+  `Delete` or ✕ removes it (the next row selected), the pin pins it or
+  not, "Tout effacer" removes all but the pinned, `Esc` closes, `Tab`
+  stays in the field.
+- **The source**: when a client takes the clipboard (a Wayland client's
+  selection, or an X11 client's through XWayland), the compositor reads
+  its `text/plain;charset=utf-8` offer (else `UTF8_STRING`, else
+  `text/plain`) or, offering no text, its `image/png`, through a pipe on a
+  thread, 8 MB and 3 s at most, and tells the shell (`copied`: the
+  application of the window focused as it was copied, and the bytes, in
+  base64). Copies the history itself makes are not read again. Never
+  read, never told: a selection offering `x-kde-passwordManagerHint` that
+  says `secret`, or `CLIPBOARD_STATE` that says `sensitive` (either unread
+  in time counting as a secret), or copied from a window whose
+  application's id names Bitwarden, KeePassXC or 1Password. The same text
+  (or image) copied again is the same item, moved to the top. The link
+  writes what its socket does not take at once later, as it takes more,
+  never waiting (64 MB at most ahead of the shell).
+- **What is kept**: the pinned items for good; the others, the last 200,
+  30 days at most (pruned as copies come and as the history opens). On
+  disk, `$XDG_STATE_HOME/hocuspanda/clipboard/` (`0700`): an item's
+  details and its text, or its image's 72 px thumbnail, in `<key>.clip`,
+  an image's PNG in `<key>.png`, each sealed with XChaCha20-Poly1305 (a
+  random nonce each time, the file's name authenticated with it), written
+  whole then renamed, `0600`, on the history's own thread. The key: the
+  session's keyring's (the Secret Service on the session bus the
+  compositor names, as the notifications' bus: never one a nested or
+  headless desktop was not given; an item `application=hocuspanda`,
+  `hocuspanda=clipboard` in the default collection, asked with a 15 s
+  timeout, an unlock prompt included), else a key file beside the
+  history, `clipboard.key` (`0600`), made once and used from then on. A
+  keyring that holds the key and does not answer leaves the history
+  alone: what is copied is then kept for the session only.
+- **Measured headless** (`crates/hocus-compositor/tests/clipboard.rs`),
+  the real shell on the CPU, no session bus (the key in its file), the
+  test's own desktop entries: a copy listed with its application's name;
+  the search by text without accents, by application, and nothing found;
+  `Enter` pasting into an editor (`Ctrl+V`) and into a terminal
+  (`Ctrl+Shift+V`), and a click on a row of a hovered history too;
+  `Shift+Enter` only copying, the item first afterwards; `Delete`
+  removing it and its file; a pin kept through "Clear all"; a password
+  marked secret and a KeePassXC window's copy never kept; the history
+  read back after a restart, nothing on disk holding the text copied, the
+  files `0600`, the directory `0700`; an image's thumbnail drawn in its
+  tile, and pasted back as the PNG copied. Unit tests for the kinds, the
+  thumbnail, the history's limits and order, the sealed files and the
+  key file, the keyring not answering, the lines, the secret marks, the
+  terminal's desktop entry and `Super+V`'s keyboard. On the Intel GPU,
+  the screenshots of the pull request.
+- **Not built**: the mockup's "1 mot de passe copié, non gardé" in the
+  footer (the spec keeps no trace of a secret); the shell's own copies
+  (the launcher's results, the Sources popover's command) in the history;
+  the primary selection.
