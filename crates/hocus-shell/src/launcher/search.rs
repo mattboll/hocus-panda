@@ -2,6 +2,11 @@
 //! application's name, its generic name and its keywords, the letters in
 //! their order, word starts and letters that follow each other counting
 //! more; accents and case ignored. The 5.1 mockup's scoring, in Rust.
+//!
+//! A weak scattered match is left out (5.2): each letter must start a
+//! word or follow the one before it, unless the query is found whole in
+//! a run; and the best score must pass the 5.2 mockup's threshold, so
+//! that "fire" lists Firefox, not LibreOffice Impress.
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -20,14 +25,22 @@ fn starts_word(text: &[char], at: usize) -> bool {
     at == 0 || matches!(text.get(at - 1), Some(' ' | '-'))
 }
 
+/// The best score an application must pass to be listed.
+const LEAST: f64 = 2.0;
+
 /// How well `query` (folded) matches `text` (folded): its letters, spaces
 /// left out, found in order, each preferring a word's start (or the letter
-/// right after the last one found); `None` when one is not there.
+/// right after the last one found); `None` when one is not there, or
+/// when one is found neither at a word's start nor right after the one
+/// before it, the query not being in the text whole.
 pub fn fuzzy(text: &str, query: &str) -> Option<f64> {
+    let whole: String = query.chars().filter(|c| *c != ' ').collect();
+    let folded = text;
     let text: Vec<char> = text.chars().collect();
     let mut from = 0;
     let mut score = 0.0;
     let mut last: Option<usize> = None;
+    let mut scattered = false;
     for wanted in query.chars().filter(|c| *c != ' ') {
         let next = (from..text.len()).find(|&k| text[k] == wanted)?;
         let follows = last.is_some_and(|l| next == l + 1);
@@ -38,17 +51,23 @@ pub fn fuzzy(text: &str, query: &str) -> Option<f64> {
                 .find(|&k| text[k] == wanted && starts_word(&text, k))
                 .unwrap_or(next)
         };
+        let after = last.is_some_and(|l| found == l + 1);
         if found == 0 {
             score += 12.0;
         } else if starts_word(&text, found) {
             score += 9.0;
+        } else if !after {
+            scattered = true;
         }
-        if last.is_some_and(|l| found == l + 1) {
+        if after {
             score += 6.0;
         }
         score += 1.0 - (found - from).min(6) as f64 * 0.4;
         last = Some(found);
         from = found + 1;
+    }
+    if scattered && !folded.contains(&whole) {
+        return None;
     }
     Some(score - text.len() as f64 * 0.05)
 }
@@ -99,6 +118,7 @@ pub fn rank(apps: &[(&Folded, u32)], query: &str) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter_map(|(i, (folded, _))| Some((i, folded.score(&query)?)))
+        .filter(|(_, score)| *score > LEAST)
         .collect();
     found.sort_by(|(a, sa), (b, sb)| {
         sb.total_cmp(sa)
@@ -151,5 +171,20 @@ mod tests {
         assert_eq!(rank(&apps, "édit"), [2]);
         assert_eq!(rank(&apps, "zzz"), Vec::<usize>::new());
         assert_eq!(rank(&apps, "   "), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn a_weak_scattered_match_is_left_out() {
+        let firefox = Folded::of("Firefox", Some("Navigateur web"), &[]);
+        let impress = Folded::of("LibreOffice Impress", Some("Présentation"), &[]);
+        let writer = Folded::of("LibreOffice Writer", Some("Traitement de texte"), &[]);
+        let code = Folded::of("Visual Studio Code", Some("Éditeur de code"), &[]);
+        let apps = [(&firefox, 0), (&impress, 0), (&writer, 0), (&code, 0)];
+        // "fire" is scattered over "libreoffice impress": f, i, re.
+        assert_eq!(rank(&apps, "fire"), [0]);
+        // Word starts, and a run inside a word, still count.
+        assert_eq!(rank(&apps, "office"), [2, 1]);
+        assert_eq!(rank(&apps, "vsc"), [3]);
+        assert_eq!(rank(&apps, "imp"), [1]);
     }
 }
