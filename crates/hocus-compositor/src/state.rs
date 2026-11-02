@@ -173,6 +173,8 @@ pub struct State {
     pub peek: crate::peek::Peeks,
     /// The notifications' bubbles, and their screen (5.3).
     pub bubbles: crate::bubbles::Bubbles,
+    /// The clipboard's history's copies and pastes (5.6).
+    pub clipboard: crate::clipboard::Clipboard,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -348,6 +350,7 @@ impl State {
             halo: crate::halo::Halo::default(),
             peek: crate::peek::Peeks::default(),
             bubbles: crate::bubbles::Bubbles::default(),
+            clipboard: crate::clipboard::Clipboard::default(),
             swiping: None,
             switcher: None,
             switcher_out: None,

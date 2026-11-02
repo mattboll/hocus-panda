@@ -52,6 +52,9 @@ pub enum Action {
     Level(LevelKey),
     /// The launcher, on the screen under the pointer; open, it closes.
     Launcher,
+    /// The clipboard's history, on the focused window's screen; open, it
+    /// closes (5.6).
+    Clipboard,
 }
 
 /// Modifiers and a key, as `Super+Shift+E`. The key is the one of the
@@ -223,6 +226,7 @@ shortcuts! {
     take_to_desktop_right: ["Super+Ctrl+Shift+Right"] => Action::TakeToDesktopBy(1),
     toggle_bar: ["Super+B"] => Action::ToggleBar,
     launcher: ["Super+Space"] => Action::Launcher,
+    clipboard: ["Super+V"] => Action::Clipboard,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
     volume_down: ["XF86AudioLowerVolume"] => Action::Level(LevelKey::VolumeDown),
     mute: ["XF86AudioMute"] => Action::Level(LevelKey::Mute),
@@ -342,6 +346,7 @@ impl State {
             }
             Action::Level(key) => self.level_key(key),
             Action::Launcher => self.toggle_launcher(),
+            Action::Clipboard => self.toggle_clipboard(),
         }
     }
 

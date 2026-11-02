@@ -138,6 +138,9 @@
 # The launcher, full screen on the screen under the pointer; again, it
 # closes (docs/design/launcher.md).
 # launcher = "Super+Space"
+# The clipboard's history, from the bar of the focused window's screen, its
+# search holding the keyboard; again, it closes (docs/design/bar.md, 5.6).
+# clipboard = "Super+V"
 # The keyboard's sound and brightness keys: 5 % a press, stepping on while
 # held; up stops at 100 %, brightness down at 5 %, so that the screen never
 # goes black. A volume key unmutes. Only the bar's gauges show it.

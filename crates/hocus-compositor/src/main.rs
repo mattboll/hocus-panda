@@ -141,6 +141,7 @@ fn main() -> ExitCode {
         .filter(|path| path.exists())
         .unwrap_or_else(|| PathBuf::from("hocus"));
     config.agent_places = hocus_agents::tools::Places::from_env(hocus, config.state_dir.clone());
+    config.applications = hocus_compositor::application_dirs();
     let shell = (!args.no_shell).then(|| {
         args.shell.unwrap_or_else(|| {
             std::env::current_exe()

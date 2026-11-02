@@ -48,6 +48,13 @@ pub struct Config {
     /// look through translucent pixels. Not part of the file.
     #[serde(skip)]
     pub plain_background: bool,
+    /// The directories of the applications' desktop entries (the XDG data
+    /// directories' `applications`), where a window's tells whether it is
+    /// a terminal (the clipboard's paste, 5.6). Not part of the file: the
+    /// program reads them from its environment; empty, none is (tests,
+    /// unless they give their own).
+    #[serde(skip)]
+    pub applications: Vec<PathBuf>,
 }
 
 /// The bar, `[panel]` (docs/design/bar.md §2, §3).

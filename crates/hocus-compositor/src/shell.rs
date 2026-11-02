@@ -119,11 +119,19 @@ impl Drop for Runs {
     }
 }
 
+/// The most the shell is sent ahead of what it read: past that, it does
+/// not read, and loses its connection.
+const UNSENT_MOST: usize = 64 << 20;
+
 /// The shell's connection.
 #[derive(Debug)]
 struct Link {
     writer: UnixStream,
     token: RegistrationToken,
+    /// What the socket did not take yet (a clipboard's image, 5.6), and
+    /// what writes it as the socket takes more.
+    unsent: Vec<u8>,
+    flushing: Option<RegistrationToken>,
 }
 
 /// The shell's socket's path next to the Wayland socket's.
@@ -267,7 +275,8 @@ impl State {
         let token = self.loop_handle.insert_source(
             Generic::new(stream, Interest::READ, Mode::Level),
             move |_, stream, app| {
-                let mut buffer = [0u8; 1024];
+                // A clipboard's image comes in one long line (5.6).
+                let mut buffer = [0u8; 16 * 1024];
                 loop {
                     match (&**stream).read(&mut buffer) {
                         Ok(0) => {
@@ -305,7 +314,12 @@ impl State {
             }
         };
         tracing::info!("the shell is connected");
-        self.shell.link = Some(Link { writer, token });
+        self.shell.link = Some(Link {
+            writer,
+            token,
+            unsent: Vec::new(),
+            flushing: None,
+        });
         self.tell_shell(self.bar_look());
         self.tell_shell(ToShell::Clock(self.config.panel.clock.look()));
         let bars: Vec<ToShell> = self
@@ -334,6 +348,9 @@ impl State {
     fn shell_gone(&mut self) {
         if let Some(link) = self.shell.link.take() {
             self.loop_handle.remove(link.token);
+            if let Some(flushing) = link.flushing {
+                self.loop_handle.remove(flushing);
+            }
             tracing::info!("the shell is gone; its bars' space stays");
         }
         self.peek_shell_gone();
@@ -380,6 +397,7 @@ impl State {
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::Copy(text) => self.copy_text(text),
+            ToCompositor::Clip { paste, clip } => self.clip_asked(paste, clip),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
             ToCompositor::LogOut => {
@@ -422,15 +440,100 @@ impl State {
     /// Tells the shell, if it is there; a shell that does not read loses
     /// its connection rather than holding the loop.
     pub fn tell_shell(&mut self, message: ToShell) {
+        self.tell_shell_line(message.to_string());
+    }
+
+    /// Tells the shell a line made already (off the loop: a clipboard's
+    /// copy, 5.6). What the socket does not take at once is written as it
+    /// takes more, never waited for.
+    pub fn tell_shell_line(&mut self, mut line: String) {
         let Some(link) = &mut self.shell.link else {
             return;
         };
-        let line = format!("{message}\n");
-        if let Err(err) = link.writer.write_all(line.as_bytes()) {
-            tracing::warn!(%err, "could not write to the shell: dropping its connection");
-            self.shell_gone();
+        line.push('\n');
+        if !link.unsent.is_empty() {
+            if link.unsent.len() + line.len() > UNSENT_MOST {
+                tracing::warn!("the shell does not read: dropping its connection");
+                self.shell_gone();
+            } else {
+                link.unsent.extend_from_slice(line.as_bytes());
+            }
+            return;
+        }
+        let written = match write_some(&link.writer, line.as_bytes()) {
+            Ok(written) => written,
+            Err(err) => {
+                tracing::warn!(%err, "could not write to the shell: dropping its connection");
+                self.shell_gone();
+                return;
+            }
+        };
+        if written == line.len() {
+            return;
+        }
+        link.unsent.extend_from_slice(&line.as_bytes()[written..]);
+        let flushing = link.writer.try_clone().map(|writer| {
+            self.loop_handle.insert_source(
+                Generic::new(writer, Interest::WRITE, Mode::Level),
+                |_, _, app| Ok(app.state.flush_shell()),
+            )
+        });
+        match flushing {
+            Ok(Ok(token)) => {
+                if let Some(link) = &mut self.shell.link {
+                    link.flushing = Some(token);
+                }
+            }
+            Ok(Err(err)) => {
+                tracing::warn!(%err.error, "could not write to the shell later: dropping its connection");
+                self.shell_gone();
+            }
+            Err(err) => {
+                tracing::warn!(%err, "could not write to the shell later: dropping its connection");
+                self.shell_gone();
+            }
         }
     }
+
+    /// The shell's socket takes more: what was left is written.
+    fn flush_shell(&mut self) -> PostAction {
+        let Some(link) = &mut self.shell.link else {
+            return PostAction::Remove;
+        };
+        match write_some(&link.writer, &link.unsent) {
+            Ok(written) => {
+                link.unsent.drain(..written);
+                if link.unsent.is_empty() {
+                    link.flushing = None;
+                    PostAction::Remove
+                } else {
+                    PostAction::Continue
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%err, "could not write to the shell: dropping its connection");
+                // This source goes as it returns.
+                link.flushing = None;
+                self.shell_gone();
+                PostAction::Remove
+            }
+        }
+    }
+}
+
+/// Writes what `writer` takes of `bytes` now: how much.
+fn write_some(writer: &UnixStream, bytes: &[u8]) -> std::io::Result<usize> {
+    let mut written = 0;
+    while written < bytes.len() {
+        match (&*writer).write(&bytes[written..]) {
+            Ok(0) => return Err(ErrorKind::WriteZero.into()),
+            Ok(n) => written += n,
+            Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+            Err(err) if err.kind() == ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(written)
 }
 
 /// The shell's environment for the compositor's GPU, `gpu` (its render

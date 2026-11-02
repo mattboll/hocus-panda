@@ -10,6 +10,7 @@ mod agents;
 mod backdrop;
 mod backend;
 mod bubbles;
+mod clipboard;
 mod config;
 mod cursor;
 mod decoration;
@@ -54,6 +55,7 @@ use anyhow::Context;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 pub use backend::headless::{HeadlessConfig, RendererChoice};
+pub use clipboard::application_dirs;
 pub use config::{
     Appearance, Config, Desktops, FormChoice, OutputSettings, PanelScreens, ScaleFrom,
     SystemKeyboard,

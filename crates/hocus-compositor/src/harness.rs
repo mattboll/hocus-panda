@@ -408,7 +408,20 @@ impl Headless {
         smithay::wayland::selection::data_device::current_data_device_selection_userdata(
             &self.app.state.seat,
         )
-        .and_then(|text| text.as_ref().map(|t| t.to_string()))
+        .and_then(|bytes| {
+            bytes
+                .as_ref()
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+        })
+    }
+
+    /// What the compositor itself put on the clipboard (the shell's copies,
+    /// the clipboard's history's items), as its bytes.
+    pub fn clipboard_bytes(&self) -> Option<Vec<u8>> {
+        smithay::wayland::selection::data_device::current_data_device_selection_userdata(
+            &self.app.state.seat,
+        )
+        .and_then(|bytes| bytes.as_ref().map(|b| b.to_vec()))
     }
 
     /// The keyboard's active layout (XKB's group).
