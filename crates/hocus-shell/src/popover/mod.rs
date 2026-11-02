@@ -2,8 +2,9 @@
 //! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]),
 //! Bluetooth's ([`bluetooth`]), the brightness's ([`brightness`]), the
 //! battery's ([`battery`]), a desktop's list of windows ([`desktop`]), the
-//! agents' tools' ([`agents`]), the secretary's briefing ([`briefing`]) and
-//! the notifications' history ([`history`]), drawn and handled with the
+//! agents' tools' ([`agents`]), the secretary's briefing ([`briefing`]),
+//! the notifications' history ([`history`]), and the footer's clipboard's
+//! ([`clipboard`]) and user's ([`session`]), drawn and handled with the
 //! pieces of [`kit`].
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
@@ -15,7 +16,8 @@
 //!   `Shift+Tab` (or the arrows up and down) take it to the next and the
 //!   previous item of the bar, from its top (the desktops' tiles) to its
 //!   bottom (the levels), round its ends, from one surface to the next.
-//! - **By hovering** the item for 150 ms in the mini form: it closes 300 ms
+//! - **By hovering** the item for 150 ms in the mini form (the footer's
+//!   clipboard, bell and user in both forms; its menu never): it closes 300 ms
 //!   after the pointer has really left the item and the popover, and stays
 //!   while the pointer moves toward it, within the cone from where the
 //!   pointer was to the popover's near corners. A click on the item then
@@ -40,9 +42,11 @@ pub mod battery;
 pub mod bluetooth;
 pub mod briefing;
 pub mod brightness;
+pub mod clipboard;
 pub mod desktop;
 pub mod history;
 pub mod kit;
+pub mod session;
 pub mod sound;
 pub mod wifi;
 
@@ -53,7 +57,7 @@ use std::{
 };
 
 use hocus_link::{
-    AGENTS_NAMESPACE, BELL_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE,
+    AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
     Form, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
@@ -95,8 +99,16 @@ pub enum Item {
     /// The secretary, at the head of the agents' group (4.6): her
     /// briefing, from which Sources opens.
     Secretary,
-    /// The bell on the notifications' place (5.4): their history.
+    /// The footer's bell (5.4, 5.5): the notifications' history.
     Notifications,
+    /// The footer's clipboard (5.5): what it holds (its history, 5.6).
+    Clipboard,
+    /// The footer's menu (5.5): a click, or `Enter` while it holds the
+    /// keyboard, opens the launcher (5.1); hovering it opens nothing.
+    Menu,
+    /// The footer's user (5.5): their name and logging out (the session's
+    /// menu, 7.4).
+    User,
 }
 
 impl Item {
@@ -104,7 +116,7 @@ impl Item {
     fn clicks(self) -> bool {
         !matches!(
             self,
-            Self::Keyboard | Self::Desktop(_) | Self::Decline | Self::Agent(_)
+            Self::Keyboard | Self::Desktop(_) | Self::Decline | Self::Agent(_) | Self::Menu
         )
     }
 
@@ -116,13 +128,15 @@ impl Item {
         )
     }
 
-    /// Whether hovering it opens its popover, in `form`: a desktop's list in
-    /// both, the others in the mini form; the agents' mini item (4.7), her
-    /// briefing or Sources on the card, as the others.
+    /// Whether hovering it opens its popover, in `form`: a desktop's list
+    /// and the footer's clipboard, bell and user in both (5.5), the others
+    /// in the mini form; the agents' mini item (4.7), her briefing or
+    /// Sources on the card, as the others. The footer's menu never: a
+    /// screen-wide launcher must not open on the way past.
     fn hovers(self, form: Form) -> bool {
         match self {
-            Self::Desktop(_) => true,
-            Self::Keyboard | Self::Agent(_) => false,
+            Self::Desktop(_) | Self::Clipboard | Self::Notifications | Self::User => true,
+            Self::Keyboard | Self::Agent(_) | Self::Menu => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
             _ => form == Form::Mini,
@@ -135,6 +149,8 @@ impl Item {
             Self::Desktop(_) => desktop::WIDTH,
             Self::Secretary => briefing::WIDTH,
             Self::Notifications => history::WIDTH,
+            Self::Clipboard => clipboard::WIDTH,
+            Self::User => session::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -154,7 +170,9 @@ impl Item {
             Self::Plug(tool) => agents::consent_height(tool),
             Self::Secretary => briefing::height(form),
             Self::Notifications => history::height(),
-            Self::Keyboard | Self::Decline | Self::Agent(_) => 0,
+            Self::Clipboard => clipboard::height(),
+            Self::User => session::height(),
+            Self::Keyboard | Self::Decline | Self::Agent(_) | Self::Menu => 0,
         }
     }
 
@@ -176,6 +194,8 @@ impl Item {
             Self::Keyboard | Self::Desktop(_) | Self::Agent(_) | Self::Secretary => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
+            Self::Clipboard => clipboard::opening(),
+            Self::Menu | Self::User => {}
         }
     }
 
@@ -192,10 +212,13 @@ impl Item {
             | Self::Plug(_)
             | Self::Decline
             | Self::Agent(_)
-            | Self::Secretary => {}
+            | Self::Secretary
+            | Self::Menu
+            | Self::User => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
             Self::Notifications => crate::notifications::history_open(false),
+            Self::Clipboard => clipboard::closing(),
         }
     }
 
@@ -211,7 +234,9 @@ impl Item {
                 CONNECTIONS_NAMESPACE
             }
             (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
-            (Self::Notifications, _) => BELL_NAMESPACE,
+            (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
+                FOOTER_NAMESPACE
+            }
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -239,7 +264,7 @@ impl Item {
             LEVELS_NAMESPACE => place.levels,
             DESKTOPS_NAMESPACE => place.desktops,
             AGENTS_NAMESPACE => place.agents,
-            BELL_NAMESPACE => place.bell.unwrap_or(place.levels),
+            FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
             _ => place.connections,
         }
     }
@@ -265,8 +290,8 @@ pub struct Place {
     pub agents: window::Id,
     /// The bar's own surface, whose size gives its height.
     pub surface: window::Id,
-    /// The notifications' bell's (5.4), once the bar has told it.
-    pub bell: Option<window::Id>,
+    /// The footer's (5.5), once the bar has told it.
+    pub footer: Option<window::Id>,
 }
 
 /// A bar's height until its surface's is known.
@@ -395,6 +420,8 @@ pub enum Effect {
     Briefing(bool),
     /// The clipboard takes this text.
     Copy(String),
+    /// The launcher opens on `bar`'s screen, or closes (the footer's menu).
+    ToggleLauncher(String),
     /// A layer surface of the shell's beside `bar`, of `namespace` (the
     /// peek, 4.5): `size`, its margins from the screen's top right (top,
     /// right, bottom, left); it takes no keyboard.
@@ -498,7 +525,7 @@ impl Controller {
         (levels, connections, desktops, agents): (window::Id, window::Id, window::Id, window::Id),
     ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
-        let bell = self.bars.get(bar).and_then(|p| p.bell);
+        let footer = self.bars.get(bar).and_then(|p| p.footer);
         let place = Place {
             form,
             height,
@@ -507,15 +534,15 @@ impl Controller {
             desktops,
             agents,
             surface,
-            bell,
+            footer,
         };
         self.bars.insert(bar.to_owned(), place);
     }
 
-    /// Bar `bar`'s bell's surface is `bell`.
-    pub fn set_bell(&mut self, bar: &str, bell: window::Id) {
+    /// Bar `bar`'s footer's surface is `footer`.
+    pub fn set_footer(&mut self, bar: &str, footer: window::Id) {
         if let Some(place) = self.bars.get_mut(bar) {
-            place.bell = Some(bell);
+            place.footer = Some(footer);
         }
     }
 
@@ -1006,6 +1033,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         }),
         Item::Decline => Some(Effect::Decline),
         Item::Agent(id) => Some(Effect::GoToAgent { id, bar, row: rect }),
+        Item::Menu => Some(Effect::ToggleLauncher(bar)),
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1015,7 +1043,9 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::AnotherTool
         | Item::Plug(_)
         | Item::Secretary
-        | Item::Notifications => None,
+        | Item::Notifications
+        | Item::Clipboard
+        | Item::User => None,
     }
 }
 
@@ -1446,6 +1476,12 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Copy(text) => {
             tell(ToCompositor::Copy(text));
+            Vec::new()
+        }
+        Effect::ToggleLauncher(bar) => {
+            // The scale as the compositor's line says it, in 120ths.
+            let scale = (kit::scale(&bar) * 120.0).round() as u32;
+            crate::launcher::toggle(bar, scale);
             Vec::new()
         }
         Effect::Layer {
@@ -1896,7 +1932,7 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
-            bell: None,
+            footer: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -1922,7 +1958,7 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
-            bell: None,
+            footer: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
         let small = placed(place, item, (280, 332), false);

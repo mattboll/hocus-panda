@@ -489,7 +489,10 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Decline
                             | Item::Agent(_)
                             | Item::Secretary
-                            | Item::Notifications,
+                            | Item::Notifications
+                            | Item::Clipboard
+                            | Item::Menu
+                            | Item::User,
                             _,
                         ) => {}
                     }
