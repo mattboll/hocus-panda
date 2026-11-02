@@ -262,6 +262,14 @@ impl Target {
     }
 }
 
+/// A band of the background, across the popover.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Band {
+    Above,
+    List,
+    Below,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Head {
     Pinned,
@@ -546,7 +554,6 @@ pub struct Panel {
     pub words: Words,
     /// On the compositor's glass (else opaque).
     pub glass: bool,
-    pub software: bool,
 }
 
 /// What its surface keeps between draws: a surface each time it opens,
@@ -607,19 +614,24 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        self.background(&mut frame, bounds.size());
+        // One frame: the list's band of the background, its rows, then the
+        // bands above and below it, over what of the rows scrolls past its
+        // edges (a frame of its own, clipped to the list, has iced's GPU
+        // renderer clip the other frame's shapes to it too). Text and
+        // images, drawn over every shape, show only whole in the list.
+        let size = bounds.size();
+        let mut frame = Frame::new(renderer, size);
+        self.background(&mut frame, size, Band::List);
         let Some(laid) = &state.laid else {
+            self.background(&mut frame, size, Band::Above);
+            self.background(&mut frame, size, Band::Below);
+            self.rim(&mut frame, size);
             return vec![frame.into_geometry()];
         };
-        self.header(&mut frame, laid, state.pointer.hover);
-        let keyboard = super::with(|c| c.holds_keyboard(self.id));
-        self.field(&mut frame, state, keyboard);
         let view = Laid::view();
-        let mut list = Frame::with_bounds(renderer, view);
-        let clip = Clip::new(self.software, Some(view));
+        let clip = Clip::new(true, Some(view));
         if let Some(empty) = &laid.empty {
-            list.fill_text(text(
+            frame.fill_text(text(
                 empty.clone(),
                 Point::new(view.center_x(), LIST_TOP + EMPTY_TOP + EMPTY * LINE / 2.0),
                 EMPTY,
@@ -632,15 +644,21 @@ impl<Message> canvas::Program<Message> for Panel {
             if middle < view.y - HEAD || middle > view.y + view.height + HEAD {
                 continue;
             }
-            self.head(&mut list, clip, *head, middle);
+            self.head(&mut frame, clip, *head, middle);
         }
         for row in &laid.rows {
             let rect = Laid::rect(row, state.scroll);
             if rect.y > view.y + view.height || rect.y + rect.height < view.y {
                 continue;
             }
-            self.row(&mut list, clip, row, rect, state);
+            self.row(&mut frame, clip, row, rect, state);
         }
+        self.background(&mut frame, size, Band::Above);
+        self.background(&mut frame, size, Band::Below);
+        self.rim(&mut frame, size);
+        self.header(&mut frame, laid, state.pointer.hover);
+        let keyboard = super::with(|c| c.holds_keyboard(self.id));
+        self.field(&mut frame, state, keyboard);
         if laid.content > LIST + 0.5 {
             let list = kit::list(LIST_TOP, LIST, laid.content);
             list.scrollbar_at(&mut frame, state.scroll, W - BORDER - kit::SCROLLBAR - 2.0);
@@ -652,7 +670,7 @@ impl<Message> canvas::Program<Message> for Panel {
             KEYS,
             Alignment::Left,
         ));
-        vec![frame.into_geometry(), list.into_geometry()]
+        vec![frame.into_geometry()]
     }
 
     fn mouse_interaction(
@@ -669,17 +687,41 @@ impl<Message> canvas::Program<Message> for Panel {
 }
 
 impl Panel {
-    fn background(&self, f: &mut Frame, size: Size) {
+    /// The background's `band`: its tint (opaque without glass), the
+    /// same gradient across the three.
+    fn background(&self, f: &mut Frame, size: Size, band: Band) {
         let (top, bottom) = if self.glass {
             (GLASS_TOP, GLASS_BOTTOM)
         } else {
             (OPAQUE_TOP, OPAQUE_BOTTOM)
         };
-        let shape = Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into());
+        let (y, height, radius) = match band {
+            Band::Above => (0.0, LIST_TOP, [RADIUS, RADIUS, 0.0, 0.0]),
+            Band::List => (LIST_TOP, LIST, [0.0; 4]),
+            Band::Below => (
+                LIST_TOP + LIST,
+                size.height - LIST_TOP - LIST,
+                [0.0, 0.0, RADIUS, RADIUS],
+            ),
+        };
+        let [top_left, top_right, bottom_right, bottom_left] = radius;
+        let shape = Path::rounded_rectangle(
+            Point::new(0.0, y),
+            Size::new(size.width, height),
+            iced::border::Radius {
+                top_left,
+                top_right,
+                bottom_right,
+                bottom_left,
+            },
+        );
         let tint = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
             .add_stop(0.0, top)
             .add_stop(1.0, bottom);
         f.fill(&shape, canvas::Fill::from(tint));
+    }
+
+    fn rim(&self, f: &mut Frame, size: Size) {
         f.stroke(
             &Path::rounded_rectangle(
                 Point::new(BORDER / 2.0, BORDER / 2.0),
@@ -814,7 +856,13 @@ impl Panel {
                 ),
             ),
             Tile::Swatch(colour) => f.fill(&kit::rounded(inner, INNER_RADIUS), *colour),
-            Tile::Thumbnail(handle) => f.draw_image(inner, canvas::Image::new(handle.clone())),
+            // Images go over every shape: only whole in the list.
+            Tile::Thumbnail(handle) => {
+                let view = Laid::view();
+                if inner.y >= view.y && inner.y + inner.height <= view.y + view.height {
+                    f.draw_image(inner, canvas::Image::new(handle.clone()));
+                }
+            }
         }
         // Its content over its application and when.
         let (size, font) = if row.kind.mono() {

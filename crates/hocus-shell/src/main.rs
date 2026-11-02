@@ -109,8 +109,9 @@ fn main() -> ExitCode {
     network::start();
     bluetooth::start();
     launcher::start();
-    clipboard::start();
     notifications::start(software);
+    // After the notifications' wall clock, which its times read.
+    clipboard::start();
     user::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
@@ -1107,7 +1108,6 @@ impl Shell {
                 id,
                 words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-                software: self.software,
             })
             .width(Length::Fill)
             .height(Length::Fill)
