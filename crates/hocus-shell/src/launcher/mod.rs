@@ -20,12 +20,23 @@
 //!
 //! The applications ([`apps`]) and their icons ([`icons`]) are read on
 //! threads of their own.
+//!
+//! The field also answers (5.2, variant A): a calculation or a conversion
+//! shows in a card under the field, and an address in a card of its own
+//! ([`answers`]); then no application is listed. The web search is
+//! always the last row once something is typed. `Enter` on a result
+//! copies it and a toast says so ([`toast`]); on an address or the web
+//! row, it opens the browser; `Ctrl+Enter` searches the web whatever is
+//! selected.
 
+pub mod answers;
 pub mod apps;
 pub mod draw;
 pub mod entries;
 pub mod icons;
+pub mod rates;
 pub mod search;
+pub mod toast;
 
 use std::{
     collections::HashMap,
@@ -63,7 +74,10 @@ impl Words {
     }
 
     pub fn placeholder(self) -> &'static str {
-        self.pick("Chercher une application", "Search for an application")
+        self.pick(
+            "Chercher une application, calculer…",
+            "Search for an application, calculate…",
+        )
     }
 
     pub fn escape(self) -> &'static str {
@@ -78,29 +92,121 @@ impl Words {
         self.pick("TOUTES LES APPLICATIONS", "ALL APPLICATIONS")
     }
 
-    pub fn none_for(self, query: &str) -> String {
+    /// What `Enter` does on a card, shown at its right while it is
+    /// selected.
+    pub fn hint(self, card: Card) -> &'static str {
+        match card {
+            Card::Answer => self.pick("Entrée copie", "Enter copies"),
+            Card::Address => self.pick("Entrée ouvre", "Enter opens"),
+            Card::Web => self.pick("Entrée cherche", "Enter searches"),
+        }
+    }
+
+    pub fn open(self, typed: &str) -> String {
         if self.fr {
-            format!("Aucune application pour «\u{a0}{query}\u{a0}».")
+            format!("Ouvrir {typed}")
         } else {
-            format!("No application for \u{201c}{query}\u{201d}.")
+            format!("Open {typed}")
+        }
+    }
+
+    pub fn in_browser(self, url: &str) -> String {
+        if self.fr {
+            format!("{url} · dans le navigateur")
+        } else {
+            format!("{url} · in the browser")
+        }
+    }
+
+    pub fn search_web(self, query: &str) -> String {
+        if self.fr {
+            format!("Chercher «\u{a0}{query}\u{a0}» sur le web")
+        } else {
+            format!("Search the web for \u{201c}{query}\u{201d}")
+        }
+    }
+
+    pub fn web_engine(self) -> &'static str {
+        self.pick(
+            "DuckDuckGo · Ctrl+Entrée depuis n\u{2019}importe où",
+            "DuckDuckGo · Ctrl+Enter from anywhere",
+        )
+    }
+
+    /// The toast once a result is copied.
+    pub fn copied(self, value: &str) -> String {
+        if self.fr {
+            format!("Copié\u{a0}: {value}")
+        } else {
+            format!("Copied: {value}")
+        }
+    }
+
+    /// A currency conversion's kind, and the day of its rates
+    /// (`YYYY-MM-DD`).
+    pub fn rates_of(self, date: &str) -> String {
+        if self.fr {
+            let mut parts = date.splitn(3, '-');
+            match (parts.next(), parts.next(), parts.next()) {
+                (Some(y), Some(m), Some(d)) => format!("Monnaie, taux du {d}/{m}/{y}"),
+                _ => format!("Monnaie, taux du {date}"),
+            }
+        } else {
+            format!("Currency, rates of {date}")
         }
     }
 }
 
-/// A row of the grid: a heading, or up to [`COLUMNS`] tiles (their places
-/// in [`Grid::flat`]).
+/// A wide row of the launcher's: a calculation's or a conversion's result,
+/// an address, or the web search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Card {
+    Answer,
+    Address,
+    Web,
+}
+
+/// What can be selected: an application (its index in the catalog), or a
+/// card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Item {
+    App(usize),
+    Card(Card),
+}
+
+/// An address typed, and what opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Address {
+    pub typed: String,
+    pub url: String,
+}
+
+/// A row of the grid: a heading, up to [`COLUMNS`] tiles, or a card
+/// (their places in [`Grid::flat`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Head(&'static str),
     Tiles(Vec<usize>),
+    Card(Card, usize),
 }
 
-/// What the grid shows: its rows, and each tile's application (its index
-/// in the catalog), in the selection's order.
+/// What the grid shows: its rows, and what each of their places holds, in
+/// the selection's order; the answer or the address its cards show.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Grid {
     pub rows: Vec<Row>,
-    pub flat: Vec<usize>,
+    pub flat: Vec<Item>,
+    pub answer: Option<answers::Answer>,
+    pub address: Option<Address>,
+}
+
+/// What the field is read with besides the applications: how numbers are
+/// written, and the currencies' rates.
+#[derive(Debug, Clone, Copy)]
+pub struct Reading<'a> {
+    pub words: Words,
+    pub numbers: answers::Numbers,
+    pub rates: Option<&'a rates::Rates>,
 }
 
 impl Grid {
@@ -109,8 +215,9 @@ impl Grid {
         catalog: &apps::Catalog,
         counts: &HashMap<String, u32>,
         query: &str,
-        words: Words,
+        reading: Reading<'_>,
     ) -> Self {
+        let words = reading.words;
         let count = |i: usize| {
             catalog
                 .apps
@@ -136,14 +243,27 @@ impl Grid {
                 grid.chunk(&all);
             }
         } else {
-            let apps: Vec<(&search::Folded, u32)> = catalog
-                .apps
-                .iter()
-                .enumerate()
-                .map(|(i, a)| (&a.folded, count(i)))
-                .collect();
-            let found = search::rank(&apps, query);
-            grid.chunk(&found);
+            let typed = query.trim();
+            grid.answer = answers::answer(typed, reading.rates, reading.numbers, words);
+            if grid.answer.is_some() {
+                grid.card(Card::Answer);
+            } else if let Some(url) = answers::address(typed) {
+                grid.address = Some(Address {
+                    typed: typed.to_owned(),
+                    url,
+                });
+                grid.card(Card::Address);
+            } else {
+                let apps: Vec<(&search::Folded, u32)> = catalog
+                    .apps
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| (&a.folded, count(i)))
+                    .collect();
+                let found = search::rank(&apps, query);
+                grid.chunk(&found);
+            }
+            grid.card(Card::Web);
         }
         grid
     }
@@ -151,16 +271,22 @@ impl Grid {
     fn chunk(&mut self, apps: &[usize]) {
         for row in apps.chunks(COLUMNS) {
             let start = self.flat.len();
-            self.flat.extend_from_slice(row);
+            self.flat.extend(row.iter().map(|i| Item::App(*i)));
             self.rows
                 .push(Row::Tiles((start..self.flat.len()).collect()));
         }
     }
 
-    /// The row holding tile `at`, and its column.
+    fn card(&mut self, card: Card) {
+        self.rows.push(Row::Card(card, self.flat.len()));
+        self.flat.push(Item::Card(card));
+    }
+
+    /// The row holding place `at`, and its column (a card's is 0).
     pub fn place(&self, at: usize) -> Option<(usize, usize)> {
         self.rows.iter().enumerate().find_map(|(r, row)| match row {
             Row::Tiles(tiles) => tiles.iter().position(|t| *t == at).map(|c| (r, c)),
+            Row::Card(_, place) => (*place == at).then_some((r, 0)),
             Row::Head(_) => None,
         })
     }
@@ -190,6 +316,7 @@ impl Grid {
                         Row::Tiles(tiles) => tiles
                             .get(column.min(tiles.len().saturating_sub(1)))
                             .copied(),
+                        Row::Card(_, place) => Some(*place),
                         Row::Head(_) => None,
                     })
                     .unwrap_or(at)
@@ -211,6 +338,8 @@ pub enum Arrow {
 #[derive(Debug)]
 pub struct Open {
     pub surface: window::Id,
+    /// Its screen, where a toast shows once it closes.
+    pub output: String,
     pub scale: f32,
     pub query: String,
     pub grid: Grid,
@@ -233,7 +362,13 @@ pub struct Open {
 
 impl Open {
     fn regrid(&mut self, words: Words) {
-        self.grid = Grid::of(&self.catalog, &self.counts, &self.query, words);
+        let rates = rates::current();
+        let reading = Reading {
+            words,
+            numbers: answers::Numbers::new(Lang::of_numbers()),
+            rates: rates.as_deref(),
+        };
+        self.grid = Grid::of(&self.catalog, &self.counts, &self.query, reading);
         self.selected = 0;
         self.offset = 0;
         self.hover = None;
@@ -242,7 +377,10 @@ impl Open {
 
     /// The application of tile `at`.
     pub fn app(&self, at: usize) -> Option<&apps::App> {
-        self.catalog.apps.get(*self.grid.flat.get(at)?)
+        match self.grid.flat.get(at)? {
+            Item::App(i) => self.catalog.apps.get(*i),
+            Item::Card(_) => None,
+        }
     }
 }
 
@@ -272,9 +410,10 @@ fn words() -> Words {
     Words::new(Lang::of_messages())
 }
 
-/// Reads the applications.
+/// Reads the applications, and the currencies' rates kept.
 pub fn start() {
     apps::start();
+    rates::start();
 }
 
 /// Its surface draws again.
@@ -300,10 +439,8 @@ pub fn changed() {
 
 /// The icons of the grid's applications, in its order.
 fn icon_names(open: &Open) -> Vec<String> {
-    open.grid
-        .flat
-        .iter()
-        .filter_map(|i| open.catalog.apps.get(*i)?.entry.icon.clone())
+    (0..open.grid.flat.len())
+        .filter_map(|at| open.app(at)?.entry.icon.clone())
         .collect()
 }
 
@@ -323,6 +460,7 @@ pub fn toggle(output: String, scale: u32) {
         let scale = (scale as f32 / 120.0).max(0.5);
         let mut open = Open {
             surface,
+            output: output.clone(),
             scale,
             query: String::new(),
             grid: Grid::default(),
@@ -350,6 +488,7 @@ pub fn toggle(output: String, scale: u32) {
         // One popover at a time, and not under the launcher.
         crate::popover::event(crate::popover::Event::PressElsewhere);
         icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        rates::refresh();
     }
     crate::popover::send(effects);
 }
@@ -409,13 +548,14 @@ pub fn is_surface(id: window::Id) -> bool {
 
 /// When [`tick`] has something to do.
 pub fn deadline() -> Option<Instant> {
-    with(|l| {
+    let launcher = with(|l| {
         let tooltip = match &l.phase {
             Phase::Open(open) => open.tooltip,
             Phase::Closed => None,
         };
         l.closing.iter().map(|(_, at)| *at).chain(tooltip).min()
-    })
+    });
+    launcher.into_iter().chain(toast::deadline()).min()
 }
 
 /// What is due at `now`: the surfaces faded out go.
@@ -436,38 +576,115 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             }
             !due
         });
+        effects.extend(toast::tick(now));
         effects
     })
 }
 
-/// Tile `at` of the open launcher on `id` starts, and the launcher closes.
-pub fn launch(id: window::Id, at: usize) {
+/// Place `at` of the open launcher on `id` is chosen: its application
+/// starts, its result is copied, its address or the web search opens; and
+/// the launcher closes.
+pub fn act(id: window::Id, at: usize) {
     let effects = with(|l| {
         let mut effects = Vec::new();
         let Some(open) = l.open_on(id) else {
             return effects;
         };
-        let Some(app) = open.app(at) else {
-            return effects;
-        };
-        let entry = &app.entry;
-        let launch = Launch {
-            id: entry.id.clone(),
-            terminal: entry.terminal,
-            dir: entry.dir.clone().unwrap_or_default(),
-            argv: entry.argv.clone(),
-        };
-        if launch.fits() {
-            tracing::debug!(app = entry.id, "the launcher launches");
-            apps::launched(&entry.id);
-            effects.push(Effect::Tell(ToCompositor::Launch(launch)));
-        } else {
-            tracing::warn!(app = entry.id, "a command that cannot be sent: not started");
+        let words = words();
+        match open.grid.flat.get(at) {
+            None => return effects,
+            Some(Item::App(_)) => {
+                let Some(app) = open.app(at) else {
+                    return effects;
+                };
+                let entry = &app.entry;
+                let launch = Launch {
+                    id: entry.id.clone(),
+                    terminal: entry.terminal,
+                    dir: entry.dir.clone().unwrap_or_default(),
+                    argv: entry.argv.clone(),
+                };
+                if launch.fits() {
+                    tracing::debug!(app = entry.id, "the launcher launches");
+                    apps::launched(&entry.id);
+                    effects.push(Effect::Tell(ToCompositor::Launch(launch)));
+                } else {
+                    tracing::warn!(app = entry.id, "a command that cannot be sent: not started");
+                }
+            }
+            Some(Item::Card(Card::Answer)) => {
+                let Some(answer) = &open.grid.answer else {
+                    return effects;
+                };
+                tracing::debug!(copied = answer.copy, "the launcher copies its result");
+                effects.push(Effect::Copy(answer.copy.clone()));
+                let output = open.output.clone();
+                let said = words.copied(&answer.copy);
+                l.close(Instant::now(), &mut effects);
+                effects.extend(toast::show(output, said, Instant::now()));
+                return effects;
+            }
+            Some(Item::Card(Card::Address)) => {
+                if let Some(address) = &open.grid.address {
+                    effects.extend(browse(&address.url));
+                }
+            }
+            Some(Item::Card(Card::Web)) => effects.extend(browse(&answers::web(&open.query))),
         }
         l.close(Instant::now(), &mut effects);
         effects
     });
     crate::popover::send(effects);
+}
+
+/// `Ctrl+Enter` on the open launcher on `id`: the web search for what is
+/// typed, whatever is selected.
+fn search_web(id: window::Id) {
+    let at = with(|l| {
+        let open = l.open_on(id)?;
+        open.grid
+            .flat
+            .iter()
+            .position(|item| *item == Item::Card(Card::Web))
+    });
+    if let Some(at) = at {
+        act(id, at);
+    }
+}
+
+/// The browser opens `url`: `xdg-open`, started by the compositor as the
+/// applications are, off its loop. The program is looked for in the
+/// shell's `PATH` and sent whole.
+fn browse(url: &str) -> Option<Effect> {
+    let Some(opener) = program("xdg-open") else {
+        tracing::warn!("no xdg-open in PATH: the address does not open");
+        return None;
+    };
+    let launch = Launch {
+        id: "xdg-open".to_owned(),
+        terminal: false,
+        dir: String::new(),
+        argv: vec![opener, url.to_owned()],
+    };
+    if !launch.fits() {
+        tracing::warn!("an address that cannot be sent: not opened");
+        return None;
+    }
+    tracing::debug!(url, "the launcher opens an address");
+    Some(Effect::Tell(ToCompositor::Launch(launch)))
+}
+
+/// Where `name` is in `PATH`, if it is there and runs.
+fn program(name: &str) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|file| {
+            std::fs::metadata(file)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+        .map(|file| file.display().to_string())
 }
 
 /// A key on the open launcher on `id`: what it does. Whether it was its.
@@ -481,7 +698,8 @@ pub fn key_on(
     enum Then {
         Nothing,
         Close,
-        Launch(usize),
+        Act(usize),
+        Web,
         Draw,
     }
     let words = words();
@@ -495,10 +713,12 @@ pub fn key_on(
         Some(match key {
             Key::Named(Named::Escape) => Then::Close,
             Key::Named(Named::Enter) => {
-                if open.grid.flat.is_empty() {
+                if modifiers.control() && !open.query.trim().is_empty() {
+                    Then::Web
+                } else if open.grid.flat.is_empty() {
                     Then::Nothing
                 } else {
-                    Then::Launch(open.selected)
+                    Then::Act(open.selected)
                 }
             }
             Key::Named(Named::ArrowLeft) => arrow(Arrow::Left, open),
@@ -546,8 +766,12 @@ pub fn key_on(
             close();
             true
         }
-        Some(Then::Launch(at)) => {
-            launch(id, at);
+        Some(Then::Act(at)) => {
+            act(id, at);
+            true
+        }
+        Some(Then::Web) => {
+            search_web(id);
             true
         }
         Some(Then::Draw) => true,
@@ -596,24 +820,35 @@ mod tests {
         apps::Catalog { apps: entries }
     }
 
+    fn reading(fr: bool) -> Reading<'static> {
+        Reading {
+            words: Words { fr },
+            numbers: answers::Numbers::new(if fr { Lang::French } else { Lang::English }),
+            rates: None,
+        }
+    }
+
+    fn apps(found: &[usize]) -> Vec<Item> {
+        found.iter().map(|i| Item::App(*i)).collect()
+    }
+
     #[test]
     fn the_empty_field_shows_the_frequent_then_all_from_a_to_z() {
         let names: Vec<String> = (0..12).map(|i| format!("App {i:02}")).collect();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let catalog = catalog(&names);
-        let words = Words { fr: true };
         // Nothing launched yet: no frequent row.
-        let grid = Grid::of(&catalog, &HashMap::new(), "", words);
+        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(true));
         assert_eq!(grid.rows[0], Row::Head("TOUTES LES APPLICATIONS"));
         assert_eq!(grid.rows.len(), 3);
         let counts: HashMap<String, u32> = [("app 05", 3), ("app 01", 7), ("app 09", 3)]
             .into_iter()
             .map(|(id, n)| (id.to_owned(), n))
             .collect();
-        let grid = Grid::of(&catalog, &counts, "", words);
+        let grid = Grid::of(&catalog, &counts, "", reading(true));
         assert_eq!(grid.rows[0], Row::Head("FRÉQUENTES"));
         // The most launched first, ties from A to Z.
-        assert_eq!(&grid.flat[..3], &[1, 5, 9]);
+        assert_eq!(&grid.flat[..3], &apps(&[1, 5, 9])[..]);
         assert_eq!(grid.rows[2], Row::Head("TOUTES LES APPLICATIONS"));
         assert_eq!(grid.rows.len(), 5);
         assert_eq!(grid.flat.len(), 3 + 12);
@@ -624,7 +859,7 @@ mod tests {
         let names: Vec<String> = (0..20).map(|i| format!("App {i:02}")).collect();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let catalog = catalog(&names);
-        let grid = Grid::of(&catalog, &HashMap::new(), "", Words { fr: false });
+        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(false));
         // Rows of 8, 8 and 4 under the heading.
         assert_eq!(grid.step(0, Arrow::Left), 0);
         assert_eq!(grid.step(7, Arrow::Right), 8);
@@ -637,16 +872,38 @@ mod tests {
     }
 
     #[test]
-    fn typing_filters_the_grid_best_first() {
+    fn typing_filters_the_grid_best_first_and_the_web_comes_last() {
         let catalog = catalog(&["Firefox", "Fichiers", "kitty"]);
-        let grid = Grid::of(&catalog, &HashMap::new(), "fire", Words { fr: true });
-        assert_eq!(grid.rows, [Row::Tiles(vec![0])]);
-        assert_eq!(grid.flat, [0]);
-        let none = Grid::of(&catalog, &HashMap::new(), "zzz", Words { fr: true });
-        assert!(none.rows.is_empty());
+        let grid = Grid::of(&catalog, &HashMap::new(), "fire", reading(true));
+        assert_eq!(grid.rows, [Row::Tiles(vec![0]), Row::Card(Card::Web, 1)]);
+        assert_eq!(grid.flat, [Item::App(0), Item::Card(Card::Web)]);
+        // Down from the tile: the web row; and back up.
+        assert_eq!(grid.step(0, Arrow::Down), 1);
+        assert_eq!(grid.step(1, Arrow::Up), 0);
+        let none = Grid::of(&catalog, &HashMap::new(), "zzz", reading(true));
+        assert_eq!(none.rows, [Row::Card(Card::Web, 0)]);
+    }
+
+    #[test]
+    fn an_answer_or_an_address_comes_first_and_lists_no_application() {
+        let catalog = catalog(&["Calculatrice", "GitHub Desktop"]);
+        let grid = Grid::of(&catalog, &HashMap::new(), "12 × (3 + 4)", reading(true));
+        assert_eq!(grid.flat, [Item::Card(Card::Answer), Item::Card(Card::Web)]);
+        assert_eq!(grid.answer.as_ref().map(|a| a.main.as_str()), Some("84"));
+        let grid = Grid::of(&catalog, &HashMap::new(), "github.com", reading(true));
         assert_eq!(
-            Words { fr: true }.none_for("zzz"),
-            "Aucune application pour «\u{a0}zzz\u{a0}»."
+            grid.flat,
+            [Item::Card(Card::Address), Item::Card(Card::Web)]
+        );
+        assert_eq!(
+            grid.address.as_ref().map(|a| a.url.as_str()),
+            Some("https://github.com")
+        );
+        let words = Words { fr: true };
+        assert_eq!(words.rates_of("2026-10-30"), "Monnaie, taux du 30/10/2026");
+        assert_eq!(
+            words.search_web("crêpes"),
+            "Chercher «\u{a0}crêpes\u{a0}» sur le web"
         );
     }
 }

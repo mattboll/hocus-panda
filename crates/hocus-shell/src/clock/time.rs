@@ -35,6 +35,11 @@ impl Lang {
         Self::from_vars(["LC_ALL", "LC_MESSAGES", "LANG"])
     }
 
+    /// How numbers are written: `LC_ALL`, `LC_NUMERIC`, then `LANG`.
+    pub fn of_numbers() -> Self {
+        Self::from_vars(["LC_ALL", "LC_NUMERIC", "LANG"])
+    }
+
     fn from_vars(names: [&str; 3]) -> Self {
         let locale = names
             .into_iter()
