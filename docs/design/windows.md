@@ -379,6 +379,7 @@ string or list turns an action's off. The package ships every setting with its d
 | `send-to-desktop-1` … `send-to-desktop-9` | `Super+Shift+1` … | Sends the focused window there, staying here (§12) |
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 | `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
+| `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
