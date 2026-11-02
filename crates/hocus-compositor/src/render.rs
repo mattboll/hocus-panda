@@ -13,7 +13,6 @@ use smithay::{
             AsRenderElements, Kind, RenderElementStates, default_primary_scanout_output_compare,
             memory::MemoryRenderBufferRenderElement,
             render_elements,
-            solid::SolidColorRenderElement,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             texture::TextureRenderElement,
             utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
@@ -76,13 +75,11 @@ render_elements! {
     Bent = BentElement,
     /// A window's live thumbnail in Alt+Tab's panel.
     Thumbnail = Keyed<WindowSurface<R>>,
-    /// The desktop's background.
+    /// The desktop's background; the tint behind the launcher (5.1, #518).
     Backdrop = MemoryRenderBufferRenderElement<R>,
     /// The compositor's own shaders: going to an agent's streak (4.3),
     /// the halo (4.4).
     Shader = ShaderElement,
-    /// What darkens the desktop behind the launcher (5.1).
-    Solid = SolidColorRenderElement,
     /// The launcher's surface, its panel growing in or shrinking out.
     Scaled = RescaleRenderElement<WaylandSurfaceRenderElement<R>>,
 }
@@ -724,8 +721,8 @@ impl State {
     }
 
     /// The launcher on `output` at `now` (5.1), front first: its surface,
-    /// its panel scaled about its middle, and what darkens the desktop
-    /// under it. How opaque it is, when it shows.
+    /// its panel scaled about its middle, and the bar's tint over the
+    /// desktop under it. How opaque it is, when it shows.
     fn launcher_elements<R>(
         &self,
         renderer: &mut R,
@@ -759,14 +756,26 @@ impl State {
         out.extend(surfaces.into_iter().map(|e| {
             OutputElements::Scaled(RescaleRenderElement::from_element(e, middle, look.scale))
         }));
-        let dim = self.panel.launchers.dim(&output.name(), size);
-        out.push(OutputElements::Solid(SolidColorRenderElement::from_buffer(
-            &dim,
-            (0, 0),
-            scale,
-            look.alpha,
+        // The bar's tint, its column stretched over the whole screen.
+        let tint = self.panel.launchers.tint();
+        // Its whole column, given: with none, the gradient only covered
+        // the screen's first 64 rows (seen on the Intel GPU).
+        let column =
+            Rectangle::<f64, Logical>::from_size((1.0, crate::launcher::TINT_ROWS as f64).into());
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            (0.0, 0.0),
+            &tint,
+            Some(look.alpha),
+            Some(column),
+            Some(size),
             Kind::Unspecified,
-        )));
+        ) {
+            Ok(element) => out.push(OutputElements::Backdrop(element)),
+            Err(err) => {
+                tracing::warn!(output = output.name(), %err, "could not tint behind the launcher");
+            }
+        }
         Some(look.alpha)
     }
 

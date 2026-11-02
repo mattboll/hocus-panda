@@ -1,6 +1,7 @@
 //! The launcher (5.1, variant C): `Super+Space` opens it full screen on
 //! the screen under the pointer, a field near the top and the
-//! applications in a grid of eight columns under it; typing filters the
+//! applications in a grid of eight columns under it (fewer on a screen too
+//! narrow for them, #518); typing filters the
 //! grid in place, the best match first and selected; `Enter`, or a click,
 //! starts the selected one and closes it. `Escape`, `Super+Space` again,
 //! or a click outside the field and the tiles close it.
@@ -49,7 +50,8 @@ use iced_layershell::reexport::KeyboardInteractivity;
 
 use crate::{clock::time::Lang, popover::Effect};
 
-/// The grid's columns, and the frequent applications shown at most.
+/// The grid's columns at most, and the frequent applications shown at
+/// most.
 pub const COLUMNS: usize = 8;
 const FREQUENT: usize = 8;
 /// The characters the field keeps at most.
@@ -166,7 +168,7 @@ pub struct Address {
     pub url: String,
 }
 
-/// A row of the grid: a heading, up to [`COLUMNS`] tiles, or a card
+/// A row of the grid: a heading, up to [`Grid::columns`] tiles, or a card
 /// (their places in [`Grid::flat`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
@@ -176,13 +178,27 @@ pub enum Row {
 }
 
 /// What the grid shows: its rows, and what each of their places holds, in
-/// the selection's order; the answer or the address its cards show.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// the selection's order; the answer or the address its cards show; how
+/// many columns its rows of tiles have.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grid {
     pub rows: Vec<Row>,
     pub flat: Vec<Item>,
     pub answer: Option<answers::Answer>,
     pub address: Option<Address>,
+    pub columns: usize,
+}
+
+impl Default for Grid {
+    fn default() -> Self {
+        Self {
+            rows: Vec::new(),
+            flat: Vec::new(),
+            answer: None,
+            address: None,
+            columns: COLUMNS,
+        }
+    }
 }
 
 /// What the field is read with besides the applications: how numbers are
@@ -194,12 +210,14 @@ pub struct Reading {
 }
 
 impl Grid {
-    /// The grid for `query` over `catalog`, launched `counts` times each.
+    /// The grid for `query` over `catalog`, launched `counts` times each,
+    /// in rows of `columns` tiles.
     pub fn of(
         catalog: &apps::Catalog,
         counts: &HashMap<String, u32>,
         query: &str,
         reading: Reading,
+        columns: usize,
     ) -> Self {
         let words = reading.words;
         let count = |i: usize| {
@@ -210,7 +228,10 @@ impl Grid {
                 .copied()
                 .unwrap_or(0)
         };
-        let mut grid = Self::default();
+        let mut grid = Self {
+            columns: columns.clamp(1, COLUMNS),
+            ..Self::default()
+        };
         if query.trim().is_empty() {
             let mut frequent: Vec<usize> =
                 (0..catalog.apps.len()).filter(|i| count(*i) > 0).collect();
@@ -253,7 +274,7 @@ impl Grid {
     }
 
     fn chunk(&mut self, apps: &[usize]) {
-        for row in apps.chunks(COLUMNS) {
+        for row in apps.chunks(self.columns.max(1)) {
             let start = self.flat.len();
             self.flat.extend(row.iter().map(|i| Item::App(*i)));
             self.rows
@@ -346,13 +367,30 @@ pub struct Open {
 
 impl Open {
     fn regrid(&mut self, words: Words) {
+        self.grid = self.grid_of(words, self.grid.columns);
+        self.selected = 0;
+        self.offset = 0;
+        self.hover = None;
+        self.tooltip = None;
+    }
+
+    fn grid_of(&self, words: Words, columns: usize) -> Grid {
         let reading = Reading {
             words,
             numbers: answers::Numbers::new(Lang::of_numbers()),
         };
-        self.grid = Grid::of(&self.catalog, &self.counts, &self.query, reading);
-        self.selected = 0;
-        self.offset = 0;
+        Grid::of(&self.catalog, &self.counts, &self.query, reading, columns)
+    }
+
+    /// Its grid in rows of `columns` tiles, as its screen has room for:
+    /// the same places in the same order, the selection kept in view.
+    pub fn fit(&mut self, columns: usize) {
+        if self.grid.columns == columns {
+            return;
+        }
+        tracing::debug!(columns, "the launcher's grid fits its screen");
+        self.grid = self.grid_of(words(), columns);
+        self.offset = draw::keep_in_view(&self.grid, self.selected, 0, self.size);
         self.hover = None;
         self.tooltip = None;
     }
@@ -817,14 +855,14 @@ mod tests {
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let catalog = catalog(&names);
         // Nothing launched yet: no frequent row.
-        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(true));
+        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(true), COLUMNS);
         assert_eq!(grid.rows[0], Row::Head("TOUTES LES APPLICATIONS"));
         assert_eq!(grid.rows.len(), 3);
         let counts: HashMap<String, u32> = [("app 05", 3), ("app 01", 7), ("app 09", 3)]
             .into_iter()
             .map(|(id, n)| (id.to_owned(), n))
             .collect();
-        let grid = Grid::of(&catalog, &counts, "", reading(true));
+        let grid = Grid::of(&catalog, &counts, "", reading(true), COLUMNS);
         assert_eq!(grid.rows[0], Row::Head("FRÉQUENTES"));
         // The most launched first, ties from A to Z.
         assert_eq!(&grid.flat[..3], &apps(&[1, 5, 9])[..]);
@@ -838,7 +876,7 @@ mod tests {
         let names: Vec<String> = (0..20).map(|i| format!("App {i:02}")).collect();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let catalog = catalog(&names);
-        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(false));
+        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(false), COLUMNS);
         // Rows of 8, 8 and 4 under the heading.
         assert_eq!(grid.step(0, Arrow::Left), 0);
         assert_eq!(grid.step(7, Arrow::Right), 8);
@@ -848,28 +886,47 @@ mod tests {
         assert_eq!(grid.step(11, Arrow::Up), 3);
         assert_eq!(grid.step(3, Arrow::Up), 3);
         assert_eq!(grid.step(19, Arrow::Right), 19);
+        // On a screen with room for five columns: rows of 5, 5, 5 and 5,
+        // the same places in the same order.
+        let narrow = Grid::of(&catalog, &HashMap::new(), "", reading(false), 5);
+        assert_eq!(narrow.rows.len(), 1 + 4);
+        assert_eq!(narrow.flat, grid.flat);
+        assert_eq!(narrow.step(3, Arrow::Down), 8);
+        assert_eq!(narrow.step(4, Arrow::Right), 5);
     }
 
     #[test]
     fn typing_filters_the_grid_best_first_and_the_web_comes_last() {
         let catalog = catalog(&["Firefox", "Fichiers", "kitty"]);
-        let grid = Grid::of(&catalog, &HashMap::new(), "fire", reading(true));
+        let grid = Grid::of(&catalog, &HashMap::new(), "fire", reading(true), COLUMNS);
         assert_eq!(grid.rows, [Row::Tiles(vec![0]), Row::Card(Card::Web, 1)]);
         assert_eq!(grid.flat, [Item::App(0), Item::Card(Card::Web)]);
         // Down from the tile: the web row; and back up.
         assert_eq!(grid.step(0, Arrow::Down), 1);
         assert_eq!(grid.step(1, Arrow::Up), 0);
-        let none = Grid::of(&catalog, &HashMap::new(), "zzz", reading(true));
+        let none = Grid::of(&catalog, &HashMap::new(), "zzz", reading(true), COLUMNS);
         assert_eq!(none.rows, [Row::Card(Card::Web, 0)]);
     }
 
     #[test]
     fn an_answer_or_an_address_comes_first_and_lists_no_application() {
         let catalog = catalog(&["Calculatrice", "GitHub Desktop"]);
-        let grid = Grid::of(&catalog, &HashMap::new(), "12 × (3 + 4)", reading(true));
+        let grid = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "12 × (3 + 4)",
+            reading(true),
+            COLUMNS,
+        );
         assert_eq!(grid.flat, [Item::Card(Card::Answer), Item::Card(Card::Web)]);
         assert_eq!(grid.answer.as_ref().map(|a| a.main.as_str()), Some("84"));
-        let grid = Grid::of(&catalog, &HashMap::new(), "github.com", reading(true));
+        let grid = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "github.com",
+            reading(true),
+            COLUMNS,
+        );
         assert_eq!(
             grid.flat,
             [Item::Card(Card::Address), Item::Card(Card::Web)]

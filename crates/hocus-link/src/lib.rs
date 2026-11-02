@@ -137,14 +137,20 @@ pub const POPOVER_CLOSE: Duration = Duration::from_millis(120);
 pub const LAUNCHER_OPEN: Duration = Duration::from_millis(160);
 pub const LAUNCHER_CLOSE: Duration = Duration::from_millis(120);
 pub const LAUNCHER_SCALE: f64 = 0.97;
-/// What darkens the desktop behind the launcher: `#06080E` at 62 %.
-pub const LAUNCHER_DIM: ([u8; 3], f32) = ([0x06, 0x08, 0x0E], 0.62);
+/// What tints the desktop behind the launcher (#518): the bar's dark blue
+/// (bar.md §13, `rgba(22,27,42,…)` to `rgba(14,17,28,…)`, top to bottom),
+/// about 85 % opaque over the blur, so that its grid reads over a white
+/// page and the desktop still shows faintly.
+pub const LAUNCHER_TINT: [([u8; 3], f32); 2] = [([22, 27, 42], 0.82), ([14, 17, 28], 0.88)];
+/// The launcher is drawn this many times the 5.1 and 5.2 mockups' sizes
+/// (#518): every size of its field, its grid, its cards and its toast.
+pub const LAUNCHER_ZOOM: f64 = 1.5;
 /// The launcher's panel (its field and its grid), logical pixels: centred
 /// across its screen, [`LAUNCHER_TOP`] from its top, reaching
-/// [`LAUNCHER_BOTTOM`] from its bottom, as the 5.1 mockup has them.
-pub const LAUNCHER_WIDTH: f64 = 760.0;
-pub const LAUNCHER_TOP: f64 = 54.0;
-pub const LAUNCHER_BOTTOM: f64 = 98.0;
+/// [`LAUNCHER_BOTTOM`] from its bottom, the 5.1 mockup's ×
+/// [`LAUNCHER_ZOOM`].
+pub const LAUNCHER_TOP: f64 = 54.0 * LAUNCHER_ZOOM;
+pub const LAUNCHER_BOTTOM: f64 = 98.0 * LAUNCHER_ZOOM;
 
 /// The middle of the launcher's panel on a screen `width` × `height`
 /// logical pixels: what it grows from and shrinks to.

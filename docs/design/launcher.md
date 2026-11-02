@@ -4,15 +4,21 @@ Status: 5.1 approved 2026-11-02 (issue #391), variant C of the 5.1
 mockup: full screen; 5.2 approved 2026-11-02 (issue #392), variant A of
 the 5.2 mockup: an answer card above the grid (§6). Built since
 2026-11-02: see [as built](#as-built). Sizes are logical pixels; they
-follow each screen's scale. Later in the same field: files and AI; room
-is left for other kinds of results.
+follow each screen's scale. **Since 5.1b (issue #518), the launcher is
+drawn ×1.5 of every size below**, as the approved mockup showed it on
+the maintainer's 2560 × 1600 screen at scale 1 (see
+[as built, 5.1b](#51b-the-launcher-larger-its-backdrop-in-the-bars-tint-2026-11-02)).
+Later in the same field: files and AI; room is left for other kinds of
+results.
 
 ## 1. Opening and closing
 
 - `Super+Space` (`[shortcuts] launcher`) opens it on the screen under the
   pointer, and closes it again. `Escape` closes it, and so does a click
   outside the field and the tiles.
-- The desktop darkens (about 62 % of `#06080E`) and blurs behind it. The
+- The desktop blurs behind it, under the bar's tint (5.1b: the bar's dark
+  blue, `rgba(22,27,42,…)` to `rgba(14,17,28,…)`, about 85 % opaque; it
+  was 62 % of `#06080E`), so that the grid reads over a white page. The
   bar is covered too.
 - It fades in over 160 ms with a scale from 0.97 to 1, and fades out over
   120 ms. With reduced motion, it only fades.
@@ -136,7 +142,8 @@ is left for other kinds of results.
   (`hocus-launcher`), in the overlay layer, anchored to the screen's four
   edges, holding the keyboard (`exclusive`). The shell draws the field and
   the grid, transparent around them; the compositor draws, under that
-  surface, the dim (`#06080E` at 62 %) over the whole screen and, with
+  surface, the dim (`#06080E` at 62 %; the bar's tint since 5.1b) over
+  the whole screen and, with
   glass, the screen behind blurred (CSS's `blur(14px)`: 28 px of reach,
   no saturation, in a pane of its own), the bar and its popovers included.
   It fades it all in over 160 ms (`ease-out`) from the surface's first
@@ -283,3 +290,52 @@ is left for other kinds of results.
   application with an answer or an address). The parser, the units (a
   currency not being one), the numbers and the scattered matches have
   unit tests. On the Intel GPU, the screenshots of the pull request.
+
+### 5.1b, the launcher larger, its backdrop in the bar's tint (2026-11-02)
+
+Found on the maintainer's laptop (2560 × 1600 at scale 1, which stays
+so), issue #518: over a white window the backdrop was too transparent
+and the grid read badly; the icons and the texts were smaller than the
+bar's.
+
+- **The sizes** are 5.1's and 5.2's × 1.5, all from one constant
+  (`hocus_link::LAUNCHER_ZOOM`, `ZOOM` in the shell's
+  `launcher/draw.rs`; each size there is the mockup's, zoomed): the
+  panel 1140 wide, 81 px from the top, down to 147 px from the bottom;
+  the field 690 × 81, radius 18, its text 28.5 px, the magnifier 27, the
+  "Échap" hint 16.5 px; 33 px under it, the grid: headings 36 px tall,
+  their letters 16.5 px; tiles 138 × 159, radius 18, rows 9 px apart,
+  the icon 72 px 13.5 px from the top, the name 17 px on 22 px lines (the
+  mockup's 11.5 on 15, × 1.5, in whole pixels), two lines at most, then
+  "…"; the scroll mark 4.5 px wide, 21 px out; the tooltip 18 px. 5.2's
+  cards as wide as the columns (1104 for eight), 102, 81 and 75 px tall,
+  12 px under each, their badges 60 and 51 px, the result in Martian Mono
+  39 px. The toast 19.5 px 600 text, 15 by 24 px in, radius 18, 60 px
+  from the bottom, rising 12 px. The 1 px rims, the caret's width and
+  the blur stay as they were.
+- **Fewer columns** when eight do not fit: as many as fit with the
+  panel's 18 px on each side and the scroll mark's 21 px past either
+  side, eight at most, one at least; the tiles keep their size, the
+  cards are as wide as the columns, the field no wider than the panel.
+  The grid is cut into rows once the surface has its size (its first
+  frame), the places and their order the same, the selection kept in
+  view. 1366 × 768 at scale 1 keeps eight; at 1.25 (1093 logical pixels
+  wide), seven.
+- **The icons** are looked for and drawn at 72 px on the screen's scale,
+  placed on its pixels. When the theme has no directory of that size,
+  a larger one is taken before a closer smaller one (Catmull-Rom scaled
+  down, they stay sharp: 128 px icons for a 72 px tile before 64 px
+  ones); the Icon Theme Specification would take the closest.
+- **The backdrop** is the bar's tint (bar.md §13): `rgba(22,27,42,0.82)`
+  at the screen's top to `rgba(14,17,28,0.88)` at its bottom
+  (`hocus_link::LAUNCHER_TINT`), the bar's own gradient a little more
+  opaque, over the blurred desktop with glass and over the desktop
+  without. The compositor draws it as a column of 64 pixels stretched
+  over the screen, made once, so that it leaves no damage at rest. With
+  a shell on the CPU, the shell's opaque fill is the same blue, opaque
+  (`#161B2A` to `#0E111C`).
+- **Measured headless** (`crates/hocus-compositor/tests/launcher.rs`):
+  the scenarios of 5.1 and 5.2 at the new sizes, and one for the columns
+  (eight on 1366 × 768, seven at 1.25, the arrows going down them); unit
+  tests for the column count, the layout, the tint's pixels and the
+  icons' sizes. On the Intel GPU, the screenshots of the pull request.
