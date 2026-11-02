@@ -16,6 +16,7 @@ mod cursor;
 mod decoration;
 pub mod desktops;
 mod focus;
+mod front;
 mod glass;
 pub mod going;
 mod grabs;

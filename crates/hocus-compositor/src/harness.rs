@@ -525,7 +525,9 @@ impl Headless {
         self.layer_rects(hocus_link::NAMESPACE)
     }
 
-    fn layer_rects(&self, namespace: &str) -> Vec<(String, Rect)> {
+    /// The layer surfaces of `namespace`: their screen, and where they
+    /// are (global).
+    pub fn layer_rects(&self, namespace: &str) -> Vec<(String, Rect)> {
         let state = &self.app.state;
         let mut surfaces = Vec::new();
         for output in state.space.outputs() {
@@ -838,15 +840,51 @@ impl Headless {
     }
 
     /// The namespace of the layer surface that takes the pointer where it
-    /// is (its input region counts), if one does.
+    /// is (its input region counts), if one does: none where a window
+    /// over it does.
     pub fn pointer_layer(&self) -> Option<String> {
-        use smithay::wayland::shell::wlr_layer::Layer;
+        use crate::handlers::layer_shell::Stand;
         let (x, y) = self.pointer();
-        let (_, _, layer) = self
-            .app
-            .state
-            .layer_surface_under((x, y).into(), &[Layer::Overlay, Layer::Top])?;
+        let state = &self.app.state;
+        let at = (x, y).into();
+        let (_, _, layer) = state.layer_surface_under(at, Stand::Above).or_else(|| {
+            state
+                .space
+                .element_under(at)
+                .is_none()
+                .then(|| state.layer_surface_under(at, Stand::Below))
+                .flatten()
+        })?;
         Some(layer.namespace().to_owned())
+    }
+
+    /// The app id of the window that takes the pointer where it is, if
+    /// one does: none where a layer surface above the windows does.
+    pub fn pointer_window(&self) -> Option<String> {
+        let (x, y) = self.pointer();
+        let state = &self.app.state;
+        let id = state.window_under((x, y).into())?;
+        self.windows()
+            .into_iter()
+            .find(|w| w.id == id)
+            .and_then(|w| w.app_id)
+    }
+
+    /// The screen whose bar is in front of the windows, brought there by
+    /// the pointer pushed against its edge (#519).
+    pub fn bar_in_front(&self) -> Option<String> {
+        let state = &self.app.state;
+        state
+            .space
+            .outputs()
+            .find(|o| state.bar_in_front(o))
+            .map(smithay::output::Output::name)
+    }
+
+    /// The next meeting is `near`, as the calendar will say: the halo
+    /// lights without an agent.
+    pub fn meeting_near(&mut self, near: Option<crate::halo::Meeting>) {
+        self.app.state.meeting_near(near);
     }
 
     /// Whether a press went on to a client: the seat holds the pointer in

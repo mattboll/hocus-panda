@@ -21,8 +21,10 @@ brought for its agents (4.3c, issue #500), and the agents' halo
 (section 6; 4.4, issue #387), the panda peeking out of the bar's edge
 (section 7 C; 4.5, issue #388), the secretary at the agents' group's
 head and her briefing (section 7 B; 4.6, issue #389), the mini form's
-agents' item (section 5; 4.7, issue #390), and the footer (section 4
-group 11, section 5; 5.5, issue #395): see [as built](#as-built).
+agents' item (section 5; 4.7, issue #390), the footer (section 4
+group 11, section 5; 5.5, issue #395), and the bar under the windows,
+brought in front by the screen's edge (sections 2 and 3; 5.13, issue
+#519): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -51,6 +53,15 @@ there.
 - The bar sits against the right edge of its output, 8 px from the top,
   right and bottom edges. Windows keep 8 px from the bar, as from the
   screen edges.
+- **Under the windows** (decided 2026-11-02, #519): the bar sits under
+  normal windows. The windows the desktop places (new, maximised,
+  snapped) still keep off it: its space stays reserved. A window the user
+  moves or resizes onto it covers it, and takes the pointer there. The
+  bar's popovers, the halo, the peeking panda, the bubbles and the
+  launcher stay above the windows. A fullscreen window covers the bar and
+  all of them, as before. Pushing the pointer against the screen's right
+  edge, over the bar, brings it in front after **300 ms** at rest there,
+  until the pointer leaves the bar (§3).
 - Corner radius 14 px. Windows: radius 8 px and a 1 px light rim
   (`rgba(255,255,255,0.22)` on dark themes); the focused window's rim is
   the accent.
@@ -93,6 +104,9 @@ The user's choice overrides the default and is remembered per output
   where the pointer is even when it reached the edge in one fast move,
   with no motion over the bar before the press.
 - `Super+B` toggles the form on the output under the pointer.
+- Held against the screen's edge over the bar for 300 ms, the pointer
+  brings the bar in front of the windows over it (§2), until it leaves the
+  bar's column; a click there still toggles the form.
 - The bar's width animates over **240 ms**,
   `cubic-bezier(0.2, 0.9, 0.25, 1.08)` (a slight overshoot). Windows that
   touch the bar's side resize in the same frames. The contents cross-fade
@@ -373,6 +387,8 @@ at a time, by priority:
   agents' states and the priorities, ready for them.
 - It costs frames only during the wave and the fades; nothing is drawn at
   rest.
+- It stays above the windows: over one covering the bar, it shows on it
+  (#519).
 
 ## 7. Pandas
 
@@ -771,7 +787,8 @@ are later slices'.
   never in `config.toml`; with `full` or `mini` set there, a switch lasts
   the session.
 - **The glass.** On GLES the compositor draws what is behind the bar (the
-  windows, the lower layers, the background) into a texture of its own
+  lower layers and the background; the windows too while the bar is in
+  front of them, since 5.13) into a texture of its own
   through a damage tracker, over the full bar's place and the blur's reach
   (52 px, twice blur(26px)'s deviation) around it, and blurs it again only
   when that changed: the first build's dual Kawase blur, its last pass
@@ -2413,6 +2430,58 @@ the maintainer's spec (§4 group 11, §5; issue #395).
 - **Not built**: the session's menu (7.4), the account's picture from
   AccountsService; names for screen readers (§11: the names are said in
   the log only).
+
+### 5.13, the bar under the windows (2026-11-02)
+
+What the maintainer decided on 2026-11-02 (§2, §3; issue #519): a window
+placed over the bar goes in front of it.
+
+- **The order**, front first: the launcher and its toast, the overlay
+  layer, a fullscreen window in front, the other surfaces of the top layer
+  (the bar's popovers and their shadows, the bubbles and their chip,
+  third-party bars), the halo, the peek, the streak, the snap preview, the
+  windows leaving, the windows; then the bar's own surfaces (its tint, the
+  clock, the levels, the connections, the desktops, the agents and the
+  footer: `hocus-bar*` but the popovers and the peek), its glass, the
+  bottom and background layers. The bar in front: its surfaces and its
+  glass go back above the windows, under the popovers, as before 5.13. The
+  pointer finds surfaces in the same order (`Stand` in
+  `handlers/layer_shell.rs`): over a window over the bar, the window's
+  are found first, and it gets the presses, the cursor and the resize
+  bands there.
+- **The glass** shows what is under the bar: the lower layers and the
+  background, blurred, where no window covers it; a window over it hides
+  it there. In front, it blurs the windows under it again (#517's glass).
+- **What still keeps off it**: the work area (§2) is unchanged, so new
+  windows, maximised, snapped and the bar's switch place windows as
+  before. Dragged by the pointer to the work area's right edge, a window
+  still snaps to the right half; held by its left part, it goes over the
+  bar. A window's shadow falls on the bar under it, as on the desktop.
+- **The edge** (`crate::front`): the pointer against the screen's right
+  edge (its last column), level with the bar, starts a 300 ms timer of
+  the loop; leaving the edge before cancels it; when it fires, the bar
+  comes in front and the pointer's surface is found again where the
+  pointer is. It stays in front while the pointer is in the bar's column
+  (from the bar's left edge to the screen's right, top to bottom), and goes
+  back under as the pointer leaves it, at the next motion. Not while a
+  button is held on a client or a window is dragged, nor over a
+  fullscreen window or under the launcher. The click on the edge zone
+  still toggles the form, raised or not. One frame as the bar comes in
+  front and one as it goes back; none at rest.
+- **Measured headless** (`crates/hocus-compositor/tests/bar_front.rs`),
+  plain layer surfaces of their own colours standing for the shell's: a
+  window dragged half over the bar covers that half (the screen shows it)
+  and takes the pointer and a click there, the other half the bar's; the
+  pointer against the edge 150 ms, or leaving it before 300 ms, brings
+  nothing; resting there brings the bar in front, over the window and
+  taking the pointer where it covered it; out of the bar, the window
+  covers it again; the edge's click switches the form; nothing drawn at
+  rest in either state. A new window and a maximised one stop 8 px from
+  the bar. A popover and a bubble over a window covering the bar show and
+  take the pointer. On the GPU, under the real shell, the halo shows over
+  the window covering the bar, and goes. A fullscreen window covers the
+  bar, pushed or not. On the Intel GPU, the screenshots of the pull
+  request.
 
 ### 5.6, the clipboard's history (2026-11-02)
 

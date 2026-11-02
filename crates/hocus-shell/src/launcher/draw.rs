@@ -1,17 +1,18 @@
 //! The launcher's surface (5.1, variant C): its field and its grid as the
-//! mockup draws them, logical pixels, and what the pointer, the wheel and
-//! the keys do on it.
+//! mockup draws them, × [`ZOOM`] (#518), logical pixels, and what the
+//! pointer, the wheel and the keys do on it.
 //!
-//! The panel is 760 px wide, centred, its top 54 px from the screen's: the
-//! field (460 × 54, centred), 22 px, then the grid's area down to 98 px
-//! from the screen's bottom. The grid's rows are its headings (24 px) and
-//! its rows of eight 92 × 106 tiles, 6 px apart; the area shows the whole
-//! rows that fit from the first one scrolled to, and a thin mark on its
-//! right when there are more.
+//! The panel is 1140 px wide (760 on the mockup), centred, its top 81 px
+//! from the screen's: the field (690 × 81, centred), 33 px, then the grid's
+//! area down to 147 px from the screen's bottom. The grid's rows are its
+//! headings (36 px) and its rows of eight 138 × 159 tiles, 9 px apart; the
+//! area shows the whole rows that fit from the first one scrolled to, and
+//! a thin mark on its right when there are more. A screen too narrow for
+//! eight columns has fewer, the tiles keeping their size.
 //!
-//! The cards (5.2, variant A) are rows of their own, 736 px wide: a
-//! result's (68 px), an address's (54 px) above the grid, and the web
-//! search's (50 px) last, 8 px under each.
+//! The cards (5.2, variant A) are rows of their own, as wide as the
+//! columns (1104 px for eight): a result's (102 px), an address's (81 px)
+//! above the grid, and the web search's (75 px) last, 12 px under each.
 
 use std::{
     collections::HashMap,
@@ -35,66 +36,90 @@ use crate::{
 };
 
 // --- The mockup's sizes ---------------------------------------------------------
+//
+// Each is the 5.1 or the 5.2 mockup's, × [`ZOOM`] (#518): one place to
+// make the launcher larger or smaller.
 
-const PANEL: f32 = hocus_link::LAUNCHER_WIDTH as f32;
+/// How many times the mockups' sizes the launcher is drawn.
+pub const ZOOM: f32 = hocus_link::LAUNCHER_ZOOM as f32;
+
+/// A mockup's size `px`, zoomed.
+const fn z(px: f32) -> f32 {
+    px * ZOOM
+}
+
+/// A mockup's size `px`, zoomed, in whole pixels (the names' text and
+/// lines, as #518 sets them: 17 px on 22 px lines).
+const fn whole(px: f32) -> f32 {
+    (px * ZOOM) as i32 as f32
+}
+
 const TOP: f32 = hocus_link::LAUNCHER_TOP as f32;
 const BOTTOM: f32 = hocus_link::LAUNCHER_BOTTOM as f32;
-const FIELD: Size = Size::new(460.0, 54.0);
-const FIELD_RADIUS: f32 = 12.0;
-const FIELD_PAD_LEFT: f32 = 14.0;
-const FIELD_PAD_RIGHT: f32 = 12.0;
-const MAGNIFIER: f32 = 18.0;
-const FIELD_GAP: f32 = 10.0;
-const QUERY: f32 = 19.0;
-const HINT: f32 = 11.0;
-const HINT_PAD: f32 = 6.0;
-const HINT_HEIGHT: f32 = 21.0;
-const HINT_RADIUS: f32 = 6.0;
+const FIELD: Size = Size::new(z(460.0), z(54.0));
+const FIELD_RADIUS: f32 = z(12.0);
+const FIELD_PAD_LEFT: f32 = z(14.0);
+const FIELD_PAD_RIGHT: f32 = z(12.0);
+const MAGNIFIER: f32 = z(18.0);
+const FIELD_GAP: f32 = z(10.0);
+const QUERY: f32 = z(19.0);
+const HINT: f32 = z(11.0);
+const HINT_PAD: f32 = z(6.0);
+const HINT_HEIGHT: f32 = z(21.0);
+const HINT_RADIUS: f32 = z(6.0);
 /// The gap between the field and the grid.
-const GAP: f32 = 22.0;
+const GAP: f32 = z(22.0);
 /// A heading's row, its letters 11 px 700 spaced by 0.08 em, 4 px in.
-const HEAD: f32 = 24.0;
-const HEAD_TEXT: f32 = 11.0;
+const HEAD: f32 = z(24.0);
+const HEAD_TEXT: f32 = z(11.0);
 const HEAD_SPACING: f32 = 0.08 * HEAD_TEXT;
-const HEAD_LEFT: f32 = 4.0;
+const HEAD_LEFT: f32 = z(4.0);
 /// A tile, and a row of them with the gap under it.
-pub const TILE: Size = Size::new(92.0, 106.0);
-const TILE_ROW: f32 = 112.0;
-const TILE_RADIUS: f32 = 12.0;
+pub const TILE: Size = Size::new(z(92.0), z(106.0));
+const TILE_ROW: f32 = z(112.0);
+const TILE_RADIUS: f32 = z(12.0);
+/// The panel's room on each side of its eight columns: 760 px in all.
+const PANEL_PAD: f32 = z(12.0);
 /// Its icon from its top, then its name 7 px under it, 4 px in from its
 /// sides, two lines of 15 px at most.
-const ICON_TOP: f32 = 9.0;
-pub const ICON: f32 = 48.0;
-const ICON_RADIUS: f32 = 12.0;
-const LETTER: f32 = 19.0;
-const NAME_TOP: f32 = ICON_TOP + ICON + 7.0;
-const NAME: f32 = 11.5;
-const NAME_LINE: f32 = 15.0;
-const NAME_ROOM: f32 = TILE.width - 2.0 * 4.0;
+const ICON_TOP: f32 = z(9.0);
+pub const ICON: f32 = z(48.0);
+const ICON_RADIUS: f32 = z(12.0);
+const LETTER: f32 = z(19.0);
+const NAME_TOP: f32 = ICON_TOP + ICON + z(7.0);
+const NAME: f32 = whole(11.5);
+const NAME_LINE: f32 = whole(15.0);
+const NAME_ROOM: f32 = TILE.width - 2.0 * z(4.0);
 /// The scroll mark, 14 px past the area's right.
-const MARK_OUT: f32 = 14.0;
-const MARK_WIDTH: f32 = 3.0;
-/// The full name over a tile whose name is cut, after resting on it.
+const MARK_OUT: f32 = z(14.0);
+const MARK_WIDTH: f32 = z(3.0);
+/// The full name over a tile whose name is cut, after resting on it: 12 px
+/// in a frame 8 px in across, 4 px under the tile.
 const TOOLTIP_AFTER: Duration = Duration::from_millis(500);
-const TOOLTIP: f32 = 12.0;
-/// A card: 736 px wide, radius 14, 8 px under it; 16 px in, its badge,
-/// 14 px, its two lines (the first 26 px Martian Mono for a result, 15 px
-/// 600 otherwise; then 12 px, 2 px under), 14 px, and what `Enter` does
-/// (11.5 px 600) while it is selected.
-const CARD_WIDTH: f32 = 736.0;
-const CARD_UNDER: f32 = 8.0;
-const CARD_RADIUS: f32 = 14.0;
-const CARD_PAD: f32 = 16.0;
-const CARD_GAP: f32 = 14.0;
-const ANSWER_BADGE: f32 = 40.0;
-const BADGE: f32 = 34.0;
-const BADGE_ICON: f32 = 20.0;
-const EQUALS: f32 = 20.0;
-const RESULT: f32 = 26.0;
-const CARD_MAIN: f32 = 15.0;
-const CARD_SUB: f32 = 12.0;
-const CARD_LINES_GAP: f32 = 2.0;
-const CARD_HINT: f32 = 11.5;
+const TOOLTIP: f32 = z(12.0);
+const TOOLTIP_PAD: Size = Size::new(z(8.0), z(4.0));
+const TOOLTIP_UNDER: f32 = z(4.0);
+const TOOLTIP_RADIUS: f32 = z(6.0);
+/// A card: as wide as eight tiles (736 px), radius 14, 8 px under it; 16 px
+/// in, its badge, 14 px, its two lines (the first 26 px Martian Mono for a
+/// result, 15 px 600 otherwise; then 12 px, 2 px under), 14 px, and what
+/// `Enter` does (11.5 px 600) while it is selected.
+const CARD_UNDER: f32 = z(8.0);
+const CARD_RADIUS: f32 = z(14.0);
+const CARD_PAD: f32 = z(16.0);
+const CARD_GAP: f32 = z(14.0);
+const ANSWER_CARD: f32 = z(68.0);
+const ADDRESS_CARD: f32 = z(54.0);
+const WEB_CARD: f32 = z(50.0);
+const ANSWER_BADGE: f32 = z(40.0);
+const BADGE: f32 = z(34.0);
+const BADGE_ICON: f32 = z(20.0);
+const EQUALS: f32 = z(20.0);
+const RESULT: f32 = z(26.0);
+const CARD_MAIN: f32 = z(15.0);
+const CARD_SUB: f32 = z(12.0);
+const CARD_LINES_GAP: f32 = z(2.0);
+const CARD_HINT: f32 = z(11.5);
 const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 
 const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
@@ -110,8 +135,10 @@ const NEUTRAL: (Color, Color) = (rgb(0x5C6576), rgb(0x9AA3B4));
 const NEUTRAL_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
 const TOOLTIP_FILL: Color = Color::from_rgba8(22, 27, 42, 0.96);
 const TOOLTIP_RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
-/// On the CPU: about the desktop's night blue under the compositor's dim.
-const OPAQUE: Color = rgb(0x0A0E18);
+/// On the CPU, whose surfaces have no transparency: the bar's dark blue
+/// (bar.md §13), opaque, top to bottom, the compositor's tint without the
+/// desktop under it.
+const OPAQUE: (Color, Color) = (rgb(0x161B2A), rgb(0x0E111C));
 const CARD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.04);
 const CARD_RIM: Color = Color::from_rgba8(255, 255, 255, 0.10);
 const CARD_SUB_INK: Color = rgb(0x8C96A8);
@@ -126,9 +153,9 @@ impl Card {
     /// Its row's height: the card, and the gap under it.
     fn row(self) -> f32 {
         let card = match self {
-            Self::Answer => 68.0,
-            Self::Address => 54.0,
-            Self::Web => 50.0,
+            Self::Answer => ANSWER_CARD,
+            Self::Address => ADDRESS_CARD,
+            Self::Web => WEB_CARD,
         };
         card + CARD_UNDER
     }
@@ -151,21 +178,39 @@ impl Card {
 
 // --- Where things are -------------------------------------------------------------
 
-/// The field on a surface `size` large.
-fn field(size: Size) -> Rectangle {
+/// The panel's width with `columns` columns of tiles.
+fn panel(columns: usize) -> f32 {
+    columns as f32 * TILE.width + 2.0 * PANEL_PAD
+}
+
+/// The columns of tiles on a surface `width` wide: eight, or as many as fit
+/// with the panel's sides and the scroll mark on either side; fewer
+/// columns, never smaller tiles.
+pub fn columns(width: f32) -> usize {
+    (1..=super::COLUMNS)
+        .rev()
+        .find(|n| panel(*n) + 2.0 * MARK_OUT <= width)
+        .unwrap_or(1)
+}
+
+/// The field on a surface `size` large, over `columns` columns: no wider
+/// than the panel.
+fn field(size: Size, columns: usize) -> Rectangle {
+    let width = FIELD.width.min(panel(columns));
     Rectangle::new(
-        Point::new(((size.width - FIELD.width) / 2.0).round(), TOP),
-        FIELD,
+        Point::new(((size.width - width) / 2.0).round(), TOP),
+        Size::new(width, FIELD.height),
     )
 }
 
-/// The grid's area on a surface `size` large.
-fn area(size: Size) -> Rectangle {
+/// The grid's area on a surface `size` large, `columns` wide.
+fn area(size: Size, columns: usize) -> Rectangle {
     let top = TOP + FIELD.height + GAP;
     let height = (size.height - BOTTOM - top).max(HEAD + TILE_ROW);
+    let width = panel(columns);
     Rectangle::new(
-        Point::new(((size.width - PANEL) / 2.0).round(), top),
-        Size::new(PANEL, height),
+        Point::new(((size.width - width) / 2.0).round(), top),
+        Size::new(width, height),
     )
 }
 
@@ -218,7 +263,7 @@ pub fn keep_in_view(grid: &Grid, selected: usize, offset: usize, size: Size) -> 
             row
         };
     }
-    let height = area(size).height;
+    let height = area(size, grid.columns).height;
     let mut offset = offset;
     while end_of(grid, offset, height) <= row && offset < row {
         offset += 1;
@@ -229,7 +274,7 @@ pub fn keep_in_view(grid: &Grid, selected: usize, offset: usize, size: Size) -> 
 /// The grid scrolled `by` rows from `offset` (down positive), within its
 /// ends.
 pub fn scrolled(grid: &Grid, offset: usize, by: i32, size: Size) -> usize {
-    let most = most_offset(grid, area(size).height);
+    let most = most_offset(grid, area(size, grid.columns).height);
     (offset as i64 + i64::from(by)).clamp(0, most as i64) as usize
 }
 
@@ -249,18 +294,20 @@ pub struct Layout {
 
 impl Layout {
     pub fn of(size: Size, grid: &Grid, offset: usize) -> Self {
-        let area = area(size);
+        let area = area(size, grid.columns);
         let end = end_of(grid, offset, area.height);
         let mut heads = Vec::new();
         let mut tiles = Vec::new();
         let mut cards = Vec::new();
-        let left = area.x + (PANEL - super::COLUMNS as f32 * TILE.width) / 2.0;
+        let left = area.x + PANEL_PAD;
+        // A card is as wide as the tiles' columns.
+        let card_width = grid.columns as f32 * TILE.width;
         let mut y = area.y;
         for row in grid.rows.get(offset..end).unwrap_or_default() {
             match row {
                 Row::Head(label) => heads.push((
                     *label,
-                    Rectangle::new(Point::new(area.x, y), Size::new(PANEL, HEAD)),
+                    Rectangle::new(Point::new(area.x, y), Size::new(area.width, HEAD)),
                 )),
                 Row::Tiles(row) => {
                     for (column, at) in row.iter().enumerate() {
@@ -272,8 +319,8 @@ impl Layout {
                     *at,
                     *card,
                     Rectangle::new(
-                        Point::new(area.x + (PANEL - CARD_WIDTH) / 2.0, y),
-                        Size::new(CARD_WIDTH, card.row() - CARD_UNDER),
+                        Point::new(left, y),
+                        Size::new(card_width, card.row() - CARD_UNDER),
                     ),
                 )),
             }
@@ -291,7 +338,7 @@ impl Layout {
             )
         });
         Self {
-            field: field(size),
+            field: field(size, grid.columns),
             area,
             heads,
             tiles,
@@ -432,6 +479,8 @@ pub struct State {
     field: (String, String, f32),
     /// The hint's width.
     hint: f32,
+    /// The field's width its text was fitted to.
+    room: f32,
     /// What was last logged of what it shows.
     logged: String,
 }
@@ -474,7 +523,13 @@ impl<Message> canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         if self.software {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), OPAQUE);
+            let fill = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, bounds.height))
+                .add_stop(0.0, OPAQUE.0)
+                .add_stop(1.0, OPAQUE.1);
+            frame.fill(
+                &Path::rectangle(Point::ORIGIN, bounds.size()),
+                canvas::Fill::from(fill),
+            );
         }
         super::with(|l| {
             if let Some(open) = l.open_on(self.id) {
@@ -510,29 +565,35 @@ impl<Message> canvas::Program<Message> for View {
 }
 
 impl View {
-    /// Before it draws: its size kept, the names shown measured, the
-    /// field's text fitted, and what it shows logged when it changed.
+    /// Before it draws: its size kept, its columns fitted to it, the names
+    /// shown measured, the field's text fitted, and what it shows logged
+    /// when it changed.
     fn prepare(&self, state: &mut State, size: Size) {
         let shown = super::with(|l| {
             let open = l.open_mut(self.id)?;
             open.size = size;
+            open.fit(columns(size.width));
             let layout = Layout::of(size, &open.grid, open.offset);
             let names: Vec<String> = layout
                 .tiles
                 .iter()
                 .filter_map(|(at, _)| open.app(*at).map(|a| a.entry.name.clone()))
                 .collect();
-            Some((open.query.clone(), names))
+            Some((open.query.clone(), names, layout.field))
         });
-        let Some((query, names)) = shown else {
+        let Some((query, names, field)) = shown else {
             return;
         };
         measure_labels(names.iter().map(String::as_str));
         if state.hint == 0.0 {
             state.hint = kit::measure(self.words.escape(), HINT, MANROPE_SEMIBOLD);
         }
-        if state.field.0 != query || state.field.1.is_empty() != query.is_empty() {
-            let room = text_room(field(size), state.hint);
+        if state.field.0 != query
+            || state.field.1.is_empty() != query.is_empty()
+            || state.room != field.width
+        {
+            state.room = field.width;
+            let room = text_room(field, state.hint);
             let width = |t: &str| kit::measure(t, QUERY, MANROPE);
             let fitted = tail(&query, room, width);
             let caret = if query.is_empty() {
@@ -731,8 +792,10 @@ impl View {
                     Stroke::default().with_color(SELECTED_RIM).with_width(1.0),
                 );
             }
+            // On the screen's pixels, so that the icon's show one for one.
+            let snap = |v: f32| (v * open.scale).round() / open.scale;
             let icon = Rectangle::new(
-                Point::new(rect.center_x() - ICON / 2.0, rect.y + ICON_TOP),
+                Point::new(snap(rect.center_x() - ICON / 2.0), snap(rect.y + ICON_TOP)),
                 Size::new(ICON, ICON),
             );
             match &app.entry.icon {
@@ -894,9 +957,9 @@ impl View {
         // Just before the placeholder's first letter, never on it; just
         // after the last one typed.
         let caret_x = if query.is_empty() {
-            x - 2.0
+            x - z(2.0)
         } else {
-            x + caret + 1.0
+            x + caret + z(1.0)
         };
         let caret = Rectangle::new(
             Point::new(caret_x, field.center_y() - QUERY * 0.6),
@@ -979,7 +1042,7 @@ fn inset(rect: Rectangle, by: f32) -> Rectangle {
     )
 }
 
-/// The magnifier, 18 px from `at`: the mockup's 24 px drawing.
+/// The magnifier, [`MAGNIFIER`] wide from `at`: the mockup's 24 px drawing.
 fn magnifier(f: &mut Frame, at: Point) {
     let k = MAGNIFIER / 24.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
@@ -1037,7 +1100,7 @@ fn badge_of(f: &mut Frame, card: Card, rect: Rectangle) {
     }
 }
 
-/// The mockup's 24 px globe, 20 px from `at`.
+/// The mockup's 24 px globe, [`BADGE_ICON`] wide from `at`.
 fn globe(f: &mut Frame, at: Point) {
     let k = BADGE_ICON / 24.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
@@ -1054,7 +1117,7 @@ fn globe(f: &mut Frame, at: Point) {
     f.stroke(&lines, stroke(1.6));
 }
 
-/// The mockup's 24 px chain link, 20 px from `at`: a bar between two
+/// The mockup's 24 px chain link, [`BADGE_ICON`] wide from `at`: a bar between two
 /// hooks, each a near half circle of radius 3.2.
 fn link(f: &mut Frame, at: Point) {
     use std::f32::consts::PI;
@@ -1090,7 +1153,7 @@ fn link(f: &mut Frame, at: Point) {
     );
 }
 
-/// A heading: its letters spaced, 4 px in, on its row's middle.
+/// A heading: its letters spaced, [`HEAD_LEFT`] in, on its row's middle.
 fn head(f: &mut Frame, label: &str, rect: Rectangle) {
     let mut x = rect.x + HEAD_LEFT;
     for ch in label.chars() {
@@ -1144,16 +1207,17 @@ fn letter_tile(f: &mut Frame, rect: Rectangle, name: &str) {
 
 /// `name` whole in a small frame under `tile`, inside the surface `size`.
 fn tooltip(f: &mut Frame, name: &str, tile: Rectangle, size: Size) {
-    let width = kit::measure(name, TOOLTIP, MANROPE) + 16.0;
-    let height = TOOLTIP * LINE + 8.0;
-    let x = (tile.center_x() - width / 2.0).clamp(4.0, (size.width - width - 4.0).max(4.0));
+    let width = kit::measure(name, TOOLTIP, MANROPE) + 2.0 * TOOLTIP_PAD.width;
+    let height = TOOLTIP * LINE + 2.0 * TOOLTIP_PAD.height;
+    let edge = TOOLTIP_UNDER;
+    let x = (tile.center_x() - width / 2.0).clamp(edge, (size.width - width - edge).max(edge));
     let rect = Rectangle::new(
-        Point::new(x, tile.y + tile.height + 4.0),
+        Point::new(x, tile.y + tile.height + TOOLTIP_UNDER),
         Size::new(width, height),
     );
-    f.fill(&kit::rounded(rect, 6.0), TOOLTIP_FILL);
+    f.fill(&kit::rounded(rect, TOOLTIP_RADIUS), TOOLTIP_FILL);
     f.stroke(
-        &kit::rounded(inset(rect, 0.5), 5.5),
+        &kit::rounded(inset(rect, 0.5), TOOLTIP_RADIUS - 0.5),
         Stroke::default().with_color(TOOLTIP_RIM).with_width(1.0),
     );
     f.fill_text(kit::text(
@@ -1210,24 +1274,70 @@ mod tests {
             ],
             ..Grid::default()
         };
-        // The mockup's laptop: an area 480 px high.
-        let size = Size::new(848.0, 708.0);
-        assert_eq!(area(size).height, 480.0);
-        // 24 + 112 + 24 + 112 + 112 = 384; one more row would be 496.
-        assert_eq!(end_of(&grid, 0, 480.0), 5);
-        // From the second heading, the rest fits: 24 + 4 × 112 = 472.
-        assert_eq!(most_offset(&grid, 480.0), 2);
+        // The mockup's laptop, × 1.5: an area 720 px high.
+        let size = Size::new(1272.0, 1062.0);
+        assert_eq!(area(size, 8).height, 720.0);
+        // 36 + 168 + 36 + 168 + 168 = 576; one more row would be 744.
+        assert_eq!(end_of(&grid, 0, 720.0), 5);
+        // From the second heading, the rest fits: 36 + 4 × 168 = 708.
+        assert_eq!(most_offset(&grid, 720.0), 2);
         assert_eq!(scrolled(&grid, 0, 1, size), 1);
         assert_eq!(scrolled(&grid, 1, 5, size), 2);
         assert_eq!(scrolled(&grid, 1, -4, size), 0);
         let layout = Layout::of(size, &grid, 0);
         assert_eq!(layout.heads.len(), 2);
         assert_eq!(layout.tiles.len(), 24);
-        // Centred: 760 px, the eight tiles 12 px in.
-        assert_eq!(layout.area.x, 44.0);
-        assert_eq!(layout.tiles[0].1.x, 56.0);
-        assert_eq!(layout.field, Rectangle::new(Point::new(194.0, 54.0), FIELD));
+        // Centred: 1140 px, the eight 138 × 159 tiles 18 px in.
+        assert_eq!(layout.area.x, 66.0);
+        assert_eq!(layout.area.width, 1140.0);
+        assert_eq!(layout.tiles[0].1.x, 84.0);
+        assert_eq!(layout.tiles[0].1.size(), Size::new(138.0, 159.0));
+        assert_eq!(layout.tiles[1].1.x, 84.0 + 138.0);
+        assert_eq!(
+            layout.field,
+            Rectangle::new(Point::new(291.0, 81.0), Size::new(690.0, 81.0))
+        );
         assert!(layout.mark.is_some());
+    }
+
+    #[test]
+    fn a_narrow_screen_has_fewer_columns_never_smaller_tiles() {
+        // 1366 × 768 at scale 1: the eight columns fit, 113 px on each
+        // side.
+        assert_eq!(columns(1366.0), 8);
+        assert_eq!(columns(2560.0), 8);
+        // At 1.25, it is 1093 logical pixels wide: seven.
+        assert_eq!(columns(1366.0 / 1.25), 7);
+        assert_eq!(columns(1024.0), 6);
+        assert_eq!(columns(800.0), 5);
+        assert_eq!(columns(100.0), 1);
+        // Seven columns: the tiles at their size, the panel and the cards
+        // as wide as they are, the field narrower than none of them (on a
+        // screen tall enough for the card under the tiles).
+        let size = Size::new(1366.0 / 1.25, 768.0);
+        let grid = Grid {
+            rows: vec![
+                Row::Head("A"),
+                Row::Tiles((0..7).collect()),
+                Row::Card(Card::Web, 7),
+            ],
+            flat: (0..7)
+                .map(super::super::Item::App)
+                .chain([super::super::Item::Card(Card::Web)])
+                .collect(),
+            columns: columns(size.width),
+            ..Grid::default()
+        };
+        let layout = Layout::of(size, &grid, 0);
+        assert_eq!(layout.tiles.len(), 7);
+        assert!(layout.tiles.iter().all(|(_, t)| t.size() == TILE));
+        let (_, last) = layout.tiles[6];
+        assert!(last.x + last.width + MARK_OUT <= size.width, "{last:?}");
+        assert!(layout.area.x >= MARK_OUT, "{:?}", layout.area);
+        assert_eq!(layout.area.width, 7.0 * 138.0 + 36.0);
+        assert_eq!(layout.cards[0].2.width, 7.0 * 138.0);
+        assert_eq!(layout.cards[0].2.x, layout.tiles[0].1.x);
+        assert_eq!(layout.field.width, 690.0);
     }
 
     #[test]
@@ -1244,7 +1354,7 @@ mod tests {
             flat: (0..32).map(super::super::Item::App).collect(),
             ..Grid::default()
         };
-        let size = Size::new(848.0, 708.0);
+        let size = Size::new(1272.0, 1062.0);
         // Down into the fourth row of tiles: the grid scrolls one row.
         assert_eq!(keep_in_view(&grid, 25, 0, size), 1);
         // Back up to the first: its heading with it.

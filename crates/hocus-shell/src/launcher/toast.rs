@@ -3,10 +3,11 @@
 //!
 //! It is a small layer surface of the shell's
 //! ([`hocus_link::LAUNCHER_TOAST_NAMESPACE`]), in the overlay layer, anchored to the
-//! bottom 40 px up and centred over the space the bar leaves, taking
-//! neither the keyboard nor the pointer. The shell draws it once and
-//! removes it after [`LAUNCHER_TOAST`]; the compositor fades it in, rising
-//! 8 px, and out, as the mockup's `toast-in`.
+//! bottom 60 px up and centred, taking neither the keyboard nor the
+//! pointer. The shell draws it once and removes it after
+//! [`LAUNCHER_TOAST`]; the compositor fades it in, rising 12 px, and out,
+//! as the mockup's `toast-in`. Its sizes are the mockup's × the
+//! launcher's [`ZOOM`] (#518).
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -23,6 +24,7 @@ use iced::{
     window,
 };
 
+use super::draw::ZOOM;
 use crate::{
     levels::draw::{LINE, TEXT},
     popover::{
@@ -32,11 +34,11 @@ use crate::{
 };
 
 /// Its text, 13 px 600, 10 px from its top and bottom, 16 from its sides,
-/// in a 1 px rim, radius 12, 40 px from the screen's bottom.
-const SIZE: f32 = 13.0;
-const PAD: Size = Size::new(16.0, 10.0);
-const RADIUS: f32 = 12.0;
-pub const BOTTOM: i32 = 40;
+/// in a 1 px rim, radius 12, 40 px from the screen's bottom: zoomed.
+const SIZE: f32 = 13.0 * ZOOM;
+const PAD: Size = Size::new(16.0 * ZOOM, 10.0 * ZOOM);
+const RADIUS: f32 = 12.0 * ZOOM;
+pub const BOTTOM: i32 = (40.0 * ZOOM) as i32;
 const FILL: Color = Color::from_rgba8(14, 17, 28, 0.94);
 const RIM: Color = Color::from_rgba8(108, 194, 135, 0.45);
 /// The compositor's fade out ends a little after the shell's clock says:
