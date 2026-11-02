@@ -70,6 +70,7 @@ impl WlrLayerShellHandler for State {
                 self.popover_gone(&layer);
                 self.launcher_gone(&layer);
                 self.peek_gone(&layer);
+                self.bubble_gone(&layer);
                 self.layer_keyboard();
                 self.redraw = true;
             }
@@ -116,6 +117,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.launcher_committed(&layer);
             }
             hocus_link::LAUNCHER_TOAST_NAMESPACE => state.launcher_toast_committed(&layer),
+            ns if hocus_link::is_bubble(ns) => state.bubble_committed(&layer),
             _ => {}
         }
         let before = state.work_area(&output);

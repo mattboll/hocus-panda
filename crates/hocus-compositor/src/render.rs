@@ -467,16 +467,27 @@ impl State {
                 let Some(mut geometry) = map.layer_geometry(&layer) else {
                     continue;
                 };
-                // A popover moves in and out; it shows from its first frame.
+                // A popover moves in and out, and a notification's bubble;
+                // they show from their first frame.
                 let popover = layer.namespace() == hocus_link::POPOVER_NAMESPACE;
-                let look = self.panel.popovers.look(&layer, now, self.popover_motion());
-                let alpha = match (popover, look) {
-                    (false, _) => 1.0,
-                    (true, Some(look)) if look.alpha > 0.0 => {
-                        geometry.loc.x += look.shift.round() as i32;
-                        look.alpha
+                let look = if popover {
+                    self.panel
+                        .popovers
+                        .look(&layer, now, self.popover_motion())
+                        .map(|l| (l.alpha, l.shift))
+                } else if hocus_link::is_bubble(layer.namespace()) {
+                    self.bubbles
+                        .look(&layer, now, self.bubbles_slide())
+                        .map(|l| (l.alpha, l.shift))
+                } else {
+                    Some((1.0, 0.0))
+                };
+                let alpha = match look {
+                    Some((alpha, shift)) if alpha > 0.0 => {
+                        geometry.loc.x += shift.round() as i32;
+                        alpha
                     }
-                    (true, _) => continue,
+                    _ => continue,
                 };
                 let loc = geometry.loc.to_physical_precise_round(scale);
                 let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
@@ -489,20 +500,24 @@ impl State {
                 // the levels', the connections' and the desktops' surfaces
                 // are opaque too, and cut to the bar: they change size in
                 // their own commits when the form switches.
+                // A bubble and the chip under them are cards of their own.
+                let own = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
                 let cut = match layer.namespace() {
-                    hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => Some(Rectangle::new(
-                        loc,
-                        geometry.size.to_physical_precise_round(scale),
-                    )),
+                    hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => {
+                        Some((own, hocus_link::RADIUS))
+                    }
+                    ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
+                    hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),
                     hocus_link::CLOCK_NAMESPACE
                     | hocus_link::LEVELS_NAMESPACE
                     | hocus_link::CONNECTIONS_NAMESPACE
                     | hocus_link::DESKTOPS_NAMESPACE
-                    | hocus_link::AGENTS_NAMESPACE => bar,
+                    | hocus_link::AGENTS_NAMESPACE
+                    | hocus_link::UNREAD_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
                     _ => None,
                 };
-                if let Some(clip) = cut.filter(|_| self.shell.software) {
-                    let radius = (hocus_link::RADIUS * scale).round() as i32;
+                if let Some((clip, radius)) = cut.filter(|_| self.shell.software) {
+                    let radius = (radius * scale).round() as i32;
                     out.extend(surfaces.into_iter().map(|e| {
                         OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))
                     }));
@@ -1072,6 +1087,7 @@ fn in_the_bar(namespace: &str) -> bool {
             | hocus_link::CONNECTIONS_NAMESPACE
             | hocus_link::DESKTOPS_NAMESPACE
             | hocus_link::AGENTS_NAMESPACE
+            | hocus_link::UNREAD_NAMESPACE
     )
 }
 

@@ -45,6 +45,8 @@ const LAST_DELAY: Duration = Duration::from_secs(30);
 pub struct Shell {
     /// Its program; `None`: no shell (tests, `--no-shell`).
     pub program: Option<PathBuf>,
+    /// The session bus it serves the notifications on; `None`: none.
+    pub bus: Option<Bus>,
     /// The socket it reaches the compositor on.
     pub socket: Option<PathBuf>,
     link: Option<Link>,
@@ -59,6 +61,25 @@ pub struct Shell {
     ended: Option<Sender<Duration>>,
     /// The shells started and not ended yet.
     pub running: Arc<Running>,
+}
+
+/// The session bus the shell serves the notifications on (5.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Bus {
+    /// The bus given (`--session-bus`), by its address.
+    Given(String),
+    /// The session's own: the compositor is the session.
+    Session,
+}
+
+impl Bus {
+    /// The word the shell takes ([`hocus_link::NOTIFICATIONS_BUS_ENV`]).
+    fn word(&self) -> &str {
+        match self {
+            Self::Given(address) => address,
+            Self::Session => "session",
+        }
+    }
 }
 
 /// How many shells run: the in-process harness waits for none to, so that
@@ -170,12 +191,17 @@ impl State {
         };
         let env = programs::Env::of(self);
         let gpu = self.gpu;
+        let bus = self.shell.bus.clone();
         let runs = Running::start(&self.shell.running);
         programs::on_a_thread("shell".to_owned(), move || {
             let _runs = runs;
             let started = Instant::now();
             let mut command = env.command(&program);
             command.env(hocus_link::SOCKET_ENV, &socket);
+            match &bus {
+                Some(bus) => command.env(hocus_link::NOTIFICATIONS_BUS_ENV, bus.word()),
+                None => command.env_remove(hocus_link::NOTIFICATIONS_BUS_ENV),
+            };
             for (name, value) in gpu_env(gpu) {
                 command.env(name, value);
             }
@@ -300,6 +326,7 @@ impl State {
         self.tell_layouts();
         self.tell_desktops();
         self.tell_agents();
+        self.tell_bubbles_screen();
         self.hand_kept_levels();
     }
 
@@ -325,6 +352,9 @@ impl State {
                 self.tell_shell(self.bar_look());
             }
             ToCompositor::Wake(namespace) => self.wake_shell_surfaces(&namespace),
+            ToCompositor::Closing(namespace) if hocus_link::is_bubble(&namespace) => {
+                self.bubble_closing(&namespace);
+            }
             ToCompositor::Closing(namespace) => {
                 self.popovers_closing(&namespace);
                 self.launcher_closing(&namespace);
@@ -351,6 +381,7 @@ impl State {
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::Copy(text) => self.copy_text(text),
             ToCompositor::Launch(launch) => self.launch(launch),
+            ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
         }
     }
 

@@ -106,3 +106,12 @@ user's click in the bar, and keeps the file as it was beside it
 (`….before-hocuspanda`); unplugging puts it back, or takes only these
 entries out if the file changed since. Codex runs a new hook only once
 the user trusted it with `/hooks`.
+
+## Their notifications
+
+A followed tool's desktop notification that only says its agent waits or
+has finished ("Claude is waiting for your input", "Claude needs your
+permission to use Bash") makes no bubble: the agent's row, its panda and
+the halo say it already. It goes to the notifications' history only. Its
+other notifications are bubbles. How one is recognised:
+[notifications.md](design/notifications.md#agents-notifications).
