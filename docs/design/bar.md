@@ -774,7 +774,11 @@ are later slices'.
   rounded rectangle as the bar is at that frame. The shell draws `bar.bg`
   (70 % to 78 %) and `bar.border` over it. With pixman, `[appearance]
   reduce-transparency`, or a shell on the CPU, there is no blur and the
-  shell draws the opaque `#161B2A → #0E111C`.
+  shell draws the opaque `#161B2A → #0E111C`. What is behind is drawn into
+  the texture moved by the region's corner, so every element draws where
+  it is told rather than where it is on the screen: a window wobbling
+  while dragged once drew at its screen place there, and the glass showed
+  nothing of it under the bar, and some of it before it got there (#517).
 - **The renderer** (3.0): the shell is started with `WGPU_POWER_PREF=low`,
   `VK_LOADER_DRIVERS_SELECT` naming the compositor's GPU's Vulkan driver,
   Mesa's EGL vendor, and `vk_wsi_force_bgra8_unorm_first=true`, Mesa's

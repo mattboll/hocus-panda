@@ -113,8 +113,10 @@ fn corner_insets(radius: i32) -> impl Iterator<Item = (i32, i32)> {
 #[derive(Debug)]
 pub struct Rounded<E> {
     inner: E,
-    /// The window's rectangle and the corner radius, physical, in the same
-    /// space as the element's geometry.
+    /// The window's rectangle, physical, from the element's own corner;
+    /// and the corner radius. Not where the output has them: the glass
+    /// draws the same element elsewhere, moved (`glass.rs`), and where it
+    /// is drawn then is all `draw` is told.
     clip: Rectangle<i32, Physical>,
     radius: i32,
     outside: Outside,
@@ -130,8 +132,18 @@ pub enum Outside {
     Cropped,
 }
 
-impl<E> Rounded<E> {
-    pub fn new(inner: E, clip: Rectangle<i32, Physical>, radius: i32, outside: Outside) -> Self {
+impl<E: Element> Rounded<E> {
+    /// `inner` cut to `clip` (physical, in the same space as its geometry
+    /// at `scale`) with corners `radius` round.
+    pub fn new(
+        inner: E,
+        clip: Rectangle<i32, Physical>,
+        radius: i32,
+        outside: Outside,
+        scale: f64,
+    ) -> Self {
+        let mut clip = clip;
+        clip.loc -= inner.geometry(Scale::from(scale)).loc;
         Self {
             inner,
             clip,
@@ -139,19 +151,10 @@ impl<E> Rounded<E> {
             outside,
         }
     }
-}
 
-impl<E: Element> Rounded<E> {
     /// The corner cutouts in the element's own coordinates.
-    fn local_cutouts(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
-        let origin = self.inner.geometry(scale).loc;
+    fn local_cutouts(&self) -> Vec<Rectangle<i32, Physical>> {
         corner_cutouts(self.clip, self.radius)
-            .into_iter()
-            .map(|mut r| {
-                r.loc -= origin;
-                r
-            })
-            .collect()
     }
 }
 
@@ -189,12 +192,13 @@ impl<E: Element> Element for Rounded<E> {
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        let cutouts = self.local_cutouts(scale);
+        let cutouts = self.local_cutouts();
         let mut opaque: Vec<_> = self.inner.opaque_regions(scale).iter().copied().collect();
         if self.outside == Outside::Cropped {
-            let mut clip = self.clip;
-            clip.loc -= self.inner.geometry(scale).loc;
-            opaque = opaque.iter().filter_map(|r| r.intersection(clip)).collect();
+            opaque = opaque
+                .iter()
+                .filter_map(|r| r.intersection(self.clip))
+                .collect();
         }
         if cutouts.is_empty() {
             return opaque.into_iter().collect();
@@ -222,16 +226,9 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
-        // Damage is relative to `dst`.
-        let cutouts: Vec<_> = corner_cutouts(self.clip, self.radius)
-            .into_iter()
-            .map(|mut r| {
-                r.loc -= dst.loc;
-                r
-            })
-            .collect();
-        let mut clip = self.clip;
-        clip.loc -= dst.loc;
+        // Damage is relative to `dst`, as the clip is.
+        let cutouts = self.local_cutouts();
+        let clip = self.clip;
         let cropped: Vec<_>;
         let damage = match self.outside {
             Outside::Shown => damage,
@@ -1190,9 +1187,10 @@ where
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
-        // Damage is relative to `dst`.
+        // Damage is relative to `dst`; the hole is made so from the
+        // piece's own place, which the glass moves (`glass.rs`).
         let mut hole = self.hole;
-        hole.loc -= dst.loc;
+        hole.loc -= self.dst.loc;
         let radius = self.radius;
         if !damage.iter().any(|d| d.overlaps(hole)) {
             return self.inner.draw(frame, src, dst, damage, opaque_regions);

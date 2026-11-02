@@ -194,6 +194,9 @@ pub enum Shows {
     /// A layer surface along the output's top edge, `height` high, which
     /// reserves its height.
     Bar { height: u32 },
+    /// A clear layer surface in the bar's namespace, where the shell puts
+    /// its full bar: what shows there is the compositor's glass alone.
+    ClearBar,
     /// An xdg toplevel of this size drawn with a translucent shadow
     /// `margin` wide around it, outside its window geometry, as
     /// client-side decorated applications draw theirs.
@@ -325,6 +328,7 @@ fn run_client(
         clip: None,
         hung: Vec::new(),
         typing: false,
+        clear: false,
     };
     match shows {
         Some(Shows::Window {
@@ -392,6 +396,24 @@ fn run_client(
             window.commit();
             client.size = size;
             client.window = Some(window);
+        }
+        Some(Shows::ClearBar) => {
+            let shell = LayerShell::bind(&globals, &qh).context("no layer shell")?;
+            let surface = client.compositor.create_surface(&qh);
+            let layer = shell.create_layer_surface(
+                &qh,
+                surface,
+                Layer::Top,
+                Some(hocus_link::NAMESPACE),
+                None,
+            );
+            let edge = hocus_link::EDGE;
+            layer.set_anchor(Anchor::RIGHT | Anchor::TOP | Anchor::BOTTOM);
+            layer.set_size(hocus_link::Form::Full.width() as u32, 0);
+            layer.set_margin(edge, edge, edge, 0);
+            layer.commit();
+            client.clear = true;
+            client.layer = Some(layer);
         }
         Some(Shows::Bar { height }) => {
             let shell = LayerShell::bind(&globals, &qh).context("no layer shell")?;
@@ -461,6 +483,8 @@ struct Client {
     hung: Vec<WritePipe>,
     /// It takes the keyboard and says its group.
     typing: bool,
+    /// Its layer surface is clear.
+    clear: bool,
 }
 
 impl Client {
@@ -498,7 +522,11 @@ impl Client {
         for (i, pixel) in canvas.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let (x, y) = (i as i32 % w, i as i32 / w);
             let inside = x >= m && y >= m && x < m + iw && y < m + ih;
-            let colour: u32 = if inside { WINDOW_COLOUR } else { SHADOW_COLOUR };
+            let colour: u32 = match (self.clear, inside) {
+                (true, _) => 0,
+                (false, true) => WINDOW_COLOUR,
+                (false, false) => SHADOW_COLOUR,
+            };
             pixel.copy_from_slice(&colour.to_le_bytes());
         }
         surface.damage_buffer(0, 0, w, h);

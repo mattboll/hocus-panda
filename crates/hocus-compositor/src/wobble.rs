@@ -359,7 +359,13 @@ pub trait Bend: Renderer + Sized {
         alpha: f32,
     ) -> Option<BentElement>;
 
-    fn draw_bent(frame: &mut Self::Frame<'_, '_>, bent: &BentElement) -> Result<(), Self::Error>;
+    /// Draws `bent` at `dst`: where its geometry is, or where the glass
+    /// moved it to (`glass.rs`).
+    fn draw_bent(
+        frame: &mut Self::Frame<'_, '_>,
+        bent: &BentElement,
+        dst: Rectangle<i32, Physical>,
+    ) -> Result<(), Self::Error>;
 }
 
 impl Bend for PixmanRenderer {
@@ -373,7 +379,11 @@ impl Bend for PixmanRenderer {
         None
     }
 
-    fn draw_bent(_frame: &mut Self::Frame<'_, '_>, _bent: &BentElement) -> Result<(), Self::Error> {
+    fn draw_bent(
+        _frame: &mut Self::Frame<'_, '_>,
+        _bent: &BentElement,
+        _dst: Rectangle<i32, Physical>,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -533,7 +543,11 @@ impl Bend for GlesRenderer {
         })
     }
 
-    fn draw_bent(frame: &mut GlesFrame<'_, '_>, bent: &BentElement) -> Result<(), GlesError> {
+    fn draw_bent(
+        frame: &mut GlesFrame<'_, '_>,
+        bent: &BentElement,
+        dst: Rectangle<i32, Physical>,
+    ) -> Result<(), GlesError> {
         let Some(texture) = bent.texture.downcast_ref::<GlesTexture>() else {
             return Ok(());
         };
@@ -545,7 +559,7 @@ impl Bend for GlesRenderer {
         else {
             return Ok(());
         };
-        let projection = *frame.projection();
+        let matrix = placed(frame.projection(), bent.geometry, dst);
         let instancing = frame.capabilities().contains(&Capability::Instancing);
         let vertices = &bent.vertices;
         let count = (vertices.len() / 4) as ffi::types::GLsizei;
@@ -563,7 +577,7 @@ impl Bend for GlesRenderer {
                 gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
                 gl.Uniform1i(program.tex, 0);
                 gl.Uniform1f(program.alpha, bent.alpha);
-                gl.UniformMatrix3fv(program.matrix, 1, ffi::FALSE, projection.as_ptr());
+                gl.UniformMatrix3fv(program.matrix, 1, ffi::FALSE, matrix.as_ptr());
                 gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
                 let stride = (4 * std::mem::size_of::<f32>()) as ffi::types::GLsizei;
                 let (pos, uv) = (program.position as u32, program.texcoord as u32);
@@ -596,6 +610,38 @@ impl Bend for GlesRenderer {
             }
         })
     }
+}
+
+/// The frame's `projection` (3×3, by columns) after the mesh's vertices,
+/// laid out over `geometry`, are moved and stretched onto `dst`.
+fn placed(
+    projection: &[f32; 9],
+    geometry: Rectangle<i32, Physical>,
+    dst: Rectangle<i32, Physical>,
+) -> [f32; 9] {
+    let k = |to: i32, from: i32| {
+        if from > 0 {
+            to as f32 / from as f32
+        } else {
+            1.0
+        }
+    };
+    let (sx, sy) = (
+        k(dst.size.w, geometry.size.w),
+        k(dst.size.h, geometry.size.h),
+    );
+    let tx = dst.loc.x as f32 - sx * geometry.loc.x as f32;
+    let ty = dst.loc.y as f32 - sy * geometry.loc.y as f32;
+    let place = [sx, 0.0, 0.0, 0.0, sy, 0.0, tx, ty, 1.0];
+    let mut out = [0.0; 9];
+    for col in 0..3 {
+        for row in 0..3 {
+            out[col * 3 + row] = (0..3)
+                .map(|i| projection[i * 3 + row] * place[col * 3 + i])
+                .sum();
+        }
+    }
+    out
 }
 
 /// Draws the window's parts into its picture.
@@ -681,11 +727,11 @@ impl<R: Bend> RenderElement<R> for BentElement {
         &self,
         frame: &mut R::Frame<'_, '_>,
         _src: Rectangle<f64, BufferCoords>,
-        _dst: Rectangle<i32, Physical>,
+        dst: Rectangle<i32, Physical>,
         _damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
-        R::draw_bent(frame, self)
+        R::draw_bent(frame, self, dst)
     }
 }
 
@@ -695,6 +741,25 @@ mod tests {
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    #[test]
+    fn a_bent_window_is_drawn_where_it_is_told() {
+        let at =
+            |m: &[f32; 9], x: f32, y: f32| (m[0] * x + m[3] * y + m[6], m[1] * x + m[4] * y + m[7]);
+        let identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let geometry = Rectangle::new((2000, 600).into(), (400, 300).into());
+        // Where it is: as it is.
+        assert_eq!(placed(&identity, geometry, geometry), identity);
+        // Moved, as into the glass's pane: its corners go with it.
+        let moved = Rectangle::new((-304, 600).into(), (400, 300).into());
+        let m = placed(&identity, geometry, moved);
+        assert_eq!(at(&m, 2000.0, 600.0), (-304.0, 600.0));
+        assert_eq!(at(&m, 2400.0, 900.0), (96.0, 900.0));
+        // Stretched to half: the far corner half way.
+        let half = Rectangle::new((0, 0).into(), (200, 150).into());
+        let m = placed(&identity, geometry, half);
+        assert_eq!(at(&m, 2400.0, 900.0), (200.0, 150.0));
     }
 
     #[test]
