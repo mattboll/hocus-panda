@@ -12,14 +12,16 @@
 //! names of the screens besides the built-in one, the keyboard's layouts
 //! and which one is active, the bars' screens' desktops with a sketch of
 //! their windows, their applications and their titles, the agents'
-//! tools and the agents, the agent whose panda peeks out of the bar, and
-//! `Super+Space` for the launcher, and the screen the notifications'
-//! bubbles show on; the shell draws the bars, their popovers, the peek,
-//! the launcher and the bubbles, keeps the levels, and says when it draws
-//! on the CPU, when a popover, the launcher or a bubble closes, and when
-//! the user asks for the next layout, another desktop or a window, plugs a
-//! tool in or out, declines them, copies a text, starts an application, or
-//! clicks a bubble (its application's window).
+//! tools and the agents, the agent whose panda peeks out of the bar,
+//! `Super+Space` for the launcher, what clients copy and `Super+V` for the
+//! clipboard's history, and the screen the notifications' bubbles show on;
+//! the shell draws the bars, their popovers, the peek, the launcher and the
+//! bubbles, keeps the levels and the clipboard's history, and says when it
+//! draws on the CPU, when a popover, the launcher or a bubble closes, and
+//! when the user asks for the next layout, another desktop or a window,
+//! plugs a tool in or out, declines them, copies a text, pastes or copies
+//! an item of the clipboard's history, starts an application, or clicks a
+//! bubble (its application's window).
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
@@ -305,6 +307,103 @@ pub enum ToShell {
     /// [`ToShell::Bar`]'s); open, it closes. Written `launcher OUTPUT
     /// SCALE`.
     Launcher { output: String, scale: u32 },
+    /// A client took the clipboard (5.6): what it offered, read off the
+    /// compositor's loop, and the application of the window focused as it
+    /// copied (its id; empty: none), for the history. Never a selection
+    /// marked secret. Written `copied APP KIND DATA`, the application `-`
+    /// for none, the data in base64.
+    Copied { app: String, clip: Clip },
+    /// `Super+V` (5.6): the clipboard's history opens on `output`'s bar,
+    /// the screen of the focused window, else the pointer's, its field
+    /// holding the keyboard; open, it closes. Written `clipboard OUTPUT`.
+    Clipboard { output: String },
+}
+
+/// What the clipboard's history keeps of a selection (5.6): its text (the
+/// `text/plain;charset=utf-8` offer), or a PNG image, as offered.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Clip {
+    pub kind: ClipKind,
+    pub data: Vec<u8>,
+}
+
+impl fmt::Debug for Clip {
+    // What was copied may be private: only its kind and its size.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Clip({}, {} bytes)", self.kind.word(), self.data.len())
+    }
+}
+
+/// A [`Clip`]'s kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClipKind {
+    Text,
+    Png,
+}
+
+impl ClipKind {
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Png => "png",
+        }
+    }
+
+    fn of(word: &str) -> Result<Self, BadLine> {
+        match word {
+            "text" => Ok(Self::Text),
+            "png" => Ok(Self::Png),
+            other => Err(BadLine(format!("no clip kind {other:?}"))),
+        }
+    }
+
+    /// The types a selection of this kind is offered as.
+    pub fn types(self) -> Vec<String> {
+        match self {
+            Self::Text => vec![
+                "text/plain;charset=utf-8",
+                "text/plain",
+                "UTF8_STRING",
+                "TEXT",
+                "STRING",
+            ],
+            Self::Png => vec!["image/png"],
+        }
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    }
+}
+
+/// The most a clip holds: a larger offer is not kept (5.6).
+pub const CLIP_MAX: usize = 8 * 1024 * 1024;
+
+impl Clip {
+    fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use base64::Engine;
+        write!(
+            f,
+            "{} {}",
+            self.kind.word(),
+            base64::engine::general_purpose::STANDARD.encode(&self.data)
+        )
+    }
+
+    fn read<'a>(words: &mut impl Iterator<Item = &'a str>) -> Result<Self, BadLine> {
+        use base64::Engine;
+        let kind = ClipKind::of(word(words, "clip kind")?)?;
+        // An empty clip has no word for its data.
+        let data = match words.next() {
+            Some(data) => base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .map_err(|e| BadLine(format!("a clip's data: {e}")))?,
+            None => Vec::new(),
+        };
+        if data.len() > CLIP_MAX {
+            return Err(BadLine("a clip too large".to_owned()));
+        }
+        Ok(Self { kind, data })
+    }
 }
 
 /// An application the launcher starts (5.1), as its desktop entry says:
@@ -936,6 +1035,12 @@ pub enum ToCompositor {
     /// The user logs out (the footer's user, 5.5): the session ends, as
     /// its shortcut ends it. Written `log-out`.
     LogOut,
+    /// An item of the clipboard's history is chosen (5.6): the clipboard
+    /// takes it, which the compositor offers; with `paste`, the window
+    /// that had the keyboard gets it back once the history lets it go, and
+    /// `Ctrl+V` (`Ctrl+Shift+V` in a terminal). Written `clip paste KIND
+    /// DATA` or `clip copy KIND DATA`, the data in base64.
+    Clip { paste: bool, clip: Clip },
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1084,6 +1189,12 @@ impl fmt::Display for ToShell {
             Self::NoPeek => f.write_str("no-peek"),
             Self::Focus(output) => write!(f, "focus {output}"),
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
+            Self::Copied { app, clip } => {
+                let app = app_word(app);
+                write!(f, "copied {} ", if app.is_empty() { "-" } else { &app })?;
+                clip.write(f)
+            }
+            Self::Clipboard { output } => write!(f, "clipboard {output}"),
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -1245,6 +1356,16 @@ impl FromStr for ToShell {
                 }))
             }
             Some("no-peek") => Ok(Self::NoPeek),
+            Some("copied") => Ok(Self::Copied {
+                app: match word(&mut words, "application")? {
+                    "-" => String::new(),
+                    app => app.to_owned(),
+                },
+                clip: Clip::read(&mut words)?,
+            }),
+            Some("clipboard") => Ok(Self::Clipboard {
+                output: word(&mut words, "output")?.to_owned(),
+            }),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("launcher") => Ok(Self::Launcher {
                 output: word(&mut words, "output")?.to_owned(),
@@ -1345,6 +1466,10 @@ impl fmt::Display for ToCompositor {
                 write!(f, "raise {pid} {}", if app.is_empty() { "-" } else { &app })
             }
             Self::LogOut => f.write_str("log-out"),
+            Self::Clip { paste, clip } => {
+                write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
+                clip.write(f)
+            }
             Self::Launch(launch) => {
                 write!(
                     f,
@@ -1404,6 +1529,10 @@ impl FromStr for ToCompositor {
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
             Some("log-out") => Ok(Self::LogOut),
+            Some("clip") => Ok(Self::Clip {
+                paste: flag(words.next(), "paste", "copy")?,
+                clip: Clip::read(&mut words)?,
+            }),
             Some("desktop") => {
                 let output = word(&mut words, "output")?.to_owned();
                 let to = match word(&mut words, "desktop")? {
@@ -1498,6 +1627,59 @@ pub fn width_at(from: f64, to: Form, elapsed: Duration) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the clipboard's history is told: a text with its line breaks,
+    /// an image, from no application; `Super+V`.
+    fn clips() -> Vec<ToShell> {
+        vec![
+            ToShell::Copied {
+                app: "kitty".into(),
+                clip: Clip {
+                    kind: ClipKind::Text,
+                    data: "cargo nextest run\nla suite".as_bytes().to_vec(),
+                },
+            },
+            ToShell::Copied {
+                app: String::new(),
+                clip: Clip {
+                    kind: ClipKind::Png,
+                    data: (0..=255).collect(),
+                },
+            },
+            ToShell::Copied {
+                app: "org.gnome.Nautilus".into(),
+                clip: Clip {
+                    kind: ClipKind::Text,
+                    data: Vec::new(),
+                },
+            },
+            ToShell::Clipboard {
+                output: "eDP-1".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn a_clip_too_large_or_of_no_kind_does_not_read() {
+        assert!("copied kitty html PGI+".parse::<ToShell>().is_err());
+        assert!("copied kitty text not*base64".parse::<ToShell>().is_err());
+        assert!("clip maybe text YQ==".parse::<ToCompositor>().is_err());
+        assert!("clipboard".parse::<ToShell>().is_err());
+        let clip = Clip {
+            kind: ClipKind::Text,
+            data: "hunter2".as_bytes().to_vec(),
+        };
+        // Never what it holds.
+        assert_eq!(format!("{clip:?}"), "Clip(text, 7 bytes)");
+        let large = ToCompositor::Clip {
+            paste: true,
+            clip: Clip {
+                kind: ClipKind::Png,
+                data: vec![0; CLIP_MAX + 1],
+            },
+        };
+        assert!(large.to_string().parse::<ToCompositor>().is_err());
+    }
 
     #[test]
     fn lines_read_back_as_written() {
@@ -1595,6 +1777,7 @@ mod tests {
             .into_iter()
             .chain(keys)
             .chain([ToShell::Outside, ToShell::Focus("DP-2".into())])
+            .chain(clips())
             .chain(screens)
             .chain(layouts)
             .chain(desktops)
@@ -1640,6 +1823,20 @@ mod tests {
             ToCompositor::Briefing { open: true },
             ToCompositor::Briefing { open: false },
             ToCompositor::Copy("hocus agent my-agent waiting".into()),
+            ToCompositor::Clip {
+                paste: true,
+                clip: Clip {
+                    kind: ClipKind::Text,
+                    data: "git log\n\tétoile ✦".as_bytes().to_vec(),
+                },
+            },
+            ToCompositor::Clip {
+                paste: false,
+                clip: Clip {
+                    kind: ClipKind::Png,
+                    data: vec![0x89, b'P', b'N', b'G', 0, 255],
+                },
+            },
             ToCompositor::Raise {
                 pid: 4242,
                 app: "org.mozilla.firefox".into(),

@@ -983,7 +983,7 @@ impl Compositor {
             &self.display_handle,
             &self.seat,
             types,
-            Some(Arc::from(text)),
+            Some(Arc::from(text.into_bytes())),
         );
     }
 

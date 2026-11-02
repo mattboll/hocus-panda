@@ -141,7 +141,7 @@ impl State {
 
     /// The screen the bubbles show on: the focused window's, else the one
     /// under the pointer.
-    fn bubbles_screen(&self) -> Option<Output> {
+    pub(crate) fn bubbles_screen(&self) -> Option<Output> {
         self.model
             .focused()
             .filter(|id| self.windows.contains_key(id) && !self.model.is_minimized(*id))

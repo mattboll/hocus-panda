@@ -53,25 +53,34 @@ impl SeatHandler for State {
             .and_then(|s| self.display_handle.get_client(s.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client.clone());
         set_primary_focus(&self.display_handle, seat, client);
+        self.clipboard_focus_changed();
     }
 }
 delegate_seat!(State);
 
 impl SelectionHandler for State {
-    /// What the compositor offers itself (a text the shell copies), or
-    /// `None`: an X11 client's selection, which XWayland's window manager
-    /// reads.
-    type SelectionUserData = Option<std::sync::Arc<str>>;
+    /// What the compositor offers itself (a text the shell copies, an item
+    /// of the clipboard's history), the same bytes for each of its types,
+    /// or `None`: an X11 client's selection, which XWayland's window
+    /// manager reads.
+    type SelectionUserData = Option<std::sync::Arc<[u8]>>;
 
-    /// A Wayland client took a selection: X11 clients see it offered.
+    /// A Wayland client took a selection: X11 clients see it offered, and
+    /// the clipboard's history gets it (5.6).
     fn new_selection(
         &mut self,
         ty: SelectionTarget,
         source: Option<SelectionSource>,
         _seat: Seat<Self>,
     ) {
+        let types = source.map(|s| s.mime_types());
+        if ty == SelectionTarget::Clipboard
+            && let Some(types) = &types
+        {
+            self.selection_taken(types.clone(), crate::clipboard::Source::Wayland);
+        }
         if let Some(xwm) = self.xwm.as_mut()
-            && let Err(err) = xwm.new_selection(ty, source.map(|s| s.mime_types()))
+            && let Err(err) = xwm.new_selection(ty, types)
         {
             tracing::warn!(?err, "could not offer the selection to X11");
         }
@@ -84,14 +93,14 @@ impl SelectionHandler for State {
         mime_type: String,
         fd: OwnedFd,
         _seat: Seat<Self>,
-        user_data: &Option<std::sync::Arc<str>>,
+        user_data: &Option<std::sync::Arc<[u8]>>,
     ) {
-        if let Some(text) = user_data {
+        if let Some(bytes) = user_data {
             // Written on a thread: the reader may be slow, or never read.
-            let text = text.clone();
+            let bytes = bytes.clone();
             crate::programs::on_a_thread("write the clipboard".to_owned(), move || {
                 let mut file = std::fs::File::from(fd);
-                if let Err(err) = std::io::Write::write_all(&mut file, text.as_bytes()) {
+                if let Err(err) = std::io::Write::write_all(&mut file, &bytes) {
                     tracing::debug!(%err, "could not write the clipboard");
                 }
             });

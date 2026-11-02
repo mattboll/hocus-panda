@@ -223,6 +223,25 @@ impl XwmHandler for State {
         fd: OwnedFd,
     ) {
         let seat = &self.seat;
+        // What the compositor offers itself (an item of the clipboard's
+        // history, 5.6): written on a thread, the reader may be slow.
+        let own = (selection == SelectionTarget::Clipboard)
+            .then(|| {
+                smithay::wayland::selection::data_device::current_data_device_selection_userdata(
+                    seat,
+                )
+                .and_then(|bytes| bytes.clone())
+            })
+            .flatten();
+        if let Some(bytes) = own {
+            crate::programs::on_a_thread("write the clipboard to X11".to_owned(), move || {
+                let mut file = std::fs::File::from(fd);
+                if let Err(err) = std::io::Write::write_all(&mut file, &bytes) {
+                    tracing::debug!(%err, "could not write the clipboard to X11");
+                }
+            });
+            return;
+        }
         let read = match selection {
             SelectionTarget::Clipboard => request_data_device_client_selection(seat, mime_type, fd)
                 .map_err(|e| format!("{e:?}")),
@@ -240,7 +259,13 @@ impl XwmHandler for State {
         let state = &*self;
         match selection {
             SelectionTarget::Clipboard => {
-                set_data_device_selection(&state.display_handle, &state.seat, mime_types, None);
+                set_data_device_selection(
+                    &state.display_handle,
+                    &state.seat,
+                    mime_types.clone(),
+                    None,
+                );
+                self.selection_taken(mime_types, crate::clipboard::Source::X11);
             }
             SelectionTarget::Primary => {
                 set_primary_selection(&state.display_handle, &state.seat, mime_types, None);

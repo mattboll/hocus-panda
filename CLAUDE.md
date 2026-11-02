@@ -111,7 +111,7 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
 the real screen; nested and headless take `--output`; `panel-form`),
 `[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
-`toggle-bar = "Super+B"`, the volume and brightness keys, and the
+`toggle-bar = "Super+B"`, `clipboard = "Super+V"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
 (`screens`, `output`, `form`) and `[appearance]` (`reduced-motion`,
 `high-contrast`, `reduce-transparency`). `packaging/config.toml` lists every setting
@@ -131,6 +131,11 @@ shell built beside them, which a test binary does not build: build it
 first (`cargo build -p hocus-shell`, as CI does). They skip without it,
 and fail when it is older than its sources. The bar's base:
 docs/design/bar.md, "As built".
+
+The shell keeps the clipboard's history in `$XDG_STATE_HOME/hocuspanda/clipboard`
+(bar.md, 5.6), its key in the keyring of the bus given with
+`--session-bus` only, else in `clipboard.key` beside it: next to a live
+session, give the nested compositor a fresh `HOME` (or `XDG_STATE_HOME`).
 
 Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
 docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`

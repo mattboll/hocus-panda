@@ -27,6 +27,7 @@
 
 mod agents;
 mod bluetooth;
+mod clipboard;
 mod clock;
 mod desktops;
 mod footer;
@@ -109,6 +110,8 @@ fn main() -> ExitCode {
     bluetooth::start();
     launcher::start();
     notifications::start(software);
+    // After the notifications' wall clock, which its times read.
+    clipboard::start();
     user::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
@@ -546,6 +549,14 @@ impl Shell {
             }
             ToShell::Focus(screen) => {
                 notifications::focus(screen);
+                Task::none()
+            }
+            ToShell::Copied { app, clip } => {
+                clipboard::copied(app, clip);
+                Task::none()
+            }
+            ToShell::Clipboard { output } => {
+                popover::toggle_clipboard(&output);
                 Task::none()
             }
         }
@@ -1453,6 +1464,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The bubbles' screen: their stack alone.
                         Ok(ToShell::Focus(screen)) => {
                             notifications::focus(screen);
+                            continue;
+                        }
+                        // A copy for the clipboard's history, kept off
+                        // this task; `Super+V`: the history's surface.
+                        Ok(ToShell::Copied { app, clip }) => {
+                            clipboard::copied(app, clip);
+                            continue;
+                        }
+                        Ok(ToShell::Clipboard { output }) => {
+                            popover::toggle_clipboard(&output);
                             continue;
                         }
                         _ => {}

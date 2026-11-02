@@ -28,12 +28,15 @@ use super::{
     Effect, Event as Seen, Pressed, event,
     kit::{self, Input, Pointer, RIGHT, text, text_in},
 };
-use crate::{
-    levels::draw::{MANROPE_BOLD, TEXT, ring},
-    popover::clipboard::{LINE_TEXT, TILE, row},
-};
+use crate::levels::draw::{MANROPE_BOLD, TEXT, ring};
 
 pub const WIDTH: u32 = POPOVER_WIDTH.unsigned_abs();
+/// The row under the header: 44 px, 4 px under it, 8 px in; its 28 px
+/// tile (radius 8), 10 px before its words (13 px, 600).
+const ROW_TOP: f32 = kit::HEADER_TOP + kit::HEADER + 4.0;
+const ROW: f32 = 44.0;
+const TILE: f32 = 28.0;
+const LINE_TEXT: f32 = 13.0;
 const ROW_PAD: f32 = 8.0;
 const ROW_RADIUS: f32 = 10.0;
 const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
@@ -55,9 +58,17 @@ fn press(armed: Option<Instant>, now: Instant) -> (Option<Instant>, bool) {
     }
 }
 
-/// Its height: the header and its one row, as the clipboard's.
+/// The row's place.
+fn row() -> Rectangle {
+    Rectangle::new(
+        Point::new(kit::LEFT - kit::ROW_OUT, ROW_TOP),
+        Size::new(kit::RIGHT - kit::LEFT + 2.0 * kit::ROW_OUT, ROW),
+    )
+}
+
+/// Its height: the header and its one row.
 pub fn height() -> u32 {
-    super::clipboard::height()
+    kit::height(ROW_TOP + ROW)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
