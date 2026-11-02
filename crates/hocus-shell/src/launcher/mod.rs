@@ -34,7 +34,6 @@ pub mod apps;
 pub mod draw;
 pub mod entries;
 pub mod icons;
-pub mod rates;
 pub mod search;
 pub mod toast;
 
@@ -141,20 +140,6 @@ impl Words {
             format!("Copied: {value}")
         }
     }
-
-    /// A currency conversion's kind, and the day of its rates
-    /// (`YYYY-MM-DD`).
-    pub fn rates_of(self, date: &str) -> String {
-        if self.fr {
-            let mut parts = date.splitn(3, '-');
-            match (parts.next(), parts.next(), parts.next()) {
-                (Some(y), Some(m), Some(d)) => format!("Monnaie, taux du {d}/{m}/{y}"),
-                _ => format!("Monnaie, taux du {date}"),
-            }
-        } else {
-            format!("Currency, rates of {date}")
-        }
-    }
 }
 
 /// A wide row of the launcher's: a calculation's or a conversion's result,
@@ -201,12 +186,11 @@ pub struct Grid {
 }
 
 /// What the field is read with besides the applications: how numbers are
-/// written, and the currencies' rates.
+/// written.
 #[derive(Debug, Clone, Copy)]
-pub struct Reading<'a> {
+pub struct Reading {
     pub words: Words,
     pub numbers: answers::Numbers,
-    pub rates: Option<&'a rates::Rates>,
 }
 
 impl Grid {
@@ -215,7 +199,7 @@ impl Grid {
         catalog: &apps::Catalog,
         counts: &HashMap<String, u32>,
         query: &str,
-        reading: Reading<'_>,
+        reading: Reading,
     ) -> Self {
         let words = reading.words;
         let count = |i: usize| {
@@ -244,7 +228,7 @@ impl Grid {
             }
         } else {
             let typed = query.trim();
-            grid.answer = answers::answer(typed, reading.rates, reading.numbers, words);
+            grid.answer = answers::answer(typed, reading.numbers, words);
             if grid.answer.is_some() {
                 grid.card(Card::Answer);
             } else if let Some(url) = answers::address(typed) {
@@ -362,11 +346,9 @@ pub struct Open {
 
 impl Open {
     fn regrid(&mut self, words: Words) {
-        let rates = rates::current();
         let reading = Reading {
             words,
             numbers: answers::Numbers::new(Lang::of_numbers()),
-            rates: rates.as_deref(),
         };
         self.grid = Grid::of(&self.catalog, &self.counts, &self.query, reading);
         self.selected = 0;
@@ -410,10 +392,9 @@ fn words() -> Words {
     Words::new(Lang::of_messages())
 }
 
-/// Reads the applications, and the currencies' rates kept.
+/// Reads the applications.
 pub fn start() {
     apps::start();
-    rates::start();
 }
 
 /// Its surface draws again.
@@ -488,7 +469,6 @@ pub fn toggle(output: String, scale: u32) {
         // One popover at a time, and not under the launcher.
         crate::popover::event(crate::popover::Event::PressElsewhere);
         icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
-        rates::refresh();
     }
     crate::popover::send(effects);
 }
@@ -820,11 +800,10 @@ mod tests {
         apps::Catalog { apps: entries }
     }
 
-    fn reading(fr: bool) -> Reading<'static> {
+    fn reading(fr: bool) -> Reading {
         Reading {
             words: Words { fr },
             numbers: answers::Numbers::new(if fr { Lang::French } else { Lang::English }),
-            rates: None,
         }
     }
 
@@ -900,7 +879,6 @@ mod tests {
             Some("https://github.com")
         );
         let words = Words { fr: true };
-        assert_eq!(words.rates_of("2026-10-30"), "Monnaie, taux du 30/10/2026");
         assert_eq!(
             words.search_web("crêpes"),
             "Chercher «\u{a0}crêpes\u{a0}» sur le web"
