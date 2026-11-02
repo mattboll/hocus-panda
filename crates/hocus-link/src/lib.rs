@@ -83,10 +83,14 @@ pub const LAUNCHER_TOAST: Duration = Duration::from_millis(1800);
 pub const BUBBLE_PREFIX: &str = "hocus-bubble-";
 /// The namespace of the "+N waiting" chip under the bubbles.
 pub const BUBBLES_WAITING_NAMESPACE: &str = "hocus-bubbles-waiting";
-/// The namespace of the bell on the bar's notifications place (5.4): the
-/// button that opens the notifications' history, its badge counting what
-/// the user has not seen, its slash while they are not to be disturbed.
-pub const BELL_NAMESPACE: &str = "hocus-bar-bell";
+/// The namespace of the bar's footer (bar.md §4 group 11, 5.5): its
+/// buttons along the bar's bottom, the clipboard, the notifications' bell,
+/// the menu and the user in the full form, the bell over the user in the
+/// mini form. The bell's badge counts what the user has not seen, its
+/// slash says they are not to be disturbed.
+pub const FOOTER_NAMESPACE: &str = "hocus-bar-footer";
+/// The bell's (5.4), on the footer's surface since 5.5.
+pub const BELL_NAMESPACE: &str = FOOTER_NAMESPACE;
 
 /// A bubble slides in from the bar's side over [`BUBBLE_IN`] (the 5.3
 /// mockup's `cubic-bezier(.2, .8, .2, 1)`), fading in, from this far
@@ -923,6 +927,9 @@ pub enum ToCompositor {
     /// compositor runs it off its loop, as its own child, its first window
     /// taking the focus on the current desktop.
     Launch(Launch),
+    /// The user logs out (the footer's user, 5.5): the session ends, as
+    /// its shortcut ends it. Written `log-out`.
+    LogOut,
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1331,6 +1338,7 @@ impl fmt::Display for ToCompositor {
                 let app = app_word(app);
                 write!(f, "raise {pid} {}", if app.is_empty() { "-" } else { &app })
             }
+            Self::LogOut => f.write_str("log-out"),
             Self::Launch(launch) => {
                 write!(
                     f,
@@ -1389,6 +1397,7 @@ impl FromStr for ToCompositor {
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
+            Some("log-out") => Ok(Self::LogOut),
             Some("desktop") => {
                 let output = word(&mut words, "output")?.to_owned();
                 let to = match word(&mut words, "desktop")? {
@@ -1620,6 +1629,7 @@ mod tests {
             ToCompositor::Plug("claude-code".into()),
             ToCompositor::Unplug("codex".into()),
             ToCompositor::Decline,
+            ToCompositor::LogOut,
             ToCompositor::Follow("herdr".into()),
             ToCompositor::Briefing { open: true },
             ToCompositor::Briefing { open: false },
