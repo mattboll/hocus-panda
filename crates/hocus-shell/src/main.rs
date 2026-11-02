@@ -33,6 +33,7 @@ mod launcher;
 mod layouts;
 mod levels;
 mod network;
+mod notifications;
 mod paste;
 mod popover;
 mod renderer;
@@ -105,6 +106,7 @@ fn main() -> ExitCode {
     network::start();
     bluetooth::start();
     launcher::start();
+    notifications::start(software);
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -357,6 +359,7 @@ impl Shell {
         }
         subscriptions.push(Subscription::run(zone_changes));
         subscriptions.push(Subscription::run(popover::effects));
+        subscriptions.push(Subscription::run(notifications::effects));
         subscriptions.push(bar_sizes());
         Subscription::batch(subscriptions)
     }
@@ -458,6 +461,7 @@ impl Shell {
                         bar: bar.output.clone(),
                     });
                     popover::with(|c| c.forget(&bar.output));
+                    notifications::bars_changed();
                     popover::kit::forget_scale(&bar.output);
                     network::draw::forget(&bar.output);
                     desktops::draw::forget(&bar.output);
@@ -524,6 +528,10 @@ impl Shell {
             }
             ToShell::NoPeek => {
                 agents::peek::back();
+                Task::none()
+            }
+            ToShell::Focus(screen) => {
+                notifications::focus(screen);
                 Task::none()
             }
         }
@@ -677,6 +685,7 @@ impl Shell {
                 (bar.levels, bar.connections, bar.desktops, bar.agents),
             );
         });
+        notifications::bars_changed();
     }
 
     /// `form` for bar `id`, switching from where it is since `start`; at
@@ -1030,6 +1039,7 @@ impl Shell {
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.popover_view(id))
+                .or_else(|| notifications::view(id, self.look.glass))
                 .unwrap_or_else(|| Space::new().into());
         };
         let width = bar.width(self.now + AHEAD);
@@ -1345,6 +1355,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::NoPeek) => {
                             agents::peek::back();
+                            continue;
+                        }
+                        // The bubbles' screen: their stack alone.
+                        Ok(ToShell::Focus(screen)) => {
+                            notifications::focus(screen);
                             continue;
                         }
                         _ => {}

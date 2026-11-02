@@ -171,6 +171,8 @@ pub struct State {
     pub halo: crate::halo::Halo,
     /// The panda peeking out of the bar's edge (bar.md §7 C, 4.5).
     pub peek: crate::peek::Peeks,
+    /// The notifications' bubbles, and their screen (5.3).
+    pub bubbles: crate::bubbles::Bubbles,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -345,6 +347,7 @@ impl State {
             going: None,
             halo: crate::halo::Halo::default(),
             peek: crate::peek::Peeks::default(),
+            bubbles: crate::bubbles::Bubbles::default(),
             swiping: None,
             switcher: None,
             switcher_out: None,

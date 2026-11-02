@@ -1254,7 +1254,7 @@ pub fn linked(sender: iced::futures::channel::mpsc::UnboundedSender<String>) {
 }
 
 /// Tells the compositor; `false` without it.
-fn tell(message: ToCompositor) -> bool {
+pub(crate) fn tell(message: ToCompositor) -> bool {
     LINK.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()

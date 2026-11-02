@@ -13,11 +13,13 @@
 //! and which one is active, the bars' screens' desktops with a sketch of
 //! their windows, their applications and their titles, the agents'
 //! tools and the agents, the agent whose panda peeks out of the bar, and
-//! `Super+Space` for the launcher; the shell draws the bars, their
-//! popovers, the peek and the launcher, keeps the levels, and says when it
-//! draws on the CPU, when a popover or the launcher closes, and when the
-//! user asks for the next layout, another desktop or a window, plugs a
-//! tool in or out, declines them, copies a text, or starts an application.
+//! `Super+Space` for the launcher, and the screen the notifications'
+//! bubbles show on; the shell draws the bars, their popovers, the peek,
+//! the launcher and the bubbles, keeps the levels, and says when it draws
+//! on the CPU, when a popover, the launcher or a bubble closes, and when
+//! the user asks for the next layout, another desktop or a window, plugs a
+//! tool in or out, declines them, copies a text, starts an application, or
+//! clicks a bubble (its application's window).
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
@@ -66,6 +68,44 @@ pub const PEEK_NAMESPACE: &str = "hocus-bar-peek";
 /// and the grid; the compositor darkens and blurs what is behind, and
 /// fades and scales it in and out ([`LAUNCHER_OPEN`], [`LAUNCHER_CLOSE`]).
 pub const LAUNCHER_NAMESPACE: &str = "hocus-launcher";
+
+/// The namespaces of a notification's bubble (5.3), one surface each, its
+/// number after the prefix ([`bubble_namespace`]): the compositor moves
+/// each in and out on its own ([`BUBBLE_IN`], [`BUBBLE_OUT`]), and the
+/// shell names one in its `wake` and `closing` lines.
+pub const BUBBLE_PREFIX: &str = "hocus-bubble-";
+/// The namespace of the "+N waiting" chip under the bubbles.
+pub const BUBBLES_WAITING_NAMESPACE: &str = "hocus-bubbles-waiting";
+/// The namespace of the dot with the count of notifications gone straight
+/// to the history, on the bar's notifications place (5.3).
+pub const UNREAD_NAMESPACE: &str = "hocus-bar-unread";
+
+/// A bubble slides in from the bar's side over [`BUBBLE_IN`] (the 5.3
+/// mockup's `cubic-bezier(.2, .8, .2, 1)`), fading in, from this far
+/// (logical pixels); out over [`BUBBLE_OUT`], `ease-in`. With reduced
+/// motion, or a shell on the CPU, it fades only.
+pub const BUBBLE_SHIFT: f64 = 26.0;
+pub const BUBBLE_IN: Duration = Duration::from_millis(220);
+pub const BUBBLE_OUT: Duration = Duration::from_millis(170);
+
+/// Bubble `n`'s namespace.
+pub fn bubble_namespace(n: u64) -> String {
+    format!("{BUBBLE_PREFIX}{n}")
+}
+
+/// Whether `namespace` is a bubble's.
+pub fn is_bubble(namespace: &str) -> bool {
+    namespace
+        .strip_prefix(BUBBLE_PREFIX)
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The environment variable naming the session bus the shell serves the
+/// notifications on (`org.freedesktop.Notifications`), set by the
+/// compositor: the bus given with `--session-bus`, else as the session,
+/// the session's own (`session`). Without it, the shell serves none: a
+/// nested or headless compositor never takes the live session's.
+pub const NOTIFICATIONS_BUS_ENV: &str = "HOCUS_NOTIFICATIONS_BUS";
 
 /// A popover's width, its distance from the bar, and how far it slides from
 /// the bar as it opens and closes (logical pixels). Its corners are the
@@ -238,6 +278,10 @@ pub enum ToShell {
     Peek(Peek),
     /// The panda is back in the bar: its surfaces go. Written `no-peek`.
     NoPeek,
+    /// The screen of the focused window, else the pointer's: where the
+    /// notifications' bubbles show (5.3). Sent as the shell connects and
+    /// when it changes. Written `focus OUTPUT`.
+    Focus(String),
     /// `Super+Space` (5.1): the launcher opens on `output`, the screen
     /// under the pointer, whose scale is `scale` (120ths, as
     /// [`ToShell::Bar`]'s); open, it closes. Written `launcher OUTPUT
@@ -861,6 +905,12 @@ pub enum ToCompositor {
     /// which the compositor offers: the shell's surfaces take no serial to
     /// set it themselves. Written `copy TEXT`, the text on one line.
     Copy(String),
+    /// A notification's bubble was clicked (5.3): the compositor brings the
+    /// window of its application, `app` (the notification's desktop entry,
+    /// else its application's name; `-` for none), else of the process that
+    /// sent it, `pid`, or one of its parents (0: not known). Written `raise
+    /// PID APP`.
+    Raise { pid: u32, app: String },
     /// The user starts an application from the launcher (5.1): the
     /// compositor runs it off its loop, as its own child, its first window
     /// taking the focus on the current desktop.
@@ -1011,6 +1061,7 @@ impl fmt::Display for ToShell {
                 screen_name(&peek.name)
             ),
             Self::NoPeek => f.write_str("no-peek"),
+            Self::Focus(output) => write!(f, "focus {output}"),
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
@@ -1173,6 +1224,7 @@ impl FromStr for ToShell {
                 }))
             }
             Some("no-peek") => Ok(Self::NoPeek),
+            Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("launcher") => Ok(Self::Launcher {
                 output: word(&mut words, "output")?.to_owned(),
                 scale: word(&mut words, "scale")?
@@ -1267,6 +1319,10 @@ impl fmt::Display for ToCompositor {
                 write!(f, "briefing {}", if *open { "open" } else { "closed" })
             }
             Self::Copy(text) => write!(f, "copy {}", screen_name(text)),
+            Self::Raise { pid, app } => {
+                let app = app_word(app);
+                write!(f, "raise {pid} {}", if app.is_empty() { "-" } else { &app })
+            }
             Self::Launch(launch) => {
                 write!(
                     f,
@@ -1338,6 +1394,15 @@ impl FromStr for ToCompositor {
                 };
                 Ok(Self::Desktop { output, to })
             }
+            Some("raise") => Ok(Self::Raise {
+                pid: word(&mut words, "process")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("process: {e}")))?,
+                app: match word(&mut words, "application")? {
+                    "-" => String::new(),
+                    app => app.to_owned(),
+                },
+            }),
             Some("bring") => Ok(Self::Bring(
                 word(&mut words, "window")?
                     .parse()
@@ -1506,7 +1571,7 @@ mod tests {
         for message in to_shell
             .into_iter()
             .chain(keys)
-            .chain([ToShell::Outside])
+            .chain([ToShell::Outside, ToShell::Focus("DP-2".into())])
             .chain(screens)
             .chain(layouts)
             .chain(desktops)
@@ -1551,6 +1616,14 @@ mod tests {
             ToCompositor::Briefing { open: true },
             ToCompositor::Briefing { open: false },
             ToCompositor::Copy("hocus agent my-agent waiting".into()),
+            ToCompositor::Raise {
+                pid: 4242,
+                app: "org.mozilla.firefox".into(),
+            },
+            ToCompositor::Raise {
+                pid: 0,
+                app: String::new(),
+            },
             ToCompositor::Launch(Launch {
                 id: "org.mozilla.firefox".into(),
                 terminal: false,
@@ -1606,6 +1679,20 @@ mod tests {
             "titles eDP-1\tthree\tfish",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_bubbles_namespace_holds_its_number() {
+        assert_eq!(bubble_namespace(7), "hocus-bubble-7");
+        assert!(is_bubble(&bubble_namespace(12)));
+        for not in [
+            "hocus-bubble-",
+            "hocus-bubble-x",
+            BUBBLES_WAITING_NAMESPACE,
+            NAMESPACE,
+        ] {
+            assert!(!is_bubble(not), "{not}");
         }
     }
 

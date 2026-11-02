@@ -12,7 +12,9 @@ as a technical reference only.
 Read, in this order: [docs/vision.md](docs/vision.md),
 [docs/design/tech-choices.md](docs/design/tech-choices.md), the
 [decisions](docs/decisions/), and the spec of whatever you work on
-([docs/design/bar.md](docs/design/bar.md) for the bar).
+([docs/design/bar.md](docs/design/bar.md) for the bar,
+[docs/design/notifications.md](docs/design/notifications.md) for the
+notifications).
 
 ## How we work
 
@@ -86,6 +88,10 @@ Always with a fresh, short runtime directory next to a live session:
 ```sh
 # nested; Alt+Super+drag moves a window (Super+drag on a real session)
 target/debug/hocuspanda --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
+# notifications (docs/design/notifications.md): only on a bus of your own,
+# never the live session's; the programs it starts use it (notify-send)
+#   --session-bus "$(dbus-daemon --session --print-address --fork)"
+# (stop that dbus-daemon by its own PID afterwards)
 # nested without touching the live session's screen: in an Xvfb display
 Xvfb :87 -screen 0 1600x1000x24 -nolisten tcp &
 env -i HOME="$(mktemp -d)" PATH=/usr/bin:/bin DISPLAY=:87 LIBGL_ALWAYS_SOFTWARE=1 \

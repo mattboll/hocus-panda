@@ -671,7 +671,8 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Phone | KDE Connect (D-Bus) | |
 | Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, whether it is the focused one or minimised, its id and its application's id, on the `desktops` line of `hocus-link`; the windows' titles on the `titles` line; a desktop asked with `desktop`, a window with `bring` (as built, 3.9, 3.9b, 3.9c) |
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
-| Notifications, clipboard | the desktop's own servers | |
+| Notifications | the desktop's own server, `org.freedesktop.Notifications` on the session bus, in the shell ([notifications.md](notifications.md), 5.3) | the bar's dot counts what went straight to the history |
+| Clipboard | the desktop's own server | |
 
 Every source is read off the event loop and pushes changes; nothing is
 polled from the loop.
