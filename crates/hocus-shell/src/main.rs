@@ -29,6 +29,7 @@ mod agents;
 mod bluetooth;
 mod clock;
 mod desktops;
+mod launcher;
 mod layouts;
 mod levels;
 mod network;
@@ -103,6 +104,7 @@ fn main() -> ExitCode {
     levels::start();
     network::start();
     bluetooth::start();
+    launcher::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -483,6 +485,11 @@ impl Shell {
             }
             ToShell::Outside => {
                 popover::event(popover::Event::Outside);
+                launcher::outside();
+                Task::none()
+            }
+            ToShell::Launcher { output, scale } => {
+                launcher::toggle(output, scale);
                 Task::none()
             }
             ToShell::Screens(names) => {
@@ -912,6 +919,23 @@ impl Shell {
         )
     }
 
+    /// The launcher, if its surface is `id`.
+    fn launcher_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !launcher::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(launcher::draw::View {
+                id,
+                words: launcher::Words::new(clock::time::Lang::of_messages()),
+                software: self.software,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The popover whose surface is `id`.
     fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let item = popover::with(|c| c.item_of(id))?;
@@ -1004,6 +1028,7 @@ impl Shell {
                 .or_else(|| self.desktops_view(id))
                 .or_else(|| self.agents_view(id))
                 .or_else(|| self.peek_view(id))
+                .or_else(|| self.launcher_view(id))
                 .or_else(|| self.popover_view(id))
                 .unwrap_or_else(|| Space::new().into());
         };
@@ -1260,6 +1285,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // either, the controller draws what changes.
                         Ok(ToShell::Outside) => {
                             popover::event(popover::Event::Outside);
+                            launcher::outside();
+                            continue;
+                        }
+                        // The launcher opens, or closes: its own surface.
+                        Ok(ToShell::Launcher { output, scale }) => {
+                            launcher::toggle(output, scale);
                             continue;
                         }
                         // The other screens: only an open brightness's

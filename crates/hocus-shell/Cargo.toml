@@ -58,6 +58,12 @@ serde = "1.0.229"
 # The Wayland connection iced draws on, made here to read the clipboard
 # on it (paste); the same version as iced_layershell's.
 wayland-client = "0.31.15"
+# The launcher's search ignores accents: names decomposed (NFD), their
+# marks left out (MIT or Apache-2.0).
+unicode-normalization = "0.1.25"
+# The launcher's SVG icons drawn at their size on the icons' thread, not
+# on the one that draws: the same resvg as iced's (MIT or Apache-2.0).
+resvg = { version = "0.45.1", default-features = false }
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 
