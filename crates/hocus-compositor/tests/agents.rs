@@ -1469,11 +1469,14 @@ fn going_to_an_agent_runs_the_streak_then_pulses_its_rim_then_rests() -> anyhow:
     let Some(node) = render_node() else {
         return Ok(());
     };
+    // No minute changes for the test's while: the clock's odometer would
+    // draw at rest.
     let mut bed = start(
         &shell,
         &hocus,
         &Machine {
             gpu: Some(node),
+            clock_at: Some("10:00:05"),
             ..Machine::default()
         },
     )?;
@@ -2413,7 +2416,9 @@ impl Bed {
 }
 
 /// A bed on the GPU, the compositor drawing with GLES (the halo is its
-/// shaders'); `None`, and the test is skipped, without one.
+/// shaders'); `None`, and the test is skipped, without one. Its clock far
+/// from a minute's change: the clock's odometer would draw while nothing
+/// else should.
 fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
     let Some((shell, hocus)) = ready() else {
         return Ok(None);
@@ -2427,6 +2432,7 @@ fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
         &Machine {
             gpu: Some(node),
             reduced_motion,
+            clock_at: Some("10:00:05"),
             ..Machine::default()
         },
     )?;
