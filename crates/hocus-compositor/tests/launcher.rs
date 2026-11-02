@@ -14,6 +14,14 @@
 //! installed while it runs shows up; an application without an icon shows
 //! its letter on a neutral square.
 //!
+//! Then one per point of the 5.2 spec (issue #392): a calculation shows in
+//! a card, `Enter` copies it and a toast says so; a conversion, a
+//! currency's at the rates of a file of the test's (the bank is never
+//! asked); an address opens; the web search comes last, and
+//! `Ctrl+Enter` runs it whatever is selected; an answer lists no
+//! application. The browser is a program of the test's, the shell's only
+//! `xdg-open` (its `PATH` is the test's own directory).
+//!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
 mod common;
@@ -24,7 +32,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, KEY_DOWN, KEY_ESC, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, wait};
+use common::{
+    BTN_LEFT, KEY_DOWN, KEY_ESC, KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP,
+    WAIT, chord, wait,
+};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
 const KEY_SPACE: u32 = 57;
@@ -59,6 +70,38 @@ fn letter(c: char) -> Option<u32> {
         _ => return None,
     })
 }
+
+/// The key typing `c` on a US keyboard, and whether with Shift.
+fn key_of(c: char) -> Option<(u32, bool)> {
+    if let Some(code) = letter(c) {
+        return Some((code, false));
+    }
+    Some(match c {
+        '1'..='9' => (2 + u32::from(c) - u32::from('1'), false),
+        '0' => (11, false),
+        '-' => (12, false),
+        '+' => (13, true),
+        '*' => (9, true),
+        '(' => (10, true),
+        ')' => (11, true),
+        '.' => (52, false),
+        ',' => (51, false),
+        ':' => (39, true),
+        _ => return None,
+    })
+}
+
+/// The bank's rates the test gives the shell: a euro is 1.25 dollars.
+const RATES: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<gesmes:Envelope xmlns:gesmes=\"http://www.gesmes.org/xml/2002-08-01\" \
+xmlns=\"http://www.ecb.int/vocabulary/2002-08-01/eurofxref\">
+<gesmes:subject>Reference rates</gesmes:subject>
+<Cube><Cube time='2026-10-30'>
+<Cube currency='USD' rate='1.25'/><Cube currency='JPY' rate='160'/>
+<Cube currency='GBP' rate='0.85'/>
+</Cube></Cube>
+</gesmes:Envelope>
+";
 
 /// The test's applications: id, name, generic name, icon (none: no
 /// `Icon` key), and what else their entry says.
@@ -205,6 +248,18 @@ impl Bed {
             )?;
         }
         std::fs::write(root.join("state/hocuspanda/launches"), COUNTS)?;
+        // Kept just now: the bank is not asked again for a day.
+        std::fs::write(root.join("state/hocuspanda/ecb-rates.xml"), RATES)?;
+        // The browser: it writes down what it opens.
+        let opener = root.join("bin/xdg-open");
+        std::fs::write(
+            &opener,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\n",
+                root.join("launched/xdg-open").display()
+            ),
+        )?;
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755))?;
         let log = root.join("shell.log");
         let script = root.join("shell");
         let home = |sub: &str| root.join(sub).display().to_string();
@@ -216,7 +271,7 @@ impl Bed {
                  PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
-                 XDG_DATA_DIRS='{}' RUST_LOG=warn,hocuspanda_shell=debug\n\
+                 XDG_DATA_DIRS='{}' PATH='{}' RUST_LOG=warn,hocuspanda_shell=debug\n\
                  exec '{}' \"$@\" 2>>'{}'\n",
                 home("home"),
                 home("config"),
@@ -224,6 +279,7 @@ impl Bed {
                 home("state"),
                 data.display(),
                 root.join("system").display(),
+                root.join("bin").display(),
                 shell.display(),
                 log.display()
             ),
@@ -312,10 +368,22 @@ impl Bed {
 
     fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
         for c in text.chars() {
-            let key = letter(c).ok_or_else(|| anyhow::anyhow!("no key for {c:?}"))?;
-            self.press(key);
+            let (key, shift) = key_of(c).ok_or_else(|| anyhow::anyhow!("no key for {c:?}"))?;
+            if shift {
+                chord(&mut self.hp, &[KEY_LEFTSHIFT, key]);
+            } else {
+                self.press(key);
+            }
         }
         Ok(())
+    }
+
+    /// What the browser was asked to open, waiting for it.
+    fn opened(&mut self) -> anyhow::Result<String> {
+        let file = self.root().join("launched/xdg-open");
+        let done = self.hp.dispatch_until(WAIT, |_| file.exists())?;
+        anyhow::ensure!(done, "the browser was never started");
+        Ok(std::fs::read_to_string(&file)?)
     }
 
     /// `Super+Space`, and the launcher drawn.
@@ -364,13 +432,27 @@ fn tile_middle(column: usize, top: f64) -> (f64, f64) {
     (580.0 + 12.0 + 92.0 * column as f64 + 46.0, top + 53.0)
 }
 
+/// The cards of what the launcher says it shows, top first.
+fn cards(shows: &str) -> Vec<String> {
+    let Some(start) = shows.find("cards=[") else {
+        return Vec::new();
+    };
+    let rest = &shows[start + 7..];
+    let end = rest.find("] offset=").unwrap_or(rest.len());
+    rest[..end]
+        .split("\", \"")
+        .map(|card| card.trim_matches('"').to_owned())
+        .filter(|card| !card.is_empty())
+        .collect()
+}
+
 /// The tiles of what the launcher says it shows, row by row.
 fn tiles(shows: &str) -> Vec<String> {
     let Some(start) = shows.find("tiles=[") else {
         return Vec::new();
     };
     let rest = &shows[start + 7..];
-    let end = rest.find("] offset=").unwrap_or(rest.len());
+    let end = rest.find("] cards=").unwrap_or(rest.len());
     rest[..end]
         .split("\", \"")
         .map(|row| row.trim_matches('"').to_owned())
@@ -485,11 +567,11 @@ fn typing_filters_the_grid_best_first_and_says_when_nothing_matches() -> anyhow:
     let from = bed.mark();
     bed.type_text("zzz")?;
     let shows = bed.shows_after(from, "query=\"zzz\"")?;
-    assert!(
-        shows.contains("empty=\"Aucune application pour «\u{a0}zzz\u{a0}».\""),
-        "{shows}"
-    );
+    // No application: only the web search (5.2).
     assert!(tiles(&shows).is_empty(), "{shows}");
+    let cards = cards(&shows);
+    assert_eq!(cards.len(), 1, "{shows}");
+    assert!(cards[0].starts_with("*web: Chercher"), "{shows}");
     Ok(())
 }
 
@@ -658,5 +740,171 @@ fn an_application_without_an_icon_shows_its_letter_on_a_neutral_square() -> anyh
     let [r, g, b] = bed.pixel(x - 18, y - 18)?;
     let grey = r.abs_diff(g) < 25 && g.abs_diff(b) < 30 && r > 50 && r < 170;
     assert!(grey, "Calculatrice's neutral square: {:?}", [r, g, b]);
+    Ok(())
+}
+
+// --- 5.2: calculations, conversions, addresses, the web ---------------------------
+
+#[test]
+fn a_calculation_shows_in_a_card_and_enter_copies_it_with_a_toast() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let from = bed.mark();
+    bed.type_text("12*(3+4)")?;
+    let shows = bed.shows_after(from, "query=\"12*(3+4)\"")?;
+    let cards = cards(&shows);
+    // The result first and selected, its expression under it; the web
+    // search last.
+    assert_eq!(cards[0], "*answer: 84 | 12 × (3 + 4) =", "{shows}");
+    assert!(cards[1].starts_with("web: "), "{shows}");
+    let from = bed.mark();
+    bed.press(KEY_ENTER);
+    assert!(bed.closed()?, "Enter did not close it");
+    // On the clipboard, and said in a toast at the bottom of the screen.
+    let copied = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.clipboard().as_deref() == Some("84"))?;
+    assert!(copied, "{:?}", bed.hp.clipboard());
+    let said = bed.logged_after(from, "the launcher's toast shows it")?;
+    assert!(said.contains("Copié") && said.contains(": 84"), "{said}");
+    let shown = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.launcher_toast_surfaces().len() == 1)?;
+    assert!(shown, "no toast");
+    let since = Instant::now();
+    let (output, rect) = bed.hp.launcher_toast_surfaces()[0].clone();
+    assert_eq!(output, "HEADLESS-1");
+    assert_eq!(rect.y + rect.height, 1080 - 40, "{rect:?}");
+    assert!(rect.height >= 36 && rect.height <= 44, "{rect:?}");
+    assert!((rect.x + rect.width / 2 - 960).abs() <= 48, "{rect:?}");
+    // For about 1.8 s.
+    let gone = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.launcher_toast_surfaces().is_empty())?;
+    assert!(gone, "the toast stayed");
+    let lasted = since.elapsed();
+    assert!(lasted > Duration::from_millis(1400), "{lasted:?}");
+    Ok(())
+}
+
+#[test]
+fn a_conversion_shows_its_kind_and_a_currency_the_rates_date() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let from = bed.mark();
+    bed.type_text("10 km en mi")?;
+    let shows = bed.shows_after(from, "query=\"10 km en mi\"")?;
+    assert_eq!(
+        cards(&shows)[0],
+        "*answer: 6,213712 mi | 10 km = 6,213712 mi · Longueur",
+        "{shows}"
+    );
+    for _ in 0.."10 km en mi".len() {
+        bed.press(KEY_BACKSPACE);
+    }
+    // At the test's rates: a euro is 1.25 dollars.
+    let from = bed.mark();
+    bed.type_text("150 usd en eur")?;
+    let shows = bed.shows_after(from, "query=\"150 usd en eur\"")?;
+    assert_eq!(
+        cards(&shows)[0],
+        "*answer: 120 € | 150 $ = 120 € · Monnaie, taux du 30/10/2026",
+        "{shows}"
+    );
+    assert!(tiles(&shows).is_empty(), "{shows}");
+    Ok(())
+}
+
+#[test]
+fn an_address_opens_in_the_browser() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let from = bed.mark();
+    bed.type_text("github.com")?;
+    let shows = bed.shows_after(from, "query=\"github.com\"")?;
+    assert_eq!(
+        cards(&shows)[0],
+        "*address: Ouvrir github.com | https://github.com · dans le navigateur",
+        "{shows}"
+    );
+    bed.press(KEY_ENTER);
+    assert!(bed.closed()?, "Enter did not close it");
+    assert_eq!(bed.opened()?, "https://github.com\n");
+    Ok(())
+}
+
+#[test]
+fn the_web_search_comes_last_and_ctrl_enter_runs_it_from_anywhere() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let from = bed.mark();
+    bed.type_text("fire")?;
+    let shows = bed.shows_after(from, "query=\"fire\"")?;
+    // The applications first, the first selected; the web row after them.
+    assert_eq!(tiles(&shows), ["*Firefox[icon]"], "{shows}");
+    let cards = cards(&shows);
+    assert_eq!(cards.len(), 1, "{shows}");
+    assert!(
+        cards[0].starts_with("web: Chercher")
+            && cards[0].contains("fire")
+            && cards[0].contains("sur le web | DuckDuckGo · Ctrl+Entrée"),
+        "{shows}"
+    );
+    // The arrows go down to it, and back.
+    let from = bed.mark();
+    bed.press(KEY_DOWN);
+    let shows = bed.shows_after(from, "*web: ")?;
+    assert_eq!(tiles(&shows), ["Firefox[icon]"], "{shows}");
+    let from = bed.mark();
+    bed.press(KEY_UP);
+    bed.shows_after(from, "*Firefox")?;
+    // Ctrl+Enter on Firefox's tile: the web search, not Firefox.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_ENTER]);
+    assert!(bed.closed()?, "Ctrl+Enter did not close it");
+    assert_eq!(bed.opened()?, "https://duckduckgo.com/?q=fire\n");
+    assert!(!bed.root().join("launched/org.mozilla.firefox").exists());
+    Ok(())
+}
+
+#[test]
+fn an_answer_or_an_address_lists_no_application() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    // "calc" lists the calculator…
+    let from = bed.mark();
+    bed.type_text("calc")?;
+    let shows = bed.shows_after(from, "query=\"calc\"")?;
+    assert_eq!(tiles(&shows), ["*Calculatrice[letter]"], "{shows}");
+    for _ in 0..4 {
+        bed.press(KEY_BACKSPACE);
+    }
+    // …an answer, none.
+    let from = bed.mark();
+    bed.type_text("2+2")?;
+    let shows = bed.shows_after(from, "query=\"2+2\"")?;
+    assert!(tiles(&shows).is_empty(), "{shows}");
+    assert_eq!(cards(&shows)[0], "*answer: 4 | 2 + 2 =", "{shows}");
+    for _ in 0..3 {
+        bed.press(KEY_BACKSPACE);
+    }
+    // Nor an address.
+    let from = bed.mark();
+    bed.type_text("localhost:3000")?;
+    let shows = bed.shows_after(from, "query=\"localhost:3000\"")?;
+    assert!(tiles(&shows).is_empty(), "{shows}");
+    assert!(
+        cards(&shows)[0].starts_with("*address: Ouvrir localhost:3000 | http://localhost:3000"),
+        "{shows}"
+    );
     Ok(())
 }
