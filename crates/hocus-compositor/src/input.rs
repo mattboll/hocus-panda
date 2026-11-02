@@ -24,6 +24,7 @@ use smithay::{
 use crate::{
     State,
     grabs::{BTN_LEFT, BTN_RIGHT},
+    handlers::layer_shell::Stand,
     model::{self, Edges, Mode, Seam, WindowId},
     shortcuts::{Action, Chord},
     switcher::{SwitchKey, is_modifier, switch_key},
@@ -307,6 +308,9 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // Against a bar's edge, or out of the bar in front (#519): first,
+        // as it decides what is under the pointer.
+        self.bar_front_follow(location);
         let mut under = self.surface_under(location);
         if !pointer.is_grabbed() {
             let seam = self.seam_near(location);
@@ -353,11 +357,7 @@ impl State {
     /// resizes: the band outside a window, or the first pixels of the top
     /// of one with no header of its own; the window in front wins.
     pub fn frame_under(&self, at: Point<f64, Logical>) -> Option<(WindowId, Edges)> {
-        use smithay::wayland::shell::wlr_layer::Layer;
-        if self
-            .layer_surface_under(at, &[Layer::Overlay, Layer::Top])
-            .is_some()
-        {
+        if self.layer_surface_under(at, Stand::Above).is_some() {
             return None;
         }
         let in_front = self.window_under(at);
@@ -388,11 +388,7 @@ impl State {
     /// The seam of a pair near `at`, where it shows: its handle shows
     /// (§8).
     fn seam_near(&self, at: Point<f64, Logical>) -> Option<Seam> {
-        use smithay::wayland::shell::wlr_layer::Layer;
-        if self
-            .layer_surface_under(at, &[Layer::Overlay, Layer::Top])
-            .is_some()
-        {
+        if self.layer_surface_under(at, Stand::Above).is_some() {
             return None;
         }
         let under = self.window_under(at);

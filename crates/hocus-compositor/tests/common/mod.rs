@@ -197,6 +197,17 @@ pub enum Shows {
     /// A clear layer surface in the bar's namespace, where the shell puts
     /// its full bar: what shows there is the compositor's glass alone.
     ClearBar,
+    /// A layer surface of the top layer in `namespace`, filled with
+    /// `colour` (ARGB), `size` large, anchored to the screen's top right
+    /// corner `margin` (top, right) from it; a height of 0 spans the
+    /// screen's height less the top margin at both ends, as the bar does.
+    /// It reserves nothing.
+    Layer {
+        namespace: &'static str,
+        size: (u32, u32),
+        margin: (i32, i32),
+        colour: u32,
+    },
     /// An xdg toplevel of this size drawn with a translucent shadow
     /// `margin` wide around it, outside its window geometry, as
     /// client-side decorated applications draw theirs.
@@ -329,6 +340,7 @@ fn run_client(
         hung: Vec::new(),
         typing: false,
         clear: false,
+        fill: None,
     };
     match shows {
         Some(Shows::Window {
@@ -415,6 +427,26 @@ fn run_client(
             client.clear = true;
             client.layer = Some(layer);
         }
+        Some(Shows::Layer {
+            namespace,
+            size,
+            margin: (top, right),
+            colour,
+        }) => {
+            let shell = LayerShell::bind(&globals, &qh).context("no layer shell")?;
+            let surface = client.compositor.create_surface(&qh);
+            let layer = shell.create_layer_surface(&qh, surface, Layer::Top, Some(namespace), None);
+            let mut anchor = Anchor::RIGHT | Anchor::TOP;
+            if size.1 == 0 {
+                anchor |= Anchor::BOTTOM;
+            }
+            layer.set_anchor(anchor);
+            layer.set_size(size.0, size.1);
+            layer.set_margin(top, right, top, 0);
+            layer.commit();
+            client.fill = Some(colour);
+            client.layer = Some(layer);
+        }
         Some(Shows::Bar { height }) => {
             let shell = LayerShell::bind(&globals, &qh).context("no layer shell")?;
             let surface = client.compositor.create_surface(&qh);
@@ -485,6 +517,8 @@ struct Client {
     typing: bool,
     /// Its layer surface is clear.
     clear: bool,
+    /// Its surface's colour, when not a window's.
+    fill: Option<u32>,
 }
 
 impl Client {
@@ -524,7 +558,7 @@ impl Client {
             let inside = x >= m && y >= m && x < m + iw && y < m + ih;
             let colour: u32 = match (self.clear, inside) {
                 (true, _) => 0,
-                (false, true) => WINDOW_COLOUR,
+                (false, true) => self.fill.unwrap_or(WINDOW_COLOUR),
                 (false, false) => SHADOW_COLOUR,
             };
             pixel.copy_from_slice(&colour.to_le_bytes());

@@ -24,6 +24,12 @@ open on), agents' badges on windows (slice 3).
   8 px gap on every side. Windows placed by the desktop (snapped,
   maximised, new) keep 8 px from the work area's edges and from each
   other.
+- Windows go **over the bar**: the bar sits under normal windows, and a
+  window the user moves or resizes onto it covers it and takes the
+  pointer there (bar.md §2, #519). Its popovers, its halo, the bubbles
+  and the launcher stay above the windows; the pointer held 300 ms
+  against the screen's right edge, over the bar, brings the bar in front
+  until it leaves the bar.
 
 ## 3. A window's look
 
@@ -481,3 +487,6 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 11. The seam's handle is drawn right above the front one of its two
     windows, not above all windows: a window over the seam hides it and
     takes the presses there (#354).
+12. A window placed over the bar goes in front of it; the desktop's
+    placements still keep off the bar, and the pointer pushed against the
+    screen's edge brings the bar back in front (#519).
