@@ -236,7 +236,9 @@ impl Bed {
             let l = self.levels();
             (
                 f64::from(l.x + l.width / 2),
-                f64::from(l.y + l.height - 6 - 15),
+                // Its bottom 54 px over the surface's: 14 px over the
+                // footer's bell (5.5).
+                f64::from(l.y + l.height - 54 - 15),
             )
         } else {
             let s = self.connections();
@@ -532,7 +534,7 @@ fn one_layout_no_row_and_no_click_taken() -> anyhow::Result<()> {
     })?;
     assert!(mini);
     bed.settle()?;
-    assert_eq!(bed.levels().height, 128);
+    assert_eq!(bed.levels().height, 176);
     Ok(())
 }
 
@@ -580,12 +582,12 @@ fn the_mini_forms_button_under_the_battery_draws_alone_and_goes_to_the_next() ->
     bed.logged(&shows("Français", "FR"))?;
     // The levels' surface grew by the button and the gap over it.
     let l = bed.levels();
-    assert_eq!((l.width, l.height), (54, 168));
-    // The code drawn in its 44 × 30 button, its bottom 47 px over the
-    // bar's.
+    assert_eq!((l.width, l.height), (54, 216));
+    // The code drawn in its 44 × 30 button, its bottom 95 px over the
+    // bar's: 14 px over the footer's bell and avatar (5.5).
     let (x, y) = bed.row(true);
     let button = Rect::new(x as i32 - 22, y as i32 - 15, 44, 30);
-    assert_eq!(button.y + button.height, 1080 - 8 - 47);
+    assert_eq!(button.y + button.height, 1080 - 8 - 95);
     assert!(bed.ink(button)? > 10, "no code drawn");
     // Hovered, nothing opens; clicked, the next layout.
     bed.hp.pointer_move(x - 1.0, y);
