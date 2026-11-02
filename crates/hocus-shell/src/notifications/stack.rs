@@ -321,6 +321,12 @@ impl Stack {
     /// What changed since `before`: the history's panel and the bell drawn
     /// again, what is kept written (once what was kept is read back).
     fn settle(&mut self, before: Marks, effects: &mut Vec<Effect>) {
+        // Held, gone from the history for their age (or past the most kept):
+        // closed as expired.
+        for id in self.history.take_dropped() {
+            tracing::debug!(id, "a notification leaves the history");
+            effects.push(Effect::Signal(Signal::Closed { id, reason: 1 }));
+        }
         let (version, unseen, dnd) = self.marks();
         if version != before.0 {
             effects.push(Effect::Changed);
@@ -537,8 +543,7 @@ impl Stack {
             .map(|b| b.serial)
             .collect();
         for serial in expired {
-            tracing::debug!(serial, "a bubble's time is up");
-            self.leave(serial, 1, now, &mut effects);
+            self.expire(serial, now, &mut effects);
         }
         let gone: Vec<window::Id> = self
             .bubbles
@@ -646,19 +651,26 @@ impl Stack {
         }
     }
 
-    /// Bubble `serial` goes, closed for `reason`.
-    /// One whose time was up without the pointer resting on it is not
-    /// seen: the badge counts it.
-    fn leave(&mut self, serial: u64, reason: u32, now: Instant, effects: &mut Vec<Effect>) {
+    /// Bubble `serial`'s time is up: it goes, its notification still held
+    /// (the server's `persistence`: its actions work from the history).
+    /// Without the pointer having rested on it, it was not seen: the badge
+    /// counts it.
+    fn expire(&mut self, serial: u64, now: Instant, effects: &mut Vec<Effect>) {
         let Some((id, rested)) = self.showing(serial).map(|b| (b.note.id, b.rested)) else {
             return;
         };
-        let seen = if reason == 1 && !rested {
-            Sight::Unseen
-        } else {
-            Sight::Seen
-        };
+        tracing::debug!(serial, id, "a bubble's time is up");
+        let seen = if rested { Sight::Seen } else { Sight::Unseen };
         self.history.set_seen(id, seen);
+        self.leave_silently(serial, now, effects);
+    }
+
+    /// Bubble `serial` goes, closed for `reason`: seen.
+    fn leave(&mut self, serial: u64, reason: u32, now: Instant, effects: &mut Vec<Effect>) {
+        let Some(id) = self.showing(serial).map(|b| b.note.id) else {
+            return;
+        };
+        self.history.set_seen(id, Sight::Seen);
         self.closed(id, reason, effects);
         self.leave_silently(serial, now, effects);
     }
@@ -917,9 +929,12 @@ mod tests {
         assert_eq!(open[0].1, (8, 8 + 196 + 8, 0, 0));
         assert_eq!(s.deadline(), Some(t0 + LIFE));
         assert!(s.tick(t0 + LIFE - MS(1)).is_empty());
+        // Its time up, it goes; its notification is still held (nothing
+        // said to its sender), in the history.
         let effects = s.tick(t0 + LIFE);
-        assert_eq!(signals(&effects), [Signal::Closed { id: 1, reason: 1 }]);
+        assert!(signals(&effects).is_empty(), "{effects:?}");
         assert!(effects.contains(&Effect::Closing(bubble_namespace(1))));
+        assert_eq!(s.history.items()[0].live, Some(1));
         // Its surface goes once it faded out.
         let effects = s.tick(t0 + LIFE + BUBBLE_OUT);
         assert!(matches!(effects[..], [Effect::Remove(_)]), "{effects:?}");
@@ -1149,13 +1164,62 @@ mod tests {
         let effects = s.handle(Input::Remove(vec![second]), t0);
         assert_eq!(signals(&effects), [Signal::Closed { id: 2, reason: 2 }]);
         assert!(s.history.items().is_empty());
-        // One its sender holds no more: raised, nothing said to it.
-        s.handle(notify(note(3)), t0);
+        // A bubble gone after its time: still held, its action works from
+        // the history, then it is closed (2).
+        let mut expired = note(3);
+        expired.actions = vec![("reply".to_owned(), "Répondre".to_owned())];
+        s.handle(notify(expired), t0);
         s.tick(t0 + LIFE);
+        let key = keys(&s)[0];
+        let effects = s.handle(
+            Input::Act {
+                key,
+                action: "reply".to_owned(),
+            },
+            t0 + LIFE,
+        );
+        assert_eq!(
+            signals(&effects),
+            [
+                Signal::Action {
+                    id: 3,
+                    key: "reply".to_owned()
+                },
+                Signal::Closed { id: 3, reason: 2 }
+            ]
+        );
+        // One read back after a restart is held by no one: raised, nothing
+        // said.
+        s.handle(
+            Input::Restored {
+                notes: vec![(note(9), Sight::Seen)],
+                dnd: Dnd::Off,
+            },
+            t0,
+        );
         let key = keys(&s)[0];
         let effects = s.handle(Input::Open(key), t0 + LIFE);
         assert!(signals(&effects).is_empty(), "{effects:?}");
         assert!(effects.iter().any(|e| matches!(e, Effect::Raise { .. })));
+    }
+
+    #[test]
+    fn a_held_one_leaving_the_history_after_seven_days_is_closed_as_expired() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        let mut low = note(1);
+        low.urgency = Urgency::Low;
+        s.handle(notify(low), t0);
+        let week = crate::notifications::history::KEEP_MS;
+        let effects = s.handle(
+            Input::History {
+                open: true,
+                wall: 1_000_000 + week,
+            },
+            t0,
+        );
+        assert_eq!(signals(&effects), [Signal::Closed { id: 1, reason: 1 }]);
+        assert!(s.history.items().is_empty());
     }
 
     #[test]

@@ -11,7 +11,8 @@
 //!
 //! And 5.4's (issue #394), one per point of its spec: the history lists by
 //! sections, newest first; a click in it invokes the default, raises and
-//! removes; its ✕ removes one, "clear all" empties it; the bell's badge
+//! removes; an expired bubble's action still works from it (a bubble's time
+//! up closes nothing: the notification stays held); its ✕ removes one, "clear all" empties it; the bell's badge
 //! counts what was not seen and opening the history resets it; do not
 //! disturb holds a normal bubble but not a critical one; the history
 //! survives a restart of the shell without what is older than 7 days. The
@@ -397,6 +398,32 @@ impl Bed {
         self.hp.button(BTN_LEFT, false);
     }
 
+    /// Waits until notification `id`'s bubble went after its time: its
+    /// sender hears nothing, the notification still held (`persistence`).
+    fn expires(&mut self, id: u32) -> anyhow::Result<()> {
+        let start = Instant::now();
+        let ended = format!("id={id}");
+        while start.elapsed() < Duration::from_secs(15) {
+            let up = self
+                .log()
+                .lines()
+                .any(|l| l.contains("a bubble's time is up") && l.ends_with(&ended));
+            if up {
+                // Its fading out over, nothing said.
+                self.idle(Duration::from_millis(300))?;
+                let closed = format!("closed {id} ");
+                anyhow::ensure!(
+                    !self.heard().iter().any(|h| h.starts_with(&closed)),
+                    "{:?}",
+                    self.heard()
+                );
+                return Ok(());
+            }
+            self.idle(Duration::from_millis(50))?;
+        }
+        anyhow::bail!("{id}'s time was not up:\n{}", self.log())
+    }
+
     /// Where the log is now: what it says after is new.
     fn mark(&self) -> usize {
         self.log().len()
@@ -551,7 +578,7 @@ fn a_bubble_shows_against_the_bar_then_goes_after_its_time() -> anyhow::Result<(
     assert_eq!((cards[0].width, cards[0].y), (340, 8));
     assert_eq!(cards[0].x + cards[0].width, CARDS_RIGHT);
     bed.logged("title=\"Camille dans #design\"")?;
-    bed.hears(&format!("closed {id} 1"))?;
+    bed.expires(id)?;
     assert!(
         shown.elapsed() >= Duration::from_millis(1300),
         "{:?}",
@@ -584,7 +611,7 @@ fn hovering_a_bubble_pauses_its_countdown() -> anyhow::Result<()> {
     // Away from it, it goes after what was left.
     bed.hp.pointer_move(400.0, 600.0);
     bed.logged("paused=false")?;
-    bed.hears(&format!("closed {id} 1"))?;
+    bed.expires(id)?;
     Ok(())
 }
 
@@ -671,7 +698,7 @@ fn a_replacement_updates_its_bubble_in_place() -> anyhow::Result<()> {
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].0, before[0].0);
     assert!(bed.heard().is_empty(), "{:?}", bed.heard());
-    bed.hears(&format!("closed {id} 1"))?;
+    bed.expires(id)?;
     Ok(())
 }
 
@@ -974,7 +1001,7 @@ fn the_badge_counts_what_was_not_seen_and_opening_the_history_resets_it() -> any
         timeout: 800,
         ..Notice::default()
     })?;
-    bed.hears(&format!("closed {id} 1"))?;
+    bed.expires(id)?;
     bed.logged("the bell unread=1")?;
     // One the pointer rested on: seen, not counted.
     let id = bed.notify(Notice {
@@ -987,7 +1014,7 @@ fn the_badge_counts_what_was_not_seen_and_opening_the_history_resets_it() -> any
         .pointer_move(f64::from(card.x + 60), f64::from(card.y + 30));
     bed.logged("paused=true")?;
     bed.hp.pointer_move(400.0, 600.0);
-    bed.hears(&format!("closed {id} 1"))?;
+    bed.expires(id)?;
     // A low one: counted.
     let mark = bed.mark();
     bed.notify(Notice {
@@ -1089,5 +1116,42 @@ fn the_history_survives_a_restart_of_the_shell_without_what_is_older_than_seven_
     );
     assert!(!shows.contains("(unseen)"), "{shows}");
     assert!(!shows.contains("huit jours"), "{shows}");
+    Ok(())
+}
+
+#[test]
+fn an_expired_bubbles_action_is_invoked_from_the_history() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    let id = bed.notify(Notice {
+        actions: &["reply", "Répondre"],
+        timeout: 800,
+        ..Notice::default()
+    })?;
+    bed.shows(1)?;
+    bed.expires(id)?;
+    let shows = bed.open_history()?;
+    assert!(shows.contains("[1 actions]"), "{shows}");
+    let log = bed.log();
+    let action = log
+        .lines()
+        .rev()
+        .find(|l| l.contains("the history's items"))
+        .and_then(|l| {
+            l.split_whitespace()
+                .map(|w| w.trim_start_matches("items="))
+                .filter_map(|w| w.split_once('@').map(|(who, _)| who.to_owned()))
+                .find(|who| who.starts_with("Action("))
+        })
+        .ok_or_else(|| anyhow::anyhow!("no action listed:\n{log}"))?;
+    let at = bed.history_item(&action)?;
+    bed.hp.pointer_move(at.0, at.1);
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(at);
+    // Invoked, then closed by the user.
+    bed.hears(&format!("action {id} reply"))?;
+    bed.hears(&format!("closed {id} 2"))?;
     Ok(())
 }

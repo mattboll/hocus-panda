@@ -51,6 +51,9 @@ pub struct History {
     open: bool,
     /// Changes with what it lists, for the panel to lay it out again.
     version: u64,
+    /// The notifications still held by their senders that went for their
+    /// age or past the most kept: to close (1).
+    dropped: Vec<u32>,
 }
 
 impl History {
@@ -77,6 +80,20 @@ impl History {
         self.version += 1;
     }
 
+    /// What is past the most kept goes.
+    fn trim(&mut self) {
+        if self.items.len() > MOST {
+            let gone = self.items.split_off(MOST);
+            self.dropped.extend(gone.iter().filter_map(|k| k.live));
+        }
+    }
+
+    /// The notifications still held by their senders that went since last
+    /// asked (for their age, or past the most kept).
+    pub fn take_dropped(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.dropped)
+    }
+
     /// `note` comes, live, `seen` so: the newest. A notification of the
     /// same id held by its sender is taken out first (replaced).
     pub fn add(&mut self, note: Note, seen: Sight) -> u64 {
@@ -92,7 +109,7 @@ impl History {
                 seen,
             },
         );
-        self.items.truncate(MOST);
+        self.trim();
         self.changed();
         key
     }
@@ -171,7 +188,11 @@ impl History {
     /// whether any did.
     pub fn prune(&mut self, now: i64) -> bool {
         let before = self.items.len();
-        self.items.retain(|k| now - k.note.at < KEEP_MS);
+        let (kept, old): (Vec<Kept>, Vec<Kept>) = std::mem::take(&mut self.items)
+            .into_iter()
+            .partition(|k| now - k.note.at < KEEP_MS);
+        self.items = kept;
+        self.dropped.extend(old.iter().filter_map(|k| k.live));
         let gone = self.items.len() != before;
         if gone {
             self.changed();
@@ -192,7 +213,7 @@ impl History {
             });
         }
         self.items.sort_by_key(|k| std::cmp::Reverse(k.note.at));
-        self.items.truncate(MOST);
+        self.trim();
         self.changed();
     }
 }
