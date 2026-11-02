@@ -37,20 +37,47 @@ impl Numbers {
     /// decimal calculation: `0.1 + 0.2` is `0.3`). `None` when it is not a
     /// number.
     pub fn format(self, value: f64) -> Option<String> {
+        self.write(value, 6, false)
+    }
+
+    /// A conversion's `value`, as it reads well: four significant digits
+    /// (none to three decimals, their trailing zeros dropped); a currency's
+    /// always with two decimals.
+    pub fn format_converted(self, value: f64, kind: Kind) -> Option<String> {
+        if kind == Kind::Currency {
+            return self.write(value, 2, true);
+        }
+        let whole = value.abs().trunc();
+        let digits = if whole < 1.0 {
+            1
+        } else {
+            whole.log10().floor() as i64 + 1
+        };
+        self.write(value, (4 - digits).clamp(0, 3) as usize, false)
+    }
+
+    /// `value` with `places` decimals, their trailing zeros dropped unless
+    /// `kept`, from its twelve first significant digits.
+    fn write(self, value: f64, places: usize, kept: bool) -> Option<String> {
         if !value.is_finite() {
             return None;
         }
         let value: f64 = format!("{value:.11e}").parse().ok()?;
-        let digits = format!("{:.6}", value.abs());
+        let digits = format!("{:.*}", places, value.abs());
         let (whole, decimals) = digits.split_once('.').unwrap_or((&digits, ""));
-        let decimals = decimals.trim_end_matches('0');
+        let decimals = if kept {
+            decimals
+        } else {
+            decimals.trim_end_matches('0')
+        };
         let (group, mark) = if self.fr {
             ('\u{202f}', ',')
         } else {
             (',', '.')
         };
         let mut out = String::new();
-        if value < 0.0 && (whole != "0" || !decimals.is_empty()) {
+        let zero = whole == "0" && decimals.chars().all(|c| c == '0');
+        if value < 0.0 && !zero {
             out.push('-');
         }
         for (i, digit) in whole.chars().enumerate() {
@@ -87,7 +114,7 @@ pub fn answer(text: &str, rates: Option<&Rates>, numbers: Numbers, words: Words)
         });
     }
     let conversion = convert(text, rates)?;
-    let value = numbers.format(conversion.value)?;
+    let value = numbers.format_converted(conversion.value, conversion.to.kind)?;
     let from = numbers.format(conversion.from)?;
     let to = show(&conversion.to.key, words);
     let kind = match (&conversion.to.kind, rates) {
@@ -782,15 +809,21 @@ mod tests {
         let rates = rates();
         let fr = Words { fr: true };
         let answer = answer("10 km en miles", Some(&rates), FR, fr).expect("an answer");
-        assert_eq!(answer.main, "6,213712 mi");
-        assert_eq!(answer.sub, "10 km = 6,213712 mi · Longueur");
-        assert_eq!(answer.copy, "6,213712");
+        assert_eq!(answer.main, "6,214 mi");
+        assert_eq!(answer.sub, "10 km = 6,214 mi · Longueur");
+        assert_eq!(answer.copy, "6,214");
+        let main = |text: &str| super::answer(text, Some(&rates), FR, fr).map(|a| a.main);
+        assert_eq!(main("22 °C en F").as_deref(), Some("71,6 °F"));
+        assert_eq!(main("1,5 go en mo").as_deref(), Some("1\u{202f}500 Mo"));
+        assert_eq!(main("1 o en To").as_deref(), Some("0 To"));
         let answer = answer_en("150 usd to eur", &rates);
-        assert_eq!(answer.main, "138.888889 €");
+        assert_eq!(answer.main, "138.89 €");
+        assert_eq!(answer.copy, "138.89");
         assert_eq!(
             answer.sub,
-            "150 $ = 138.888889 € · Currency, rates of 2026-10-30"
+            "150 $ = 138.89 € · Currency, rates of 2026-10-30"
         );
+        assert_eq!(answer_en("108 usd to eur", &rates).main, "100.00 €");
         let calc = super::answer("12 × (3 + 4)", None, FR, fr).expect("an answer");
         assert_eq!(
             (calc.main.as_str(), calc.sub.as_str()),

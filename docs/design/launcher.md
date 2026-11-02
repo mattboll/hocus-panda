@@ -230,9 +230,11 @@ is left for other kinds of results.
 - **Numbers** follow `LC_NUMERIC` (then `LC_ALL`, `LANG`): French writes
   `1 234,5` (a narrow no-break space between thousands), English
   `1,234.5`. The value keeps its twelve first significant digits (`0.1 +
-  0.2` is `0.3`), then up to six decimals: "6,213712 mi" for 10 km, the
-  spec's "6,214" being shortened. What `Enter` copies is the value so
-  written, without its unit. The units show as the card writes them:
+  0.2` is `0.3`). A calculation shows up to six decimals; a conversion
+  four significant digits, none to three decimals, trailing zeros dropped
+  ("6,214 mi" for 10 km, "71,6 °F" for 22 °C, "1 500 Mo" for 1,5 Go), a
+  currency always two decimals ("138,89 €"). What `Enter` copies is the
+  value as shown, without its unit. The units show as the card writes them:
   `°C`, `€`, `Ko` in French and `kB` in English, `j`/`d`, `sem`/`wk`.
 - **The rates** (`rates.rs`) are the bank's file as it is, in
   `$XDG_STATE_HOME/hocuspanda/ecb-rates.xml`, read on a thread as the
@@ -269,6 +271,8 @@ is left for other kinds of results.
   drawn in between but the frame its fade out starts in. With reduced
   motion it only fades. On the CPU it is opaque and the compositor cuts
   its corners.
+- **The package** recommends `xdg-utils` (for `xdg-open`) and
+  `ca-certificates` (for the rates over HTTPS).
 - **Opening**: the shell sends `launch` with `xdg-open` (looked for in
   its own `PATH`, sent with its full path) and the address, or
   `https://duckduckgo.com/?q=…` (the query form-encoded); the compositor

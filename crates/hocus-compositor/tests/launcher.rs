@@ -800,7 +800,7 @@ fn a_conversion_shows_its_kind_and_a_currency_the_rates_date() -> anyhow::Result
     let shows = bed.shows_after(from, "query=\"10 km en mi\"")?;
     assert_eq!(
         cards(&shows)[0],
-        "*answer: 6,213712 mi | 10 km = 6,213712 mi · Longueur",
+        "*answer: 6,214 mi | 10 km = 6,214 mi · Longueur",
         "{shows}"
     );
     for _ in 0.."10 km en mi".len() {
@@ -812,7 +812,7 @@ fn a_conversion_shows_its_kind_and_a_currency_the_rates_date() -> anyhow::Result
     let shows = bed.shows_after(from, "query=\"150 usd en eur\"")?;
     assert_eq!(
         cards(&shows)[0],
-        "*answer: 120 € | 150 $ = 120 € · Monnaie, taux du 30/10/2026",
+        "*answer: 120,00 € | 150 $ = 120,00 € · Monnaie, taux du 30/10/2026",
         "{shows}"
     );
     assert!(tiles(&shows).is_empty(), "{shows}");
