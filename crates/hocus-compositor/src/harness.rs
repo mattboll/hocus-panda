@@ -373,6 +373,17 @@ impl Headless {
         self.layer_rects(hocus_link::POPOVER_NAMESPACE)
     }
 
+    /// Commits of the launcher's surfaces so far.
+    pub fn launcher_commits(&self) -> u64 {
+        self.app.state.panel.launcher_commits
+    }
+
+    /// The launcher's surfaces as the shell placed them: their screen, and
+    /// where they are (global).
+    pub fn launcher_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::LAUNCHER_NAMESPACE)
+    }
+
     /// The keyboard's active layout (XKB's group).
     pub fn layout(&self) -> u32 {
         self.app

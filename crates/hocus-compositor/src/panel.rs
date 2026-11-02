@@ -104,6 +104,10 @@ pub struct Panel {
     pub peek_commits: u64,
     /// The shell's popovers beside the bars, and their motion.
     pub popovers: crate::popover::Popovers,
+    /// The shell's launcher, and its motion (5.1).
+    pub launchers: crate::launcher::Launchers,
+    /// Commits of the launcher's surfaces, for tests.
+    pub launcher_commits: u64,
     /// The other screens' names, as last told to the shell.
     screens: Option<Vec<String>>,
 }
@@ -164,7 +168,7 @@ impl Panel {
                 }
             }
         }
-        moving || self.popovers.tick(now, popover_motion)
+        moving || self.popovers.tick(now, popover_motion) || self.launchers.tick(now)
     }
 }
 
@@ -308,6 +312,8 @@ impl State {
         self.space
             .outputs()
             .filter(|o| self.panel.bars.contains_key(&o.name()))
+            // The launcher covers the bar, and takes the press.
+            .filter(|o| self.launcher_on(o).is_none())
             .find(|o| {
                 self.space.output_geometry(o).is_some_and(|g| {
                     let g = g.to_f64();
