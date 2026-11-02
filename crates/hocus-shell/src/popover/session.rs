@@ -4,8 +4,13 @@
 //! compositor's `log-out`). The desktop has no lock of its own yet: no
 //! "Verrouiller" until it does.
 //!
-//! A click on the row, or `Enter` or `Space` once `Tab` gave it the
-//! keyboard, logs out; `Esc` closes.
+//! Logging out takes two steps, so that a slip loses no open work: a click
+//! on the row (or `Enter` or `Space` once `Tab` gave it the keyboard)
+//! turns it into "Confirmer la déconnexion" in amber for 4 s, and a second
+//! one within that time logs out. `Esc`, the pointer leaving the popover,
+//! or the 4 s running out let it go back; `Esc` again closes.
+
+use std::time::{Duration, Instant};
 
 use hocus_link::{POPOVER_WIDTH, ToCompositor};
 use iced::{
@@ -36,6 +41,19 @@ const TILE_RADIUS: f32 = 8.0;
 const TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.08);
 const TILE_GAP: f32 = 10.0;
 const GLYPH: f32 = 18.0;
+/// The row asking to confirm: amber, as long as this.
+const CONFIRM: Duration = Duration::from_secs(4);
+const CONFIRM_INK: Color = crate::levels::draw::rgb(0xF5C46E);
+const CONFIRM_FILL: Color = Color::from_rgba8(245, 196, 110, 0.12);
+
+/// What a press on the row does, the row asking to confirm since `armed`:
+/// it asks (from now), or, asked less than 4 s ago, logs out (`true`).
+fn press(armed: Option<Instant>, now: Instant) -> (Option<Instant>, bool) {
+    match armed {
+        Some(since) if now.saturating_duration_since(since) < CONFIRM => (None, true),
+        _ => (Some(now), false),
+    }
+}
 
 /// Its height: the header and its one row, as the clipboard's.
 pub fn height() -> u32 {
@@ -61,6 +79,14 @@ impl Words {
             "Log out"
         }
     }
+
+    pub fn confirm(self) -> &'static str {
+        if self.fr {
+            "Confirmer la déconnexion"
+        } else {
+            "Confirm log out"
+        }
+    }
 }
 
 /// The popover on its surface.
@@ -80,6 +106,44 @@ pub struct State {
     name: Option<String>,
     pointer: Pointer<()>,
     focused: bool,
+    /// The row asks to confirm, since then.
+    armed: Option<Instant>,
+}
+
+impl State {
+    /// A press on the row: asks to confirm, or logs out.
+    fn press<Message>(&mut self) -> Option<canvas::Action<Message>> {
+        let now = Instant::now();
+        let (armed, out) = press(self.armed, now);
+        self.armed = armed;
+        if out {
+            Panel::log_out();
+            return Some(canvas::Action::request_redraw().and_capture());
+        }
+        tracing::debug!("the session's popover asks to confirm");
+        // Drawn again as the question lapses: a wake through the
+        // compositor, from a thread that waits for it (the layer surface
+        // takes no timed redraw of its own).
+        let woke = std::thread::Builder::new()
+            .name("log out".to_owned())
+            .spawn(|| {
+                std::thread::sleep(CONFIRM);
+                super::changed(super::Item::User);
+            });
+        if let Err(err) = woke {
+            tracing::warn!(%err, "the question to confirm will not lapse on its own");
+        }
+        Some(canvas::Action::request_redraw().and_capture())
+    }
+
+    /// The question goes back to "Se déconnecter", if it was asked.
+    fn cancel(&mut self, why: &str) -> bool {
+        let asked = self.armed.take().is_some();
+        if asked {
+            tracing::debug!(why, "the session's popover no longer asks to confirm");
+        }
+        asked
+    }
 }
 
 /// The log-out glyph: a door and an arrow leaving it.
@@ -113,9 +177,15 @@ impl<Message> canvas::Program<Message> for Panel {
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(_) => {
+            Input::Redraw(now) => {
                 for pressed in kit::keys(self.id) {
                     let _: Option<canvas::Action<Message>> = Self::key(state, &pressed);
+                }
+                if state
+                    .armed
+                    .is_some_and(|since| now.saturating_duration_since(since) >= CONFIRM)
+                {
+                    state.cancel("its time ran out");
                 }
                 self.refresh(state);
                 None
@@ -141,7 +211,10 @@ impl<Message> canvas::Program<Message> for Panel {
             kit::title(f, name);
         }
         let row = row();
-        if state.pointer.hover.is_some() {
+        let asking = state.armed.is_some();
+        if asking {
+            f.fill(&kit::rounded(row, ROW_RADIUS), CONFIRM_FILL);
+        } else if state.pointer.hover.is_some() {
             f.fill(&kit::rounded(row, ROW_RADIUS), ROW_HOVER);
         }
         if state.focused {
@@ -163,10 +236,15 @@ impl<Message> canvas::Program<Message> for Panel {
         f.fill_text(text_in(
             kit::MANROPE_SEMIBOLD,
             text(
-                self.words.log_out().to_owned(),
+                if asking {
+                    self.words.confirm()
+                } else {
+                    self.words.log_out()
+                }
+                .to_owned(),
                 Point::new(tile.x + TILE + TILE_GAP, row.center_y()),
                 LINE_TEXT,
-                TEXT,
+                if asking { CONFIRM_INK } else { TEXT },
                 Alignment::Left,
             ),
         ));
@@ -229,6 +307,7 @@ impl Panel {
             }
             mouse::Event::CursorLeft => {
                 state.pointer.left();
+                state.cancel("the pointer left");
                 redraw
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
@@ -238,7 +317,7 @@ impl Panel {
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
                 if state.pointer.release(target).is_some() {
-                    Self::log_out();
+                    return state.press();
                 }
                 redraw
             }
@@ -249,15 +328,38 @@ impl Panel {
     fn key<Message>(state: &mut State, pressed: &Pressed) -> Option<canvas::Action<Message>> {
         use keyboard::{Key, key::Named};
         match &pressed.key {
+            // Asking to confirm, it goes back; else it closes.
             Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
+                if !state.cancel("Escape") {
+                    event(Seen::Escape);
+                    return Some(canvas::Action::capture());
+                }
             }
             // Its one row holds the keyboard, round and round.
             Key::Named(Named::Tab | Named::ArrowDown | Named::ArrowUp) => state.focused = true,
-            Key::Named(Named::Enter | Named::Space) if state.focused => Self::log_out(),
+            Key::Named(Named::Enter | Named::Space) if state.focused => return state.press(),
             _ => return None,
         }
         Some(canvas::Action::request_redraw().and_capture())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logging_out_takes_a_second_press_within_four_seconds() {
+        let t = Instant::now();
+        // The first asks to confirm; a second within 4 s logs out.
+        assert_eq!(press(None, t), (Some(t), false));
+        let later = t + Duration::from_millis(3900);
+        assert_eq!(press(Some(t), later), (None, true));
+        // Past 4 s, it asks again.
+        let lapsed = t + CONFIRM;
+        assert_eq!(press(Some(t), lapsed), (Some(lapsed), false));
+        let fr = Words { fr: true };
+        assert_eq!(fr.confirm(), "Confirmer la déconnexion");
+        assert_eq!(Words { fr: false }.confirm(), "Confirm log out");
     }
 }

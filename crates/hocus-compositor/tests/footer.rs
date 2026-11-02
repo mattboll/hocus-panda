@@ -5,9 +5,9 @@
 //! One scenario per point of the approved spec: the full form's footer is
 //! four buttons in a row along the bar's bottom, each opening its thing
 //! (the clipboard's text, the notifications' history, the launcher, the
-//! user's name and logging out); the menu opens the launcher on a click,
-//! not on a hover; the mini form's bell sits over the user's avatar, last
-//! of all. The badge still counting is the notifications' tests' (they
+//! user's name and logging out, confirmed by a second click within 4 s);
+//! the menu opens the launcher on a click, not on a hover; the mini form's
+//! bell sits over the user's avatar, last of all. The badge still counting is the notifications' tests' (they
 //! click the footer's bell), and its colour is checked there.
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
@@ -338,11 +338,33 @@ fn each_footer_button_opens_its_thing() -> anyhow::Result<()> {
     assert!(line.contains("name=\"Alex\""), "{line}");
     assert!(line.contains("Se déconnecter"), "{line}");
     assert_eq!(bed.hp.ending(), None);
-    // Its row: 8 px into the popover's padding, 49 px down, 44 px tall.
-    bed.click((
+    // Its row: 8 px into the popover's padding, 49 px down, 44 px tall. A
+    // click asks to confirm, for 4 s; once they ran out, nothing ended.
+    let row = (
         f64::from(session.x + 9 + 131),
         f64::from(session.y + 49 + 22),
-    ))?;
+    );
+    let mark = bed.mark();
+    bed.click(row)?;
+    bed.logged_after(mark, "the session's popover asks to confirm")?;
+    let mark = bed.mark();
+    wait(&mut bed.hp, Duration::from_millis(4300))?;
+    bed.logged_after(mark, "its time ran out")?;
+    assert_eq!(bed.hp.ending(), None);
+    // Asked again, Escape lets it go back, the popover still open.
+    let mark = bed.mark();
+    bed.click(row)?;
+    bed.logged_after(mark, "asks to confirm")?;
+    bed.press(KEY_ESC);
+    bed.logged_after(mark, "why=\"Escape\"")?;
+    assert_eq!(bed.hp.popover_surfaces().len(), 1);
+    assert_eq!(bed.hp.ending(), None);
+    // Asked, then confirmed within 4 s: the session ends.
+    let mark = bed.mark();
+    bed.click(row)?;
+    bed.logged_after(mark, "asks to confirm")?;
+    assert_eq!(bed.hp.ending(), None);
+    bed.click(row)?;
     let ended = bed.hp.dispatch_until(WAIT, |hp| hp.ending().is_some())?;
     anyhow::ensure!(ended, "the session did not end");
     assert_eq!(bed.hp.ending(), Some(Ending::LoggedOut));

@@ -2384,10 +2384,16 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   compositor's, does away with that). Nothing in it acts.
 - **The user's popover**, until the session's menu (7.4): 280 wide, the
   user's name as the title, and one 44 px row, a log-out glyph in its
-  tile and "Se déconnecter" / "Log out" (lit `0.06` under the pointer),
-  which ends the session as `Super+Shift+E` does (the shell's `log-out`
-  line). No "Verrouiller" / "Lock": the desktop has no lock of its own
-  yet. `Tab` gives the row the keyboard, `Enter` or `Space` logs out.
+  tile and "Se déconnecter" / "Log out" (lit `0.06` under the pointer).
+  Logging out takes two steps, so that a slip loses no open work: a
+  click turns the row into "Confirmer la déconnexion" / "Confirm log out"
+  in amber (`#F5C46E` on `rgba(245,196,110,0.12)`) for 4 s; a second
+  click within that time ends the session as `Super+Shift+E` does (the
+  shell's `log-out` line; the shortcut still ends it at once). `Esc`, the
+  pointer leaving the popover, or the 4 s running out bring "Se
+  déconnecter" back; `Esc` again closes. No "Verrouiller" / "Lock": the
+  desktop has no lock of its own yet. `Tab` gives the row the keyboard,
+  `Enter` or `Space` act as a click.
 - **The user's name**: their account entry's (`getent passwd UID`, else
   `/etc/passwd`), its GECOS field's first part, else their login; looked
   up on a thread as the shell starts, the session's `USER` standing in
@@ -2403,7 +2409,9 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   buttons drawn in a row, their names in order; the clipboard's popover
   saying "nothing", then the text a window copied; the bell opening the
   history, the menu the launcher over the whole screen, the user's
-  popover with "Alex" and "Se déconnecter", which ends the session; the
+  popover with "Alex" and "Se déconnecter", a click asking to confirm,
+  the 4 s running out and `Esc` ending nothing, a second click within
+  4 s ending the session; the
   menu opening nothing after 600 ms of hovering, the bell beside it
   opening its history, and a click opening the launcher with the
   keyboard; the mini form's bell over the avatar at the bar's bottom, the
