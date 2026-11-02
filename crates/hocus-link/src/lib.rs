@@ -12,11 +12,12 @@
 //! names of the screens besides the built-in one, the keyboard's layouts
 //! and which one is active, the bars' screens' desktops with a sketch of
 //! their windows, their applications and their titles, the agents'
-//! tools and the agents, and the agent whose panda peeks out of the bar;
-//! the shell draws the bars, their popovers and the peek,
-//! keeps the levels, and says when it draws on the CPU, when a popover
-//! closes, and when the user asks for the next layout, another desktop or
-//! a window, plugs a tool in or out, declines them, or copies a text.
+//! tools and the agents, the agent whose panda peeks out of the bar, and
+//! `Super+Space` for the launcher; the shell draws the bars, their
+//! popovers, the peek and the launcher, keeps the levels, and says when it
+//! draws on the CPU, when a popover or the launcher closes, and when the
+//! user asks for the next layout, another desktop or a window, plugs a
+//! tool in or out, declines them, copies a text, or starts an application.
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
@@ -60,6 +61,11 @@ pub const POPOVER_NAMESPACE: &str = "hocus-bar-popover";
 /// 4.5): one surface beside each bar while it is out, none at rest. The
 /// shell draws it once; the compositor moves it out and back.
 pub const PEEK_NAMESPACE: &str = "hocus-bar-peek";
+/// The namespace of the launcher's layer surface (5.1): over everything of
+/// one screen, the bar too, while it is open. The shell draws the field
+/// and the grid; the compositor darkens and blurs what is behind, and
+/// fades and scales it in and out ([`LAUNCHER_OPEN`], [`LAUNCHER_CLOSE`]).
+pub const LAUNCHER_NAMESPACE: &str = "hocus-launcher";
 
 /// A popover's width, its distance from the bar, and how far it slides from
 /// the bar as it opens and closes (logical pixels). Its corners are the
@@ -71,6 +77,29 @@ pub const POPOVER_SHIFT: f64 = 8.0;
 /// 0, 1, 1)`); neither with reduced motion, nor for a shell on the CPU.
 pub const POPOVER_OPEN: Duration = Duration::from_millis(160);
 pub const POPOVER_CLOSE: Duration = Duration::from_millis(120);
+
+/// The launcher fades in over this, CSS's `ease-out`, its panel growing
+/// from [`LAUNCHER_SCALE`] to its size on the mockup's
+/// `cubic-bezier(0.2, 0.8, 0.2, 1)`; it fades out over [`LAUNCHER_CLOSE`],
+/// `ease-in`, shrinking back. With reduced motion it only fades.
+pub const LAUNCHER_OPEN: Duration = Duration::from_millis(160);
+pub const LAUNCHER_CLOSE: Duration = Duration::from_millis(120);
+pub const LAUNCHER_SCALE: f64 = 0.97;
+/// What darkens the desktop behind the launcher: `#06080E` at 62 %.
+pub const LAUNCHER_DIM: ([u8; 3], f32) = ([0x06, 0x08, 0x0E], 0.62);
+/// The launcher's panel (its field and its grid), logical pixels: centred
+/// across its screen, [`LAUNCHER_TOP`] from its top, reaching
+/// [`LAUNCHER_BOTTOM`] from its bottom, as the 5.1 mockup has them.
+pub const LAUNCHER_WIDTH: f64 = 760.0;
+pub const LAUNCHER_TOP: f64 = 54.0;
+pub const LAUNCHER_BOTTOM: f64 = 98.0;
+
+/// The middle of the launcher's panel on a screen `width` × `height`
+/// logical pixels: what it grows from and shrinks to.
+pub fn launcher_middle(width: f64, height: f64) -> (f64, f64) {
+    let bottom = (height - LAUNCHER_BOTTOM).max(LAUNCHER_TOP);
+    (width / 2.0, (LAUNCHER_TOP + bottom) / 2.0)
+}
 
 /// The bar's distance from the output's top, right and bottom edges, and
 /// the windows' from the bar (logical pixels).
@@ -209,6 +238,38 @@ pub enum ToShell {
     Peek(Peek),
     /// The panda is back in the bar: its surfaces go. Written `no-peek`.
     NoPeek,
+    /// `Super+Space` (5.1): the launcher opens on `output`, the screen
+    /// under the pointer, whose scale is `scale` (120ths, as
+    /// [`ToShell::Bar`]'s); open, it closes. Written `launcher OUTPUT
+    /// SCALE`.
+    Launcher { output: String, scale: u32 },
+}
+
+/// An application the launcher starts (5.1), as its desktop entry says:
+/// its id (`org.mozilla.firefox`, for the log), whether it runs in a
+/// terminal, its working directory (empty: the compositor's), and its
+/// command, field codes taken out, one argument each. Written `launch`,
+/// then each after a tab: the id, `terminal` or `window`, the directory,
+/// then the arguments; none of them holds a tab or a line break.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Launch {
+    pub id: String,
+    pub terminal: bool,
+    pub dir: String,
+    pub argv: Vec<String>,
+}
+
+impl Launch {
+    /// Whether it can go on a line: something to run, and no field holds
+    /// a tab or a control character.
+    pub fn fits(&self) -> bool {
+        let clean = |s: &str| !s.chars().any(char::is_control);
+        !self.argv.is_empty()
+            && !self.argv[0].is_empty()
+            && clean(&self.id)
+            && clean(&self.dir)
+            && self.argv.iter().all(|a| clean(a))
+    }
 }
 
 /// The panda peeking out (4.5): the agent, why, since when (microseconds
@@ -800,6 +861,10 @@ pub enum ToCompositor {
     /// which the compositor offers: the shell's surfaces take no serial to
     /// set it themselves. Written `copy TEXT`, the text on one line.
     Copy(String),
+    /// The user starts an application from the launcher (5.1): the
+    /// compositor runs it off its loop, as its own child, its first window
+    /// taking the focus on the current desktop.
+    Launch(Launch),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -946,6 +1011,7 @@ impl fmt::Display for ToShell {
                 screen_name(&peek.name)
             ),
             Self::NoPeek => f.write_str("no-peek"),
+            Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -1107,6 +1173,12 @@ impl FromStr for ToShell {
                 }))
             }
             Some("no-peek") => Ok(Self::NoPeek),
+            Some("launcher") => Ok(Self::Launcher {
+                output: word(&mut words, "output")?.to_owned(),
+                scale: word(&mut words, "scale")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("scale: {e}")))?,
+            }),
             Some("layout") => Ok(Self::Layout(
                 word(&mut words, "layout")?
                     .parse()
@@ -1195,6 +1267,23 @@ impl fmt::Display for ToCompositor {
                 write!(f, "briefing {}", if *open { "open" } else { "closed" })
             }
             Self::Copy(text) => write!(f, "copy {}", screen_name(text)),
+            Self::Launch(launch) => {
+                write!(
+                    f,
+                    "launch\t{}\t{}\t{}",
+                    launch.id,
+                    if launch.terminal {
+                        "terminal"
+                    } else {
+                        "window"
+                    },
+                    launch.dir
+                )?;
+                for arg in &launch.argv {
+                    write!(f, "\t{arg}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -1205,6 +1294,23 @@ impl FromStr for ToCompositor {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         if let Some(text) = line.strip_prefix("copy ") {
             return Ok(Self::Copy(text.to_owned()));
+        }
+        if let Some(fields) = line.strip_prefix("launch\t") {
+            let mut fields = fields.split('\t');
+            let id = word(&mut fields, "application")?.to_owned();
+            let terminal = flag(fields.next(), "terminal", "window")?;
+            let dir = word(&mut fields, "directory")?.to_owned();
+            let argv: Vec<String> = fields.map(str::to_owned).collect();
+            let launch = Launch {
+                id,
+                terminal,
+                dir,
+                argv,
+            };
+            if !launch.fits() {
+                return Err(BadLine("a launch with nothing to run".to_owned()));
+            }
+            return Ok(Self::Launch(launch));
         }
         let mut words = line.split_whitespace();
         match words.next() {
@@ -1445,6 +1551,18 @@ mod tests {
             ToCompositor::Briefing { open: true },
             ToCompositor::Briefing { open: false },
             ToCompositor::Copy("hocus agent my-agent waiting".into()),
+            ToCompositor::Launch(Launch {
+                id: "org.mozilla.firefox".into(),
+                terminal: false,
+                dir: String::new(),
+                argv: vec!["firefox".into(), "--new-window".into()],
+            }),
+            ToCompositor::Launch(Launch {
+                id: "htop".into(),
+                terminal: true,
+                dir: "/home/alex/my projects".into(),
+                argv: vec!["htop".into(), String::new(), "a b".into()],
+            }),
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
@@ -1452,6 +1570,9 @@ mod tests {
         assert!("closing".parse::<ToCompositor>().is_err());
         assert!("briefing".parse::<ToCompositor>().is_err());
         assert!("briefing shut".parse::<ToCompositor>().is_err());
+        assert!("launch\tx\twindow\t".parse::<ToCompositor>().is_err());
+        assert!("launch\tx\tmaybe\t\tfoot".parse::<ToCompositor>().is_err());
+        assert!("launcher eDP-1".parse::<ToShell>().is_err());
         assert!("desktop eDP-1".parse::<ToCompositor>().is_err());
         assert!("desktop eDP-1 last".parse::<ToCompositor>().is_err());
         assert!(
@@ -1560,6 +1681,10 @@ mod tests {
                 name: "api-paiements".into(),
             }),
             ToShell::NoPeek,
+            ToShell::Launcher {
+                output: "eDP-1".into(),
+                scale: 240,
+            },
         ]
     }
 
