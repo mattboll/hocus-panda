@@ -1,12 +1,14 @@
-# Notifications — the server and its bubbles (5.3)
+# Notifications — the server, its bubbles, the history, do not disturb
 
-Status: approved by the maintainer on 2026-11-02 (issue #393, variant A:
-at the top, against the bar); built in 5.3. The history, "clear all" and
-do not disturb are 5.4; the bar's notifications button is 5.5.
+Status: the server and its bubbles approved by the maintainer on
+2026-11-02 (issue #393, variant A: at the top, against the bar), built in
+5.3; the history, "clear all" and do not disturb approved on 2026-11-02
+(issue #394, variant B: by time), built in 5.4 ([below](#54-the-history-clear-all-do-not-disturb)).
+The footer's four buttons, the bell among them, are 5.5.
 
 All sizes are logical pixels.
 
-## The approved spec
+## The approved spec (5.3)
 
 **The server**
 
@@ -39,7 +41,7 @@ All sizes are logical pixels.
   stays until closed or acted on.
 - **Low urgency**: no bubble. It goes straight to the history (5.4), and a
   dot with the count shows on the bar's notifications place (its button is
-  5.5).
+  5.5). *The bell's badge replaced the dot in 5.4.*
 - **Replacement** (`replaces_id`): the bubble updates in place with no new
   animation, and its countdown restarts.
 - **Many at once**: at most 3 bubbles. The others wait their turn, shown as
@@ -133,7 +135,7 @@ Codex's terminal notifications carry no name of Codex's: they are bubbles.
 - **Surfaces**: one layer surface per bubble (namespace
   `hocus-bubble-N`), on the top layer, anchored to the screen's top right;
   the chip (`hocus-bubbles-waiting`) and the bar's dot (`hocus-bar-unread`)
-  have one each. They take no keyboard.
+  have one each. (5.4: the dot is now the bell, `hocus-bar-bell`, below.) They take no keyboard.
 - **Place**: the stack's screen is the focused window's (else the
   pointer's), as the compositor says it (`focus OUTPUT`), taken when the
   first bubble of a stack shows; the next ones join it there until it is
@@ -189,9 +191,11 @@ Codex's terminal notifications carry no name of Codex's: they are bubbles.
   that ran `notify-send`; to its desktop, focused), invokes `default` if
   it has one, then closes (2). An action invokes its key, then closes (2).
   A `resident` notification stays after either. ✕ closes (2), the time up
-  closes (1), `CloseNotification` closes (3), a waiting one too.
+  closes (1), `CloseNotification` closes (3), a waiting one too. *5.4: the
+  time up closes nothing any more, the notification staying held in the
+  history (below).*
 - **Low urgency** goes to the history (kept for 5.4, 200 at most), and the
-  dot counts it: on each bar, a 14 px `#8FB3FF` pill with its count in
+  dot counts it (5.4 replaced the dot with the bell's badge): on each bar, a 14 px `#8FB3FF` pill with its count in
   9 px bold `#0B1020`, where the notifications button's badge goes. Until
   5.5 draws the button, its place is assumed: in the mini form, a 24 px
   bell centred in the notifications' place under the keyboard layout's
@@ -203,7 +207,8 @@ Codex's terminal notifications carry no name of Codex's: they are bubbles.
 
 ### Not built
 
-- The history, "clear all", do not disturb (5.4); the bar's button (5.5).
+- The history, "clear all", do not disturb (built in 5.4, below); the
+  footer's buttons (5.5).
 - The keyboard: the bubbles take none (`Tab` does not reach them), and
   names for screen readers (bar.md §11).
 - Sounds (`sound-file`, `sound-name`), `action-icons`, the
@@ -215,7 +220,8 @@ The real shell on a D-Bus daemon of the test's own
 (`crates/hocus-compositor/tests/notifications.rs`), on the CPU as in CI:
 
 - a bubble shows 340 px wide, its top 8 px from the screen's, its right
-  8 px from the full bar, and goes after its time (closed, 1);
+  8 px from the full bar, and goes after its time (closed, 1; since 5.4,
+  nothing said: still held);
 - the pointer on it pauses it past its time; away, it goes after what was
   left;
 - a critical one stays past its time, and its ✕ closes it (2);
@@ -234,3 +240,259 @@ Unit tests for the stack (the rules above), the card's layout, the
 surfaces' places, the markup, the timeouts, the actions, the agents'
 rule, and the compositor's motion curves. On the Intel GPU, the
 screenshots of the pull request.
+
+## 5.4: the history, clear all, do not disturb
+
+### The approved spec
+
+Approved by the maintainer on 2026-11-02 (issue #394), variant B: by time.
+
+**The history popover**
+
+- It opens from the bell, the notifications place 5.3 put in the bar; 5.5
+  turns that place into the footer's bell button. Like the other popovers:
+  a hover of 150 ms or a click, 360 wide, at most 600 tall, anchored at
+  the bar's bottom.
+- **Header**: "Notifications" (15 px bold) and "Tout effacer" / "Clear
+  all" (a ghost button, shown when there is something to clear).
+- **Do not disturb card**: under the header.
+  - A moon icon, "Ne pas déranger" / "Do not disturb", and its subtitle:
+    "Les bulles s'affichent" / "Bubbles show" when off; when on, "Jusqu'à
+    15 h 32" / "Until 3:32 PM", "Jusqu'à demain, 8 h" / "Until tomorrow,
+    8 AM" or "Jusqu'à ce que tu l'arrêtes" / "Until you turn it off", then
+    "· seules les urgences passent" / "· only urgent ones come through".
+  - A switch on the right.
+  - When on, the card turns amber and offers three chips: "Pendant 1 h" /
+    "For 1 hour" (the default), "Jusqu'à demain matin" / "Until tomorrow
+    morning" (8:00) and "Sans limite" / "No limit".
+- **The list (variant B)**: everything in order of arrival, newest first,
+  under section headers "RÉCENTES" (under an hour) / "RECENT", "PLUS TÔT
+  AUJOURD'HUI" / "EARLIER TODAY", "HIER" / "YESTERDAY", then "PLUS
+  ANCIENNES" / "OLDER".
+- **Each item**: the app's 28 px icon (5.3's lookup); "App · il y a 9 min";
+  a blue dot when it has not been seen; the bold title on one line; the
+  body clamped to 2 lines; ✕ on hover.
+  - A click invokes its default action (if the app still holds it) and
+    raises the app's window, then removes the item.
+  - ✕ removes it.
+  - Actions show only while the sender still holds the notification.
+- **Clear all**: the items slide out right one after another, 35 ms apart,
+  in 180 ms. The empty state is the resting panda, "Rien de neuf" /
+  "Nothing new" and "Tout est lu." / "All read.".
+- **Scrolling**: the wheel, and the keyboard as the other popovers.
+
+**The count**
+
+- The bell's badge counts what the user has not seen: bubbles that left
+  without the pointer resting on them or a click, low urgency, and
+  everything held during do not disturb.
+- Opening the history resets the count to 0 and marks the items seen when
+  it closes.
+- This replaces 5.3's dot.
+
+**Do not disturb**
+
+- While on, bubbles are held: they go straight to the history, except
+  critical ones, which still show.
+- The bell shows a slash in amber (`#F5C46E`).
+- It ends by itself at the chosen time, on the monotonic clock with the
+  wall clock read for the target.
+- It survives a restart of the shell, but not a new session.
+
+**Keeping**
+
+- The history keeps 7 days, written on disk in the user's state directory
+  (`$XDG_STATE_HOME/hocuspanda/notifications`), off the loop.
+- Agents' notifications that 5.3 sends straight to the history are there
+  too.
+
+### As built (5.4, 2026-11-02)
+
+#### The bell
+
+- **Its place, until 5.5.** A layer surface of its own over each bar
+  (`hocus-bar-bell`, 52 × 44, anchored to the screen's bottom right),
+  opened with the bar's other surfaces and after them, so that it is
+  above them. Its button is 40 × 32, radius 10, centred where 5.3's dot
+  assumed the bell: in the mini form on the bar's middle, its centre 22 px
+  over the bar's bottom (under the keyboard layout's button); in the full
+  form the footer's second place of four, its centre 29 px over the bar's
+  bottom. The surface takes the pointer on the button only. The bell is
+  drawn by a function of its own (`notifications::bell::draw`), for 5.5's
+  footer to take with its place.
+- **Its look**, the mockup's: the bell's 24 px path drawn at 20 px,
+  `#C9D0DC`, 1.8 px; while the user is not to be disturbed, amber
+  (`#F5C46E`) with the slash. The button is lit `rgba(255,255,255,0.08)`
+  under the pointer, `0.10` while the history shows, and wears the
+  keyboard's ring when it holds the keyboard.
+- **The badge**: what was not seen, none at 0 and none while the history
+  shows; 15 px high (wider for its figures, 3 px in), `#8FB3FF`, its count
+  in 9.5 px bold `#0B1020`, a 2 px `rgba(14,17,28,0.95)` ring; its right
+  5 px past the bell's 24 px box and its top 4 px over it.
+- **It opens the history** as the other items open their popovers: a
+  click (in both forms), a hover of 150 ms in the mini form; `Esc` gives
+  it the keyboard, `Tab` and the arrows reach it from the bar's other
+  items, `Enter` or `Space` opens the history again.
+
+#### The history
+
+- **The popover**: 360 wide, as tall as what it shows and 600 at most,
+  its bottom on the bar's, 8 px from the bar; the bubbles' tint
+  (`rgba(22,27,42,0.95) → rgba(14,17,28,0.97)`, opaque without glass), a
+  1 px rim, radius 14.
+- **The header**: 14 px in; "Notifications" 15 px bold; "Tout effacer" a
+  28 px ghost button, 10 px in, 12.5 px 600 `text.dim` (`text` and
+  `rgba(255,255,255,0.08)` under the pointer); 10 px under it, the card.
+- **The card**: 14 px from the sides, 10 px and 12 px in, radius 12, a
+  1 px rim; off `rgba(255,255,255,0.04)` and `0.08`, on
+  `rgba(245,196,110,0.08)` and `rgba(245,196,110,0.35)`. The moon (18 px,
+  `#A9B2C2`, amber while on), 10 px before "Ne pas déranger" (13.5 px
+  600) over what it does (11.5 px `text.faint`, wrapped when long), then
+  the switch: 38 × 22, `rgba(255,255,255,0.18)` off and `#F5B44A` on, a
+  16 px white knob 3 px in, sliding over 160 ms (at once without motion).
+  On, the chips 8 px under: 26 px, 10 px in, radius 13, 12 px 600, 6 px
+  apart, on another row when they do not fit (the second and the third,
+  in French); the chosen one `rgba(245,196,110,0.18)`, a
+  `rgba(245,196,110,0.6)` rim and `#F5C46E`, the others
+  `rgba(255,255,255,0.05)`, `rgba(255,255,255,0.14)` and `#C9D0DC`.
+- **The list**: 8 px in, from 8 px under the card to 10 px over the
+  bottom. A section's label 8 px in, 11 px bold capitals spaced 0.08 em,
+  `#7C8698`; everything 2 px apart. An item: 8 px in (30 px on its right),
+  radius 10, lit `rgba(255,255,255,0.05)` under the pointer; its icon
+  28 px (the launcher's letter tile without one); 10 px after it, "App"
+  (11 px bold `text.dim`, cut to half the column), "·" and how long ago
+  (11 px `#7C8698`) 6 px apart, and the blue dot (6 px `#8FB3FF`) when not
+  seen; the title 13 px bold on a line, cut; the body 12 px `text.dim` on
+  1.4 lines, two at most, the last cut with an ellipsis. Its actions,
+  while its sender holds it: 26 px buttons, 6 px under the body, 10 px
+  in, radius 8, 12 px 600. Its ✕ under the pointer: 22 px, radius 6, 6 px
+  from its right and 8 px from its top, two strokes in `text.faint`
+  (`text` on `rgba(255,255,255,0.08)` under the pointer).
+- **Sections and ages**, on the wall clock (the system's time zone; the
+  clock's own time with `HOCUS_CLOCK_AT`): under an hour, "RÉCENTES",
+  "maintenant" under a minute, then "il y a 9 min" / "9 min ago"; the
+  same calendar day, "PLUS TÔT AUJOURD'HUI", "il y a 2 h" / "2 h ago";
+  the day before, "HIER", "hier" / "yesterday"; earlier, "PLUS
+  ANCIENNES", "il y a 3 jours" / "3 days ago".
+- **A click** on an item invokes its `default` if its sender still holds
+  it and has one, asks the compositor for its application's window (5.3's
+  `raise`), then takes it out of the history (its sender hears it closed
+  by the user, 2, if it holds it) and the history closes. ✕ takes it out
+  (closed, 2, if held). An action invokes its key and takes it out
+  (unless `resident`).
+- **Clear all** takes everything out (each one still held closed, 2):
+  with motion, the items slide 40 px right and fade, each over 180 ms
+  (`ease-in`), 35 ms after the one above, from the first in view; then
+  they go, and the empty state comes in (8 px up and fading in over
+  260 ms). Without motion, or on the CPU, at once. ✕ slides its item out
+  the same way. The empty state: the resting panda (96 px, at 90 %),
+  "Rien de neuf" (14 px 600 `#C9D0DC`) and "Tout est lu." (12 px
+  `#7C8698`), 8 px apart, in a 220 px list.
+- **Scrolling**: past 600 px the list scrolls, the wheel 40 px a notch,
+  a 6 px thumb on the right. `Tab` goes through "Tout effacer", the
+  switch, the chips, then each item, its ✕ and its actions; the arrows go
+  through the items; the list scrolls to what holds the keyboard;
+  `Enter` or `Space` acts; `Esc` closes and gives the keyboard to the
+  bell.
+- **The panel draws** when it opens, when the history or do not disturb
+  changes (resized then), and on the minute's change only if something
+  else draws it: the ages do not tick by themselves.
+
+#### What the history keeps, and the count
+
+- **Everything** goes to the history as it comes, newest first: a bubble
+  as it shows (or waits its turn), a low one, an agents' tool's (5.3's
+  rule: not counted, shown seen), one held while the user is not to be
+  disturbed. A replacement of a notification its sender holds updates it
+  in place and comes first again. `CloseNotification` takes it out of the
+  history too: its application took it back. 200 at most.
+- **Held by its sender** (the server's `persistence`): from its `Notify`
+  until it is closed. A bubble whose time is up closes nothing: its
+  notification stays held, its actions and its default working from the
+  history. It is closed (`NotificationClosed`, with its reason) when the
+  user takes it out of the history, its ✕ or "clear all" (2), clicks it
+  or one of its actions (`ActionInvoked`, then 2), or the bubble's ✕, card
+  or actions (2); when its application calls `CloseNotification` (3);
+  when it leaves the history after 7 days, or past the 200 kept (1); or
+  when the session ends (the shell's connection to the bus goes). A
+  notification read back after a restart of the shell is held by no one.
+- **Not seen**, counted by the badge: a bubble whose time ran out without
+  the pointer having rested on it (a hover pauses it, 5.3), a low one,
+  one held while not to be disturbed. A bubble the pointer rested on, or
+  clicked, closed with its ✕ or acted on, is seen. Opening the history
+  sets the badge to 0; as it closes, what it listed is seen.
+- **On disk**: `$XDG_STATE_HOME/hocuspanda/notifications` (else
+  `~/.local/state`'s), one JSON object a line (the application, its desktop
+  entry, what its icon was found by — `app_icon` and `image-path` —, the
+  title, the body, the process, whether it is an agent's, when, whether it
+  was seen), the newest first, readable by the user alone (0600), written
+  whole (a new file renamed over the old). A thread reads it as the shell
+  starts, leaves out what is older than 7 days and finds the icons again
+  (once the launcher's applications and the screens' scales are known, a
+  few seconds at most; an image sent as pixels is not kept: the letter
+  tile then); the stack writes nothing until it is read back. Then the
+  same thread writes it after each change, the latest of those sent
+  meanwhile. What is older than 7 days also goes as notifications come
+  and as the history opens. A notification read back is held by no one:
+  no actions, no default.
+- **Only where notifications are served**: a shell given no bus (a nested
+  or headless desktop without `--session-bus`) neither reads nor writes
+  the history, nor do not disturb.
+
+#### Do not disturb
+
+- **The switch** turns it on for an hour; a chip chooses again from now:
+  an hour, the next 8:00 ("Jusqu'à demain, 8 h", "Jusqu'à 8 h" before
+  8:00), or no limit. Its end is on the monotonic clock: the wall clock
+  read once for how long until the target. The stack's deadline wakes it
+  at its end; it turns off by itself, the bell losing its slash.
+- **While on**, a bubble of normal or low urgency is held: no bubble, to
+  the history, not seen; a critical one shows. A bubble already on screen
+  stays its time; a replacement of one on screen updates it.
+- **Kept for the session**: written in the session's runtime directory
+  (`$XDG_RUNTIME_DIR/hocuspanda/dnd`) with the compositor's process id
+  (the shell's parent, which starts it again) and its end on
+  `CLOCK_MONOTONIC`; read back by a shell started again by the same
+  compositor, left off by another. Turned off, the file goes.
+
+#### Measured headless
+
+The real shell on a D-Bus daemon of the test's own, on the CPU as in CI,
+its wall clock reading 2 November 2026, 14:32:07 UTC
+(`crates/hocus-compositor/tests/notifications.rs`):
+
+- the history lists, newest first, a low one just come (not seen) and
+  three read back from its file under "RÉCENTES", "PLUS TÔT AUJOURD'HUI"
+  and "HIER"; 360 wide, 8 px from the full bar, its bottom on the bar's;
+- a click on a held item invokes its default, the sender hearing it
+  closed (2), the history closes and no longer lists it;
+- its ✕ takes one out; "clear all" empties it, the empty state's words
+  and no "clear all" left, its file written empty;
+- a bubble gone after its time closes nothing, and its action, invoked
+  from the history, says `ActionInvoked` then closed (2);
+- a bubble gone after its time counts 1, one the pointer rested on does
+  not, a low one counts; opening sets 0, two not seen listed; opened
+  again after closing, none;
+- do not disturb from its switch: on for an hour, the bell slashed; a
+  normal one held (no bubble, counted), a critical one shows;
+- the history read back after the shell is ended and started again by
+  the compositor, without what was older than 7 days, do not disturb
+  still on.
+
+Unit tests for the history (order, replacement, seen, file, 7 days,
+sections and ages), do not disturb (its ends, a restart, another
+session), the stack (the count, a click, clear all, do not disturb
+ending at its time on the clock it is given, nothing written before what
+was kept is read back), the panel's layout and words, the bell's place.
+On the Intel GPU, the screenshots of the pull request.
+
+#### Not built
+
+- The footer's other buttons (5.5); the bell moves there with it.
+- Hovering the bell in the full form opens nothing (only a click, as the
+  full form's other items).
+- Names for screen readers (bar.md §11); grouping by application
+  (variant A).
+- Images sent as pixels (`image-data`) are not kept on disk: after a
+  restart such a notification shows the letter tile.
+

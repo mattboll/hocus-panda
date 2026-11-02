@@ -488,7 +488,8 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Plug(_)
                             | Item::Decline
                             | Item::Agent(_)
-                            | Item::Secretary,
+                            | Item::Secretary
+                            | Item::Notifications,
                             _,
                         ) => {}
                     }

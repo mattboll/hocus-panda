@@ -501,9 +501,9 @@ impl Headless {
         self.layer_rects(hocus_link::BUBBLES_WAITING_NAMESPACE)
     }
 
-    /// The dots on the bars' notifications place.
-    pub fn unread_surfaces(&self) -> Vec<(String, Rect)> {
-        self.layer_rects(hocus_link::UNREAD_NAMESPACE)
+    /// The bells on the bars' notifications place.
+    pub fn bell_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::BELL_NAMESPACE)
     }
 
     /// The bars' surfaces as the shell placed them: their screen, and

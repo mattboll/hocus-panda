@@ -83,9 +83,10 @@ pub const LAUNCHER_TOAST: Duration = Duration::from_millis(1800);
 pub const BUBBLE_PREFIX: &str = "hocus-bubble-";
 /// The namespace of the "+N waiting" chip under the bubbles.
 pub const BUBBLES_WAITING_NAMESPACE: &str = "hocus-bubbles-waiting";
-/// The namespace of the dot with the count of notifications gone straight
-/// to the history, on the bar's notifications place (5.3).
-pub const UNREAD_NAMESPACE: &str = "hocus-bar-unread";
+/// The namespace of the bell on the bar's notifications place (5.4): the
+/// button that opens the notifications' history, its badge counting what
+/// the user has not seen, its slash while they are not to be disturbed.
+pub const BELL_NAMESPACE: &str = "hocus-bar-bell";
 
 /// A bubble slides in from the bar's side over [`BUBBLE_IN`] (the 5.3
 /// mockup's `cubic-bezier(.2, .8, .2, 1)`), fading in, from this far

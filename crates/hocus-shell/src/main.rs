@@ -211,6 +211,8 @@ struct Bar {
     desktops: window::Id,
     /// Its agents' group's surface (placed by [`agents::draw`]).
     agents: window::Id,
+    /// Its notifications' bell's (placed by [`notifications::bell`]).
+    bell: window::Id,
 }
 
 impl Bar {
@@ -402,6 +404,7 @@ impl Shell {
             }
             Message::Zone(zone) => {
                 tracing::info!(zone = zone.iana_name(), "the time zone changed");
+                notifications::set_zone(zone.clone());
                 self.wall.zone = zone;
                 Task::none()
             }
@@ -467,7 +470,9 @@ impl Shell {
                     desktops::draw::forget(&bar.output);
                     agents::draw::forget(&bar.output);
                     agents::peek::forget(&bar.output);
+                    notifications::bell::forget(&bar.output);
                     Some(Task::batch([
+                        Task::done(Message::RemoveWindow(bar.bell)),
                         Task::done(Message::RemoveWindow(bar.agents)),
                         Task::done(Message::RemoveWindow(bar.desktops)),
                         Task::done(Message::RemoveWindow(bar.connections)),
@@ -555,6 +560,7 @@ impl Shell {
             connections: window::Id::unique(),
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
+            bell: window::Id::unique(),
         };
         bar.surface = bar.surface_width();
         bar.clock_surface = bar.clock_size();
@@ -660,6 +666,9 @@ impl Shell {
             id: agents_id,
         });
         bar.agents = agents_id;
+        // Last, above the others: the notifications' bell.
+        let (bell_id, open_bell) = notifications::bell::open(&bar.output, form, option.clone());
+        bar.bell = bell_id;
         self.bars.insert(id, bar);
         BARS.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -670,6 +679,7 @@ impl Shell {
             .chain(open_connections)
             .chain(open_desktops)
             .chain(open_agents)
+            .chain(Task::batch(open_bell.map(Task::done)))
     }
 
     /// Where bar `id` is, for the popovers.
@@ -684,6 +694,7 @@ impl Shell {
                 id,
                 (bar.levels, bar.connections, bar.desktops, bar.agents),
             );
+            c.set_bell(&bar.output, bar.bell);
         });
         notifications::bars_changed();
     }
@@ -760,6 +771,9 @@ impl Shell {
         .flatten()
         {
             tasks.push(Task::done(Message::SizeChange { id, size }));
+            tasks.push(Task::done(Message::MarginChange { id, margin }));
+        }
+        if let Some((id, margin)) = notifications::bell::form(&bar.output, bar.form) {
             tasks.push(Task::done(Message::MarginChange { id, margin }));
         }
         Task::batch(tasks)
@@ -1027,6 +1041,15 @@ impl Shell {
                 id,
                 words: agents::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            popover::Item::Notifications => canvas(popover::history::Panel {
+                id,
+                glass: self.look.glass,
+                motion: self.look.motion,
+                software: self.software,
             })
             .width(Length::Fill)
             .height(Length::Fill)

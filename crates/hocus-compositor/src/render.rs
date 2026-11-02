@@ -513,7 +513,7 @@ impl State {
                     | hocus_link::CONNECTIONS_NAMESPACE
                     | hocus_link::DESKTOPS_NAMESPACE
                     | hocus_link::AGENTS_NAMESPACE
-                    | hocus_link::UNREAD_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
+                    | hocus_link::BELL_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
                     _ => None,
                 };
                 if let Some((clip, radius)) = cut.filter(|_| self.shell.software) {
@@ -1087,7 +1087,7 @@ fn in_the_bar(namespace: &str) -> bool {
             | hocus_link::CONNECTIONS_NAMESPACE
             | hocus_link::DESKTOPS_NAMESPACE
             | hocus_link::AGENTS_NAMESPACE
-            | hocus_link::UNREAD_NAMESPACE
+            | hocus_link::BELL_NAMESPACE
     )
 }
 
