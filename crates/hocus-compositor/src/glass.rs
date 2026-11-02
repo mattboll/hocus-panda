@@ -320,6 +320,8 @@ impl Glass for GlesRenderer {
                 .map_err(|err| tracing::warn!(output = name, %err, "no glass"))
                 .ok()?,
         };
+        // Moved to the pane's corner: what is drawn here must go where it
+        // is told to, never where it is on the output (#517).
         let shift = Point::from((-region.loc.x, -region.loc.y));
         let behind: Vec<_> = behind
             .iter()

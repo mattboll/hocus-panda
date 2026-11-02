@@ -250,7 +250,7 @@ impl State {
         let wrap = |e: WaylandSurfaceRenderElement<R>, radius: i32| {
             let scaled = RescaleRenderElement::from_element(e, actual_loc, k);
             let moved = RelocateRenderElement::from_element(scaled, offset, Relocate::Relative);
-            OutputElements::Window(Rounded::new(moved, clip, radius, outside))
+            OutputElements::Window(Rounded::new(moved, clip, radius, outside, scale))
         };
         let sc = Scale::from(scale);
         if let Some(toplevel) = window.toplevel() {
@@ -519,7 +519,7 @@ impl State {
                 if let Some((clip, radius)) = cut.filter(|_| self.shell.software) {
                     let radius = (radius * scale).round() as i32;
                     out.extend(surfaces.into_iter().map(|e| {
-                        OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))
+                        OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
                     }));
                 } else {
                     out.extend(surfaces.into_iter().map(OutputElements::Surface));
@@ -693,7 +693,13 @@ impl State {
                     .stretched(renderer, local, scale, alpha)
                     .into_iter()
                     .map(|e| {
-                        OutputElements::Picture(Rounded::new(e, clip, radius, Outside::Shown))
+                        OutputElements::Picture(Rounded::new(
+                            e,
+                            clip,
+                            radius,
+                            Outside::Shown,
+                            scale,
+                        ))
                     }),
             );
         }
@@ -804,11 +810,9 @@ impl State {
             if self.shell.software {
                 let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
                 let radius = (crate::launcher::TOAST_RADIUS * scale).round() as i32;
-                out.extend(
-                    surfaces.into_iter().map(|e| {
-                        OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))
-                    }),
-                );
+                out.extend(surfaces.into_iter().map(|e| {
+                    OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
+                }));
             } else {
                 out.extend(surfaces.into_iter().map(OutputElements::Surface));
             }
@@ -896,11 +900,9 @@ impl State {
                     Scale::from(scale),
                     look.alpha,
                 );
-            out.extend(
-                surfaces
-                    .into_iter()
-                    .map(|e| OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))),
-            );
+            out.extend(surfaces.into_iter().map(|e| {
+                OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
+            }));
         }
     }
 
@@ -1138,6 +1140,7 @@ where
         pane,
         radius,
         Outside::Cropped,
+        scale,
     )))
 }
 
