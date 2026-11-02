@@ -21,7 +21,9 @@
 //! The mini form's item (4.7): her mood, the badge and how many work, her
 //! briefing on a hover or a click with who works and who rests, its lines
 //! going to their agents, the group's rules, the halo and the peek beside
-//! the mini bar, and nothing drawn at rest.
+//! the mini bar, and nothing drawn at rest. From the mini form's "+",
+//! Sources' "Ne rien brancher"; the peek going back as her briefing opens,
+//! and none coming out while it is open (4.7b).
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of motion and of the streak run on a GPU when the
@@ -504,12 +506,23 @@ impl Bed {
     /// Where the briefing's `item` is (`Sources`, `Agent(3)`), global, as
     /// the shell last logged its items' middles in the popover `popover`.
     fn briefing_item(&mut self, popover: Rect, item: &str) -> anyhow::Result<(f64, f64)> {
+        self.popover_item(popover, "the briefing's items", item)
+    }
+
+    /// Where `item` of the popover `popover` is, global, as the shell last
+    /// logged its items' middles (on a line saying `items`).
+    fn popover_item(
+        &mut self,
+        popover: Rect,
+        items: &str,
+        item: &str,
+    ) -> anyhow::Result<(f64, f64)> {
         let wanted = format!("{item}@");
         let log = self.log.clone();
         let found = |text: &str| {
             text.lines()
                 .rev()
-                .find(|l| l.contains("the briefing's items"))
+                .find(|l| l.contains(items))
                 .and_then(|l| {
                     let at = l.split(&wanted).nth(1)?;
                     let at = at.split_whitespace().next()?;
@@ -520,7 +533,7 @@ impl Bed {
         let done = self
             .hp
             .dispatch_until(WAIT, |_| found(&plain(&log)).is_some())?;
-        anyhow::ensure!(done, "no {item} in the briefing");
+        anyhow::ensure!(done, "no {item} in {items:?}");
         let (x, y) = found(&plain(&log)).unwrap_or_default();
         Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
     }
@@ -3086,6 +3099,74 @@ fn a_newer_peek_replaces_the_one_out() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Her briefing opening sends the panda out back at once, with its usual
+/// motion (4.7b): it would show through it; while it is open, no panda
+/// comes out, and none is kept for later.
+#[test]
+fn her_briefing_sends_the_peek_back_and_none_comes_out_while_it_is_open() -> anyhow::Result<()> {
+    let Some(mut bed) = peek_bed(false)? else {
+        return Ok(());
+    };
+    let slides = bed.hp.renderer() == "gles" && !bed.hp.shell_on_cpu();
+    bed.agent_is("build", "working")?;
+    bed.agent_is("api", "working")?;
+    bed.settle()?;
+    bed.agent_is("build", "waiting")?;
+    bed.peek_surface()?;
+    bed.peek_out_still()?;
+    let secretary = bed.item("Secretary")?;
+    let start = Instant::now();
+    bed.click(secretary);
+    let samples = bed.peek_until(start, Duration::from_millis(1500))?;
+    let leaving = samples
+        .iter()
+        .find(|s| s.look.is_none_or(|l| l.alpha < 1.0 || l.shift > 0.0))
+        .map(|s| s.at)
+        .ok_or_else(|| anyhow::anyhow!("never back: {samples:?}"))?;
+    // At once, far from its 8 s; back under the bar on a GPU, else fading
+    // out in place.
+    assert!(leaving < Duration::from_millis(1000), "{leaving:?}");
+    if slides {
+        assert!(
+            samples
+                .iter()
+                .any(|s| s.look.is_some_and(|l| l.shift > 20.0)),
+            "{samples:?}"
+        );
+    } else {
+        assert!(
+            samples
+                .iter()
+                .all(|s| s.look.is_none_or(|l| l.shift == 0.0)),
+            "{samples:?}"
+        );
+    }
+    bed.peek_gone()?;
+    assert!(bed.hp.peek_out().is_none());
+    let briefing = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.popover_surfaces()
+            .iter()
+            .any(|(_, r)| r.width == 320 && r.height > 0)
+    })?;
+    anyhow::ensure!(briefing, "no briefing: {:?}", bed.hp.popover_surfaces());
+    // Another agent finishing while it is open: no panda.
+    let told = bed.hp.peeks_told();
+    bed.agent_is("api", "done")?;
+    wait(&mut bed.hp, Duration::from_secs(1))?;
+    assert_eq!(bed.hp.peeks_told(), told);
+    assert!(bed.hp.peek_surfaces().is_empty());
+    // Closed, none comes out for what happened while it was open.
+    bed.hp.key(common::KEY_ESC, true);
+    bed.hp.key(common::KEY_ESC, false);
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "{:?}", bed.hp.popover_surfaces());
+    wait(&mut bed.hp, Duration::from_secs(1))?;
+    assert_eq!(bed.hp.peeks_told(), told);
+    Ok(())
+}
+
 /// With reduced motion on a GPU, and with a shell on the CPU: the panda
 /// fades in and out where it stays, without sliding.
 #[test]
@@ -3479,6 +3560,15 @@ fn sources_opens_from_her_briefing() -> anyhow::Result<()> {
     // In the briefing's place, where 4.0 opened it.
     assert_eq!((sources.width, sources.y), (300, 8 + 62));
     bed.logged_after(from, &["Trouvé, pas branché"])?;
+    // "Ne rien brancher" stays the card's, under her (4.7b).
+    bed.logged_after(from, &["the agents' popover's items", "Plug(ClaudeCode)@"])?;
+    let items = plain(&bed.log);
+    let items = items
+        .lines()
+        .rev()
+        .find(|l| l.contains("the agents' popover's items"))
+        .unwrap_or_default();
+    assert!(!items.contains("Decline@"), "{items}");
     Ok(())
 }
 
@@ -3784,6 +3874,58 @@ fn the_mini_item_hides_and_proposes_to_plug_in_as_the_group_does() -> anyhow::Re
     })?;
     anyhow::ensure!(shown, "no Sources: {:?}", bed.hp.popover_surfaces());
     bed.logged_after(from, &["Trouvé, pas branché"])?;
+    Ok(())
+}
+
+/// From the mini form's "+", Sources offers "Ne rien brancher" (4.7b), as
+/// the full form's card does: it declines the tools, the group goes in
+/// the mini form, and in the full form too, in a new session.
+#[test]
+fn plugging_nothing_in_from_the_mini_forms_sources_hides_the_group_in_both_forms()
+-> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            claude: true,
+            codex: true,
+            mini: true,
+            ..Machine::default()
+        },
+    )?;
+    bed.logged("mini=badge + green")?;
+    bed.settle()?;
+    let plus = bed.item("Sources")?;
+    let from = bed.mark();
+    bed.click(plus);
+    let sources = bed.popover()?;
+    bed.logged_after(from, &["the agents' popover's items", "Decline@"])?;
+    let decline = bed.popover_item(sources, "the agents' popover's items", "Decline")?;
+    let from = bed.mark();
+    bed.click(decline);
+    bed.tool_becomes("claude-code", ToolState::Declined)?;
+    bed.tool_becomes("codex", ToolState::Declined)?;
+    bed.logged_after(from, &["shows=nothing"])?;
+    // Sources closes, and her item goes, the pointer going through.
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "{:?}", bed.hp.popover_surfaces());
+    bed.one_pixel()?;
+    assert_eq!(
+        std::fs::read_to_string(bed.home().join(".claude/settings.json"))?,
+        ORIGINAL
+    );
+    // A new session in the full form: still hidden, as 4.0 keeps it.
+    let Bed { dir, hp, .. } = bed;
+    drop(hp);
+    let mut again = start_in(dir, &shell, &hocus, None, &Machine::default())?;
+    again.tool_becomes("claude-code", ToolState::Declined)?;
+    again.logged("shows=nothing")?;
+    again.one_pixel()?;
     Ok(())
 }
 

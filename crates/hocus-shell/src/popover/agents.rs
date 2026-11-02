@@ -5,8 +5,10 @@
 //! - **Sources** (the secretary's briefing's "Sources", the card's "Un
 //!   autre outil ?"): "Sources des agents";
 //!   a row per tool (its mark, its name over its state, "Brancher" or
-//!   "Débrancher"); the divider, "UN AUTRE OUTIL", the generic command in
-//!   a box with "Copier", and the states it takes.
+//!   "Débrancher"); in the mini form, opened from the secretary's "+",
+//!   "Ne rien brancher" under them, as the card has it (4.7b: the mini
+//!   form has no card); the divider, "UN AUTRE OUTIL", the generic
+//!   command in a box with "Copier", and the states it takes.
 //! - **Consent** (a row's "Brancher"): "Brancher <outil>", what it lets
 //!   the desktop know, the file it changes and that a copy is kept;
 //!   "Annuler" and "Brancher". Nothing is written before that click.
@@ -16,7 +18,7 @@
 
 use std::time::Instant;
 
-use hocus_link::ToolState;
+use hocus_link::{Form, ToolState};
 use iced::{
     Color, Font, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
     widget::{
@@ -31,7 +33,7 @@ use super::{
     kit::{self, FILL, FILL_HOVER, Input, Pointer, text, text_in},
 };
 use crate::{
-    agents::{self, HERDR_MARK, MARK_INK, Tool, Words},
+    agents::{self, HERDR_MARK, LINK, MARK_INK, Shows, Tool, Words},
     levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE_BOLD, TEXT, ring},
 };
 
@@ -98,6 +100,8 @@ enum Target {
     Unplug(Tool),
     /// herdr, declined, followed again.
     Follow,
+    /// "Ne rien brancher", in the mini form (4.7b).
+    Decline,
     Copy,
     Cancel,
     Confirm,
@@ -124,6 +128,8 @@ type SourceRow = (Row, Rectangle, Option<(Target, Rectangle)>);
 
 struct SourcesLayout {
     rows: Vec<SourceRow>,
+    /// "Ne rien brancher", when it is offered.
+    decline: Option<Rectangle>,
     rule: f32,
     label: f32,
     any: (f32, Vec<String>),
@@ -133,7 +139,15 @@ struct SourcesLayout {
     end: f32,
 }
 
-fn sources_layout(said: &agents::Said, words: Words, copied: bool) -> SourcesLayout {
+/// Whether Sources offers "Ne rien brancher" on a bar in `form`: in the
+/// mini form, while the group would show the card (the secretary's "+"
+/// opens it then), which has no other way to it (4.7b). The full form's
+/// card has its own.
+fn declines(said: &agents::Said, form: Option<Form>) -> bool {
+    form == Some(Form::Mini) && matches!(said.shows(0), Shows::Card(_))
+}
+
+fn sources_layout(said: &agents::Said, words: Words, copied: bool, decline: bool) -> SourcesLayout {
     let mut y = HEADER_TOP + HEADER;
     let rows = ROWS
         .into_iter()
@@ -180,6 +194,14 @@ fn sources_layout(said: &agents::Said, words: Words, copied: bool) -> SourcesLay
             (row, rect, target)
         })
         .collect();
+    // Under the rows on the right, as the card's foot has it.
+    let decline = decline.then(|| {
+        y += GAP;
+        let w = kit::measure(words.decline(), LINK, crate::levels::draw::MANROPE);
+        let rect = Rectangle::new(Point::new(RIGHT - w, y), Size::new(w, LINK * LINE));
+        y += LINK * LINE;
+        rect
+    });
     y += GAP + 4.0;
     let rule = y;
     y += 1.0 + 4.0 + GAP;
@@ -200,6 +222,7 @@ fn sources_layout(said: &agents::Said, words: Words, copied: bool) -> SourcesLay
     y += note.len() as f32 * SMALL * NOTE_LINE;
     SourcesLayout {
         rows,
+        decline,
         rule,
         label,
         any: (any_top, any),
@@ -210,9 +233,11 @@ fn sources_layout(said: &agents::Said, words: Words, copied: bool) -> SourcesLay
     }
 }
 
-/// Sources' height as it shows now.
-pub fn sources_height() -> u32 {
-    (sources_layout(&agents::said(), words(), false).end + PAD_BOTTOM + BORDER).round() as u32
+/// Sources' height as it shows now on a bar in `form`.
+pub fn sources_height(form: Form) -> u32 {
+    let said = agents::said();
+    let decline = declines(&said, Some(form));
+    (sources_layout(&said, words(), false, decline).end + PAD_BOTTOM + BORDER).round() as u32
 }
 
 // --- Consent --------------------------------------------------------------------
@@ -289,9 +314,16 @@ pub struct State {
     pointer: Pointer<Target>,
     focus: Option<Target>,
     copied: bool,
+    /// The form of its bar, as it last read it.
+    form: Option<Form>,
 }
 
 impl State {
+    fn sources_layout(&self, words: Words) -> SourcesLayout {
+        let decline = declines(&self.said, self.form);
+        sources_layout(&self.said, words, self.copied, decline)
+    }
+
     fn targets(&self, words: Words) -> Vec<(Target, Rectangle)> {
         match self.item {
             Some(Item::Plug(tool)) => {
@@ -299,10 +331,11 @@ impl State {
                 vec![(Target::Cancel, l.cancel), (Target::Confirm, l.confirm)]
             }
             Some(Item::Sources | Item::AnotherTool) => {
-                let l = sources_layout(&self.said, words, self.copied);
+                let l = self.sources_layout(words);
                 l.rows
                     .into_iter()
                     .filter_map(|(_, _, t)| t)
+                    .chain(l.decline.map(|r| (Target::Decline, r)))
                     .chain([(Target::Copy, l.copy)])
                     .collect()
             }
@@ -411,7 +444,7 @@ impl Panel {
         let words = self.words;
         let hover = state.pointer.hover;
         kit::title(f, words.sources_title());
-        let l = sources_layout(&state.said, words, state.copied);
+        let l = state.sources_layout(words);
         for (row, rect, target) in &l.rows {
             let (name, mark, tool_state) = match row {
                 Row::Tool(tool) => (tool.title(), tool.mark(), state.said.state(tool.word())),
@@ -465,6 +498,16 @@ impl Panel {
                 }
                 _ => {}
             }
+        }
+        if let Some(rect) = l.decline {
+            let lit = hover == Some(Target::Decline);
+            f.fill_text(text(
+                words.decline().to_owned(),
+                Point::new(rect.x, rect.center_y()),
+                LINK,
+                if lit { TEXT } else { FAINT },
+                Alignment::Left,
+            ));
         }
         f.fill_rectangle(Point::new(LEFT, l.rule), Size::new(ROOM, 1.0), RULE);
         let letters = kit::label_letters(words.another_label());
@@ -567,17 +610,28 @@ impl Panel {
         for pressed in kit::keys(self.id) {
             let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
-        let item = super::with(|c| c.is_open(self.id).then(|| c.open_item()).flatten());
-        if let Some(item) = item {
+        let open = super::with(|c| {
+            c.is_open(self.id)
+                .then(|| c.open_item().map(|item| (item, c.form_of(self.id))))
+                .flatten()
+        });
+        if let Some((item, form)) = open {
             state.item = Some(item);
             let said = agents::said();
-            if said != state.said {
+            if said != state.said || form != state.form {
                 tracing::debug!(
                     ?item,
                     tools = ?said.tools.iter().map(|t| (t.tool.as_str(), self.words.tool_state(t.state).0)).collect::<Vec<_>>(),
                     "the agents' popover shows it"
                 );
                 state.said = said;
+                state.form = form;
+                let items: Vec<String> = state
+                    .targets(self.words)
+                    .iter()
+                    .map(|(t, r)| format!("{t:?}@{:.0},{:.0}", r.center().x, r.center().y))
+                    .collect();
+                tracing::debug!(items = %items.join(" "), "the agents' popover's items");
                 super::refit(item);
             }
         }
@@ -590,6 +644,12 @@ impl Panel {
             Target::Plug(tool) => event(Seen::Replace(Item::Plug(tool))),
             Target::Unplug(tool) => super::send(vec![Effect::Unplug(tool)]),
             Target::Follow => super::send(vec![Effect::FollowHerdr]),
+            // As the card's: the group goes, its item with it in the mini
+            // form, and Sources with them.
+            Target::Decline => {
+                super::send(vec![Effect::Decline]);
+                event(Seen::Chosen);
+            }
             Target::Copy => {
                 state.copied = true;
                 super::send(vec![
@@ -685,12 +745,48 @@ mod tests {
     #[test]
     fn sources_lists_three_tools_and_the_command() {
         let said = agents::Said::default();
-        let l = sources_layout(&said, Words::new(crate::clock::time::Lang::French), false);
+        let l = sources_layout(
+            &said,
+            Words::new(crate::clock::time::Lang::French),
+            false,
+            false,
+        );
         // Its rows 40 px from 51, 6 px apart; none can be plugged in when
         // nothing is there.
         assert_eq!(l.rows[0].1.y, 51.0);
         assert_eq!(l.rows[2].1.y, 51.0 + 2.0 * 46.0);
         assert!(l.rows.iter().all(|(_, _, t)| t.is_none()));
         assert!(l.code.y > l.rule && l.note.0 > l.code.y + CODE_BOX);
+    }
+
+    #[test]
+    fn the_mini_forms_sources_offers_to_plug_nothing_in_under_the_rows() {
+        let tool = |tool: &str, state| hocus_link::AgentTool {
+            tool: tool.to_owned(),
+            state,
+            file: String::new(),
+        };
+        let said = agents::Said {
+            tools: vec![tool("claude-code", ToolState::Found)],
+            agents: Vec::new(),
+        };
+        // Only in the mini form, and only while the card would show.
+        assert!(declines(&said, Some(Form::Mini)));
+        assert!(!declines(&said, Some(Form::Full)));
+        let plugged = agents::Said {
+            tools: vec![tool("claude-code", ToolState::Plugged)],
+            agents: Vec::new(),
+        };
+        assert!(!declines(&plugged, Some(Form::Mini)));
+        let words = Words::new(crate::clock::time::Lang::French);
+        let without = sources_layout(&said, words, false, false);
+        let with = sources_layout(&said, words, false, true);
+        let link = with.decline.expect("Ne rien brancher");
+        // On the right, 6 px under the last row, the divider under it.
+        assert_eq!(link.x + link.width, RIGHT);
+        assert_eq!(link.y, with.rows[2].1.y + SOURCE_ROW + GAP);
+        assert!(with.rule > link.y + link.height);
+        assert!((with.end - without.end - (GAP + LINK * LINE)).abs() < 0.01);
+        assert!(without.decline.is_none());
     }
 }
