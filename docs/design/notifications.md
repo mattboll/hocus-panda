@@ -4,7 +4,8 @@ Status: the server and its bubbles approved by the maintainer on
 2026-11-02 (issue #393, variant A: at the top, against the bar), built in
 5.3; the history, "clear all" and do not disturb approved on 2026-11-02
 (issue #394, variant B: by time), built in 5.4 ([below](#54-the-history-clear-all-do-not-disturb)).
-The footer's four buttons, the bell among them, are 5.5.
+The footer's four buttons, the bell among them, are 5.5 (built:
+[bar.md](bar.md), as built, 5.5).
 
 All sizes are logical pixels.
 
@@ -310,7 +311,11 @@ Approved by the maintainer on 2026-11-02 (issue #394), variant B: by time.
 
 #### The bell
 
-- **Its place, until 5.5.** A layer surface of its own over each bar
+- **Its place, until 5.5** (since 5.5 the bell is the footer's second
+  button in the full form, and over the user's avatar in the mini form,
+  on the footer's surface, `hocus-bar-footer`, and a 150 ms hover opens
+  the history in both forms: [bar.md](bar.md), as built, 5.5). A layer
+  surface of its own over each bar
   (`hocus-bar-bell`, 52 × 44, anchored to the screen's bottom right),
   opened with the bar's other surfaces and after them, so that it is
   above them. Its button is 40 × 32, radius 10, centred where 5.3's dot
@@ -488,9 +493,11 @@ On the Intel GPU, the screenshots of the pull request.
 
 #### Not built
 
-- The footer's other buttons (5.5); the bell moves there with it.
+- The footer's other buttons (5.5); the bell moves there with it. (Built
+  in 5.5.)
 - Hovering the bell in the full form opens nothing (only a click, as the
-  full form's other items).
+  full form's other items). (In 5.5, a 150 ms hover opens it in both
+  forms, as the mockup has it.)
 - Names for screen readers (bar.md §11); grouping by application
   (variant A).
 - Images sent as pixels (`image-data`) are not kept on disk: after a

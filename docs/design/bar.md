@@ -20,8 +20,9 @@ pulse and herdr's pane (section 8; 4.3, issue #386), herdr's terminal
 brought for its agents (4.3c, issue #500), and the agents' halo
 (section 6; 4.4, issue #387), the panda peeking out of the bar's edge
 (section 7 C; 4.5, issue #388), the secretary at the agents' group's
-head and her briefing (section 7 B; 4.6, issue #389), and the mini form's
-agents' item (section 5; 4.7, issue #390): see [as built](#as-built).
+head and her briefing (section 7 B; 4.6, issue #389), the mini form's
+agents' item (section 5; 4.7, issue #390), and the footer (section 4
+group 11, section 5; 5.5, issue #395): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -66,7 +67,7 @@ there.
 | Form | Width | Shows without a click |
 |---|---|---|
 | Full | 196 px | everything in section 4 |
-| Mini | 56 px | clock, next meeting mark, the agents' item (the secretary, how many need the user, how many work; 4.7), battery, keyboard layout, notifications count |
+| Mini | 56 px | clock, next meeting mark, the agents' item (the secretary, how many need the user, how many work; 4.7), battery, keyboard layout, the bell with its count, the user's avatar (5.5) |
 
 Default form per output: **full** when the output's usable width (logical,
 without the bar) is at least 1600 px, **mini** otherwise. With these
@@ -115,7 +116,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
-| 11 | Footer | Clipboard, notifications (count badge), menu, user | 34 px |
+| 11 | Footer | Four 40 × 34 buttons spread evenly across the bar's inside (5.5, variant A): the clipboard, the notifications' bell (its badge counting what was not seen, 5.4), the menu (the launcher, on a click only) and the user's avatar (their initial on the accent's gradient); a 150 ms hover or a click opens the clipboard's, the bell's and the user's popovers (as built, 5.5) | 34 px |
 
 ### 4.1 The clock (approved 2026-10-28, issues #359 and #332; sizes of #378, 2026-10-29)
 
@@ -329,7 +330,10 @@ above its percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
 hover opens; the keyboard layout (3.8): its code alone (Manrope 700, 13 px,
 `text`) in a 44 × 30 button, radius 8, 14 px under the battery's
 percentage, which a click (not a hover) takes to the next layout, with two
-layouts or more; notifications count.
+layouts or more; at the bottom, the bell (44 × 34, its badge) and, 2 px
+under it, last of all, the user's avatar (44 × 34, 24 px round), which
+opens the same popover as the full form's (5.5); the clipboard and the
+menu have their shortcuts instead (`Super+V`, 5.6; `Super+Space`).
 
 A hover of 150 ms on an item opens its popover beside the bar; it floats
 over the windows and closes 300 ms after the pointer leaves, unless the
@@ -650,7 +654,8 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
-  file, ring), clipboard history, notifications (clear all), menu (apps,
+  file, ring), clipboard history (5.5 shows what it holds until 5.6),
+  notifications (clear all), menu (apps,
   settings, session). The keyboard layouts have none: their row goes to the
   next layout (§4.3, 3.8).
 
@@ -2327,3 +2332,86 @@ calendar.
   pull request.
 - **Not built**: the next meeting's mark above her (the calendar); names
   for screen readers (§11).
+
+### 5.5, the footer (2026-11-02)
+
+What the approved 5.5 mockup shows, variant A (four equal buttons), with
+the maintainer's spec (§4 group 11, §5; issue #395).
+
+- **Its surface** is the bell's of 5.4 (`hocus-bar-footer` now), over the
+  bar's bottom, opened after the bar's other surfaces so that it is above
+  them, taking the pointer on its buttons only; a change of the badge
+  draws it alone. Full form: 194 × 46 (the bar inside its rim), its
+  bottom 7 px over the bar's. Mini form: 54 × 82, its bottom 5 px over
+  the bar's. While the form switches, the full form's width and both
+  forms' height, the two forms cross-faded as the other groups'.
+- **The full form**: a 34 px row, its bottom 12 px over the bar's inside
+  bottom, four 40 × 34 buttons across the bar's 172 px inside, 4 px
+  apart: the clipboard, the bell, the menu (a 2 × 2 grid) and the user.
+  The levels keep 14 px over it, as before.
+- **The mini form**: the bell (44 × 34), and 2 px under it (as the
+  Wi-Fi's and Bluetooth's buttons are), last of all, the user's avatar
+  (44 × 34), its bottom 10 px over the bar's inside bottom. The column's
+  items over them moved up 48 px: the keyboard layout's button (or the
+  battery, or the sound's gauge, whichever is lowest) keeps 14 px over the
+  bell.
+- **The buttons**: radius 9, lit `rgba(255,255,255,0.08)` under the
+  pointer, `0.10` while their popover shows, the keyboard's ring while
+  they hold it; the pointer a hand over them. The glyphs are the
+  mockup's 24 px paths drawn at 20 px, 1.8 px strokes in `#C9D0DC`, the
+  bell's colour (the spec says `text.dim`; the mockup and 5.4's bell use
+  this one). The avatar: 24 px round, the name's first letter (Manrope
+  700, 12 px, `#0B1020`) on the accent's gradient (`#6CC287` to
+  `#3E8FBF`, top left to bottom right). The badge is 5.4's, its right
+  2 px inside the button's and its top 1 px under it (the mockup's).
+- **Opening**: the clipboard, the bell and the user open their popovers
+  by a 150 ms hover or a click, in both forms (the mockup's; the bar's
+  other items in the full form open on a click only), closing 300 ms
+  after the pointer leaves unless a click opened them (§9). Their bottom
+  is on the bar's. The menu opens the launcher (5.1) on the bar's screen
+  on a click, or `Enter`, only: never by hovering.
+- **The clipboard's popover**, until 5.6 replaces it: 280 wide, the
+  popovers' header, "Presse-papiers" / "Clipboard", and a 44 px row: a
+  28 px tile "T" (radius 8, `rgba(255,255,255,0.08)`) and the clipboard's
+  text on one line (its line breaks and tabs made spaces, Manrope 600,
+  13 px, cut with an ellipsis), or "Rien de copié." / "Nothing copied.".
+  The shell reads the clipboard as a client does: the compositor offers it
+  the clipboard when one of its surfaces holds the keyboard. It is read
+  off the loop as the popover opens, and again 150 ms and 400 ms later,
+  once a click has given the popover the keyboard; no text is said only
+  after the last reading. Opened by hovering, the popover holds no
+  keyboard and shows what the shell last saw (5.6's source, the
+  compositor's, does away with that). Nothing in it acts.
+- **The user's popover**, until the session's menu (7.4): 280 wide, the
+  user's name as the title, and one 44 px row, a log-out glyph in its
+  tile and "Se déconnecter" / "Log out" (lit `0.06` under the pointer),
+  which ends the session as `Super+Shift+E` does (the shell's `log-out`
+  line). No "Verrouiller" / "Lock": the desktop has no lock of its own
+  yet. `Tab` gives the row the keyboard, `Enter` or `Space` logs out.
+- **The user's name**: their account entry's (`getent passwd UID`, else
+  `/etc/passwd`), its GECOS field's first part, else their login; looked
+  up on a thread as the shell starts, the session's `USER` standing in
+  meanwhile. `HOCUS_USER_NAME` names the user instead, for recordings and
+  tests.
+- **Names**: "Presse-papiers", "Notifications, 3 non vues",
+  "Menu : toutes les applications", "Alex, menu de session" (and in
+  English), said in the shell's log as the footer draws them; `Tab` and
+  the arrows reach the buttons from the bar's other items, `Enter` or
+  `Space` acts.
+- **Measured headless** (`crates/hocus-compositor/tests/footer.rs`), the
+  real shell on the CPU: the full form's footer at its place, its four
+  buttons drawn in a row, their names in order; the clipboard's popover
+  saying "nothing", then the text a window copied; the bell opening the
+  history, the menu the launcher over the whole screen, the user's
+  popover with "Alex" and "Se déconnecter", which ends the session; the
+  menu opening nothing after 600 ms of hovering, the bell beside it
+  opening its history, and a click opening the launcher with the
+  keyboard; the mini form's bell over the avatar at the bar's bottom, the
+  avatar's hover opening the user's popover beside the mini bar. The
+  badge drawn on the footer's bell (`tests/notifications.rs`). Unit tests
+  for the places, the names, the user's name from an entry and its
+  initial, and the clipboard's readings. On the Intel GPU, the
+  screenshots of the pull request.
+- **Not built**: the clipboard's history (5.6) and `Super+V`; the
+  session's menu (7.4), the account's picture from AccountsService; names
+  for screen readers (§11: the names are said in the log only).
