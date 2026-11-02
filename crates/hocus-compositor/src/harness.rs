@@ -89,6 +89,17 @@ impl Headless {
         config: Config,
         shell: Option<std::path::PathBuf>,
     ) -> anyhow::Result<Self> {
+        Self::start_on_bus(headless, config, shell, None)
+    }
+
+    /// The same, the session bus at `bus` (`--session-bus`): the shell
+    /// serves the notifications there.
+    pub fn start_on_bus(
+        headless: HeadlessConfig,
+        config: Config,
+        shell: Option<std::path::PathBuf>,
+        bus: Option<String>,
+    ) -> anyhow::Result<Self> {
         let started = crate::start(Options {
             backend: BackendKind::Headless(headless),
             runtime_dir: None,
@@ -97,6 +108,7 @@ impl Headless {
             session: false,
             config,
             shell,
+            session_bus: bus,
         })?;
         let shell = ShellEnd(started.app.state.shell.running.clone());
         Ok(Self {
@@ -426,6 +438,46 @@ impl Headless {
     /// where they are (global).
     pub fn desktops_surfaces(&self) -> Vec<(String, Rect)> {
         self.layer_rects(hocus_link::DESKTOPS_NAMESPACE)
+    }
+
+    /// The notifications' bubbles as the shell placed them, top first:
+    /// their namespace, their screen, and where they are (global).
+    pub fn bubble_surfaces(&self) -> Vec<(String, String, Rect)> {
+        let state = &self.app.state;
+        let mut surfaces = Vec::new();
+        for output in state.space.outputs() {
+            let Some(origin) = state.space.output_geometry(output).map(|g| g.loc) else {
+                continue;
+            };
+            let map = smithay::desktop::layer_map_for_output(output);
+            for layer in map.layers() {
+                if !hocus_link::is_bubble(layer.namespace()) {
+                    continue;
+                }
+                if let Some(g) = map.layer_geometry(layer) {
+                    let rect =
+                        Rect::new(origin.x + g.loc.x, origin.y + g.loc.y, g.size.w, g.size.h);
+                    surfaces.push((layer.namespace().to_owned(), output.name(), rect));
+                }
+            }
+        }
+        surfaces.sort_by_key(|(_, _, r)| r.y);
+        surfaces
+    }
+
+    /// Commits of the bubbles' surfaces so far.
+    pub fn bubble_commits(&self) -> u64 {
+        self.app.state.bubbles.commits
+    }
+
+    /// The "+N waiting" chip under the bubbles, where it is.
+    pub fn bubbles_waiting_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::BUBBLES_WAITING_NAMESPACE)
+    }
+
+    /// The dots on the bars' notifications place.
+    pub fn unread_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::UNREAD_NAMESPACE)
     }
 
     /// The bars' surfaces as the shell placed them: their screen, and

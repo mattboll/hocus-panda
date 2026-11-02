@@ -26,6 +26,8 @@ pub struct Env {
     pub activation: Option<String>,
     /// The cursor's theme and size, for the program's to match.
     pub cursor: crate::cursor::Choice,
+    /// The session bus given (`--session-bus`), which the programs use.
+    pub session_bus: Option<String>,
 }
 
 impl Env {
@@ -36,6 +38,10 @@ impl Env {
             xdisplay: state.xdisplay,
             activation: None,
             cursor: state.cursor_images.choice().clone(),
+            session_bus: match &state.shell.bus {
+                Some(crate::shell::Bus::Given(address)) => Some(address.clone()),
+                _ => None,
+            },
         }
     }
 
@@ -76,6 +82,9 @@ impl Env {
             .env_remove("DISPLAY");
         if let Some(display) = self.display() {
             cmd.env("DISPLAY", display);
+        }
+        if let Some(bus) = &self.session_bus {
+            cmd.env("DBUS_SESSION_BUS_ADDRESS", bus);
         }
         match &self.activation {
             Some(token) => {
@@ -242,6 +251,7 @@ mod tests {
             xdisplay: Some(1),
             activation: None,
             cursor: crate::cursor::Choice::of(None, None, &crate::CursorEnv::default()),
+            session_bus: None,
         };
         assert_eq!(env("/run/user/1000/hocus-0").wayland_display(), "hocus-0");
         assert_eq!(env("/tmp/hp/hocus-0").wayland_display(), "/tmp/hp/hocus-0");

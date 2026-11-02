@@ -9,6 +9,7 @@
 mod agents;
 mod backdrop;
 mod backend;
+mod bubbles;
 mod config;
 mod cursor;
 mod decoration;
@@ -101,6 +102,11 @@ pub struct Options {
     /// The shell's program, started once the compositor is ready and again
     /// whenever it ends; `None`: no shell (the bar's space is still kept).
     pub shell: Option<PathBuf>,
+    /// The session bus given (`--session-bus`), an address: the shell
+    /// serves the notifications there, and the programs started use it.
+    /// Without it, only the session on a virtual terminal serves them, on
+    /// the session's own bus; nested or headless, none is served.
+    pub session_bus: Option<String>,
 }
 
 /// What the event loop owns: the compositor's state and its backend.
@@ -173,6 +179,11 @@ fn start(options: Options) -> anyhow::Result<Started> {
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
     state.shell.program = options.shell;
+    state.shell.bus = match (options.session_bus, &options.backend) {
+        (Some(address), _) => Some(shell::Bus::Given(address)),
+        (None, BackendKind::Tty) => Some(shell::Bus::Session),
+        (None, _) => None,
+    };
     shell::listen(&event_loop.handle(), &mut state)?;
     agents::start(&event_loop.handle(), &mut state)?;
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
@@ -270,6 +281,8 @@ impl App {
         state.tick();
         // The agents' changes of this turn, in one line.
         state.flush_agents();
+        // The screen the notifications' bubbles show on, when it changed.
+        state.flush_bubbles_screen();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

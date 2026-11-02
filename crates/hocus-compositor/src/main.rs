@@ -70,6 +70,15 @@ struct Args {
     /// WAYLAND_DISPLAY and DISPLAY, for the programs they start.
     #[arg(long)]
     session: bool,
+
+    /// The session bus the desktop serves the notifications on, and the
+    /// programs it starts use: an address, as `dbus-daemon --session
+    /// --print-address` prints it. Without it, only the session on a
+    /// virtual terminal serves them, on its own session bus; nested or
+    /// headless, none is served, so that the live session's is never
+    /// taken.
+    #[arg(long, value_name = "ADDRESS")]
+    session_bus: Option<String>,
 }
 
 /// The shell's program.
@@ -161,6 +170,7 @@ fn main() -> ExitCode {
         session: args.session,
         config,
         shell,
+        session_bus: args.session_bus,
     };
     match hocus_compositor::run(options) {
         Ok(()) => ExitCode::SUCCESS,
