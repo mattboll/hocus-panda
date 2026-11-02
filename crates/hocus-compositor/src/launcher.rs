@@ -15,12 +15,20 @@
 //! the compositor's other programs do, on a thread of its own, its first
 //! window taking the focus on the current desktop.
 //!
+//! The toast a copied result leaves (5.2, [`LAUNCHER_TOAST_NAMESPACE`]) is
+//! a small surface of the shell's at the bottom of the screen: from its
+//! first frame, the compositor fades it in rising 8 px over 216 ms, and
+//! out over the last 270 ms of its [`LAUNCHER_TOAST`], the mockup's
+//! `toast-in`; with reduced motion it only fades. In between nothing
+//! moves: a timer wakes the frame its fade out starts in.
+//!
 //! [`ToCompositor::Launch`]: hocus_link::ToCompositor::Launch
 
 use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use hocus_link::{
-    LAUNCHER_CLOSE, LAUNCHER_NAMESPACE, LAUNCHER_OPEN, LAUNCHER_SCALE, Launch, ToShell,
+    LAUNCHER_CLOSE, LAUNCHER_NAMESPACE, LAUNCHER_OPEN, LAUNCHER_SCALE, LAUNCHER_TOAST,
+    LAUNCHER_TOAST_NAMESPACE, Launch, ToShell,
 };
 use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, utils::with_renderer_surface_state},
@@ -37,6 +45,13 @@ use crate::{
 
 /// The mockup's `cubic-bezier(.2, .8, .2, 1)`, the panel growing in.
 const GROW: Bezier = Bezier(0.2, 0.8, 0.2, 1.0);
+/// The toast's `toast-in` over its 1.8 s: in over its first 12 %, rising
+/// 8 px; out over its last 15 %, each `ease-out`.
+const TOAST_IN: Duration = Duration::from_millis(216);
+const TOAST_OUT: Duration = Duration::from_millis(270);
+const TOAST_RISE: f64 = 8.0;
+/// Its corners, which the compositor cuts on the CPU.
+pub const TOAST_RADIUS: f64 = 12.0;
 
 /// The launchers shown (one, but one closing may still fade out as
 /// another opens), with their motion.
@@ -46,6 +61,36 @@ pub struct Launchers {
     /// What darkens each screen behind it, by screen: the same pixels
     /// from one frame to the next, for the damage.
     dims: RefCell<HashMap<String, SolidColorBuffer>>,
+    /// The toasts shown, from their first frame.
+    toasts: Vec<(LayerSurface, Duration)>,
+}
+
+/// How the launcher's toast is drawn at a moment: how opaque, and how far
+/// under its place (logical pixels).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ToastLook {
+    pub alpha: f32,
+    pub drop: f64,
+}
+
+/// How a toast first drawn at `opened` is drawn at `now`; `motion`: it
+/// rises as it comes, else it only fades.
+fn toast_look(opened: Duration, now: Duration, motion: bool) -> ToastLook {
+    let came = Tween::new(opened, TOAST_IN, Bezier::EASE_OUT).at(now);
+    let gone = Tween::new(
+        opened + LAUNCHER_TOAST - TOAST_OUT,
+        TOAST_OUT,
+        Bezier::EASE_OUT,
+    )
+    .at(now);
+    ToastLook {
+        alpha: came.min(1.0 - gone).clamp(0.0, 1.0) as f32,
+        drop: if motion {
+            TOAST_RISE * (1.0 - came.clamp(0.0, 1.0))
+        } else {
+            0.0
+        },
+    }
 }
 
 #[derive(Debug)]
@@ -105,9 +150,34 @@ impl Launchers {
         Some(look(shown.opened, shown.closing, now, motion))
     }
 
-    /// Whether one is still moving at `now`.
+    /// Whether one, or a toast, is still moving at `now`.
     pub fn tick(&self, now: Duration) -> bool {
+        let fading = |opened: Duration| {
+            now < opened + TOAST_IN
+                || (now >= opened + LAUNCHER_TOAST - TOAST_OUT && now < opened + LAUNCHER_TOAST)
+        };
         self.shown.iter().any(|s| s.moving(now))
+            || self.toasts.iter().any(|(_, opened)| fading(*opened))
+    }
+
+    /// When a toast resting at `now` starts to fade out.
+    pub fn next(&self, now: Duration) -> Option<Duration> {
+        self.toasts
+            .iter()
+            .map(|(_, opened)| *opened + LAUNCHER_TOAST - TOAST_OUT)
+            .filter(|at| *at > now)
+            .min()
+    }
+
+    /// The toast `layer`, if it shows, and how.
+    pub fn toast_look(
+        &self,
+        layer: &LayerSurface,
+        now: Duration,
+        motion: bool,
+    ) -> Option<ToastLook> {
+        let (_, opened) = self.toasts.iter().find(|(l, _)| l == layer)?;
+        Some(toast_look(*opened, now, motion))
     }
 
     /// Whether one shows and is not closing.
@@ -154,6 +224,30 @@ impl State {
         });
     }
 
+    /// A commit of the shell's toast `layer`: its first frame starts its
+    /// motion.
+    pub fn launcher_toast_committed(&mut self, layer: &LayerSurface) {
+        if self.panel.launchers.toasts.iter().any(|(l, _)| l == layer) {
+            return;
+        }
+        let drawn = with_renderer_surface_state(layer.wl_surface(), |s| s.buffer().is_some())
+            .unwrap_or(false);
+        if drawn {
+            let opened = self.now();
+            self.panel.launchers.toasts.push((layer.clone(), opened));
+            self.redraw = true;
+        }
+    }
+
+    /// The toasts' surfaces on `output`, if any shows.
+    pub fn launcher_toasts_on(&self, output: &Output) -> Vec<LayerSurface> {
+        layer_map_for_output(output)
+            .layers()
+            .filter(|l| l.namespace() == LAUNCHER_TOAST_NAMESPACE)
+            .cloned()
+            .collect()
+    }
+
     /// A commit of the shell's launcher `layer`: its first frame starts its
     /// motion.
     pub fn launcher_committed(&mut self, layer: &LayerSurface) {
@@ -190,6 +284,7 @@ impl State {
     /// A layer surface went: if it was a launcher, its motion goes too.
     pub fn launcher_gone(&mut self, layer: &LayerSurface) {
         self.panel.launchers.shown.retain(|s| &s.layer != layer);
+        self.panel.launchers.toasts.retain(|(l, _)| l != layer);
     }
 
     /// The launcher's surface on `output`, open or closing, if one shows.
@@ -249,6 +344,25 @@ mod tests {
         let gone = at(1000, Some(2000), 2120, true);
         assert_eq!(gone.alpha, 0.0);
         assert!((gone.scale - LAUNCHER_SCALE).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_toast_rises_in_rests_and_fades_out() {
+        let ms = Duration::from_millis;
+        let start = toast_look(ms(1000), ms(1000), true);
+        assert_eq!(start.alpha, 0.0);
+        assert!((start.drop - TOAST_RISE).abs() < 1e-9);
+        assert_eq!(
+            toast_look(ms(1000), ms(1500), true),
+            ToastLook {
+                alpha: 1.0,
+                drop: 0.0
+            }
+        );
+        let out = toast_look(ms(1000), ms(2700), true);
+        assert!(out.alpha > 0.0 && out.alpha < 1.0, "{out:?}");
+        assert_eq!(toast_look(ms(1000), ms(2800), true).alpha, 0.0);
+        assert_eq!(toast_look(ms(1000), ms(1100), false).drop, 0.0);
     }
 
     #[test]

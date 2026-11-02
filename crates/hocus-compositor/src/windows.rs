@@ -1250,6 +1250,9 @@ impl State {
         moving |= self.tick_peek(now);
         let popover_motion = self.popover_motion();
         moving |= self.panel.tick(now, popover_motion);
+        if let Some(at) = self.panel.launchers.next(now) {
+            wake(at);
+        }
         moving |= self.tick_switcher(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();

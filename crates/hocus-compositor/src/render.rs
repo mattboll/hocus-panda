@@ -454,10 +454,13 @@ impl State {
                 });
             for layer in on {
                 // The peek goes under the bar's surfaces (`peek_elements`),
-                // the launcher over everything (`launcher_elements`).
+                // the launcher and its toast over everything
+                // (`launcher_elements`, `toast_elements`).
                 if matches!(
                     layer.namespace(),
-                    hocus_link::PEEK_NAMESPACE | hocus_link::LAUNCHER_NAMESPACE
+                    hocus_link::PEEK_NAMESPACE
+                        | hocus_link::LAUNCHER_NAMESPACE
+                        | hocus_link::LAUNCHER_TOAST_NAMESPACE
                 ) {
                     continue;
                 }
@@ -528,6 +531,8 @@ impl State {
         };
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
+        // The launcher's toast over the launcher fading out.
+        self.toast_elements(renderer, output, now, &mut elements);
         // The launcher over the rest, the bar too; its glass goes right
         // under what darkens the desktop.
         let launcher = self
@@ -742,6 +747,57 @@ impl State {
             Kind::Unspecified,
         )));
         Some(look.alpha)
+    }
+
+    /// The launcher's toasts on `output` at `now` (5.2), where their motion
+    /// has them; on the CPU, whose buffers have no alpha, cut to their
+    /// rounded corners.
+    fn toast_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        now: Duration,
+        out: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let scale = output.current_scale().fractional_scale();
+        let motion = self.launcher_motion();
+        for layer in self.launcher_toasts_on(output) {
+            let geometry = layer_map_for_output(output).layer_geometry(&layer);
+            let (Some(look), Some(geometry)) = (
+                self.panel.launchers.toast_look(&layer, now, motion),
+                geometry,
+            ) else {
+                continue;
+            };
+            if look.alpha <= 0.0 {
+                continue;
+            }
+            let mut at = geometry.loc.to_f64();
+            at.y += look.drop;
+            let loc: Point<i32, Physical> = at.to_physical_precise_round(scale);
+            let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
+                AsRenderElements::<R>::render_elements(
+                    &layer,
+                    renderer,
+                    loc,
+                    Scale::from(scale),
+                    look.alpha,
+                );
+            if self.shell.software {
+                let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
+                let radius = (crate::launcher::TOAST_RADIUS * scale).round() as i32;
+                out.extend(
+                    surfaces.into_iter().map(|e| {
+                        OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped))
+                    }),
+                );
+            } else {
+                out.extend(surfaces.into_iter().map(OutputElements::Surface));
+            }
+        }
     }
 
     /// The glass under the launcher on `output`, `alpha` opaque: what is
