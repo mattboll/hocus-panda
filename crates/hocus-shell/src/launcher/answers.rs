@@ -9,15 +9,14 @@
 //! - **A conversion**: `<number> <unit> en|to|vers|-> <unit>`, the units'
 //!   French and English names and symbols, accents and case ignored:
 //!   lengths, masses, times, volumes, temperatures, data (decimal and
-//!   binary), and currencies at the European Central Bank's rates
-//!   ([`super::rates`]).
+//!   binary). Currencies are not converted: the web search answers those.
 //! - **An address**: `scheme://…`, `localhost[:port][/…]`, or
 //!   `name.tld[:port][/…]`, without spaces.
 //!
 //! The 5.2 mockup's logic is the reference for what counts; this is our
 //! own reading of it.
 
-use super::{Words, rates::Rates, search::fold};
+use super::{Words, search::fold};
 
 /// How numbers are written: French (`1 234,5`) or English (`1,234.5`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,39 +36,31 @@ impl Numbers {
     /// decimal calculation: `0.1 + 0.2` is `0.3`). `None` when it is not a
     /// number.
     pub fn format(self, value: f64) -> Option<String> {
-        self.write(value, 6, false)
+        self.write(value, 6)
     }
 
     /// A conversion's `value`, as it reads well: four significant digits
-    /// (none to three decimals, their trailing zeros dropped); a currency's
-    /// always with two decimals.
-    pub fn format_converted(self, value: f64, kind: Kind) -> Option<String> {
-        if kind == Kind::Currency {
-            return self.write(value, 2, true);
-        }
+    /// (none to three decimals, their trailing zeros dropped).
+    pub fn format_converted(self, value: f64) -> Option<String> {
         let whole = value.abs().trunc();
         let digits = if whole < 1.0 {
             1
         } else {
             whole.log10().floor() as i64 + 1
         };
-        self.write(value, (4 - digits).clamp(0, 3) as usize, false)
+        self.write(value, (4 - digits).clamp(0, 3) as usize)
     }
 
-    /// `value` with `places` decimals, their trailing zeros dropped unless
-    /// `kept`, from its twelve first significant digits.
-    fn write(self, value: f64, places: usize, kept: bool) -> Option<String> {
+    /// `value` with `places` decimals, their trailing zeros dropped, from
+    /// its twelve first significant digits.
+    fn write(self, value: f64, places: usize) -> Option<String> {
         if !value.is_finite() {
             return None;
         }
         let value: f64 = format!("{value:.11e}").parse().ok()?;
         let digits = format!("{:.*}", places, value.abs());
         let (whole, decimals) = digits.split_once('.').unwrap_or((&digits, ""));
-        let decimals = if kept {
-            decimals
-        } else {
-            decimals.trim_end_matches('0')
-        };
+        let decimals = decimals.trim_end_matches('0');
         let (group, mark) = if self.fr {
             ('\u{202f}', ',')
         } else {
@@ -104,7 +95,7 @@ pub struct Answer {
 }
 
 /// The answer to `text`, if it is a calculation or a conversion.
-pub fn answer(text: &str, rates: Option<&Rates>, numbers: Numbers, words: Words) -> Option<Answer> {
+pub fn answer(text: &str, numbers: Numbers, words: Words) -> Option<Answer> {
     if let Some(value) = calc(text) {
         let shown = numbers.format(value)?;
         return Some(Answer {
@@ -113,19 +104,16 @@ pub fn answer(text: &str, rates: Option<&Rates>, numbers: Numbers, words: Words)
             copy: shown,
         });
     }
-    let conversion = convert(text, rates)?;
-    let value = numbers.format_converted(conversion.value, conversion.to.kind)?;
+    let conversion = convert(text)?;
+    let value = numbers.format_converted(conversion.value)?;
     let from = numbers.format(conversion.from)?;
     let to = show(&conversion.to.key, words);
-    let kind = match (&conversion.to.kind, rates) {
-        (Kind::Currency, Some(rates)) => words.rates_of(&rates.date),
-        (kind, _) => kind.name(words).to_owned(),
-    };
     Some(Answer {
         main: format!("{value} {to}"),
         sub: format!(
-            "{from} {} = {value} {to} · {kind}",
-            show(&conversion.unit.key, words)
+            "{from} {} = {value} {to} · {}",
+            show(&conversion.unit.key, words),
+            conversion.to.kind.name(words)
         ),
         copy: value,
     })
@@ -312,7 +300,6 @@ pub enum Kind {
     Volume,
     Temperature,
     Data,
-    Currency,
 }
 
 impl Kind {
@@ -324,14 +311,13 @@ impl Kind {
             Self::Volume => words.pick("Volume", "Volume"),
             Self::Temperature => words.pick("Température", "Temperature"),
             Self::Data => words.pick("Données", "Data"),
-            Self::Currency => words.pick("Monnaie", "Currency"),
         }
     }
 }
 
 /// The units, by their key: what they measure, and how many of the
 /// kind's base (metre, kilogram, second, litre, byte) each is. The
-/// temperatures go through kelvins instead, the currencies through euros.
+/// temperatures go through kelvins instead.
 const UNITS: &[(&str, Kind, f64)] = &[
     ("m", Kind::Length, 1.0),
     ("km", Kind::Length, 1000.0),
@@ -373,7 +359,7 @@ const UNITS: &[(&str, Kind, f64)] = &[
 ];
 
 /// Other names of the units (folded: lower case, without accents), French
-/// and English, and the currencies' symbols and names.
+/// and English.
 const ALIASES: &[(&str, &str)] = &[
     ("metre", "m"),
     ("metres", "m"),
@@ -492,16 +478,6 @@ const ALIASES: &[(&str, &str)] = &[
     ("mib", "mio"),
     ("gib", "gio"),
     ("tib", "tio"),
-    ("€", "eur"),
-    ("euro", "eur"),
-    ("euros", "eur"),
-    ("$", "usd"),
-    ("dollar", "usd"),
-    ("dollars", "usd"),
-    ("£", "gbp"),
-    ("¥", "jpy"),
-    ("yen", "jpy"),
-    ("yens", "jpy"),
 ];
 
 /// A unit typed: its key, and what it measures.
@@ -511,33 +487,29 @@ pub struct Unit {
     pub kind: Kind,
 }
 
-/// The unit `word` names, a currency only when its rate is known.
-fn unit(word: &str, rates: Option<&Rates>) -> Option<Unit> {
+/// The unit `word` names.
+fn unit(word: &str) -> Option<Unit> {
     let folded = fold(word);
     let key = ALIASES
         .iter()
         .find(|(alias, _)| *alias == folded)
         .map_or(folded.as_str(), |(_, key)| *key);
-    if let Some((key, kind, _)) = UNITS.iter().find(|(k, ..)| *k == key) {
-        return Some(Unit {
+    UNITS
+        .iter()
+        .find(|(k, ..)| *k == key)
+        .map(|(key, kind, _)| Unit {
             key: (*key).to_owned(),
             kind: *kind,
-        });
-    }
-    rates?.per_eur.get(key).map(|_| Unit {
-        key: key.to_owned(),
-        kind: Kind::Currency,
-    })
+        })
 }
 
 /// `value` of `unit` in its kind's base: metres, kilograms, seconds,
-/// litres, bytes, kelvins or euros.
-fn to_base(unit: &Unit, value: f64, rates: Option<&Rates>) -> Option<f64> {
+/// litres, bytes or kelvins.
+fn to_base(unit: &Unit, value: f64) -> Option<f64> {
     match (unit.kind, unit.key.as_str()) {
         (Kind::Temperature, "c") => Some(value + 273.15),
         (Kind::Temperature, "f") => Some((value - 32.0) * 5.0 / 9.0 + 273.15),
         (Kind::Temperature, _) => Some(value),
-        (Kind::Currency, key) => Some(value / rates?.per_eur.get(key)?),
         (_, key) => UNITS
             .iter()
             .find(|(k, ..)| *k == key)
@@ -545,12 +517,11 @@ fn to_base(unit: &Unit, value: f64, rates: Option<&Rates>) -> Option<f64> {
     }
 }
 
-fn from_base(unit: &Unit, value: f64, rates: Option<&Rates>) -> Option<f64> {
+fn from_base(unit: &Unit, value: f64) -> Option<f64> {
     match (unit.kind, unit.key.as_str()) {
         (Kind::Temperature, "c") => Some(value - 273.15),
         (Kind::Temperature, "f") => Some((value - 273.15) * 9.0 / 5.0 + 32.0),
         (Kind::Temperature, _) => Some(value),
-        (Kind::Currency, key) => Some(value * rates?.per_eur.get(key)?),
         (_, key) => UNITS
             .iter()
             .find(|(k, ..)| *k == key)
@@ -564,10 +535,6 @@ fn show(key: &str, words: Words) -> String {
         "c" => "°C",
         "f" => "°F",
         "k" => "K",
-        "eur" => "€",
-        "usd" => "$",
-        "gbp" => "£",
-        "jpy" => "¥",
         "j" => words.pick("j", "d"),
         "sem" => words.pick("sem", "wk"),
         "o" => words.pick("o", "B"),
@@ -579,9 +546,7 @@ fn show(key: &str, words: Words) -> String {
         "mio" => words.pick("Mio", "MiB"),
         "gio" => words.pick("Gio", "GiB"),
         "tio" => words.pick("Tio", "TiB"),
-        key if UNITS.iter().any(|(k, ..)| *k == key) => key,
-        // Another currency: its code.
-        key => return key.to_uppercase(),
+        key => key,
     };
     shown.to_owned()
 }
@@ -600,7 +565,7 @@ const INTO: [&str; 4] = ["en", "to", "vers", "->"];
 
 /// `text` as a conversion, `<number> <unit> en|to|vers|-> <unit>`, if it
 /// is one of two different units of the same kind.
-pub fn convert(text: &str, rates: Option<&Rates>) -> Option<Conversion> {
+pub fn convert(text: &str) -> Option<Conversion> {
     let spaced = text.replace("->", " -> ");
     let words: Vec<&str> = spaced.split_whitespace().collect();
     let [left @ .., into, target] = words.as_slice() else {
@@ -619,12 +584,12 @@ pub fn convert(text: &str, rates: Option<&Rates>) -> Option<Conversion> {
         .map(|(at, _)| at)?;
     let (number, from_word) = left.split_at(unit_at);
     let from = number_of(number)?;
-    let unit = unit(from_word, rates)?;
-    let to = self::unit(target, rates)?;
+    let unit = unit(from_word)?;
+    let to = self::unit(target)?;
     if unit.kind != to.kind || unit.key == to.key {
         return None;
     }
-    let value = from_base(&to, to_base(&unit, from, rates)?, rates)?;
+    let value = from_base(&to, to_base(&unit, from)?)?;
     value.is_finite().then_some(Conversion {
         from,
         unit,
@@ -704,8 +669,6 @@ pub fn web(query: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
 
     const FR: Numbers = Numbers { fr: true };
@@ -754,17 +717,6 @@ mod tests {
         assert_eq!(pretty("= 2x-3 / 4"), "2 × -3 ÷ 4");
     }
 
-    fn rates() -> Rates {
-        Rates {
-            date: "2026-10-30".to_owned(),
-            per_eur: HashMap::from([
-                ("eur".to_owned(), 1.0),
-                ("usd".to_owned(), 1.08),
-                ("chf".to_owned(), 0.94),
-            ]),
-        }
-    }
-
     fn close(conversion: Option<Conversion>, want: f64) {
         let value = conversion.expect("a conversion").value;
         assert!(
@@ -775,64 +727,51 @@ mod tests {
 
     #[test]
     fn units_convert_within_their_kind() {
-        let rates = rates();
-        let r = Some(&rates);
-        close(convert("10 km en miles", r), 6.213_711_922_373_34);
-        close(convert("10km to mi", r), 6.213_711_922_373_34);
-        close(convert("1,5 go en mo", r), 1500.0);
-        close(convert("1 Gio vers Mo", r), 1_073.741_824);
-        close(convert("1 To to GB", r), 1000.0);
-        close(convert("22 °C en F", r), 71.6);
-        close(convert("-40 fahrenheit -> celsius", r), -40.0);
-        close(convert("0 k en °c", r), -273.15);
-        close(convert("2 heures en minutes", r), 120.0);
-        close(convert("1 semaine en jours", r), 7.0);
-        close(convert("1 000 g en kg", r), 1.0);
-        close(convert("3 Pieds en mètres", r), 0.9144);
-        close(convert("1 gallon en litres", r), 3.785_411_784);
-        // Currencies at the rates, through the euro.
-        close(convert("108 usd en eur", r), 100.0);
-        close(convert("108 $ en CHF", r), 94.0);
-        // Not conversions: another kind, the same unit, an unknown unit or
-        // currency, a currency without rates.
-        assert_eq!(convert("10 km en kg", r), None);
-        assert_eq!(convert("10 km en km", r), None);
-        assert_eq!(convert("10 parsecs en km", r), None);
-        assert_eq!(convert("10 gbp en eur", r), None);
-        assert_eq!(convert("10 usd en eur", None), None);
-        assert_eq!(convert("km en mi", r), None);
-        assert_eq!(convert("10 km mi", r), None);
+        close(convert("10 km en miles"), 6.213_711_922_373_34);
+        close(convert("10km to mi"), 6.213_711_922_373_34);
+        close(convert("1,5 go en mo"), 1500.0);
+        close(convert("1 Gio vers Mo"), 1_073.741_824);
+        close(convert("1 To to GB"), 1000.0);
+        close(convert("22 °C en F"), 71.6);
+        close(convert("-40 fahrenheit -> celsius"), -40.0);
+        close(convert("0 k en °c"), -273.15);
+        close(convert("2 heures en minutes"), 120.0);
+        close(convert("1 semaine en jours"), 7.0);
+        close(convert("1 000 g en kg"), 1.0);
+        close(convert("3 Pieds en mètres"), 0.9144);
+        close(convert("1 gallon en litres"), 3.785_411_784);
+        // Not conversions: another kind, the same unit, an unknown unit.
+        assert_eq!(convert("10 km en kg"), None);
+        assert_eq!(convert("10 km en km"), None);
+        assert_eq!(convert("10 parsecs en km"), None);
+        assert_eq!(convert("km en mi"), None);
+        assert_eq!(convert("10 km mi"), None);
     }
 
     #[test]
-    fn a_conversion_answers_with_its_kind_and_the_rates_date() {
-        let rates = rates();
+    fn a_currency_is_not_a_conversion() {
+        let words = Words { fr: false };
+        assert_eq!(convert("150 usd en eur"), None);
+        assert_eq!(convert("150 $ to €"), None);
+        assert_eq!(answer("150 usd en eur", EN, words), None);
+    }
+
+    #[test]
+    fn a_conversion_answers_with_its_kind() {
         let fr = Words { fr: true };
-        let answer = answer("10 km en miles", Some(&rates), FR, fr).expect("an answer");
+        let answer = answer("10 km en miles", FR, fr).expect("an answer");
         assert_eq!(answer.main, "6,214 mi");
         assert_eq!(answer.sub, "10 km = 6,214 mi · Longueur");
         assert_eq!(answer.copy, "6,214");
-        let main = |text: &str| super::answer(text, Some(&rates), FR, fr).map(|a| a.main);
+        let main = |text: &str| super::answer(text, FR, fr).map(|a| a.main);
         assert_eq!(main("22 °C en F").as_deref(), Some("71,6 °F"));
         assert_eq!(main("1,5 go en mo").as_deref(), Some("1\u{202f}500 Mo"));
         assert_eq!(main("1 o en To").as_deref(), Some("0 To"));
-        let answer = answer_en("150 usd to eur", &rates);
-        assert_eq!(answer.main, "138.89 €");
-        assert_eq!(answer.copy, "138.89");
-        assert_eq!(
-            answer.sub,
-            "150 $ = 138.89 € · Currency, rates of 2026-10-30"
-        );
-        assert_eq!(answer_en("108 usd to eur", &rates).main, "100.00 €");
-        let calc = super::answer("12 × (3 + 4)", None, FR, fr).expect("an answer");
+        let calc = super::answer("12 × (3 + 4)", FR, fr).expect("an answer");
         assert_eq!(
             (calc.main.as_str(), calc.sub.as_str()),
             ("84", "12 × (3 + 4) =")
         );
-    }
-
-    fn answer_en(text: &str, rates: &Rates) -> Answer {
-        answer(text, Some(rates), EN, Words { fr: false }).expect("an answer")
     }
 
     #[test]

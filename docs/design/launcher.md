@@ -89,10 +89,8 @@ is left for other kinds of results.
 - **Conversion**: `<number> <unit> en|to|vers|-> <unit>`, with French and
   English unit names and symbols, accents and case ignored. Units:
   length, mass, time, volume, temperature, data (decimal Ko/Mo/Go/To and
-  binary Kio/Mio/Gio; KB/MB/GB as aliases), currencies. Currency rates
-  come from the European Central Bank's daily reference rates, fetched
-  once a day off the loop and kept on disk. Offline, the last known rates
-  are used, and the card says their date.
+  binary Kio/Mio/Gio; KB/MB/GB as aliases). No currencies (decided on
+  2026-11-02): the web search answers those.
 - **Address**: `scheme://…`, `localhost[:port][/…]`, or
   `name.tld[:port][/…]` with no spaces. It opens in the default browser
   (`xdg-open`).
@@ -224,30 +222,17 @@ is left for other kinds of results.
   words between the units are `en`, `to`, `vers` and `->` only. Time
   goes from milliseconds to weeks (no months nor years: their length
   varies); the gallon is the US one; `b` is the byte (bits are not
-  converted). The currencies are the bank's (about thirty), by their
-  code, `€ $ £ ¥`, `euro`, `dollar` and `yen`; `$` is the US dollar. Two
-  units of the same kind and different only.
+  converted). Two units of the same kind and different only. A currency
+  is not a unit: `150 usd en eur` falls through to the web row.
 - **Numbers** follow `LC_NUMERIC` (then `LC_ALL`, `LANG`): French writes
   `1 234,5` (a narrow no-break space between thousands), English
   `1,234.5`. The value keeps its twelve first significant digits (`0.1 +
   0.2` is `0.3`). A calculation shows up to six decimals; a conversion
   four significant digits, none to three decimals, trailing zeros dropped
-  ("6,214 mi" for 10 km, "71,6 °F" for 22 °C, "1 500 Mo" for 1,5 Go), a
-  currency always two decimals ("138,89 €"). What `Enter` copies is the
-  value as shown, without its unit. The units show as the card writes them:
-  `°C`, `€`, `Ko` in French and `kB` in English, `j`/`d`, `sem`/`wk`.
-- **The rates** (`rates.rs`) are the bank's file as it is, in
-  `$XDG_STATE_HOME/hocuspanda/ecb-rates.xml`, read on a thread as the
-  shell starts. When the launcher opens and the file is 24 h old or more
-  (by its time on disk) or missing, a thread fetches it again, with a
-  30 s timeout, and an open launcher shows the new rates; after a failure
-  it is not tried again for an hour. Nothing is fetched before the
-  launcher opens. The client is `ureq` over `rustls` (ring) with the
-  system's certificates; the file is read with `roxmltree`. A currency
-  conversion's line ends with the rates' day: "Monnaie, taux du
-  30/10/2026" / "Currency, rates of 2026-10-30", always, not only
-  offline. With no rates at all, a currency is not a unit and the
-  applications are searched instead.
+  ("6,214 mi" for 10 km, "71,6 °F" for 22 °C, "1 500 Mo" for 1,5 Go).
+  What `Enter` copies is the value as shown, without its unit. The units
+  show as the card writes them: `°C`, `Ko` in French and `kB` in
+  English, `j`/`d`, `sem`/`wk`.
 - **The cards** are rows of the grid of their own (the 5.2 mockup's row
   heights: the card and 8 px under it), so that the arrows, the wheel and
   the selection kept in view treat them as the tiles' rows; a card's
@@ -271,8 +256,7 @@ is left for other kinds of results.
   drawn in between but the frame its fade out starts in. With reduced
   motion it only fades. On the CPU it is opaque and the compositor cuts
   its corners.
-- **The package** recommends `xdg-utils` (for `xdg-open`) and
-  `ca-certificates` (for the rates over HTTPS).
+- **The package** recommends `xdg-utils` (for `xdg-open`).
 - **Opening**: the shell sends `launch` with `xdg-open` (looked for in
   its own `PATH`, sent with its full path) and the address, or
   `https://duckduckgo.com/?q=…` (the query form-encoded); the compositor
@@ -291,13 +275,11 @@ is left for other kinds of results.
   screen, not the space left of the bar (the bar reserves none); it has
   no shadow.
 - **Measured headless** (`crates/hocus-compositor/tests/launcher.rs`),
-  the real shell, rates from a file of the test's, the browser a program
-  of the test's (the shell's `PATH` is the test's directory, so the
-  machine's `xdg-open` is never found): one scenario per point of the
-  spec (the calculation's card, `Enter` copying it and the toast; a
-  conversion, and a currency's at the file's rates with their date; an
-  address opening; the web row last, reached by the arrows, and
-  `Ctrl+Enter` from a tile; no application with an answer or an
-  address). The parser, the units, the numbers, the bank's file and the
-  scattered matches have unit tests. On the Intel GPU, the screenshots
-  of the pull request.
+  the real shell, the browser a program of the test's (the shell's `PATH`
+  is the test's directory, so the machine's `xdg-open` is never found):
+  one scenario per point of the spec (the calculation's card, `Enter`
+  copying it and the toast; a conversion; an address opening; the web
+  row last, reached by the arrows, and `Ctrl+Enter` from a tile; no
+  application with an answer or an address). The parser, the units (a
+  currency not being one), the numbers and the scattered matches have
+  unit tests. On the Intel GPU, the screenshots of the pull request.

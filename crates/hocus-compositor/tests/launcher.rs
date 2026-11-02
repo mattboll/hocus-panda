@@ -15,11 +15,9 @@
 //! its letter on a neutral square.
 //!
 //! Then one per point of the 5.2 spec (issue #392): a calculation shows in
-//! a card, `Enter` copies it and a toast says so; a conversion, a
-//! currency's at the rates of a file of the test's (the bank is never
-//! asked); an address opens; the web search comes last, and
-//! `Ctrl+Enter` runs it whatever is selected; an answer lists no
-//! application. The browser is a program of the test's, the shell's only
+//! a card, `Enter` copies it and a toast says so; a conversion; an
+//! address opens; the web search comes last, and `Ctrl+Enter` runs it
+//! whatever is selected; an answer lists no application. The browser is a program of the test's, the shell's only
 //! `xdg-open` (its `PATH` is the test's own directory).
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
@@ -90,18 +88,6 @@ fn key_of(c: char) -> Option<(u32, bool)> {
         _ => return None,
     })
 }
-
-/// The bank's rates the test gives the shell: a euro is 1.25 dollars.
-const RATES: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<gesmes:Envelope xmlns:gesmes=\"http://www.gesmes.org/xml/2002-08-01\" \
-xmlns=\"http://www.ecb.int/vocabulary/2002-08-01/eurofxref\">
-<gesmes:subject>Reference rates</gesmes:subject>
-<Cube><Cube time='2026-10-30'>
-<Cube currency='USD' rate='1.25'/><Cube currency='JPY' rate='160'/>
-<Cube currency='GBP' rate='0.85'/>
-</Cube></Cube>
-</gesmes:Envelope>
-";
 
 /// The test's applications: id, name, generic name, icon (none: no
 /// `Icon` key), and what else their entry says.
@@ -248,8 +234,6 @@ impl Bed {
             )?;
         }
         std::fs::write(root.join("state/hocuspanda/launches"), COUNTS)?;
-        // Kept just now: the bank is not asked again for a day.
-        std::fs::write(root.join("state/hocuspanda/ecb-rates.xml"), RATES)?;
         // The browser: it writes down what it opens.
         let opener = root.join("bin/xdg-open");
         std::fs::write(
@@ -790,7 +774,7 @@ fn a_calculation_shows_in_a_card_and_enter_copies_it_with_a_toast() -> anyhow::R
 }
 
 #[test]
-fn a_conversion_shows_its_kind_and_a_currency_the_rates_date() -> anyhow::Result<()> {
+fn a_conversion_shows_its_kind() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(0)? else {
         return Ok(());
     };
@@ -801,18 +785,6 @@ fn a_conversion_shows_its_kind_and_a_currency_the_rates_date() -> anyhow::Result
     assert_eq!(
         cards(&shows)[0],
         "*answer: 6,214 mi | 10 km = 6,214 mi · Longueur",
-        "{shows}"
-    );
-    for _ in 0.."10 km en mi".len() {
-        bed.press(KEY_BACKSPACE);
-    }
-    // At the test's rates: a euro is 1.25 dollars.
-    let from = bed.mark();
-    bed.type_text("150 usd en eur")?;
-    let shows = bed.shows_after(from, "query=\"150 usd en eur\"")?;
-    assert_eq!(
-        cards(&shows)[0],
-        "*answer: 120,00 € | 150 $ = 120,00 € · Monnaie, taux du 30/10/2026",
         "{shows}"
     );
     assert!(tiles(&shows).is_empty(), "{shows}");
