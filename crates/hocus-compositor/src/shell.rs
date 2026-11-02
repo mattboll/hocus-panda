@@ -325,7 +325,10 @@ impl State {
                 self.tell_shell(self.bar_look());
             }
             ToCompositor::Wake(namespace) => self.wake_shell_surfaces(&namespace),
-            ToCompositor::Closing(namespace) => self.popovers_closing(&namespace),
+            ToCompositor::Closing(namespace) => {
+                self.popovers_closing(&namespace);
+                self.launcher_closing(&namespace);
+            }
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
@@ -347,6 +350,7 @@ impl State {
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::Copy(text) => self.copy_text(text),
+            ToCompositor::Launch(launch) => self.launch(launch),
         }
     }
 

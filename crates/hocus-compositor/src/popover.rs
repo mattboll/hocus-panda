@@ -173,7 +173,17 @@ impl State {
             .map(|s| s.layer.clone())
             .collect();
         let keyboard = self.shell_keyboard();
-        let Some(shell) = open.first().cloned().or_else(|| keyboard.clone()) else {
+        let launcher = self
+            .space
+            .outputs()
+            .find_map(|o| self.launcher_on(o))
+            .filter(|_| self.panel.launchers.open());
+        let Some(shell) = open
+            .first()
+            .cloned()
+            .or_else(|| launcher.clone())
+            .or_else(|| keyboard.clone())
+        else {
             return false;
         };
         let on_shell = self
@@ -183,9 +193,11 @@ impl State {
             return false;
         }
         self.tell_shell(ToShell::Outside);
-        open.iter().any(|layer| {
-            layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
-        })
+        // The launcher open on another screen closes, as a menu does.
+        launcher.is_some()
+            || open.iter().any(|layer| {
+                layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+            })
     }
 
     /// The shell's layer surface holding the keyboard, if one does.

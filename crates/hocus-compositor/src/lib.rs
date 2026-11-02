@@ -21,6 +21,7 @@ pub mod halo;
 mod handlers;
 mod harness;
 mod input;
+mod launcher;
 mod layouts;
 mod levels;
 mod magnet;

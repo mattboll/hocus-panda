@@ -13,6 +13,7 @@ use smithay::{
             AsRenderElements, Kind, RenderElementStates, default_primary_scanout_output_compare,
             memory::MemoryRenderBufferRenderElement,
             render_elements,
+            solid::SolidColorRenderElement,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             texture::TextureRenderElement,
             utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
@@ -80,6 +81,10 @@ render_elements! {
     /// The compositor's own shaders: going to an agent's streak (4.3),
     /// the halo (4.4).
     Shader = ShaderElement,
+    /// What darkens the desktop behind the launcher (5.1).
+    Solid = SolidColorRenderElement,
+    /// The launcher's surface, its panel growing in or shrinking out.
+    Scaled = RescaleRenderElement<WaylandSurfaceRenderElement<R>>,
 }
 
 /// What an output shows, element by element.
@@ -448,8 +453,12 @@ impl State {
                     )
                 });
             for layer in on {
-                // The peek goes under the bar's surfaces (`peek_elements`).
-                if layer.namespace() == hocus_link::PEEK_NAMESPACE {
+                // The peek goes under the bar's surfaces (`peek_elements`),
+                // the launcher over everything (`launcher_elements`).
+                if matches!(
+                    layer.namespace(),
+                    hocus_link::PEEK_NAMESPACE | hocus_link::LAUNCHER_NAMESPACE
+                ) {
                     continue;
                 }
                 let Some(mut geometry) = map.layer_geometry(&layer) else {
@@ -519,6 +528,11 @@ impl State {
         };
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
+        // The launcher over the rest, the bar too; its glass goes right
+        // under what darkens the desktop.
+        let launcher = self
+            .launcher_elements(renderer, output, now, &mut elements)
+            .map(|alpha| (elements.len(), alpha));
         layers(renderer, Layer::Overlay, &mut elements);
         // The windows on this output, front first, where their desktop is
         // on the strip; a fullscreen one on top goes over the bars.
@@ -675,7 +689,90 @@ impl State {
         for pane in popovers.into_iter().chain(glass) {
             elements.insert(glass_at, pane);
         }
+        if let Some((at, alpha)) = launcher
+            && let Some(pane) = self.launcher_glass(renderer, output, alpha, &elements[at..])
+        {
+            elements.insert(at, pane);
+        }
         elements
+    }
+
+    /// The launcher on `output` at `now` (5.1), front first: its surface,
+    /// its panel scaled about its middle, and what darkens the desktop
+    /// under it. How opaque it is, when it shows.
+    fn launcher_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        now: Duration,
+        out: &mut Vec<OutputElement<R>>,
+    ) -> Option<f32>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let layer = self.launcher_on(output)?;
+        let look = self
+            .panel
+            .launchers
+            .look(&layer, now, self.launcher_motion())
+            .filter(|l| l.alpha > 0.0)?;
+        let size = self.space.output_geometry(output)?.size;
+        let geometry = layer_map_for_output(output).layer_geometry(&layer)?;
+        let scale = output.current_scale().fractional_scale();
+        let loc = geometry.loc.to_physical_precise_round(scale);
+        let surfaces: Vec<WaylandSurfaceRenderElement<R>> = AsRenderElements::<R>::render_elements(
+            &layer,
+            renderer,
+            loc,
+            Scale::from(scale),
+            look.alpha,
+        );
+        let (mx, my) = hocus_link::launcher_middle(f64::from(size.w), f64::from(size.h));
+        let middle = Point::<f64, Logical>::from((mx, my)).to_physical_precise_round(scale);
+        out.extend(surfaces.into_iter().map(|e| {
+            OutputElements::Scaled(RescaleRenderElement::from_element(e, middle, look.scale))
+        }));
+        let dim = self.panel.launchers.dim(&output.name(), size);
+        out.push(OutputElements::Solid(SolidColorRenderElement::from_buffer(
+            &dim,
+            (0, 0),
+            scale,
+            look.alpha,
+            Kind::Unspecified,
+        )));
+        Some(look.alpha)
+    }
+
+    /// The glass under the launcher on `output`, `alpha` opaque: what is
+    /// `behind` it, the whole screen, blurred. None without glass.
+    fn launcher_glass<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        alpha: f32,
+        behind: &[OutputElement<R>],
+    ) -> Option<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        if !self.glass_on() {
+            return None;
+        }
+        let size = self.space.output_geometry(output)?.size;
+        let scale = output.current_scale().fractional_scale();
+        let region: Rectangle<i32, Physical> =
+            Rectangle::<f64, Logical>::from_size(size.to_f64()).to_physical_precise_round(scale);
+        let blurred = renderer.frost(
+            &mut self.panes.borrow_mut(),
+            &crate::glass::launcher_pane(&output.name()),
+            region,
+            scale,
+            crate::glass::Frost::LAUNCHER,
+            behind,
+        )?;
+        glass_piece(renderer, blurred, region, scale, alpha, 0.0)
     }
 
     /// The shell's peek surfaces on `output` at `now` (4.5), where their
@@ -827,10 +924,11 @@ impl State {
             &output.name(),
             region,
             scale,
+            crate::glass::Frost::BAR,
             behind,
         )?;
         let pane: Rectangle<i32, Physical> = bar.to_physical_precise_round(scale);
-        glass_piece(renderer, blurred, pane, scale, 1.0)
+        glass_piece(renderer, blurred, pane, scale, 1.0, hocus_link::RADIUS)
     }
 
     /// The glass under the shell's popovers on `output` at `now`, as under
@@ -886,6 +984,7 @@ impl State {
                 &crate::glass::popover_pane(&output.name()),
                 around.to_physical_precise_round(scale),
                 scale,
+                crate::glass::Frost::BAR,
                 behind,
             ) else {
                 continue;
@@ -893,7 +992,14 @@ impl State {
             let mut at = rect;
             at.loc.x += look.shift.round();
             let pane: Rectangle<i32, Physical> = at.to_physical_precise_round(scale);
-            panes.extend(glass_piece(renderer, blurred, pane, scale, look.alpha));
+            panes.extend(glass_piece(
+                renderer,
+                blurred,
+                pane,
+                scale,
+                look.alpha,
+                hocus_link::RADIUS,
+            ));
         }
         panes
     }
@@ -913,14 +1019,15 @@ fn in_the_bar(namespace: &str) -> bool {
     )
 }
 
-/// The part of `blurred` over `pane` (physical, output-local), cut to the
-/// bar's rounded corners, `alpha` opaque.
+/// The part of `blurred` over `pane` (physical, output-local), cut to
+/// corners `radius` round (logical), `alpha` opaque.
 fn glass_piece<R>(
     renderer: &mut R,
     blurred: crate::glass::Blurred<R::TextureId>,
     pane: Rectangle<i32, Physical>,
     scale: f64,
     alpha: f32,
+    radius: f64,
 ) -> Option<OutputElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + Bend + Shaders,
@@ -953,7 +1060,7 @@ where
         None,
         Kind::Unspecified,
     );
-    let radius = (hocus_link::RADIUS * scale).round() as i32;
+    let radius = (radius * scale).round() as i32;
     Some(OutputElements::Picture(Rounded::new(
         element,
         pane,
