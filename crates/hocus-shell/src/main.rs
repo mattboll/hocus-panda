@@ -27,6 +27,7 @@
 
 mod agents;
 mod bluetooth;
+mod clipboard;
 mod clock;
 mod desktops;
 mod footer;
@@ -108,6 +109,7 @@ fn main() -> ExitCode {
     network::start();
     bluetooth::start();
     launcher::start();
+    clipboard::start();
     notifications::start(software);
     user::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
@@ -546,6 +548,14 @@ impl Shell {
             }
             ToShell::Focus(screen) => {
                 notifications::focus(screen);
+                Task::none()
+            }
+            ToShell::Copied { app, clip } => {
+                clipboard::copied(app, clip);
+                Task::none()
+            }
+            ToShell::Clipboard { output } => {
+                popover::toggle_clipboard(&output);
                 Task::none()
             }
         }
@@ -1097,6 +1107,7 @@ impl Shell {
                 id,
                 words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
+                software: self.software,
             })
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1453,6 +1464,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The bubbles' screen: their stack alone.
                         Ok(ToShell::Focus(screen)) => {
                             notifications::focus(screen);
+                            continue;
+                        }
+                        // A copy for the clipboard's history, kept off
+                        // this task; `Super+V`: the history's surface.
+                        Ok(ToShell::Copied { app, clip }) => {
+                            clipboard::copied(app, clip);
+                            continue;
+                        }
+                        Ok(ToShell::Clipboard { output }) => {
+                            popover::toggle_clipboard(&output);
                             continue;
                         }
                         _ => {}

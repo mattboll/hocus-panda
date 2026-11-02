@@ -4,8 +4,8 @@
 //! battery's ([`battery`]), a desktop's list of windows ([`desktop`]), the
 //! agents' tools' ([`agents`]), the secretary's briefing ([`briefing`]),
 //! the notifications' history ([`history`]), and the footer's clipboard's
-//! ([`clipboard`]) and user's ([`session`]), drawn and handled with the
-//! pieces of [`kit`].
+//! history ([`clipboard`], which `Super+V` opens too) and user's
+//! ([`session`]), drawn and handled with the pieces of [`kit`].
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -101,7 +101,8 @@ pub enum Item {
     Secretary,
     /// The footer's bell (5.4, 5.5): the notifications' history.
     Notifications,
-    /// The footer's clipboard (5.5): what it holds (its history, 5.6).
+    /// The footer's clipboard (5.5): its history (5.6), which `Super+V`
+    /// opens too.
     Clipboard,
     /// The footer's menu (5.5): a click, or `Enter` while it holds the
     /// keyboard, opens the launcher (5.1); hovering it opens nothing.
@@ -214,11 +215,11 @@ impl Item {
             | Self::Agent(_)
             | Self::Secretary
             | Self::Menu
-            | Self::User => {}
+            | Self::User
+            | Self::Clipboard => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
             Self::Notifications => crate::notifications::history_open(false),
-            Self::Clipboard => clipboard::closing(),
         }
     }
 
@@ -482,6 +483,9 @@ struct Open {
     /// the pointer was last seen.
     leave: Option<Instant>,
     last: Option<Point>,
+    /// Opened by a shortcut (`Super+V`): `Esc` gives the keyboard back to
+    /// the window that had it, not to the item.
+    shortcut: bool,
 }
 
 /// Which popover shows, and what is under way.
@@ -747,7 +751,11 @@ impl Controller {
             Event::Escape => {
                 if let Phase::Open(open) = &self.phase {
                     let (bar, item, from) = (open.bar.clone(), open.item, open.from);
+                    let shortcut = open.shortcut;
                     self.close(now, &mut effects);
+                    if shortcut {
+                        return effects;
+                    }
                     if let Some(place) = self.bars.get(&bar) {
                         effects.push(Effect::Keyboard(
                             item.surface(place),
@@ -887,7 +895,64 @@ impl Controller {
             inside: true,
             leave: None,
             last: None,
+            shortcut: false,
         });
+    }
+
+    /// `Super+V` (5.6): the clipboard's history opens on `output`'s bar
+    /// (else the first bar), beside the footer's clipboard, its search
+    /// holding the keyboard; open, it closes (opened by hovering, it takes
+    /// the keyboard).
+    pub fn toggle_clipboard(&mut self, output: &str, now: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if let Phase::Open(open) = &mut self.phase
+            && open.item == Item::Clipboard
+        {
+            // Opened by hovering: its search takes the keyboard.
+            if open.how == Opened::Hover {
+                open.how = Opened::Click;
+                open.leave = None;
+                open.shortcut = true;
+                effects.push(Effect::Keyboard(
+                    open.surface,
+                    KeyboardInteractivity::Exclusive,
+                ));
+                effects.push(Effect::Wake(POPOVER_NAMESPACE));
+            } else {
+                self.close(now, &mut effects);
+            }
+            return effects;
+        }
+        let bar = if self.bars.contains_key(output) {
+            output.to_owned()
+        } else {
+            match self.bars.keys().min() {
+                Some(bar) => bar.clone(),
+                None => return effects,
+            }
+        };
+        let from = self
+            .items
+            .get(&(bar.clone(), FOOTER_NAMESPACE))
+            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Clipboard))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| {
+                let height = self.bar_height(&bar);
+                Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
+            });
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        self.open(&bar, Item::Clipboard, from, Opened::Click, &mut effects);
+        if let Phase::Open(open) = &mut self.phase {
+            open.shortcut = true;
+        }
+        effects
+    }
+
+    /// Whether the popover `id` holds the keyboard: opened by a click (or
+    /// a shortcut), or clicked in.
+    pub fn holds_keyboard(&self, id: window::Id) -> bool {
+        matches!(&self.phase, Phase::Open(open) if open.surface == id && open.how == Opened::Click)
     }
 
     /// What the open popover shows changed: to its new size, if it
@@ -1274,6 +1339,13 @@ pub fn send(effects: Vec<Effect>) {
     {
         let _ = sender.send(effects);
     }
+}
+
+/// `Super+V` (5.6): the clipboard's history opens on `output`'s bar, or
+/// closes.
+pub fn toggle_clipboard(output: &str) {
+    let effects = with(|c| c.toggle_clipboard(output, Instant::now()));
+    send(effects);
 }
 
 /// What `item`'s popover shows changed: if it is open, it draws again, to
@@ -1671,6 +1743,44 @@ mod tests {
         c.handle(press(), t + MS(400));
         c.handle(Event::PressElsewhere, t + MS(500));
         assert!(!c.shows(BAR, Item::Sound));
+    }
+
+    #[test]
+    fn super_v_opens_the_clipboards_history_holding_the_keyboard() {
+        let (mut c, _) = controller(Form::Full);
+        let t = Instant::now();
+        c.motion = false;
+        // On a screen without a bar: on the bar there is.
+        let (id, keyboard) = opened(&c.toggle_clipboard("DP-9", t)).expect("opened");
+        assert_eq!(keyboard, KeyboardInteractivity::Exclusive);
+        assert!(c.shows(BAR, Item::Clipboard));
+        assert!(c.holds_keyboard(id));
+        // Esc closes it, and the keyboard goes back to the window, not to
+        // the footer's button.
+        let effects = c.handle(Event::Escape, t);
+        assert!(effects.contains(&Effect::Remove(id)));
+        assert!(!c.focused(BAR, Item::Clipboard));
+        // Again, it closes.
+        c.toggle_clipboard(BAR, t);
+        assert!(c.shows(BAR, Item::Clipboard));
+        c.toggle_clipboard(BAR, t);
+        assert!(!c.shows(BAR, Item::Clipboard));
+        // Opened by hovering its button, it takes the keyboard.
+        let button = Rectangle::new(Point::new(-183.0, 1006.0), Size::new(40.0, 34.0));
+        c.handle(
+            Event::ItemEnter {
+                bar: BAR.to_owned(),
+                item: Item::Clipboard,
+                rect: button,
+            },
+            t,
+        );
+        let (id, keyboard) = opened(&c.tick(t + MS(150))).expect("opened");
+        assert_eq!(keyboard, KeyboardInteractivity::OnDemand);
+        assert!(!c.holds_keyboard(id));
+        let effects = c.toggle_clipboard(BAR, t + MS(200));
+        assert!(effects.contains(&Effect::Keyboard(id, KeyboardInteractivity::Exclusive)));
+        assert!(c.holds_keyboard(id));
     }
 
     #[test]
