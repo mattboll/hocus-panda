@@ -1,8 +1,9 @@
 //! What an output shows, front first: the cursor, the layer surfaces above
 //! the windows, a fullscreen window, the snap preview, windows leaving,
 //! the windows with their grips, rims and shadows (opening, settling and
-//! wobbling as they go), and the layers under them; and what clients are
-//! told once a frame is out.
+//! wobbling as they go), the bar's own surfaces and its glass unless the
+//! bar is in front (`crate::front`), and the layers under them; and what
+//! clients are told once a frame is out.
 
 use std::time::Duration;
 
@@ -45,6 +46,7 @@ use crate::{
         self, FramePiece, Keyed, Outside, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element,
         handle_element, preview_elements, rim_elements, shadow_elements,
     },
+    front::{Pick, in_the_bar},
     going::{ShaderElement, Shaders},
     model::{Mode, WindowId},
     motion::lerp,
@@ -434,8 +436,12 @@ impl State {
                     .map(OutputElements::Cursor),
             );
         }
-        // Where the bar's first surface is drawn among `out`, if it is.
-        let layers = |renderer: &mut R, which: Layer, out: &mut Vec<OutputElement<R>>| {
+        // The surfaces of layer `which` that `pick` takes; where the bar's
+        // first surface is drawn among `out`, if it is.
+        let layers = |renderer: &mut R,
+                      which: Layer,
+                      pick: Pick,
+                      out: &mut Vec<OutputElement<R>>| {
             let mut bar_at = None;
             let map = layer_map_for_output(output);
             let on: Vec<_> = map.layers_on(which).rev().cloned().collect();
@@ -449,7 +455,7 @@ impl State {
                         g.size.to_physical_precise_round(scale),
                     )
                 });
-            for layer in on {
+            for layer in on.into_iter().filter(|l| pick.takes(l.namespace())) {
                 // The peek goes under the bar's surfaces (`peek_elements`),
                 // the launcher and its toast over everything
                 // (`launcher_elements`, `toast_elements`).
@@ -550,7 +556,11 @@ impl State {
         let launcher = self
             .launcher_elements(renderer, output, now, &mut elements)
             .map(|alpha| (elements.len(), alpha));
-        layers(renderer, Layer::Overlay, &mut elements);
+        layers(renderer, Layer::Overlay, Pick::All, &mut elements);
+        // The bar's own surfaces go under the windows unless the pointer
+        // brought it in front (#519); its popovers, its halo, the peek and
+        // the bubbles stay above them.
+        let front = self.bar_in_front(output);
         // The windows on this output, front first, where their desktop is
         // on the strip; a fullscreen one on top goes over the bars.
         let looks: Vec<(WindowId, Look)> = self
@@ -616,8 +626,18 @@ impl State {
             elements.append(&mut windows);
         }
         // The halo over the bar's surfaces and around them, under the
-        // popovers beside it (4.4).
-        if let Some(at) = layers(renderer, Layer::Top, &mut elements)
+        // popovers beside it (4.4); with the bar under the windows, over
+        // them still.
+        let bar_at = layers(renderer, Layer::Top, Pick::above(front), &mut elements);
+        let halo_at = if front {
+            bar_at
+        } else {
+            let map = layer_map_for_output(output);
+            map.layers()
+                .any(|l| in_the_bar(l.namespace()))
+                .then_some(elements.len())
+        };
+        if let Some(at) = halo_at
             && let Some(bar) = self.bar_rect(output, now)
         {
             let halo = self.halo_elements(renderer, output, bar, now);
@@ -634,8 +654,9 @@ impl State {
         {
             elements.push(OutputElements::Shader(element));
         }
-        // The bar's glass goes right under the layers above the windows,
-        // over everything after them.
+        // The popovers' glass goes right under the layers above the
+        // windows, over everything after them; the bar's too when it is in
+        // front.
         let glass_at = elements.len();
         // Where a dragged window would snap, above the windows.
         let preview = self
@@ -701,14 +722,23 @@ impl State {
             );
         }
         elements.append(&mut windows);
-        layers(renderer, Layer::Bottom, &mut elements);
-        layers(renderer, Layer::Background, &mut elements);
+        // Under the windows, the bar, its glass right under it showing
+        // what is under the bar: a window over it hides both there.
+        layers(renderer, Layer::Top, Pick::below(front), &mut elements);
+        let bar_glass_at = if front { glass_at } else { elements.len() };
+        layers(renderer, Layer::Bottom, Pick::All, &mut elements);
+        layers(renderer, Layer::Background, Pick::All, &mut elements);
         if let Some(backdrop) = self.backdrop_element(renderer, output) {
             elements.push(backdrop);
         }
-        let behind = &elements[glass_at..];
-        let glass = self.glass_element(renderer, output, now, behind);
-        let popovers = self.popover_glass(renderer, output, now, behind);
+        let mut glass = self.glass_element(renderer, output, now, &elements[bar_glass_at..]);
+        let popovers = self.popover_glass(renderer, output, now, &elements[glass_at..]);
+        // From the back, so that the places before stay right.
+        if bar_glass_at > glass_at
+            && let Some(pane) = glass.take()
+        {
+            elements.insert(bar_glass_at, pane);
+        }
         for pane in popovers.into_iter().chain(glass) {
             elements.insert(glass_at, pane);
         }
@@ -1085,21 +1115,6 @@ impl State {
         }
         panes
     }
-}
-
-/// Whether a layer surface of the shell's is one of the bar's: the halo
-/// goes over them, not over the popovers.
-fn in_the_bar(namespace: &str) -> bool {
-    matches!(
-        namespace,
-        hocus_link::NAMESPACE
-            | hocus_link::CLOCK_NAMESPACE
-            | hocus_link::LEVELS_NAMESPACE
-            | hocus_link::CONNECTIONS_NAMESPACE
-            | hocus_link::DESKTOPS_NAMESPACE
-            | hocus_link::AGENTS_NAMESPACE
-            | hocus_link::BELL_NAMESPACE
-    )
 }
 
 /// The part of `blurred` over `pane` (physical, output-local), cut to

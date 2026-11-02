@@ -22,11 +22,20 @@ use smithay::{
     },
 };
 
-use crate::{State, focus::KeyboardFocus};
+use crate::{State, focus::KeyboardFocus, front::Pick};
 
-/// The layers above the windows, front first.
+/// The layers above the windows, front first, for the keyboard.
 const ABOVE: [Layer; 2] = [Layer::Overlay, Layer::Top];
-const BELOW: [Layer; 2] = [Layer::Bottom, Layer::Background];
+
+/// Where layer surfaces stand to the windows for the pointer: the overlay
+/// and top layers above them, but the bar's own surfaces under them unless
+/// the bar is brought in front (#519, `crate::front`); the bottom and
+/// background layers under them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stand {
+    Above,
+    Below,
+}
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
@@ -142,18 +151,37 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
 }
 
 impl State {
-    /// The layer surface under `pos` in `layers` (front first), and where
-    /// the surface found is.
+    /// The layer surface under `pos` that stands `stand` the windows
+    /// (front first), and where the surface found is.
     pub fn layer_surface_under(
         &self,
         pos: Point<f64, Logical>,
-        layers: &[Layer],
+        stand: Stand,
     ) -> Option<(WlSurface, Point<f64, Logical>, LayerSurface)> {
         let output = self.space.output_under(pos).next()?;
         let origin = self.space.output_geometry(output)?.loc;
+        let front = self.bar_in_front(output);
+        let passes = match stand {
+            Stand::Above => [
+                (Layer::Overlay, Pick::All),
+                (Layer::Top, Pick::above(front)),
+                (Layer::Bottom, Pick::Nothing),
+            ],
+            Stand::Below => [
+                (Layer::Top, Pick::below(front)),
+                (Layer::Bottom, Pick::All),
+                (Layer::Background, Pick::All),
+            ],
+        };
         let map = layer_map_for_output(output);
-        for layer in layers {
-            for surface in map.layers_on(*layer).rev() {
+        for (layer, pick) in passes {
+            if pick == Pick::Nothing {
+                continue;
+            }
+            for surface in map.layers_on(layer).rev() {
+                if !pick.takes(surface.namespace()) {
+                    continue;
+                }
                 let Some(geometry) = map.layer_geometry(surface) else {
                     continue;
                 };
@@ -232,11 +260,11 @@ impl State {
     /// A press over a layer surface: one that takes the keyboard on demand
     /// gets it. Whether there was one under `pos`.
     pub fn layer_click(&mut self, pos: Point<f64, Logical>) -> bool {
-        let found = self.layer_surface_under(pos, &ABOVE).or_else(|| {
+        let found = self.layer_surface_under(pos, Stand::Above).or_else(|| {
             self.space
                 .element_under(pos)
                 .is_none()
-                .then(|| self.layer_surface_under(pos, &BELOW))
+                .then(|| self.layer_surface_under(pos, Stand::Below))
                 .flatten()
         });
         let Some((_, _, layer)) = found else {

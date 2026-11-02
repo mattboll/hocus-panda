@@ -347,7 +347,7 @@ impl State {
     }
 
     /// Milliseconds on the monotonic clock, as input events carry.
-    fn input_time(&self) -> u32 {
+    pub(crate) fn input_time(&self) -> u32 {
         // Wraps as input times do.
         self.now().as_millis() as u32
     }

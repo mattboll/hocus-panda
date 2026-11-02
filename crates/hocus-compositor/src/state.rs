@@ -424,18 +424,16 @@ impl State {
     }
 
     /// The surface under `pos`, and where its origin is: layer surfaces of
-    /// the overlay and top layers, then windows, then the bottom and
+    /// the overlay and top layers, then windows, then the bar's own
+    /// surfaces unless it is in front (#519), then the bottom and
     /// background layers.
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        use smithay::wayland::shell::wlr_layer::Layer;
-        let layer = |layers: &[Layer]| {
-            self.layer_surface_under(pos, layers)
-                .map(|(s, p, _)| (s, p))
-        };
-        layer(&[Layer::Overlay, Layer::Top])
+        use crate::handlers::layer_shell::Stand;
+        let layer = |stand| self.layer_surface_under(pos, stand).map(|(s, p, _)| (s, p));
+        layer(Stand::Above)
             .or_else(|| {
                 // Where its surface's origin is, its geometry's corner less
                 // its client-side shadow.
@@ -445,16 +443,13 @@ impl State {
                         .map(|(s, p)| (s, (p + origin).to_f64()))
                 })
             })
-            .or_else(|| layer(&[Layer::Bottom, Layer::Background]))
+            .or_else(|| layer(Stand::Below))
     }
 
     /// The window under `pos`, if no layer surface above the windows is.
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<WindowId> {
-        use smithay::wayland::shell::wlr_layer::Layer;
-        if self
-            .layer_surface_under(pos, &[Layer::Overlay, Layer::Top])
-            .is_some()
-        {
+        use crate::handlers::layer_shell::Stand;
+        if self.layer_surface_under(pos, Stand::Above).is_some() {
             return None;
         }
         let (window, _) = self.space.element_under(pos)?;

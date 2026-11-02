@@ -26,6 +26,9 @@
 //!   switches the form. The compositor takes it itself (`bar_edge_at`): it
 //!   knows where the pointer is even when it entered the bar pushed against
 //!   the screen's edge, with no motion after.
+//! - **Under the windows:** the bar's own surfaces are drawn under normal
+//!   windows; the pointer resting against the screen's edge brings a bar in
+//!   front (`crate::front`, #519).
 
 use std::{
     collections::BTreeMap,
@@ -110,6 +113,9 @@ pub struct Panel {
     pub launcher_commits: u64,
     /// The other screens' names, as last told to the shell.
     screens: Option<Vec<String>>,
+    /// Where the bars stand to the windows: under them, or one brought in
+    /// front by the pointer pushed against its edge (#519).
+    pub front: crate::front::Front,
 }
 
 /// A screen's model, as its EDID names it (none for the compositor's own
@@ -238,6 +244,7 @@ impl State {
         let mut changed = !gone.is_empty();
         for name in gone {
             self.panel.bars.remove(&name);
+            self.bar_front_gone(&name);
             tracing::info!(output = name, "no bar there any more");
             self.tell_shell(ToShell::NoBar { output: name });
         }
