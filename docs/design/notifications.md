@@ -191,7 +191,9 @@ Codex's terminal notifications carry no name of Codex's: they are bubbles.
   that ran `notify-send`; to its desktop, focused), invokes `default` if
   it has one, then closes (2). An action invokes its key, then closes (2).
   A `resident` notification stays after either. ✕ closes (2), the time up
-  closes (1), `CloseNotification` closes (3), a waiting one too.
+  closes (1), `CloseNotification` closes (3), a waiting one too. *5.4: the
+  time up closes nothing any more, the notification staying held in the
+  history (below).*
 - **Low urgency** goes to the history (kept for 5.4, 200 at most), and the
   dot counts it (5.4 replaced the dot with the bell's badge): on each bar, a 14 px `#8FB3FF` pill with its count in
   9 px bold `#0B1020`, where the notifications button's badge goes. Until
@@ -218,7 +220,8 @@ The real shell on a D-Bus daemon of the test's own
 (`crates/hocus-compositor/tests/notifications.rs`), on the CPU as in CI:
 
 - a bubble shows 340 px wide, its top 8 px from the screen's, its right
-  8 px from the full bar, and goes after its time (closed, 1);
+  8 px from the full bar, and goes after its time (closed, 1; since 5.4,
+  nothing said: still held);
 - the pointer on it pauses it past its time; away, it goes after what was
   left;
 - a critical one stays past its time, and its ✕ closes it (2);
@@ -403,11 +406,16 @@ Approved by the maintainer on 2026-11-02 (issue #394), variant B: by time.
   disturbed. A replacement of a notification its sender holds updates it
   in place and comes first again. `CloseNotification` takes it out of the
   history too: its application took it back. 200 at most.
-- **Held by its sender**: from its `Notify` until it is closed
-  (`NotificationClosed`: expired, 1; the user, 2; its application, 3). So
-  a bubble gone after its time no longer offers its actions in the
-  history; a low one, one held while not to be disturbed, or an agent's,
-  still do.
+- **Held by its sender** (the server's `persistence`): from its `Notify`
+  until it is closed. A bubble whose time is up closes nothing: its
+  notification stays held, its actions and its default working from the
+  history. It is closed (`NotificationClosed`, with its reason) when the
+  user takes it out of the history, its ✕ or "clear all" (2), clicks it
+  or one of its actions (`ActionInvoked`, then 2), or the bubble's ✕, card
+  or actions (2); when its application calls `CloseNotification` (3);
+  when it leaves the history after 7 days, or past the 200 kept (1); or
+  when the session ends (the shell's connection to the bus goes). A
+  notification read back after a restart of the shell is held by no one.
 - **Not seen**, counted by the badge: a bubble whose time ran out without
   the pointer having rested on it (a hover pauses it, 5.3), a low one,
   one held while not to be disturbed. A bubble the pointer rested on, or
@@ -460,6 +468,8 @@ its wall clock reading 2 November 2026, 14:32:07 UTC
   closed (2), the history closes and no longer lists it;
 - its ✕ takes one out; "clear all" empties it, the empty state's words
   and no "clear all" left, its file written empty;
+- a bubble gone after its time closes nothing, and its action, invoked
+  from the history, says `ActionInvoked` then closed (2);
 - a bubble gone after its time counts 1, one the pointer rested on does
   not, a low one counts; opening sets 0, two not seen listed; opened
   again after closing, none;
