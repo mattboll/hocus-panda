@@ -145,7 +145,7 @@ impl Item {
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
             Self::Desktop(index) => desktop::height(bar, index),
-            Self::Sources | Self::AnotherTool => agents::sources_height(),
+            Self::Sources | Self::AnotherTool => agents::sources_height(form),
             Self::Plug(tool) => agents::consent_height(tool),
             Self::Secretary => briefing::height(form),
             Self::Keyboard | Self::Decline | Self::Agent(_) => 0,
@@ -377,6 +377,10 @@ pub enum Effect {
     Decline,
     /// The compositor follows herdr again.
     FollowHerdr,
+    /// The secretary's briefing opened (`true`) or closed: the compositor
+    /// sends a panda peeking out back, and keeps others in while it is
+    /// open (4.7b).
+    Briefing(bool),
     /// The clipboard takes this text.
     Copy(String),
     /// A layer surface of the shell's beside `bar`, of `namespace` (the
@@ -807,6 +811,9 @@ impl Controller {
         if item.lit_while_open() {
             effects.push(Effect::Wake(item.namespace(place.form)));
         }
+        if item == Item::Secretary {
+            effects.push(Effect::Briefing(true));
+        }
         self.phase = Phase::Open(Open {
             bar: bar.to_owned(),
             item,
@@ -865,6 +872,9 @@ impl Controller {
         let form = self.bars.get(&open.bar).map_or(Form::Full, |p| p.form);
         if open.item.lit_while_open() {
             effects.push(Effect::Wake(open.item.namespace(form)));
+        }
+        if open.item == Item::Secretary {
+            effects.push(Effect::Briefing(false));
         }
     }
 
@@ -1379,6 +1389,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::FollowHerdr => {
             tell(ToCompositor::Follow("herdr".to_owned()));
+            Vec::new()
+        }
+        Effect::Briefing(open) => {
+            tell(ToCompositor::Briefing { open });
             Vec::new()
         }
         Effect::Copy(text) => {

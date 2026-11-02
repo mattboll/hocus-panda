@@ -345,6 +345,7 @@ impl State {
             ToCompositor::Follow(tool) => {
                 tracing::warn!(tool, "the shell follows a tool that is not herdr");
             }
+            ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::Copy(text) => self.copy_text(text),
         }
     }

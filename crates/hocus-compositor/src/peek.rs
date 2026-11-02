@@ -17,6 +17,11 @@
 //! on the CPU, it only fades in and out in place. Its two moments are a
 //! timer of the loop each, never a poll; then the shell is told that it is
 //! back (`no-peek`) and removes its surfaces: nothing is drawn at rest.
+//!
+//! While the secretary's briefing is open (the shell's `briefing open`,
+//! 4.7b), no panda peeks out, and one out goes back at once: it would show
+//! through the briefing. What would have peeked out meanwhile is not kept
+//! for later; the halo still shows it.
 
 use std::time::Duration;
 
@@ -75,6 +80,8 @@ pub struct Peeks {
     layers: Vec<LayerSurface>,
     /// The next moment's timer, and when it fires.
     timer: Option<(Duration, RegistrationToken)>,
+    /// The secretary's briefing is open: no panda peeks out.
+    briefing: bool,
     /// Peeks told the shell so far, for tests.
     pub told: u64,
 }
@@ -182,6 +189,10 @@ impl State {
         if !self.shell_linked() {
             return;
         }
+        if self.peek.briefing {
+            tracing::debug!(id, kind = kind.name(), "the briefing is open: no peek");
+            return;
+        }
         let Some(agent) = self
             .agents
             .told
@@ -253,6 +264,17 @@ impl State {
         }
     }
 
+    /// The secretary's briefing opened (`open`) or closed: open, the panda
+    /// out goes back at once, with its usual motion, and none comes out
+    /// until it closes.
+    pub(crate) fn peek_briefing(&mut self, open: bool) {
+        self.peek.briefing = open;
+        if open && self.peek.out.is_some_and(|o| o.back.is_none()) {
+            tracing::debug!("the briefing opens: the panda goes back");
+            self.peek_back();
+        }
+    }
+
     /// After the agents changed: a panda whose agent no longer waits, or
     /// was seen, or that the user acted on, goes back.
     pub(crate) fn peek_follows(&mut self) {
@@ -297,6 +319,7 @@ impl State {
     /// The shell went: its surfaces with it.
     pub(crate) fn peek_shell_gone(&mut self) {
         self.peek.out = None;
+        self.peek.briefing = false;
         self.peek.layers.clear();
         self.arm_peek();
     }

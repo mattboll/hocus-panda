@@ -2082,7 +2082,7 @@ issue #388): it stays out 8 s, and also comes out when an agent finishes.
   back from where it is. It also goes back at once when its agent is dealt
   with otherwise (answered, working again; a finished one seen; its window
   getting the keyboard), as the halo ends: the bubble would say something
-  no longer true.
+  no longer true; and when the secretary's briefing opens (4.7b).
 - **The latest replaces the one out**: while that one is out and still,
   the new one takes its place there (its words, its row) for 8 s more;
   while it goes back, the new one comes out afresh.
@@ -2270,9 +2270,31 @@ calendar.
   count (50 px), and her hover or click opens Sources (4.0's popover, its
   top 62 px under the bar's), where "Brancher" is; plugged in with no
   agent, she and "0 au travail".
+- **"Ne rien brancher" from Sources** (4.7b, issue #508): the mini form
+  has no card, so Sources opened from her "+" (in the mini form, while the
+  group would show the card) has the card's "Ne rien brancher" / "Plug
+  nothing in", under the tools' rows on the right (12 px, `text.faint`,
+  `text` under the pointer, 6 px under the last row), one of its buttons
+  for `Tab`. A click does what the card's does (4.0): every tool there
+  and not plugged in declined, herdr's following too, remembered in the
+  same file; Sources closes and the group goes, in both forms; a tool
+  found later that was never declined brings it back. Sources opened
+  otherwise (the full form's briefing, the card's "Un autre outil ?")
+  does not have it: the card under her does.
 - **The halo** is the compositor's, around whichever form the bar has
   (4.4): nothing changes. **The peek** comes out at her head's middle
   (92 px under the bar's top), 18 px from the mini bar.
+- **The peek and her briefing** (4.7b, issue #508), in both forms: when
+  her briefing opens while a panda is out, it goes back at once, with its
+  usual going-back motion (4.5), so that it never shows through the
+  briefing; while the briefing is open, none comes out. An agent that
+  starts waiting or finishes meanwhile does not peek out, then or once the
+  briefing closes (nothing is kept for later): its row, the briefing's
+  line and the halo show it, and a waiting one's reminder at its fifth
+  minute still brings its panda out if the briefing is closed by then.
+  The shell tells the compositor `briefing open` and `briefing closed` as
+  the briefing opens and closes (Sources taking its place closes it).
+- **Her briefing's top** stays on her item's (4.7b, as built in 4.7).
 - **The keyboard**: the item is one of the bar's items for `Tab`; `Enter`
   or `Space` opens her briefing, whose `Esc` gives the keyboard back to
   it (its ring at radius 10).
@@ -2287,8 +2309,16 @@ calendar.
   desktop; no tool, no item and the pointer going through; a tool to plug
   in, the "+" and Sources from it; the halo's concern and the peek beside
   the mini bar at her head; nothing committed at rest with her briefing
-  open. Unit tests for the badge's number, colour and place, the card's
-  "+", and the briefing's mini sections. On the Intel GPU, the screenshots
-  of the pull request.
+  open. Since 4.7b: from the "+", Sources' "Ne rien brancher" declining
+  both tools, Sources closing and the item going, the settings untouched,
+  and the group still hidden in a new session in the full form; Sources
+  from the full form's briefing without it; a panda out going back as her
+  briefing opens (sliding under the bar on a GPU, fading in place on the
+  CPU), gone long before its 8 s, and an agent finishing while it is open
+  bringing none out, nor after it closes. Unit tests for the badge's
+  number, colour and place, the card's "+", the briefing's mini sections,
+  Sources' "Ne rien brancher" (where it is, and when it shows), and the
+  `briefing` line read back. On the Intel GPU, the screenshots of the
+  pull request.
 - **Not built**: the next meeting's mark above her (the calendar); names
   for screen readers (§11).

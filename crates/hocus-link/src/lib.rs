@@ -791,6 +791,11 @@ pub enum ToCompositor {
     /// The user follows herdr again, declined before (Sources' "Suivre").
     /// Written `follow herdr`.
     Follow(String),
+    /// The secretary's briefing opened (`open`) or closed (4.7b): while it
+    /// is open no panda peeks out, and one out goes back at once, so that
+    /// it never shows through it. Written `briefing open` or `briefing
+    /// closed`.
+    Briefing { open: bool },
     /// The clipboard takes `text` (the command the Sources popover shows),
     /// which the compositor offers: the shell's surfaces take no serial to
     /// set it themselves. Written `copy TEXT`, the text on one line.
@@ -1186,6 +1191,9 @@ impl fmt::Display for ToCompositor {
             Self::Unplug(tool) => write!(f, "unplug {tool}"),
             Self::Decline => f.write_str("decline"),
             Self::Follow(tool) => write!(f, "follow {tool}"),
+            Self::Briefing { open } => {
+                write!(f, "briefing {}", if *open { "open" } else { "closed" })
+            }
             Self::Copy(text) => write!(f, "copy {}", screen_name(text)),
         }
     }
@@ -1205,6 +1213,9 @@ impl FromStr for ToCompositor {
             Some("unplug") => Ok(Self::Unplug(word(&mut words, "tool")?.to_owned())),
             Some("decline") => Ok(Self::Decline),
             Some("follow") => Ok(Self::Follow(word(&mut words, "tool")?.to_owned())),
+            Some("briefing") => Ok(Self::Briefing {
+                open: flag(words.next(), "open", "closed")?,
+            }),
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
@@ -1431,12 +1442,16 @@ mod tests {
             ToCompositor::Unplug("codex".into()),
             ToCompositor::Decline,
             ToCompositor::Follow("herdr".into()),
+            ToCompositor::Briefing { open: true },
+            ToCompositor::Briefing { open: false },
             ToCompositor::Copy("hocus agent my-agent waiting".into()),
         ] {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
         assert!("wake".parse::<ToCompositor>().is_err());
         assert!("closing".parse::<ToCompositor>().is_err());
+        assert!("briefing".parse::<ToCompositor>().is_err());
+        assert!("briefing shut".parse::<ToCompositor>().is_err());
         assert!("desktop eDP-1".parse::<ToCompositor>().is_err());
         assert!("desktop eDP-1 last".parse::<ToCompositor>().is_err());
         assert!(
