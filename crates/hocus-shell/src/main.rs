@@ -928,8 +928,19 @@ impl Shell {
         )
     }
 
-    /// The launcher, if its surface is `id`.
+    /// The launcher, or its toast, if its surface is `id`.
     fn launcher_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if launcher::toast::is_surface(id) {
+            return Some(
+                canvas(launcher::toast::View {
+                    id,
+                    software: self.software,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            );
+        }
         if !launcher::is_surface(id) {
             return None;
         }

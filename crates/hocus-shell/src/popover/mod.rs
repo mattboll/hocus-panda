@@ -404,6 +404,13 @@ pub enum Effect {
         id: window::Id,
         output: String,
     },
+    /// The launcher's toast on `output` (5.2), `size` large: at its
+    /// bottom, taking neither the keyboard nor the pointer.
+    Toast {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+    },
     /// A line to the compositor.
     Tell(ToCompositor),
 }
@@ -1478,6 +1485,25 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: false,
                 namespace: Some(hocus_link::LAUNCHER_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::Toast { id, output, size } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                // Centred across the space the bar leaves.
+                anchor: Anchor::Bottom,
+                exclusive_zone: Some(0),
+                margin: Some((0, 0, crate::launcher::toast::BOTTOM, 0)),
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: true,
+                namespace: Some(hocus_link::LAUNCHER_TOAST_NAMESPACE.to_owned()),
             },
             id,
         }],

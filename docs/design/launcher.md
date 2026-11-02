@@ -1,10 +1,11 @@
-# The launcher — specification (5.1)
+# The launcher — specification (5.1, 5.2)
 
-Status: approved 2026-11-02 (issue #391), variant C of the 5.1 mockup:
-full screen. Built since 2026-11-02: see [as built](#as-built). Sizes are
-logical pixels; they follow each screen's scale. Later in the same field:
-calculation and web search (5.2), then files and AI; room is left for
-other kinds of results.
+Status: 5.1 approved 2026-11-02 (issue #391), variant C of the 5.1
+mockup: full screen; 5.2 approved 2026-11-02 (issue #392), variant A of
+the 5.2 mockup: an answer card above the grid (§6). Built since
+2026-11-02: see [as built](#as-built). Sizes are logical pixels; they
+follow each screen's scale. Later in the same field: files and AI; room
+is left for other kinds of results.
 
 ## 1. Opening and closing
 
@@ -76,6 +77,55 @@ other kinds of results.
   current desktop.
 - Directories are watched: an application installed while the session
   runs shows up.
+
+## 6. Calculation, conversions, web search (5.2, variant A)
+
+**What the field understands**
+
+- **Calculation**: `+ − × ÷ ^ %`, parentheses, square root (`sqrt`,
+  `√`), comma or point as the decimal mark, `x`/`×`/`*` and `÷`/`/`. A
+  leading `=` forces calculation. Only an input that parses as an
+  expression with an operator counts; a bare number does not.
+- **Conversion**: `<number> <unit> en|to|vers|-> <unit>`, with French and
+  English unit names and symbols, accents and case ignored. Units:
+  length, mass, time, volume, temperature, data (decimal Ko/Mo/Go/To and
+  binary Kio/Mio/Gio; KB/MB/GB as aliases), currencies. Currency rates
+  come from the European Central Bank's daily reference rates, fetched
+  once a day off the loop and kept on disk. Offline, the last known rates
+  are used, and the card says their date.
+- **Address**: `scheme://…`, `localhost[:port][/…]`, or
+  `name.tld[:port][/…]` with no spaces. It opens in the default browser
+  (`xdg-open`).
+- **Web search**: always offered last when the field is not empty.
+  DuckDuckGo by default; the setting comes with the settings sprint.
+  `Ctrl+Enter` searches the web whatever is selected.
+
+**Layout**
+
+- **The answer card**: a calculation's or a conversion's result shows
+  under the field, 736 wide, 68 tall, radius 14, selected first: a 40 px
+  green badge with "=", the result in Martian Mono 26 px, and a line
+  under it: the expression, or "10 km = 6,214 mi · Longueur" / "Length".
+  "Entrée copie" / "Enter copies" shows at the right while it is
+  selected.
+- **An address**: a 54 px card, with a link badge, "Ouvrir github.com"
+  and its full URL.
+- **The applications**: the 5.1 grid follows, as before. When the input
+  is an answer or an address, no application is listed.
+- **The web row**: last, 50 px tall, with a globe badge, "Chercher « … »
+  sur le web" and "DuckDuckGo · Ctrl+Entrée…".
+- **Selection**: the arrows move between the cards, the grid rows and the
+  web row. The first item is selected.
+
+**Actions**
+
+- `Enter` on a result copies it to the clipboard, formatted for the
+  locale (`6,214`), and closes the launcher. A toast "Copié : 6,214" /
+  "Copied: 6.214" shows at the bottom for about 1.8 s.
+- `Enter` on an address or the web row opens the browser and closes the
+  launcher.
+- Results are formatted for the user's locale: up to 6 decimals, with
+  the thousands separator.
 
 ## As built
 
@@ -162,3 +212,92 @@ other kinds of results.
 - **Not built**: names for screen readers (§11 of the bar's spec, the
   Accessibility milestone); D-Bus activation (`DBusActivatable`) and the
   entries' actions; pasting into the field; input methods' preedit.
+
+### 5.2, calculation, conversions, web search (2026-11-02)
+
+- **What counts** (`crates/hocus-shell/src/launcher/answers.rs`, our own
+  reading of the mockup's logic): a calculation first, then a
+  conversion, then an address; anything else lists the applications.
+  `%` is a hundredth of what it follows (`200 × 15%` is 30), `^` goes to
+  the right. A conversion's units are one word each, a quantity's
+  thousands may be spaced (`1 000 g en kg`); `in` is the inch, so the
+  words between the units are `en`, `to`, `vers` and `->` only. Time
+  goes from milliseconds to weeks (no months nor years: their length
+  varies); the gallon is the US one; `b` is the byte (bits are not
+  converted). The currencies are the bank's (about thirty), by their
+  code, `€ $ £ ¥`, `euro`, `dollar` and `yen`; `$` is the US dollar. Two
+  units of the same kind and different only.
+- **Numbers** follow `LC_NUMERIC` (then `LC_ALL`, `LANG`): French writes
+  `1 234,5` (a narrow no-break space between thousands), English
+  `1,234.5`. The value keeps its twelve first significant digits (`0.1 +
+  0.2` is `0.3`). A calculation shows up to six decimals; a conversion
+  four significant digits, none to three decimals, trailing zeros dropped
+  ("6,214 mi" for 10 km, "71,6 °F" for 22 °C, "1 500 Mo" for 1,5 Go), a
+  currency always two decimals ("138,89 €"). What `Enter` copies is the
+  value as shown, without its unit. The units show as the card writes them:
+  `°C`, `€`, `Ko` in French and `kB` in English, `j`/`d`, `sem`/`wk`.
+- **The rates** (`rates.rs`) are the bank's file as it is, in
+  `$XDG_STATE_HOME/hocuspanda/ecb-rates.xml`, read on a thread as the
+  shell starts. When the launcher opens and the file is 24 h old or more
+  (by its time on disk) or missing, a thread fetches it again, with a
+  30 s timeout, and an open launcher shows the new rates; after a failure
+  it is not tried again for an hour. Nothing is fetched before the
+  launcher opens. The client is `ureq` over `rustls` (ring) with the
+  system's certificates; the file is read with `roxmltree`. A currency
+  conversion's line ends with the rates' day: "Monnaie, taux du
+  30/10/2026" / "Currency, rates of 2026-10-30", always, not only
+  offline. With no rates at all, a currency is not a unit and the
+  applications are searched instead.
+- **The cards** are rows of the grid of their own (the 5.2 mockup's row
+  heights: the card and 8 px under it), so that the arrows, the wheel and
+  the selection kept in view treat them as the tiles' rows; a card's
+  column is the first. Hover selects a card, a click acts on it. The
+  hint at the right ("Entrée copie", "Entrée ouvre", "Entrée cherche")
+  keeps its room unselected, as the mockup's. A line too long for the
+  card ends with "…". The badges are drawn: "=" in Martian Mono 20 px on
+  `#6CC287`; the mockup's link on `#2E7D6B → #5CC0A6`, its globe on
+  `#3B5BA9 → #6E8FE0`, each in a light rim.
+- **Copying** goes through the compositor's selection, as the Sources
+  popover's command does (`copy TEXT`): the shell's surfaces have no
+  serial to set it themselves.
+- **The toast** is a layer surface of the shell's of its own
+  (`hocus-launcher-toast`), in the overlay layer, anchored to the bottom
+  of the launcher's screen 40 px up, taking neither the keyboard nor the
+  pointer: 13 px 600 text, 10 px by 16 px in, a 1 px green rim
+  (`rgba(108,194,135,0.45)`) on `rgba(14,17,28,0.94)`, radius 12. The
+  shell draws it once and removes it after 1.8 s (and 100 ms); the
+  compositor plays the mockup's `toast-in` from its first frame: in over
+  216 ms rising 8 px, out over the last 270 ms, `ease-out` each, nothing
+  drawn in between but the frame its fade out starts in. With reduced
+  motion it only fades. On the CPU it is opaque and the compositor cuts
+  its corners.
+- **The package** recommends `xdg-utils` (for `xdg-open`) and
+  `ca-certificates` (for the rates over HTTPS).
+- **Opening**: the shell sends `launch` with `xdg-open` (looked for in
+  its own `PATH`, sent with its full path) and the address, or
+  `https://duckduckgo.com/?q=…` (the query form-encoded); the compositor
+  starts it as it starts the applications, off its loop, with an
+  activation token.
+- **The search** (5.1, fixed here): a match is left out when one of its
+  letters is neither at a word's start nor right after the one before
+  it, unless the query is in the name whole; and the best score must be
+  over 2, the 5.2 mockup's threshold. "fire" no longer lists
+  LibreOffice Impress or Writer; "office" still does.
+- **Choices made here** (to confirm on the machine): with the web row
+  always there once something is typed, the 5.1 "Aucune application pour
+  « … »" line is gone (the 5.2 mockup has none); the placeholder is the
+  5.2 mockup's, "Chercher une application, calculer…" / "Search for an
+  application, calculate…"; the toast is centred across the whole
+  screen, not the space left of the bar (the bar reserves none); it has
+  no shadow.
+- **Measured headless** (`crates/hocus-compositor/tests/launcher.rs`),
+  the real shell, rates from a file of the test's, the browser a program
+  of the test's (the shell's `PATH` is the test's directory, so the
+  machine's `xdg-open` is never found): one scenario per point of the
+  spec (the calculation's card, `Enter` copying it and the toast; a
+  conversion, and a currency's at the file's rates with their date; an
+  address opening; the web row last, reached by the arrows, and
+  `Ctrl+Enter` from a tile; no application with an answer or an
+  address). The parser, the units, the numbers, the bank's file and the
+  scattered matches have unit tests. On the Intel GPU, the screenshots
+  of the pull request.

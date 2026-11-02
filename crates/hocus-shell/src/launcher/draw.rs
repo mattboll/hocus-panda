@@ -8,6 +8,10 @@
 //! its rows of eight 92 × 106 tiles, 6 px apart; the area shows the whole
 //! rows that fit from the first one scrolled to, and a thin mark on its
 //! right when there are more.
+//!
+//! The cards (5.2, variant A) are rows of their own, 736 px wide: a
+//! result's (68 px), an address's (54 px) above the grid, and the web
+//! search's (50 px) last, 8 px under each.
 
 use std::{
     collections::HashMap,
@@ -24,9 +28,9 @@ use iced::{
     window,
 };
 
-use super::{Grid, Open, Row, Words};
+use super::{Card, Grid, Open, Row, Words};
 use crate::{
-    levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
+    levels::draw::{DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD, Wheel},
 };
 
@@ -67,15 +71,31 @@ const NAME_TOP: f32 = ICON_TOP + ICON + 7.0;
 const NAME: f32 = 11.5;
 const NAME_LINE: f32 = 15.0;
 const NAME_ROOM: f32 = TILE.width - 2.0 * 4.0;
-/// "No application": 13.5 px on 1.6 lines, 26 px in.
-const EMPTY: f32 = 13.5;
-const EMPTY_TOP: f32 = 26.0;
 /// The scroll mark, 14 px past the area's right.
 const MARK_OUT: f32 = 14.0;
 const MARK_WIDTH: f32 = 3.0;
 /// The full name over a tile whose name is cut, after resting on it.
 const TOOLTIP_AFTER: Duration = Duration::from_millis(500);
 const TOOLTIP: f32 = 12.0;
+/// A card: 736 px wide, radius 14, 8 px under it; 16 px in, its badge,
+/// 14 px, its two lines (the first 26 px Martian Mono for a result, 15 px
+/// 600 otherwise; then 12 px, 2 px under), 14 px, and what `Enter` does
+/// (11.5 px 600) while it is selected.
+const CARD_WIDTH: f32 = 736.0;
+const CARD_UNDER: f32 = 8.0;
+const CARD_RADIUS: f32 = 14.0;
+const CARD_PAD: f32 = 16.0;
+const CARD_GAP: f32 = 14.0;
+const ANSWER_BADGE: f32 = 40.0;
+const BADGE: f32 = 34.0;
+const BADGE_ICON: f32 = 20.0;
+const EQUALS: f32 = 20.0;
+const RESULT: f32 = 26.0;
+const CARD_MAIN: f32 = 15.0;
+const CARD_SUB: f32 = 12.0;
+const CARD_LINES_GAP: f32 = 2.0;
+const CARD_HINT: f32 = 11.5;
+const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 
 const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
 const FIELD_RIM: Color = Color::from_rgba8(108, 194, 135, 0.45);
@@ -92,6 +112,42 @@ const TOOLTIP_FILL: Color = Color::from_rgba8(22, 27, 42, 0.96);
 const TOOLTIP_RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
 /// On the CPU: about the desktop's night blue under the compositor's dim.
 const OPAQUE: Color = rgb(0x0A0E18);
+const CARD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.04);
+const CARD_RIM: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const CARD_SUB_INK: Color = rgb(0x8C96A8);
+const CARD_HINT_INK: Color = rgb(0x8FE0A8);
+const BADGE_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
+const ANSWER_FILL: Color = rgb(0x6CC287);
+const EQUALS_INK: Color = rgb(0x0B1020);
+const ADDRESS_FILL: (Color, Color) = (rgb(0x2E7D6B), rgb(0x5CC0A6));
+const WEB_FILL: (Color, Color) = (rgb(0x3B5BA9), rgb(0x6E8FE0));
+
+impl Card {
+    /// Its row's height: the card, and the gap under it.
+    fn row(self) -> f32 {
+        let card = match self {
+            Self::Answer => 68.0,
+            Self::Address => 54.0,
+            Self::Web => 50.0,
+        };
+        card + CARD_UNDER
+    }
+
+    fn badge(self) -> f32 {
+        match self {
+            Self::Answer => ANSWER_BADGE,
+            Self::Address | Self::Web => BADGE,
+        }
+    }
+
+    fn word(self) -> &'static str {
+        match self {
+            Self::Answer => "answer",
+            Self::Address => "address",
+            Self::Web => "web",
+        }
+    }
+}
 
 // --- Where things are -------------------------------------------------------------
 
@@ -117,6 +173,7 @@ fn height_of(row: &Row) -> f32 {
     match row {
         Row::Head(_) => HEAD,
         Row::Tiles(_) => TILE_ROW,
+        Row::Card(card, _) => card.row(),
     }
 }
 
@@ -184,6 +241,8 @@ pub struct Layout {
     pub heads: Vec<(&'static str, Rectangle)>,
     /// The tiles shown: their place in the grid's order, and where.
     pub tiles: Vec<(usize, Rectangle)>,
+    /// The cards shown: their place in the grid's order, and where.
+    pub cards: Vec<(usize, Card, Rectangle)>,
     /// The scroll mark, when the grid overflows.
     pub mark: Option<Rectangle>,
 }
@@ -194,6 +253,7 @@ impl Layout {
         let end = end_of(grid, offset, area.height);
         let mut heads = Vec::new();
         let mut tiles = Vec::new();
+        let mut cards = Vec::new();
         let left = area.x + (PANEL - super::COLUMNS as f32 * TILE.width) / 2.0;
         let mut y = area.y;
         for row in grid.rows.get(offset..end).unwrap_or_default() {
@@ -208,6 +268,14 @@ impl Layout {
                         tiles.push((*at, Rectangle::new(Point::new(x, y), TILE)));
                     }
                 }
+                Row::Card(card, at) => cards.push((
+                    *at,
+                    *card,
+                    Rectangle::new(
+                        Point::new(area.x + (PANEL - CARD_WIDTH) / 2.0, y),
+                        Size::new(CARD_WIDTH, card.row() - CARD_UNDER),
+                    ),
+                )),
             }
             y += height_of(row);
         }
@@ -227,16 +295,23 @@ impl Layout {
             area,
             heads,
             tiles,
+            cards,
             mark,
         }
     }
 
-    /// The tile under `at`.
-    pub fn tile_at(&self, at: Point) -> Option<usize> {
+    /// The tile or the card under `at`.
+    pub fn item_at(&self, at: Point) -> Option<usize> {
         self.tiles
             .iter()
             .find(|(_, rect)| rect.contains(at))
             .map(|(i, _)| *i)
+            .or_else(|| {
+                self.cards
+                    .iter()
+                    .find(|(_, _, rect)| rect.contains(at))
+                    .map(|(i, ..)| *i)
+            })
     }
 
     fn rect_of(&self, tile: usize) -> Option<Rectangle> {
@@ -423,7 +498,7 @@ impl<Message> canvas::Program<Message> for View {
                 return mouse::Interaction::default();
             };
             let layout = Layout::of(bounds.size(), &open.grid, open.offset);
-            if layout.tile_at(at).is_some() {
+            if layout.item_at(at).is_some() {
                 mouse::Interaction::Pointer
             } else if layout.field.contains(at) {
                 mouse::Interaction::Text
@@ -516,16 +591,22 @@ impl View {
                 line.push_str(&tile);
             }
         }
-        let empty = (!open.query.trim().is_empty() && open.grid.flat.is_empty())
-            .then(|| self.words.none_for(open.query.trim()));
+        let cards: Vec<String> = layout
+            .cards
+            .iter()
+            .map(|(at, card, _)| {
+                let (main, sub) = self.lines(open, *card);
+                let mark = if *at == open.selected { "*" } else { "" };
+                format!("{mark}{}: {main} | {sub}", card.word())
+            })
+            .collect();
         let tooltip = tooltip_of(open).map(|(_, name)| name).unwrap_or_default();
         format!(
-            "query={:?} heads={rows:?} tiles={lines:?} offset={} mark={} empty=\"{}\" \
+            "query={:?} heads={rows:?} tiles={lines:?} cards={cards:?} offset={} mark={} \
              tooltip=\"{tooltip}\"",
             open.query,
             open.offset,
             layout.mark.is_some(),
-            empty.unwrap_or_default()
         )
     }
 
@@ -543,12 +624,12 @@ impl View {
             Draw,
             DrawAt,
             Close,
-            Launch(usize),
+            Act(usize),
         }
         let then = super::with(|l| {
             let open = l.open_mut(self.id)?;
             let layout = Layout::of(size, &open.grid, open.offset);
-            let target = at.and_then(|at| layout.tile_at(at));
+            let target = at.and_then(|at| layout.item_at(at));
             Some(match seen {
                 mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
                     open.pointer = at;
@@ -569,7 +650,7 @@ impl View {
                 },
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
                     match open.pressed.take().filter(|p| Some(*p) == target) {
-                        Some(tile) => Then::Launch(tile),
+                        Some(tile) => Then::Act(tile),
                         None => Then::Nothing,
                     }
                 }
@@ -581,7 +662,7 @@ impl View {
                     open.offset = scrolled(&open.grid, open.offset, -notches, size);
                     // What is under the pointer now.
                     let layout = Layout::of(size, &open.grid, open.offset);
-                    let target = open.pointer.and_then(|at| layout.tile_at(at));
+                    let target = open.pointer.and_then(|at| layout.item_at(at));
                     match hovered(open, target, now) {
                         Then::Nothing => Then::Draw,
                         then => then,
@@ -625,8 +706,8 @@ impl View {
                 super::close();
                 redraw
             }
-            Then::Launch(tile) => {
-                super::launch(self.id, tile);
+            Then::Act(at) => {
+                super::act(self.id, at);
                 redraw
             }
         }
@@ -683,20 +764,11 @@ impl View {
                 });
             }
         }
+        for (at, card, rect) in &layout.cards {
+            self.draw_card(f, open, *card, *rect, *at == open.selected);
+        }
         if let Some(mark) = layout.mark {
             f.fill(&kit::rounded(mark, MARK_WIDTH / 2.0), MARK);
-        }
-        if !open.query.trim().is_empty() && open.grid.flat.is_empty() {
-            f.fill_text(kit::text(
-                self.words.none_for(open.query.trim()),
-                Point::new(
-                    layout.area.center_x(),
-                    layout.area.y + EMPTY_TOP + EMPTY * 1.6 / 2.0,
-                ),
-                EMPTY,
-                FAINT,
-                Alignment::Center,
-            ));
         }
         // The full name of a tile whose name is cut, rested on.
         if let Some((tile, name)) = tooltip_of(open)
@@ -704,6 +776,93 @@ impl View {
         {
             tooltip(f, name, rect, size);
         }
+    }
+
+    /// A card's two lines: what it is, and under it what it says more.
+    fn lines(&self, open: &Open, card: Card) -> (String, String) {
+        let words = self.words;
+        match card {
+            Card::Answer => open
+                .grid
+                .answer
+                .as_ref()
+                .map(|a| (a.main.clone(), a.sub.clone()))
+                .unwrap_or_default(),
+            Card::Address => open
+                .grid
+                .address
+                .as_ref()
+                .map(|a| (words.open(&a.typed), words.in_browser(&a.url)))
+                .unwrap_or_default(),
+            Card::Web => (
+                words.search_web(open.query.trim()),
+                words.web_engine().to_owned(),
+            ),
+        }
+    }
+
+    fn draw_card(&self, f: &mut Frame, open: &Open, card: Card, rect: Rectangle, selected: bool) {
+        let (fill, rim) = if selected {
+            (SELECTED_FILL, SELECTED_RIM)
+        } else {
+            (CARD_FILL, CARD_RIM)
+        };
+        f.fill(&kit::rounded(rect, CARD_RADIUS), fill);
+        f.stroke(
+            &kit::rounded(inset(rect, 0.5), CARD_RADIUS - 0.5),
+            Stroke::default().with_color(rim).with_width(1.0),
+        );
+        let size = card.badge();
+        let badge = Rectangle::new(
+            Point::new(rect.x + CARD_PAD, rect.center_y() - size / 2.0),
+            Size::new(size, size),
+        );
+        badge_of(f, card, badge);
+        // The hint keeps its room unselected, as the mockup's.
+        let hint = self.words.hint(card);
+        let hint_width = kit::measure(hint, CARD_HINT, MANROPE_SEMIBOLD);
+        let right = rect.x + rect.width - CARD_PAD;
+        if selected {
+            f.fill_text(kit::text_in(
+                MANROPE_SEMIBOLD,
+                kit::text(
+                    hint.to_owned(),
+                    Point::new(right, rect.center_y()),
+                    CARD_HINT,
+                    CARD_HINT_INK,
+                    Alignment::Right,
+                ),
+            ));
+        }
+        let x = badge.x + size + CARD_GAP;
+        let room = (right - hint_width - CARD_GAP - x).max(0.0);
+        let (main, sub) = self.lines(open, card);
+        let (font, main_size) = match card {
+            Card::Answer => (MONO, RESULT),
+            Card::Address | Card::Web => (MANROPE_SEMIBOLD, CARD_MAIN),
+        };
+        let main_height = main_size * LINE;
+        let sub_height = CARD_SUB * LINE;
+        let top = rect.center_y() - (main_height + CARD_LINES_GAP + sub_height) / 2.0;
+        let main = kit::elide(&main, room, |t| kit::measure(t, main_size, font));
+        let sub = kit::elide(&sub, room, |t| kit::measure(t, CARD_SUB, MANROPE));
+        f.fill_text(kit::text_in(
+            font,
+            kit::text(
+                main,
+                Point::new(x, top + main_height / 2.0),
+                main_size,
+                TEXT,
+                Alignment::Left,
+            ),
+        ));
+        f.fill_text(kit::text(
+            sub,
+            Point::new(x, top + main_height + CARD_LINES_GAP + sub_height / 2.0),
+            CARD_SUB,
+            CARD_SUB_INK,
+            Alignment::Left,
+        ));
     }
 
     fn draw_field(&self, f: &mut Frame, state: &State, layout: &Layout) {
@@ -832,6 +991,105 @@ fn magnifier(f: &mut Frame, at: Point) {
     f.stroke(&Path::line(p(15.5, 15.5), p(20.0, 20.0)), stroke);
 }
 
+/// A card's badge in `rect`: "=" on green for a result, a link for an
+/// address, a globe for the web, each on its gradient and in a light rim.
+fn badge_of(f: &mut Frame, card: Card, rect: Rectangle) {
+    let radius = (rect.width * 0.28).round();
+    let shape = kit::rounded(rect, radius);
+    match card {
+        Card::Answer => f.fill(&shape, ANSWER_FILL),
+        Card::Address | Card::Web => {
+            let (from, to) = if card == Card::Web {
+                WEB_FILL
+            } else {
+                ADDRESS_FILL
+            };
+            let fill = gradient::Linear::new(
+                rect.position(),
+                Point::new(rect.x + rect.width, rect.y + rect.height),
+            )
+            .add_stop(0.0, from)
+            .add_stop(1.0, to);
+            f.fill(&shape, canvas::Fill::from(fill));
+        }
+    }
+    f.stroke(
+        &kit::rounded(inset(rect, 0.5), radius - 0.5),
+        Stroke::default().with_color(BADGE_RIM).with_width(1.0),
+    );
+    let at = Point::new(
+        rect.center_x() - BADGE_ICON / 2.0,
+        rect.center_y() - BADGE_ICON / 2.0,
+    );
+    match card {
+        Card::Answer => f.fill_text(kit::text_in(
+            MONO,
+            kit::text(
+                "=".to_owned(),
+                rect.center(),
+                EQUALS,
+                EQUALS_INK,
+                Alignment::Center,
+            ),
+        )),
+        Card::Address => link(f, at),
+        Card::Web => globe(f, at),
+    }
+}
+
+/// The mockup's 24 px globe, 20 px from `at`.
+fn globe(f: &mut Frame, at: Point) {
+    let k = BADGE_ICON / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
+    let stroke = |width: f32| Stroke::default().with_color(TEXT).with_width(width * k);
+    f.stroke(&Path::circle(p(12.0, 12.0), 8.5 * k), stroke(1.8));
+    let lines = Path::new(|b| {
+        b.move_to(p(3.5, 12.0));
+        b.line_to(p(20.5, 12.0));
+        b.move_to(p(12.0, 3.5));
+        b.bezier_curve_to(p(8.5, 7.0), p(8.5, 17.0), p(12.0, 20.5));
+        b.move_to(p(12.0, 3.5));
+        b.bezier_curve_to(p(15.5, 7.0), p(15.5, 17.0), p(12.0, 20.5));
+    });
+    f.stroke(&lines, stroke(1.6));
+}
+
+/// The mockup's 24 px chain link, 20 px from `at`: a bar between two
+/// hooks, each a near half circle of radius 3.2.
+fn link(f: &mut Frame, at: Point) {
+    use std::f32::consts::PI;
+    let k = BADGE_ICON / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
+    let stroke = Stroke {
+        line_cap: canvas::LineCap::Round,
+        ..Stroke::default().with_color(TEXT).with_width(1.8 * k)
+    };
+    let degrees = |d: f32| iced::Radians(d * PI / 180.0);
+    let hook =
+        |from: (f32, f32), start: (f32, f32), centre: (f32, f32), turn: f32, end: (f32, f32)| {
+            Path::new(move |b| {
+                b.move_to(p(from.0, from.1));
+                b.line_to(p(start.0, start.1));
+                b.arc(canvas::path::Arc {
+                    center: p(centre.0, centre.1),
+                    radius: 3.2 * k,
+                    start_angle: degrees(turn),
+                    end_angle: degrees(turn - 168.0),
+                });
+                b.line_to(p(end.0, end.1));
+            })
+        };
+    f.stroke(&Path::line(p(10.0, 14.0), p(14.0, 10.0)), stroke);
+    f.stroke(
+        &hook((8.5, 11.5), (6.8, 13.2), (9.29, 15.21), 219.0, (13.0, 16.0)),
+        stroke,
+    );
+    f.stroke(
+        &hook((15.5, 12.5), (17.2, 10.8), (14.71, 8.79), 39.0, (11.0, 8.0)),
+        stroke,
+    );
+}
+
 /// A heading: its letters spaced, 4 px in, on its row's middle.
 fn head(f: &mut Frame, label: &str, rect: Rectangle) {
     let mut x = rect.x + HEAD_LEFT;
@@ -950,7 +1208,7 @@ mod tests {
                 tiles(8),
                 tiles(3),
             ],
-            flat: Vec::new(),
+            ..Grid::default()
         };
         // The mockup's laptop: an area 480 px high.
         let size = Size::new(848.0, 708.0);
@@ -983,7 +1241,8 @@ mod tests {
                 Row::Tiles((16..24).collect()),
                 Row::Tiles((24..32).collect()),
             ],
-            flat: (0..32).collect(),
+            flat: (0..32).map(super::super::Item::App).collect(),
+            ..Grid::default()
         };
         let size = Size::new(848.0, 708.0);
         // Down into the fourth row of tiles: the grid scrolls one row.

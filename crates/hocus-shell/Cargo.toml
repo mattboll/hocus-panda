@@ -64,6 +64,13 @@ unicode-normalization = "0.1.25"
 # The launcher's SVG icons drawn at their size on the icons' thread, not
 # on the one that draws: the same resvg as iced's (MIT or Apache-2.0).
 resvg = { version = "0.45.1", default-features = false }
+# The launcher's currency rates, fetched once a day from the European
+# Central Bank over HTTPS on a thread of their own (MIT or Apache-2.0):
+# rustls with ring, the system's certificates (no bundled roots), and the
+# bank's XML read with roxmltree, resvg's (MIT or Apache-2.0).
+ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+roxmltree = "0.20.0"
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 

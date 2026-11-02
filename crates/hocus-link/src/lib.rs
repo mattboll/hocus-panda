@@ -68,6 +68,13 @@ pub const PEEK_NAMESPACE: &str = "hocus-bar-peek";
 /// and the grid; the compositor darkens and blurs what is behind, and
 /// fades and scales it in and out ([`LAUNCHER_OPEN`], [`LAUNCHER_CLOSE`]).
 pub const LAUNCHER_NAMESPACE: &str = "hocus-launcher";
+/// The namespace of the launcher's toast (5.2), "Copié : 6,214" at the
+/// bottom of its screen once a result is copied. The shell draws it once
+/// and removes it after [`LAUNCHER_TOAST`]; the compositor fades it in
+/// rising and fades it out, from its first frame.
+pub const LAUNCHER_TOAST_NAMESPACE: &str = "hocus-launcher-toast";
+/// How long the launcher's toast shows, its fades included.
+pub const LAUNCHER_TOAST: Duration = Duration::from_millis(1800);
 
 /// The namespaces of a notification's bubble (5.3), one surface each, its
 /// number after the prefix ([`bubble_namespace`]): the compositor moves

@@ -116,6 +116,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.panel.launcher_commits += 1;
                 state.launcher_committed(&layer);
             }
+            hocus_link::LAUNCHER_TOAST_NAMESPACE => state.launcher_toast_committed(&layer),
             ns if hocus_link::is_bubble(ns) => state.bubble_committed(&layer),
             _ => {}
         }

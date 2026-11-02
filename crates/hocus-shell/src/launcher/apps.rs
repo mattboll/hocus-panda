@@ -92,13 +92,19 @@ pub fn launched(id: &str) {
 /// The launch counts' file: `$XDG_STATE_HOME/hocuspanda/launches`, else
 /// `~/.local/state`'s.
 fn counts_file() -> Option<PathBuf> {
+    state_file("launches")
+}
+
+/// `name` in the launcher's state directory, `$XDG_STATE_HOME/hocuspanda`,
+/// else `~/.local/state`'s.
+pub fn state_file(name: &str) -> Option<PathBuf> {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
     let state = var("XDG_STATE_HOME")
         .map(PathBuf::from)
         .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     state
         .is_absolute()
-        .then(|| state.join("hocuspanda/launches"))
+        .then(|| state.join("hocuspanda").join(name))
 }
 
 /// The counts a file holds: `COUNT\tID` lines; others are left out.

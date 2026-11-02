@@ -396,6 +396,21 @@ impl Headless {
         self.layer_rects(hocus_link::LAUNCHER_NAMESPACE)
     }
 
+    /// The launcher's toasts as the shell placed them (5.2): their screen,
+    /// and where they are (global).
+    pub fn launcher_toast_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::LAUNCHER_TOAST_NAMESPACE)
+    }
+
+    /// The text the compositor itself put on the clipboard (the shell's
+    /// copies), if the clipboard holds it.
+    pub fn clipboard(&self) -> Option<String> {
+        smithay::wayland::selection::data_device::current_data_device_selection_userdata(
+            &self.app.state.seat,
+        )
+        .and_then(|text| text.as_ref().map(|t| t.to_string()))
+    }
+
     /// The keyboard's active layout (XKB's group).
     pub fn layout(&self) -> u32 {
         self.app
