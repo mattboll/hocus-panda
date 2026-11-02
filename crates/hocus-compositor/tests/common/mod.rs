@@ -228,6 +228,8 @@ pub enum Command {
     /// Takes the clipboard (it must hold the keyboard), then says
     /// [`Event::Copied`] once the compositor has it.
     Copy(Clip),
+    /// Takes the clipboard with a PNG image (`image/png`), as [`Command::Copy`].
+    CopyPng(&'static [u8]),
     /// Closes its window, as an application quitting.
     Close,
     /// Titles its window, without drawing (a terminal's prompt does so).
@@ -235,8 +237,9 @@ pub enum Command {
 }
 
 /// What a client puts on the clipboard: its types, and the text it writes
-/// for any of them; or, `hang`ing, the pipe kept open and nothing written,
-/// as a client that stopped answering.
+/// for any of them (`secret` for `x-kde-passwordManagerHint`, as a password
+/// manager marks a password); or, `hang`ing, the pipe kept open and nothing
+/// written, as a client that stopped answering.
 #[derive(Debug, Clone, Copy)]
 pub struct Clip {
     pub types: &'static [&'static str],
@@ -256,6 +259,8 @@ pub enum Event {
     Copied,
     /// The keyboard's modifiers came, with this layout (XKB's group).
     Group(u32),
+    /// A typing client's key (its evdev code), pressed or released.
+    Key(u32, bool),
 }
 
 /// A client running on its thread.
@@ -326,6 +331,7 @@ fn run_client(
         data,
         device: None,
         clip: None,
+        png: None,
         hung: Vec::new(),
         typing: false,
         clear: false,
@@ -435,7 +441,19 @@ fn run_client(
                 (Command::Fullscreen(true), Some(window)) => window.set_fullscreen(None),
                 (Command::Fullscreen(false), Some(window)) => window.unset_fullscreen(),
                 (Command::Fullscreen(_), None) => {}
-                (Command::Copy(clip), _) => client.copy(conn, &qh, clip),
+                (Command::Copy(clip), _) => {
+                    client.png = None;
+                    client.copy(conn, &qh, clip);
+                }
+                (Command::CopyPng(png), _) => {
+                    client.png = Some(png);
+                    let clip = Clip {
+                        types: &["image/png"],
+                        text: "",
+                        hang: false,
+                    };
+                    client.copy(conn, &qh, clip);
+                }
                 (Command::Close, _) => client.window = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}
@@ -477,8 +495,10 @@ struct Client {
     xdg: Option<XdgShell>,
     data: Option<DataDeviceManagerState>,
     device: Option<DataDevice>,
-    /// What it offers on the clipboard, and its source.
+    /// What it offers on the clipboard, and its source; an image instead
+    /// of its text.
     clip: Option<(Clip, CopyPasteSource)>,
+    png: Option<&'static [u8]>,
     /// The pipes it was asked to write to and never will.
     hung: Vec<WritePipe>,
     /// It takes the keyboard and says its group.
@@ -769,8 +789,15 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_keyboard::Event::Modifiers { group, .. } = event {
-            let _ = client.events.send(Event::Group(group));
+        match event {
+            wl_keyboard::Event::Modifiers { group, .. } => {
+                let _ = client.events.send(Event::Group(group));
+            }
+            wl_keyboard::Event::Key { key, state, .. } => {
+                let pressed = state == wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed);
+                let _ = client.events.send(Event::Key(key, pressed));
+            }
+            _ => {}
         }
     }
 }
@@ -804,7 +831,7 @@ impl DataSourceHandler for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &wl_data_source::WlDataSource,
-        _: String,
+        mime: String,
         mut pipe: WritePipe,
     ) {
         use std::io::Write;
@@ -813,6 +840,10 @@ impl DataSourceHandler for Client {
         };
         if clip.hang {
             self.hung.push(pipe);
+        } else if mime == "x-kde-passwordManagerHint" {
+            let _ = pipe.write_all(b"secret");
+        } else if let Some(png) = self.png {
+            let _ = pipe.write_all(png);
         } else {
             let _ = pipe.write_all(clip.text.as_bytes());
         }

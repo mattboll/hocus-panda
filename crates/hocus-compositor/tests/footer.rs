@@ -4,7 +4,7 @@
 //!
 //! One scenario per point of the approved spec: the full form's footer is
 //! four buttons in a row along the bar's bottom, each opening its thing
-//! (the clipboard's text, the notifications' history, the launcher, the
+//! (the clipboard's history, the notifications' history, the launcher, the
 //! user's name and logging out, confirmed by a second click within 4 s);
 //! the menu opens the launcher on a click, not on a hover; the mini form's
 //! bell sits over the user's avatar, last of all. The badge still counting is the notifications' tests' (they
@@ -273,19 +273,20 @@ fn each_footer_button_opens_its_thing() -> anyhow::Result<()> {
         return Ok(());
     };
     let bar_bottom = 1080 - 8;
-    // The clipboard, nothing copied: "Rien de copié.", its bottom on the
-    // bar's.
+    // The clipboard, nothing copied: its history says so, its bottom on
+    // the bar's (5.6, tests/clipboard.rs).
     let mark = bed.mark();
     let clipboard = bed.button(0);
     bed.click(clipboard)?;
     let popover = bed.popover()?;
-    assert_eq!(popover.width, 280);
+    assert_eq!(popover.width, 360);
     assert_eq!(popover.y + popover.height, bar_bottom);
-    let line = bed.logged_after(mark, "copied=\"nothing\"")?;
+    let line = bed.logged_after(mark, "the clipboard's history shows it")?;
     assert!(line.contains("Presse-papiers"), "{line}");
+    assert!(line.contains("Rien de copié pour l’instant."), "{line}");
     bed.press(KEY_ESC);
     bed.closed()?;
-    // A window copies a text: the popover shows it.
+    // A window copies a text: the history shows it.
     let (rect, client) = common::open_with(&mut bed.hp, "test.copy", (300, 200), false)?;
     bed.click((
         f64::from(rect.x + rect.width / 2),
@@ -304,7 +305,7 @@ fn each_footer_button_opens_its_thing() -> anyhow::Result<()> {
     let mark = bed.mark();
     bed.click(clipboard)?;
     bed.popover()?;
-    bed.logged_after(mark, "copied=\"text\"")?;
+    bed.logged_after(mark, "[code] «git rebase --onto v2")?;
     bed.press(KEY_ESC);
     bed.closed()?;
     // The bell: the notifications' history, 360 wide.
