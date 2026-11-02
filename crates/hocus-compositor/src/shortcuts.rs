@@ -50,6 +50,8 @@ pub enum Action {
     ToggleBar,
     /// Volume, mute or brightness: to the shell, which keeps them.
     Level(LevelKey),
+    /// The launcher, on the screen under the pointer; open, it closes.
+    Launcher,
 }
 
 /// Modifiers and a key, as `Super+Shift+E`. The key is the one of the
@@ -220,6 +222,7 @@ shortcuts! {
     take_to_desktop_left: ["Super+Ctrl+Shift+Left"] => Action::TakeToDesktopBy(-1),
     take_to_desktop_right: ["Super+Ctrl+Shift+Right"] => Action::TakeToDesktopBy(1),
     toggle_bar: ["Super+B"] => Action::ToggleBar,
+    launcher: ["Super+Space"] => Action::Launcher,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
     volume_down: ["XF86AudioLowerVolume"] => Action::Level(LevelKey::VolumeDown),
     mute: ["XF86AudioMute"] => Action::Level(LevelKey::Mute),
@@ -338,6 +341,7 @@ impl State {
                 }
             }
             Action::Level(key) => self.level_key(key),
+            Action::Launcher => self.toggle_launcher(),
         }
     }
 
@@ -448,6 +452,11 @@ mod tests {
         assert_eq!(
             action(mods(false, true, false, true), Keysym::Tab),
             Some(Action::SwitchWindows { backward: true })
+        );
+        // The launcher's (#365, #391).
+        assert_eq!(
+            action(mods(true, false, false, false), Keysym::space),
+            Some(Action::Launcher)
         );
         // Close has two: Super+Q and Alt+F4.
         assert_eq!(

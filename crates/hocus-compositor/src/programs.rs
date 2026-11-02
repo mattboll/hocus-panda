@@ -148,6 +148,56 @@ pub fn spawn(command: String, env: Env) {
     on_a_thread(format!("spawn {command}"), move || run(&command, &env));
 }
 
+/// Starts an application the launcher asks for (5.1): its arguments as
+/// they are, without a shell, in its working directory when it names one
+/// that is there; one that runs in a terminal (`terminal`: the configured
+/// one, empty for the first of [`TERMINALS`] in `PATH`) after its `-e`.
+pub fn launch(launch: hocus_link::Launch, terminal: Option<String>, env: Env) {
+    on_a_thread(format!("launch {}", launch.id), move || {
+        let mut cmd = match terminal {
+            Some(configured) => {
+                let path = std::env::var_os("PATH");
+                let Some(terminal) = self::terminal(&configured, path.as_deref()) else {
+                    tracing::warn!(
+                        app = launch.id,
+                        looked_for = ?TERMINALS,
+                        "no terminal in PATH for an application that needs one"
+                    );
+                    return;
+                };
+                // The terminal as configured may hold its own arguments.
+                let mut cmd = env.command("/bin/sh");
+                cmd.arg("-c")
+                    .arg(format!("{terminal} -e \"$@\""))
+                    .arg("sh")
+                    .args(&launch.argv);
+                cmd
+            }
+            None => {
+                let Some((program, args)) = launch.argv.split_first() else {
+                    return;
+                };
+                let mut cmd = env.command(program);
+                cmd.args(args);
+                cmd
+            }
+        };
+        if !launch.dir.is_empty() && Path::new(&launch.dir).is_dir() {
+            cmd.current_dir(&launch.dir);
+        }
+        match cmd.spawn() {
+            Ok(mut child) => {
+                tracing::info!(app = launch.id, pid = child.id(), "started");
+                match child.wait() {
+                    Ok(status) => tracing::info!(app = launch.id, %status, "ended"),
+                    Err(err) => tracing::warn!(app = launch.id, %err, "could not wait for it"),
+                }
+            }
+            Err(err) => tracing::warn!(app = launch.id, %err, "could not start"),
+        }
+    });
+}
+
 /// Starts the terminal: `configured`, or the first of [`TERMINALS`] in
 /// `PATH`.
 pub fn spawn_terminal(configured: String, env: Env) {

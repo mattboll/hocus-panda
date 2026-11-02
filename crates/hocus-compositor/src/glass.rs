@@ -43,6 +43,27 @@ pub const REACH: f64 = 52.0;
 /// CSS's `saturate(1.35)`.
 const SATURATION: f32 = 1.35;
 
+/// A blur: how far it reaches (logical pixels) and how it saturates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frost {
+    pub reach: f64,
+    pub saturation: f32,
+}
+
+impl Frost {
+    /// The bar's and its popovers' (§13).
+    pub const BAR: Self = Self {
+        reach: REACH,
+        saturation: SATURATION,
+    };
+    /// Behind the launcher (5.1): the mockup's `blur(14px)`, twice its
+    /// deviation, without saturation.
+    pub const LAUNCHER: Self = Self {
+        reach: 28.0,
+        saturation: 1.0,
+    };
+}
+
 /// How many times the picture is halved, and how far apart the samples
 /// are, for a blur that reaches `reach` pixels: each level doubles the
 /// reach; the offset makes up the rest, between 1 and 2.
@@ -79,7 +100,13 @@ impl Panes {
     pub fn forget(&mut self, output: &str) {
         self.0.remove(output);
         self.0.remove(&popover_pane(output));
+        self.0.remove(&launcher_pane(output));
     }
+}
+
+/// The name of the pane under the launcher on `output`.
+pub fn launcher_pane(output: &str) -> String {
+    format!("{output} launcher")
 }
 
 /// The name of the pane under the popovers on `output`, beside its bar's.
@@ -98,6 +125,7 @@ pub trait Glass: Renderer + Sized {
         name: &str,
         region: Rectangle<i32, Physical>,
         scale: f64,
+        frost: Frost,
         behind: &[E],
     ) -> Option<Blurred<Self::TextureId>>;
 }
@@ -109,6 +137,7 @@ impl Glass for PixmanRenderer {
         _name: &str,
         _region: Rectangle<i32, Physical>,
         _scale: f64,
+        _frost: Frost,
         _behind: &[E],
     ) -> Option<Blurred<Self::TextureId>> {
         None
@@ -140,6 +169,7 @@ fn compile(renderer: &mut GlesRenderer) -> Result<(GlesTexProgram, GlesTexProgra
 struct Frosted {
     region: Rectangle<i32, Physical>,
     scale: f64,
+    frost: Frost,
     tracker: OutputDamageTracker,
     behind: GlesTexture,
     /// Halves of `behind`; the first holds the blur once done.
@@ -154,8 +184,9 @@ impl Frosted {
         renderer: &mut GlesRenderer,
         region: Rectangle<i32, Physical>,
         scale: f64,
+        frost: Frost,
     ) -> Result<Self, String> {
-        let (n, offset) = levels(REACH * scale);
+        let (n, offset) = levels(frost.reach * scale);
         let size = |w: i32, h: i32| Size::<i32, Buffer>::from((w.max(1), h.max(1)));
         let behind: GlesTexture = renderer
             .create_buffer(Fourcc::Abgr8888, size(region.size.w, region.size.h))
@@ -172,6 +203,7 @@ impl Frosted {
         Ok(Self {
             region,
             scale,
+            frost,
             tracker: OutputDamageTracker::new(region.size, scale, Transform::Normal),
             behind,
             levels,
@@ -195,7 +227,7 @@ impl Frosted {
         }
         for i in (0..self.levels.len().saturating_sub(1)).rev() {
             let from = self.levels[i + 1].clone();
-            let saturation = if i == 0 { SATURATION } else { 1.0 };
+            let saturation = if i == 0 { self.frost.saturation } else { 1.0 };
             pass(
                 renderer,
                 up,
@@ -261,6 +293,7 @@ impl Glass for GlesRenderer {
         name: &str,
         region: Rectangle<i32, Physical>,
         scale: f64,
+        frost: Frost,
         behind: &[E],
     ) -> Option<Blurred<GlesTexture>> {
         if self.egl_context().user_data().get::<Programs>().is_none() {
@@ -280,10 +313,10 @@ impl Glass for GlesRenderer {
             .0
             .remove(name)
             .and_then(|b| b.downcast::<Frosted>().ok())
-            .filter(|f| f.region == region && f.scale == scale);
+            .filter(|f| f.region == region && f.scale == scale && f.frost == frost);
         let mut frosted = match kept {
             Some(frosted) => *frosted,
-            None => Frosted::new(self, region, scale)
+            None => Frosted::new(self, region, scale, frost)
                 .map_err(|err| tracing::warn!(output = name, %err, "no glass"))
                 .ok()?,
         };

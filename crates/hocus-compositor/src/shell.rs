@@ -355,7 +355,10 @@ impl State {
             ToCompositor::Closing(namespace) if hocus_link::is_bubble(&namespace) => {
                 self.bubble_closing(&namespace);
             }
-            ToCompositor::Closing(namespace) => self.popovers_closing(&namespace),
+            ToCompositor::Closing(namespace) => {
+                self.popovers_closing(&namespace);
+                self.launcher_closing(&namespace);
+            }
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
@@ -377,6 +380,7 @@ impl State {
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::Copy(text) => self.copy_text(text),
+            ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
         }
     }
