@@ -9,6 +9,16 @@
 //! the actions, the card and the ✕ say what they should; an agents' tool
 //! saying its agent waits makes no bubble, its other notifications do.
 //!
+//! And 5.4's (issue #394), one per point of its spec: the history lists by
+//! sections, newest first; a click in it invokes the default, raises and
+//! removes; its ✕ removes one, "clear all" empties it; the bell's badge
+//! counts what was not seen and opening the history resets it; do not
+//! disturb holds a normal bubble but not a critical one; the history
+//! survives a restart of the shell without what is older than 7 days. The
+//! shell's wall clock reads 2 November 2026, 14:32:07 UTC
+//! (`HOCUS_CLOCK_AT`); do not disturb ending at its time is the stack's
+//! unit test, on the clock it is given.
+//!
 //! Pixman here, so the shell draws on the CPU: each bubble's surface is its
 //! card, and nothing moves (as in CI).
 
@@ -23,7 +33,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::BTN_LEFT;
+use common::{BTN_LEFT, KEY_ESC};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use zbus::{MatchRule, MessageStream, OwnedVariant, Variant};
 
@@ -37,6 +47,8 @@ struct Bed {
     _dir: tempfile::TempDir,
     hp: Headless,
     log: PathBuf,
+    /// The shell's process id, as its script writes it.
+    pid: PathBuf,
     /// The test's own D-Bus daemon, stopped by its process id.
     bus: Child,
     runtime: tokio::runtime::Runtime,
@@ -104,11 +116,30 @@ fn private_bus(dir: &Path) -> anyhow::Result<(Child, String)> {
 /// serving the notifications on the test's bus; `config` changes the
 /// compositor's configuration (the agents' tools' places).
 fn start(shell: &Path, config: impl FnOnce(&Path, &mut Config)) -> anyhow::Result<Bed> {
+    start_with(shell, config, "")
+}
+
+/// The wall clock the shell reads (`HOCUS_CLOCK_AT`, in UTC) as it starts:
+/// 2 November 2026, 14:32:07.
+const NOW_MS: i64 = 1_793_629_927_000;
+const MINUTE_MS: i64 = 60_000;
+
+/// The same, the history kept before holding `kept` (its file's lines).
+fn start_with(
+    shell: &Path,
+    config: impl FnOnce(&Path, &mut Config),
+    kept: &str,
+) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let home = dir.path().join("home");
-    std::fs::create_dir_all(&home)?;
+    let state = dir.path().join("state");
+    for sub in [&home, &state.join("hocuspanda")] {
+        std::fs::create_dir_all(sub)?;
+    }
+    std::fs::write(state.join("hocuspanda/notifications"), kept)?;
     let (bus, address) = private_bus(dir.path())?;
     let log = dir.path().join("shell.log");
+    let pid = dir.path().join("shell.pid");
     let script = dir.path().join("shell");
     std::fs::write(
         &script,
@@ -116,11 +147,16 @@ fn start(shell: &Path, config: impl FnOnce(&Path, &mut Config)) -> anyhow::Resul
             "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
              export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
              PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
-             LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' \
-             RUST_LOG=warn,hocuspanda_shell=debug\nexec '{}' \"$@\" 2>>'{}'\n",
-            home.display(),
-            shell.display(),
-            log.display()
+             LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{home}' \
+             XDG_CONFIG_HOME='{home}/.config' XDG_CACHE_HOME='{home}/.cache' \
+             XDG_STATE_HOME='{state}' TZ=UTC HOCUS_CLOCK_AT='2026-11-02T14:32:07' \
+             RUST_LOG=warn,hocuspanda_shell=debug,hocuspanda_shell::notifications::bell=trace\necho $$ > '{pid}'\n\
+             exec '{shell}' \"$@\" 2>>'{log}'\n",
+            home = home.display(),
+            state = state.display(),
+            pid = pid.display(),
+            shell = shell.display(),
+            log = log.display()
         ),
     )?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
@@ -149,6 +185,7 @@ fn start(shell: &Path, config: impl FnOnce(&Path, &mut Config)) -> anyhow::Resul
         _dir: dir,
         hp,
         log,
+        pid,
         bus,
         runtime,
         client,
@@ -359,6 +396,135 @@ impl Bed {
         self.hp.button(BTN_LEFT, true);
         self.hp.button(BTN_LEFT, false);
     }
+
+    /// Where the log is now: what it says after is new.
+    fn mark(&self) -> usize {
+        self.log().len()
+    }
+
+    /// Waits until the shell logged `what` after `mark`; the line.
+    fn logged_since(&mut self, mark: usize, what: &str) -> anyhow::Result<String> {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(15) {
+            let log = self.log();
+            if let Some(line) = log
+                .get(mark..)
+                .and_then(|new| new.lines().find(|l| l.contains(what)))
+            {
+                return Ok(line.to_owned());
+            }
+            self.idle(Duration::from_millis(50))?;
+        }
+        anyhow::bail!("the shell did not log {what:?}:\n{}", self.log())
+    }
+
+    /// The bell's button's centre, on the bar.
+    fn bell(&mut self) -> anyhow::Result<(f64, f64)> {
+        let shown = self
+            .hp
+            .dispatch_until(Duration::from_secs(10), |hp| hp.bell_surfaces().len() == 1)?;
+        anyhow::ensure!(shown, "no bell");
+        let (_, at) = self.hp.bell_surfaces()[0];
+        Ok((
+            f64::from(at.x + at.width / 2),
+            f64::from(at.y + at.height / 2),
+        ))
+    }
+
+    /// Opens the history with a click on the bell: what it shows, as
+    /// logged.
+    fn open_history(&mut self) -> anyhow::Result<String> {
+        let bell = self.bell()?;
+        let mark = self.mark();
+        self.hp.pointer_move(bell.0, bell.1);
+        self.idle(Duration::from_millis(100))?;
+        self.click(bell);
+        let shows = self.logged_since(mark, "the history shows")?;
+        self.logged_since(mark, "the history's items")?;
+        let open = self.hp.dispatch_until(Duration::from_secs(5), |hp| {
+            hp.popover_surfaces().len() == 1
+        })?;
+        anyhow::ensure!(open, "the history did not open");
+        self.idle(Duration::from_millis(200))?;
+        Ok(shows)
+    }
+
+    /// The history's popover, on the screen.
+    fn history(&self) -> Rect {
+        self.hp.popover_surfaces()[0].1
+    }
+
+    /// Where `name` (`Clear`, `Switch`, `Item(3)`, `Close(3)`…) is on the
+    /// screen, as the history last logged its items.
+    fn history_item(&self, name: &str) -> anyhow::Result<(f64, f64)> {
+        let log = self.log();
+        let line = log
+            .lines()
+            .rev()
+            .find(|l| l.contains("the history's items"))
+            .ok_or_else(|| anyhow::anyhow!("no items logged"))?;
+        let at = line
+            .split_whitespace()
+            .find_map(|word| {
+                let word = word.strip_prefix("items=").unwrap_or(word);
+                let (who, xy) = word.rsplit_once('@')?;
+                let (x, y) = xy.split_once(',')?;
+                (who == name).then(|| (x.parse::<f64>().ok(), y.parse::<f64>().ok()))
+            })
+            .and_then(|(x, y)| Some((x?, y?)))
+            .ok_or_else(|| anyhow::anyhow!("no {name} in {line}"))?;
+        let popover = self.history();
+        Ok((f64::from(popover.x) + at.0, f64::from(popover.y) + at.1))
+    }
+
+    /// The items the history lists, by their names in its last line of
+    /// items (`Item(3)`…), top first.
+    fn history_items(&self) -> Vec<String> {
+        let log = self.log();
+        let Some(line) = log
+            .lines()
+            .rev()
+            .find(|l| l.contains("the history's items"))
+        else {
+            return Vec::new();
+        };
+        line.split_whitespace()
+            .filter_map(|w| w.strip_prefix("items=").or(Some(w)))
+            .filter(|w| w.starts_with("Item("))
+            .filter_map(|w| w.split_once('@').map(|(who, _)| who.to_owned()))
+            .collect()
+    }
+
+    /// Closes the history (`Esc`).
+    fn close_history(&mut self) -> anyhow::Result<()> {
+        self.hp.key(KEY_ESC, true);
+        self.hp.key(KEY_ESC, false);
+        let closed = self.hp.dispatch_until(Duration::from_secs(5), |hp| {
+            hp.popover_surfaces().is_empty()
+        })?;
+        anyhow::ensure!(closed, "the history did not close");
+        Ok(())
+    }
+}
+
+/// A line of the history's file: kept `ago` minutes before the shell's
+/// clock started, of `app`, `seen` or not.
+fn kept(app: &str, summary: &str, ago: i64, unseen: bool) -> String {
+    format!(
+        "{}\n",
+        serde_json::json!({
+            "app": app,
+            "entry": null,
+            "app_icon": "",
+            "image_path": null,
+            "summary": summary,
+            "body": "",
+            "pid": 0,
+            "agent": false,
+            "at": NOW_MS - ago * MINUTE_MS,
+            "unseen": unseen,
+        })
+    )
 }
 
 /// A card's ✕: 8 px in from its top right, inside the rim, 24 px.
@@ -461,12 +627,9 @@ fn a_low_one_goes_to_the_history_and_the_bar_counts_it() -> anyhow::Result<()> {
         ..Notice::default()
     })?;
     bed.logged("unread=1")?;
-    let dot = bed
-        .hp
-        .dispatch_until(Duration::from_secs(5), |hp| hp.unread_surfaces().len() == 1)?;
-    assert!(dot, "no dot on the bar");
-    // On the bar, at its bottom.
-    let (_, at) = bed.hp.unread_surfaces()[0];
+    // The bell, on the bar at its bottom, counts it.
+    bed.bell()?;
+    let (_, at) = bed.hp.bell_surfaces()[0];
     assert!(at.x > 1920 - 8 - 196 && at.y > 1080 - 60, "{at:?}");
     bed.idle(Duration::from_millis(500))?;
     assert!(bed.bubbles().is_empty(), "{:?}", bed.bubbles());
@@ -661,7 +824,7 @@ fn an_agents_tool_saying_its_agent_waits_makes_no_bubble() -> anyhow::Result<()>
     bed.idle(Duration::from_millis(500))?;
     assert!(bed.bubbles().is_empty(), "{:?}", bed.bubbles());
     // Not counted on the bar either: the agent's row says it.
-    assert!(bed.hp.unread_surfaces().is_empty());
+    assert!(!bed.log().contains("unread=1"), "{}", bed.log());
     // What else it says is a bubble.
     bed.notify(Notice {
         app: "foot",
@@ -670,5 +833,261 @@ fn an_agents_tool_saying_its_agent_waits_makes_no_bubble() -> anyhow::Result<()>
         ..Notice::default()
     })?;
     bed.shows(1)?;
+    Ok(())
+}
+
+// --- 5.4: the history, clear all, do not disturb -------------------------------------
+
+#[test]
+fn the_history_lists_by_sections_newest_first() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let history = kept("Logiciels", "12 mises à jour disponibles", 26 * 60, false)
+        + &kept("Firefox", "Téléchargement terminé", 70, false)
+        + &kept("Calendrier", "Point produit", 40, false);
+    let mut bed = start_with(&shell, |_, _| {}, &history)?;
+    bed.logged("the history read kept=3 dropped=0")?;
+    bed.notify(Notice {
+        summary: "Camille dans #design",
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    bed.logged("a notification to the history")?;
+    let shows = bed.open_history()?;
+    // Newest first, under their sections; the one that just came not seen.
+    assert!(
+        shows.contains(
+            "RÉCENTES: Slack «Camille dans #design» maintenant (unseen) Calendrier «Point produit» \
+             il y a 40\u{a0}min PLUS TÔT AUJOURD’HUI: Firefox «Téléchargement terminé» il y a \
+             1\u{a0}h HIER: Logiciels «12 mises à jour disponibles» hier"
+        ),
+        "{shows}"
+    );
+    // 360 px wide, 8 px from the full bar, its bottom on the bar's.
+    let popover = bed.history();
+    assert_eq!(popover.width, 360);
+    assert_eq!(popover.x + popover.width, 1920 - 8 - 196 - 8);
+    assert_eq!(popover.y + popover.height, 1080 - 8);
+    assert_eq!(bed.history_items().len(), 4);
+    Ok(())
+}
+
+#[test]
+fn a_click_in_the_history_invokes_its_default_raises_and_removes_it() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    // Held by its sender: low urgency, no bubble, its default there.
+    let id = bed.notify(Notice {
+        summary: "Hugo dans #dev",
+        actions: &["default", "", "reply", "Répondre"],
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    bed.notify(Notice {
+        app: "Firefox",
+        summary: "Téléchargement terminé",
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    let shows = bed.open_history()?;
+    assert!(
+        shows.contains("Slack «Hugo dans #dev» maintenant (unseen) [1 actions]"),
+        "{shows}"
+    );
+    let items = bed.history_items();
+    assert_eq!(items.len(), 2);
+    // The older: Slack's.
+    let item = bed.history_item(&items[1])?;
+    let mark = bed.mark();
+    bed.hp.pointer_move(item.0, item.1);
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(item);
+    // Its default invoked, its window asked for, then it goes: its sender
+    // hears it closed by the user, and the history closes.
+    bed.hears(&format!("action {id} default"))?;
+    bed.hears(&format!("closed {id} 2"))?;
+    bed.logged_since(mark, "a notification of the history opened")?;
+    let closed = bed.hp.dispatch_until(Duration::from_secs(5), |hp| {
+        hp.popover_surfaces().is_empty()
+    })?;
+    assert!(closed, "the history stays open");
+    let shows = bed.open_history()?;
+    assert!(!shows.contains("Hugo"), "{shows}");
+    assert_eq!(bed.history_items().len(), 1);
+    Ok(())
+}
+
+#[test]
+fn its_close_removes_one_and_clear_all_empties_it() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let history = kept("Spotify", "Morceau suivant", 180, false)
+        + &kept("Discord", "Léa", 125, false)
+        + &kept("Firefox", "Téléchargement terminé", 70, false);
+    let mut bed = start_with(&shell, |_, _| {}, &history)?;
+    bed.logged("the history read back kept=3")?;
+    bed.open_history()?;
+    let items = bed.history_items();
+    assert_eq!(items.len(), 3);
+    // The ✕ of the first, under the pointer.
+    let first = bed.history_item(&items[0])?;
+    bed.hp.pointer_move(first.0, first.1);
+    bed.idle(Duration::from_millis(100))?;
+    let close = bed.history_item(&items[0].replace("Item", "Close"))?;
+    let mark = bed.mark();
+    bed.hp.pointer_move(close.0, close.1);
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(close);
+    let shows = bed.logged_since(mark, "the history shows")?;
+    assert!(!shows.contains("Firefox"), "{shows}");
+    assert!(
+        shows.contains("Discord") && shows.contains("Spotify"),
+        "{shows}"
+    );
+    // "Clear all": empty, the resting panda's words, nothing to clear.
+    let clear = bed.history_item("Clear")?;
+    let mark = bed.mark();
+    bed.hp.pointer_move(clear.0, clear.1);
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(clear);
+    let shows = bed.logged_since(mark, "the history shows")?;
+    assert!(shows.contains("history=Rien de neuf"), "{shows}");
+    let items = bed.logged_since(mark, "the history's items")?;
+    assert!(items.ends_with("items=Switch@313,82"), "{items}");
+    // Its file holds nothing then.
+    bed.logged_since(mark, "the history written count=0")?;
+    Ok(())
+}
+
+#[test]
+fn the_badge_counts_what_was_not_seen_and_opening_the_history_resets_it() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    // A bubble gone after its time, the pointer never on it.
+    let id = bed.notify(Notice {
+        timeout: 800,
+        ..Notice::default()
+    })?;
+    bed.hears(&format!("closed {id} 1"))?;
+    bed.logged("the bell unread=1")?;
+    // One the pointer rested on: seen, not counted.
+    let id = bed.notify(Notice {
+        timeout: 1500,
+        summary: "Hugo dans #dev",
+        ..Notice::default()
+    })?;
+    let card = bed.shows(1)?[0];
+    bed.hp
+        .pointer_move(f64::from(card.x + 60), f64::from(card.y + 30));
+    bed.logged("paused=true")?;
+    bed.hp.pointer_move(400.0, 600.0);
+    bed.hears(&format!("closed {id} 1"))?;
+    // A low one: counted.
+    let mark = bed.mark();
+    bed.notify(Notice {
+        app: "Spotify",
+        summary: "Morceau suivant",
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    bed.logged_since(mark, "the bell unread=2")?;
+    // Opened: 0; what it lists is seen once it closes.
+    let mark = bed.mark();
+    let shows = bed.open_history()?;
+    bed.logged_since(mark, "the bell unread=0")?;
+    assert_eq!(shows.matches("(unseen)").count(), 2, "{shows}");
+    bed.close_history()?;
+    let shows = bed.open_history()?;
+    assert!(!shows.contains("(unseen)"), "{shows}");
+    Ok(())
+}
+
+#[test]
+fn do_not_disturb_holds_a_normal_bubble_but_lets_a_critical_one_show() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    bed.open_history()?;
+    let switch = bed.history_item("Switch")?;
+    let mark = bed.mark();
+    bed.hp.pointer_move(switch.0, switch.1);
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(switch);
+    // On for an hour, the default; the bell slashed.
+    bed.logged_since(mark, "do not disturb on=true choice=Some(Hour)")?;
+    let shows = bed.logged_since(mark, "the history shows")?;
+    assert!(shows.contains("dnd=Some(Hour)"), "{shows}");
+    bed.logged_since(mark, "the bell unread=0 dnd=true")?;
+    bed.close_history()?;
+    // A normal one: held, to the history, counted.
+    let mark = bed.mark();
+    bed.notify(Notice::default())?;
+    bed.logged_since(mark, "held: do not disturb")?;
+    bed.logged_since(mark, "the bell unread=1 dnd=true")?;
+    bed.idle(Duration::from_millis(500))?;
+    assert!(bed.bubbles().is_empty(), "{:?}", bed.bubbles());
+    // A critical one shows.
+    bed.notify(Notice {
+        app: "Batterie",
+        summary: "Batterie très faible : 5 %",
+        urgency: Some(2),
+        ..Notice::default()
+    })?;
+    bed.shows(1)?;
+    Ok(())
+}
+
+#[test]
+fn the_history_survives_a_restart_of_the_shell_without_what_is_older_than_seven_days()
+-> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let history = kept("Slack", "Il y a huit jours", 8 * 24 * 60, false)
+        + &kept("Slack", "Inès dans #général", 25 * 60, true);
+    let mut bed = start_with(&shell, |_, _| {}, &history)?;
+    bed.logged("the history read kept=1 dropped=1")?;
+    let mark = bed.mark();
+    bed.notify(Notice {
+        app: "Spotify",
+        summary: "Morceau suivant",
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    bed.logged_since(mark, "the history written count=2")?;
+    // Do not disturb, on in this session.
+    bed.open_history()?;
+    let switch = bed.history_item("Switch")?;
+    bed.hp.pointer_move(switch.0, switch.1);
+    bed.idle(Duration::from_millis(100))?;
+    let mark = bed.mark();
+    bed.click(switch);
+    bed.logged_since(mark, "do not disturb on=true")?;
+    bed.close_history()?;
+    // The shell ends (by its process id, its script's); the compositor
+    // starts it again.
+    let pid = std::fs::read_to_string(&bed.pid)?.trim().to_owned();
+    let mark = bed.mark();
+    let killed = Command::new("kill").arg(&pid).status()?;
+    assert!(killed.success());
+    bed.logged_since(mark, "the history read back kept=2 dnd=true")?;
+    let again = std::fs::read_to_string(&bed.pid)?.trim().to_owned();
+    assert_ne!(again, pid);
+    // Seen as the history closed before.
+    let shows = bed.open_history()?;
+    assert!(
+        shows.contains("RÉCENTES: Spotify «Morceau suivant»")
+            && shows.contains("HIER: Slack «Inès dans #général» hier"),
+        "{shows}"
+    );
+    assert!(!shows.contains("(unseen)"), "{shows}");
+    assert!(!shows.contains("huit jours"), "{shows}");
     Ok(())
 }

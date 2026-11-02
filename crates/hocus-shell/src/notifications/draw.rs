@@ -1,5 +1,5 @@
-//! The bubbles as the 5.3 mockup draws them (sizes at ×1), the "+N" chip
-//! under them, and the dot on the bar's notifications place.
+//! The bubbles as the 5.3 mockup draws them (sizes at ×1), and the "+N"
+//! chip under them.
 //!
 //! A bubble's card: 340 px wide, radius 14, a 1 px rim, the popovers' tint
 //! (near opaque, `rgba(22,27,42,0.95) → rgba(14,17,28,0.97)`); its 32 px
@@ -20,7 +20,6 @@
 
 use std::time::{Duration, Instant};
 
-use hocus_link::{EDGE, Form};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
@@ -137,12 +136,6 @@ const CHIP_PAD: (f32, f32) = (4.0, 10.0);
 const CHIP_RADIUS: f32 = 10.0;
 const CHIP_FILL: Color = rgba(14, 17, 28, 0.9);
 const CHIP_RIM: Color = rgba(255, 255, 255, 0.12);
-
-/// The dot: 14 px high, 3 px in, `#8FB3FF`, its count 9 px bold.
-const DOT: f32 = 14.0;
-const DOT_TEXT: f32 = 9.0;
-const DOT_FILL: Color = rgb(0x8FB3FF);
-const DOT_INK: Color = rgb(0x0B1020);
 
 // --- Words ---------------------------------------------------------------------
 
@@ -319,35 +312,6 @@ pub fn chip_size(n: usize) -> (u32, u32) {
     (
         (text + 2.0 * (CHIP_PAD.1 + BORDER)).ceil() as u32,
         (CHIP_TEXT * LINE + 2.0 * (CHIP_PAD.0 + BORDER)).ceil() as u32,
-    )
-}
-
-/// The dot's size for `count`, and its margins on a bar in `form`
-/// (anchored to the bottom right): where the badge of the notifications'
-/// button (5.5) goes, its right 4 px past a 24 px bell's and its top 3 px
-/// over it. In the mini form the bell sits in the notifications' place
-/// under the keyboard layout's button (bar.md 3.8: its top 14 px under
-/// it); in the full form, it is the footer's second item of four (§4 group
-/// 11).
-pub fn dot_placed(form: Form, count: usize) -> ((u32, u32), (i32, i32, i32, i32)) {
-    let text = kit::measure(&count.to_string(), DOT_TEXT, MANROPE_BOLD);
-    let size = ((text + 6.0).max(DOT).ceil() as u32, DOT as u32);
-    let bar = form.width() as f32;
-    // The bell's centre from the bar's left, its top over the bar's bottom.
-    let (centre, bell_top) = match form {
-        Form::Mini => (bar / 2.0, 33.0),
-        Form::Full => (12.0 + (bar - 24.0) * 1.5 / 4.0, 41.0),
-    };
-    let right = bar - (centre + 12.0 + 4.0);
-    let bottom = bell_top + 3.0 - DOT;
-    (
-        size,
-        (
-            0,
-            EDGE + right.round() as i32,
-            EDGE + bottom.round() as i32,
-            0,
-        ),
     )
 }
 
@@ -823,7 +787,7 @@ fn shadow(size: Size, card: Rectangle, critical: bool) -> svg::Handle {
     )
 }
 
-// --- The chip and the dot ---------------------------------------------------------
+// --- The chip ------------------------------------------------------------------
 
 /// The "+N waiting" chip's surface.
 #[derive(Debug, Clone)]
@@ -883,51 +847,6 @@ impl<Message> canvas::Program<Message> for Chip {
     }
 }
 
-/// The dot on a bar's notifications place.
-#[derive(Debug, Clone)]
-pub struct Dot {
-    pub id: window::Id,
-    /// On the CPU, the bar's colour under it (its buffer has no alpha).
-    pub backdrop: Option<Color>,
-}
-
-impl<Message> canvas::Program<Message> for Dot {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut f = Frame::new(renderer, bounds.size());
-        let Some((count, _)) = super::with(|c| c.stack.dot(self.id)) else {
-            return vec![f.into_geometry()];
-        };
-        let size = bounds.size();
-        if let Some(backdrop) = self.backdrop {
-            f.fill_rectangle(Point::ORIGIN, size, backdrop);
-        }
-        f.fill(
-            &Path::rounded_rectangle(Point::ORIGIN, size, (DOT / 2.0).into()),
-            DOT_FILL,
-        );
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                count.to_string(),
-                Point::new(size.width / 2.0, size.height / 2.0),
-                DOT_TEXT,
-                DOT_INK,
-                Alignment::Center,
-            ),
-        ));
-        vec![f.into_geometry()]
-    }
-}
-
 /// `colour` over `under`, opaque.
 fn over(colour: Color, under: Color) -> Color {
     Color::from_rgb(
@@ -958,6 +877,8 @@ mod tests {
             resident: false,
             pid: 0,
             agent: false,
+            icon_from: crate::notifications::note::IconFrom::default(),
+            at: 0,
         }
     }
 

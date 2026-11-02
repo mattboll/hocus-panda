@@ -1,6 +1,15 @@
-//! Notifications (5.3): the desktop's server, `org.freedesktop.Notifications`
-//! on the session bus the compositor names ([`server`]), and their bubbles
-//! beside the bar ([`stack`] decides, [`draw`] draws).
+//! Notifications (5.3, 5.4): the desktop's server,
+//! `org.freedesktop.Notifications` on the session bus the compositor names
+//! ([`server`]), their bubbles beside the bar ([`stack`] decides, [`draw`]
+//! draws), their history ([`history`], its panel in
+//! [`crate::popover::history`]), do not disturb ([`dnd`]) and the bell on
+//! the bar that opens the history ([`bell`]).
+//!
+//! The history is kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications`
+//! and do not disturb for the session, in its runtime directory: read back
+//! as the shell starts and written as they change, on threads of their own;
+//! only where notifications are served, never by a nested desktop beside
+//! the live session's.
 //!
 //! The server runs on a thread of its own and hands each notification,
 //! owned, to [`input`]; so do the bubbles' surfaces with what the pointer
@@ -12,14 +21,18 @@
 //! server's thread. Nothing here goes through iced's messages, which would
 //! draw every surface again.
 
+pub mod bell;
+pub mod dnd;
 pub mod draw;
+pub mod history;
 pub mod note;
 mod server;
 pub mod stack;
 
 use std::{
-    sync::{Mutex, PoisonError},
-    time::Instant,
+    path::PathBuf,
+    sync::{Mutex, PoisonError, mpsc},
+    time::{Duration, Instant},
 };
 
 use hocus_link::{Form, ToCompositor};
@@ -29,6 +42,9 @@ use iced_layershell::reexport::{
 };
 pub use stack::Input;
 use stack::{Effect, Stack};
+
+use self::{dnd::Dnd, history::Record};
+use crate::clock::time::Wall;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::Message;
@@ -54,9 +70,40 @@ pub fn with<T>(with: impl FnOnce(&mut Center) -> T) -> T {
     }))
 }
 
-/// Starts the server, if the compositor named a bus; `software`: the
-/// shell draws on the CPU.
+/// The wall clock the history reads: the system's time zone, and the
+/// clock's shift for recordings (`HOCUS_CLOCK_AT`).
+static WALL: Mutex<Option<Wall>> = Mutex::new(None);
+
+/// The wall clock now.
+pub fn wall() -> jiff::Zoned {
+    let wall = WALL.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    match wall {
+        Some(wall) => wall.now(),
+        None => jiff::Zoned::now(),
+    }
+}
+
+/// The wall clock now, milliseconds since the epoch.
+pub fn wall_ms() -> i64 {
+    wall().timestamp().as_millisecond()
+}
+
+/// The system's time zone changed.
+pub fn set_zone(zone: jiff::tz::TimeZone) {
+    if let Some(wall) = WALL.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+        wall.zone = zone;
+    }
+}
+
+/// Starts the server, if the compositor named a bus, and reads back the
+/// history and do not disturb; `software`: the shell draws on the CPU.
 pub fn start(software: bool) {
+    let zone = crate::clock::time::system_zone();
+    let shift = std::env::var("HOCUS_CLOCK_AT")
+        .ok()
+        .and_then(|at| Wall::shift_to(&at, &zone))
+        .unwrap_or_default();
+    *WALL.lock().unwrap_or_else(PoisonError::into_inner) = Some(Wall { zone, shift });
     with(|c| {
         c.stack = Stack::new(software);
         c.card = software;
@@ -64,7 +111,184 @@ pub fn start(software: bool) {
     let (sender, receiver) = unbounded_channel();
     *INPUTS.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
     *TAKEN.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
-    server::start();
+    // The history and do not disturb are kept only where notifications
+    // are served: a nested or headless desktop without a bus of its own
+    // never reads or writes the live session's.
+    if server::start() {
+        keep();
+    } else {
+        input(Input::Restored {
+            notes: Vec::new(),
+            dnd: Dnd::Off,
+        });
+    }
+}
+
+/// The history's panel opened (`open`) or closed.
+pub fn history_open(open: bool) {
+    input(Input::History {
+        open,
+        wall: wall_ms(),
+    });
+}
+
+// --- Kept: the history on disk, do not disturb for the session -----------------------
+
+/// What to write.
+enum Write {
+    History(Vec<Record>),
+    Dnd(Dnd),
+}
+
+static WRITE: Mutex<Option<mpsc::Sender<Write>>> = Mutex::new(None);
+
+/// The history's file: `$XDG_STATE_HOME/hocuspanda/notifications`, else
+/// `~/.local/state`'s.
+fn history_file() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    let state = var("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    state
+        .is_absolute()
+        .then(|| state.join("hocuspanda/notifications"))
+}
+
+/// Do not disturb's file, in the session's runtime directory.
+fn dnd_file() -> Option<PathBuf> {
+    let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty())?);
+    dir.is_absolute().then(|| dir.join("hocuspanda/dnd"))
+}
+
+/// `text` in `file`, readable by the user alone, whole or not at all.
+fn write(file: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::{io::Write as _, os::unix::fs::OpenOptionsExt};
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let new = file.with_extension("new");
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&new)?;
+    out.write_all(text.as_bytes())?;
+    out.sync_all()?;
+    std::fs::rename(&new, file)
+}
+
+/// Reads back the history and do not disturb, then writes them as they
+/// change, on threads of their own.
+fn keep() {
+    let (history, dnd_at) = (history_file(), dnd_file());
+    let (sender, writes) = mpsc::channel::<Write>();
+    *WRITE.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
+    let read = std::thread::Builder::new()
+        .name("notifications' history".to_owned())
+        .spawn(move || {
+            let notes = read_history(history.as_deref());
+            let dnd = dnd_at
+                .as_deref()
+                .and_then(|file| std::fs::read_to_string(file).ok())
+                .map_or(Dnd::Off, |text| {
+                    dnd::decode(&text, dnd::session(), Instant::now())
+                });
+            input(Input::Restored { notes, dnd });
+            while let Ok(first) = writes.recv() {
+                // The latest of each sent meanwhile.
+                let (mut records, mut dnd) = (None, None);
+                for write in std::iter::once(first).chain(writes.try_iter()) {
+                    match write {
+                        Write::History(r) => records = Some(r),
+                        Write::Dnd(d) => dnd = Some(d),
+                    }
+                }
+                if let (Some(records), Some(file)) = (records, &history) {
+                    match self::write(file, &history::encode(&records)) {
+                        Ok(()) => tracing::debug!(count = records.len(), "the history written"),
+                        Err(err) => {
+                            tracing::warn!(file = %file.display(), %err, "the history not written");
+                        }
+                    }
+                }
+                if let (Some(dnd), Some(file)) = (dnd, &dnd_at) {
+                    let done = match dnd::encode(dnd, dnd::session()) {
+                        Some(text) => self::write(file, &text),
+                        None => match std::fs::remove_file(file) {
+                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                            done => done,
+                        },
+                    };
+                    if let Err(err) = done {
+                        tracing::warn!(file = %file.display(), %err, "do not disturb not written");
+                    }
+                }
+            }
+        });
+    if let Err(err) = read {
+        tracing::warn!(%err, "cannot keep the notifications' history");
+        input(Input::Restored {
+            notes: Vec::new(),
+            dnd: Dnd::Off,
+        });
+    }
+}
+
+/// The history in `file`, younger than 7 days, its icons found again (once
+/// the launcher's applications and the bars' scales are known, a few
+/// seconds at most).
+fn read_history(file: Option<&std::path::Path>) -> Vec<(note::Note, history::Sight)> {
+    let Some(file) = file else {
+        return Vec::new();
+    };
+    let text = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => {
+            tracing::warn!(file = %file.display(), %err, "the history not read");
+            String::new()
+        }
+    };
+    let (records, dropped) = history::decode(&text, wall_ms());
+    tracing::info!(kept = records.len(), dropped, "the history read");
+    if records.is_empty() {
+        return Vec::new();
+    }
+    let ready = || {
+        !crate::launcher::apps::catalog().apps.is_empty()
+            && !crate::popover::with(|c| c.bar_forms()).is_empty()
+    };
+    let start = Instant::now();
+    while !ready() && start.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let scale = server::screens_scale();
+    records
+        .into_iter()
+        .map(|record| {
+            let (mut note, seen) = record.note();
+            note.icon = server::icon_of(server::Looked {
+                app_icon: note.icon_from.app_icon.clone(),
+                image_path: note.icon_from.image_path.clone(),
+                image: None,
+                entry: note.entry.clone(),
+                app: note.app.clone(),
+                scale,
+            });
+            (note, seen)
+        })
+        .collect()
+}
+
+fn send_write(write: Write) {
+    if let Some(sender) = WRITE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+    {
+        let _ = sender.send(write);
+    }
 }
 
 /// What happened, for the stack.
@@ -83,7 +307,7 @@ pub fn focus(screen: String) {
     input(Input::Focus(screen));
 }
 
-/// The bars changed: the bubbles keep beside them, and the dots on them.
+/// The bars changed: the bubbles keep beside them.
 pub fn bars_changed() {
     let bars: Vec<(String, Form)> = crate::popover::with(|c| c.bar_forms());
     input(Input::Bars(bars));
@@ -133,7 +357,7 @@ const EVERYWHERE: i32 = 1 << 20;
 type WlRegion = wayland_client::protocol::wl_region::WlRegion;
 
 /// Surface `id` takes the pointer in `region` only, or nowhere.
-fn region(id: window::Id, region: Option<Rectangle>) -> Message {
+pub fn region(id: window::Id, region: Option<Rectangle>) -> Message {
     let rect = region.map(|r| {
         let (x, y) = (r.x.floor() as i32, r.y.floor() as i32);
         let right = (r.x + r.width).ceil() as i32;
@@ -167,7 +391,6 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             namespace,
             size,
             margin,
-            bottom,
             region: taken,
         } => {
             let pointer = taken.is_some();
@@ -176,11 +399,7 @@ fn carry_out(effect: Effect) -> Vec<Message> {
                     settings: NewLayerShellSettings {
                         size: Some(size),
                         layer: Layer::Top,
-                        anchor: if bottom {
-                            Anchor::Right | Anchor::Bottom
-                        } else {
-                            Anchor::Right | Anchor::Top
-                        },
+                        anchor: Anchor::Right | Anchor::Top,
                         exclusive_zone: Some(0),
                         margin: Some(margin),
                         keyboard_interactivity: KeyboardInteractivity::None,
@@ -226,16 +445,50 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             crate::popover::tell(ToCompositor::Raise { pid, app });
             Vec::new()
         }
+        Effect::Changed => {
+            crate::popover::changed(crate::popover::Item::Notifications);
+            Vec::new()
+        }
+        Effect::Save(records) => {
+            send_write(Write::History(records));
+            Vec::new()
+        }
+        Effect::SaveDnd(dnd) => {
+            send_write(Write::Dnd(dnd));
+            Vec::new()
+        }
     }
 }
 
 /// What surface `id` shows, if it is one of the notifications': a bubble,
-/// the chip, a dot. `glass`: the compositor blurs behind the shell.
+/// the chip, a bell. `glass`: the compositor blurs behind the shell.
 pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
     enum Is {
         Bubble,
         Chip,
-        Dot(String),
+    }
+    if let Some((bar, form)) = bell::of(id) {
+        let card = with(|c| c.card);
+        // On the CPU, the bar's colour at the bell's height under it.
+        let backdrop = card.then(|| {
+            let height = crate::popover::with(|c| c.bar_height(&bar));
+            let middle = (height - bell::rise(form)) / height.max(1.0);
+            crate::mix(
+                crate::OPAQUE_TOP,
+                crate::OPAQUE_BOTTOM,
+                middle.clamp(0.0, 1.0),
+            )
+        });
+        return Some(
+            canvas(bell::Surface {
+                bar,
+                form,
+                backdrop,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        );
     }
     let (is, card) = with(|c| {
         let is = if c.stack.bubble(id).is_some() {
@@ -243,7 +496,7 @@ pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
         } else if c.stack.chip(id).is_some() {
             Some(Is::Chip)
         } else {
-            c.stack.dot(id).map(|(_, bar)| Is::Dot(bar))
+            None
         };
         (is, c.card)
     });
@@ -256,22 +509,6 @@ pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-        Is::Dot(bar) => {
-            // On the CPU, the bar's colour at the dot's height under it.
-            let backdrop = card.then(|| {
-                let height = crate::popover::with(|c| c.bar_height(&bar));
-                let middle = (height - 30.0) / height.max(1.0);
-                crate::mix(
-                    crate::OPAQUE_TOP,
-                    crate::OPAQUE_BOTTOM,
-                    middle.clamp(0.0, 1.0),
-                )
-            });
-            canvas(draw::Dot { id, backdrop })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        }
     };
     Some(element)
 }

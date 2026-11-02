@@ -2,8 +2,9 @@
 //! one at a time. The sound's ([`sound`]), the Wi-Fi's ([`wifi`]),
 //! Bluetooth's ([`bluetooth`]), the brightness's ([`brightness`]), the
 //! battery's ([`battery`]), a desktop's list of windows ([`desktop`]), the
-//! agents' tools' ([`agents`]) and the secretary's briefing ([`briefing`]),
-//! drawn and handled with the pieces of [`kit`].
+//! agents' tools' ([`agents`]), the secretary's briefing ([`briefing`]) and
+//! the notifications' history ([`history`]), drawn and handled with the
+//! pieces of [`kit`].
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -40,6 +41,7 @@ pub mod bluetooth;
 pub mod briefing;
 pub mod brightness;
 pub mod desktop;
+pub mod history;
 pub mod kit;
 pub mod sound;
 pub mod wifi;
@@ -51,8 +53,8 @@ use std::{
 };
 
 use hocus_link::{
-    AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, Form,
-    LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
+    AGENTS_NAMESPACE, BELL_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE,
+    Form, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -93,6 +95,8 @@ pub enum Item {
     /// The secretary, at the head of the agents' group (4.6): her
     /// briefing, from which Sources opens.
     Secretary,
+    /// The bell on the notifications' place (5.4): their history.
+    Notifications,
 }
 
 impl Item {
@@ -130,6 +134,7 @@ impl Item {
         match self {
             Self::Desktop(_) => desktop::WIDTH,
             Self::Secretary => briefing::WIDTH,
+            Self::Notifications => history::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -148,6 +153,7 @@ impl Item {
             Self::Sources | Self::AnotherTool => agents::sources_height(form),
             Self::Plug(tool) => agents::consent_height(tool),
             Self::Secretary => briefing::height(form),
+            Self::Notifications => history::height(),
             Self::Keyboard | Self::Decline | Self::Agent(_) => 0,
         }
     }
@@ -169,6 +175,7 @@ impl Item {
             Self::Battery => battery::opening(),
             Self::Keyboard | Self::Desktop(_) | Self::Agent(_) | Self::Secretary => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
+            Self::Notifications => crate::notifications::history_open(true),
         }
     }
 
@@ -188,6 +195,7 @@ impl Item {
             | Self::Secretary => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
+            Self::Notifications => crate::notifications::history_open(false),
         }
     }
 
@@ -203,6 +211,7 @@ impl Item {
                 CONNECTIONS_NAMESPACE
             }
             (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
+            (Self::Notifications, _) => BELL_NAMESPACE,
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -230,6 +239,7 @@ impl Item {
             LEVELS_NAMESPACE => place.levels,
             DESKTOPS_NAMESPACE => place.desktops,
             AGENTS_NAMESPACE => place.agents,
+            BELL_NAMESPACE => place.bell.unwrap_or(place.levels),
             _ => place.connections,
         }
     }
@@ -255,6 +265,8 @@ pub struct Place {
     pub agents: window::Id,
     /// The bar's own surface, whose size gives its height.
     pub surface: window::Id,
+    /// The notifications' bell's (5.4), once the bar has told it.
+    pub bell: Option<window::Id>,
 }
 
 /// A bar's height until its surface's is known.
@@ -486,6 +498,7 @@ impl Controller {
         (levels, connections, desktops, agents): (window::Id, window::Id, window::Id, window::Id),
     ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
+        let bell = self.bars.get(bar).and_then(|p| p.bell);
         let place = Place {
             form,
             height,
@@ -494,8 +507,16 @@ impl Controller {
             desktops,
             agents,
             surface,
+            bell,
         };
         self.bars.insert(bar.to_owned(), place);
+    }
+
+    /// Bar `bar`'s bell's surface is `bell`.
+    pub fn set_bell(&mut self, bar: &str, bell: window::Id) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.bell = Some(bell);
+        }
     }
 
     /// The bar whose surface is `surface` is `height` tall.
@@ -993,7 +1014,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Sources
         | Item::AnotherTool
         | Item::Plug(_)
-        | Item::Secretary => None,
+        | Item::Secretary
+        | Item::Notifications => None,
     }
 }
 
@@ -1874,6 +1896,7 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
+            bell: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -1899,6 +1922,7 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
+            bell: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
         let small = placed(place, item, (280, 332), false);

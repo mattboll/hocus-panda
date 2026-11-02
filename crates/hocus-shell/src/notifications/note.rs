@@ -42,6 +42,20 @@ pub struct Note {
     /// An agent's tool saying only that the agent waits or has finished:
     /// to the history, no bubble.
     pub agent: bool,
+    /// What its icon was found by, to find it again for the history after
+    /// a restart (an image sent as pixels is not kept).
+    pub icon_from: IconFrom,
+    /// When it came, on the wall clock (milliseconds since the epoch): the
+    /// history says how long ago, and keeps it 7 days.
+    pub at: i64,
+}
+
+/// What a notification's icon is looked for by, besides its application's
+/// name and desktop entry: its `app_icon`, and its `image-path` hint.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IconFrom {
+    pub app_icon: String,
+    pub image_path: Option<String>,
 }
 
 /// The `urgency` hint.

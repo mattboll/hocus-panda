@@ -31,7 +31,7 @@ use zbus::{
 
 use super::{
     Input,
-    note::{self, Note, Sender, Timeout, Urgency},
+    note::{self, IconFrom, Note, Sender, Timeout, Urgency},
 };
 use crate::{
     launcher::{
@@ -73,14 +73,14 @@ pub fn signal(signal: Signal) {
 }
 
 /// Serves the notifications on the bus the compositor names, if it names
-/// one.
-pub fn start() {
+/// one: whether it does.
+pub fn start() -> bool {
     let Some(bus) = std::env::var(NOTIFICATIONS_BUS_ENV)
         .ok()
         .filter(|b| !b.is_empty())
     else {
         tracing::info!("no session bus given: no notifications served");
-        return;
+        return false;
     };
     let (sender, signals) = unbounded_channel();
     *SIGNALS.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
@@ -97,7 +97,9 @@ pub fn start() {
         });
     if let Err(err) = started {
         tracing::warn!(%err, "cannot serve the notifications");
+        return false;
     }
+    true
 }
 
 async fn run(bus: String, mut signals: UnboundedReceiver<Signal>) {
@@ -210,6 +212,10 @@ impl Server {
             .get("image-path")
             .or_else(|| hints.get("image_path"))
             .and_then(|v| String::try_from(&**v).ok());
+        let icon_from = IconFrom {
+            app_icon: app_icon.clone(),
+            image_path: image_path.clone(),
+        };
         let looked = Looked {
             app_icon,
             image_path,
@@ -258,6 +264,8 @@ impl Server {
             resident,
             pid,
             agent,
+            icon_from,
+            at: super::wall_ms(),
         };
         tracing::debug!(
             id,
@@ -267,7 +275,7 @@ impl Server {
             agent,
             "a notification"
         );
-        super::input(Input::Notify(note));
+        super::input(Input::Notify(Box::new(note)));
         id
     }
 
@@ -379,18 +387,18 @@ fn image_data(value: &OwnedVariant) -> Option<Icon> {
 }
 
 /// What a notification's icon is looked for by.
-struct Looked {
-    app_icon: String,
-    image_path: Option<String>,
-    image: Option<Icon>,
-    entry: Option<String>,
-    app: String,
+pub(super) struct Looked {
+    pub app_icon: String,
+    pub image_path: Option<String>,
+    pub image: Option<Icon>,
+    pub entry: Option<String>,
+    pub app: String,
     /// The bubbles' screens' largest scale.
-    scale: u32,
+    pub scale: u32,
 }
 
 /// The largest scale of the bars' screens: the icon is drawn for it.
-fn screens_scale() -> u32 {
+pub(super) fn screens_scale() -> u32 {
     let bars = crate::popover::with(|c| c.bar_forms());
     bars.iter()
         .map(|(bar, _)| crate::popover::kit::scale(bar))
@@ -428,7 +436,7 @@ fn icon_named(text: &str, scale: u32) -> Option<Icon> {
 /// the icon named as the entry), else
 /// the icon of the application whose name is its application's, among
 /// those the launcher lists. Read off the drawing thread.
-fn icon_of(looked: Looked) -> Option<Icon> {
+pub(super) fn icon_of(looked: Looked) -> Option<Icon> {
     let scale = looked.scale.max(1);
     if let Some(icon) = icon_named(&looked.app_icon, scale) {
         return Some(icon);

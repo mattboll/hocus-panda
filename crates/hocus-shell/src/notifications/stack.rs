@@ -1,6 +1,7 @@
-//! The bubbles' stack (5.3, variant A): which notifications show, where,
-//! how long, and what each event does. Pure: it takes what happened and
-//! the time, and says what to carry out ([`Effect`]).
+//! The bubbles' stack (5.3, variant A) and the history (5.4, variant B):
+//! which notifications show, where, how long, what each event does, and
+//! what the history keeps. Pure: it takes what happened and the time, and
+//! says what to carry out ([`Effect`]).
 //!
 //! - At most [`MOST`] bubbles, top first, 8 px apart, right of the screen
 //!   against the bar (8 px from it, or from the screen's edge without
@@ -9,9 +10,16 @@
 //!   stack saying how many.
 //! - A normal one counts down its time (6 s, or the application's); a
 //!   critical one stays until closed or acted on; a low one makes no
-//!   bubble: it goes to the history, and the dot on the bar counts it. So
-//!   does nothing for an agents' tool saying only that its agent waits or
-//!   finished: to the history, no bubble, no count.
+//!   bubble. So does nothing for an agents' tool saying only that its
+//!   agent waits or finished.
+//! - Every notification goes to the history as it comes. The bell's badge
+//!   counts what was not seen: a bubble that went without the pointer
+//!   resting on it or a click, a low one, one held while the user is not
+//!   to be disturbed; not an agent's. Opening the history sets it to 0;
+//!   what it lists is seen as it closes.
+//! - While the user is not to be disturbed, bubbles are held (to the
+//!   history only), critical ones still showing; it ends by itself at its
+//!   time.
 //! - Hovering any bubble pauses every countdown.
 //! - A notification replacing one shown updates its bubble in place, its
 //!   countdown starting again.
@@ -20,17 +28,19 @@
 //!   one shows.
 
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, VecDeque},
     time::{Duration, Instant},
 };
 
 use hocus_link::{
-    BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, Form, UNREAD_NAMESPACE, bubble_namespace,
+    BELL_NAMESPACE, BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, Form, bubble_namespace,
 };
 use iced::{Rectangle, window};
 
 use super::{
+    dnd::Dnd,
     draw::{self, Laid},
+    history::{History, Record, Sight},
     note::{Note, Timeout, Urgency},
     server::Signal,
 };
@@ -39,14 +49,12 @@ use super::{
 pub const MOST: usize = 3;
 /// Between two bubbles, and between the last and the chip.
 const GAP: f32 = 8.0;
-/// The history keeps this many, the oldest going first.
-const HISTORY: usize = 200;
 
 /// What happened.
 #[derive(Debug, Clone)]
 pub enum Input {
     /// A notification, new or replacing one (same id).
-    Notify(Note),
+    Notify(Box<Note>),
     /// `CloseNotification`.
     Close(u32),
     /// The compositor says the focused window's screen.
@@ -61,22 +69,34 @@ pub enum Input {
     Dismiss(u64),
     /// One of its actions.
     Action { serial: u64, key: String },
+    /// The history's panel opened (`open`) or closed, the wall clock
+    /// reading `wall` (milliseconds).
+    History { open: bool, wall: i64 },
+    /// A click on a notification of the history, by its key.
+    Open(u64),
+    /// Its ✕, or "clear all": these go.
+    Remove(Vec<u64>),
+    /// One of its actions, in the history.
+    Act { key: u64, action: String },
+    /// Do not disturb, as the user set it.
+    Dnd(Dnd),
+    /// What the history kept before the shell started again, and do not
+    /// disturb as it was in this session.
+    Restored { notes: Vec<(Note, Sight)>, dnd: Dnd },
 }
 
 /// What to carry out.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
-    /// A layer surface: a bubble's, the chip's or a dot's, on `screen`,
-    /// anchored to the top right (a dot: the bottom right), `size`, its
-    /// margins (top, right, bottom, left); it takes the pointer in
-    /// `region` only (none: nowhere).
+    /// A layer surface: a bubble's or the chip's, on `screen`, anchored to
+    /// the top right, `size`, its margins (top, right, bottom, left); it
+    /// takes the pointer in `region` only (none: nowhere).
     Open {
         id: window::Id,
         screen: String,
         namespace: String,
         size: (u32, u32),
         margin: (i32, i32, i32, i32),
-        bottom: bool,
         region: Option<Rectangle>,
     },
     /// Surface `id` to this size and these margins.
@@ -97,6 +117,13 @@ pub enum Effect {
         pid: u32,
         app: String,
     },
+    /// What the history lists changed: its panel draws again, at its new
+    /// size.
+    Changed,
+    /// The history to write, as it is now.
+    Save(Vec<Record>),
+    /// Do not disturb to write, as it is now.
+    SaveDnd(Dnd),
 }
 
 /// A bubble's countdown.
@@ -176,6 +203,8 @@ pub struct Bubble {
     pub note: Note,
     pub laid: Laid,
     phase: Phase,
+    /// The pointer rested on it: it was seen.
+    rested: bool,
     screen: String,
     /// Where it is: its size and margins.
     placed: ((u32, u32), (i32, i32, i32, i32)),
@@ -199,7 +228,7 @@ impl Bubble {
     }
 }
 
-/// A surface of the stack's other than a bubble: the chip, a dot.
+/// A surface of the stack's other than a bubble: the chip.
 #[derive(Debug, Clone, PartialEq)]
 struct Extra {
     id: window::Id,
@@ -212,11 +241,11 @@ struct Extra {
 pub struct Stack {
     bubbles: Vec<Bubble>,
     queue: VecDeque<Note>,
-    /// What went straight to the history (low, an agent's), newest last;
-    /// for the history (5.4).
-    pub history: VecDeque<Note>,
-    /// The ids the bar's dot counts.
-    unread: BTreeSet<u32>,
+    pub history: History,
+    pub dnd: Dnd,
+    /// What was kept before is read back: until then, nothing is written
+    /// over it.
+    restored: bool,
     hovered: BTreeSet<u64>,
     /// The focused window's screen, as last told.
     focus: Option<String>,
@@ -226,23 +255,26 @@ pub struct Stack {
     card: bool,
     next: u64,
     chip: Option<(Extra, usize)>,
-    dots: HashMap<String, Extra>,
 }
+
+/// What, changing, is written or drawn again: the history's version, the
+/// badge, do not disturb.
+type Marks = (u64, usize, Dnd);
 
 impl Stack {
     pub fn new(card: bool) -> Self {
         Self {
             bubbles: Vec::new(),
             queue: VecDeque::new(),
-            history: VecDeque::new(),
-            unread: BTreeSet::new(),
+            history: History::default(),
+            dnd: Dnd::Off,
+            restored: false,
             hovered: BTreeSet::new(),
             focus: None,
             bars: Vec::new(),
             card,
             next: 1,
             chip: None,
-            dots: HashMap::new(),
         }
     }
 
@@ -259,18 +291,9 @@ impl Stack {
             .map(|(_, n)| *n)
     }
 
-    /// The count, and the bar's form, if a dot's surface is `id`.
-    pub fn dot(&self, id: window::Id) -> Option<(usize, String)> {
-        self.dots
-            .iter()
-            .find(|(_, d)| d.id == id)
-            .map(|(bar, _)| (self.unread.len(), bar.clone()))
-    }
-
-    /// How many the dot counts.
-    #[cfg(test)]
-    pub fn unread(&self) -> usize {
-        self.unread.len()
+    /// What the bell's badge counts.
+    pub fn badge(&self) -> usize {
+        self.history.unseen()
     }
 
     /// Whether the countdowns are paused (a bubble is hovered).
@@ -287,40 +310,78 @@ impl Stack {
                 Phase::Leaving(at) => Some(at),
                 Phase::Shown(_) => None,
             })
+            .chain(self.dnd.deadline())
             .min()
+    }
+
+    fn marks(&self) -> Marks {
+        (self.history.version(), self.history.unseen(), self.dnd)
+    }
+
+    /// What changed since `before`: the history's panel and the bell drawn
+    /// again, what is kept written (once what was kept is read back).
+    fn settle(&mut self, before: Marks, effects: &mut Vec<Effect>) {
+        let (version, unseen, dnd) = self.marks();
+        if version != before.0 {
+            effects.push(Effect::Changed);
+            if self.restored {
+                effects.push(Effect::Save(
+                    self.history.items().iter().map(Record::of).collect(),
+                ));
+            }
+        }
+        if unseen != before.1 || dnd.is_on() != before.2.is_on() {
+            tracing::debug!(unread = unseen, dnd = dnd.is_on(), "the bell");
+            effects.push(Effect::Wake(BELL_NAMESPACE.to_owned()));
+        }
+        if dnd != before.2 {
+            effects.push(Effect::Changed);
+            if self.restored {
+                effects.push(Effect::SaveDnd(dnd));
+            }
+        }
     }
 
     /// What `input` at `now` does.
     pub fn handle(&mut self, input: Input, now: Instant) -> Vec<Effect> {
+        let before = self.marks();
         let mut effects = Vec::new();
+        self.handle_input(input, now, &mut effects);
+        self.settle(before, &mut effects);
+        effects
+    }
+
+    fn handle_input(&mut self, input: Input, now: Instant, effects: &mut Vec<Effect>) {
         match input {
-            Input::Notify(note) => self.notify(note, now, &mut effects),
-            Input::Close(id) => self.close(id, now, &mut effects),
+            Input::Notify(note) => self.notify(*note, now, effects),
+            Input::Close(id) => self.close(id, now, effects),
             Input::Focus(screen) => self.focus = Some(screen),
             Input::Bars(bars) => {
                 self.bars = bars;
-                self.dots(&mut effects);
-                self.relayout(&mut effects);
+                self.relayout(effects);
             }
             Input::Hover { serial, on } => {
                 let before = self.paused();
-                if on
-                    && self
-                        .bubbles
-                        .iter()
-                        .any(|b| b.serial == serial && !b.leaving())
-                {
-                    self.hovered.insert(serial);
-                } else {
-                    self.hovered.remove(&serial);
+                let bubble = self
+                    .bubbles
+                    .iter_mut()
+                    .find(|b| b.serial == serial && !matches!(b.phase, Phase::Leaving(_)));
+                match bubble {
+                    Some(bubble) if on => {
+                        bubble.rested = true;
+                        self.hovered.insert(serial);
+                    }
+                    _ => {
+                        self.hovered.remove(&serial);
+                    }
                 }
                 if before != self.paused() {
-                    self.set_paused(self.paused(), now, &mut effects);
+                    self.set_paused(self.paused(), now, effects);
                 }
             }
             Input::Card(serial) => {
                 let Some(bubble) = self.showing(serial) else {
-                    return effects;
+                    return;
                 };
                 let note = bubble.note.clone();
                 tracing::debug!(id = note.id, "a bubble's card clicked");
@@ -334,32 +395,141 @@ impl Stack {
                     pid: note.pid,
                     app: note.entry.clone().unwrap_or_else(|| note.app.clone()),
                 });
+                self.history.set_seen(note.id, Sight::Seen);
                 if !note.resident {
-                    self.leave(serial, 2, now, &mut effects);
+                    self.leave(serial, 2, now, effects);
                 }
             }
             Input::Dismiss(serial) => {
                 tracing::debug!(serial, "a bubble dismissed");
-                self.leave(serial, 2, now, &mut effects);
+                self.leave(serial, 2, now, effects);
             }
             Input::Action { serial, key } => {
                 let Some(bubble) = self.showing(serial) else {
-                    return effects;
+                    return;
                 };
                 let (id, resident) = (bubble.note.id, bubble.note.resident);
                 tracing::debug!(id, key, "a bubble's action");
                 effects.push(Effect::Signal(Signal::Action { id, key }));
+                self.history.set_seen(id, Sight::Seen);
                 if !resident {
-                    self.leave(serial, 2, now, &mut effects);
+                    self.leave(serial, 2, now, effects);
                 }
             }
+            Input::History { open, wall } => {
+                self.history.prune(wall);
+                if self.history.set_open(open) {
+                    tracing::debug!(open, "the history");
+                }
+            }
+            Input::Open(key) => {
+                let Some(kept) = self.history.get(key) else {
+                    return;
+                };
+                let note = kept.note.clone();
+                let live = kept.live;
+                tracing::debug!(
+                    key,
+                    live = live.is_some(),
+                    "a notification of the history opened"
+                );
+                if let Some(id) = live
+                    && note.default
+                {
+                    effects.push(Effect::Signal(Signal::Action {
+                        id,
+                        key: "default".to_owned(),
+                    }));
+                }
+                effects.push(Effect::Raise {
+                    pid: note.pid,
+                    app: note.entry.clone().unwrap_or_else(|| note.app.clone()),
+                });
+                self.forget(key, now, effects);
+            }
+            Input::Remove(keys) => {
+                tracing::debug!(count = keys.len(), "notifications taken out of the history");
+                for key in keys {
+                    self.forget(key, now, effects);
+                }
+            }
+            Input::Act { key, action } => {
+                let Some(kept) = self.history.get(key) else {
+                    return;
+                };
+                let Some(id) = kept.live else {
+                    return;
+                };
+                let resident = kept.note.resident;
+                tracing::debug!(id, action, "an action of the history");
+                effects.push(Effect::Signal(Signal::Action { id, key: action }));
+                if !resident {
+                    self.forget(key, now, effects);
+                }
+            }
+            Input::Dnd(dnd) => {
+                tracing::debug!(on = dnd.is_on(), choice = ?dnd.choice(), "do not disturb");
+                self.dnd = dnd;
+            }
+            Input::Restored { notes, dnd } => {
+                tracing::info!(
+                    kept = notes.len(),
+                    dnd = dnd.is_on(),
+                    "the history read back"
+                );
+                // Written then, with what came meanwhile (nothing was until
+                // then).
+                self.history.restore(notes);
+                if !self.dnd.is_on() && !dnd.over(now) {
+                    self.dnd = dnd;
+                }
+                self.restored = true;
+            }
         }
-        effects
     }
 
-    /// What is due at `now`: countdowns ended, bubbles gone.
+    /// The notification of the history `key` goes; its sender, if it still
+    /// holds it, hears that the user closed it (2), its bubble going too.
+    fn forget(&mut self, key: u64, now: Instant, effects: &mut Vec<Effect>) {
+        let Some(kept) = self.history.remove(key) else {
+            return;
+        };
+        let Some(id) = kept.live else {
+            return;
+        };
+        if let Some(serial) = self
+            .bubbles
+            .iter()
+            .find(|b| b.note.id == id && !b.leaving())
+            .map(|b| b.serial)
+        {
+            self.leave(serial, 2, now, effects);
+            return;
+        }
+        let before = self.queue.len();
+        self.queue.retain(|n| n.id != id);
+        if self.queue.len() != before {
+            self.relayout(effects);
+        }
+        self.closed(id, 2, effects);
+    }
+
+    /// Notification `id` closed for `reason`: its sender hears it, and holds
+    /// it no more.
+    fn closed(&mut self, id: u32, reason: u32, effects: &mut Vec<Effect>) {
+        effects.push(Effect::Signal(Signal::Closed { id, reason }));
+        self.history.closed(id);
+    }
+
+    /// What is due at `now`: do not disturb over, countdowns ended,
+    /// bubbles gone.
     pub fn tick(&mut self, now: Instant) -> Vec<Effect> {
+        let before = self.marks();
         let mut effects = Vec::new();
+        if self.dnd.over(now) {
+            tracing::debug!("do not disturb ends at its time");
+            self.dnd = Dnd::Off;
+        }
         let expired: Vec<u64> = self
             .bubbles
             .iter()
@@ -382,6 +552,7 @@ impl Stack {
             self.fill(now);
             self.relayout(&mut effects);
         }
+        self.settle(before, &mut effects);
         effects
     }
 
@@ -393,68 +564,71 @@ impl Stack {
 
     fn notify(&mut self, note: Note, now: Instant, effects: &mut Vec<Effect>) {
         let id = note.id;
+        self.history.prune(note.at);
+        let quiet = note.agent || note.urgency == Urgency::Low;
         // A replacement: in place, wherever it is.
         if let Some(bubble) = self
             .bubbles
             .iter_mut()
             .find(|b| b.note.id == id && !b.leaving())
         {
-            if note.agent || note.urgency == Urgency::Low {
+            if quiet {
                 let serial = bubble.serial;
                 self.leave_silently(serial, now, effects);
-                self.keep_in_history(note, effects);
+                self.keep(note);
                 return;
             }
             tracing::debug!(id, "a bubble updated in place");
             let paused = !self.hovered.is_empty();
             bubble.laid = draw::lay(&note);
             bubble.phase = Phase::Shown(Countdown::of(note.timeout, paused, now));
-            bubble.note = note;
+            bubble.note = note.clone();
             effects.push(Effect::Wake(bubble.namespace()));
+            self.history.update(note);
             self.relayout(effects);
             return;
         }
         if let Some(waiting) = self.queue.iter_mut().find(|n| n.id == id) {
-            *waiting = note;
+            *waiting = note.clone();
+            self.history.update(note);
             return;
         }
-        if let Some(at) = self.history.iter().position(|n| n.id == id) {
-            self.history.remove(at);
-            if self.unread.remove(&id) {
-                self.dots(effects);
-            }
-        }
-        if note.agent || note.urgency == Urgency::Low {
-            self.keep_in_history(note, effects);
+        if quiet {
+            self.keep(note);
             return;
         }
+        if self.dnd.is_on() && note.urgency != Urgency::Critical {
+            tracing::debug!(id, title = note.summary, "held: do not disturb");
+            self.history.add(note, Sight::Unseen);
+            return;
+        }
+        self.history.add(note.clone(), Sight::Showing);
         self.queue.push_back(note);
         self.fill(now);
         self.relayout(effects);
     }
 
-    /// Straight to the history: a low one counted by the dot, an agent's
+    /// Straight to the history: a low one counted by the badge, an agent's
     /// not.
-    fn keep_in_history(&mut self, note: Note, effects: &mut Vec<Effect>) {
-        if !note.agent {
-            self.unread.insert(note.id);
-        }
+    fn keep(&mut self, note: Note) {
+        let seen = if note.agent {
+            Sight::Seen
+        } else {
+            Sight::Unseen
+        };
+        let (id, agent) = (note.id, note.agent);
+        self.history.add(note, seen);
         tracing::debug!(
-            id = note.id,
-            agent = note.agent,
-            unread = self.unread.len(),
+            id,
+            agent,
+            unread = self.history.unseen(),
             "a notification to the history"
         );
-        self.history.push_back(note);
-        while self.history.len() > HISTORY {
-            if let Some(old) = self.history.pop_front() {
-                self.unread.remove(&old.id);
-            }
-        }
-        self.dots(effects);
     }
 
     fn close(&mut self, id: u32, now: Instant, effects: &mut Vec<Effect>) {
+        // Its application takes it back: from the history too.
+        let kept = self.history.remove_live(id);
         if let Some(serial) = self
             .bubbles
             .iter()
@@ -466,26 +640,26 @@ impl Stack {
         }
         let before = self.queue.len();
         self.queue.retain(|n| n.id != id);
-        let mut found = self.queue.len() != before;
-        if let Some(at) = self.history.iter().position(|n| n.id == id) {
-            self.history.remove(at);
-            if self.unread.remove(&id) {
-                self.dots(effects);
-            }
-            found = true;
-        }
-        if found {
-            effects.push(Effect::Signal(Signal::Closed { id, reason: 3 }));
+        if kept || self.queue.len() != before {
+            self.closed(id, 3, effects);
             self.relayout(effects);
         }
     }
 
     /// Bubble `serial` goes, closed for `reason`.
+    /// One whose time was up without the pointer resting on it is not
+    /// seen: the badge counts it.
     fn leave(&mut self, serial: u64, reason: u32, now: Instant, effects: &mut Vec<Effect>) {
-        let Some(id) = self.showing(serial).map(|b| b.note.id) else {
+        let Some((id, rested)) = self.showing(serial).map(|b| (b.note.id, b.rested)) else {
             return;
         };
-        effects.push(Effect::Signal(Signal::Closed { id, reason }));
+        let seen = if reason == 1 && !rested {
+            Sight::Unseen
+        } else {
+            Sight::Seen
+        };
+        self.history.set_seen(id, seen);
+        self.closed(id, reason, effects);
         self.leave_silently(serial, now, effects);
     }
 
@@ -545,6 +719,7 @@ impl Stack {
             let bubble = Bubble {
                 serial,
                 id: window::Id::unique(),
+                rested: false,
                 phase: Phase::Shown(Countdown::of(note.timeout, paused, now)),
                 note,
                 laid,
@@ -596,7 +771,6 @@ impl Stack {
                     namespace: bubble.namespace(),
                     size,
                     margin,
-                    bottom: false,
                     region: Some(region),
                 });
             } else if bubble.placed != (size, margin) {
@@ -654,7 +828,6 @@ impl Stack {
                     namespace: BUBBLES_WAITING_NAMESPACE.to_owned(),
                     size,
                     margin,
-                    bottom: false,
                     region: None,
                 });
                 self.chip = Some((
@@ -666,68 +839,6 @@ impl Stack {
                     n,
                 ));
             }
-        }
-    }
-
-    /// A dot on each bar while the history holds unread ones, where its
-    /// form has its notifications' place.
-    fn dots(&mut self, effects: &mut Vec<Effect>) {
-        let count = self.unread.len();
-        if count == 0 {
-            effects.extend(self.dots.drain().map(|(_, d)| Effect::Remove(d.id)));
-            return;
-        }
-        let gone: Vec<String> = self
-            .dots
-            .keys()
-            .filter(|bar| !self.bars.iter().any(|(b, _)| b == *bar))
-            .cloned()
-            .collect();
-        for bar in gone {
-            if let Some(dot) = self.dots.remove(&bar) {
-                effects.push(Effect::Remove(dot.id));
-            }
-        }
-        let mut woken = false;
-        for (bar, form) in &self.bars {
-            let (size, margin) = draw::dot_placed(*form, count);
-            match self.dots.get_mut(bar) {
-                Some(dot) => {
-                    if dot.placed != (size, margin) {
-                        dot.placed = (size, margin);
-                        effects.push(Effect::Place {
-                            id: dot.id,
-                            size,
-                            margin,
-                            region: None,
-                        });
-                    }
-                    woken = true;
-                }
-                None => {
-                    let id = window::Id::unique();
-                    effects.push(Effect::Open {
-                        id,
-                        screen: bar.clone(),
-                        namespace: UNREAD_NAMESPACE.to_owned(),
-                        size,
-                        margin,
-                        bottom: true,
-                        region: None,
-                    });
-                    self.dots.insert(
-                        bar.clone(),
-                        Extra {
-                            id,
-                            screen: bar.clone(),
-                            placed: (size, margin),
-                        },
-                    );
-                }
-            }
-        }
-        if woken {
-            effects.push(Effect::Wake(UNREAD_NAMESPACE.to_owned()));
         }
     }
 }
@@ -756,7 +867,13 @@ mod tests {
             resident: false,
             pid: 0,
             agent: false,
+            icon_from: crate::notifications::note::IconFrom::default(),
+            at: 1_000_000,
         }
+    }
+
+    fn notify(note: Note) -> Input {
+        Input::Notify(Box::new(note))
     }
 
     fn stack() -> Stack {
@@ -793,7 +910,7 @@ mod tests {
     fn a_bubble_shows_against_the_bar_and_goes_after_its_time() {
         let mut s = stack();
         let t0 = Instant::now();
-        let effects = s.handle(Input::Notify(note(1)), t0);
+        let effects = s.handle(notify(note(1)), t0);
         let open = opened(&effects);
         assert_eq!(open.len(), 1);
         // Its top 8 px from the screen's, its right 8 px from the full bar.
@@ -813,8 +930,8 @@ mod tests {
     fn hovering_pauses_every_countdown() {
         let mut s = stack();
         let t0 = Instant::now();
-        s.handle(Input::Notify(note(1)), t0);
-        s.handle(Input::Notify(note(2)), t0 + MS(1000));
+        s.handle(notify(note(1)), t0);
+        s.handle(notify(note(2)), t0 + MS(1000));
         s.handle(
             Input::Hover {
                 serial: 2,
@@ -844,39 +961,38 @@ mod tests {
         let mut critical = note(1);
         critical.urgency = Urgency::Critical;
         critical.timeout = Timeout::of(2000, Urgency::Critical);
-        s.handle(Input::Notify(critical), t0);
+        s.handle(notify(critical), t0);
         assert_eq!(s.deadline(), None);
         let effects = s.handle(Input::Dismiss(1), t0 + MS(90_000));
         assert_eq!(signals(&effects), [Signal::Closed { id: 1, reason: 2 }]);
     }
 
     #[test]
-    fn a_low_one_goes_to_the_history_and_the_dot_counts_it() {
+    fn a_low_one_goes_to_the_history_and_the_badge_counts_it() {
         let mut s = stack();
         let mut low = note(1);
         low.urgency = Urgency::Low;
-        let effects = s.handle(Input::Notify(low), Instant::now());
-        let open = opened(&effects);
-        assert_eq!(open.len(), 1);
-        assert_eq!(open[0].0, UNREAD_NAMESPACE);
-        assert_eq!((s.unread(), s.history.len()), (1, 1));
+        let effects = s.handle(notify(low), Instant::now());
+        assert!(opened(&effects).is_empty(), "{effects:?}");
+        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        assert_eq!((s.badge(), s.history.items().len()), (1, 1));
         // An agent's: to the history, no bubble, no count.
         let mut agent = note(2);
         agent.agent = true;
-        let effects = s.handle(Input::Notify(agent), Instant::now());
+        let effects = s.handle(notify(agent), Instant::now());
         assert!(opened(&effects).is_empty(), "{effects:?}");
-        assert_eq!((s.unread(), s.history.len()), (1, 2));
+        assert_eq!((s.badge(), s.history.items().len()), (1, 2));
     }
 
     #[test]
     fn a_replacement_updates_its_bubble_in_place_and_starts_its_countdown_again() {
         let mut s = stack();
         let t0 = Instant::now();
-        s.handle(Input::Notify(note(1)), t0);
+        s.handle(notify(note(1)), t0);
         let mut later = note(1);
         later.body = "Téléchargement : 38 %".to_owned();
         later.progress = Some(38);
-        let effects = s.handle(Input::Notify(later), t0 + MS(3000));
+        let effects = s.handle(notify(later), t0 + MS(3000));
         assert!(opened(&effects).is_empty(), "{effects:?}");
         assert!(effects.contains(&Effect::Wake(bubble_namespace(1))));
         assert_eq!(s.deadline(), Some(t0 + MS(3000) + LIFE));
@@ -887,7 +1003,7 @@ mod tests {
         let mut s = stack();
         let t0 = Instant::now();
         for id in 1..=5 {
-            s.handle(Input::Notify(note(id)), t0);
+            s.handle(notify(note(id)), t0);
         }
         assert_eq!(s.bubbles.len(), MOST);
         assert_eq!(s.chip.as_ref().map(|(_, n)| *n), Some(2));
@@ -910,7 +1026,7 @@ mod tests {
         first.default = true;
         first.entry = Some("slack".to_owned());
         first.pid = 42;
-        s.handle(Input::Notify(first), t0);
+        s.handle(notify(first), t0);
         let effects = s.handle(Input::Card(1), t0);
         assert_eq!(
             signals(&effects),
@@ -928,7 +1044,7 @@ mod tests {
         }));
         let mut second = note(2);
         second.actions = vec![("reply".to_owned(), "Répondre".to_owned())];
-        s.handle(Input::Notify(second), t0);
+        s.handle(notify(second), t0);
         let effects = s.handle(
             Input::Action {
                 serial: 2,
@@ -946,5 +1062,173 @@ mod tests {
                 Signal::Closed { id: 2, reason: 2 }
             ]
         );
+    }
+
+    fn keys(s: &Stack) -> Vec<u64> {
+        s.history.items().iter().map(|k| k.key).collect()
+    }
+
+    #[test]
+    fn the_history_lists_everything_newest_first_and_counts_what_was_not_seen() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        // Shown and gone after its time, the pointer never on it: counted.
+        s.handle(notify(note(1)), t0);
+        assert_eq!(s.badge(), 0);
+        s.tick(t0 + LIFE);
+        assert_eq!(s.badge(), 1);
+        // Shown, the pointer resting on it before it went: seen.
+        s.handle(notify(note(2)), t0 + LIFE);
+        let serial = s.bubbles.last().map(|b| b.serial).expect("a bubble");
+        s.handle(Input::Hover { serial, on: true }, t0 + LIFE);
+        s.handle(Input::Hover { serial, on: false }, t0 + LIFE + MS(10));
+        s.tick(t0 + LIFE * 3);
+        assert_eq!(s.badge(), 1);
+        let mut low = note(3);
+        low.urgency = Urgency::Low;
+        s.handle(notify(low), t0 + LIFE * 3);
+        assert_eq!(s.badge(), 2);
+        let ids: Vec<u32> = s.history.items().iter().map(|k| k.note.id).collect();
+        assert_eq!(ids, [3, 2, 1]);
+        // Opened: the badge says 0; closed, all of it is seen.
+        let effects = s.handle(
+            Input::History {
+                open: true,
+                wall: 1_000_000,
+            },
+            t0 + LIFE * 3,
+        );
+        assert_eq!(s.badge(), 0);
+        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        assert!(s.history.items().iter().any(|k| k.seen == Sight::Unseen));
+        s.handle(
+            Input::History {
+                open: false,
+                wall: 1_000_000,
+            },
+            t0 + LIFE * 3,
+        );
+        assert_eq!(s.badge(), 0);
+        assert!(s.history.items().iter().all(|k| k.seen == Sight::Seen));
+    }
+
+    #[test]
+    fn a_click_in_the_history_invokes_raises_and_removes_and_the_close_removes() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        let mut low = note(1);
+        low.urgency = Urgency::Low;
+        low.default = true;
+        low.pid = 42;
+        low.entry = Some("slack".to_owned());
+        s.handle(notify(low), t0);
+        let mut other = note(2);
+        other.urgency = Urgency::Low;
+        s.handle(notify(other), t0);
+        let [second, first] = keys(&s)[..] else {
+            panic!("{:?}", keys(&s));
+        };
+        let effects = s.handle(Input::Open(first), t0);
+        assert_eq!(
+            signals(&effects),
+            [
+                Signal::Action {
+                    id: 1,
+                    key: "default".to_owned()
+                },
+                Signal::Closed { id: 1, reason: 2 }
+            ]
+        );
+        assert!(effects.contains(&Effect::Raise {
+            pid: 42,
+            app: "slack".to_owned()
+        }));
+        assert!(effects.contains(&Effect::Changed));
+        assert_eq!(keys(&s), [second]);
+        // Its ✕: closed, no action.
+        let effects = s.handle(Input::Remove(vec![second]), t0);
+        assert_eq!(signals(&effects), [Signal::Closed { id: 2, reason: 2 }]);
+        assert!(s.history.items().is_empty());
+        // One its sender holds no more: raised, nothing said to it.
+        s.handle(notify(note(3)), t0);
+        s.tick(t0 + LIFE);
+        let key = keys(&s)[0];
+        let effects = s.handle(Input::Open(key), t0 + LIFE);
+        assert!(signals(&effects).is_empty(), "{effects:?}");
+        assert!(effects.iter().any(|e| matches!(e, Effect::Raise { .. })));
+    }
+
+    #[test]
+    fn clear_all_empties_the_history_and_closes_what_is_held() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        for id in 1..=3 {
+            let mut low = note(id);
+            low.urgency = Urgency::Low;
+            s.handle(notify(low), t0);
+        }
+        s.handle(notify(note(4)), t0);
+        let effects = s.handle(Input::Remove(keys(&s)), t0);
+        assert!(s.history.items().is_empty());
+        assert_eq!(s.badge(), 0);
+        // The bubble on screen goes too.
+        assert!(effects.contains(&Effect::Closing(bubble_namespace(1))));
+        assert_eq!(signals(&effects).len(), 4);
+    }
+
+    #[test]
+    fn do_not_disturb_holds_bubbles_but_critical_ones_and_ends_at_its_time() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        let wall: jiff::Zoned = "2026-11-02T14:32:00+01:00[Europe/Paris]"
+            .parse()
+            .expect("a time");
+        let dnd = Dnd::starting(super::super::dnd::Choice::Hour, t0, &wall);
+        let effects = s.handle(Input::Dnd(dnd), t0);
+        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        assert_eq!(s.deadline(), Some(t0 + Duration::from_secs(3600)));
+        // Held: no bubble, to the history, counted.
+        let effects = s.handle(notify(note(1)), t0 + MS(10));
+        assert!(opened(&effects).is_empty(), "{effects:?}");
+        assert_eq!((s.badge(), s.history.items().len()), (1, 1));
+        // A critical one shows.
+        let mut critical = note(2);
+        critical.urgency = Urgency::Critical;
+        critical.timeout = Timeout::Never;
+        let effects = s.handle(notify(critical), t0 + MS(20));
+        assert_eq!(opened(&effects).len(), 1);
+        // At its time, on the clock it is given, it ends: bubbles again.
+        assert!(s.tick(t0 + Duration::from_secs(3599)).is_empty());
+        let effects = s.tick(t0 + Duration::from_secs(3600));
+        assert!(!s.dnd.is_on());
+        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        let effects = s.handle(notify(note(3)), t0 + Duration::from_secs(3601));
+        assert_eq!(opened(&effects).len(), 1);
+    }
+
+    #[test]
+    fn nothing_is_written_until_what_was_kept_is_read_back() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        let mut low = note(1);
+        low.urgency = Urgency::Low;
+        let effects = s.handle(notify(low), t0);
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Save(_))));
+        let mut old = note(9);
+        old.at = 500;
+        let effects = s.handle(
+            Input::Restored {
+                notes: vec![(old, Sight::Unseen)],
+                dnd: Dnd::Off,
+            },
+            t0,
+        );
+        let saved = effects.iter().find_map(|e| match e {
+            Effect::Save(records) => Some(records.len()),
+            _ => None,
+        });
+        assert_eq!(saved, Some(2));
+        assert_eq!(s.badge(), 2);
+        assert_eq!(s.history.items()[1].note.at, 500);
     }
 }
