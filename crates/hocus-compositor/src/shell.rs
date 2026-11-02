@@ -382,6 +382,10 @@ impl State {
             ToCompositor::Copy(text) => self.copy_text(text),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
+            ToCompositor::LogOut => {
+                tracing::info!("the shell logs out");
+                self.end(crate::Ending::LoggedOut);
+            }
         }
     }
 
