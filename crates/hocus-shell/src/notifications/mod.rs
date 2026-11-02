@@ -2,8 +2,8 @@
 //! `org.freedesktop.Notifications` on the session bus the compositor names
 //! ([`server`]), their bubbles beside the bar ([`stack`] decides, [`draw`]
 //! draws), their history ([`history`], its panel in
-//! [`crate::popover::history`]), do not disturb ([`dnd`]) and the bell on
-//! the bar that opens the history ([`bell`]).
+//! [`crate::popover::history`]), do not disturb ([`dnd`]) and the bell
+//! that opens the history ([`bell`], one of the bar's footer's buttons).
 //!
 //! The history is kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications`
 //! and do not disturb for the session, in its runtime directory: read back
@@ -461,34 +461,11 @@ fn carry_out(effect: Effect) -> Vec<Message> {
 }
 
 /// What surface `id` shows, if it is one of the notifications': a bubble,
-/// the chip, a bell. `glass`: the compositor blurs behind the shell.
+/// or the chip. `glass`: the compositor blurs behind the shell.
 pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
     enum Is {
         Bubble,
         Chip,
-    }
-    if let Some((bar, form)) = bell::of(id) {
-        let card = with(|c| c.card);
-        // On the CPU, the bar's colour at the bell's height under it.
-        let backdrop = card.then(|| {
-            let height = crate::popover::with(|c| c.bar_height(&bar));
-            let middle = (height - bell::rise(form)) / height.max(1.0);
-            crate::mix(
-                crate::OPAQUE_TOP,
-                crate::OPAQUE_BOTTOM,
-                middle.clamp(0.0, 1.0),
-            )
-        });
-        return Some(
-            canvas(bell::Surface {
-                bar,
-                form,
-                backdrop,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        );
     }
     let (is, card) = with(|c| {
         let is = if c.stack.bubble(id).is_some() {

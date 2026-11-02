@@ -1,7 +1,8 @@
 //! Pasting into the shell's text fields: `Ctrl+V` and `Shift+Insert` take
 //! the clipboard's text (the clipboard, not the primary selection), its
 //! line breaks and other control characters dropped. A field asks with
-//! [`request`] and gets the text back once, off the loop.
+//! [`request`] and gets the text back once, off the loop. The footer's
+//! clipboard (5.5) reads it the same way to show it ([`glance`]).
 //!
 //! The shell reads the clipboard itself, on the Wayland connection iced
 //! uses (its surfaces hold the keyboard, so the compositor offers it the
@@ -67,6 +68,26 @@ pub fn asks(key: &Key, modifiers: Modifiers) -> bool {
 /// for the call. `false` when there is nothing to read (no clipboard, no
 /// text in it): `done` is then never called.
 pub fn request(done: impl FnOnce(Option<&str>) + Send + 'static) -> bool {
+    ask(Take::Field, done)
+}
+
+/// Reads the clipboard's text off the loop to show it (the footer's
+/// clipboard, 5.5): as [`request`], but its line breaks and tabs made
+/// spaces, and a long text cut to its first 4 KiB rather than refused.
+pub fn glance(done: impl FnOnce(Option<&str>) + Send + 'static) -> bool {
+    ask(Take::Glance, done)
+}
+
+/// What the text read is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Take {
+    /// A field: a line, whole or nothing.
+    Field,
+    /// To be shown: on one line, its start if it is long.
+    Glance,
+}
+
+fn ask(take: Take, done: impl FnOnce(Option<&str>) + Send + 'static) -> bool {
     let pipe = {
         let mut clipboard = CLIPBOARD.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(clipboard) = clipboard.as_mut() else {
@@ -83,7 +104,7 @@ pub fn request(done: impl FnOnce(Option<&str>) + Send + 'static) -> bool {
     };
     let reader = std::thread::Builder::new()
         .name("paste".to_owned())
-        .spawn(move || read(pipe, done));
+        .spawn(move || read(pipe, take, done));
     if let Err(err) = reader {
         tracing::warn!(%err, "could not read the clipboard");
         return false;
@@ -189,16 +210,26 @@ impl Clipboard {
     }
 }
 
-/// Reads `pipe` and hands the text to `done`; both buffers are zeroed
-/// after.
-fn read(pipe: PipeReader, done: impl FnOnce(Option<&str>)) {
+/// Reads `pipe` and hands the text to `done`, as `take` wants it; both
+/// buffers are zeroed after.
+fn read(pipe: PipeReader, take: Take, done: impl FnOnce(Option<&str>)) {
     let mut raw = Wiped([0; ROOM]);
     let mut clean = Wiped([0; ROOM]);
-    let read = read_until(&pipe, &mut raw.0, Instant::now() + WAIT);
+    let read = read_until(
+        &pipe,
+        &mut raw.0,
+        Instant::now() + WAIT,
+        take == Take::Glance,
+    );
     drop(pipe);
     let text = match read {
         Ok(len) => match std::str::from_utf8(&raw.0[..len]) {
-            Ok(text) => Some(without_controls(text, &mut clean.0)),
+            Ok(text) => Some(clean_into(text, take, &mut clean.0)),
+            // Cut in the middle of a character: what comes before it.
+            Err(err) if take == Take::Glance && err.error_len().is_none() => {
+                let text = std::str::from_utf8(&raw.0[..err.valid_up_to()]).unwrap_or_default();
+                Some(clean_into(text, take, &mut clean.0))
+            }
             Err(_) => {
                 tracing::debug!("the clipboard's text is not UTF-8: nothing pasted");
                 None
@@ -212,12 +243,21 @@ fn read(pipe: PipeReader, done: impl FnOnce(Option<&str>)) {
     done(text);
 }
 
-/// What comes through `pipe` until it closes, into `into`; past `until`,
-/// or past `into`'s size, nothing.
-fn read_until(pipe: &PipeReader, into: &mut [u8], until: Instant) -> Result<usize, &'static str> {
+/// What comes through `pipe` until it closes, into `into`; past `until`
+/// nothing, and past `into`'s size nothing either, or what it holds when
+/// `cut`.
+fn read_until(
+    pipe: &PipeReader,
+    into: &mut [u8],
+    until: Instant,
+    cut: bool,
+) -> Result<usize, &'static str> {
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
     let mut len = 0;
     loop {
+        if cut && len == into.len() {
+            return Ok(len);
+        }
         let left = until.saturating_duration_since(Instant::now());
         if left.is_zero() {
             return Err("the clipboard's client did not write it in time");
@@ -246,6 +286,15 @@ fn read_until(pipe: &PipeReader, into: &mut [u8], until: Instant) -> Result<usiz
     }
 }
 
+/// `text` as `take` wants it, written into `into`, which is as long as
+/// `text` at least.
+fn clean_into<'a>(text: &str, take: Take, into: &'a mut [u8]) -> &'a str {
+    match take {
+        Take::Field => without_controls(text, into),
+        Take::Glance => on_one_line(text, into),
+    }
+}
+
 /// `text` without its control characters (line breaks, tabs), written
 /// into `into`, which is as long as `text` at least.
 fn without_controls<'a>(text: &str, into: &'a mut [u8]) -> &'a str {
@@ -254,6 +303,28 @@ fn without_controls<'a>(text: &str, into: &'a mut [u8]) -> &'a str {
         len += c.encode_utf8(&mut into[len..]).len();
     }
     // Whole characters only were written.
+    std::str::from_utf8(&into[..len]).unwrap_or_default()
+}
+
+/// `text` on one line: each run of white space (line breaks, tabs) one
+/// space, the other control characters dropped, its ends trimmed.
+fn on_one_line<'a>(text: &str, into: &'a mut [u8]) -> &'a str {
+    let mut len = 0;
+    let mut space = false;
+    for c in text.trim().chars() {
+        if c.is_whitespace() {
+            space = true;
+            continue;
+        }
+        if c.is_control() {
+            continue;
+        }
+        if space && len > 0 {
+            len += ' '.encode_utf8(&mut into[len..]).len();
+        }
+        space = false;
+        len += c.encode_utf8(&mut into[len..]).len();
+    }
     std::str::from_utf8(&into[..len]).unwrap_or_default()
 }
 
@@ -400,6 +471,7 @@ mod tests {
                 &reader,
                 &mut into,
                 Instant::now() + Duration::from_millis(100),
+                false,
             );
             drop(kept);
             got.map(|len| into[..len].to_vec())
@@ -409,5 +481,28 @@ mod tests {
         assert!(read(b"too long", 4, true).is_err());
         // A client that never closes it: nothing, once the time is up.
         assert!(read(b"azerty", 16, false).is_err());
+        // To be shown, a long text is cut to the room.
+        let (reader, mut writer) = std::io::pipe().expect("a pipe");
+        writer.write_all(b"a long text").expect("written");
+        drop(writer);
+        let mut into = vec![0; 6];
+        let got = read_until(
+            &reader,
+            &mut into,
+            Instant::now() + Duration::from_millis(100),
+            true,
+        );
+        assert_eq!(got, Ok(6));
+        assert_eq!(&into, b"a long");
+    }
+
+    #[test]
+    fn a_text_shown_is_on_one_line() {
+        let mut into = [0; 64];
+        assert_eq!(
+            on_one_line("  git rebase\n\t--onto v2\r\n\u{7f}", &mut into),
+            "git rebase --onto v2"
+        );
+        assert_eq!(on_one_line("\n \t", &mut into), "");
     }
 }

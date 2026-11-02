@@ -49,19 +49,19 @@ use crate::{
 /// bar's bottom; tall enough for its form's group (the full one while the
 /// form switches), and the sound's item lit and ringed above it. The mini
 /// form's grows by the keyboard layout's button and the gap over it when
-/// it shows ([`mini_surface`]).
+/// it shows ([`mini_surface`]); it reaches down over the footer's place
+/// (its bell and the user's avatar, 5.5), where it draws nothing.
 pub const BOTTOM: i32 = 41;
 pub const FULL_SURFACE: (u32, u32) = (194, 175);
-pub const MINI_SURFACE: (u32, u32) = (54, 128);
+pub const MINI_SURFACE: (u32, u32) = (54, 176);
 /// The full group's bottom above the surface's: the footer's place.
 const FULL_RAISE: f32 = 20.0;
-/// The mini group's: its battery's item, lit and ringed, above the
-/// layout's place (the 3.7 mockup's 22 px and 14 px between).
-const MINI_RAISE: f32 = 10.0;
-/// The layout's button's bottom above the surface's, where the battery's
-/// item was: 14 px over the notifications' place (the 3.8 mockup), the
-/// battery's percentage 14 px over it.
-const KEY_BOTTOM: f32 = 6.0;
+/// The layout's button's bottom above the surface's: 14 px over the
+/// footer's bell (5.5), the battery's percentage 14 px over it.
+const KEY_BOTTOM: f32 = crate::footer::MINI_HEIGHT + MINI_GAP - BOTTOM as f32;
+/// The mini group's: its battery's item, lit and ringed, 14 px over the
+/// footer's bell without the layout's button (the 3.7 mockup's gap).
+const MINI_RAISE: f32 = KEY_BOTTOM + 4.0;
 const MINI_KEY: Size = crate::layouts::draw::MINI_BUTTON;
 /// From the bar's inside edges to the group's: 12 px padding less the rim.
 pub(crate) const SIDE: f32 = 11.0;
@@ -692,7 +692,7 @@ pub fn group_tops(levels: &Snapshot, status: usize, keys: bool) -> (f32, f32) {
         (Some(_), _) => height - (mini_gauge_bottom(levels, height, keys) - MINI_GAUGE),
         (None, Some(_)) => mini_raise(keys) - mini_battery_pad() + MINI_BATTERY.height,
         (None, None) if keys => KEY_BOTTOM + MINI_KEY.height,
-        (None, None) => 0.0,
+        (None, None) => KEY_BOTTOM,
     };
     (full, mini)
 }
@@ -729,14 +729,14 @@ fn mini_battery_pad() -> f32 {
 }
 
 /// The mini form's sound gauge's bottom: 14 px over the battery's item;
-/// without it, its item 14 px over the layout's button (`keys`), or high
-/// enough for the gauge's light and ring under it.
+/// without it, its item 14 px over the layout's button (`keys`), or over
+/// the footer's bell.
 fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
     let lit = (MINI_ITEM.height - MINI_GAUGE) / 2.0;
     match levels.battery {
         Some(_) => bottom - mini_raise(keys) + mini_battery_pad() - MINI_BATTERY.height - MINI_GAP,
         None if keys => bottom - KEY_BOTTOM - MINI_KEY.height - MINI_GAP - lit,
-        None => bottom - lit - RING_OUT - RING,
+        None => bottom - KEY_BOTTOM - lit,
     }
 }
 
@@ -1387,13 +1387,17 @@ mod tests {
         let sound = sound.expect("sound");
         assert!((light - (175.0 - FULL_RAISE - ROW / 2.0)).abs() < 0.01);
         assert!((light - sound - ROW - ROW_GAP).abs() < 0.01);
-        // Alone in the mini form, the gauge keeps its light and its ring
-        // on the surface.
-        assert_eq!(mini_gauge_bottom(&levels, 97.0, false), 97.0 - 8.0 - 5.0);
-        // Over the layout's button: its item 14 px above it.
+        // Alone in the mini form, the gauge's item 14 px over the footer's
+        // bell, as over the layout's button: its item 14 px above it.
+        let lit = (MINI_ITEM.height - MINI_GAUGE) / 2.0;
+        assert_eq!(lit, 8.0);
         assert_eq!(
-            mini_gauge_bottom(&levels, 97.0, true),
-            97.0 - 6.0 - 30.0 - 14.0 - 8.0
+            mini_gauge_bottom(&levels, 176.0, false),
+            176.0 - KEY_BOTTOM - lit
+        );
+        assert_eq!(
+            mini_gauge_bottom(&levels, 216.0, true),
+            216.0 - KEY_BOTTOM - 30.0 - 14.0 - lit
         );
     }
 
@@ -1473,21 +1477,20 @@ mod tests {
         // The full group's bottom is 61 px above the bar's: 12 px of
         // padding, the footer's 34 px and 14 px between, and the rim.
         assert_eq!(BOTTOM as f32 + FULL_RAISE, 1.0 + 12.0 + 34.0 + 14.0);
-        // The mini's battery item's bottom, 47 px: 10 px of padding, the
-        // layout's 22 px and 14 px between, and the rim (the 3.7 mockup).
+        // The mini's battery item's bottom, 95 px: 10 px of padding, the
+        // footer's avatar and bell (34 px each, 2 px apart, 5.5) and 14 px
+        // between, and the rim.
+        let footer = 1.0 + 10.0 + 34.0 + 2.0 + 34.0 + 14.0;
         let item_bottom = BOTTOM as f32 + MINI_RAISE - mini_battery_pad();
-        assert!(
-            (item_bottom - (1.0 + 10.0 + 22.0 + 14.0)).abs() < 0.1,
-            "{item_bottom}"
-        );
+        assert!((item_bottom - footer).abs() < 0.1, "{item_bottom}");
         // With the layout's button there, 44 × 30 (the 3.8 mockup): its
         // bottom there, the battery's percentage 14 px over its top, and
         // the whole group still lit and ringed on its taller surface.
-        assert_eq!(BOTTOM as f32 + KEY_BOTTOM, 1.0 + 10.0 + 22.0 + 14.0);
+        assert_eq!(BOTTOM as f32 + KEY_BOTTOM, footer);
         const { assert!(KEY_BOTTOM >= RING_OUT + RING) };
         assert_eq!(mini_raise(true), KEY_BOTTOM + 30.0 + 14.0);
         let keys = mini_surface(true);
-        assert_eq!(keys, (54, 168));
+        assert_eq!(keys, (54, 216));
         let mini =
             mini_raise(true) - mini_battery_pad() + MINI_BATTERY.height + MINI_GAP + MINI_GAUGE;
         assert!(mini + lit <= keys.1 as f32, "{mini} + {lit}");

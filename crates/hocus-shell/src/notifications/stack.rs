@@ -33,7 +33,7 @@ use std::{
 };
 
 use hocus_link::{
-    BELL_NAMESPACE, BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, Form, bubble_namespace,
+    BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, FOOTER_NAMESPACE, Form, bubble_namespace,
 };
 use iced::{Rectangle, window};
 
@@ -338,7 +338,7 @@ impl Stack {
         }
         if unseen != before.1 || dnd.is_on() != before.2.is_on() {
             tracing::debug!(unread = unseen, dnd = dnd.is_on(), "the bell");
-            effects.push(Effect::Wake(BELL_NAMESPACE.to_owned()));
+            effects.push(Effect::Wake(FOOTER_NAMESPACE.to_owned()));
         }
         if dnd != before.2 {
             effects.push(Effect::Changed);
@@ -989,7 +989,7 @@ mod tests {
         low.urgency = Urgency::Low;
         let effects = s.handle(notify(low), Instant::now());
         assert!(opened(&effects).is_empty(), "{effects:?}");
-        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        assert!(effects.contains(&Effect::Wake(FOOTER_NAMESPACE.to_owned())));
         assert_eq!((s.badge(), s.history.items().len()), (1, 1));
         // An agent's: to the history, no bubble, no count.
         let mut agent = note(2);
@@ -1114,7 +1114,7 @@ mod tests {
             t0 + LIFE * 3,
         );
         assert_eq!(s.badge(), 0);
-        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        assert!(effects.contains(&Effect::Wake(FOOTER_NAMESPACE.to_owned())));
         assert!(s.history.items().iter().any(|k| k.seen == Sight::Unseen));
         s.handle(
             Input::History {
@@ -1249,7 +1249,7 @@ mod tests {
             .expect("a time");
         let dnd = Dnd::starting(super::super::dnd::Choice::Hour, t0, &wall);
         let effects = s.handle(Input::Dnd(dnd), t0);
-        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        assert!(effects.contains(&Effect::Wake(FOOTER_NAMESPACE.to_owned())));
         assert_eq!(s.deadline(), Some(t0 + Duration::from_secs(3600)));
         // Held: no bubble, to the history, counted.
         let effects = s.handle(notify(note(1)), t0 + MS(10));
@@ -1265,7 +1265,7 @@ mod tests {
         assert!(s.tick(t0 + Duration::from_secs(3599)).is_empty());
         let effects = s.tick(t0 + Duration::from_secs(3600));
         assert!(!s.dnd.is_on());
-        assert!(effects.contains(&Effect::Wake(BELL_NAMESPACE.to_owned())));
+        assert!(effects.contains(&Effect::Wake(FOOTER_NAMESPACE.to_owned())));
         let effects = s.handle(notify(note(3)), t0 + Duration::from_secs(3601));
         assert_eq!(opened(&effects).len(), 1);
     }

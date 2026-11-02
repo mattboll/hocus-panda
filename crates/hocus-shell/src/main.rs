@@ -21,14 +21,15 @@
 //! own over the bar's top ([`clock`]): it draws every second, and iced
 //! presents a surface whole, so that only its region is drawn again. The
 //! levels have theirs, for the same reason, the connections and the
-//! desktops theirs, and so has a popover beside the bar ([`popover`]),
-//! opened from an item, and the panda peeking out of the bar's edge
-//! ([`agents::peek`]).
+//! desktops theirs, the footer along its bottom ([`footer`]), and so has a
+//! popover beside the bar ([`popover`]), opened from an item, and the panda
+//! peeking out of the bar's edge ([`agents::peek`]).
 
 mod agents;
 mod bluetooth;
 mod clock;
 mod desktops;
+mod footer;
 mod launcher;
 mod layouts;
 mod levels;
@@ -37,6 +38,7 @@ mod notifications;
 mod paste;
 mod popover;
 mod renderer;
+mod user;
 
 use std::{
     borrow::Cow,
@@ -107,6 +109,7 @@ fn main() -> ExitCode {
     bluetooth::start();
     launcher::start();
     notifications::start(software);
+    user::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -211,8 +214,8 @@ struct Bar {
     desktops: window::Id,
     /// Its agents' group's surface (placed by [`agents::draw`]).
     agents: window::Id,
-    /// Its notifications' bell's (placed by [`notifications::bell`]).
-    bell: window::Id,
+    /// Its footer's (placed by [`footer`]).
+    footer: window::Id,
 }
 
 impl Bar {
@@ -235,12 +238,18 @@ impl Bar {
         }
     }
 
-    /// The levels' surface's size, as the clock's; the mini form's taller
-    /// with the keyboard layout's button.
+    /// The levels' surface's size, as the clock's (tall enough for both
+    /// forms' groups while the form switches); the mini form's taller with
+    /// the keyboard layout's button.
     fn levels_size(&self) -> (u32, u32) {
+        let mini = levels::draw::mini_surface(layouts::snapshot().shown().is_some());
         match (self.switch, self.form) {
-            (Some(_), _) | (None, Form::Full) => levels::draw::FULL_SURFACE,
-            (None, Form::Mini) => levels::draw::mini_surface(layouts::snapshot().shown().is_some()),
+            (Some(_), _) => (
+                levels::draw::FULL_SURFACE.0,
+                levels::draw::FULL_SURFACE.1.max(mini.1),
+            ),
+            (None, Form::Full) => levels::draw::FULL_SURFACE,
+            (None, Form::Mini) => mini,
         }
     }
 
@@ -470,9 +479,9 @@ impl Shell {
                     desktops::draw::forget(&bar.output);
                     agents::draw::forget(&bar.output);
                     agents::peek::forget(&bar.output);
-                    notifications::bell::forget(&bar.output);
+                    footer::forget(&bar.output);
                     Some(Task::batch([
-                        Task::done(Message::RemoveWindow(bar.bell)),
+                        Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.agents)),
                         Task::done(Message::RemoveWindow(bar.desktops)),
                         Task::done(Message::RemoveWindow(bar.connections)),
@@ -560,7 +569,7 @@ impl Shell {
             connections: window::Id::unique(),
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
-            bell: window::Id::unique(),
+            footer: window::Id::unique(),
         };
         bar.surface = bar.surface_width();
         bar.clock_surface = bar.clock_size();
@@ -666,9 +675,9 @@ impl Shell {
             id: agents_id,
         });
         bar.agents = agents_id;
-        // Last, above the others: the notifications' bell.
-        let (bell_id, open_bell) = notifications::bell::open(&bar.output, form, option.clone());
-        bar.bell = bell_id;
+        // Last, above the others: the footer.
+        let (footer_id, open_footer) = footer::open(&bar.output, form, option.clone());
+        bar.footer = footer_id;
         self.bars.insert(id, bar);
         BARS.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -679,7 +688,7 @@ impl Shell {
             .chain(open_connections)
             .chain(open_desktops)
             .chain(open_agents)
-            .chain(Task::batch(open_bell.map(Task::done)))
+            .chain(Task::batch(open_footer.into_iter().map(Task::done)))
     }
 
     /// Where bar `id` is, for the popovers.
@@ -694,7 +703,7 @@ impl Shell {
                 id,
                 (bar.levels, bar.connections, bar.desktops, bar.agents),
             );
-            c.set_bell(&bar.output, bar.bell);
+            c.set_footer(&bar.output, bar.footer);
         });
         notifications::bars_changed();
     }
@@ -773,9 +782,11 @@ impl Shell {
             tasks.push(Task::done(Message::SizeChange { id, size }));
             tasks.push(Task::done(Message::MarginChange { id, margin }));
         }
-        if let Some((id, margin)) = notifications::bell::form(&bar.output, bar.form) {
-            tasks.push(Task::done(Message::MarginChange { id, margin }));
-        }
+        tasks.extend(
+            footer::form(&bar.output, bar.form, switching)
+                .into_iter()
+                .map(Task::done),
+        );
         Task::batch(tasks)
     }
 
@@ -931,6 +942,34 @@ impl Shell {
         )
     }
 
+    /// The footer of the bar whose footer's surface is `id`.
+    fn footer_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self.bars.values().find(|b| b.footer == id)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = bar_height - 40.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = footer::Footer {
+            bar: bar.output.clone(),
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            words: footer::Words::new(clock::time::Lang::of_messages()),
+            backdrop,
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = agents::peek::bar_of(id)?;
@@ -1054,8 +1093,27 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Clipboard => canvas(popover::clipboard::Panel {
+                id,
+                words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            popover::Item::User => canvas(popover::session::Panel {
+                id,
+                words: popover::session::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             // They open none.
-            popover::Item::Keyboard | popover::Item::Decline | popover::Item::Agent(_) => {
+            popover::Item::Keyboard
+            | popover::Item::Decline
+            | popover::Item::Agent(_)
+            | popover::Item::Menu => {
                 return None;
             }
         };
@@ -1070,6 +1128,7 @@ impl Shell {
                 .or_else(|| self.connections_view(id))
                 .or_else(|| self.desktops_view(id))
                 .or_else(|| self.agents_view(id))
+                .or_else(|| self.footer_view(id))
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.popover_view(id))
