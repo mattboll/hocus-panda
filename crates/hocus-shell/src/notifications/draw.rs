@@ -56,7 +56,7 @@ const PAD_TOP: f32 = 12.0;
 const PAD_BOTTOM: f32 = 10.0;
 const PAD_LEFT: f32 = 12.0;
 const PAD_RIGHT: f32 = 34.0;
-const ICON: f32 = 32.0;
+pub const ICON: f32 = 32.0;
 const ICON_GAP: f32 = 11.0;
 /// The text's column.
 const COLUMN_X: f32 = BORDER + PAD_LEFT + ICON + ICON_GAP;
@@ -121,7 +121,10 @@ const TRACK: Color = rgba(255, 255, 255, 0.10);
 const PROGRESS_FILL: Color = rgb(0x8FB3FF);
 const RUNNING: Color = rgba(108, 194, 135, 0.7);
 const PAUSED: Color = rgba(255, 255, 255, 0.35);
-const NEUTRAL: Color = rgba(255, 255, 255, 0.10);
+/// The launcher's letter tile (5.1), its letter at the launcher's 19 px
+/// for 48 px, here for 32 px.
+const NEUTRAL: (Color, Color) = (rgb(0x5C6576), rgb(0x9AA3B4));
+const LETTER: f32 = 13.0;
 const NEUTRAL_RIM: Color = rgba(255, 255, 255, 0.14);
 /// The shadow `0 14px 40px rgba(0,0,0,0.42)` and a critical one's glow
 /// `0 0 24px rgba(242,148,91,0.25)`: offset, deviation, alpha.
@@ -575,7 +578,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
             ..Stroke::default()
         },
     );
-    // The icon, else a neutral square.
+    // The icon, else the first letter of its application on a square.
     let icon = Rectangle::new(
         Point::new(BORDER + PAD_LEFT, BORDER + PAD_TOP),
         Size::new(ICON, ICON),
@@ -583,9 +586,17 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
     match &note.icon {
         Some(Icon::Raster(handle)) => f.draw_image(icon, canvas::Image::new(handle.clone())),
         Some(Icon::Vector(handle)) => f.draw_svg(icon, svg::Svg::new(handle.clone())),
+        // The launcher's tile for an application without an icon: a
+        // neutral square and the name's first letter.
         None => {
             let radius = (ICON * 0.28).round();
-            f.fill(&kit::rounded(icon, radius), NEUTRAL);
+            let fill = canvas::gradient::Linear::new(
+                icon.position(),
+                Point::new(icon.x + icon.width, icon.y + icon.height),
+            )
+            .add_stop(0.0, NEUTRAL.0)
+            .add_stop(1.0, NEUTRAL.1);
+            f.fill(&kit::rounded(icon, radius), canvas::Fill::from(fill));
             f.stroke(
                 &Path::rounded_rectangle(
                     Point::new(icon.x + 0.5, icon.y + 0.5),
@@ -598,6 +609,22 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
                     ..Stroke::default()
                 },
             );
+            let first = note
+                .app
+                .chars()
+                .find(|c| c.is_alphanumeric())
+                .map(|c| c.to_uppercase().collect::<String>())
+                .unwrap_or_default();
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                kit::text(
+                    first,
+                    icon.center(),
+                    LETTER,
+                    Color::WHITE,
+                    Alignment::Center,
+                ),
+            ));
         }
     }
     // The first line.

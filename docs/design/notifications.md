@@ -95,12 +95,17 @@ All sizes are logical pixels.
   1024 px), `image-path` (`image_path`), `value`, `resident` (an action
   does not close it). `CloseNotification` always answers; an id not known
   is ignored.
-- **The icon**: the image's data, else the image's path, else
-  `app_icon` (a path, a `file://` address or an icon's name), else the
-  desktop entry's `Icon`, else a desktop file named as the application;
-  icons looked for as the sound's applications' are (`hicolor`, then
-  `pixmaps`). None: a neutral square (radius 9, `rgba(255,255,255,0.10)`, a
-  1 px `rgba(255,255,255,0.14)` rim).
+- **The icon**, found as the launcher finds its icons (5.1: the user's
+  icon theme and those it inherits, then `hicolor`, then `pixmaps`, drawn
+  at the card's 32 px on the screens' scale), on the server's thread:
+  `app_icon` (an icon's name, a path or a `file://` address), else the
+  image (`image-path`, then `image-data`), else the `Icon` of the desktop
+  entry the `desktop-entry` hint names among the launcher's applications
+  (else the icon named as that entry), else the icon of the application
+  whose name is the notification's application's. None: the launcher's
+  letter tile, the application's first letter in white on its neutral
+  gradient (`#5C6576 → #9AA3B4`, a 1 px `rgba(255,255,255,0.14)` rim),
+  radius 9, the letter 13 px bold.
 
 ### Agents' notifications
 

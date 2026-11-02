@@ -33,7 +33,13 @@ use super::{
     Input,
     note::{self, Note, Sender, Timeout, Urgency},
 };
-use crate::levels::icons::Icon;
+use crate::{
+    launcher::{
+        entries,
+        icons::{self, Themes},
+    },
+    levels::icons::Icon,
+};
 
 const NAME: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
@@ -204,9 +210,16 @@ impl Server {
             .get("image-path")
             .or_else(|| hints.get("image_path"))
             .and_then(|v| String::try_from(&**v).ok());
-        let looked = (image_path, app_icon, entry.clone(), app_name.clone());
+        let looked = Looked {
+            app_icon,
+            image_path,
+            image,
+            entry: entry.clone(),
+            app: app_name.clone(),
+            scale: screens_scale(),
+        };
         let found = tokio::task::spawn_blocking(move || {
-            let icon = image.or_else(|| icon_of(looked));
+            let icon = icon_of(looked);
             (icon, note::programs_above(pid))
         })
         .await;
@@ -365,28 +378,91 @@ fn image_data(value: &OwnedVariant) -> Option<Icon> {
     )))
 }
 
-/// The icon of an image's path, the application's icon (a path, a
-/// `file://` address or an icon's name), else its desktop entry's.
-fn icon_of(
-    (image_path, app_icon, entry, app): (Option<String>, String, Option<String>, String),
-) -> Option<Icon> {
-    let as_name = |text: &str| -> Option<String> {
-        let text = text.trim();
-        let text = text.strip_prefix("file://").unwrap_or(text);
-        (!text.is_empty()).then(|| text.replace("%20", " "))
+/// What a notification's icon is looked for by.
+struct Looked {
+    app_icon: String,
+    image_path: Option<String>,
+    image: Option<Icon>,
+    entry: Option<String>,
+    app: String,
+    /// The bubbles' screens' largest scale.
+    scale: u32,
+}
+
+/// The largest scale of the bars' screens: the icon is drawn for it.
+fn screens_scale() -> u32 {
+    let bars = crate::popover::with(|c| c.bar_forms());
+    bars.iter()
+        .map(|(bar, _)| crate::popover::kit::scale(bar))
+        .fold(1.0_f32, f32::max)
+        .ceil() as u32
+}
+
+/// The icon themes, as the launcher reads them, once.
+static THEMES: Mutex<Option<Themes>> = Mutex::new(None);
+
+/// Icon `text` (a path, a `file://` address or an icon's name) at the
+/// card's size, found as the launcher finds its icons (5.1).
+fn icon_named(text: &str, scale: u32) -> Option<Icon> {
+    let text = text.trim();
+    let text = text
+        .strip_prefix("file://")
+        .unwrap_or(text)
+        .replace("%20", " ");
+    if text.is_empty() {
+        return None;
+    }
+    let px = icons::pixels(super::draw::ICON as u32, scale as f32);
+    let file = if text.starts_with('/') {
+        std::path::PathBuf::from(&text)
+    } else {
+        let mut themes = THEMES.lock().unwrap_or_else(PoisonError::into_inner);
+        let themes = themes.get_or_insert_with(|| Themes::load(&entries::data_dirs()));
+        themes.find(&text, super::draw::ICON as u32, scale)?
     };
-    let mut names: Vec<String> = [image_path.as_deref(), Some(app_icon.as_str())]
-        .into_iter()
-        .flatten()
-        .filter_map(as_name)
-        .collect();
-    if let Some(entry) = entry {
-        names.extend(crate::desktops::icons::names(&entry));
+    icons::load(&file, px).map(Icon::Raster)
+}
+
+/// A notification's icon: its application's icon (`app_icon`), else its
+/// image (`image-path`, `image-data`), else its desktop entry's icon (or
+/// the icon named as the entry), else
+/// the icon of the application whose name is its application's, among
+/// those the launcher lists. Read off the drawing thread.
+fn icon_of(looked: Looked) -> Option<Icon> {
+    let scale = looked.scale.max(1);
+    if let Some(icon) = icon_named(&looked.app_icon, scale) {
+        return Some(icon);
     }
-    if names.is_empty() && !app.trim().is_empty() {
-        // Some name their application only: its desktop file may be named
-        // so too (`firefox`).
-        names.extend(crate::desktops::icons::names(&app.trim().to_lowercase()));
+    if let Some(icon) = looked
+        .image_path
+        .as_deref()
+        .and_then(|p| icon_named(p, scale))
+    {
+        return Some(icon);
     }
-    crate::levels::icons::find(&names)
+    if looked.image.is_some() {
+        return looked.image;
+    }
+    let catalog = crate::launcher::apps::catalog();
+    let entries = || catalog.apps.iter().map(|a| &a.entry);
+    if let Some(wanted) = looked.entry.as_deref() {
+        // Its entry's icon; an entry the launcher does not list (shown in
+        // another desktop only) is often its icon's name too.
+        let found = entries()
+            .find(|e| e.id.eq_ignore_ascii_case(wanted))
+            .and_then(|e| e.icon.clone())
+            .and_then(|name| icon_named(&name, scale))
+            .or_else(|| icon_named(wanted, scale));
+        if found.is_some() {
+            return found;
+        }
+    }
+    let app = looked.app.trim();
+    if app.is_empty() {
+        return None;
+    }
+    entries()
+        .find(|e| e.name.eq_ignore_ascii_case(app))
+        .and_then(|e| e.icon.clone())
+        .and_then(|name| icon_named(&name, scale))
 }
