@@ -7,9 +7,7 @@ mod common;
 
 use anyhow::Context;
 
-use common::{
-    BTN_LEFT, KEY_2, KEY_DOWN, KEY_LEFTMETA, WAIT, chord, compositor, open, wait_for_rect,
-};
+use common::{BTN_LEFT, KEY_2, KEY_DOWN, KEY_LEFTMETA, chord, compositor, open, wait_for_rect};
 use hocus_compositor::{
     Headless,
     model::{GAP, Rect},
@@ -117,13 +115,21 @@ fn sticking_does_not_make_the_jelly_jump() -> anyhow::Result<()> {
     let mut hp = compositor()?;
     let a = open(&mut hp, "test.still", (400, 300))?;
     let b = open(&mut hp, "test.jelly", (400, 300))?;
-    // 20 px short of the gap, then still until the jelly rests.
+    // The jelly's springs on the motions' clock, held and stepped a
+    // refresh at a time: on a loaded machine, its loop reads them late,
+    // and a bend read late has swung on.
+    hp.hold_clock();
+    let still = |hp: &mut Headless| -> anyhow::Result<()> {
+        for _ in 0..50 {
+            hp.step(common::STEP)?;
+        }
+        Ok(())
+    };
+    // 20 px short of the gap, then still until the jelly rests (800 ms).
     let at = grab(&mut hp, b);
     let dx = f64::from(a.right() + GAP + 20 - b.x);
     hp.pointer_move(at.0 + dx, at.1 + 50.0);
-    // Still until the jelly rests: its springs on the compositor's clock,
-    // which a loaded machine's loop reads late.
-    hp.dispatch_until(WAIT, |hp| hp.bend().unwrap_or(0.0) < 1.0)?;
+    still(&mut hp)?;
     let rest = hp.bend().unwrap_or(0.0);
     assert!(rest < 1.0, "at rest: {rest}");
     // 8 px on: it jumps the last 12 px, and bends only by the 8.
@@ -135,11 +141,12 @@ fn sticking_does_not_make_the_jelly_jump() -> anyhow::Result<()> {
     )?;
     let bend = hp.bend().context("it wobbles")?;
     assert!(bend <= 8.5, "the jelly bent by {bend} px");
-    // Held still by the magnet, it does not bend: once its 8 px rested.
-    hp.dispatch_until(WAIT, |hp| hp.bend().unwrap_or(0.0) < 1.0)?;
+    // Held still by the magnet, it does not bend.
+    still(&mut hp)?;
     hp.pointer_move(at.0 + dx - 14.0, at.1 + 50.0);
     let bend = hp.bend().unwrap_or(0.0);
     assert!(bend < 1.0, "the jelly bent by {bend} px");
+    hp.release_clock();
     release(&mut hp);
     Ok(())
 }
