@@ -102,7 +102,7 @@ fn a_resize_edge_shows_the_themes_cursor_at_the_screens_scale() -> anyhow::Resul
     assert_eq!(at_an_edge(&mut hp, 2, 20, GREEN)?, GREEN);
     // Once the window has opened, nothing is drawn while the cursor stays
     // the same.
-    hp.dispatch_until(Duration::from_secs(1), |_| false)?;
+    common::at_rest(&mut hp)?;
     let frames = hp.frames();
     hp.dispatch_until(Duration::from_millis(300), |_| false)?;
     assert_eq!(hp.frames(), frames);
@@ -118,19 +118,23 @@ fn an_animated_cursor_is_drawn_when_its_frame_changes_only() -> anyhow::Result<(
     ])?;
     let mut hp = compositor(1.0, Some(&theme))?;
     at_an_edge(&mut hp, 1, 8, RED)?;
-    hp.dispatch_until(Duration::from_secs(1), |_| false)?;
+    common::at_rest(&mut hp)?;
     let frames = hp.frames();
     let (mut red, mut green) = (false, false);
-    let until = Instant::now() + Duration::from_millis(600);
-    while Instant::now() < until {
-        hp.dispatch(Duration::from_millis(5))?;
+    // A refresh at a time for 600 ms, the motions' clock held: a loaded
+    // machine draws as many frames as an idle one then.
+    hp.hold_clock();
+    let start = hp.now();
+    while hp.now() - start < Duration::from_millis(600) {
+        hp.step(common::STEP)?;
         let rect = hp.windows()[0].rect;
         let seen = pixel(&mut hp, rect.x + rect.width + 3 + 8, rect.y + 100 + 8)?;
         red |= seen == RED;
         green |= seen == GREEN;
     }
+    hp.release_clock();
     assert!(red && green, "red {red}, green {green}");
-    // About one frame per 100 ms, not one per turn of the loop.
+    // About one frame per 100 ms, not one per refresh.
     let drawn = hp.frames() - frames;
     assert!((2..=12).contains(&drawn), "{drawn} frames");
     Ok(())

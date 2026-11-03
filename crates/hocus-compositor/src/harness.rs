@@ -215,6 +215,28 @@ impl Headless {
             .collect()
     }
 
+    /// The caret of `app_id`'s window's enabled text input (surface-local:
+    /// x, y, width, height), as its client last committed it: `None`
+    /// without one enabled, `Some(None)` with one that said no caret.
+    pub fn text_input(&self, app_id: &str) -> Option<Option<(i32, i32, i32, i32)>> {
+        let state = &self.app.state;
+        let surface = state.windows.values().find_map(|m| {
+            (crate::windows::app_id(&m.window).as_deref() == Some(app_id))
+                .then(|| m.window.wl_surface().map(|s| s.into_owned()))
+                .flatten()
+        })?;
+        if !state.emoji.inputs.enabled(&surface) {
+            return None;
+        }
+        Some(
+            state
+                .emoji
+                .inputs
+                .caret(&surface)
+                .map(|r| (r.loc.x, r.loc.y, r.size.w, r.size.h)),
+        )
+    }
+
     /// How many windows are minimised.
     pub fn minimized(&self) -> usize {
         let state = &self.app.state;
@@ -407,6 +429,12 @@ impl Headless {
         let state = &self.app.state;
         let drawn = state.drawn_at.get();
         drawn.is_some_and(|at| state.panel.launchers.at_rest(at))
+    }
+
+    /// When the launcher's toast was first drawn, on the compositor's
+    /// clock ([`Headless::now`]), while it shows.
+    pub fn launcher_toast_since(&self) -> Option<Duration> {
+        self.app.state.panel.launchers.toast_since()
     }
 
     /// The launcher's surfaces as the shell placed them: their screen, and
@@ -607,6 +635,134 @@ impl Headless {
     /// where they are (global).
     pub fn bar_surfaces(&self) -> Vec<(String, Rect)> {
         self.layer_rects(hocus_link::NAMESPACE)
+    }
+
+    /// Holds the motions' clock where it is: from now on it moves only by
+    /// [`Headless::step`], each step drawing a frame at its time. A test
+    /// sees a motion at the same moments then, however late a loaded
+    /// machine draws; the frame callbacks and presentation times the
+    /// clients get stay on the real clock.
+    pub fn hold_clock(&mut self) {
+        let state = &mut self.app.state;
+        if state.held_clock.is_none() {
+            state.held_clock = Some(state.now());
+        }
+    }
+
+    /// Lets the motions' clock run again, from where it was held if that
+    /// is ahead of the real one: it never goes back.
+    pub fn release_clock(&mut self) {
+        let state = &mut self.app.state;
+        if let Some(held) = state.held_clock.take() {
+            let real = Duration::from(state.clock.now());
+            state.clock_ahead = held.saturating_sub(real);
+        }
+    }
+
+    /// The held clock moved on by `by`, and a frame drawn at that time, as
+    /// a screen refreshing: the motions under way are drawn as they are
+    /// then. Holds the clock first if it was not.
+    pub fn step(&mut self, by: Duration) -> anyhow::Result<()> {
+        self.hold_clock();
+        let state = &mut self.app.state;
+        let at = state.held_clock.map(|t| t + by);
+        state.held_clock = at;
+        state.redraw = true;
+        // Drawn at that time: the frame counts only when something changed
+        // on the screen, but each frame drawn notes its time.
+        let drawn = self.dispatch_until(Duration::from_secs(30), |hp| {
+            hp.app.state.drawn_at.get() == at
+        })?;
+        anyhow::ensure!(drawn, "no frame drawn at {at:?}");
+        Ok(())
+    }
+
+    /// Whether nothing moved as of the last frame drawn (`tick`'s word).
+    pub fn still(&self) -> bool {
+        self.app.state.still
+    }
+
+    /// The motions' time now (held, or running).
+    pub fn now(&self) -> Duration {
+        self.app.state.now()
+    }
+
+    /// Whether the last frame drawn shows everything at rest: no motion
+    /// under way as of that frame, and no frame asked for since. A frame is
+    /// only drawn after the loop turns, so on a loaded machine it can come
+    /// well after a motion's end in time: read pixels once this holds.
+    pub fn at_rest(&self) -> bool {
+        let state = &self.app.state;
+        state.still && !state.redraw && state.drawn_at.get().is_some()
+    }
+
+    /// The layer surfaces of `namespace` that show what was asked of them:
+    /// a buffer of their place's size. A layer surface has its place from
+    /// its first commit, before any buffer: until it has one it shows
+    /// nothing and takes no input, and on a loaded machine the shell's
+    /// first buffer can come long after.
+    pub fn drawn_layers(&self, namespace: &str) -> Vec<(String, Rect)> {
+        use smithay::backend::renderer::utils::with_renderer_surface_state;
+        let state = &self.app.state;
+        let mut surfaces = Vec::new();
+        for output in state.space.outputs() {
+            let Some(origin) = state.space.output_geometry(output).map(|g| g.loc) else {
+                continue;
+            };
+            let map = smithay::desktop::layer_map_for_output(output);
+            for layer in map.layers() {
+                if layer.namespace() != namespace {
+                    continue;
+                }
+                let Some(g) = map.layer_geometry(layer) else {
+                    continue;
+                };
+                let size =
+                    with_renderer_surface_state(layer.wl_surface(), |s| s.surface_size()).flatten();
+                if size != Some(g.size) {
+                    continue;
+                }
+                let rect = Rect::new(origin.x + g.loc.x, origin.y + g.loc.y, g.size.w, g.size.h);
+                surfaces.push((output.name(), rect));
+            }
+        }
+        surfaces
+    }
+
+    /// The namespaces of the layer surfaces placed over the point (`x`,
+    /// `y`) that do not show what was asked of them yet: no buffer, or one
+    /// of another size than their place (a configure not drawn yet). A
+    /// press there now goes to whatever is under them, or lands on a part
+    /// of theirs that moves once their buffer comes.
+    pub fn undrawn_at(&self, x: f64, y: f64) -> Vec<String> {
+        use smithay::backend::renderer::utils::with_renderer_surface_state;
+        let state = &self.app.state;
+        let mut undrawn = Vec::new();
+        for output in state.space.outputs() {
+            let Some(origin) = state.space.output_geometry(output).map(|g| g.loc) else {
+                continue;
+            };
+            let map = smithay::desktop::layer_map_for_output(output);
+            for layer in map.layers() {
+                let Some(g) = map.layer_geometry(layer) else {
+                    continue;
+                };
+                let (left, top) = (f64::from(origin.x + g.loc.x), f64::from(origin.y + g.loc.y));
+                let over = x >= left
+                    && y >= top
+                    && x < left + f64::from(g.size.w)
+                    && y < top + f64::from(g.size.h);
+                if !over {
+                    continue;
+                }
+                let size =
+                    with_renderer_surface_state(layer.wl_surface(), |s| s.surface_size()).flatten();
+                if size != Some(g.size) {
+                    undrawn.push(layer.namespace().to_owned());
+                }
+            }
+        }
+        undrawn
     }
 
     /// The layer surfaces of `namespace`: their screen, and where they

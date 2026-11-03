@@ -123,9 +123,9 @@ impl Bed {
             log,
             state: root.join("state/hocuspanda"),
         };
-        let up = bed
-            .hp
-            .dispatch_until(WAIT, |hp| hp.bell_surfaces().len() == 1)?;
+        let up = bed.hp.dispatch_until(WAIT, |hp| {
+            hp.drawn_layers(hocus_link::BELL_NAMESPACE).len() == 1
+        })?;
         anyhow::ensure!(up, "no footer");
         // Drawn: until then it takes no click.
         let button = bed.button();
@@ -176,6 +176,33 @@ impl Bed {
         Ok(line)
     }
 
+    /// What the history last said after `from`, once it says `text` and
+    /// not `not`: the keys of its search reach it one by one, and its
+    /// lines between say what each left (only as what it shows changes).
+    fn history_with(&mut self, from: usize, text: &str, not: &str) -> anyhow::Result<String> {
+        let log = self.log.clone();
+        let shown = |log: &Path| {
+            plain(log)
+                .get(from..)
+                .and_then(|l| {
+                    l.lines()
+                        .rfind(|l| l.contains("the clipboard's history shows it"))
+                        .map(str::to_owned)
+                })
+                .unwrap_or_default()
+        };
+        let done = self.hp.dispatch_until(WAIT, |_| {
+            let said = history(&shown(&log));
+            said.contains(text) && !said.contains(not)
+        })?;
+        let line = shown(&log);
+        anyhow::ensure!(
+            done,
+            "the history never said {text:?} without {not:?}; it said {line:?}"
+        );
+        Ok(line)
+    }
+
     /// A window that takes the keyboard and says its keys.
     fn window(&mut self, app_id: &'static str, size: (u32, u32)) -> anyhow::Result<Window> {
         let (rect, client) =
@@ -184,8 +211,9 @@ impl Bed {
     }
 
     fn click(&mut self, (x, y): (f64, f64)) -> anyhow::Result<()> {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
+        // Once the shell's surfaces there are drawn: else the press goes
+        // to what is under them.
+        common::point(&mut self.hp, (x, y))?;
         wait(&mut self.hp, Duration::from_millis(60))?;
         self.hp.button(BTN_LEFT, true);
         self.hp.button(BTN_LEFT, false);
@@ -233,6 +261,11 @@ impl Bed {
         chord(&mut self.hp, &[KEY_LEFTMETA, KEY_V]);
         let rect = self.popover()?;
         let line = self.logged_after(mark, "the clipboard's history shows it")?;
+        // Holding the keyboard: the keys typed next are its.
+        let held = self.hp.dispatch_until(WAIT, |hp| {
+            hp.keyboard_layer().as_deref() == Some(hocus_link::POPOVER_NAMESPACE)
+        })?;
+        anyhow::ensure!(held, "the keyboard is on {:?}", self.hp.keyboard_layer());
         Ok((rect, line))
     }
 
@@ -240,9 +273,10 @@ impl Bed {
     fn popover(&mut self) -> anyhow::Result<Rect> {
         let open = self
             .hp
-            .dispatch_until(WAIT, |hp| hp.popover_surfaces().len() == 1)?;
-        anyhow::ensure!(open, "no popover");
-        wait(&mut self.hp, Duration::from_millis(200))?;
+            .dispatch_until(WAIT, |hp| common::drawn_popovers(hp).len() == 1)?;
+        anyhow::ensure!(open, "no popover: {:?}", self.hp.popover_surfaces());
+        // Its fade in over in the frame the screen shows.
+        common::at_rest(&mut self.hp)?;
         Ok(self.hp.popover_surfaces()[0].1)
     }
 
@@ -449,16 +483,14 @@ fn the_search_filters_on_the_text_and_the_application() -> anyhow::Result<()> {
     // Without its accents, in any case: the editor's text alone.
     let mark = bed.mark();
     bed.type_text("pepin");
-    let line = bed.history_after(mark, "Pépinière")?;
-    assert!(!history(&line).contains("cargo"), "{line}");
+    bed.history_with(mark, "Pépinière", "cargo")?;
     // The application's name finds the terminal's.
     let mark = bed.mark();
     for _ in 0..5 {
         bed.press(KEY_BACKSPACE);
     }
     bed.type_text("term");
-    let line = bed.history_after(mark, "cargo build")?;
-    assert!(!history(&line).contains("Pépinière"), "{line}");
+    bed.history_with(mark, "cargo build", "Pépinière")?;
     // Nothing found: said so.
     let mark = bed.mark();
     bed.type_text("zzz");

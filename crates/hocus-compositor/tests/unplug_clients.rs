@@ -20,6 +20,9 @@ use std::{
 
 use anyhow::Context;
 use common::{WAIT, wait};
+
+/// How long a real program (foot, kitty) may take to show its window.
+const PROGRAM_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 use hocus_compositor::{Headless, HeadlessConfig, OutputSpec, Placed, RendererChoice};
 use smithay_client_toolkit::reexports::protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
@@ -730,7 +733,9 @@ fn a_terminal_survives(program: &str, args: &[&str], app_id: &str) -> anyhow::Re
         let lines: Vec<&str> = text.lines().collect();
         lines[lines.len().saturating_sub(40)..].join("\n")
     };
-    let shown = hp.dispatch_until(WAIT, |hp| on(hp, app_id).as_deref() == Some(SECOND))?;
+    // A real program starting: on a loaded machine, with its GL on the
+    // CPU, well over the tests' usual wait.
+    let shown = hp.dispatch_until(PROGRAM_WAIT, |hp| on(hp, app_id).as_deref() == Some(SECOND))?;
     assert!(shown, "{program} on the second screen: {}", tail(&log));
     wait(&mut hp, Duration::from_millis(300))?;
 

@@ -5,12 +5,10 @@
 
 mod common;
 
-use std::time::Duration;
-
 use anyhow::Context;
 
 use common::{
-    BTN_LEFT, KEY_2, KEY_DOWN, KEY_LEFTMETA, chord, compositor, open, wait, wait_for_rect,
+    BTN_LEFT, KEY_2, KEY_DOWN, KEY_LEFTMETA, WAIT, chord, compositor, open, wait_for_rect,
 };
 use hocus_compositor::{
     Headless,
@@ -123,7 +121,9 @@ fn sticking_does_not_make_the_jelly_jump() -> anyhow::Result<()> {
     let at = grab(&mut hp, b);
     let dx = f64::from(a.right() + GAP + 20 - b.x);
     hp.pointer_move(at.0 + dx, at.1 + 50.0);
-    wait(&mut hp, Duration::from_millis(800))?;
+    // Still until the jelly rests: its springs on the compositor's clock,
+    // which a loaded machine's loop reads late.
+    hp.dispatch_until(WAIT, |hp| hp.bend().unwrap_or(0.0) < 1.0)?;
     let rest = hp.bend().unwrap_or(0.0);
     assert!(rest < 1.0, "at rest: {rest}");
     // 8 px on: it jumps the last 12 px, and bends only by the 8.
@@ -135,8 +135,8 @@ fn sticking_does_not_make_the_jelly_jump() -> anyhow::Result<()> {
     )?;
     let bend = hp.bend().context("it wobbles")?;
     assert!(bend <= 8.5, "the jelly bent by {bend} px");
-    // Held still by the magnet, it does not bend.
-    wait(&mut hp, Duration::from_millis(800))?;
+    // Held still by the magnet, it does not bend: once its 8 px rested.
+    hp.dispatch_until(WAIT, |hp| hp.bend().unwrap_or(0.0) < 1.0)?;
     hp.pointer_move(at.0 + dx - 14.0, at.1 + 50.0);
     let bend = hp.bend().unwrap_or(0.0);
     assert!(bend < 1.0, "the jelly bent by {bend} px");

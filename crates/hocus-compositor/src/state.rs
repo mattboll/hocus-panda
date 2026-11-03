@@ -78,6 +78,13 @@ pub struct State {
     pub loop_signal: LoopSignal,
     /// CLOCK_MONOTONIC, which frame callbacks and presentation times use.
     pub clock: Clock<Monotonic>,
+    /// The motions' time while a test holds it (`Headless::hold_clock`):
+    /// it moves only as the test steps it, so that a motion is seen at
+    /// the same moments however slowly a loaded machine draws.
+    pub held_clock: Option<Duration>,
+    /// How far ahead of `clock` the motions' time is since a test let it
+    /// go, having stepped it faster than it ran: it never goes back.
+    pub clock_ahead: Duration,
     pub socket_path: PathBuf,
     pub runtime_dir: PathBuf,
     pub config: Config,
@@ -166,6 +173,9 @@ pub struct State {
     pub cursor_images: CursorImages,
     /// Something changed on screen since the last frame.
     pub redraw: bool,
+    /// Nothing moved as of the last frame drawn, as `tick` judged it then:
+    /// that frame shows every motion at its end (the tests' `at_rest`).
+    pub still: bool,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
     /// Going to an agent, its streak under way (bar.md §8, 4.3).
@@ -299,6 +309,8 @@ impl State {
             loop_handle,
             loop_signal,
             clock: Clock::new(),
+            held_clock: None,
+            clock_ahead: Duration::ZERO,
             socket_path,
             runtime_dir,
             config,
@@ -353,6 +365,7 @@ impl State {
             popup_grab: None,
             wake: None,
             drawn_at: std::cell::Cell::new(None),
+            still: false,
             cursor: CursorImageStatus::default_named(),
             cursor_images,
             redraw: true,

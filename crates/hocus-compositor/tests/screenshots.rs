@@ -270,7 +270,8 @@ fn window_mode_takes_the_window_under_the_pointer() -> anyhow::Result<()> {
     let _ = left;
     open(&mut bed.hp, "right", (640, 480))?;
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_RIGHT]);
-    wait(&mut bed.hp, Duration::from_millis(400))?;
+    // Both drawn where they went, their motions over.
+    common::at_rest(&mut bed.hp)?;
     let left = common::rect_of(&bed.hp, "left").context("no left window")?;
     bed.open()?;
     bed.hp.capture_ask(CaptureAsk::Mode(CaptureMode::Window));

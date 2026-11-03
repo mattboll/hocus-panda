@@ -463,7 +463,20 @@ impl Panel {
             ui.react(&bt);
             ui.relist(&bt);
             ui.switch.settle(bt.powered, now);
-            state.nearby = ui.nearby(&bt);
+            let nearby = ui.nearby(&bt);
+            if nearby != state.nearby {
+                // What a click on a row does follows these, not the
+                // thread's word: the tests wait for them.
+                let rows: Vec<String> = nearby
+                    .iter()
+                    .map(|d| {
+                        let code = if d.code { " (code)" } else { "" };
+                        format!("{}{code}", d.name)
+                    })
+                    .collect();
+                tracing::debug!(rows = %rows.join(", "), "the popover's nearby rows");
+            }
+            state.nearby = nearby;
             let layout = Layout::of(&bt, ui, &state.nearby);
             ui.scroll = ui.scroll.clamp(0.0, layout.most_scroll());
             if ui

@@ -455,31 +455,9 @@ impl Fakes {
 
     /// A D-Bus daemon of its own, as the system bus.
     pub fn start_bus(&mut self) -> anyhow::Result<()> {
-        let config = self.dir.path().join("bus.conf");
-        let socket = self.dir.path().join("bus");
-        std::fs::write(
-            &config,
-            format!(
-                "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
-                 \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
-                 <busconfig><type>session</type><listen>unix:path={}</listen>\
-                 <policy context=\"default\"><allow send_destination=\"*\"/>\
-                 <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
-                socket.display()
-            ),
-        )?;
-        let bus = Command::new("dbus-daemon")
-            .arg(format!("--config-file={}", config.display()))
-            .arg("--nofork")
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .context("dbus-daemon")?;
+        let (bus, address) = crate::common::private_bus(self.dir.path())?;
+        anyhow::ensure!(address == self.address, "the bus at {address}");
         self.bus = Some(bus);
-        wait_for(|| socket.exists(), "the bus's socket")?;
         let session = Session {
             backlights: self.backlights(),
             calls: self.brightness_calls.clone(),
@@ -664,8 +642,7 @@ impl Fakes {
             .spawn()
             .context("pipewire")?;
         self.pipewire = Some(pipewire);
-        let socket = self.pw_socket();
-        wait_for(|| socket.exists(), "PipeWire's socket")?;
+        crate::common::wait_accepts(&self.pw_socket())?;
         wait_for(|| self.sink(first).is_ok(), "the test sink")?;
         self.start_policy()?;
         Ok(())

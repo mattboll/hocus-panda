@@ -187,7 +187,8 @@ fn a_floating_window_over_the_seam_hides_its_handle_and_takes_the_press() -> any
     // Near the seam above it: the handle shows, under the window.
     hp.pointer_move(x, f64::from(over.y - 100));
     assert!(hp.state().seam_handle.is_some(), "the handle shows");
-    wait(&mut hp, Duration::from_millis(200))?;
+    // The window's opening and the handle's fade over in the frame shown.
+    common::at_rest(&mut hp)?;
     let shot = hp.screenshot(0)?;
     assert_eq!(
         pixel(&shot, x, y),

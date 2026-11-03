@@ -27,8 +27,7 @@ use std::{
 };
 
 use common::{
-    BTN_LEFT, ClientHandle, Event, KEY_ESC, KEY_LEFTALT, KEY_LEFTSHIFT, KEY_TAB, Shows, WAIT,
-    chord, wait,
+    ClientHandle, Event, KEY_ESC, KEY_LEFTALT, KEY_LEFTSHIFT, KEY_TAB, Shows, WAIT, chord, wait,
 };
 use fakes::Fakes;
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
@@ -249,11 +248,10 @@ impl Bed {
         }
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
     }
 
     fn press(&mut self, key: u32) {
@@ -436,7 +434,7 @@ fn a_click_on_the_row_goes_to_the_next_layout_and_the_row_follows_round_and_roun
     // A click: the compositor's keyboard on the next layout, which the
     // window holding the keyboard is given; then the row follows.
     let mark = bed.mark();
-    bed.click(bed.row(false));
+    bed.click(bed.row(false))?;
     bed.group(1)?;
     assert_eq!(bed.hp.layout(), 1);
     bed.logged_after(mark, &shows("Anglais (US)", "US"))?;
@@ -445,7 +443,7 @@ fn a_click_on_the_row_goes_to_the_next_layout_and_the_row_follows_round_and_roun
     assert_ne!(bed.pixels(row)?, first, "the row did not change");
     // Again: back to the first, which the row shows as it was.
     let mark = bed.mark();
-    bed.click(bed.row(false));
+    bed.click(bed.row(false))?;
     bed.group(0)?;
     bed.logged_after(mark, &shows("Français", "FR"))?;
     bed.hp.pointer_move(600.0, 500.0);
@@ -474,7 +472,7 @@ fn two_french_layouts_go_by_their_variants_code() -> anyhow::Result<()> {
         (0, "Français", "FR"),
     ] {
         let mark = bed.mark();
-        bed.click(bed.row(false));
+        bed.click(bed.row(false))?;
         bed.group(group)?;
         bed.logged_after(mark, &shows(name, code))?;
     }
@@ -494,7 +492,7 @@ fn in_english_the_names_are_xkbs() -> anyhow::Result<()> {
     let mut bed = start(&shell, setup)?;
     bed.logged(&shows("French", "FR"))?;
     let mark = bed.mark();
-    bed.click(bed.row(false));
+    bed.click(bed.row(false))?;
     bed.group(1)?;
     bed.logged_after(mark, &shows("French (BEPO)", "BEPO"))?;
     Ok(())
@@ -521,7 +519,7 @@ fn one_layout_no_row_and_no_click_taken() -> anyhow::Result<()> {
             .is_some_and(|l| l != hocus_link::CONNECTIONS_NAMESPACE)
     })?;
     assert!(through, "the pointer is on {:?}", bed.hp.pointer_layer());
-    bed.click((x, y));
+    bed.click((x, y))?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     assert_eq!(bed.hp.layout(), 0);
     assert!(!plain(&bed.log).contains("the layout's row shows it layout=Some"));
@@ -595,7 +593,7 @@ fn the_mini_forms_button_under_the_battery_draws_alone_and_goes_to_the_next() ->
     wait(&mut bed.hp, Duration::from_millis(500))?;
     assert!(bed.hp.popover_surfaces().is_empty());
     let mark = bed.mark();
-    bed.click((x, y));
+    bed.click((x, y))?;
     bed.group(1)?;
     bed.logged_after(mark, &shows("Anglais (US)", "US"))?;
     // A switch from the keyboard draws the levels alone.
@@ -624,11 +622,17 @@ fn the_keyboard_reaches_the_row_where_enter_and_space_go_to_the_next() -> anyhow
     };
     let mut bed = start(&shell, setup)?;
     bed.logged(&shows("Français", "FR"))?;
-    // The Wi-Fi's row over the layout's.
+    // The Wi-Fi's row over the layout's, once NetworkManager answered and
+    // the shell drew it.
+    let rows = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::CONNECTIONS_NAMESPACE)
+            .first()
+            .is_some_and(|(_, r)| (r.width, r.height) == (194, 72))
+    })?;
     let s = bed.connections();
-    assert_eq!((s.width, s.height), (194, 72));
+    assert!(rows, "{s:?}");
     let wifi = (f64::from(s.x + s.width / 2), f64::from(s.y) + 5.0 + 15.0);
-    bed.click(wifi);
+    bed.click(wifi)?;
     let open = bed
         .hp
         .dispatch_until(WAIT, |hp| !hp.popover_surfaces().is_empty())?;

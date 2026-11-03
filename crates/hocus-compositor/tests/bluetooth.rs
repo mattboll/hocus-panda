@@ -298,11 +298,10 @@ impl Bed {
         )
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
     }
 
     fn press(&mut self, key: u32) {
@@ -321,12 +320,14 @@ impl Bed {
     /// Waits until the popover is at `rect`, or gone.
     fn popover_is(&mut self, rect: Option<Rect>) -> anyhow::Result<()> {
         let want: Vec<Rect> = rect.into_iter().collect();
+        // Drawn there too: else a click on it is lost.
         let done = self.hp.dispatch_until(WAIT, |hp| {
             hp.popover_surfaces()
                 .into_iter()
                 .map(|(_, r)| r)
                 .collect::<Vec<_>>()
                 == want
+                && common::drawn_popovers(hp) == want
         })?;
         anyhow::ensure!(done, "popovers {:?}, not {want:?}", self.popovers());
         Ok(())
@@ -399,7 +400,7 @@ impl Bed {
     /// Opens the popover with a click on the row, at `rect`.
     fn open(&mut self, rect: Rect) -> anyhow::Result<()> {
         let item = self.item();
-        self.click(item);
+        self.click(item)?;
         self.popover_is(Some(rect))?;
         // Drawn, so that a click finds its rows.
         wait(&mut self.hp, Duration::from_millis(300))
@@ -557,14 +558,14 @@ fn a_click_opens_it_and_searches_until_it_closes_listing_the_named_strongest_fir
     // As it opens nothing is around yet; then three named devices: the
     // unnamed one is left out.
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     bed.asked(&Call::StartDiscovery)?;
     let rect = popover(shape.height(3, 0.0));
     bed.popover_is(Some(rect))?;
     assert!(bed.bluez().discovering());
     // The strongest first: the Buds. A click pairs them.
     wait(&mut bed.hp, Duration::from_millis(300))?;
-    bed.click(shape.nearby_row(rect, 0));
+    bed.click(shape.nearby_row(rect, 0))?;
     bed.asked(&Call::Pair(BUDS.to_owned()))?;
     // Paired, trusted, connected: in the connected blocks now, the
     // newest first.
@@ -581,15 +582,15 @@ fn a_click_opens_it_and_searches_until_it_closes_listing_the_named_strongest_fir
     let shape = Shape::new(&[BLOCK, BATTERY], 3);
     bed.popover_is(Some(popover(shape.height(2, 0.0))))?;
     // A second click on the row closes it: the search stops.
-    bed.click(item);
+    bed.click(item)?;
     bed.popover_is(None)?;
     bed.asked(&Call::StopDiscovery)?;
     assert!(!bed.bluez().discovering());
     // Open again, then a click outside: it stops again.
-    bed.click(item);
+    bed.click(item)?;
     bed.popover_is(Some(popover(shape.height(2, 0.0))))?;
     let stop = Call::StopDiscovery;
-    bed.click((600.0, 400.0));
+    bed.click((600.0, 400.0))?;
     bed.popover_is(None)?;
     let stopped = bed.hp.dispatch_until(WAIT, |_| {
         bed.bluez
@@ -619,14 +620,14 @@ fn a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect() ->
     let rect = popover(shape.height(0, 0.0));
     bed.open(rect)?;
     // The mouse connects: its block comes, the newest first.
-    bed.click(shape.mine_row(rect, 2));
+    bed.click(shape.mine_row(rect, 2))?;
     bed.asked(&Call::Connect(MX.to_owned()))?;
     let shape = Shape::new(&[BATTERY, BATTERY], 2);
     let rect = popover(shape.height(0, 0.0));
     bed.popover_is(Some(rect))?;
     bed.logged("row=Connected { name: \"MX Master 3S\", battery: Some(12), more: 1, low: true }")?;
     // The speaker refuses: said under its row.
-    bed.click(shape.mine_row(rect, 0));
+    bed.click(shape.mine_row(rect, 0))?;
     bed.asked(&Call::Connect(JBL.to_owned()))?;
     let mut failed = shape.clone();
     failed.mine[0] = FAILURE;
@@ -634,7 +635,7 @@ fn a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect() ->
     bed.popover_is(Some(rect))?;
     // The keyboard does not answer: given up after the time allowed (1 s
     // here), then said; the speaker's message goes.
-    bed.click(failed.mine_row(rect, 1));
+    bed.click(failed.mine_row(rect, 1))?;
     bed.asked(&Call::Connect(KEYCHRON.to_owned()))?;
     bed.logged("action=Connect")?;
     bed.asked(&Call::Disconnect(KEYCHRON.to_owned()))?;
@@ -643,7 +644,7 @@ fn a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect() ->
     bed.popover_is(Some(popover(given_up.height(0, 0.0))))?;
     // Disconnect: the mouse, first, leaves.
     let rect = popover(given_up.height(0, 0.0));
-    bed.click(given_up.disconnect(rect, 0));
+    bed.click(given_up.disconnect(rect, 0))?;
     bed.asked(&Call::Disconnect(MX.to_owned()))?;
     let mut back = Shape::new(&[BATTERY], 3);
     back.mine[1] = FAILURE;
@@ -663,7 +664,7 @@ fn while_nothing_is_connected_the_row_says_connecting() -> anyhow::Result<()> {
     let shape = Shape::new(&[], 1);
     let rect = popover(shape.height(0, 0.0));
     bed.open(rect)?;
-    bed.click(shape.mine_row(rect, 0));
+    bed.click(shape.mine_row(rect, 0))?;
     bed.logged("row=Connecting")?;
     // Given up: nothing again.
     bed.asked(&Call::Disconnect(KEYCHRON.to_owned()))?;
@@ -688,24 +689,26 @@ fn pairing_without_a_code_works_one_asking_a_passkey_goes_to_the_settings_one_fa
     let shape = Shape::new(&[], 0);
     let rect = popover(shape.height(3, 0.0));
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     bed.popover_is(Some(rect))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     // The phone, second, is inert: "in Settings".
-    bed.click(shape.nearby_row(rect, 1));
+    bed.click(shape.nearby_row(rect, 1))?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     assert_eq!(bed.times(&Call::Pair(PIXEL.to_owned())), 0);
     // The speaker asks a passkey: the agent refuses, the row is left to
     // the Settings, nothing said under it.
-    bed.click(shape.nearby_row(rect, 2));
+    bed.click(shape.nearby_row(rect, 2))?;
     bed.asked(&Call::Pair(BOSE.to_owned()))?;
     bed.logged("step=Failed(Code)")?;
+    // The popover's rows know it too, which a click follows.
+    bed.logged(&format!("{BOSE} (code)"))?;
     assert_eq!(bed.popovers(), vec![rect]);
-    bed.click(shape.nearby_row(rect, 2));
+    bed.click(shape.nearby_row(rect, 2))?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     assert_eq!(bed.times(&Call::Pair(BOSE.to_owned())), 1);
     // The buds, not in pairing mode: said under their row.
-    bed.click(shape.nearby_row(rect, 0));
+    bed.click(shape.nearby_row(rect, 0))?;
     bed.asked(&Call::Pair(BUDS.to_owned()))?;
     // Two or three lines, as the font measures them.
     let grown = bed.hp.dispatch_until(WAIT, |hp| {
@@ -736,7 +739,7 @@ fn past_four_devices_around_the_list_scrolls() -> anyhow::Result<()> {
     let mut bed = start(&shell, Some(setup(mine(), later)), true)?;
     let shape = Shape::new(&[BATTERY], 3);
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let rect = popover(shape.height(8, 0.0));
     bed.popover_is(Some(rect))?;
     assert_eq!(rect.height, shape.height(4, 2.0), "four rows and a peek");
@@ -748,7 +751,7 @@ fn past_four_devices_around_the_list_scrolls() -> anyhow::Result<()> {
     bed.hp.wheel(2);
     wait(&mut bed.hp, Duration::from_millis(300))?;
     let bottom = f64::from(rect.y) + shape.nearby_top() + LIST;
-    bed.click((first.0, bottom - ROW / 2.0));
+    bed.click((first.0, bottom - ROW / 2.0))?;
     bed.asked(&Call::Pair("Enceinte 8".to_owned()))?;
     Ok(())
 }
@@ -763,14 +766,14 @@ fn the_switch_turns_it_off_and_on_and_a_blocked_adapter_is_off() -> anyhow::Resu
     let rect = popover(shape.height(0, 0.0));
     bed.open(rect)?;
     let switch = (f64::from(rect.x + 245), f64::from(rect.y + 29));
-    bed.click(switch);
+    bed.click(switch)?;
     bed.asked(&Call::Power(false))?;
     let off = popover(off_height());
     bed.popover_is(Some(off))?;
     bed.logged("row=Off")?;
     // The search stopped with the adapter; on again, it starts again.
     let switch = (switch.0, f64::from(off.y + 1 + 12 + 16));
-    bed.click(switch);
+    bed.click(switch)?;
     bed.asked(&Call::Power(true))?;
     let back = bed.hp.dispatch_until(WAIT, |_| {
         bed.bluez.as_ref().is_some_and(|b| {
@@ -793,7 +796,7 @@ fn the_switch_turns_it_off_and_on_and_a_blocked_adapter_is_off() -> anyhow::Resu
     bed.logged("row=Off")?;
     let off = popover(off_height());
     bed.open(off)?;
-    bed.click((f64::from(off.x + 245), f64::from(off.y + 29)));
+    bed.click((f64::from(off.x + 245), f64::from(off.y + 29)))?;
     bed.asked(&Call::Power(true))?;
     wait(&mut bed.hp, Duration::from_secs(4))?;
     assert!(!bed.bluez().powered());
