@@ -748,6 +748,11 @@ struct ShellBed {
 
 impl ShellBed {
     fn start(output: &str, form: hocus_compositor::FormChoice) -> anyhow::Result<Option<Self>> {
+        // The recorder's steps, shown with a failure.
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("hocus_compositor::record=debug")
+            .with_writer(std::io::stderr)
+            .try_init();
         let Some(shell) = common::shell_program() else {
             eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
             return Ok(None);
@@ -859,9 +864,10 @@ impl ShellBed {
         })?;
         anyhow::ensure!(
             shown,
-            "no thumbnail ({:?}, {:?}):\n{}",
+            "no thumbnail ({:?}, {:?}, ending: {}):\n{}",
             self.hp.record_failures(),
             self.hp.recorded(),
+            self.hp.recording_ending(),
             self.log()
         );
         Ok(self.hp.capture_thumb_surfaces()[0].1)
@@ -938,9 +944,11 @@ fn the_toolbar_in_video_has_the_switch_son_micro_and_demarrer() -> anyhow::Resul
         .hp
         .dispatch_until(WAIT, |hp| hp.capture_toolbar_surfaces().is_empty())?;
     assert!(gone, "the toolbar stayed");
-    let started = bed
-        .hp
-        .dispatch_until(SLOW, |hp| hp.recording().is_some_and(|r| r.started))?;
+    // Its first frame recorded before it stops: stopped sooner, nothing
+    // is saved (#550).
+    let started = bed.hp.dispatch_until(SLOW, |hp| {
+        hp.recording().is_some_and(|r| r.started) && hp.record_frames() > 0
+    })?;
     assert!(started);
     bed.hp.record_ask(RecordAsk::Stop);
     bed.thumbnail()?;
@@ -1222,5 +1230,35 @@ fn on_gles_the_frames_read_back_off_the_loop_come_upright() -> anyhow::Result<()
     assert!(near(window, WINDOW), "{window:?}");
     assert!(corner.iter().all(|c| *c < 60), "{corner:?}");
     assert_eq!(bed.hp.record_copied_on_loop(), 0);
+    Ok(())
+}
+
+/// Stopped before its first frame (#550: v2's CI stopped one as ffmpeg
+/// started, the sound on): the recorder still ends, saying nothing was
+/// recorded, rather than waiting for ever on a pipe nobody reads.
+#[test]
+fn stopped_before_its_first_frame_it_ends_all_the_same() -> anyhow::Result<()> {
+    if !ready() {
+        return Ok(());
+    }
+    let mut bed = Bed::start()?;
+    bed.choose(CaptureMode::Screen, true, false)?;
+    bed.hp.capture_ask(CaptureAsk::Shoot);
+    let counted = bed.hp.dispatch_until(SLOW, |hp| hp.recording().is_some())?;
+    anyhow::ensure!(counted, "no recording");
+    assert_eq!(bed.hp.record_frames(), 0);
+    bed.hp.record_ask(RecordAsk::Stop);
+    let ended = bed.hp.dispatch_until(SLOW, |hp| {
+        !hp.recording_ending() && (hp.recorded().is_some() || !hp.record_failures().is_empty())
+    })?;
+    assert!(ended, "the recorder never ended");
+    assert!(bed.hp.recorded().is_none());
+    let why = bed.hp.record_failures().join(" ");
+    assert!(why.contains("nothing was recorded"), "{why}");
+    // Nothing is left in the videos' folder.
+    let left: Vec<_> = std::fs::read_dir(bed.folder())
+        .map(|d| d.filter_map(Result::ok).map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(left.is_empty(), "{left:?}");
     Ok(())
 }
