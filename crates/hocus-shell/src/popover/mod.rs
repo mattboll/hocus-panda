@@ -47,6 +47,7 @@ pub mod desktop;
 pub mod history;
 pub mod kit;
 pub mod session;
+pub mod sharing;
 pub mod sound;
 pub mod wifi;
 
@@ -58,7 +59,8 @@ use std::{
 
 use hocus_link::{
     AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
-    Form, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, ToCompositor,
+    Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH,
+    ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -110,6 +112,9 @@ pub enum Item {
     /// The footer's user (5.5): their name and logging out (the session's
     /// menu, 7.4).
     User,
+    /// The sign of what is in use, under the clock (5.11): who sees the
+    /// screen, and stopping it.
+    Sharing,
 }
 
 impl Item {
@@ -136,7 +141,11 @@ impl Item {
     /// screen-wide launcher must not open on the way past.
     fn hovers(self, form: Form) -> bool {
         match self {
-            Self::Desktop(_) | Self::Clipboard | Self::Notifications | Self::User => true,
+            Self::Desktop(_)
+            | Self::Clipboard
+            | Self::Notifications
+            | Self::User
+            | Self::Sharing => true,
             Self::Keyboard | Self::Agent(_) | Self::Menu => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
@@ -152,6 +161,7 @@ impl Item {
             Self::Notifications => history::WIDTH,
             Self::Clipboard => clipboard::WIDTH,
             Self::User => session::WIDTH,
+            Self::Sharing => sharing::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -173,6 +183,7 @@ impl Item {
             Self::Notifications => history::height(),
             Self::Clipboard => clipboard::height(),
             Self::User => session::height(),
+            Self::Sharing => sharing::height(),
             Self::Keyboard | Self::Decline | Self::Agent(_) | Self::Menu => 0,
         }
     }
@@ -196,7 +207,7 @@ impl Item {
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
-            Self::Menu | Self::User => {}
+            Self::Menu | Self::User | Self::Sharing => {}
         }
     }
 
@@ -216,6 +227,7 @@ impl Item {
             | Self::Secretary
             | Self::Menu
             | Self::User
+            | Self::Sharing
             | Self::Clipboard => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
@@ -238,6 +250,7 @@ impl Item {
             (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
                 FOOTER_NAMESPACE
             }
+            (Self::Sharing, _) => IN_USE_NAMESPACE,
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -255,7 +268,10 @@ impl Item {
     /// brightness's and the battery's (else its top is on the item's,
     /// pushed up to stay inside the bar: a desktop's list's on the tiles').
     fn on_bottom(self) -> bool {
-        !matches!(self, Self::Sound | Self::Desktop(_) | Self::Secretary) && !self.agents()
+        !matches!(
+            self,
+            Self::Sound | Self::Desktop(_) | Self::Secretary | Self::Sharing
+        ) && !self.agents()
     }
 
     /// Its surface on the bar at `place`, which holds the keyboard after
@@ -266,6 +282,7 @@ impl Item {
             DESKTOPS_NAMESPACE => place.desktops,
             AGENTS_NAMESPACE => place.agents,
             FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
+            IN_USE_NAMESPACE => place.in_use.unwrap_or(place.levels),
             _ => place.connections,
         }
     }
@@ -293,6 +310,8 @@ pub struct Place {
     pub surface: window::Id,
     /// The footer's (5.5), once the bar has told it.
     pub footer: Option<window::Id>,
+    /// The sign of what is in use (5.11), while it shows.
+    pub in_use: Option<window::Id>,
 }
 
 /// A bar's height until its surface's is known.
@@ -469,6 +488,13 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
     },
+    /// The share's chooser on `output` (5.11), `size` large: centred on
+    /// it, over everything, holding the keyboard.
+    ShareChooser {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -546,6 +572,7 @@ impl Controller {
     ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
         let footer = self.bars.get(bar).and_then(|p| p.footer);
+        let in_use = self.bars.get(bar).and_then(|p| p.in_use);
         let place = Place {
             form,
             height,
@@ -555,6 +582,7 @@ impl Controller {
             agents,
             surface,
             footer,
+            in_use,
         };
         self.bars.insert(bar.to_owned(), place);
     }
@@ -563,6 +591,16 @@ impl Controller {
     pub fn set_footer(&mut self, bar: &str, footer: window::Id) {
         if let Some(place) = self.bars.get_mut(bar) {
             place.footer = Some(footer);
+        }
+    }
+
+    /// Bar `bar`'s sign of what is in use is `in_use` (none: it went).
+    pub fn set_in_use(&mut self, bar: &str, in_use: Option<window::Id>) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.in_use = in_use;
+        }
+        if in_use.is_none() {
+            self.items.remove(&(bar.to_owned(), IN_USE_NAMESPACE));
         }
     }
 
@@ -965,6 +1003,37 @@ impl Controller {
         effects
     }
 
+    /// The notifications' history opens on `output`'s bar (else the
+    /// first), beside the footer's bell: the summary of what was held
+    /// while sharing links to it (5.11).
+    pub fn open_history(&mut self, output: &str, now: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if self.open_item() == Some(Item::Notifications) {
+            return effects;
+        }
+        let bar = if self.bars.contains_key(output) {
+            output.to_owned()
+        } else {
+            match self.bars.keys().min() {
+                Some(bar) => bar.clone(),
+                None => return effects,
+            }
+        };
+        let from = self
+            .items
+            .get(&(bar.clone(), FOOTER_NAMESPACE))
+            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Notifications))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| {
+                let height = self.bar_height(&bar);
+                Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
+            });
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        self.open(&bar, Item::Notifications, from, Opened::Click, &mut effects);
+        effects
+    }
+
     /// Whether the popover `id` holds the keyboard: opened by a click (or
     /// a shortcut), or clicked in.
     pub fn holds_keyboard(&self, id: window::Id) -> bool {
@@ -1126,7 +1195,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Secretary
         | Item::Notifications
         | Item::Clipboard
-        | Item::User => None,
+        | Item::User
+        | Item::Sharing => None,
     }
 }
 
@@ -1355,6 +1425,12 @@ pub fn send(effects: Vec<Effect>) {
     {
         let _ = sender.send(effects);
     }
+}
+
+/// The notifications' history opens on `output`'s bar (5.11's summary).
+pub fn open_history(output: &str) {
+    let effects = with(|c| c.open_history(output, Instant::now()));
+    send(effects);
 }
 
 /// `Super+V` (5.6): the clipboard's history opens on `output`'s bar, or
@@ -1702,6 +1778,25 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: false,
                 namespace: Some(hocus_link::CAPTURE_TOOLBAR_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::ShareChooser { id, output, size } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                // No anchor: centred on the screen.
+                anchor: Anchor::empty(),
+                exclusive_zone: Some(-1),
+                margin: Some((0, 0, 0, 0)),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::SHARE_CHOOSER_NAMESPACE.to_owned()),
             },
             id,
         }],
@@ -2107,6 +2202,7 @@ mod tests {
             agents: window::Id::unique(),
             surface: window::Id::unique(),
             footer: None,
+            in_use: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -2133,6 +2229,7 @@ mod tests {
             agents: window::Id::unique(),
             surface: window::Id::unique(),
             footer: None,
+            in_use: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
         let small = placed(place, item, (280, 332), false);

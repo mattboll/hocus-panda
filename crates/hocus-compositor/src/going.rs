@@ -228,6 +228,10 @@ pub trait Shaders: Renderer + Sized {
     /// The halo's program (`crate::halo`), compiled once; `None`: no halo.
     fn halo_program(&mut self) -> Option<GlesPixelProgram>;
 
+    /// The shared thing's ring's (`crate::share::ring`), compiled once;
+    /// `None`: the ring is drawn plain.
+    fn ring_program(&mut self) -> Option<GlesPixelProgram>;
+
     fn draw_shader(
         frame: &mut Self::Frame<'_, '_>,
         element: &ShaderElement,
@@ -255,6 +259,10 @@ impl Shaders for PixmanRenderer {
     }
 
     fn halo_program(&mut self) -> Option<GlesPixelProgram> {
+        None
+    }
+
+    fn ring_program(&mut self) -> Option<GlesPixelProgram> {
         None
     }
 
@@ -421,6 +429,10 @@ impl Shaders for GlesRenderer {
 
     fn halo_program(&mut self) -> Option<GlesPixelProgram> {
         crate::halo::program(self)
+    }
+
+    fn ring_program(&mut self) -> Option<GlesPixelProgram> {
+        crate::share::ring::program(self)
     }
 
     fn draw_shader(

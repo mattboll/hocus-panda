@@ -503,3 +503,11 @@ On the Intel GPU, the screenshots of the pull request.
 - Images sent as pixels (`image-data`) are not kept on disk: after a
   restart such a notification shows the letter tile.
 
+## 5.11: held while the screen is shared
+
+While something is shared ([sharing.md](sharing.md)), bubbles are held as
+with do not disturb (critical ones still show); when the last share ends,
+one bubble sums them up ("3 notifications pendant le partage", "Slack (2),
+Signal · dans l'historique"), its card opening the history. The sharing
+popover says how many wait meanwhile. See sharing.md, as built.
+

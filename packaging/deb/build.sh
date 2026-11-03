@@ -64,19 +64,22 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # daemon, PipeWire's pw-dump and WirePlumber's wpctl (each missing hides
 # its row); what the connections' rows read: NetworkManager and BlueZ
 # (each missing hides its row); for the launcher, xdg-open to open an
-# address or a web search; and the emoji picker's colour emoji font.
+# address or a web search; the emoji picker's colour emoji font; and
+# PipeWire's daemon, which screen sharing streams to. Depends:
+# xdg-desktop-portal, through which applications ask to share the screen.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
 Version: $version-$revision
 Architecture: $arch
 Maintainer: Matthieu Bollot <m.bollot@code-troopers.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$root" | cut -f 1)
-Depends: $depends, libegl1
+Depends: $depends, libegl1, xdg-desktop-portal
 Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  dbus-user-session,
  kitty | foot | alacritty | xterm,
  upower, power-profiles-daemon | tuned-ppd, pipewire-bin, wireplumber,
- network-manager, bluez, xdg-utils, fonts-noto-color-emoji
+ network-manager, bluez, xdg-utils, fonts-noto-color-emoji,
+ pipewire
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda

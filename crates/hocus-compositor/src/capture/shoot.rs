@@ -176,7 +176,7 @@ where
 }
 
 /// Screen `output` drawn for a capture, at its resolution.
-fn screen<R, T>(
+pub(crate) fn screen<R, T>(
     renderer: &mut R,
     state: &State,
     output: &Output,
@@ -215,7 +215,7 @@ where
 
 /// `elements` drawn into a buffer `size` large, upright, on `clear`; its
 /// pixels read back as ARGB8888 (B, G, R, A in memory).
-fn draw<R, T>(
+pub(crate) fn draw<R, T>(
     renderer: &mut R,
     size: Size<i32, Physical>,
     scale: f64,

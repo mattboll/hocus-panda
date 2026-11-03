@@ -2606,3 +2606,11 @@ maintainer's spec (issue #396).
   footer (the spec keeps no trace of a secret); the shell's own copies
   (the launcher's results, the Sources popover's command) in the history;
   the primary selection.
+
+### 5.11, the sign of what is shared (2026-11-03)
+
+While the screen is shared, a sign shows under the clock (48 wide, in
+both forms, where the agents' group or item was, which move under it) and
+its popover stops the share: [sharing.md](sharing.md), as built. 5.12
+groups it with the microphone and the camera (issue #445).
+

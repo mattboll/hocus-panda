@@ -492,7 +492,8 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Notifications
                             | Item::Clipboard
                             | Item::Menu
-                            | Item::User,
+                            | Item::User
+                            | Item::Sharing,
                             _,
                         ) => {}
                     }

@@ -219,13 +219,13 @@ fn out<T>(with: impl FnOnce(&mut Option<Out>) -> T) -> T {
 /// in its item (4.7).
 fn middle(id: u64, form: Form) -> f32 {
     if form == Form::Mini {
-        return super::MINI_TOP + super::MINI_PAD_TOP + super::HEAD / 2.0;
+        return super::draw::mini_top() + super::MINI_PAD_TOP + super::HEAD / 2.0;
     }
     let row = match super::said().shows(now_us()) {
         super::Shows::Lines(lines) => lines.rows.iter().position(|r| r.id == id),
         _ => None,
     };
-    let top = super::draw::TOP;
+    let top = super::draw::full_top();
     match row {
         Some(i) => top + super::HEADER + super::GAP + (i as f32 + 0.5) * super::AGENT_ROW,
         None => top + super::HEADER / 2.0,

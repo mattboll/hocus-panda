@@ -546,6 +546,7 @@ impl State {
             self.restack();
             self.sync_activated();
         }
+        self.share_sources_changed();
         self.redraw = true;
     }
 
@@ -649,6 +650,7 @@ impl State {
         }
         self.end_popup_grab_of(id);
         self.switcher_forget(id);
+        self.share_window_gone(id);
         self.overlay.forget(id);
         self.windows.remove(&id);
         self.pictures.remove(&id);

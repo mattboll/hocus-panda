@@ -20,6 +20,9 @@
 //! - While the user is not to be disturbed, bubbles are held (to the
 //!   history only), critical ones still showing; it ends by itself at its
 //!   time.
+//! - While the screen is shared (5.11), bubbles are held as with do not
+//!   disturb, critical ones still showing; when the sharing ends, one
+//!   bubble sums up what was held, its card opening the history.
 //! - Hovering any bubble pauses every countdown.
 //! - A notification replacing one shown updates its bubble in place, its
 //!   countdown starting again.
@@ -47,6 +50,9 @@ use super::{
 
 /// The most bubbles shown at once.
 pub const MOST: usize = 3;
+/// The id of the bubble that sums up what was held while sharing: the
+/// server's ids start from 1, and no signal goes for it.
+pub const SUMMARY: u32 = 0;
 /// Between two bubbles, and between the last and the chip.
 const GAP: f32 = 8.0;
 
@@ -80,6 +86,8 @@ pub enum Input {
     Act { key: u64, action: String },
     /// Do not disturb, as the user set it.
     Dnd(Dnd),
+    /// The screen is shared (5.11), or no longer is.
+    Sharing(bool),
     /// What the history kept before the shell started again, and do not
     /// disturb as it was in this session.
     Restored { notes: Vec<(Note, Sight)>, dnd: Dnd },
@@ -124,6 +132,8 @@ pub enum Effect {
     Save(Vec<Record>),
     /// Do not disturb to write, as it is now.
     SaveDnd(Dnd),
+    /// The history opens on this screen's bar (the summary's card).
+    History(String),
 }
 
 /// A bubble's countdown.
@@ -243,6 +253,9 @@ pub struct Stack {
     queue: VecDeque<Note>,
     pub history: History,
     pub dnd: Dnd,
+    /// While the screen is shared (5.11): the applications of the
+    /// notifications held meanwhile, one each, in their order.
+    sharing: Option<Vec<String>>,
     /// What was kept before is read back: until then, nothing is written
     /// over it.
     restored: bool,
@@ -268,6 +281,7 @@ impl Stack {
             queue: VecDeque::new(),
             history: History::default(),
             dnd: Dnd::Off,
+            sharing: None,
             restored: false,
             hovered: BTreeSet::new(),
             focus: None,
@@ -289,6 +303,11 @@ impl Stack {
             .as_ref()
             .filter(|(chip, _)| chip.id == id)
             .map(|(_, n)| *n)
+    }
+
+    /// How many notifications were held since the screen is shared.
+    pub fn held_while_sharing(&self) -> usize {
+        self.sharing.as_ref().map_or(0, Vec::len)
     }
 
     /// What the bell's badge counts.
@@ -389,6 +408,12 @@ impl Stack {
                 let Some(bubble) = self.showing(serial) else {
                     return;
                 };
+                if bubble.note.id == SUMMARY {
+                    tracing::debug!("the summary's card opens the history");
+                    effects.push(Effect::History(bubble.screen.clone()));
+                    self.leave_silently(serial, now, effects);
+                    return;
+                }
                 let note = bubble.note.clone();
                 tracing::debug!(id = note.id, "a bubble's card clicked");
                 if note.default {
@@ -477,6 +502,28 @@ impl Stack {
                 tracing::debug!(on = dnd.is_on(), choice = ?dnd.choice(), "do not disturb");
                 self.dnd = dnd;
             }
+            Input::Sharing(true) => {
+                if self.sharing.is_none() {
+                    tracing::debug!("the screen is shared: bubbles are held");
+                    self.sharing = Some(Vec::new());
+                }
+            }
+            Input::Sharing(false) => {
+                let Some(held) = self.sharing.take() else {
+                    return;
+                };
+                tracing::debug!(held = held.len(), "sharing ended");
+                if let Some(note) = summary(&held, super::wall_ms()) {
+                    tracing::debug!(
+                        title = note.summary,
+                        body = note.body,
+                        "the summary of what was held"
+                    );
+                    self.queue.push_back(note);
+                    self.fill(now);
+                    self.relayout(effects);
+                }
+            }
             Input::Restored { notes, dnd } => {
                 tracing::info!(
                     kept = notes.len(),
@@ -523,6 +570,9 @@ impl Stack {
     /// Notification `id` closed for `reason`: its sender hears it, and holds
     /// it no more.
     fn closed(&mut self, id: u32, reason: u32, effects: &mut Vec<Effect>) {
+        if id == SUMMARY {
+            return;
+        }
         effects.push(Effect::Signal(Signal::Closed { id, reason }));
         self.history.closed(id);
     }
@@ -604,6 +654,17 @@ impl Stack {
         }
         if self.dnd.is_on() && note.urgency != Urgency::Critical {
             tracing::debug!(id, title = note.summary, "held: do not disturb");
+            if let Some(held) = &mut self.sharing {
+                held.push(note.app.clone());
+            }
+            self.history.add(note, Sight::Unseen);
+            return;
+        }
+        if let Some(held) = &mut self.sharing
+            && note.urgency != Urgency::Critical
+        {
+            tracing::debug!(id, title = note.summary, "held: the screen is shared");
+            held.push(note.app.clone());
             self.history.add(note, Sight::Unseen);
             return;
         }
@@ -853,6 +914,103 @@ impl Stack {
             }
         }
     }
+}
+
+/// The bubble that sums up the notifications of applications `held`
+/// (one each, in their order) while the screen was shared: none when
+/// nothing was held.
+pub fn summary(held: &[String], at: i64) -> Option<Note> {
+    if held.is_empty() {
+        return None;
+    }
+    let fr = crate::clock::time::Lang::of_messages() == crate::clock::time::Lang::French;
+    let (summary, body) = summary_words(held, fr);
+    Some(Note {
+        id: SUMMARY,
+        app: "Hocuspanda".to_owned(),
+        entry: None,
+        icon: Some(crate::levels::icons::Icon::Vector(summary_icon())),
+        summary,
+        body,
+        actions: Vec::new(),
+        default: false,
+        urgency: Urgency::Normal,
+        timeout: Timeout::of(-1, Urgency::Normal),
+        progress: None,
+        resident: false,
+        pid: 0,
+        agent: false,
+        icon_from: super::note::IconFrom::default(),
+        at,
+    })
+}
+
+/// "4 notifications pendant le partage" and "Slack (2), Signal ·
+/// dans l'historique".
+pub fn summary_words(held: &[String], fr: bool) -> (String, String) {
+    let mut apps: Vec<(String, usize)> = Vec::new();
+    for app in held {
+        let app = if app.trim().is_empty() {
+            if fr {
+                "Une application"
+            } else {
+                "An application"
+            }
+            .to_owned()
+        } else {
+            app.trim().to_owned()
+        };
+        match apps.iter_mut().find(|(a, _)| *a == app) {
+            Some((_, n)) => *n += 1,
+            None => apps.push((app, 1)),
+        }
+    }
+    let n = held.len();
+    let summary = match (n, fr) {
+        (1, true) => "1 notification pendant le partage".to_owned(),
+        (1, false) => "1 notification while sharing".to_owned(),
+        (n, true) => format!("{n} notifications pendant le partage"),
+        (n, false) => format!("{n} notifications while sharing"),
+    };
+    let list: Vec<String> = apps
+        .iter()
+        .map(|(app, n)| {
+            if *n > 1 {
+                format!("{app} ({n})")
+            } else {
+                app.clone()
+            }
+        })
+        .collect();
+    let body = format!(
+        "{} · {}",
+        list.join(", "),
+        if fr {
+            "dans l'historique"
+        } else {
+            "in the history"
+        }
+    );
+    (summary, body)
+}
+
+/// The summary's icon: the mockup's bell, `#B9CEFF`, on
+/// `rgba(91,141,239,0.25)`.
+fn summary_icon() -> iced::advanced::svg::Handle {
+    static ICON: std::sync::OnceLock<iced::advanced::svg::Handle> = std::sync::OnceLock::new();
+    ICON.get_or_init(|| {
+        iced::advanced::svg::Handle::from_memory(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"32\" \
+             height=\"32\"><rect width=\"32\" height=\"32\" rx=\"9\" fill=\"#5B8DEF\" \
+             fill-opacity=\"0.25\"/><g transform=\"translate(7 7) scale(0.75)\"><path d=\"M6 \
+             16.5 V11 a6 6 0 0 1 12 0 V16.5 L19.5 18 H4.5 Z M10 20.5 a2 2 0 0 0 4 0\" \
+             fill=\"none\" stroke=\"#B9CEFF\" stroke-width=\"1.8\" \
+             stroke-linejoin=\"round\"/></g></svg>"
+                .as_bytes()
+                .to_vec(),
+        )
+    })
+    .clone()
 }
 
 #[cfg(test)]
@@ -1238,6 +1396,47 @@ mod tests {
         // The bubble on screen goes too.
         assert!(effects.contains(&Effect::Closing(bubble_namespace(1))));
         assert_eq!(signals(&effects).len(), 4);
+    }
+
+    #[test]
+    fn sharing_holds_bubbles_and_one_sums_them_up_at_its_end() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        s.handle(Input::Sharing(true), t0);
+        let mut slack = note(1);
+        slack.app = "Slack".into();
+        let mut slack_again = note(2);
+        slack_again.app = "Slack".into();
+        let mut signal = note(3);
+        signal.app = "Signal".into();
+        for n in [slack, slack_again, signal] {
+            let effects = s.handle(notify(n), t0);
+            assert!(opened(&effects).is_empty(), "held, no bubble");
+        }
+        let mut urgent = note(4);
+        urgent.urgency = Urgency::Critical;
+        assert_eq!(opened(&s.handle(notify(urgent), t0)).len(), 1);
+        assert_eq!(s.held_while_sharing(), 3);
+        // Its end: one bubble sums them up.
+        let effects = s.handle(Input::Sharing(false), t0);
+        assert_eq!(opened(&effects).len(), 1);
+        assert_eq!(s.held_while_sharing(), 0);
+        let shown: Vec<&Bubble> = s.bubbles.iter().filter(|b| b.note.id == SUMMARY).collect();
+        assert_eq!(shown.len(), 1);
+        let (fr, fr_body) = summary_words(&["Slack".into(), "Slack".into(), "Signal".into()], true);
+        assert_eq!(fr, "3 notifications pendant le partage");
+        assert_eq!(fr_body, "Slack (2), Signal · dans l'historique");
+        let (en, en_body) = summary_words(&["Thunderbird".into()], false);
+        assert_eq!(en, "1 notification while sharing");
+        assert_eq!(en_body, "Thunderbird · in the history");
+        // Its card opens the history, and says nothing to the bus.
+        let serial = shown[0].serial;
+        let effects = s.handle(Input::Card(serial), t0);
+        assert!(effects.iter().any(|e| matches!(e, Effect::History(_))));
+        assert!(signals(&effects).is_empty());
+        // Nothing held: no summary.
+        s.handle(Input::Sharing(true), t0);
+        assert!(opened(&s.handle(Input::Sharing(false), t0)).is_empty());
     }
 
     #[test]

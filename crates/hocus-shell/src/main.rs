@@ -33,6 +33,7 @@ mod clock;
 mod desktops;
 mod emoji;
 mod footer;
+mod in_use;
 mod launcher;
 mod layouts;
 mod levels;
@@ -41,6 +42,7 @@ mod notifications;
 mod paste;
 mod popover;
 mod renderer;
+mod share;
 mod user;
 
 use std::{
@@ -486,7 +488,9 @@ impl Shell {
                     agents::draw::forget(&bar.output);
                     agents::peek::forget(&bar.output);
                     footer::forget(&bar.output);
+                    let sign = in_use::forget(&bar.output);
                     Some(Task::batch([
+                        sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
                         Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.agents)),
                         Task::done(Message::RemoveWindow(bar.desktops)),
@@ -591,6 +595,18 @@ impl Shell {
             }
             ToShell::Captured(captured) => {
                 capture::captured(captured);
+                Task::none()
+            }
+            ToShell::ShareChoose(choose) => {
+                share::set(choose);
+                Task::none()
+            }
+            ToShell::ShareChooseEnd(request) => {
+                share::end(request);
+                Task::none()
+            }
+            ToShell::Shares(shares) => {
+                in_use::set_shares(shares);
                 Task::none()
             }
         }
@@ -728,6 +744,11 @@ impl Shell {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(id);
         self.place_popovers(id);
+        // The sign of what is in use, if something is (5.11).
+        let output = self.bars.get(&id).map(|b| (b.output.clone(), b.form));
+        if let Some((output, form)) = output {
+            popover::send(in_use::bar_opened(&output, form));
+        }
         open.chain(open_clock)
             .chain(open_levels)
             .chain(open_connections)
@@ -832,6 +853,7 @@ impl Shell {
                 .into_iter()
                 .map(Task::done),
         );
+        popover::send(in_use::form(&bar.output, bar.form, switching));
         Task::batch(tasks)
     }
 
@@ -1015,6 +1037,52 @@ impl Shell {
         )
     }
 
+    /// The sign of what is in use (5.11), if its surface is `id`.
+    fn in_use_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = in_use::bar_of(id)?;
+        let bar = self.bars.values().find(|b| b.output == output)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = agents::draw::TOP;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = in_use::draw::Sign {
+            bar: bar.output.clone(),
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            words: in_use::Words::new(clock::time::Lang::of_messages()),
+            backdrop,
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// The share's chooser (5.11), if its surface is `id`.
+    fn share_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !share::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(share::draw::View {
+                id,
+                words: share::words(),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = agents::peek::bar_of(id)?;
@@ -1180,6 +1248,14 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Sharing => canvas(popover::sharing::Panel {
+                id,
+                words: in_use::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             popover::Item::User => canvas(popover::session::Panel {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),
@@ -1212,6 +1288,8 @@ impl Shell {
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
                 .or_else(|| self.capture_view(id))
+                .or_else(|| self.share_view(id))
+                .or_else(|| self.in_use_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .unwrap_or_else(|| Space::new().into());
@@ -1578,6 +1656,19 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Captured(captured)) => {
                             capture::captured(captured);
+                            continue;
+                        }
+                        // Sharing (5.11): the chooser's surface, the sign's.
+                        Ok(ToShell::ShareChoose(choose)) => {
+                            share::set(choose);
+                            continue;
+                        }
+                        Ok(ToShell::ShareChooseEnd(request)) => {
+                            share::end(request);
+                            continue;
+                        }
+                        Ok(ToShell::Shares(shares)) => {
+                            in_use::set_shares(shares);
                             continue;
                         }
                         _ => {}

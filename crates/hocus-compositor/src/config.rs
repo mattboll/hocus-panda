@@ -66,6 +66,12 @@ pub struct Config {
     /// it. Not part of the file.
     #[serde(skip)]
     pub french: bool,
+    /// The PipeWire socket screen sharing streams to (5.11), when not
+    /// PipeWire's default (`PIPEWIRE_REMOTE`, else `pipewire-0` in the
+    /// runtime directory): tests give one of their own. Not part of the
+    /// file.
+    #[serde(skip)]
+    pub pipewire_remote: Option<PathBuf>,
 }
 
 /// The bar, `[panel]` (docs/design/bar.md §2, §3).

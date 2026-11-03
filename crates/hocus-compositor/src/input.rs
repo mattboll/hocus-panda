@@ -339,6 +339,22 @@ impl State {
         if self.capture_motion(location, time) {
             return;
         }
+        // The share's chooser keeps it from what it darkens (5.11).
+        if self.share_keeps_pointer(location) {
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+            pointer.frame(self);
+            self.frame_cursor = None;
+            self.redraw = true;
+            return;
+        }
         // Against a bar's edge, or out of the bar in front (#519): first,
         // as it decides what is under the pointer.
         self.bar_front_follow(location);
@@ -479,6 +495,11 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let at = pointer.current_location();
         if state == ButtonState::Released && self.kept_buttons.remove(&button) {
+            return;
+        }
+        // The share's chooser keeps the presses off what it darkens.
+        if state == ButtonState::Pressed && self.share_keeps_pointer(at) {
+            self.kept_buttons.insert(button);
             return;
         }
         // Alt+Tab's panel takes the click.

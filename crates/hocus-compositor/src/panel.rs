@@ -54,6 +54,11 @@ use crate::{
 /// screen is named.
 const BUILT_IN: [&str; 3] = ["eDP", "LVDS", "DSI"];
 
+/// Whether screen `name` is a built-in panel.
+pub(crate) fn built_in(name: &str) -> bool {
+    BUILT_IN.iter().any(|b| name.starts_with(b))
+}
+
 /// Of the bar itself, the part next to the screen's edge where a press
 /// switches the form, with the strip between the bar and that edge.
 const EDGE_INSIDE: i32 = 6;

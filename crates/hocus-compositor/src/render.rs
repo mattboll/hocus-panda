@@ -485,6 +485,11 @@ impl State {
                     .map(OutputElements::Cursor),
             );
         }
+        // The share's chooser over everything but the cursor, and the
+        // ring around a screen shared (5.11): on the screen only.
+        if purpose.screen() {
+            self.share_elements(renderer, output, now, &mut elements);
+        }
         // The capture over everything but the cursor (5.8); its toolbar's
         // glass goes in once what is behind it is known.
         let capture_glass = if purpose.screen() {
@@ -521,6 +526,7 @@ impl State {
                         | hocus_link::LAUNCHER_NAMESPACE
                         | hocus_link::LAUNCHER_TOAST_NAMESPACE
                         | hocus_link::CAPTURE_TOOLBAR_NAMESPACE
+                        | hocus_link::SHARE_CHOOSER_NAMESPACE
                 ) {
                     continue;
                 }
@@ -579,6 +585,7 @@ impl State {
                     | hocus_link::CONNECTIONS_NAMESPACE
                     | hocus_link::DESKTOPS_NAMESPACE
                     | hocus_link::AGENTS_NAMESPACE
+                    | hocus_link::IN_USE_NAMESPACE
                     | hocus_link::BELL_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
                     _ => None,
                 };
@@ -694,6 +701,11 @@ impl State {
                     Kind::Unspecified,
                 )));
                 continue;
+            }
+            // A shared window's ring, right over it (5.11).
+            if purpose.screen() {
+                let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
+                windows.extend(self.window_ring(renderer, *id, &output.name(), visual, scale, now));
             }
             match self.bent_window(renderer, *id, look, origin, scale) {
                 Some(bent) => windows.push(OutputElements::Bent(bent)),

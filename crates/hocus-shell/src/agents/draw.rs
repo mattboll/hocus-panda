@@ -147,13 +147,24 @@ struct Place {
 /// A layer surface's margins: top, right, bottom, left.
 type Margin = (i32, i32, i32, i32);
 
+/// The group's top under the bar's in the full form, and the mini item's:
+/// under the sign of what is in use when it shows (5.11), else under the
+/// clock.
+pub fn full_top() -> f32 {
+    TOP + crate::in_use::room()
+}
+
+pub fn mini_top() -> f32 {
+    MINI_TOP + crate::in_use::room()
+}
+
 /// Bar `bar`'s surface's top under the bar's, as last asked for.
 fn top_of(bar: &str) -> f32 {
     places(|places| {
         places
             .get(bar)
             .and_then(|p| p.asked)
-            .map_or(TOP - ROOM, |(_, margin)| (margin.0 - EDGE) as f32)
+            .map_or(full_top() - ROOM, |(_, margin)| (margin.0 - EDGE) as f32)
     })
 }
 
@@ -190,8 +201,8 @@ fn group_height() -> f32 {
 /// switches, the surface then holding both.
 fn surface_top(form: Form, switching: bool) -> f32 {
     match (switching, form) {
-        (false, Form::Full) => TOP - ROOM,
-        _ => MINI_TOP - ROOM,
+        (false, Form::Full) => full_top() - ROOM,
+        _ => mini_top() - ROOM,
     }
 }
 
@@ -267,6 +278,25 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Option<crate::network::dr
         place.switching = switching;
         refit(place)
     })
+}
+
+/// The sign of what is in use came or went (5.11): every bar's surface
+/// moves under it, or back under the clock.
+pub fn moved() {
+    let effects: Vec<popover::Effect> = places(|places| {
+        places
+            .values_mut()
+            .filter_map(refit)
+            .map(|(id, size, margin)| popover::Effect::Resize {
+                id,
+                size,
+                margin: Some(margin),
+            })
+            .collect()
+    });
+    if !effects.is_empty() {
+        popover::send(effects);
+    }
 }
 
 /// The group was laid out again: every bar's surface to its height.
@@ -798,14 +828,14 @@ impl Group {
     /// The group's top left on the surface.
     fn origin(&self, size: Size) -> Point {
         let left = size.width + 2.0 - self.bar_width;
-        Point::new(left + SIDE, TOP - top_of(&self.bar))
+        Point::new(left + SIDE, full_top() - top_of(&self.bar))
     }
 
     /// The mini item's top left on the surface: its button centred in the
     /// bar as wide as it is drawn now.
     fn mini_origin(&self, size: Size) -> Point {
         let centre = size.width + 1.0 - self.bar_width / 2.0;
-        Point::new(centre - MINI_ITEM / 2.0, MINI_TOP - top_of(&self.bar))
+        Point::new(centre - MINI_ITEM / 2.0, mini_top() - top_of(&self.bar))
     }
 
     /// The group's items and where they are on the surface, in a form

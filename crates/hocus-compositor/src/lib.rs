@@ -42,6 +42,7 @@ mod programs;
 mod render;
 mod screens;
 mod session;
+mod share;
 mod shell;
 mod shortcuts;
 mod snapshot;
@@ -73,6 +74,7 @@ pub use harness::{Headless, Placed, WindowInfo};
 /// The bar's forms.
 pub use hocus_link::Form as BarForm;
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
+pub use share::ShareInfo;
 pub use shortcuts::{Action, CaptureNow, Chord, Ending, Shortcuts};
 pub use state::State;
 
@@ -193,6 +195,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
         (None, _) => None,
     };
     shell::listen(&event_loop.handle(), &mut state)?;
+    state.start_sharing();
     agents::start(&event_loop.handle(), &mut state)?;
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);

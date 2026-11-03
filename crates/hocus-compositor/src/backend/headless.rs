@@ -68,6 +68,10 @@ pub struct HeadlessBackend {
     canvas: Canvas,
     /// The frame to come, once something changed.
     frame_timer: Option<RegistrationToken>,
+    /// Screen sharing's frames (5.11), with the renderer drawing.
+    gles_share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
+    pixman_share:
+        Box<crate::share::frames::Frames<PixmanRenderer, pixman::Image<'static, 'static>>>,
 }
 
 impl std::fmt::Debug for HeadlessBackend {
@@ -138,6 +142,8 @@ pub fn init(
     let backend = HeadlessBackend {
         canvas,
         frame_timer: None,
+        gles_share: Default::default(),
+        pixman_share: Default::default(),
     };
     tracing::info!(renderer = backend.renderer(), "headless backend ready");
     Ok(backend)
@@ -482,6 +488,19 @@ impl HeadlessBackend {
     /// Schedules the next frame when something changed: nothing wakes up
     /// at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // Screen sharing's thumbnails and frames (5.11).
+        match &mut self.canvas {
+            Canvas::Gles(c) => crate::share::frames::run::<_, GlesTexture>(
+                &mut c.renderer,
+                state,
+                &mut self.gles_share,
+            ),
+            Canvas::Pixman(c) => crate::share::frames::run::<_, pixman::Image<'static, 'static>>(
+                &mut c.renderer,
+                state,
+                &mut self.pixman_share,
+            ),
+        }
         // A capture asked for (5.8): drawn for it before the next frame.
         if state.capture.has_pending() {
             match &mut self.canvas {
