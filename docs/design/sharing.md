@@ -232,9 +232,10 @@ what is in use.
   versions); the sign shows under the
   clock, its popover says who sees what, and its button ends the share and
   closes the session; three notifications held, then one bubble summing
-  them up; a shared window closing ends its share; handing a 2560 × 1600
-  frame over costs the loop well under a millisecond (pixman, its buffer
-  lent); on GLES (Mesa's software device, never a GPU: the harness's
+  them up; a shared window closing ends its share; frames of 2560 × 1600
+  reach a consumer with none of their bytes copied on the loop (pixman,
+  its buffer lent; counted: the lent pixels read on the loop's thread,
+  0; how long a hand-over took is printed, never asserted); on GLES (Mesa's software device, never a GPU: the harness's
   `RendererChoice::GlesSoftware`), the read-back thread's frames come
   whole, upright and in the screen's colours. Unit tests for the
   lines, the chooser's words and its arrows, the cards' sizes, the

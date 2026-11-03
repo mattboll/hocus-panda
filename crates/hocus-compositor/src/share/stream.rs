@@ -11,13 +11,15 @@
 //! not) goes back to the loop. Nothing here waits for the loop, nor the
 //! loop for PipeWire.
 
-use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
 use pipewire as pw;
 use pw::{properties::properties, spa};
 use smithay::reexports::calloop::channel::Sender;
 use spa::pod::{ChoiceValue, Object, Pod, Property, PropertyFlags, Value};
 use spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Fraction, Rectangle};
+
+use super::lease::{Lease, LoopCopies};
 
 /// The most frames a second a consumer may ask for.
 pub const MOST_FPS: u32 = 60;
@@ -40,7 +42,7 @@ pub enum ToStreams {
     /// given back once copied.
     Frame {
         id: u64,
-        lease: super::lease::Lease,
+        lease: Lease,
         size: (u32, u32),
         stride: u32,
     },
@@ -92,6 +94,8 @@ pub enum FromStreams {
 pub struct StreamsSender {
     to: pw::channel::Sender<ToStreams>,
     back: Sender<FromStreams>,
+    /// The bytes of frames read on the loop: none, ever.
+    copies: Arc<LoopCopies>,
 }
 
 impl std::fmt::Debug for StreamsSender {
@@ -110,6 +114,21 @@ impl StreamsSender {
     /// Tells the loop, as the streams' thread would.
     pub fn tell(&self, said: FromStreams) {
         let _ = self.back.send(said);
+    }
+
+    /// `pixels`, lent to the streams (see [`Lease::new`]).
+    pub fn lend(&self, pixels: &[u8]) -> Lease {
+        Lease::new(pixels, self.copies.clone())
+    }
+
+    /// The same, the lender telling the loop once they are free.
+    pub fn lend_quiet(&self, pixels: &[u8]) -> Lease {
+        Lease::quiet(pixels, self.copies.clone())
+    }
+
+    /// The bytes of shared frames read (so copied) on the loop's thread.
+    pub fn copied_on_loop(&self) -> u64 {
+        self.copies.bytes()
     }
 }
 
@@ -137,7 +156,8 @@ impl Drop for Streams {
 
 /// Starts the thread, on PipeWire's socket `remote` (its default
 /// otherwise: `PIPEWIRE_REMOTE`, else `pipewire-0` in the runtime
-/// directory).
+/// directory). Called on the loop, whose thread the leases' reads are
+/// counted on.
 pub fn start(remote: Option<PathBuf>, back: Sender<FromStreams>) -> Option<Streams> {
     let (to, from_loop) = pw::channel::channel::<ToStreams>();
     let tell = back.clone();
@@ -154,7 +174,11 @@ pub fn start(remote: Option<PathBuf>, back: Sender<FromStreams>) -> Option<Strea
         });
     match started {
         Ok(_) => Some(Streams {
-            sender: StreamsSender { to, back: tell },
+            sender: StreamsSender {
+                to,
+                back: tell,
+                copies: LoopCopies::here(),
+            },
         }),
         Err(err) => {
             tracing::warn!(%err, "cannot start the streams' thread");
