@@ -79,6 +79,7 @@ impl WlrLayerShellHandler for State {
                 self.popover_gone(&layer);
                 self.launcher_gone(&layer);
                 self.capture_toolbar_gone(&layer);
+                self.capture_after_gone(&layer);
                 self.peek_gone(&layer);
                 self.bubble_gone(&layer);
                 self.layer_keyboard();
@@ -129,6 +130,9 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             }
             hocus_link::LAUNCHER_TOAST_NAMESPACE => state.launcher_toast_committed(&layer),
             hocus_link::CAPTURE_TOOLBAR_NAMESPACE => state.capture_toolbar_committed(&layer),
+            hocus_link::CAPTURE_THUMB_NAMESPACE | hocus_link::CAPTURE_EDITOR_NAMESPACE => {
+                state.capture_after_committed(&layer);
+            }
             ns if hocus_link::is_bubble(ns) => state.bubble_committed(&layer),
             _ => {}
         }

@@ -67,6 +67,9 @@ unicode-normalization = "0.1.25"
 # The launcher's SVG icons drawn at their size on the icons' thread, not
 # on the one that draws: the same resvg as iced's (MIT or Apache-2.0).
 resvg = { version = "0.45.1", default-features = false }
+# The capture's marks' texts drawn into its image off the shell's thread
+# (5.9), in Manrope: the compositor's (MIT, Apache-2.0 or Zlib).
+fontdue = "0.9.3"
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 

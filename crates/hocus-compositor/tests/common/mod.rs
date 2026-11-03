@@ -229,6 +229,12 @@ pub enum Shows {
         size: (u32, u32),
         cell: u32,
     },
+    /// An xdg toplevel of this size drawn in black and white squares of
+    /// 3 pixels, as fine as small text: what a blur makes unreadable.
+    Checkered {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
     /// An xdg toplevel of this size that takes the keyboard and says the
     /// layout (XKB's group) each modifiers event gives it.
     Typing {
@@ -368,6 +374,7 @@ fn run_client(
         hung: Vec::new(),
         typing: false,
         clear: false,
+        checkered: false,
         fill: None,
         caret: None,
         text_inputs: None,
@@ -404,6 +411,16 @@ fn run_client(
             client.size = size;
             client.margin = margin;
             client.window = Some(window);
+        }
+        Some(Shows::Checkered { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.checkered = true;
         }
         Some(Shows::Typing { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -589,6 +606,8 @@ struct Client {
     typing: bool,
     /// Its layer surface is clear.
     clear: bool,
+    /// Drawn in black and white squares.
+    checkered: bool,
     /// Its surface's colour, when not a window's.
     fill: Option<u32>,
     /// A writing client's caret, its text input, and what is committed
@@ -659,6 +678,13 @@ impl Client {
             let inside = x >= m && y >= m && x < m + iw && y < m + ih;
             let colour: u32 = match (self.clear, inside) {
                 (true, _) => 0,
+                (false, true) if self.checkered => {
+                    if ((x - m) / 3 + (y - m) / 3) % 2 == 0 {
+                        0xffff_ffff
+                    } else {
+                        0xff00_0000
+                    }
+                }
                 (false, true) => self.fill.unwrap_or(WINDOW_COLOUR),
                 (false, false) => SHADOW_COLOUR,
             };
