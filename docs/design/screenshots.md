@@ -608,7 +608,11 @@ the 5.10 mockup: the indicator in the bar.
   manager's lock or another user's session shows: the tty backend's
   pause), its screen unplugged, its window closed, a frame that cannot be
   drawn, or ffmpeg failing (the toast "L'enregistrement n'a pas pu être
-  enregistré"). One at a time: Démarrer while one records does nothing
+  enregistré"). Stopped before its first frame (#550), nothing is saved:
+  ffmpeg, which has nothing to end, is stopped and its sound left (the
+  same toast); and the sound's mixer, finishing, waits 2 s at most for
+  ffmpeg to read what is left, since the pipe it writes is its own to read
+  as well and so is never broken, only full. One at a time: Démarrer while one records does nothing
   (the capture stays open for a photo).
 - **Choices made here** (to confirm on the machine): ffmpeg as a program
   rather than a library (below); the pointer is always in the video

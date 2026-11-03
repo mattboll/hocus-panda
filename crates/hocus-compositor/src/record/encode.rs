@@ -376,6 +376,23 @@ fn record(
         frames = frames.written,
         "the recording's frames are all written"
     );
+    // Stopped before its first frame, or ffmpeg reads no more: there is no
+    // file to end. ffmpeg (the recorder's own) is stopped and the sound
+    // left at once; the mixer would otherwise wait on a pipe nobody reads.
+    if frames.written == 0 || ended.is_err() {
+        let _ = child.kill();
+        if let Some(sound) = sound {
+            sound.abandon();
+        }
+        let _ = child.wait();
+        drop(pipes);
+        let _ = std::fs::remove_file(&file);
+        let errors = said.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        match ended {
+            Err(err) => anyhow::bail!("ffmpeg could not record: {err:#} {}", errors.trim()),
+            Ok(()) => anyhow::bail!("nothing was recorded: it stopped before its first frame"),
+        }
+    }
     if let Some(sound) = sound {
         sound.finish();
         tracing::debug!(id = job.id, "the recording's sound is all written");

@@ -30,6 +30,10 @@ use super::save::{CHANNELS, RATE};
 pub const LATE: Duration = Duration::from_millis(100);
 /// How often the mixer writes.
 const EVERY: Duration = Duration::from_millis(10);
+/// Finishing, how long the mixer waits for ffmpeg to read what is left:
+/// the pipe is its own to write as to read, so a pipe nobody reads any
+/// more is only ever full, never broken.
+const STALL: Duration = Duration::from_secs(2);
 /// The node names the recording's streams have on PipeWire.
 pub const SOUND_NODE: &str = "hocuspanda-recording-sound";
 pub const MICRO_NODE: &str = "hocuspanda-recording-micro";
@@ -118,6 +122,7 @@ pub struct Sound {
     quit: Option<pw::channel::Sender<()>>,
     mixer: Option<std::thread::JoinHandle<()>>,
     done: Arc<AtomicBool>,
+    abandoned: Arc<AtomicBool>,
 }
 
 impl Sound {
@@ -146,14 +151,16 @@ impl Sound {
                 }
             })?;
         let done = Arc::new(AtomicBool::new(false));
-        let mixer_done = done.clone();
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let (mixer_done, mixer_abandoned) = (done.clone(), abandoned.clone());
         let mixer = std::thread::Builder::new()
             .name("recording's mixer".to_owned())
-            .spawn(move || mix(file, &queues, &timeline, &mixer_done))?;
+            .spawn(move || mix(file, &queues, &timeline, &mixer_done, &mixer_abandoned))?;
         Ok(Self {
             quit: Some(quit),
             mixer: Some(mixer),
             done,
+            abandoned,
         })
     }
 
@@ -162,6 +169,18 @@ impl Sound {
     /// mixer (the recorder's thread, never the loop).
     pub fn finish(mut self) {
         self.done.store(true, Ordering::Release);
+        self.end();
+    }
+
+    /// The recording ended with nothing for ffmpeg (it is gone): the mixer
+    /// stops at once, writing nothing more.
+    pub fn abandon(mut self) {
+        self.abandoned.store(true, Ordering::Release);
+        self.done.store(true, Ordering::Release);
+        self.end();
+    }
+
+    fn end(&mut self) {
         if let Some(mixer) = self.mixer.take() {
             let _ = mixer.join();
         }
@@ -345,6 +364,7 @@ fn mix(
     queues: &[(&'static str, Queue)],
     timeline: &Timeline,
     done: &AtomicBool,
+    abandoned: &AtomicBool,
 ) {
     let late = frames_in(LATE);
     // Kept at most: twice the lateness and a fifth of a second, past
@@ -352,7 +372,12 @@ fn mix(
     let most = 2 * late + u64::from(RATE / 5);
     let mut mixer = Mixer::new(queues.iter().map(|(_, q)| q.clone()).collect(), late, most);
     let mut pending: Vec<u8> = Vec::new();
+    // Since when nothing could be written while finishing.
+    let mut stalled: Option<Instant> = None;
     loop {
+        if abandoned.load(Ordering::Acquire) {
+            return;
+        }
         let finishing = done.load(Ordering::Acquire);
         let now = Instant::now();
         // Stopped, its last samples at once: ffmpeg holds the last frames
@@ -367,6 +392,7 @@ fn mix(
         let samples = mixer.take(owed);
         pending.extend(samples.iter().flat_map(|s| s.to_le_bytes()));
         // A full pipe is written again at the next turn.
+        let before = pending.len();
         while !pending.is_empty() {
             match pipe.write(&pending) {
                 Ok(0) => break,
@@ -383,6 +409,20 @@ fn mix(
         }
         if finishing && pending.is_empty() && mixer.written >= owed {
             return;
+        }
+        // Finishing, and ffmpeg reads no more of it (it ended, or never
+        // got a frame): what is left is dropped.
+        if finishing && pending.len() == before && !pending.is_empty() {
+            let since = *stalled.get_or_insert(now);
+            if now.saturating_duration_since(since) >= STALL {
+                tracing::warn!(
+                    left = pending.len(),
+                    "ffmpeg reads no more of the recording's sound: the rest is dropped"
+                );
+                return;
+            }
+        } else {
+            stalled = None;
         }
         if finishing && timeline.stopped().is_none() {
             return;
