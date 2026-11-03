@@ -31,6 +31,7 @@ mod capture;
 mod clipboard;
 mod clock;
 mod desktops;
+mod emoji;
 mod footer;
 mod launcher;
 mod layouts;
@@ -110,6 +111,7 @@ fn main() -> ExitCode {
     network::start();
     bluetooth::start();
     launcher::start();
+    emoji::start();
     notifications::start(software);
     // After the notifications' wall clock, which its times read.
     clipboard::start();
@@ -508,6 +510,7 @@ impl Shell {
             ToShell::Outside => {
                 popover::event(popover::Event::Outside);
                 launcher::outside();
+                emoji::outside();
                 Task::none()
             }
             ToShell::Launcher { output, scale } => {
@@ -558,6 +561,20 @@ impl Shell {
             }
             ToShell::Clipboard { output } => {
                 popover::toggle_clipboard(&output);
+                Task::none()
+            }
+            ToShell::Emoji {
+                output,
+                scale,
+                width,
+                height,
+                at,
+            } => {
+                emoji::toggle(output, scale, (width, height), at);
+                Task::none()
+            }
+            ToShell::EmojiInserted => {
+                emoji::inserted();
                 Task::none()
             }
             ToShell::Capture(bar) => {
@@ -1033,6 +1050,23 @@ impl Shell {
         )
     }
 
+    /// The emoji picker, if its surface is `id`.
+    fn emoji_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !emoji::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(emoji::draw::View {
+                id,
+                words: emoji::words(),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The capture's toolbar (5.8), if its surface is `id`.
     fn capture_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !capture::is_surface(id) {
@@ -1172,6 +1206,7 @@ impl Shell {
                 .or_else(|| self.footer_view(id))
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
+                .or_else(|| self.emoji_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
@@ -1431,6 +1466,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         Ok(ToShell::Outside) => {
                             popover::event(popover::Event::Outside);
                             launcher::outside();
+                            emoji::outside();
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
@@ -1505,6 +1541,21 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Clipboard { output }) => {
                             popover::toggle_clipboard(&output);
+                            continue;
+                        }
+                        // The emoji picker: its own surface.
+                        Ok(ToShell::Emoji {
+                            output,
+                            scale,
+                            width,
+                            height,
+                            at,
+                        }) => {
+                            emoji::toggle(output, scale, (width, height), at);
+                            continue;
+                        }
+                        Ok(ToShell::EmojiInserted) => {
+                            emoji::inserted();
                             continue;
                         }
                         // The capture's toolbar, and its toast: their own

@@ -118,6 +118,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.panel.popover_commits += 1;
                 state.popover_committed(&layer);
             }
+            hocus_link::EMOJI_NAMESPACE => state.popover_committed(&layer),
             hocus_link::PEEK_NAMESPACE => {
                 state.panel.peek_commits += 1;
                 state.peek_committed(&layer);

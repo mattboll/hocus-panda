@@ -29,6 +29,11 @@
 //! copies it and a toast says so ([`toast`]); on an address or the web
 //! row, it opens the browser; `Ctrl+Enter` searches the web whatever is
 //! selected.
+//!
+//! A query starting with `:` (5.7, `:chat`) shows a row of emoji first, up
+//! to eight, found as the emoji picker finds them ([`crate::emoji`]):
+//! `Enter` inserts the selected one, the first at first, into the window
+//! that had the keyboard before the launcher opened.
 
 pub mod answers;
 pub mod apps;
@@ -56,6 +61,8 @@ pub const COLUMNS: usize = 8;
 const FREQUENT: usize = 8;
 /// The characters the field keeps at most.
 const QUERY_MOST: usize = 200;
+/// The emoji a `:` query shows at most (5.7).
+pub const EMOJI_MOST: usize = 8;
 
 /// The launcher's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +79,10 @@ impl Words {
 
     fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
         if self.fr { fr } else { en }
+    }
+
+    pub fn lang(self) -> Lang {
+        if self.fr { Lang::French } else { Lang::English }
     }
 
     pub fn placeholder(self) -> &'static str {
@@ -153,12 +164,13 @@ pub enum Card {
     Web,
 }
 
-/// What can be selected: an application (its index in the catalog), or a
-/// card.
+/// What can be selected: an application (its index in the catalog), a
+/// card, or an emoji (its index in the emoji's table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     App(usize),
     Card(Card),
+    Emoji(usize),
 }
 
 /// An address typed, and what opens.
@@ -175,6 +187,8 @@ pub enum Row {
     Head(&'static str),
     Tiles(Vec<usize>),
     Card(Card, usize),
+    /// The emoji a `:` query finds, in a card of their own.
+    Emoji(Vec<usize>),
 }
 
 /// What the grid shows: its rows, and what each of their places holds, in
@@ -249,6 +263,19 @@ impl Grid {
             }
         } else {
             let typed = query.trim();
+            if let Some(name) = typed.strip_prefix(':').filter(|n| !n.trim().is_empty()) {
+                let found: Vec<usize> = crate::emoji::data::table()
+                    .search(name)
+                    .into_iter()
+                    .take(EMOJI_MOST)
+                    .collect();
+                if !found.is_empty() {
+                    let start = grid.flat.len();
+                    grid.flat.extend(found.iter().map(|e| Item::Emoji(*e)));
+                    grid.rows
+                        .push(Row::Emoji((start..grid.flat.len()).collect()));
+                }
+            }
             grid.answer = answers::answer(typed, reading.numbers, words);
             if grid.answer.is_some() {
                 grid.card(Card::Answer);
@@ -290,7 +317,9 @@ impl Grid {
     /// The row holding place `at`, and its column (a card's is 0).
     pub fn place(&self, at: usize) -> Option<(usize, usize)> {
         self.rows.iter().enumerate().find_map(|(r, row)| match row {
-            Row::Tiles(tiles) => tiles.iter().position(|t| *t == at).map(|c| (r, c)),
+            Row::Tiles(tiles) | Row::Emoji(tiles) => {
+                tiles.iter().position(|t| *t == at).map(|c| (r, c))
+            }
             Row::Card(_, place) => (*place == at).then_some((r, 0)),
             Row::Head(_) => None,
         })
@@ -318,7 +347,7 @@ impl Grid {
                 };
                 rows.into_iter()
                     .find_map(|r| match &self.rows[r] {
-                        Row::Tiles(tiles) => tiles
+                        Row::Tiles(tiles) | Row::Emoji(tiles) => tiles
                             .get(column.min(tiles.len().saturating_sub(1)))
                             .copied(),
                         Row::Card(_, place) => Some(*place),
@@ -399,7 +428,7 @@ impl Open {
     pub fn app(&self, at: usize) -> Option<&apps::App> {
         match self.grid.flat.get(at)? {
             Item::App(i) => self.catalog.apps.get(*i),
-            Item::Card(_) => None,
+            Item::Card(_) | Item::Emoji(_) => None,
         }
     }
 }
@@ -648,6 +677,16 @@ pub fn act(id: window::Id, at: usize) {
                 }
             }
             Some(Item::Card(Card::Web)) => effects.extend(browse(&answers::web(&open.query))),
+            Some(Item::Emoji(e)) => {
+                let Some(emoji) = crate::emoji::data::table().emoji.get(*e) else {
+                    return effects;
+                };
+                let text = emoji.with_tone(crate::emoji::store::kept().tone);
+                // The keyboard back to the window first, then the emoji.
+                l.close(Instant::now(), &mut effects);
+                crate::emoji::chosen(emoji, text, false, &mut effects);
+                return effects;
+            }
         }
         l.close(Instant::now(), &mut effects);
         effects
@@ -847,6 +886,34 @@ mod tests {
 
     fn apps(found: &[usize]) -> Vec<Item> {
         found.iter().map(|i| Item::App(*i)).collect()
+    }
+
+    #[test]
+    fn a_colon_shows_a_row_of_emoji_first_the_web_last() {
+        let catalog = catalog(&["Chat", "Firefox"]);
+        let grid = Grid::of(&catalog, &HashMap::new(), ":chat", reading(true), COLUMNS);
+        let Some(Row::Emoji(places)) = grid.rows.first() else {
+            panic!("no emoji row: {:?}", grid.rows);
+        };
+        assert!(!places.is_empty() && places.len() <= EMOJI_MOST);
+        let table = crate::emoji::data::table();
+        let first = match grid.flat[0] {
+            Item::Emoji(e) => table.emoji[e].text,
+            other => panic!("{other:?}"),
+        };
+        assert!(["🐱", "🐈", "😺"].contains(&first), "{first}");
+        assert_eq!(
+            grid.rows.last(),
+            Some(&Row::Card(Card::Web, grid.flat.len() - 1))
+        );
+        // Across the row, then down to the web.
+        assert_eq!(grid.step(0, Arrow::Right), 1);
+        assert_eq!(grid.step(0, Arrow::Down), grid.flat.len() - 1);
+        // A colon alone, or nothing found: no row.
+        let alone = Grid::of(&catalog, &HashMap::new(), ":", reading(true), COLUMNS);
+        assert!(!alone.rows.iter().any(|r| matches!(r, Row::Emoji(_))));
+        let none = Grid::of(&catalog, &HashMap::new(), ":zzzz", reading(true), COLUMNS);
+        assert!(!none.rows.iter().any(|r| matches!(r, Row::Emoji(_))));
     }
 
     #[test]

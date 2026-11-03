@@ -55,6 +55,9 @@ pub enum Action {
     /// The clipboard's history, on the focused window's screen; open, it
     /// closes (5.6).
     Clipboard,
+    /// The emoji picker, under the focused application's caret; open, it
+    /// closes (5.7).
+    Emoji,
     /// The screen capture, on every screen (5.8).
     Capture,
     /// A capture taken at once, without choosing (5.8).
@@ -240,6 +243,7 @@ shortcuts! {
     toggle_bar: ["Super+B"] => Action::ToggleBar,
     launcher: ["Super+Space"] => Action::Launcher,
     clipboard: ["Super+V"] => Action::Clipboard,
+    emoji: ["Super+period"] => Action::Emoji,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
     volume_down: ["XF86AudioLowerVolume"] => Action::Level(LevelKey::VolumeDown),
     mute: ["XF86AudioMute"] => Action::Level(LevelKey::Mute),
@@ -363,6 +367,7 @@ impl State {
             Action::Level(key) => self.level_key(key),
             Action::Launcher => self.toggle_launcher(),
             Action::Clipboard => self.toggle_clipboard(),
+            Action::Emoji => self.toggle_emoji(),
             Action::Capture => self.open_capture(),
             Action::CaptureNow(what) => self.capture_now(what),
         }

@@ -63,8 +63,8 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # Super+Return, and what the bar's levels read: UPower, a power profiles
 # daemon, PipeWire's pw-dump and WirePlumber's wpctl (each missing hides
 # its row); what the connections' rows read: NetworkManager and BlueZ
-# (each missing hides its row); and for the launcher, xdg-open to open an
-# address or a web search.
+# (each missing hides its row); for the launcher, xdg-open to open an
+# address or a web search; and the emoji picker's colour emoji font.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
 Version: $version-$revision
@@ -76,7 +76,7 @@ Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  dbus-user-session,
  kitty | foot | alacritty | xterm,
  upower, power-profiles-daemon | tuned-ppd, pipewire-bin, wireplumber,
- network-manager, bluez, xdg-utils
+ network-manager, bluez, xdg-utils, fonts-noto-color-emoji
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda

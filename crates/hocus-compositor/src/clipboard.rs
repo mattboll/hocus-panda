@@ -46,8 +46,8 @@ use smithay::{
 use crate::{State, focus::KeyboardFocus, model::WindowId, programs};
 
 /// The text types read, best first (UTF8_STRING for X11 clients).
-const TEXT: [&str; 3] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"];
-const PNG: &str = "image/png";
+pub(crate) const TEXT: [&str; 3] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"];
+pub(crate) const PNG: &str = "image/png";
 /// The marks of a secret selection, and what they say then.
 const HINTS: [(&str, &str); 2] = [
     ("x-kde-passwordManagerHint", "secret"),
@@ -71,6 +71,9 @@ pub struct Clipboard {
     pastes: u64,
     paste: Option<Paste>,
     done: Option<Sender<Done>>,
+    /// The types the client holding the clipboard offered, and where it
+    /// is: what the emoji picker's paste reads to give it back (5.7).
+    pub(crate) offered: Option<(Vec<String>, Source)>,
 }
 
 /// A paste waiting for its window to hold the keyboard, and for whether it
@@ -107,7 +110,7 @@ pub fn password_manager(app: &str) -> bool {
 
 /// What of a selection offered as `types` is read: the marks it has, and
 /// the text, else the image; nothing without either.
-fn wanted(types: &[String]) -> Option<(Vec<&'static str>, &'static str, ClipKind)> {
+pub(crate) fn wanted(types: &[String]) -> Option<(Vec<&'static str>, &'static str, ClipKind)> {
     let offers = |t: &str| types.iter().any(|o| o == t);
     let hints = HINTS
         .iter()
@@ -127,6 +130,8 @@ impl State {
     /// read once the selection is in place (smithay keeps it after telling
     /// of it), off the loop.
     pub fn selection_taken(&mut self, types: Vec<String>, from: Source) {
+        // What the emoji picker's paste gives back afterwards (5.7).
+        self.clipboard.offered = Some((types.clone(), from));
         if !self.shell_linked() {
             return;
         }
@@ -185,7 +190,7 @@ impl State {
 
     /// Asks the selection's client for `mime`: what it writes comes
     /// through the pipe returned.
-    fn ask_selection(&mut self, mime: &str, from: Source) -> Option<PipeReader> {
+    pub(crate) fn ask_selection(&mut self, mime: &str, from: Source) -> Option<PipeReader> {
         let (reader, writer) = match std::io::pipe() {
             Ok(pipe) => pipe,
             Err(err) => {
@@ -382,6 +387,15 @@ impl State {
             return;
         }
         self.clipboard.paste = None;
+        self.paste_keys(terminal);
+    }
+
+    /// `Ctrl+V` to what holds the keyboard, `Ctrl+Shift+V` for a
+    /// `terminal`: the active layout's keys, as the keyboard's own.
+    pub(crate) fn paste_keys(&mut self, terminal: bool) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
         let v = keyboard.with_xkb_state(self, |context| {
             let xkb = context.xkb().lock().ok()?;
             let layout = xkb.active_layout();
@@ -473,7 +487,11 @@ fn read(
 
 /// What comes through `pipe` until it closes, `most` bytes at most, until
 /// `until` at most.
-fn read_all(pipe: &PipeReader, most: usize, until: Instant) -> Result<Vec<u8>, &'static str> {
+pub(crate) fn read_all(
+    pipe: &PipeReader,
+    most: usize,
+    until: Instant,
+) -> Result<Vec<u8>, &'static str> {
     use smithay::reexports::rustix::{
         event::{PollFd, PollFlags, Timespec, poll},
         io::Errno,

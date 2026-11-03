@@ -192,6 +192,18 @@ impl State {
                     .and_then(|key| shortcuts.action(mods, key, this.nested))
                     .or_else(|| {
                         digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
+                    })
+                    .or_else(|| {
+                        // A key the layout types with Shift (`.` on
+                        // AZERTY): the chord without Shift, Shift held.
+                        let typed = keysym.modified_sym();
+                        let raw = keysym.raw_latin_sym_or_raw_current_sym()?;
+                        if !mods.shift || typed == raw || typed == Keysym::NoSymbol {
+                            return None;
+                        }
+                        let mut unshifted = *mods;
+                        unshifted.shift = false;
+                        shortcuts.action(&unshifted, typed, this.nested)
                     });
                 if let Some((action, chord)) = action {
                     this.kept_keys.insert(code);

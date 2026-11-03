@@ -39,12 +39,17 @@ use smithay_client_toolkit::{
     shm::{Shm, ShmHandler, slot::SlotPool},
 };
 use wayland_client::{
-    Connection, Dispatch, QueueHandle,
+    Connection, Dispatch, Proxy, QueueHandle,
     globals::registry_queue_init,
     protocol::{
         wl_callback, wl_data_device, wl_data_device_manager, wl_data_source, wl_keyboard,
         wl_output, wl_pointer, wl_seat, wl_shm, wl_surface,
     },
+};
+
+use wayland_protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3::ZwpTextInputManagerV3,
+    zwp_text_input_v3::{self, ZwpTextInputV3},
 };
 
 pub const WAIT: Duration = Duration::from_secs(10);
@@ -230,6 +235,16 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// A typing window with a text field: with `caret`, through
+    /// text-input-v3, enabled as it takes the keyboard (and disabled as
+    /// it loses it), its caret there (surface-local); it says what is
+    /// committed to it ([`Event::Committed`]). With or without, `Ctrl+V`
+    /// reads the clipboard's text ([`Event::Pasted`]).
+    Writing {
+        app_id: &'static str,
+        size: (u32, u32),
+        caret: Option<(i32, i32, i32, i32)>,
+    },
 }
 
 /// What the test asks of a client.
@@ -245,6 +260,8 @@ pub enum Command {
     Close,
     /// Titles its window, without drawing (a terminal's prompt does so).
     Title(&'static str),
+    /// Reads the clipboard's text, as `Ctrl+V` does: [`Event::Pasted`].
+    ReadClipboard,
 }
 
 /// What a client puts on the clipboard: its types, and the text it writes
@@ -272,6 +289,11 @@ pub enum Event {
     Group(u32),
     /// A typing client's key (its evdev code), pressed or released.
     Key(u32, bool),
+    /// A writing client's text input got this text (`commit_string`, then
+    /// `done`).
+    Committed(String),
+    /// A writing client read this text from the clipboard (empty: none).
+    Pasted(String),
 }
 
 /// A client running on its thread.
@@ -347,6 +369,12 @@ fn run_client(
         typing: false,
         clear: false,
         fill: None,
+        caret: None,
+        text_inputs: None,
+        text_input: None,
+        committing: None,
+        ctrl: false,
+        writing: false,
     };
     match shows {
         Some(Shows::Window {
@@ -386,6 +414,29 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.typing = true;
+        }
+        Some(Shows::Writing {
+            app_id,
+            size,
+            caret,
+        }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.typing = true;
+            client.writing = true;
+            client.caret = caret;
+            if caret.is_some() {
+                client.text_inputs = Some(
+                    globals
+                        .bind::<ZwpTextInputManagerV3, _, _>(&qh, 1..=1, ())
+                        .context("no text input")?,
+                );
+            }
         }
         Some(Shows::Cells { app_id, size, cell }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -489,6 +540,7 @@ fn run_client(
                 (Command::Close, _) => client.window = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}
+                (Command::ReadClipboard, _) => client.read_clipboard(),
             }
         }
         queue.flush()?;
@@ -539,6 +591,14 @@ struct Client {
     clear: bool,
     /// Its surface's colour, when not a window's.
     fill: Option<u32>,
+    /// A writing client's caret, its text input, and what is committed
+    /// to it until `done`; whether Ctrl is held.
+    caret: Option<(i32, i32, i32, i32)>,
+    text_inputs: Option<ZwpTextInputManagerV3>,
+    text_input: Option<ZwpTextInputV3>,
+    committing: Option<String>,
+    ctrl: bool,
+    writing: bool,
 }
 
 impl Client {
@@ -554,6 +614,27 @@ impl Client {
         source.set_selection(device, 0);
         self.clip = Some((clip, source));
         conn.display().sync(qh, ());
+    }
+
+    /// Reads the clipboard's text off its thread: [`Event::Pasted`].
+    fn read_clipboard(&mut self) {
+        let offer = self
+            .device
+            .as_ref()
+            .and_then(|d| d.data().selection_offer());
+        let events = self.events.clone();
+        let Some(pipe) = offer.and_then(|o| o.receive("text/plain;charset=utf-8".to_owned()).ok())
+        else {
+            let _ = events.send(Event::Pasted(String::new()));
+            return;
+        };
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut file = std::fs::File::from(std::os::fd::OwnedFd::from(pipe));
+            let mut text = String::new();
+            let _ = file.read_to_string(&mut text);
+            let _ = events.send(Event::Pasted(text));
+        });
     }
 
     /// Fills `surface` with a solid colour, `size` large.
@@ -702,6 +783,16 @@ impl SeatHandler for Client {
             self.seat = Some(seat);
         } else if capability == Capability::Keyboard && self.typing {
             seat.get_keyboard(qh, ());
+            // To read the clipboard on Ctrl+V.
+            if self.writing
+                && let Some(data) = &self.data
+                && self.device.is_none()
+            {
+                self.device = Some(data.get_data_device(qh, &seat));
+            }
+            if let Some(manager) = &self.text_inputs {
+                self.text_input = Some(manager.get_text_input(&seat, qh, ()));
+            }
         }
     }
 
@@ -824,12 +915,22 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         _: &QueueHandle<Self>,
     ) {
         match event {
-            wl_keyboard::Event::Modifiers { group, .. } => {
+            wl_keyboard::Event::Modifiers {
+                group,
+                mods_depressed,
+                ..
+            } => {
+                // XKB's Control.
+                client.ctrl = mods_depressed & 0x4 != 0;
                 let _ = client.events.send(Event::Group(group));
             }
             wl_keyboard::Event::Key { key, state, .. } => {
                 let pressed = state == wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed);
                 let _ = client.events.send(Event::Key(key, pressed));
+                // Ctrl+V pastes in a writing window.
+                if pressed && client.ctrl && key == 47 && client.device.is_some() {
+                    client.read_clipboard();
+                }
             }
             _ => {}
         }
@@ -1051,4 +1152,52 @@ pub fn chord(hp: &mut Headless, keys: &[u32]) {
 pub fn wait(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
     hp.dispatch_until(time, |_| false)?;
     Ok(())
+}
+
+impl Dispatch<ZwpTextInputManagerV3, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpTextInputManagerV3,
+        _: <ZwpTextInputManagerV3 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+/// A writing client's text input: enabled with its caret as its window
+/// takes the keyboard, disabled as it loses it, as toolkits do.
+impl Dispatch<ZwpTextInputV3, ()> for Client {
+    fn event(
+        client: &mut Self,
+        input: &ZwpTextInputV3,
+        event: zwp_text_input_v3::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwp_text_input_v3::Event::Enter { .. } => {
+                input.enable();
+                if let Some((x, y, w, h)) = client.caret {
+                    input.set_cursor_rectangle(x, y, w, h);
+                }
+                input.commit();
+            }
+            zwp_text_input_v3::Event::Leave { .. } => {
+                input.disable();
+                input.commit();
+            }
+            zwp_text_input_v3::Event::CommitString { text } => {
+                client.committing = text;
+            }
+            zwp_text_input_v3::Event::Done { .. } => {
+                if let Some(text) = client.committing.take() {
+                    let _ = client.events.send(Event::Committed(text));
+                }
+            }
+            _ => {}
+        }
+    }
 }

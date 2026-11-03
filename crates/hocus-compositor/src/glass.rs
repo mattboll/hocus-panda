@@ -120,6 +120,12 @@ pub fn popover_pane(output: &str) -> String {
     format!("{output} popover")
 }
 
+/// The name of the pane under the emoji picker on `output` (5.7): its
+/// own, as a popover may fade out while it comes.
+pub fn emoji_pane(output: &str) -> String {
+    format!("{output} emoji")
+}
+
 /// Renderers that can blur what is behind the bar.
 pub trait Glass: Renderer + Sized {
     /// `behind` (output-local, as drawn on the output) drawn into output
