@@ -387,8 +387,11 @@ impl Bed {
         })?;
         anyhow::ensure!(opened, "no launcher");
         let shows = self.shows_after(from, "the launcher shows it")?;
-        // Its motion over.
-        wait(&mut self.hp, Duration::from_millis(250))?;
+        // Its motion over, in the frame the screen shows: it starts at the
+        // shell's first buffer, which on a loaded machine comes well after
+        // the shell said what it shows.
+        let still = self.hp.dispatch_until(WAIT, Headless::launcher_at_rest)?;
+        anyhow::ensure!(still, "the launcher still moves");
         Ok(shows)
     }
 

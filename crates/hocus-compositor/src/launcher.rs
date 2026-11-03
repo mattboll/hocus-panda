@@ -162,6 +162,11 @@ impl Launchers {
             || self.toasts.iter().any(|(_, opened)| fading(*opened))
     }
 
+    /// Whether a launcher shows, and is done moving by `at`.
+    pub fn at_rest(&self, at: Duration) -> bool {
+        !self.shown.is_empty() && !self.shown.iter().any(|s| s.moving(at))
+    }
+
     /// When a toast resting at `now` starts to fade out.
     pub fn next(&self, now: Duration) -> Option<Duration> {
         self.toasts

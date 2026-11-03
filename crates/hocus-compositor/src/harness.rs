@@ -400,6 +400,15 @@ impl Headless {
         self.app.state.panel.launcher_commits
     }
 
+    /// Whether the launcher shows at rest in the last frame drawn: its
+    /// fade in over, which starts at the shell's first buffer, however
+    /// late that comes on a loaded machine.
+    pub fn launcher_at_rest(&self) -> bool {
+        let state = &self.app.state;
+        let drawn = state.drawn_at.get();
+        drawn.is_some_and(|at| state.panel.launchers.at_rest(at))
+    }
+
     /// The launcher's surfaces as the shell placed them: their screen, and
     /// where they are (global).
     pub fn launcher_surfaces(&self) -> Vec<(String, Rect)> {
