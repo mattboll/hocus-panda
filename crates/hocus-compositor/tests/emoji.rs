@@ -101,9 +101,9 @@ impl Bed {
             log,
             state: root.join("state/hocuspanda"),
         };
-        let up = bed
-            .hp
-            .dispatch_until(WAIT, |hp| hp.bell_surfaces().len() == 1)?;
+        let up = bed.hp.dispatch_until(WAIT, |hp| {
+            hp.drawn_layers(hocus_link::BELL_NAMESPACE).len() == 1
+        })?;
         anyhow::ensure!(up, "no footer");
         bed.hp.pointer_move(200.0, 200.0);
         wait(&mut bed.hp, Duration::from_millis(300))?;
@@ -152,13 +152,31 @@ impl Bed {
                 caret,
             },
         )?;
-        wait(&mut self.hp, Duration::from_millis(200))?;
+        // Holding the keyboard, and with a caret its text input enabled
+        // there: the picker opens on what the compositor knows then.
+        let ready = self.hp.dispatch_until(WAIT, |hp| {
+            let keyboard = hp
+                .windows()
+                .iter()
+                .any(|w| w.keyboard && w.app_id.as_deref() == Some(app_id));
+            keyboard
+                && match caret {
+                    Some(caret) => hp.text_input(app_id) == Some(Some(caret)),
+                    None => true,
+                }
+        })?;
+        anyhow::ensure!(
+            ready,
+            "{app_id} never took the keyboard with its caret: {:?}",
+            self.hp.text_input(app_id)
+        );
         Ok(Window { client, rect })
     }
 
     fn click(&mut self, (x, y): (f64, f64)) -> anyhow::Result<()> {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
+        // Once the shell's surfaces there are drawn: else the press goes
+        // to what is under them.
+        common::point(&mut self.hp, (x, y))?;
         wait(&mut self.hp, Duration::from_millis(60))?;
         self.hp.button(BTN_LEFT, true);
         self.hp.button(BTN_LEFT, false);
@@ -170,19 +188,24 @@ impl Bed {
     fn open(&mut self) -> anyhow::Result<(Rect, String)> {
         let mark = self.mark();
         chord(&mut self.hp, &[KEY_LEFTMETA, KEY_DOT]);
+        // Drawn at its place: it has one from its first commit, 0 × 0
+        // until the shell's first buffer, which takes no click either.
         let open = self.hp.dispatch_until(WAIT, |hp| {
-            hp.layer_rects(hocus_link::EMOJI_NAMESPACE).len() == 1
+            hp.drawn_layers(hocus_link::EMOJI_NAMESPACE).len() == 1
         })?;
-        anyhow::ensure!(open, "no emoji picker");
+        anyhow::ensure!(
+            open,
+            "no emoji picker: {:?}",
+            self.hp.layer_rects(hocus_link::EMOJI_NAMESPACE)
+        );
         let line = self.picker_after(mark, "holding=true")?;
-        wait(&mut self.hp, Duration::from_millis(200))?;
         let picker = self.picker().ok_or_else(|| anyhow::anyhow!("no picker"))?;
         Ok((picker, line))
     }
 
     fn picker(&self) -> Option<Rect> {
         self.hp
-            .layer_rects(hocus_link::EMOJI_NAMESPACE)
+            .drawn_layers(hocus_link::EMOJI_NAMESPACE)
             .first()
             .map(|(_, r)| *r)
     }

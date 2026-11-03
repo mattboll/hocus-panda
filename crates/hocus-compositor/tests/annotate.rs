@@ -19,7 +19,7 @@ use std::{
 };
 
 use anyhow::Context;
-use common::{BTN_LEFT, KEY_ESC, KEY_LEFTCTRL, KEY_LEFTSHIFT, Shows, chord, open_showing};
+use common::{BTN_LEFT, KEY_ESC, KEY_LEFTCTRL, KEY_LEFTSHIFT, Shows, WAIT, chord, open_showing};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
 const KEY_PRINT: u32 = 99;
@@ -55,38 +55,6 @@ impl Drop for Bed {
     }
 }
 
-/// A D-Bus daemon of the test's own in `dir`, and its address.
-fn private_bus(dir: &Path) -> anyhow::Result<(Child, String)> {
-    let socket = dir.join("bus");
-    let config = dir.join("bus.conf");
-    std::fs::write(
-        &config,
-        format!(
-            "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
-             \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
-             <busconfig><type>session</type><listen>unix:path={}</listen>\
-             <policy context=\"default\"><allow send_destination=\"*\"/>\
-             <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
-            socket.display()
-        ),
-    )?;
-    let bus = Command::new("dbus-daemon")
-        .arg(format!("--config-file={}", config.display()))
-        .arg("--nofork")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let start = Instant::now();
-    while !socket.exists() {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(10), "no bus");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    Ok((bus, format!("unix:path={}", socket.display())))
-}
-
 fn ready() -> Option<PathBuf> {
     let Some(shell) = common::shell_program() else {
         eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
@@ -113,7 +81,7 @@ impl Bed {
         for sub in ["home", "state", "config", "cache"] {
             std::fs::create_dir_all(root.join(sub))?;
         }
-        let (bus, address) = private_bus(root)?;
+        let (bus, address) = common::private_bus(root)?;
         let log = root.join("shell.log");
         let script = root.join("shell");
         let p = |s: &str| root.join(s).display().to_string();
@@ -218,8 +186,9 @@ impl Bed {
     }
 
     fn click(&mut self, (x, y): (f64, f64)) -> anyhow::Result<()> {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
+        // Once the shell's surfaces there are drawn: else the press goes
+        // to what is under them.
+        common::point(&mut self.hp, (x, y))?;
         self.idle(Duration::from_millis(60))?;
         self.hp.button(BTN_LEFT, true);
         self.idle(Duration::from_millis(30))?;
@@ -318,9 +287,9 @@ impl Bed {
 
     /// Opens the history with a click on the bell: what it shows.
     fn open_history(&mut self) -> anyhow::Result<String> {
-        let shown = self
-            .hp
-            .dispatch_until(Duration::from_secs(10), |hp| hp.bell_surfaces().len() == 1)?;
+        let shown = self.hp.dispatch_until(Duration::from_secs(10), |hp| {
+            hp.drawn_layers(hocus_link::BELL_NAMESPACE).len() == 1
+        })?;
         anyhow::ensure!(shown, "no bell");
         let (_, at) = self.hp.bell_surfaces()[0];
         let bell = (f64::from(at.x + 11 + 44 + 20), f64::from(at.y + 6 + 17));
@@ -711,8 +680,11 @@ fn closing_with_no_marks_changes_nothing() -> anyhow::Result<()> {
     let mark = bed.mark();
     bed.click(places.at("copy"))?;
     bed.logged_since(mark, "the capture's editor closes")?;
-    bed.idle(Duration::from_millis(500))?;
-    assert!(bed.hp.capture_editor_surfaces().is_empty());
+    // Gone once its fade out is over.
+    let gone = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.capture_editor_surfaces().is_empty())?;
+    assert!(gone, "{:?}", bed.hp.capture_editor_surfaces());
     assert_eq!(std::fs::read(&file)?, before);
     assert_eq!(std::fs::metadata(&file)?.modified()?, modified);
     assert_eq!(bed.hp.clipboard_bytes(), Some(before));

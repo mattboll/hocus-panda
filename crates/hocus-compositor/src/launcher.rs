@@ -167,6 +167,11 @@ impl Launchers {
         !self.shown.is_empty() && !self.shown.iter().any(|s| s.moving(at))
     }
 
+    /// When the toast shown first was first drawn, on the motions' clock.
+    pub fn toast_since(&self) -> Option<Duration> {
+        self.toasts.first().map(|(_, opened)| *opened)
+    }
+
     /// When a toast resting at `now` starts to fade out.
     pub fn next(&self, now: Duration) -> Option<Duration> {
         self.toasts

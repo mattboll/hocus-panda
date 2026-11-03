@@ -436,10 +436,11 @@ fn a_menu_takes_the_keyboard_and_a_press_elsewhere_closes_it() -> anyhow::Result
 fn nothing_is_drawn_once_the_motions_end() -> anyhow::Result<()> {
     let mut hp = compositor()?;
     open(&mut hp, "test.rest", (400, 300))?;
-    // The opening (220 ms) and the focus rim (120 ms) run, then stop.
-    wait(&mut hp, Duration::from_millis(500))?;
+    // The opening (220 ms) and the focus rim (120 ms) run, then stop: as
+    // many frames as the machine draws in that time, one at least.
+    common::at_rest(&mut hp)?;
     let frames = hp.frames();
-    assert!(frames > 2, "the opening was drawn: {frames} frames");
+    assert!(frames > 0, "the opening was drawn: {frames} frames");
     wait(&mut hp, Duration::from_millis(300))?;
     assert_eq!(hp.frames(), frames, "no frame at rest");
     Ok(())
@@ -574,18 +575,15 @@ fn a_window_opened_in_the_background_pulses_once_then_nothing_draws() -> anyhow:
         let ring = hp.renderer() == "gles" && !reduced_motion;
         let machine = format!("{}, reduced motion {reduced_motion}", hp.renderer());
         let _foreign = foreign_window(&mut hp)?;
-        wait(&mut hp, Duration::from_millis(500))?;
+        common::at_rest(&mut hp)?;
+        // Seen a refresh at a time from its first frame, the motions'
+        // clock held: on a loaded machine frames come late and few.
+        hp.hold_clock();
         let (_, _client) = open_with(&mut hp, "test.behind", (400, 300), false)?;
-        let start = std::time::Instant::now();
-        let mut frames = hp.frames();
-        let mut samples = Vec::new();
-        while start.elapsed() < Duration::from_millis(1200) {
-            hp.dispatch(Duration::from_millis(2))?;
-            if hp.frames() != frames {
-                frames = hp.frames();
-                samples.push((start.elapsed(), hp.pulse("test.behind")));
-            }
-        }
+        let samples = common::sample(&mut hp, Duration::from_millis(1200), |hp| {
+            hp.pulse("test.behind")
+        })?;
+        hp.release_clock();
         // Behind, the keyboard where it was.
         let windows = hp.windows();
         let at = |app: &str| {

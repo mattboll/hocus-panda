@@ -131,18 +131,23 @@ fn a_window_taken_to_the_side_goes_along_and_stays_at_the_last() -> anyhow::Resu
 fn the_strip_slides_then_nothing_is_drawn() -> anyhow::Result<()> {
     let mut hp = compositor()?;
     open(&mut hp, "test.slide", (400, 300))?;
-    wait(&mut hp, Duration::from_millis(400))?;
+    common::at_rest(&mut hp)?;
+    // Seen a refresh at a time, the motions' clock held: on a loaded
+    // machine, the frames drawn as they come may all miss the middle.
+    hp.hold_clock();
     chord(&mut hp, &[KEY_LEFTMETA, KEY_3]);
+    let seen = common::sample(&mut hp, Duration::from_millis(800), Headless::desktop);
+    hp.release_clock();
+    let seen = seen?;
     // On its way, past the second desktop: from 1 to 3 the strip slides
     // past 2.
-    let passing = hp.dispatch_until(WAIT, |hp| {
-        let (_, at) = hp.desktop();
-        at > 0.9 && at < 1.9
-    })?;
-    assert!(passing, "the strip went straight to {:?}", hp.desktop());
+    assert!(
+        seen.iter().any(|(_, (_, at))| *at > 0.9 && *at < 1.9),
+        "the strip went straight there: {seen:?}"
+    );
     settle_on(&mut hp, 2)?;
     // The dots fade, then no frame is drawn.
-    wait(&mut hp, Duration::from_millis(500))?;
+    common::at_rest(&mut hp)?;
     let frames = hp.frames();
     wait(&mut hp, Duration::from_millis(300))?;
     assert_eq!(hp.frames(), frames, "frames drawn at rest");
@@ -281,15 +286,9 @@ fn escape_cancels_alt_tab_and_a_click_picks_a_window() -> anyhow::Result<()> {
 /// Runs the compositor until Alt+Tab's panel has appeared and nothing
 /// more is drawn: a loaded machine draws its motion late.
 fn appeared(hp: &mut Headless) -> anyhow::Result<()> {
-    wait(hp, Duration::from_millis(150))?;
-    for _ in 0..40 {
-        let frames = hp.frames();
-        wait(hp, Duration::from_millis(150))?;
-        if hp.frames() == frames {
-            return Ok(());
-        }
-    }
-    anyhow::bail!("the panel never came to rest")
+    let shown = hp.dispatch_until(WAIT, |hp| hp.switcher().is_some())?;
+    anyhow::ensure!(shown, "no panel");
+    common::at_rest(hp)
 }
 
 /// The pixel at (`x`, `y`) of a screenshot, ARGB.

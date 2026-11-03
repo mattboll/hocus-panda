@@ -201,11 +201,10 @@ impl Bed {
         )
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
     }
 
     fn press(&mut self, key: u32) {
@@ -504,13 +503,22 @@ fn a_click_on_a_tile_slides_to_its_desktop() -> anyhow::Result<()> {
     };
     let mut bed = start(&shell, Setup::default())?;
     let third = bed.middle(2);
-    bed.click(third);
+    // Seen a refresh at a time from the shell's word, the motions' clock
+    // held: on a loaded machine, the frames drawn as they come may all
+    // miss the middle.
+    bed.hp.hold_clock();
+    let seen = bed.click(third).and_then(|()| {
+        let asked = bed.hp.dispatch_until(WAIT, |hp| hp.desktop().0 == 2)?;
+        anyhow::ensure!(asked, "never on the third: {:?}", bed.hp.desktop());
+        common::sample(&mut bed.hp, Duration::from_secs(1), Headless::desktop)
+    });
+    bed.hp.release_clock();
+    let seen = seen?;
     // The strip slides past the second, as with the shortcuts.
-    let passing = bed.hp.dispatch_until(WAIT, |hp| {
-        let (_, at) = hp.desktop();
-        at > 0.5 && at < 1.9
-    })?;
-    assert!(passing, "the strip went straight to {:?}", bed.hp.desktop());
+    assert!(
+        seen.iter().any(|(_, (_, at))| *at > 0.5 && *at < 1.9),
+        "the strip went straight there: {seen:?}"
+    );
     bed.on(2)?;
     bed.settle()?;
     assert!(bed.ringed(2)?);
@@ -581,7 +589,7 @@ fn six_desktops_take_two_rows() -> anyhow::Result<()> {
     assert_eq!(bed.count(seventh, |p| light(p) > 60)?, 0, "a seventh");
     // The sixth, clicked.
     let sixth = bed.middle(5);
-    bed.click(sixth);
+    bed.click(sixth)?;
     bed.on(5)?;
     Ok(())
 }
@@ -628,7 +636,7 @@ fn the_mini_forms_dots_in_their_three_looks_and_a_click() -> anyhow::Result<()> 
     assert_eq!(look(&mut bed, 3)?, (empty, rim));
     // A click on the second: there.
     let second = bed.middle(1);
-    bed.click(second);
+    bed.click(second)?;
     bed.on(1)?;
     Ok(())
 }
@@ -640,7 +648,7 @@ fn the_keyboard_reaches_the_tiles_where_enter_and_space_go_there() -> anyhow::Re
     };
     let mut bed = start(&shell, Setup::default())?;
     // The sound's popover, then Esc: its row holds the keyboard.
-    bed.click(SOUND_ROW);
+    bed.click(SOUND_ROW)?;
     let open = bed
         .hp
         .dispatch_until(WAIT, |hp| !hp.popover_surfaces().is_empty())?;
@@ -735,7 +743,13 @@ fn a_sketch_with_room_for_it_shows_its_windows_icon() -> anyhow::Result<()> {
     let sketch = bed.sketch(0, window);
     let (x, y) = centre(sketch);
     let icon = Rect::new(x - 5, y - 5, 10, 10);
-    assert!(bed.count(icon, red)? > 50, "no icon in {sketch:?}");
+    // Drawn once the shell has the icon, which it looks up off its loop:
+    // on a loaded machine, after the commits settled.
+    let start = Instant::now();
+    while bed.count(icon, red)? <= 50 {
+        anyhow::ensure!(start.elapsed() < WAIT, "no icon in {sketch:?}");
+        wait(&mut bed.hp, Duration::from_millis(50))?;
+    }
     let second = bed.tile(1);
     assert_eq!(bed.count(second, red)?, 0, "an icon in a 5 px sketch");
     Ok(())
@@ -776,7 +790,7 @@ fn resting_on_a_tile_lists_its_windows_front_to_back_after_150_ms() -> anyhow::R
         .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
     assert!(closed, "the list stays");
     let third = bed.middle(2);
-    bed.click(third);
+    bed.click(third)?;
     bed.on(2)?;
     wait(&mut bed.hp, Duration::from_millis(400))?;
     assert!(bed.hp.popover_surfaces().is_empty(), "a list after a click");
@@ -820,7 +834,7 @@ fn a_row_goes_to_its_desktop_and_focuses_its_window() -> anyhow::Result<()> {
     bed.logged_after(mark, "rows=[\"Beta\", \"Alpha\"]")?;
     // Into the list, on its second row, Alpha's: a click.
     let (x, y) = Bed::row(list, 1);
-    bed.click((x, y));
+    bed.click((x, y))?;
     bed.on(1)?;
     let focused = bed.hp.dispatch_until(WAIT, |hp| {
         hp.windows()
@@ -955,7 +969,7 @@ fn past_eight_windows_the_list_scrolls_by_the_wheel_and_to_the_keyboards_row() -
     assert!(thumb_at_bottom(&mut bed, list)?, "the wheel did not scroll");
     // Clicked into, off the rows: the keyboard. Tab holds the first row,
     // which scrolls back into view; Up, round to the last, scrolls to it.
-    bed.click((f64::from(list.x + 120), f64::from(list.y + 20)));
+    bed.click((f64::from(list.x + 120), f64::from(list.y + 20)))?;
     let held = bed.hp.dispatch_until(WAIT, |hp| {
         hp.keyboard_layer().as_deref() == Some(hocus_link::POPOVER_NAMESPACE)
     })?;
@@ -1051,7 +1065,7 @@ fn a_minimised_window_is_listed_last_greyed_and_a_click_brings_it_back() -> anyh
     assert!(lettered > 100, "no letter tile: {lettered}");
     // A click on Beta: back, focused, the list gone.
     let (x, y) = Bed::row(list, 2);
-    bed.click((x, y));
+    bed.click((x, y))?;
     anyhow::ensure!(focus(&mut bed.hp, "test.small")?, "{:?}", bed.hp.windows());
     let closed = bed
         .hp

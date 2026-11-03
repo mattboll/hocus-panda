@@ -196,8 +196,9 @@ fn a_window_half_over_the_bar_covers_it_and_takes_the_clicks_there() -> anyhow::
     pointer_at(&mut hp, UNCOVERED);
     assert_eq!(hp.pointer_window(), None);
     assert_eq!(hp.pointer_layer().as_deref(), Some(hocus_link::NAMESPACE));
-    // Nothing draws at rest, with the window over the bar.
-    wait(&mut hp, Duration::from_millis(300))?;
+    // Nothing draws at rest, with the window over the bar: once the
+    // motions are over, however late a loaded machine draws their end.
+    common::at_rest(&mut hp)?;
     let frames = hp.frames();
     wait(&mut hp, Duration::from_secs(1))?;
     assert_eq!(hp.frames(), frames, "frames drawn at rest");
@@ -230,10 +231,13 @@ fn pushing_against_the_edge_brings_the_bar_in_front_until_the_pointer_leaves_it(
     pointer_at(&mut hp, edge);
     wait(&mut hp, Duration::from_millis(250))?;
     assert_eq!(hp.bar_in_front(), None, "in front before 300 ms");
-    let raised = hp.dispatch_until(Duration::from_millis(300), |hp| hp.bar_in_front().is_some())?;
+    // Its time on the compositor's clock; a loaded machine's loop only
+    // turns later.
+    let raised = hp.dispatch_until(WAIT, |hp| hp.bar_in_front().is_some())?;
     assert!(raised, "the bar never came in front");
     assert_eq!(hp.bar_in_front().as_deref(), Some("HEADLESS-1"));
     shows(&mut hp, COVERED, BAR, "the bar in front")?;
+    common::at_rest(&mut hp)?;
     let frames = hp.frames();
     wait(&mut hp, Duration::from_secs(1))?;
     assert_eq!(
@@ -253,7 +257,7 @@ fn pushing_against_the_edge_brings_the_bar_in_front_until_the_pointer_leaves_it(
     shows(&mut hp, COVERED, WINDOW_COLOUR, "the bar back under")?;
     pointer_at(&mut hp, COVERED);
     assert_eq!(hp.pointer_window().as_deref(), Some("over"));
-    wait(&mut hp, Duration::from_millis(300))?;
+    common::at_rest(&mut hp)?;
     let frames = hp.frames();
     wait(&mut hp, Duration::from_secs(1))?;
     assert_eq!(hp.frames(), frames, "frames drawn at rest, the bar back");

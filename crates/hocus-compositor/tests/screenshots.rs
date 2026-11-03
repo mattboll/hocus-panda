@@ -270,7 +270,8 @@ fn window_mode_takes_the_window_under_the_pointer() -> anyhow::Result<()> {
     let _ = left;
     open(&mut bed.hp, "right", (640, 480))?;
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_RIGHT]);
-    wait(&mut bed.hp, Duration::from_millis(400))?;
+    // Both drawn where they went, their motions over.
+    common::at_rest(&mut bed.hp)?;
     let left = common::rect_of(&bed.hp, "left").context("no left window")?;
     bed.open()?;
     bed.hp.capture_ask(CaptureAsk::Mode(CaptureMode::Window));
@@ -569,8 +570,9 @@ fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
     wait(&mut hp, Duration::from_millis(250))?;
     let click = |hp: &mut Headless, x: i32| -> anyhow::Result<()> {
         let y = f64::from(bar.y + bar.height / 2);
-        hp.pointer_move(f64::from(x) - 1.0, y);
-        hp.pointer_move(f64::from(x), y);
+        // Once the toolbar there is drawn at its size: it changes with
+        // the mode, a moment after the compositor's.
+        common::point(hp, (f64::from(x), y))?;
         wait(hp, Duration::from_millis(100))?;
         hp.button(BTN_LEFT, true);
         hp.button(BTN_LEFT, false);
@@ -605,6 +607,17 @@ fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
         )
     })?;
     assert!(area, "back to the area: {:?}", hp.capture());
+    // Where the toolbar is now drawn, back in its area's size.
+    let back = hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::CAPTURE_TOOLBAR_NAMESPACE)
+            .first()
+            .is_some_and(|(_, r)| *r == bar)
+    })?;
+    assert!(
+        back,
+        "{:?}, not {bar:?}",
+        hp.layer_rects(hocus_link::CAPTURE_TOOLBAR_NAMESPACE)
+    );
     click(&mut hp, bar.x + bar.width - 30)?;
     let taken = hp.dispatch_until(WAIT, |hp| hp.captures().0 == 1)?;
     assert!(taken, "nothing captured: {:?}", hp.capture());

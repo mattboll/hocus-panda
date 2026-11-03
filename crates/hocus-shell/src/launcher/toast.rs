@@ -42,7 +42,7 @@ pub const BOTTOM: i32 = (40.0 * ZOOM) as i32;
 const FILL: Color = Color::from_rgba8(14, 17, 28, 0.94);
 const RIM: Color = Color::from_rgba8(108, 194, 135, 0.45);
 /// The compositor's fade out ends a little after the shell's clock says:
-/// it counts from the toast's first frame.
+/// both count from the toast's first frame.
 const LINGER: Duration = Duration::from_millis(100);
 
 /// The toast shown.
@@ -50,7 +50,11 @@ const LINGER: Duration = Duration::from_millis(100);
 struct Shown {
     id: window::Id,
     said: String,
+    /// When it goes: counted from its first frame once it is drawn, as the
+    /// compositor's motion is. A loaded machine draws it well after it
+    /// was asked for, and counted from then it went before its fade out.
     until: Instant,
+    drawn: bool,
 }
 
 static TOAST: Mutex<Option<Shown>> = Mutex::new(None);
@@ -74,6 +78,7 @@ pub fn show(output: String, said: String, now: Instant) -> Vec<Effect> {
             id,
             said,
             until: now + LAUNCHER_TOAST + LINGER,
+            drawn: false,
         });
     });
     effects.push(Effect::Toast {
@@ -127,10 +132,14 @@ impl<Message> canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let said = with(|toast| {
-            toast
-                .as_ref()
-                .filter(|t| t.id == self.id)
-                .map(|t| t.said.clone())
+            let shown = toast.as_mut().filter(|t| t.id == self.id)?;
+            if !shown.drawn {
+                // Its time from here: the deadline's wait finds it later
+                // and waits again.
+                shown.drawn = true;
+                shown.until = Instant::now() + LAUNCHER_TOAST + LINGER;
+            }
+            Some(shown.said.clone())
         });
         if let Some(said) = said {
             draw(&mut frame, &said, bounds.size(), self.software);
