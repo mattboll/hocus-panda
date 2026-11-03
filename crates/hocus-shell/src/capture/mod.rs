@@ -472,7 +472,10 @@ pub fn recorded(recorded: Recorded) {
                     tracing::debug!(err, "the recording's first frame: a dark one instead");
                     image::RgbaImage::from_pixel(16, 10, image::Rgba([28, 36, 54, 255]))
                 });
-            let made = thumb::Made::of(&image, scale);
+            let length = shot.video.as_ref().map_or(4, |v| {
+                crate::in_use::draw::elapsed(v.duration).chars().count()
+            });
+            let made = thumb::Made::of_recording(&image, scale, length);
             keep_icon(shot.id, made.icon.clone());
             thumb::show(shot, made, Instant::now());
         });

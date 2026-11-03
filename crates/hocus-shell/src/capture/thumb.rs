@@ -91,13 +91,11 @@ const PAUSED: Color = Color::from_rgba8(255, 255, 255, 0.35);
 /// white triangle of 16; its length in Martian Mono 10.5 px on
 /// `rgba(0,0,0,0.6)`, 1 px by 6 px in, radius 6, 6 px from the corner.
 const PLAY: f32 = 40.0 * Z;
-const PLAY_DISC: Color = Color::from_rgba8(255, 255, 255, 0.18);
 const PLAY_ICON: f32 = 16.0 * Z;
 const LENGTH: f32 = 10.5 * Z;
 const LENGTH_PAD: (f32, f32) = (6.0 * Z, 1.0 * Z);
 const LENGTH_RADIUS: f32 = 6.0 * Z;
 const LENGTH_IN: f32 = 6.0 * Z;
-const LENGTH_BACK: Color = Color::from_rgba8(0, 0, 0, 0.6);
 const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 
 /// What its card shows of the capture, made on the thread that read it:
@@ -126,6 +124,94 @@ impl Made {
             icon: icon(capture, (ICON * scale.max(1.0)).round() as u32),
         }
     }
+
+    /// What a recording's first frame shows at `scale`: its picture with
+    /// the play sign and the length's backing drawn into it (a picture is
+    /// drawn over the shapes of the card), `length` characters long.
+    pub fn of_recording(first: &marks::Image, scale: f32, length: usize) -> Self {
+        let room = (WIDTH - 2.0 * PAD) * scale;
+        let (w, h) = fit(first.dimensions(), (room, IMAGE * scale));
+        let mut small = resize(first, w, h);
+        let k = scale.max(0.1);
+        // The play sign in its middle.
+        let centre = (w as f32 / 2.0, h as f32 / 2.0);
+        let r = PLAY / 2.0 * k;
+        let sign = PLAY_ICON * k;
+        let o = (centre.0 - sign / 2.0, centre.1 - sign / 2.0);
+        let tri = [(8.0, 5.0), (19.0, 12.0), (8.0, 19.0)]
+            .map(|(x, y)| (o.0 + x / 24.0 * sign, o.1 + y / 24.0 * sign));
+        // The length's backing at its bottom right.
+        let badge = badge((w as f32 / k, h as f32 / k), length);
+        let badge = Rectangle::new(
+            Point::new(badge.x * k, badge.y * k),
+            Size::new(badge.width * k, badge.height * k),
+        );
+        let radius = LENGTH_RADIUS * k;
+        for (x, y, pixel) in small.enumerate_pixels_mut() {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut layers: Vec<([f32; 3], f32)> = Vec::new();
+            let d = (px - centre.0).hypot(py - centre.1);
+            let disc = (r + 0.5 - d).clamp(0.0, 1.0);
+            if disc > 0.0 {
+                layers.push(([1.0; 3], 0.18 * disc));
+            }
+            let inside = supersample(px, py, |x, y| in_triangle((x, y), tri));
+            if inside > 0.0 {
+                layers.push(([1.0; 3], inside));
+            }
+            let cx = px.clamp(badge.x + radius, badge.x + badge.width - radius);
+            let cy = py.clamp(badge.y + radius, badge.y + badge.height - radius);
+            let corner = (radius + 0.5 - (px - cx).hypot(py - cy)).clamp(0.0, 1.0);
+            let inside_badge = px >= badge.x
+                && px <= badge.x + badge.width
+                && py >= badge.y
+                && py <= badge.y + badge.height;
+            if inside_badge && corner > 0.0 {
+                layers.push(([0.0; 3], 0.6 * corner));
+            }
+            for (colour, a) in layers {
+                for (channel, c) in pixel.0.iter_mut().zip(colour) {
+                    let v = f32::from(*channel) / 255.0;
+                    *channel = ((v * (1.0 - a) + c * a) * 255.0).round() as u8;
+                }
+            }
+        }
+        Self {
+            image: Handle::from_rgba(w, h, small.clone().into_raw()),
+            size: (w, h),
+            scale: k,
+            icon: icon(first, (ICON * scale.max(1.0)).round() as u32),
+        }
+    }
+}
+
+/// A recording's length's backing in a picture `size` logical pixels
+/// large: `chars` characters of Martian Mono (each 0.62 of its size), 6
+/// px in, 6 px from its bottom right corner.
+pub fn badge(size: (f32, f32), chars: usize) -> Rectangle {
+    let w = chars as f32 * 0.62 * LENGTH + 2.0 * LENGTH_PAD.0;
+    let h = LENGTH * 1.3 + 2.0 * LENGTH_PAD.1;
+    Rectangle::new(
+        Point::new(size.0 - LENGTH_IN - w, size.1 - LENGTH_IN - h),
+        Size::new(w, h),
+    )
+}
+
+/// How much of the pixel at (`x`, `y`) `inside` covers, four samples.
+fn supersample(x: f32, y: f32, inside: impl Fn(f32, f32) -> bool) -> f32 {
+    let n = [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)]
+        .iter()
+        .filter(|(dx, dy)| inside(x + dx, y + dy))
+        .count();
+    n as f32 / 4.0
+}
+
+fn in_triangle(p: (f32, f32), [a, b, c]: [(f32, f32); 3]) -> bool {
+    let side = |u: (f32, f32), v: (f32, f32)| (v.0 - u.0) * (p.1 - u.1) - (v.1 - u.1) * (p.0 - u.0);
+    let (d1, d2, d3) = (side(a, b), side(b, c), side(c, a));
+    let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(neg && pos)
 }
 
 /// The history's icon side, logical pixels (5.4's).
@@ -412,11 +498,25 @@ impl<Message> canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let shown = with(|t| t.as_ref().filter(|t| t.id == self.id).cloned());
+        let mut over = None;
         if let Some(thumb) = shown {
             let now = state.drawn.unwrap_or_else(Instant::now);
             self.draw_card(&mut frame, &thumb, now);
+            // A recording's play sign and length over its picture, on a
+            // layer of their own: a picture is drawn over the shapes of
+            // its own layer.
+            if let Some(video) = &thumb.shot.video {
+                let mut layer = Frame::new(renderer, bounds.size());
+                let place = Layout::of(self.words, true).image;
+                let (w, h) = thumb.made.size;
+                let scale = (place.width / w as f32)
+                    .min(place.height / h as f32)
+                    .min(1.0 / thumb.made.scale);
+                draw_play(&mut layer, fit_in(place, (w, h), scale), video);
+                over = Some(layer.into_geometry());
+            }
         }
-        vec![frame.into_geometry()]
+        std::iter::once(frame.into_geometry()).chain(over).collect()
     }
 
     fn mouse_interaction(
@@ -616,38 +716,6 @@ impl View {
             ),
             Stroke::default().with_color(IMAGE_RIM).with_width(1.0),
         );
-        // A recording's play sign over its first frame, and its length.
-        if let Some(video) = video {
-            let centre = place.center();
-            f.fill(&Path::circle(centre, PLAY / 2.0), PLAY_DISC);
-            let k = PLAY_ICON / 24.0;
-            let o = Point::new(centre.x - PLAY_ICON / 2.0, centre.y - PLAY_ICON / 2.0);
-            let p = |x: f32, y: f32| Point::new(o.x + x * k, o.y + y * k);
-            f.fill(
-                &Path::new(|b| {
-                    b.move_to(p(8.0, 5.0));
-                    b.line_to(p(19.0, 12.0));
-                    b.line_to(p(8.0, 19.0));
-                    b.close();
-                }),
-                Color::WHITE,
-            );
-            let said = crate::in_use::draw::elapsed(video.duration);
-            let w = kit::measure(&said, LENGTH, MONO) + 2.0 * LENGTH_PAD.0;
-            let h = LENGTH * 1.3 + 2.0 * LENGTH_PAD.1;
-            let badge = Rectangle::new(
-                Point::new(
-                    place.x + place.width - LENGTH_IN - w,
-                    place.y + place.height - LENGTH_IN - h,
-                ),
-                Size::new(w, h),
-            );
-            f.fill(&kit::rounded(badge, LENGTH_RADIUS), LENGTH_BACK);
-            f.fill_text(kit::text_in(
-                MONO,
-                kit::text(said, badge.center(), LENGTH, TEXT, Alignment::Center),
-            ));
-        }
         // "Copiée · enregistrée", "Annoter", ✕; a recording's "Enregistrée ·
         // MP4" and "Ouvrir".
         let (status, button) = match video {
@@ -696,6 +764,18 @@ impl View {
             );
         }
     }
+}
+
+/// A recording's length at the bottom right of its picture, `shown`
+/// (its play sign and the length's backing are in the picture).
+fn draw_play(f: &mut Frame, shown: Rectangle, video: &super::Video) {
+    let said = crate::in_use::draw::elapsed(video.duration);
+    let badge = badge((shown.width, shown.height), said.chars().count());
+    let centre = Point::new(shown.x + badge.center_x(), shown.y + badge.center_y());
+    f.fill_text(kit::text_in(
+        MONO,
+        kit::text(said, centre, LENGTH, TEXT, Alignment::Center),
+    ));
 }
 
 /// An image `size` pixels drawn `scale` logical pixels a pixel in the

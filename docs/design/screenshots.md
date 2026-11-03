@@ -585,7 +585,10 @@ the 5.10 mockup: the indicator in the bar.
 - **The thumbnail** is 5.9's card: the first frame fitted in its place, a
   40 px disc `rgba(255,255,255,0.18)` with a white play triangle in its
   middle, the length at its bottom right (Martian Mono 10.5 px on
-  `rgba(0,0,0,0.6)`, radius 6), "Enregistrée · MP4" / "Saved · MP4",
+  `rgba(0,0,0,0.6)`, radius 6; the disc, the triangle and the length's
+  backing are drawn into the picture on the thread that makes it, since
+  the shell's renderer draws pictures over a card's shapes), "Enregistrée
+  · MP4" / "Saved · MP4",
   **Ouvrir** / **Open** (green tint) and ✕; its countdown and its hold as
   5.9's. Ouvrir, or a click on the picture, gives the file to `xdg-open`
   (found in the shell's `PATH`, started by the compositor) and sends it
