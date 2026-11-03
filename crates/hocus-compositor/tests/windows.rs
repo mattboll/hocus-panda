@@ -551,32 +551,26 @@ fn foreign_window(hp: &mut Headless) -> anyhow::Result<Foreign> {
 
 /// A window of this program opening while the user works in another's:
 /// it opens behind without the keyboard, and its rim pulses once as a
-/// window gone to from an agent's row does (bar.md §8): on a GPU, the
-/// 2 px rim and the ring growing to 14 px in 600 ms; with reduced motion,
-/// or on the CPU, the rim lights and fades without its ring. Then nothing
-/// is drawn.
+/// window gone to from an agent's row does (bar.md §8): on GLES (the GPU
+/// `HOCUS_TEST_GPU` names, else Mesa's software device), the 2 px rim and
+/// the ring growing to 14 px in 600 ms; with reduced motion, or with
+/// pixman, the rim lights and fades without its ring. Then nothing is
+/// drawn.
 #[test]
 fn a_window_opened_in_the_background_pulses_once_then_nothing_draws() -> anyhow::Result<()> {
+    let pixman = HeadlessConfig {
+        renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
+    };
     let machines = [
-        common::render_node().map(|node| (Some(node), false)),
-        common::render_node().map(|node| (Some(node), true)),
-        Some((None, false)),
+        (common::gles(), false),
+        (common::gles(), true),
+        (pixman, false),
     ];
-    for (gpu, reduced_motion) in machines.into_iter().flatten() {
+    for (drawing, reduced_motion) in machines {
         let mut config = hocus_compositor::Config::default();
         config.appearance.reduced_motion = reduced_motion;
-        let mut hp = Headless::start_with(
-            HeadlessConfig {
-                renderer: if gpu.is_some() {
-                    RendererChoice::Gles
-                } else {
-                    RendererChoice::Pixman
-                },
-                render_node: gpu,
-                ..HeadlessConfig::default()
-            },
-            config,
-        )?;
+        let mut hp = Headless::start_with(drawing, config)?;
         let ring = hp.renderer() == "gles" && !reduced_motion;
         let machine = format!("{}, reduced motion {reduced_motion}", hp.renderer());
         let _foreign = foreign_window(&mut hp)?;

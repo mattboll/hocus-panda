@@ -409,20 +409,19 @@ fn motion_of(commits: &[Duration]) -> (usize, Duration) {
 
 /// On a GPU (the shell draws with wgpu): a minute change moves once, for
 /// about 520 ms, then the clock rests; with reduced motion it does not
-/// move. Skipped without a render node.
+/// move. Skipped without a render node named in `HOCUS_TEST_GPU`.
 #[test]
 fn a_minute_change_moves_once_then_rests() -> anyhow::Result<()> {
     let Some(shell) = shell_program() else {
         eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
         return Ok(());
     };
-    // The first render node: on a machine with two GPUs, as often as not
-    // the integrated one, which this keeps the other asleep.
-    let node = PathBuf::from("/dev/dri/renderD128");
-    if !node.exists() {
-        eprintln!("no render node: the shell would draw on the CPU, without motion");
+    // Only the GPU HOCUS_TEST_GPU names: the first one found may be the
+    // one the session draws with.
+    let Some(node) = common::render_node() else {
+        eprintln!("the shell would draw on the CPU, without motion: skipped");
         return Ok(());
-    }
+    };
     let dir = tempfile::tempdir()?;
     for (config, moves) in [(Config::default(), true), (reduced(), false)] {
         // The minute changes about two seconds after the shell starts.

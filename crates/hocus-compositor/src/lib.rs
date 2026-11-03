@@ -49,6 +49,7 @@ mod snapshot;
 mod socket;
 mod state;
 mod switcher;
+pub mod test_gpu;
 mod text_input;
 mod windows;
 mod wobble;

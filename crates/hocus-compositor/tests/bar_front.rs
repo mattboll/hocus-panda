@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use common::{
     BTN_LEFT, Command, KEY_LEFTMETA, KEY_UP, Shows, WAIT, WINDOW_COLOUR, chord, client, open,
-    open_with, rect_of, render_node, shell_program, wait, wait_for_rect,
+    open_with, rect_of, shell_program, wait, wait_for_rect,
 };
 use hocus_compositor::{
     BarForm, Config, Headless, HeadlessConfig, RendererChoice, halo::Meeting, model::Rect,
@@ -337,14 +337,12 @@ fn popovers_and_bubbles_stay_above_a_window_over_the_bar() -> anyhow::Result<()>
     Ok(())
 }
 
-/// On the GPU, under the real shell's bar, the halo stays above a window
-/// covering the bar: lit, it shows over the window there; out, the window
-/// shows as it is.
+/// On GLES (the GPU `HOCUS_TEST_GPU` names, else Mesa's software device),
+/// under the real shell's bar, the halo stays above a window covering the
+/// bar: lit, it shows over the window there; out, the window shows as it
+/// is.
 #[test]
 fn the_halo_stays_above_a_window_over_the_bar() -> anyhow::Result<()> {
-    let Some(node) = render_node() else {
-        return Ok(());
-    };
     let Some(shell) = shell_program() else {
         eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
         return Ok(());
@@ -354,8 +352,7 @@ fn the_halo_stays_above_a_window_over_the_bar() -> anyhow::Result<()> {
     let mut hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec![format!("{}x{}", SCREEN.0, SCREEN.1).parse()?],
-            renderer: RendererChoice::Gles,
-            render_node: Some(node),
+            ..common::gles()
         },
         reduced(),
         Some(shell),

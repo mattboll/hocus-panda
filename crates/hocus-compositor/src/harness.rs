@@ -60,6 +60,14 @@ impl Drop for ShellEnd {
     }
 }
 
+impl Drop for Headless {
+    /// With its shell and its programs still running: what drew on a GPU
+    /// holds its render node open now.
+    fn drop(&mut self) {
+        crate::test_gpu::check_none_open();
+    }
+}
+
 /// What a test can know about a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowInfo {
@@ -100,6 +108,8 @@ impl Headless {
         shell: Option<std::path::PathBuf>,
         bus: Option<String>,
     ) -> anyhow::Result<Self> {
+        // A GPU only when the developer named one (#534).
+        let headless = crate::test_gpu::resolve(headless)?;
         let started = crate::start(Options {
             backend: BackendKind::Headless(headless),
             runtime_dir: None,

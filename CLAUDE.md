@@ -76,7 +76,7 @@ sharing's streams).
 
 ```sh
 cargo build                                   # build everything
-cargo nextest run --workspace                 # tests
+cargo nextest run --workspace                 # tests, on the CPU
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo deny check                              # licences and advisories
@@ -84,6 +84,18 @@ cargo deny check                              # licences and advisories
 
 CI runs the same on every pull request to `v2`. Update this section as
 commands land.
+
+Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
+(docs/performance.md): the compositor draws with pixman, or with GLES on
+Mesa's software device for its shaders' tests; test shells draw with
+tiny-skia; the shell's motion tests are skipped. A test fails if it, or a
+process it started, holds a render node open without the variable. Run
+the GPU tests on purpose only: alone, one process at a time, on a machine
+or VM whose session does not depend on that GPU:
+
+```sh
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor --test glass -j1
+```
 
 The compositor (`crates/hocus-compositor`, binary `hocuspanda`): nested in
 a window when started from a graphical session, the session itself on a

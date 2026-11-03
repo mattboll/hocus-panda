@@ -1,6 +1,7 @@
-//! The bar's glass, headless on a GPU (docs/design/bar.md, 3.1): what
-//! shows through it is what is under it, in the same frame, while a window
-//! is dragged under the bar (issue #517). A clear surface in the bar's
+//! The bar's glass, headless on GLES (docs/design/bar.md, 3.1), on the GPU
+//! `HOCUS_TEST_GPU` names or else on Mesa's software device: what shows
+//! through it is what is under it, in the same frame, while a window is
+//! dragged under the bar (issue #517). A clear surface in the bar's
 //! namespace and place stands for the shell's, so that the screen there
 //! shows the glass alone.
 
@@ -8,8 +9,8 @@ mod common;
 
 use std::time::Duration;
 
-use common::{BTN_LEFT, KEY_LEFTMETA, Shows, WAIT, client, open, render_node, wait};
-use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use common::{BTN_LEFT, KEY_LEFTMETA, Shows, WAIT, client, open, wait};
+use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, model::Rect};
 
 /// One pixel of a screenshot (B, G, R, A in memory), as R, G, B.
 fn pixel(shot: &(i32, i32, Vec<u8>), x: i32, y: i32) -> [i32; 3] {
@@ -38,9 +39,6 @@ fn outside(rect: Rect, x: i32, y: i32) -> i32 {
 /// the screen, not where the glass's pane is. At scale 1 and 2.
 #[test]
 fn the_glass_shows_a_dragged_window_where_it_is() -> anyhow::Result<()> {
-    let Some(node) = render_node() else {
-        return Ok(());
-    };
     let mut config = Config::default();
     // The form the clear surface stands for, at both scales.
     config.panel.form = FormChoice::Full;
@@ -48,8 +46,7 @@ fn the_glass_shows_a_dragged_window_where_it_is() -> anyhow::Result<()> {
         let mut hp = Headless::start_with(
             HeadlessConfig {
                 outputs: vec![format!("2560x1600@{scale}").parse()?],
-                renderer: RendererChoice::Gles,
-                render_node: Some(node.clone()),
+                ..common::gles()
             },
             config.clone(),
         )?;
