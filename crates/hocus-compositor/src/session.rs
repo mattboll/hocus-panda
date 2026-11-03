@@ -2,7 +2,11 @@
 //! the user's service manager and D-Bus learn where its displays are, so
 //! that what they start (portals, notification daemons, applications
 //! activated by D-Bus) shows in it. The session's launcher
-//! (`packaging/hocuspanda-session`) takes them back when it ends.
+//! (`packaging/hocuspanda-session`) takes them back when it ends. A
+//! desktop portal a previous session left running is restarted then
+//! ([`portals`]).
+
+pub mod portals;
 
 use std::process::Output;
 
@@ -18,10 +22,14 @@ pub const VARIABLES: [&str; 6] = [
     "XCURSOR_SIZE",
 ];
 
+/// The session's `XDG_CURRENT_DESKTOP`, as the programs started have it.
+pub const DESKTOP: &str = "Hocuspanda";
+
 /// Tells the session bus's activation environment and systemd's user
 /// manager about the session, on a thread: both are calls to other
 /// processes. Each separately: the session bus may be one of the display
-/// manager's own (`dbus-run-session`) that systemd is not on.
+/// manager's own (`dbus-run-session`) that systemd is not on. Once systemd
+/// has them, the portals it runs for another session are restarted.
 pub fn announce(env: Env) {
     on_a_thread("announce the session".to_owned(), move || {
         let names: Vec<&str> = VARIABLES
@@ -38,7 +46,16 @@ pub fn announce(env: Env) {
             .args(["--user", "import-environment"])
             .args(&names)
             .output();
+        let given = matches!(&systemd, Ok(out) if out.status.success());
         report("systemd", systemd, &names);
+        if given {
+            let session = portals::Session {
+                desktop: DESKTOP.to_owned(),
+                wayland_display: env.wayland_display().to_string_lossy().into_owned(),
+                given_at: portals::now(),
+            };
+            portals::refresh(&env, &session);
+        }
     });
 }
 
