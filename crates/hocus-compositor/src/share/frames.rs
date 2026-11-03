@@ -129,7 +129,7 @@ impl Lends<pixman::Image<'static, 'static>> for PixmanRenderer {
             anyhow::ensure!(!data.is_null() && len > 0, "no pixels to lend");
             std::slice::from_raw_parts(data as *const u8, len)
         };
-        let lease = Lease::new(bytes);
+        let lease = to.lend(bytes);
         to.send(ToStreams::Frame {
             id,
             lease: lease.clone(),

@@ -30,10 +30,7 @@ use smithay::backend::{
     renderer::gles::{GlesRenderer, GlesTexture, ffi},
 };
 
-use super::{
-    lease::Lease,
-    stream::{FromStreams, StreamsSender, ToStreams},
-};
+use super::stream::{FromStreams, StreamsSender, ToStreams};
 
 /// Buffers a share reads into at most: one drawn, one being copied, one
 /// spare.
@@ -347,7 +344,7 @@ fn read_back(context: &EGLContext, jobs: &mpsc::Receiver<Job>) {
                     std::slice::from_raw_parts(mapped as *const u8, job.len)
                 }
             };
-            let lease = Lease::quiet(pixels);
+            let lease = job.to.lend_quiet(pixels);
             job.to.send(ToStreams::Frame {
                 id: job.id,
                 lease: lease.clone(),
