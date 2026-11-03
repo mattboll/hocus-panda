@@ -502,19 +502,35 @@ pub fn capture_of(id: u32) -> Option<u64> {
 pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::icons::Icon>) {
     let words = crate::capture::words();
     let icon = icon.or_else(|| crate::capture::icon(shot.id));
+    // A recording's (5.10): its length for its size, "Ouvrir" for
+    // "Annoter".
+    let (app, what, first, image) = match &shot.video {
+        Some(video) => (
+            words.screen_recording(),
+            crate::in_use::draw::elapsed(video.duration),
+            ("open", words.open()),
+            video.poster.display().to_string(),
+        ),
+        None => (
+            words.screenshot(),
+            format!("{} × {}", shot.width, shot.height),
+            ("annotate", words.annotate()),
+            shot.file.display().to_string(),
+        ),
+    };
     let note = note::Note {
         id: capture_id(shot.id),
-        app: words.screenshot().to_owned(),
+        app: app.to_owned(),
         entry: None,
         icon,
         summary: shot.name(),
         body: if shot.folder.is_empty() {
-            format!("{} × {}", shot.width, shot.height)
+            what
         } else {
-            format!("{} × {} · {}", shot.width, shot.height, shot.folder)
+            format!("{what} · {}", shot.folder)
         },
         actions: vec![
-            ("annotate".to_owned(), words.annotate().to_owned()),
+            (first.0.to_owned(), first.1.to_owned()),
             ("folder".to_owned(), words.open_folder().to_owned()),
             ("delete".to_owned(), words.delete().to_owned()),
         ],
@@ -527,7 +543,7 @@ pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::ico
         agent: false,
         icon_from: note::IconFrom {
             app_icon: String::new(),
-            image_path: Some(shot.file.display().to_string()),
+            image_path: Some(image),
         },
         at: wall_ms(),
     };

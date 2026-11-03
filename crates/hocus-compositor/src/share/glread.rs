@@ -262,7 +262,15 @@ impl Reader {
         let (sender, jobs) = mpsc::channel::<Job>();
         std::thread::Builder::new()
             .name("screen cast read-back".to_owned())
-            .spawn(move || read_back(&context, &jobs))?;
+            .spawn(move || {
+                read_back(&context, &jobs);
+                // The thread ends as the backend goes, its renderer and
+                // its EGL display with it: destroying the context here,
+                // while the display is terminated on the loop's thread,
+                // corrupted Mesa's heap (llvmpipe, 5.10's tests). The
+                // display's end frees it.
+                std::mem::forget(context);
+            })?;
         self.thread = Some(sender.clone());
         Ok(sender)
     }

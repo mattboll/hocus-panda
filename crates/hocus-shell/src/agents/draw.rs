@@ -151,11 +151,11 @@ type Margin = (i32, i32, i32, i32);
 /// under the sign of what is in use when it shows (5.11), else under the
 /// clock.
 pub fn full_top() -> f32 {
-    TOP + crate::in_use::room()
+    TOP + crate::in_use::room(Form::Full)
 }
 
 pub fn mini_top() -> f32 {
-    MINI_TOP + crate::in_use::room()
+    MINI_TOP + crate::in_use::room(Form::Mini)
 }
 
 /// Bar `bar`'s surface's top under the bar's, as last asked for.

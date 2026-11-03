@@ -115,8 +115,15 @@ impl std::fmt::Debug for RecordSender {
 
 impl RecordSender {
     pub fn send(&self, said: ToRecorder) {
-        if self.to.send(said).is_err() {
+        if let Err(mpsc::SendError(said)) = self.to.send(said) {
             tracing::debug!(id = self.id, "the recorder is gone");
+            // Its pixels back at once: their lender frees them.
+            if let ToRecorder::Frame { lease, .. } = said {
+                lease.give_back();
+                if !lease.is_quiet() {
+                    self.tell(FromRecorder::Returned { id: self.id });
+                }
+            }
         }
     }
 
@@ -152,7 +159,7 @@ pub fn start(job: Job, back: Sender<FromRecorder>) -> anyhow::Result<RecordSende
     std::thread::Builder::new()
         .name("screen recording".to_owned())
         .spawn(move || {
-            let said = match record(&job, &from_loop, &back) {
+            let said = match record(&job, from_loop, &back) {
                 Ok(saved) => FromRecorder::Finished { id, saved },
                 Err(err) => {
                     tracing::warn!("the recording failed: {err:#}");
@@ -279,7 +286,7 @@ fn wait(child: &mut Child, most: Duration) -> Option<std::process::ExitStatus> {
 /// The recording, from its start to its file.
 fn record(
     job: &Job,
-    from_loop: &mpsc::Receiver<ToRecorder>,
+    from_loop: mpsc::Receiver<ToRecorder>,
     back: &Sender<FromRecorder>,
 ) -> anyhow::Result<Saved> {
     let video = encoder(job)?;
@@ -348,13 +355,30 @@ fn record(
         first: None,
         written: 0,
     };
-    let went = frames.run(job.id, from_loop, back, &timeline);
+    let went = frames.run(job.id, &from_loop, back, &timeline);
     let length = timeline.stop(Instant::now());
+    // Frames lent since are given back, and those to come at once: their
+    // lenders need not wait for them while the file is ended.
+    while let Ok(said) = from_loop.try_recv() {
+        if let ToRecorder::Frame { lease, .. } = said {
+            lease.give_back();
+            if !lease.is_quiet() {
+                let _ = back.send(FromRecorder::Returned { id: job.id });
+            }
+        }
+    }
+    drop(from_loop);
     // The last frames, then the end of the input: ffmpeg ends the file.
     let ended = went.and_then(|()| frames.until(length));
     frames.stdin = None;
+    tracing::debug!(
+        id = job.id,
+        frames = frames.written,
+        "the recording's frames are all written"
+    );
     if let Some(sound) = sound {
         sound.finish();
+        tracing::debug!(id = job.id, "the recording's sound is all written");
     }
     let status = wait(&mut child, Duration::from_secs(120));
     drop(pipes);

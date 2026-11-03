@@ -355,9 +355,11 @@ fn mix(
     loop {
         let finishing = done.load(Ordering::Acquire);
         let now = Instant::now();
-        let owed = match (finishing, timeline.stopped()) {
-            (true, Some(length)) => frames_in(length) + late,
-            _ => frames_in(timeline.at(now)),
+        // Stopped, its last samples at once: ffmpeg holds the last frames
+        // until the sound reaches them (they are `LATE` in the file).
+        let owed = match timeline.stopped() {
+            Some(length) => frames_in(length) + late,
+            None => frames_in(timeline.at(now)),
         };
         if timeline.paused() {
             mixer.trim();

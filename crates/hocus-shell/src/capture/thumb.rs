@@ -10,6 +10,10 @@
 //! - Its time up, it goes, and the capture goes to the notifications'
 //!   history with its image and its actions.
 //!
+//! A recording's (5.10) is the same card: its first frame with a play
+//! sign and its length, "Enregistrée · MP4", **Ouvrir** (its default
+//! player) and ✕ (its file deleted); dragged, its file drops.
+//!
 //! A layer surface of its own ([`hocus_link::CAPTURE_THUMB_NAMESPACE`]), on the
 //! overlay layer, taking the pointer, never the keyboard. The compositor
 //! slides it in and draws its shadow; the shell draws its card, the
@@ -83,6 +87,18 @@ const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
 const CLOSE_COLOUR: Color = rgb(0xC9D0DC);
 const RUNNING: Color = Color::from_rgba8(108, 194, 135, 0.7);
 const PAUSED: Color = Color::from_rgba8(255, 255, 255, 0.35);
+/// A recording's play sign: a 40 px disc of `rgba(255,255,255,0.18)`, a
+/// white triangle of 16; its length in Martian Mono 10.5 px on
+/// `rgba(0,0,0,0.6)`, 1 px by 6 px in, radius 6, 6 px from the corner.
+const PLAY: f32 = 40.0 * Z;
+const PLAY_DISC: Color = Color::from_rgba8(255, 255, 255, 0.18);
+const PLAY_ICON: f32 = 16.0 * Z;
+const LENGTH: f32 = 10.5 * Z;
+const LENGTH_PAD: (f32, f32) = (6.0 * Z, 1.0 * Z);
+const LENGTH_RADIUS: f32 = 6.0 * Z;
+const LENGTH_IN: f32 = 6.0 * Z;
+const LENGTH_BACK: Color = Color::from_rgba8(0, 0, 0, 0.6);
+const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 
 /// What its card shows of the capture, made on the thread that read it:
 /// the image at the size it shows (the screen's pixels), and the
@@ -304,11 +320,17 @@ struct Layout {
 }
 
 impl Layout {
-    fn of(words: Words) -> Self {
+    /// The card in `words`, a recording's (`video`) or a capture's.
+    fn of(words: Words, video: bool) -> Self {
         let image = Rectangle::new(Point::new(PAD, PAD), Size::new(WIDTH - 2.0 * PAD, IMAGE));
         let top = PAD + IMAGE + ROW_GAP;
         let close = Rectangle::new(Point::new(WIDTH - PAD - ROW, top), Size::new(ROW, ROW));
-        let label = kit::measure(words.annotate(), BUTTON_TEXT, MANROPE_BOLD);
+        let said = if video {
+            words.open()
+        } else {
+            words.annotate()
+        };
+        let label = kit::measure(said, BUTTON_TEXT, MANROPE_BOLD);
         let width = (label + 2.0 * BUTTON_PAD).ceil();
         let annotate = Rectangle::new(
             Point::new(close.x - BUTTON_GAP - width, top),
@@ -403,7 +425,7 @@ impl<Message> canvas::Program<Message> for View {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        let layout = Layout::of(self.words);
+        let layout = Layout::of(self.words, shows_video(self.id));
         match cursor.position_in(bounds).map(|at| layout.spot(at)) {
             Some(Spot::Image | Spot::Annotate | Spot::Close) => mouse::Interaction::Pointer,
             _ => mouse::Interaction::default(),
@@ -411,11 +433,19 @@ impl<Message> canvas::Program<Message> for View {
     }
 }
 
+/// Whether thumbnail `id` is a recording's.
+fn shows_video(id: window::Id) -> bool {
+    with(|t| {
+        t.as_ref()
+            .is_some_and(|t| t.id == id && t.shot.video.is_some())
+    })
+}
+
 /// What a click on the thumbnail does.
 enum Act {
     Edit(Thumb),
     Delete(Thumb),
-    Drag(u64),
+    Drag(Shot),
 }
 
 impl View {
@@ -425,7 +455,7 @@ impl View {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        let layout = Layout::of(self.words);
+        let layout = Layout::of(self.words, shows_video(self.id));
         let at = cursor.position_in(bounds);
         let spot = at.map(|p| layout.spot(p));
         let now = Instant::now();
@@ -452,7 +482,7 @@ impl View {
                         && (p.x - from.x).hypot(p.y - from.y) >= DRAG
                     {
                         thumb.dragged = true;
-                        act = Some(Act::Drag(thumb.shot.id));
+                        act = Some(Act::Drag(thumb.shot.clone()));
                     }
                     Some(changed)
                 }
@@ -492,9 +522,30 @@ impl View {
             crate::popover::send(Vec::new());
         }
         match act {
-            Some(Act::Drag(capture)) => {
-                tracing::debug!(capture, "the capture's thumbnail is dragged");
-                super::tell(CaptureAsk::Drag(capture));
+            Some(Act::Drag(shot)) => match shot.recording() {
+                Some(recording) => {
+                    tracing::debug!(recording, "the recording's thumbnail is dragged");
+                    crate::popover::tell(hocus_link::ToCompositor::Record(
+                        hocus_link::RecordAsk::Drag(recording),
+                    ));
+                }
+                None => {
+                    tracing::debug!(capture = shot.id, "the capture's thumbnail is dragged");
+                    super::tell(CaptureAsk::Drag(shot.id));
+                }
+            },
+            // A recording's opens in its player; it goes to the history.
+            Some(Act::Edit(shown)) if shown.shot.video.is_some() => {
+                if let Some(gone) = take(shown.id) {
+                    tracing::debug!(
+                        recording = ?shown.shot.recording(),
+                        "the recording's thumbnail opens it"
+                    );
+                    crate::popover::send(vec![Effect::Remove(shown.id)]);
+                    super::open_file(&gone.shot.file);
+                    to_history(&gone);
+                }
+                return Some(canvas::Action::capture());
             }
             Some(Act::Edit(shown)) => {
                 if take(shown.id).is_some() {
@@ -541,7 +592,8 @@ impl View {
             ),
             Stroke::default().with_color(RIM).with_width(BORDER),
         );
-        let layout = Layout::of(self.words);
+        let video = thumb.shot.video.as_ref();
+        let layout = Layout::of(self.words, video.is_some());
         // The image, scaled to fit, in the middle of its place.
         let place = layout.image;
         f.fill(&kit::rounded(place, IMAGE_RADIUS), IMAGE_BACK);
@@ -564,9 +616,46 @@ impl View {
             ),
             Stroke::default().with_color(IMAGE_RIM).with_width(1.0),
         );
-        // "Copiée · enregistrée", "Annoter", ✕.
+        // A recording's play sign over its first frame, and its length.
+        if let Some(video) = video {
+            let centre = place.center();
+            f.fill(&Path::circle(centre, PLAY / 2.0), PLAY_DISC);
+            let k = PLAY_ICON / 24.0;
+            let o = Point::new(centre.x - PLAY_ICON / 2.0, centre.y - PLAY_ICON / 2.0);
+            let p = |x: f32, y: f32| Point::new(o.x + x * k, o.y + y * k);
+            f.fill(
+                &Path::new(|b| {
+                    b.move_to(p(8.0, 5.0));
+                    b.line_to(p(19.0, 12.0));
+                    b.line_to(p(8.0, 19.0));
+                    b.close();
+                }),
+                Color::WHITE,
+            );
+            let said = crate::in_use::draw::elapsed(video.duration);
+            let w = kit::measure(&said, LENGTH, MONO) + 2.0 * LENGTH_PAD.0;
+            let h = LENGTH * 1.3 + 2.0 * LENGTH_PAD.1;
+            let badge = Rectangle::new(
+                Point::new(
+                    place.x + place.width - LENGTH_IN - w,
+                    place.y + place.height - LENGTH_IN - h,
+                ),
+                Size::new(w, h),
+            );
+            f.fill(&kit::rounded(badge, LENGTH_RADIUS), LENGTH_BACK);
+            f.fill_text(kit::text_in(
+                MONO,
+                kit::text(said, badge.center(), LENGTH, TEXT, Alignment::Center),
+            ));
+        }
+        // "Copiée · enregistrée", "Annoter", ✕; a recording's "Enregistrée ·
+        // MP4" and "Ouvrir".
+        let (status, button) = match video {
+            Some(video) => (self.words.recorded(video.format), self.words.open()),
+            None => (self.words.kept().to_owned(), self.words.annotate()),
+        };
         f.fill_text(kit::text(
-            self.words.kept().to_owned(),
+            status,
             Point::new(PAD, layout.row_middle),
             STATUS,
             STATUS_COLOUR,
@@ -580,7 +669,7 @@ impl View {
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
             kit::text(
-                self.words.annotate().to_owned(),
+                button.to_owned(),
                 annotate.center(),
                 BUTTON_TEXT,
                 TEXT,
@@ -657,7 +746,7 @@ mod tests {
     fn its_card_is_the_mockups_zoomed_its_buttons_on_its_row() {
         assert_eq!(WIDTH, 330.0);
         assert_eq!(HEIGHT, 267.0);
-        let layout = Layout::of(Words::new(Lang::French));
+        let layout = Layout::of(Words::new(Lang::French), false);
         assert_eq!(
             layout.image,
             Rectangle::new(Point::new(12.0, 12.0), Size::new(306.0, 192.0))

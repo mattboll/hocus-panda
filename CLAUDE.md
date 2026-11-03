@@ -128,9 +128,9 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
 the real screen; nested and headless take `--output`; `panel-form`),
 `[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
-`toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, the volume and brightness keys, and the
+`toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, `record = "Super+Shift+R"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
-(`screens`, `output`, `form`) and `[appearance]` (`reduced-motion`,
+(`screens`, `output`, `form`), `[recording]` (`format`) and `[appearance]` (`reduced-motion`,
 `high-contrast`, `reduce-transparency`). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd
@@ -172,7 +172,14 @@ Screen captures (`Print`, docs/design/screenshots.md) are saved in
 `$XDG_PICTURES_DIR` (else `user-dirs.dirs`', else `~/Pictures`): next to a
 live session, give the nested compositor a fresh `HOME` (or
 `XDG_PICTURES_DIR`). Its tests save in folders of their own
-(`Config::pictures`). The capture's editor (5.9) asks the desktop
+(`Config::pictures`). Screen recordings (`Super+Shift+R`, or the capture's Vidéo; same doc,
+5.10) are encoded by `ffmpeg` (a program of its own, which must be
+installed) and saved in `$XDG_VIDEOS_DIR` (else `user-dirs.dirs`', else
+`~/Videos`), their sound from PipeWire's default socket: next to a live
+session, give the nested compositor a fresh `HOME` (or `XDG_VIDEOS_DIR`)
+and a PipeWire of its own. Its tests save in folders of their own
+(`Config::videos`), decode the files with ffmpeg and ffprobe, and skip
+without them. The capture's editor (5.9) asks the desktop
 portal's file chooser only on the bus given with `--session-bus` (or the
 session's own on a virtual terminal), else saves beside the capture.
 

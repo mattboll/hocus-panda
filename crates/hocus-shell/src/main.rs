@@ -629,6 +629,18 @@ impl Shell {
                 in_use::set_shares(shares);
                 Task::none()
             }
+            ToShell::Recording(shown) => {
+                in_use::set_recording(Some(shown));
+                Task::none()
+            }
+            ToShell::RecordingEnd => {
+                in_use::set_recording(None);
+                Task::none()
+            }
+            ToShell::Recorded(recorded) => {
+                capture::recorded(recorded);
+                Task::none()
+            }
         }
     }
 
@@ -1082,6 +1094,7 @@ impl Shell {
             bar_width: bar.width(at),
             words: in_use::Words::new(clock::time::Lang::of_messages()),
             backdrop,
+            motion: self.look.motion,
         };
         Some(
             canvas(program)
@@ -1762,6 +1775,19 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Shares(shares)) => {
                             in_use::set_shares(shares);
+                            continue;
+                        }
+                        // Recording (5.10): the bar's item, the thumbnail.
+                        Ok(ToShell::Recording(shown)) => {
+                            in_use::set_recording(Some(shown));
+                            continue;
+                        }
+                        Ok(ToShell::RecordingEnd) => {
+                            in_use::set_recording(None);
+                            continue;
+                        }
+                        Ok(ToShell::Recorded(recorded)) => {
+                            capture::recorded(recorded);
                             continue;
                         }
                         // A tray click's token: to the tray's thread.
