@@ -144,7 +144,9 @@ Screen captures (`Print`, docs/design/screenshots.md) are saved in
 `$XDG_PICTURES_DIR` (else `user-dirs.dirs`', else `~/Pictures`): next to a
 live session, give the nested compositor a fresh `HOME` (or
 `XDG_PICTURES_DIR`). Its tests save in folders of their own
-(`Config::pictures`).
+(`Config::pictures`). The capture's editor (5.9) asks the desktop
+portal's file chooser only on the bus given with `--session-bus` (or the
+session's own on a virtual terminal), else saves beside the capture.
 
 Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
 docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`

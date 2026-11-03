@@ -1,11 +1,12 @@
-# Screenshots — specification (5.8)
+# Screenshots — specification (5.8, 5.9)
 
 Status: approved 2026-11-02 (issue #398), variant A of the 5.8 mockup:
 choose, then capture, with working handles. Built since 2026-11-03: see
 [as built](#as-built). Sizes are logical pixels, the mockup's; like the
 launcher's, they are drawn × 1.5 (`hocus_link::LAUNCHER_ZOOM`), as the
 mockup showed them on the maintainer's 2560 × 1600 screen at scale 1.
-What comes after the capture (a preview, annotating) is 5.9.
+What comes after the capture, its thumbnail and its annotator, is 5.9
+([below](#59-the-thumbnail-and-the-annotator)).
 
 ## 1. Opening
 
@@ -57,6 +58,8 @@ the image.
 - It is taken at the screens' real resolution.
 - The toast is a placeholder until 5.9: "… copiée · enregistrée dans
   Images/Captures d'écran" / "… copied · saved to Pictures/Screenshots".
+  *Since 5.9 the thumbnail replaces it; it is left for a capture that
+  could not be saved.*
 
 ## 6. Shortcuts
 
@@ -135,7 +138,8 @@ at once. `Alt+Print`: the focused window, at once. All three are in
   number coming in over 300 ms from 1.25 times its size and 0.3 of its
   opacity (the mockup's `tick`; at once with reduced motion). Input goes
   to the windows meanwhile, so that a menu can be opened for the image.
-- **The toast**: "Zone de 600 × 380 copiée · enregistrée dans
+- **The toast** (since 5.9, only for a capture not saved: the thumbnail
+  shows instead): "Zone de 600 × 380 copiée · enregistrée dans
   Images/Captures d'écran", "Fenêtre copiée · …", "Écran copié · enregistré
   dans …", "Tous les écrans copiés · enregistrés dans …"; "Area of 600 ×
   380 copied · saved to Pictures/Screenshots", "Window copied · …". The
@@ -220,3 +224,200 @@ Decided by the maintainer after 5.8 (issue #528).
   (`tests/clipboard.rs`). Unit tests for the line, the source's words and
   search, and an item replaced keeping its pin. On the Intel GPU, the
   screenshot of the pull request.
+
+## 5.9: the thumbnail and the annotator
+
+### The approved spec
+
+Approved by the maintainer on 2026-11-03 (issue #399), variant **A** of
+the 5.9 mockup: a thumbnail at the bottom, beside the bar. It follows
+5.8's capture and replaces its placeholder toast.
+
+**The thumbnail**
+
+- **Where**: bottom right of the captured screen, against the bar (8 px
+  from the bar and from the bottom).
+- **Look** (mockup units × 1.5, the launcher's zoom): 220 wide, padding
+  8, radius 14, the popovers' glass. It shows the image scaled to fit,
+  128 tall, radius 10. Under it: "Copiée · enregistrée" / "Copied ·
+  saved", an "Annoter" / "Annotate" button (green tint) and ✕.
+- **Motion**: it slides up 14 px and fades in over 240 ms.
+- **Time**: it stays 6 s, with a 2 px countdown line at its bottom;
+  hovering pauses the countdown.
+- **Actions**: a click on the image or on "Annoter" opens the editor; ✕
+  deletes the capture: the file goes, and the clipboard empties if it
+  still holds this image; dragging the thumbnail into an application
+  drops the PNG file there (a `text/uri-list` drag, plus `image/png`).
+- **When its time is up**, it goes, and the capture goes to the
+  notifications' history (5.4) as an item with its image and actions:
+  "Annoter" / "Annotate", "Ouvrir le dossier" / "Open folder", "Supprimer"
+  / "Delete".
+
+**The editor**
+
+- **Where**: a panel centred on the screen over a darkened, blurred
+  desktop, holding the image fitted at most 1.5× the launcher's zoom of
+  the mockup (672 × 420 in mockup units).
+- **Tools**: **Flèche** / **Arrow** (drag from tail to head, 4 px line
+  with a 16 px head); **Cadre** / **Box** (drag; 3 px border, radius 4);
+  **Texte** / **Text** (click, type, `Enter`; Manrope bold 18 px with a
+  dark outline); **Flou** / **Blur** (drag a rectangle that blurs what is
+  under it, strongly enough that text cannot be read; the saved image is
+  blurred too, not just covered). The selected tool has the green tint.
+- **Colours**: red `#F2545B` (the default), amber, green, blue, white.
+- **Undo**: `Ctrl+Z` undoes and `Ctrl+Shift+Z` redoes, with the undo
+  button in the toolbar. `Escape` while typing cancels the text.
+- **Buttons**: **"Copier et fermer"** / **"Copy and close"** writes the
+  annotated image over the saved file and the clipboard, then closes;
+  **"Enregistrer sous…"** / **"Save as…"**: the desktop portal's file
+  chooser; **"Supprimer"** / **"Delete"**: as ✕. Closing with no
+  annotation changes nothing.
+- **Sizes**: the drawing is done at the image's real resolution; marks
+  scale with it.
+- **Original**: the original is kept until the editor closes, so undoing
+  back to nothing restores it.
+
+All encoding and writing happen off the loop.
+
+### As built (5.9, 2026-11-03)
+
+- **Who does what.** The shell draws the thumbnail and the editor, each a
+  layer surface of its own on the overlay layer
+  (`hocus-capture-thumb`, taking the pointer, never the keyboard;
+  `hocus-capture-editor`, all of the screen, holding the keyboard). The
+  compositor moves them from their first frame (the thumbnail up 14 px
+  and in over 240 ms, `cubic-bezier(.2, .8, .2, 1)`; the editor in over
+  180 ms; at once with reduced motion), draws the thumbnail's shadow (the
+  mockup's `0 16px 44px rgba(0,0,0,0.5)`, zoomed; on the CPU it cuts its
+  corners) and blurs the whole screen behind the editor (the mockup's
+  `blur(10px)`, zoomed); neither is ever in a capture. What is the
+  compositor's stays its own: the clipboard, the file's deletion, the
+  drag.
+- **The lines.** `captured ID OUTPUT MODE WIDTH HEIGHT`, then the folder
+  and the file after tabs (`-` for none): the id is the capture's number
+  (5.8b's, `Capture::numbered`). The shell asks `capture forget ID` (✕,
+  "Supprimer": the compositor deletes the file on a thread and empties
+  the clipboard if the selection is still the bytes it offered for that
+  capture, Wayland's and X11's), `capture annotated ID` (the shell wrote
+  the annotated image over the file: a thread reads it back, the
+  clipboard takes it, and the clipboard's history replaces the capture's
+  item with it, 5.8b's `capture_line` and `capture_in_history`) and
+  `capture drag ID`.
+- **The thumbnail**: its card 330 × 267 (220 × 178 zoomed), its right 8 px
+  from the bar (from the screen's edge on a screen without one), its
+  bottom 8 px from the screen's. The image is read and made small on a
+  thread of the shell's (contain-fitted in 306 × 192, never larger than a
+  pixel a pixel), its corners cut at 15 px; "Copiée · enregistrée" 16.5 px
+  `#A9B2C2`; "Annoter" 11.5 × 1.5 px bold on `rgba(108,194,135,0.22)`,
+  radius 10.5; ✕ 39 px square, lit `rgba(255,255,255,0.10)` under the
+  pointer, as "Annoter" is. The countdown: 3 px (2 zoomed),
+  `rgba(108,194,135,0.7)`, 15 px from the sides, drawn again a pixel at a
+  time and 30 times a second at most; paused, `rgba(255,255,255,0.35)`.
+  The pointer anywhere on the card holds it; it goes on from where it
+  was when the pointer leaves. A new capture while one shows sends that
+  one to the history.
+- **The drag**: a press on the image moved 6 px tells the compositor,
+  which starts a drag of its own from the pointer's press (smithay's
+  server-side drag): `text/uri-list` (`file://` and the path, its bytes
+  escaped) and `image/png` (the file's bytes), written to the application
+  on a thread. Nothing is drawn under the pointer while it drags (no drag
+  icon).
+- **To the history**: as its time is up, or as its editor closes but by
+  "Supprimer", the capture is a notification of the shell's own in the
+  history (an id past the server's), seen: "Capture d'écran" /
+  "Screenshot", its file's name for title, "1300 × 800 ·
+  Images/Captures d'écran" for body, its image cut square as its icon
+  (28 px, its corners rounded as the letter tiles'), and its three
+  actions; a click on it opens the editor too (no window is raised).
+  "Annoter" and "Ouvrir le dossier" leave it there (`resident`);
+  "Ouvrir le dossier" runs `xdg-open` on the folder (through the
+  compositor's launch); "Supprimer" deletes it and takes it out. It is
+  kept on disk with the history (its image found again from its file);
+  read back after a restart, it has no actions, as any notification read
+  back. Without a bus of its own (nested, headless), the history is not
+  kept on disk, as in 5.4.
+- **The editor's panel**: the mockup's sizes × 1.5 (less on a screen too
+  small for it, 24 px from its edges at least): 1044 × 795, padding 18,
+  radius 24, `rgba(22,27,42,0.97) → rgba(14,17,28,0.98)`, a 1 px rim, its
+  shadow (`0 22px 60px rgba(0,0,0,0.5)`, zoomed) on a GPU; the screen
+  darkened `rgba(6,8,14,0.6)` over the compositor's blur. The toolbar:
+  the four tools (icon 25.5 px, label 18 px 600), a separator, the five
+  colours (33 px, a 3 px ring `#EEF1F6` on the chosen one), undo on the
+  right. The image's place 1008 × 630, radius 15, the image contain-fitted
+  in it, never larger than a pixel a pixel. Under it the file's name and
+  the image's size (17.25 px `#7C8698`), then "Supprimer" (`#F7A77A`),
+  "Enregistrer sous…" and "Copier et fermer" (green).
+- **The marks**: kept in the image's own pixels, each mark's sizes the
+  mockup's × the editor's zoom × the image's pixels per logical pixel of
+  its place, so that what shows is what is saved: an arrow 6 px wide with
+  a 24 px head (the line running three quarters into it), a faint dark
+  halo; a box 4.5 px, its outer corners 6; a text 27 px Manrope bold, its
+  outline 2.25 px `rgba(0,0,0,0.9)`, its line's left 10.5 px right of the
+  click; a blur three box blurs of 10.5 px (about a Gaussian of that
+  deviation, reading around the region), with the mockup's faint
+  `rgba(120,130,150,0.12)` tint. A drag under 12 px draws nothing. The
+  marks are drawn in order: a blur blurs the marks before it. The image
+  shown is drawn with its marks by the same code as the saved one (no 2D
+  library: the shapes by their distance to each pixel, the text by
+  fontdue), at the screen's pixels, again as marks come and go; the mark
+  being dragged and the text being typed (in its dashed field, 330 × 45)
+  are drawn over it as shapes, a blur being dragged from the image
+  blurred once as the editor opens.
+- **Keys**: while typing, `Enter` keeps the text, `Escape` drops it,
+  `Backspace` takes a character back; a click elsewhere on the image, a
+  tool or a button keeps it. Otherwise `Ctrl+Z`, `Ctrl+Shift+Z`, and
+  `Escape` closes the editor without changing anything (the capture to
+  the history).
+- **"Copier et fermer"** with marks: a thread draws them on the original
+  at its resolution, encodes the PNG and writes it over the file (a new
+  file renamed over it), then tells the compositor (`capture annotated`).
+  With no marks (none drawn, or all undone): nothing is written, the
+  clipboard is left as it is.
+- **"Enregistrer sous…"**: on its own thread, the portal
+  (`org.freedesktop.portal.FileChooser.SaveFile`) on the session bus the
+  compositor names (the notifications' bus: `--session-bus`, or the
+  session's own on a virtual terminal), if `org.freedesktop.portal.Desktop`
+  has an owner there or can be started; the bus and the call have 5 s,
+  then the user as long as they like. The proposed name is "Capture du …
+  (annotée).png" / "Screenshot from … (annotated).png" in the capture's
+  folder. While the chooser shows, the editor steps aside (its surface
+  goes, its marks kept) and comes back after. Without a bus, a portal, or
+  a portal choosing files, the copy is saved beside the capture under
+  that name (" (2)"… when taken). Either way, the file's line under the
+  image says "Enregistrée : NAME" / "Saved: NAME"; the capture's own file
+  and the clipboard are left as they are.
+- **Choices made here** (to confirm on the machine): `Escape` closes the
+  editor and keeps nothing of its marks; a closed editor (but by
+  "Supprimer") sends the capture to the history, as the thumbnail's time
+  up does, its item seen; "Enregistrer sous…" leaves the editor open; the
+  thumbnail's motion out is none (it goes at once); the thumbnail and the
+  history item for a capture that was not saved: none (5.8's toast);
+  the 2 px of the countdown and the gaps are zoomed as the card is, but
+  the 8 px from the bar and the bottom are not (the bubbles' 8 px); the
+  history's icon is the image's middle, cut square.
+- **Fixed on the way**: pressing to draw a new area and holding without
+  moving drew a border of a negative size, which panicked the
+  compositor's renderer (5.8); its sides are now at least nothing.
+- **Measured headless** (`crates/hocus-compositor/tests/annotate.rs`), the
+  real shell on the CPU and a D-Bus daemon of the test's own, an area
+  over a window of 3 px black and white squares: the thumbnail 330 ×
+  267, 8 px from the bar and the bottom, the file in `Captures d'écran`;
+  the pointer on it holds it past 6 s, away it goes after what was left;
+  its time up, the history lists it ("Capture d'écran «…» maintenant [3
+  actions]") and its "Annoter" opens the editor; ✕ deletes the file and
+  empties the clipboard; an arrow (red), a box (green), a text and a blur
+  where they were drawn in the written file, the rest as it was; a blur's
+  variance under 2 % of what it was, grey, not covered; `Ctrl+Z`,
+  `Ctrl+Shift+Z`, the undo button and `Escape` on a text; "Copier et
+  fermer" writing the file and the clipboard the same bytes; undone back
+  to nothing, the file and the clipboard untouched. Unit tests for the
+  marks' pixels (an arrow's line and head, a box's frame, a text's colour
+  and outline, a blur's variance, a blur over the marks before it), the
+  thumbnail's and the editor's layouts and fit, the countdown, the
+  marks' sizes in the image's pixels, undo and redo, the names a copy
+  takes, the portal's addresses and a bus without one, the drag's
+  address, the lines. On the Intel GPU, the screenshots of the pull
+  request.
+- **Not built**: a drag icon; the keyboard on the thumbnail; a portal's
+  file chooser tried by hand (no portal answers in the tests: the copy is
+  saved beside, as without one).

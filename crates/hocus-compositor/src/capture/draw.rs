@@ -259,13 +259,15 @@ fn pixels(rect: Rectangle<f64, Logical>, scale: f64) -> Rectangle<i32, Physical>
 /// The four sides of a border inside `edge` (pixels), as wide as
 /// [`BORDER_WIDTH`] at `scale`, in whole pixels.
 fn border(edge: Rectangle<i32, Physical>, scale: f64) -> [Rectangle<i32, Physical>; 4] {
+    // Each side's length is at least 0, on an area too small for two
+    // sides.
     let w = ((BORDER_WIDTH * scale).round() as i32).clamp(1, edge.size.w.min(edge.size.h).max(1));
     let (x, y, ew, eh) = (edge.loc.x, edge.loc.y, edge.size.w, edge.size.h);
     [
         Rectangle::new((x, y).into(), (ew, w).into()),
         Rectangle::new((x, y + eh - w).into(), (ew, w).into()),
-        Rectangle::new((x, y + w).into(), (w, eh - 2 * w).into()),
-        Rectangle::new((x + ew - w, y + w).into(), (w, eh - 2 * w).into()),
+        Rectangle::new((x, y + w).into(), (w, (eh - 2 * w).max(0)).into()),
+        Rectangle::new((x + ew - w, y + w).into(), (w, (eh - 2 * w).max(0)).into()),
     ]
 }
 
@@ -397,8 +399,12 @@ impl State {
                             }
                         }
                         let edge = pixels(r, scale);
+                        // An area just begun has no size: its sides none
+                        // either (a negative one would not draw).
                         for (id, part) in drawn.border.iter().zip(border(edge, scale)) {
-                            out.push(OutputElements::Solid(solid(id, part, BORDER, 0)));
+                            if part.size.w > 0 && part.size.h > 0 {
+                                out.push(OutputElements::Solid(solid(id, part, BORDER, 0)));
+                            }
                         }
                     } else {
                         out.extend(
@@ -659,5 +665,22 @@ impl State {
             glass.alpha,
             CAPTURE_TOOLBAR_RADIUS,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_area_just_begun_has_no_sides_of_a_negative_size() {
+        let empty = Rectangle::<i32, Physical>::new((400, 200).into(), (0, 0).into());
+        for side in border(empty, 1.0) {
+            assert!(side.size.w >= 0 && side.size.h >= 0, "{side:?}");
+        }
+        let area = Rectangle::<i32, Physical>::new((0, 0).into(), (100, 50).into());
+        let sides = border(area, 1.0);
+        assert_eq!(sides[0].size, (100, 2).into());
+        assert_eq!(sides[2].size, (2, 46).into());
     }
 }

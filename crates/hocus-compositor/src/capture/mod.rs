@@ -27,7 +27,10 @@
 //!   the focused window at once.
 //! - The area is kept in the state directory, written off the loop as the
 //!   capture closes.
+//! - Then (5.9) the shell shows the capture's thumbnail and its editor,
+//!   and asks for what is the compositor's ([`after`]).
 
+mod after;
 mod draw;
 pub mod geometry;
 mod save;
@@ -162,6 +165,20 @@ struct Finished {
     saved: Result<save::Saved, String>,
     /// Its line for the clipboard's history (5.8b).
     history: Option<String>,
+    /// Its number ([`Capture::numbered`]).
+    number: u64,
+}
+
+/// What the captures' threads send back to the loop.
+#[derive(Debug)]
+enum Back {
+    Finished(Finished),
+    /// Capture `id`'s file, annotated, read back (5.9).
+    Annotated {
+        id: u64,
+        png: Result<Vec<u8>, String>,
+        history: Option<String>,
+    },
 }
 
 /// The capture's state, owned by the loop.
@@ -185,10 +202,14 @@ pub struct Capture {
     toolbar: Option<(LayerSurface, Duration)>,
     /// The buttons pressed while it was open: their releases are its own.
     held: HashSet<u32>,
-    done: Option<Sender<Finished>>,
+    done: Option<Sender<Back>>,
     /// Captures drawn: each one's number, which the clipboard's history
-    /// knows its item by (5.8b; 5.9 tells it the annotated image by it).
+    /// knows its item by (5.8b), and the shell its thumbnail and its
+    /// editor (5.9).
     numbered: u64,
+    /// What is kept of the captures taken, and their thumbnail's and
+    /// editor's surfaces (5.9).
+    after: after::After,
     /// Captures saved, and the last file written: for tests.
     taken: u64,
     last_file: Option<PathBuf>,
@@ -393,8 +414,15 @@ impl State {
         self.tell_shell(ToShell::Capture(bar));
     }
 
-    /// The shell's toolbar was clicked.
+    /// The shell's toolbar was clicked; or (5.9) a capture's thumbnail, its
+    /// editor or its history asks for what is the compositor's.
     pub fn capture_asked(&mut self, ask: CaptureAsk) {
+        match ask {
+            CaptureAsk::Forget(id) => return self.capture_forget(id),
+            CaptureAsk::Annotated(id) => return self.capture_annotated(id),
+            CaptureAsk::Drag(id) => return self.capture_drag(id),
+            _ => {}
+        }
         if !self.capture.choosing() {
             return;
         }
@@ -422,6 +450,7 @@ impl State {
                 self.capture_shoot();
                 return;
             }
+            CaptureAsk::Forget(_) | CaptureAsk::Annotated(_) | CaptureAsk::Drag(_) => return,
         }
         tracing::debug!(
             mode = self.capture.mode.name(),
@@ -932,25 +961,30 @@ impl State {
                 .as_ref()
                 .ok()
                 .and_then(|saved| crate::clipboard::capture_line(number, &saved.png));
-            let _ = done.send(Finished {
+            let _ = done.send(Back::Finished(Finished {
                 shot,
                 saved,
                 history,
-            });
+                number,
+            }));
         });
     }
 
     /// Where the threads' captures come back, made once.
-    fn capture_done(&mut self) -> Option<Sender<Finished>> {
+    fn capture_done(&mut self) -> Option<Sender<Back>> {
         if let Some(done) = &self.capture.done {
             return Some(done.clone());
         }
-        let (sender, receiver) = channel::channel::<Finished>();
-        let inserted = self.loop_handle.insert_source(receiver, |event, _, app| {
-            if let Event::Msg(finished) = event {
-                app.state.capture_finished(finished);
-            }
-        });
+        let (sender, receiver) = channel::channel::<Back>();
+        let inserted = self
+            .loop_handle
+            .insert_source(receiver, |event, _, app| match event {
+                Event::Msg(Back::Finished(finished)) => app.state.capture_finished(finished),
+                Event::Msg(Back::Annotated { id, png, history }) => {
+                    app.state.capture_reread(id, png, history);
+                }
+                Event::Closed => {}
+            });
         match inserted {
             Ok(_) => {
                 self.capture.done = Some(sender.clone());
@@ -963,12 +997,14 @@ impl State {
         }
     }
 
-    /// A capture made: the clipboard offers it, and the toast says so.
+    /// A capture made: the clipboard offers it, and the shell shows its
+    /// thumbnail (its toast when it was not saved).
     fn capture_finished(&mut self, finished: Finished) {
         let Finished {
             shot,
             saved,
             history,
+            number,
         } = finished;
         let saved = match saved {
             Ok(saved) => saved,
@@ -984,17 +1020,27 @@ impl State {
             "captured"
         );
         self.capture.taken += 1;
+        let id = number;
         self.capture.last_file.clone_from(&saved.file);
-        self.offer_clipboard(ClipKind::Png.types(), saved.png);
+        let offered = self.offer_clipboard(ClipKind::Png.types(), saved.png);
+        self.capture.after.keep(id, saved.file.clone(), &offered);
         if let Some(line) = history {
             self.capture_in_history(line);
         }
+        let file = saved
+            .file
+            .as_deref()
+            .and_then(Path::to_str)
+            .map(str::to_owned)
+            .unwrap_or_default();
         self.tell_shell(ToShell::Captured(Captured {
+            id,
             output: shot.toast,
             mode: shot.mode,
             width: saved.width,
             height: saved.height,
             folder: saved.folder,
+            file,
         }));
     }
 
@@ -1029,6 +1075,7 @@ impl State {
         if let Some((_, opened)) = &self.capture.toolbar {
             moving |= now < *opened + hocus_link::CAPTURE_TOOLBAR_IN;
         }
+        moving |= self.capture_after_moving(now);
         moving
     }
 

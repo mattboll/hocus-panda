@@ -3,18 +3,28 @@
 //! the area and its handles, the countdown, the flash); the shell draws
 //! the toolbar at the bottom of the screen under the pointer, as the
 //! compositor says what it shows (`capture`), and tells it what is
-//! clicked (`capture mode|delay|pointer|shoot`). Then the toast, the
-//! launcher's, says what was taken (`captured`), a placeholder until the
-//! capture's own preview (5.9).
+//! clicked (`capture mode|delay|pointer|shoot`).
+//!
+//! Once taken (`captured`, 5.9), its thumbnail shows at the bottom right
+//! of its screen for 6 s ([`thumb`]), then it goes to the notifications'
+//! history; a click opens its editor ([`editor`]), which draws arrows,
+//! boxes, texts and blurs on it ([`marks`]) and writes it back, or saves
+//! it elsewhere ([`portal`]). A capture that was not saved has the
+//! launcher's toast instead, as in 5.8.
 //!
 //! As for the launcher, nothing goes through iced's messages: the
-//! toolbar's state is here, the pointer changes it and draws its surface
-//! alone.
+//! toolbar's, the thumbnail's and the editor's states are here, the
+//! pointer and the keys change them and draw their surfaces alone.
 
 pub mod draw;
+pub mod editor;
+pub mod marks;
+pub mod portal;
+pub mod thumb;
 
 use std::{
-    sync::{Mutex, PoisonError},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, PoisonError},
     time::Instant,
 };
 
@@ -61,6 +71,75 @@ impl Words {
         self.pick("Capturer", "Capture")
     }
 
+    /// Under the thumbnail (5.9).
+    pub fn kept(self) -> &'static str {
+        self.pick("Copiée · enregistrée", "Copied · saved")
+    }
+
+    pub fn annotate(self) -> &'static str {
+        self.pick("Annoter", "Annotate")
+    }
+
+    pub fn open_folder(self) -> &'static str {
+        self.pick("Ouvrir le dossier", "Open folder")
+    }
+
+    pub fn delete(self) -> &'static str {
+        self.pick("Supprimer", "Delete")
+    }
+
+    /// The editor's tools.
+    pub fn tool(self, tool: editor::Tool) -> &'static str {
+        match tool {
+            editor::Tool::Arrow => self.pick("Flèche", "Arrow"),
+            editor::Tool::Box => self.pick("Cadre", "Box"),
+            editor::Tool::Text => self.pick("Texte", "Text"),
+            editor::Tool::Blur => self.pick("Flou", "Blur"),
+        }
+    }
+
+    /// What the text's field shows while empty.
+    pub fn text_hint(self) -> &'static str {
+        self.pick("Texte", "Text")
+    }
+
+    pub fn save_as(self) -> &'static str {
+        self.pick("Enregistrer sous…", "Save as…")
+    }
+
+    pub fn copy_and_close(self) -> &'static str {
+        self.pick("Copier et fermer", "Copy and close")
+    }
+
+    /// The file chooser's title.
+    pub fn save_title(self) -> &'static str {
+        self.pick("Enregistrer la capture", "Save the capture")
+    }
+
+    /// Where "Save as…" wrote it, under the image.
+    pub fn saved_as(self, name: &str) -> String {
+        if self.fr {
+            format!("Enregistrée : {name}")
+        } else {
+            format!("Saved: {name}")
+        }
+    }
+
+    /// The name a copy saved without a file chooser takes, beside the
+    /// capture: "Capture du … (annotée).png".
+    pub fn annotated_name(self, stem: &str) -> String {
+        if self.fr {
+            format!("{stem} (annotée).png")
+        } else {
+            format!("{stem} (annotated).png")
+        }
+    }
+
+    /// The capture in the notifications' history: its application's name.
+    pub fn screenshot(self) -> &'static str {
+        self.pick("Capture d'écran", "Screenshot")
+    }
+
     /// The toast once taken: what, copied, and where it was saved.
     pub fn captured(self, captured: &Captured) -> String {
         let saved = !captured.folder.is_empty();
@@ -98,8 +177,156 @@ impl Words {
     }
 }
 
-fn words() -> Words {
+pub fn words() -> Words {
     Words::new(Lang::of_messages())
+}
+
+/// A capture taken and saved, as the compositor said it (5.9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shot {
+    /// The compositor's number for it.
+    pub id: u64,
+    /// The screen its thumbnail shows on, and its editor.
+    pub output: String,
+    pub file: PathBuf,
+    /// The folder as the user reads it.
+    pub folder: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Shot {
+    pub fn name(&self) -> String {
+        self.file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
+    /// The folder it is in, on disk.
+    pub fn dir(&self) -> Option<&Path> {
+        self.file.parent()
+    }
+}
+
+/// The captures the shell was told of, the newest last.
+static SHOTS: Mutex<Vec<Shot>> = Mutex::new(Vec::new());
+/// The most kept: what the history can still act on.
+const SHOTS_KEPT: usize = 64;
+/// The newest capture's image, read for its thumbnail: its editor opens
+/// on it at once.
+static DECODED: Mutex<Option<(u64, Arc<marks::Image>)>> = Mutex::new(None);
+
+/// The captures' icons in the history, made with their thumbnails.
+static ICONS: Mutex<Vec<(u64, crate::levels::icons::Icon)>> = Mutex::new(Vec::new());
+
+/// Capture `id`'s icon in the history, if its thumbnail made one.
+pub fn icon(id: u64) -> Option<crate::levels::icons::Icon> {
+    ICONS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|(_, icon)| icon.clone())
+}
+
+fn keep_icon(id: u64, icon: crate::levels::icons::Icon) {
+    let mut icons = ICONS.lock().unwrap_or_else(PoisonError::into_inner);
+    icons.retain(|(i, _)| *i != id);
+    icons.push((id, icon));
+    let extra = icons.len().saturating_sub(SHOTS_KEPT);
+    icons.drain(..extra);
+}
+
+/// An action of capture `id`'s in the history: annotate it (a click on
+/// it too), open its folder, delete it.
+pub fn from_history(id: u64, action: &str) {
+    let Some(shot) = shot(id) else {
+        tracing::debug!(id, "a capture the shell knows no more");
+        return;
+    };
+    tracing::debug!(id, action, "a capture's action in the history");
+    match action {
+        "default" | "annotate" => editor::open(shot),
+        "folder" => {
+            let Some(dir) = shot.dir().and_then(Path::to_str) else {
+                return;
+            };
+            let launch = hocus_link::Launch {
+                id: "xdg-open".to_owned(),
+                terminal: false,
+                dir: String::new(),
+                argv: vec!["xdg-open".to_owned(), dir.to_owned()],
+            };
+            if launch.fits() {
+                crate::popover::tell(hocus_link::ToCompositor::Launch(launch));
+            }
+        }
+        "delete" => delete(id),
+        _ => {}
+    }
+}
+
+/// Capture `id`, if the shell was told of it.
+pub fn shot(id: u64) -> Option<Shot> {
+    SHOTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|s| s.id == id)
+        .cloned()
+}
+
+fn keep_shot(shot: Shot) {
+    let mut shots = SHOTS.lock().unwrap_or_else(PoisonError::into_inner);
+    shots.retain(|s| s.id != shot.id);
+    shots.push(shot);
+    let extra = shots.len().saturating_sub(SHOTS_KEPT);
+    shots.drain(..extra);
+}
+
+/// Capture `id` is no more (deleted).
+fn forget_shot(id: u64) {
+    SHOTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|s| s.id != id);
+    let mut decoded = DECODED.lock().unwrap_or_else(PoisonError::into_inner);
+    if decoded.as_ref().is_some_and(|(d, _)| *d == id) {
+        *decoded = None;
+    }
+}
+
+/// Capture `id`'s image, if it was read already.
+fn decoded(id: u64) -> Option<Arc<marks::Image>> {
+    DECODED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .filter(|(d, _)| *d == id)
+        .map(|(_, image)| image.clone())
+}
+
+/// Capture `file`'s image, read and decoded (on a thread of the caller's).
+fn read_image(file: &Path) -> Result<marks::Image, String> {
+    let bytes = std::fs::read(file).map_err(|err| format!("{}: {err}", file.display()))?;
+    image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+        .map(|i| i.to_rgba8())
+        .map_err(|err| format!("{}: {err}", file.display()))
+}
+
+/// A line to the compositor about a capture.
+fn tell(ask: CaptureAsk) {
+    crate::popover::tell(hocus_link::ToCompositor::Capture(ask));
+}
+
+/// Capture `id` deleted (✕, "Supprimer"): the compositor deletes its file
+/// and lets the clipboard go if it still holds it; out of the history too.
+pub fn delete(id: u64) {
+    tracing::info!(id, "the capture is deleted");
+    tell(CaptureAsk::Forget(id));
+    forget_shot(id);
+    crate::notifications::forget_capture(id);
 }
 
 /// A button of the toolbar.
@@ -191,11 +418,48 @@ pub fn end() {
     }
 }
 
-/// `captured`: the launcher's toast says what was taken, on its screen.
+/// `captured`: its thumbnail once its image is read (on a thread); the
+/// launcher's toast when it was not saved, or cannot be read.
 pub fn captured(captured: Captured) {
-    let said = words().captured(&captured);
+    if captured.file.is_empty() {
+        return toast(&captured);
+    }
+    let shot = Shot {
+        id: captured.id,
+        output: captured.output.clone(),
+        file: PathBuf::from(&captured.file),
+        folder: captured.folder.clone(),
+        width: captured.width,
+        height: captured.height,
+    };
+    keep_shot(shot.clone());
+    let scale = crate::popover::kit::scale(&shot.output);
+    let started = std::thread::Builder::new()
+        .name("capture's thumbnail".to_owned())
+        .spawn(move || match read_image(&shot.file) {
+            Ok(image) => {
+                let image = Arc::new(image);
+                *DECODED.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some((shot.id, image.clone()));
+                let made = thumb::Made::of(&image, scale);
+                keep_icon(shot.id, made.icon.clone());
+                thumb::show(shot, made, Instant::now());
+            }
+            Err(err) => {
+                tracing::warn!(err, "the capture cannot be read: its toast instead");
+                toast(&captured);
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "no thread for the capture's thumbnail");
+    }
+}
+
+/// The launcher's toast says what was taken, on its screen (5.8).
+fn toast(captured: &Captured) {
+    let said = words().captured(captured);
     crate::popover::send(crate::launcher::toast::show(
-        captured.output,
+        captured.output.clone(),
         said,
         Instant::now(),
     ));
@@ -218,11 +482,13 @@ mod tests {
 
     fn captured(mode: CaptureMode, folder: &str) -> Captured {
         Captured {
+            id: 1,
             output: "eDP-1".into(),
             mode,
             width: 1200,
             height: 760,
             folder: folder.into(),
+            file: String::new(),
         }
     }
 
