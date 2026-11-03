@@ -127,6 +127,9 @@ impl Bed {
             .hp
             .dispatch_until(WAIT, |hp| hp.bell_surfaces().len() == 1)?;
         anyhow::ensure!(up, "no footer");
+        // Drawn: until then it takes no click.
+        let button = bed.button();
+        common::over(&mut bed.hp, button, hocus_link::BELL_NAMESPACE)?;
         bed.hp.pointer_move(400.0, 300.0);
         wait(&mut bed.hp, Duration::from_millis(300))?;
         Ok(Some(bed))
@@ -743,10 +746,14 @@ fn an_image_copy_shows_its_thumbnail() -> anyhow::Result<()> {
         "the thumbnail: {:?}",
         [r, g, b]
     );
-    // Pasted back, it is the PNG copied.
+    // Pasted back, it is the PNG copied: once the shell's line reaches the
+    // compositor, which may be after its popover went (two sockets).
     bed.press(KEY_ENTER);
     bed.closed()?;
-    assert_eq!(bed.hp.clipboard_bytes().as_deref(), Some(RED_PNG));
+    let pasted = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.clipboard_bytes().as_deref() == Some(RED_PNG))?;
+    assert!(pasted, "{:?}", bed.hp.clipboard_bytes().map(|b| b.len()));
     Ok(())
 }
 

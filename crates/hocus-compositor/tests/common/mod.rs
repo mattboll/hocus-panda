@@ -1180,6 +1180,29 @@ pub fn wait(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The pointer at `at`, once the shell's surface of `namespace` takes it
+/// there. A layer surface maps (and has its place) before the shell has
+/// drawn it, and until it has a buffer it takes no pointer: a press then
+/// goes to what is under it and is lost. On a loaded machine, with the
+/// shell drawing on the CPU, that is long enough for a test's click.
+#[allow(dead_code)]
+pub fn over(hp: &mut Headless, at: (f64, f64), namespace: &str) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    loop {
+        hp.pointer_move(at.0 - 1.0, at.1);
+        hp.pointer_move(at.0, at.1);
+        wait(hp, Duration::from_millis(30))?;
+        if hp.pointer_layer().as_deref() == Some(namespace) {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(15),
+            "{namespace} never took the pointer at {at:?}: {:?}",
+            hp.pointer_layer()
+        );
+    }
+}
+
 impl Dispatch<ZwpTextInputManagerV3, ()> for Client {
     fn event(
         _: &mut Self,

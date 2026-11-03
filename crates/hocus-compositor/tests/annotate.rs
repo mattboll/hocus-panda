@@ -44,6 +44,12 @@ struct Bed {
 
 impl Drop for Bed {
     fn drop(&mut self) {
+        // A test failed: what the shell said of the capture, to see why.
+        if std::thread::panicking() {
+            for line in self.log().lines().filter(|l| l.contains("capture")) {
+                eprintln!("shell: {line}");
+            }
+        }
         let _ = self.bus.kill();
         let _ = self.bus.wait();
     }
@@ -271,11 +277,19 @@ impl Bed {
     /// are, as it logs them.
     fn edit(&mut self, thumb: Rect) -> anyhow::Result<Places> {
         let mark = self.mark();
-        self.click((
+        let image = (
             f64::from(thumb.x + thumb.width / 2),
             f64::from(thumb.y + 100),
-        ))?;
+        );
+        self.over(image, hocus_link::CAPTURE_THUMB_NAMESPACE)?;
+        self.click(image)?;
         self.editor(mark)
+    }
+
+    /// The pointer at `at`, once the shell's surface of `namespace` takes
+    /// it ([`common::over`]).
+    fn over(&mut self, at: (f64, f64), namespace: &str) -> anyhow::Result<()> {
+        common::over(&mut self.hp, at, namespace)
     }
 
     /// The editor once it shows, laid out after `mark`.
@@ -285,8 +299,10 @@ impl Bed {
             hp.capture_editor_surfaces().len() == 1
         })?;
         anyhow::ensure!(open, "no editor");
-        self.idle(Duration::from_millis(200))?;
-        Places::read(&line)
+        let places = Places::read(&line)?;
+        self.over(places.at("copy"), hocus_link::CAPTURE_EDITOR_NAMESPACE)?;
+        self.idle(Duration::from_millis(100))?;
+        Ok(places)
     }
 
     /// The thumbnail's ✕.
@@ -420,10 +436,10 @@ fn the_pointer_on_the_thumbnail_holds_it() -> anyhow::Result<()> {
     };
     let mut bed = Bed::start(&shell)?;
     let (_, _, thumb) = bed.capture()?;
-    bed.hp
-        .pointer_move(f64::from(thumb.x + 40), f64::from(thumb.y + 240));
-    bed.hp
-        .pointer_move(f64::from(thumb.x + 41), f64::from(thumb.y + 240));
+    bed.over(
+        (f64::from(thumb.x + 40), f64::from(thumb.y + 240)),
+        hocus_link::CAPTURE_THUMB_NAMESPACE,
+    )?;
     bed.idle(Duration::from_millis(7000))?;
     assert_eq!(
         bed.hp.capture_thumb_surfaces().len(),
@@ -486,7 +502,9 @@ fn after_6_s_the_capture_goes_to_the_history() -> anyhow::Result<()> {
         })
         .context("no action")?;
     let mark = bed.mark();
-    bed.click((f64::from(popover.x) + at.0, f64::from(popover.y) + at.1))?;
+    let action = (f64::from(popover.x) + at.0, f64::from(popover.y) + at.1);
+    bed.over(action, hocus_link::POPOVER_NAMESPACE)?;
+    bed.click(action)?;
     bed.editor(mark)?;
     Ok(())
 }
@@ -501,6 +519,7 @@ fn the_cross_deletes_the_file_and_empties_the_clipboard() -> anyhow::Result<()> 
     let mut bed = Bed::start(&shell)?;
     let (file, bytes, thumb) = bed.capture()?;
     assert_eq!(bed.hp.clipboard_bytes(), Some(bytes));
+    bed.over(Bed::close_spot(thumb), hocus_link::CAPTURE_THUMB_NAMESPACE)?;
     bed.click(Bed::close_spot(thumb))?;
     let gone = bed.hp.dispatch_until(Duration::from_secs(5), |hp| {
         !file.exists() && hp.capture_thumb_surfaces().is_empty()
