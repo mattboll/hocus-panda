@@ -443,6 +443,15 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             Vec::new()
         }
         Effect::Remove(id) => vec![Message::RemoveWindow(id)],
+        // A capture's (5.9) is the shell's own: its actions here, nothing
+        // to say on the bus.
+        Effect::Signal(server::Signal::Action { id, key }) if capture_of(id).is_some() => {
+            if let Some(capture) = capture_of(id) {
+                crate::capture::from_history(capture, &key);
+            }
+            Vec::new()
+        }
+        Effect::Signal(server::Signal::Closed { id, .. }) if capture_of(id).is_some() => Vec::new(),
         Effect::Signal(signal) => {
             server::signal(signal);
             Vec::new()
@@ -468,6 +477,71 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             Vec::new()
         }
     }
+}
+
+// --- The captures in the history (5.9) ----------------------------------------------
+
+/// The ids of the captures in the history: past any the server gives (it
+/// counts from 1).
+const CAPTURES_FROM: u32 = 0xC000_0000;
+
+/// Capture `capture`'s id in the history.
+pub fn capture_id(capture: u64) -> u32 {
+    CAPTURES_FROM | (capture as u32 & !CAPTURES_FROM)
+}
+
+/// The capture whose id in the history is `id`, if it is one.
+pub fn capture_of(id: u32) -> Option<u64> {
+    (id & CAPTURES_FROM == CAPTURES_FROM).then(|| u64::from(id & !CAPTURES_FROM))
+}
+
+/// Capture `shot` goes to the history, the newest (in place of itself if
+/// it was there): its image as its icon, its name, its size and folder,
+/// "Annoter", "Ouvrir le dossier" and "Supprimer"; a click annotates it.
+/// Seen: the user took it.
+pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::icons::Icon>) {
+    let words = crate::capture::words();
+    let icon = icon.or_else(|| crate::capture::icon(shot.id));
+    let note = note::Note {
+        id: capture_id(shot.id),
+        app: words.screenshot().to_owned(),
+        entry: None,
+        icon,
+        summary: shot.name(),
+        body: if shot.folder.is_empty() {
+            format!("{} × {}", shot.width, shot.height)
+        } else {
+            format!("{} × {} · {}", shot.width, shot.height, shot.folder)
+        },
+        actions: vec![
+            ("annotate".to_owned(), words.annotate().to_owned()),
+            ("folder".to_owned(), words.open_folder().to_owned()),
+            ("delete".to_owned(), words.delete().to_owned()),
+        ],
+        default: true,
+        urgency: note::Urgency::Normal,
+        timeout: note::Timeout::After(note::LIFE),
+        progress: None,
+        resident: true,
+        pid: 0,
+        agent: false,
+        icon_from: note::IconFrom {
+            app_icon: String::new(),
+            image_path: Some(shot.file.display().to_string()),
+        },
+        at: wall_ms(),
+    };
+    tracing::debug!(
+        capture = shot.id,
+        title = note.summary,
+        "the capture goes to the history"
+    );
+    input(Input::Keep(Box::new(note)));
+}
+
+/// Capture `capture` deleted: out of the history.
+pub fn forget_capture(capture: u64) {
+    input(Input::Close(capture_id(capture)));
 }
 
 /// What surface `id` shows, if it is one of the notifications': a bubble,

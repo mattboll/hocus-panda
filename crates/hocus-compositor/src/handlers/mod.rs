@@ -123,7 +123,20 @@ impl DataDeviceHandler for State {
     }
 }
 impl ClientDndGrabHandler for State {}
-impl ServerDndGrabHandler for State {}
+/// The compositor's own drags: a capture's thumbnail (5.9).
+impl ServerDndGrabHandler for State {
+    fn send(&mut self, mime_type: String, fd: OwnedFd, _seat: Seat<Self>) {
+        self.capture_drag_send(&mime_type, fd);
+    }
+
+    fn cancelled(&mut self, _seat: Seat<Self>) {
+        self.capture_drag_ended();
+    }
+
+    fn finished(&mut self, _seat: Seat<Self>) {
+        self.capture_drag_ended();
+    }
+}
 delegate_data_device!(State);
 
 impl PrimarySelectionHandler for State {

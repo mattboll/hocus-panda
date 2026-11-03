@@ -1649,6 +1649,7 @@ name = "hocus-shell"
 version = "0.2.0"
 dependencies = [
  "chacha20poly1305",
+ "fontdue",
  "hocus-link",
  "iced",
  "iced_layershell",

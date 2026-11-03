@@ -2,7 +2,7 @@
 //! one scenario per point of the approved spec. The compositor owns the
 //! capture, so most run without a shell: the toolbar's clicks are given
 //! as the shell would send them (`capture mode|delay|shoot`); one runs the
-//! real shell for its toolbar and its toast. The pictures' folder is the
+//! real shell for its toolbar and what follows the capture. The pictures' folder is the
 //! test's own, never the machine's.
 //!
 //! Pixman, a flat background: what is darkened, and what is not, is told
@@ -496,8 +496,8 @@ fn escape_cancels() -> anyhow::Result<()> {
 }
 
 /// With the real shell: the toolbar at the bottom of the screen under the
-/// pointer, its modes and its green button clicked, and the toast that
-/// says what was taken.
+/// pointer, its modes and its green button clicked, and the capture's
+/// thumbnail once taken (5.9), in its French folder.
 #[test]
 fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
     let Some(shell) = common::shell_program() else {
@@ -599,16 +599,18 @@ fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
     assert!(taken, "nothing captured: {:?}", hp.capture());
     let gone = hp.dispatch_until(WAIT, |hp| hp.capture_toolbar_surfaces().is_empty())?;
     assert!(gone, "the toolbar stayed");
-    let toast = hp.dispatch_until(WAIT, |hp| hp.launcher_toast_surfaces().len() == 1)?;
-    assert!(toast, "no toast");
+    // Saved: its thumbnail (5.9) in place of 5.8's toast.
+    let thumb = hp.dispatch_until(WAIT, |hp| hp.capture_thumb_surfaces().len() == 1)?;
+    assert!(thumb, "no thumbnail");
+    assert!(hp.launcher_toast_surfaces().is_empty());
     let said = String::from_utf8_lossy(&std::fs::read(&log)?).into_owned();
     let line = said
         .lines()
-        .rfind(|l| l.contains("the launcher's toast shows it"))
+        .rfind(|l| l.contains("the capture's thumbnail shows"))
         .unwrap_or_default()
         .to_owned();
     assert!(
-        line.contains("Zone de 640 × 360 copiée · enregistrée dans Images/Captures d'écran"),
+        line.contains("Images/Captures d'écran/Capture du "),
         "{line}"
     );
     let saved = files(&root.join("Images/Captures d'écran"));

@@ -339,13 +339,15 @@ impl State {
     }
 
     /// The clipboard takes `data`, offered as `types` to Wayland and X11
-    /// clients alike: an item of the history, a capture (5.8).
-    pub fn offer_clipboard(&mut self, types: Vec<String>, data: Vec<u8>) {
+    /// clients alike: an item of the history, a capture (5.8). The bytes it
+    /// holds, by which a capture knows it still holds them (5.9).
+    pub fn offer_clipboard(&mut self, types: Vec<String>, data: Vec<u8>) -> Arc<[u8]> {
+        let data: Arc<[u8]> = Arc::from(data);
         data_device::set_data_device_selection(
             &self.display_handle,
             &self.seat,
             types.clone(),
-            Some(Arc::from(data)),
+            Some(data.clone()),
         );
         // X11 clients see it offered too.
         if let Some(xwm) = self.xwm.as_mut()
@@ -353,6 +355,7 @@ impl State {
         {
             tracing::warn!(?err, "could not offer the clipboard to X11");
         }
+        data
     }
 
     /// A capture's line for the clipboard's history ([`capture_line`]):

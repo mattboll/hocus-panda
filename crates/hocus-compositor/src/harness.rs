@@ -466,6 +466,17 @@ impl Headless {
         self.layer_rects(hocus_link::CAPTURE_TOOLBAR_NAMESPACE)
     }
 
+    /// The capture's thumbnail's surfaces (5.9), by output name, and where
+    /// they are (global).
+    pub fn capture_thumb_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::CAPTURE_THUMB_NAMESPACE)
+    }
+
+    /// The capture's editor's surfaces (5.9).
+    pub fn capture_editor_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::CAPTURE_EDITOR_NAMESPACE)
+    }
+
     /// The cursor the compositor shows over a frame, a grip or the
     /// capture, by its name (`crosshair`, `move`, `nwse-resize`…).
     pub fn frame_cursor(&self) -> Option<String> {

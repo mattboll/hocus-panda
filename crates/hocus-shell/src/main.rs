@@ -1139,8 +1139,35 @@ impl Shell {
         )
     }
 
-    /// The capture's toolbar (5.8), if its surface is `id`.
+    /// The capture's toolbar (5.8), its thumbnail or its editor (5.9), if
+    /// its surface is `id`.
     fn capture_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if capture::thumb::is_surface(id) {
+            return Some(
+                canvas(capture::thumb::View {
+                    id,
+                    words: capture::words(),
+                    software: self.software,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            );
+        }
+        if capture::editor::is_surface(id) {
+            let layer = |layer| {
+                canvas(capture::editor::draw::View {
+                    id,
+                    words: capture::words(),
+                    glass: self.look.glass,
+                    layer,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+            };
+            use capture::editor::draw::Layer;
+            return Some(stack![layer(Layer::Panel), layer(Layer::Over)].into());
+        }
         if !capture::is_surface(id) {
             return None;
         }

@@ -40,8 +40,10 @@ use std::{fmt, str::FromStr, time::Duration};
 mod capture;
 mod share;
 pub use capture::{
-    CAPTURE_DELAYS, CAPTURE_TOOLBAR_BOTTOM, CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE,
-    CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar, CaptureMode, Captured,
+    CAPTURE_DELAYS, CAPTURE_EDITOR_IN, CAPTURE_EDITOR_NAMESPACE, CAPTURE_THUMB_IN,
+    CAPTURE_THUMB_NAMESPACE, CAPTURE_THUMB_RADIUS, CAPTURE_THUMB_RISE, CAPTURE_TOOLBAR_BOTTOM,
+    CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE, CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar,
+    CaptureMode, Captured,
 };
 pub use share::{
     IN_USE_NAMESPACE, SHARE_CHOOSER_FROM, SHARE_CHOOSER_IN, SHARE_CHOOSER_NAMESPACE,
@@ -370,7 +372,8 @@ pub enum ToShell {
     /// The capture's toolbar goes: the capture is taken, counts down, or
     /// was cancelled. Written `capture-end`.
     CaptureEnd,
-    /// A capture was taken, copied and saved: its toast ([`Captured`]).
+    /// A capture was taken, copied and saved: its thumbnail, or its toast
+    /// when it was not saved ([`Captured`]).
     Captured(Captured),
     /// The emoji picker's shortcut (5.7, `Super+.`): it opens on `output`
     /// (its scale in 120ths, its size `width` × `height` logical pixels)

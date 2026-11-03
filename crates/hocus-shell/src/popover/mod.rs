@@ -495,6 +495,21 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
     },
+    /// The capture's thumbnail on `output` (5.9), `size` large, its
+    /// margins from the screen's bottom right corner (top, right, bottom,
+    /// left): taking the pointer, never the keyboard.
+    CaptureThumb {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+        margin: (i32, i32, i32, i32),
+    },
+    /// The capture's editor on `output` (5.9): all of it, over everything,
+    /// holding the keyboard.
+    CaptureEditor {
+        id: window::Id,
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1498,6 +1513,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                 deadline,
                 crate::launcher::deadline(),
                 crate::emoji::deadline(),
+                crate::capture::thumb::deadline(),
             ]
             .into_iter()
             .flatten()
@@ -1514,6 +1530,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             let mut due = with(|c| c.tick(now));
                             due.extend(crate::launcher::tick(now));
                             due.extend(crate::emoji::tick(now));
+                            due.extend(crate::capture::thumb::tick(now));
                             Some(due)
                         }
                     }
@@ -1778,6 +1795,49 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: false,
                 namespace: Some(hocus_link::CAPTURE_TOOLBAR_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::CaptureThumb {
+            id,
+            output,
+            size,
+            margin,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Bottom | Anchor::Right,
+                // Its margins from the screen's corner, whatever the bar
+                // keeps.
+                exclusive_zone: Some(-1),
+                margin: Some(margin),
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::CAPTURE_THUMB_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::CaptureEditor { id, output } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some((0, 0)),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+                exclusive_zone: Some(-1),
+                margin: Some((0, 0, 0, 0)),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::CAPTURE_EDITOR_NAMESPACE.to_owned()),
             },
             id,
         }],

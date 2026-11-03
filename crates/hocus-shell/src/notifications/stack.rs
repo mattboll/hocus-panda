@@ -61,6 +61,9 @@ const GAP: f32 = 8.0;
 pub enum Input {
     /// A notification, new or replacing one (same id).
     Notify(Box<Note>),
+    /// A notification of the shell's own straight to the history, seen,
+    /// replacing one of its id: a capture (5.9).
+    Keep(Box<Note>),
     /// `CloseNotification`.
     Close(u32),
     /// The compositor says the focused window's screen.
@@ -379,6 +382,10 @@ impl Stack {
     fn handle_input(&mut self, input: Input, now: Instant, effects: &mut Vec<Effect>) {
         match input {
             Input::Notify(note) => self.notify(*note, now, effects),
+            Input::Keep(note) => {
+                self.history.prune(note.at);
+                self.history.add(*note, Sight::Seen);
+            }
             Input::Close(id) => self.close(id, now, effects),
             Input::Focus(screen) => self.focus = Some(screen),
             Input::Bars(bars) => {
@@ -472,10 +479,13 @@ impl Stack {
                         key: "default".to_owned(),
                     }));
                 }
-                effects.push(Effect::Raise {
-                    pid: note.pid,
-                    app: note.entry.clone().unwrap_or_else(|| note.app.clone()),
-                });
+                // A capture has no window to raise: its editor opens.
+                if super::capture_of(note.id).is_none() {
+                    effects.push(Effect::Raise {
+                        pid: note.pid,
+                        app: note.entry.clone().unwrap_or_else(|| note.app.clone()),
+                    });
+                }
                 self.forget(key, now, effects);
             }
             Input::Remove(keys) => {

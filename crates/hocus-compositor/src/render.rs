@@ -497,6 +497,12 @@ impl State {
         } else {
             None
         };
+        // A capture's editor and its thumbnail (5.9), never in a capture.
+        let editor_glass = if purpose.screen() {
+            self.capture_after_elements(renderer, output, now, &mut elements)
+        } else {
+            None
+        };
         // The surfaces of layer `which` that `pick` takes; where the bar's
         // first surface is drawn among `out`, if it is.
         let layers = |renderer: &mut R,
@@ -527,6 +533,8 @@ impl State {
                         | hocus_link::LAUNCHER_TOAST_NAMESPACE
                         | hocus_link::CAPTURE_TOOLBAR_NAMESPACE
                         | hocus_link::SHARE_CHOOSER_NAMESPACE
+                        | hocus_link::CAPTURE_THUMB_NAMESPACE
+                        | hocus_link::CAPTURE_EDITOR_NAMESPACE
                 ) {
                     continue;
                 }
@@ -838,6 +846,11 @@ impl State {
             elements.insert(at, pane);
         }
         // In front of the launcher's: inserted after it.
+        if let Some((at, alpha)) = editor_glass
+            && let Some(pane) = self.capture_editor_glass(renderer, output, alpha, &elements[at..])
+        {
+            elements.insert(at, pane);
+        }
         if let Some(glass) = capture_glass
             && let Some(pane) = self.capture_glass(renderer, output, glass, &elements[glass.at..])
         {
