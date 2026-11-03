@@ -9,6 +9,10 @@
 //!   its own, 8 MB at most and for 3 s at most, so that a client that hangs
 //!   or offers too much stalls nothing; then the shell is told, with the
 //!   application of the window focused as it was copied (`copied`).
+//! - **A capture** (5.8b): the clipboard offering it is the compositor's
+//!   own, never read back; the capture's thread makes its line instead
+//!   (`capture-copied`, [`capture_line`]), the capture's number with it,
+//!   by which a later line (the annotated image, 5.9) replaces its item.
 //! - **Never a secret**: a selection marked so (`x-kde-passwordManagerHint`
 //!   saying `secret`, `CLIPBOARD_STATE` saying `sensitive`, either unread
 //!   counting as so), or copied from a password manager's window
@@ -351,6 +355,20 @@ impl State {
         }
     }
 
+    /// A capture's line for the clipboard's history ([`capture_line`]):
+    /// told to the shell, which lists the capture first, or replaces the
+    /// item the same capture made (its annotated image, 5.9). The
+    /// clipboard offering a capture is the compositor's own selection,
+    /// never read back as a client's copy is: this line is how the history
+    /// hears of it.
+    pub fn capture_in_history(&mut self, line: String) {
+        if !self.shell_linked() {
+            return;
+        }
+        tracing::debug!("a capture for the clipboard's history");
+        self.tell_shell_line(line);
+    }
+
     /// The keyboard went somewhere: a paste waiting for its window may go
     /// on, after this turn of the loop (the keyboard is busy now).
     pub fn clipboard_focus_changed(&mut self) {
@@ -447,6 +465,26 @@ impl State {
             output: output.name(),
         });
     }
+}
+
+/// The line telling the clipboard's history of capture `capture` (the
+/// session's count of captures, 5.8b), its `png`: made off the loop, as a
+/// copy's is, its base64 being as long as the image. None for an image
+/// larger than the history keeps ([`CLIP_MAX`]). The history lists it as
+/// copied from [`hocus_link::CAPTURE_APP`].
+pub fn capture_line(capture: u64, png: &[u8]) -> Option<String> {
+    if png.len() > CLIP_MAX {
+        tracing::info!(
+            bytes = png.len(),
+            "a capture too large for the clipboard's history"
+        );
+        return None;
+    }
+    let clip = Clip {
+        kind: ClipKind::Png,
+        data: png.to_vec(),
+    };
+    Some(ToShell::CaptureCopied { capture, clip }.to_string())
 }
 
 /// What a selection holds, read from `pipe` as `kind`, unless one of its

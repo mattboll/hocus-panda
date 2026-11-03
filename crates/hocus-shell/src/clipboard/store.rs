@@ -29,7 +29,7 @@ use chacha20poly1305::{
     KeyInit, XChaCha20Poly1305, XNonce,
     aead::{Aead, Generate, Key, Payload},
 };
-use hocus_link::{Clip, ClipKind, ToCompositor};
+use hocus_link::{CAPTURE_APP, Clip, ClipKind, ToCompositor};
 
 use super::{Item, Kind, Picture, digest, keyring};
 
@@ -39,6 +39,13 @@ pub enum Ask {
     /// A client copied `clip` from `app` at `at` (milliseconds).
     Copied {
         app: String,
+        clip: Clip,
+        at: i64,
+    },
+    /// Capture `capture` of the compositor's session (5.8b), its PNG, at
+    /// `at`.
+    Captured {
+        capture: u64,
         clip: Clip,
         at: i64,
     },
@@ -83,6 +90,7 @@ fn run(dir: Option<PathBuf>, bus: Option<&str>, asked: &mpsc::Receiver<Ask>) {
     let mut store = Store {
         files: dir.and_then(|dir| Files::open(dir, bus)),
         images: HashMap::new(),
+        captures: HashMap::new(),
     };
     if let Some(files) = &store.files {
         let items = files.load();
@@ -101,12 +109,16 @@ struct Store {
     files: Option<Files>,
     /// Images' PNGs when there are no files to keep them in.
     images: HashMap<u64, Arc<[u8]>>,
+    /// The item each capture of this session made, by the capture's number
+    /// (5.8b): the one its annotated image replaces (5.9).
+    captures: HashMap<u64, u64>,
 }
 
 impl Store {
     fn ask(&mut self, ask: Ask) {
         match ask {
             Ask::Copied { app, clip, at } => self.copied(app, clip, at),
+            Ask::Captured { capture, clip, at } => self.captured(capture, clip, at),
             Ask::Changed(item) => {
                 if let Some(files) = &self.files {
                     files.write_item(&item);
@@ -136,39 +148,8 @@ impl Store {
     }
 
     fn copied(&mut self, app: String, clip: Clip, at: i64) {
-        let key = match new_key() {
-            Some(key) => key,
-            None => return,
-        };
-        let item = match clip.kind {
-            ClipKind::Text => {
-                let text = String::from_utf8_lossy(&clip.data).into_owned();
-                Item {
-                    key,
-                    kind: Kind::of(&text),
-                    digest: digest(text.as_bytes()),
-                    text: text.into(),
-                    app,
-                    at,
-                    pinned: false,
-                    picture: None,
-                }
-            }
-            ClipKind::Png => {
-                let Some(picture) = Picture::of_png(&clip.data) else {
-                    return;
-                };
-                Item {
-                    key,
-                    kind: Kind::Image,
-                    digest: digest(&clip.data),
-                    text: "".into(),
-                    app,
-                    at,
-                    pinned: false,
-                    picture: Some(picture),
-                }
-            }
+        let Some(item) = item(app, &clip, at) else {
+            return;
         };
         tracing::debug!(
             kind = item.kind.word(),
@@ -176,6 +157,37 @@ impl Store {
             "a copy for the history"
         );
         let change = super::with(|h| h.add(item, at));
+        self.keep(change, clip);
+    }
+
+    /// Capture `capture` (5.8b): an image copied from the capture, first;
+    /// told again (its annotated image, 5.9), it replaces the item it made,
+    /// its pin kept, unless that item went meanwhile.
+    fn captured(&mut self, capture: u64, clip: Clip, at: i64) {
+        let Some(item) = item(CAPTURE_APP.to_owned(), &clip, at) else {
+            return;
+        };
+        tracing::debug!(capture, "a capture for the history");
+        let made = self
+            .captures
+            .get(&capture)
+            .copied()
+            .filter(|key| super::with(|h| h.get(*key).is_some()));
+        let change = match made {
+            Some(old) => {
+                tracing::debug!(capture, "a capture's item replaced");
+                super::with(|h| h.replace(old, item, at))
+            }
+            None => super::with(|h| h.add(item, at)),
+        };
+        if let Some(key) = self.keep(change, clip) {
+            self.captures.insert(capture, key);
+        }
+    }
+
+    /// A change of the history kept on disk, `clip` the new item's: the
+    /// item now holding the copy, if one does.
+    fn keep(&mut self, change: super::Change, clip: Clip) -> Option<u64> {
         if let Some(new) = &change.new {
             match &self.files {
                 Some(files) => {
@@ -195,6 +207,7 @@ impl Store {
         }
         self.forget(&change.gone);
         super::changed();
+        change.new.or(change.changed).map(|item| item.key)
     }
 
     /// What went: its files.
@@ -206,6 +219,38 @@ impl Store {
             }
         }
     }
+}
+
+/// The item `clip` makes, copied from `app` at `at`, under a new key;
+/// none for an image that does not read.
+fn item(app: String, clip: &Clip, at: i64) -> Option<Item> {
+    let key = new_key()?;
+    let item = match clip.kind {
+        ClipKind::Text => {
+            let text = String::from_utf8_lossy(&clip.data).into_owned();
+            Item {
+                key,
+                kind: Kind::of(&text),
+                digest: digest(text.as_bytes()),
+                text: text.into(),
+                app,
+                at,
+                pinned: false,
+                picture: None,
+            }
+        }
+        ClipKind::Png => Item {
+            key,
+            kind: Kind::Image,
+            digest: digest(&clip.data),
+            text: "".into(),
+            app,
+            at,
+            pinned: false,
+            picture: Some(Picture::of_png(&clip.data)?),
+        },
+    };
+    Some(item)
 }
 
 /// A new item's number, at random.

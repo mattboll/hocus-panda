@@ -407,10 +407,27 @@ impl State {
         let Some(area) = self.space.output_geometry(output) else {
             return Vec::new();
         };
+        let scale = output.current_scale().fractional_scale();
+        self.cursor_elements_in(renderer, area.to_f64(), scale)
+    }
+
+    /// The cursor's elements in a picture of `area` (of the desktop,
+    /// logical pixels) drawn at `scale`, placed from its top left corner,
+    /// front first: a screen's, or a window's in its capture (5.8b). None
+    /// when the pointer is not near it or the client hid it.
+    pub(crate) fn cursor_elements_in<R>(
+        &self,
+        renderer: &mut R,
+        area: Rectangle<f64, Logical>,
+        scale: f64,
+    ) -> Vec<CursorElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
         let Some(pointer) = self.seat.get_pointer().map(|p| p.current_location()) else {
             return Vec::new();
         };
-        let scale = output.current_scale().fractional_scale();
         let size = f64::from(self.cursor_images.choice.size);
         // A theme's image may be larger than its size says.
         let reach = size * 2.0;
@@ -418,10 +435,10 @@ impl State {
             pointer - Point::from((reach, reach)),
             Size::from((reach * 2.0, reach * 2.0)),
         );
-        if !near.overlaps(area.to_f64()) {
+        if !near.overlaps(area) {
             return Vec::new();
         }
-        let on_output = pointer - area.loc.to_f64();
+        let on_output = pointer - area.loc;
         let element = match self.shown_cursor() {
             Shown::Hidden => return Vec::new(),
             Shown::Surface(surface) => {

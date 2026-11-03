@@ -559,6 +559,10 @@ impl Shell {
                 clipboard::copied(app, clip);
                 Task::none()
             }
+            ToShell::CaptureCopied { capture, clip } => {
+                clipboard::captured(capture, clip);
+                Task::none()
+            }
             ToShell::Clipboard { output } => {
                 popover::toggle_clipboard(&output);
                 Task::none()
@@ -1537,6 +1541,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // this task; `Super+V`: the history's surface.
                         Ok(ToShell::Copied { app, clip }) => {
                             clipboard::copied(app, clip);
+                            continue;
+                        }
+                        Ok(ToShell::CaptureCopied { capture, clip }) => {
+                            clipboard::captured(capture, clip);
                             continue;
                         }
                         Ok(ToShell::Clipboard { output }) => {

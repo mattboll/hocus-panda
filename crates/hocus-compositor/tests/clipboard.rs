@@ -9,7 +9,8 @@
 //! `Shift+Enter` only copies, and what is used moves to the top; `Delete`
 //! removes; a pin stays through "Clear all"; a secret copy is never kept;
 //! the history comes back after a restart and is not plain text on disk;
-//! an image shows its thumbnail.
+//! an image shows its thumbnail. And a screen capture (5.8b, issue #528):
+//! the history's first row, pasted from there.
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
@@ -32,6 +33,8 @@ const KEY_V: u32 = 47;
 const KEY_ENTER: u32 = 28;
 const KEY_DELETE: u32 = 111;
 const KEY_BACKSPACE: u32 = 14;
+/// Print (`KEY_SYSRQ`).
+const KEY_PRINT: u32 = 99;
 
 /// A 40 × 20 PNG, all `#E53935`.
 const RED_PNG: &[u8] = &[
@@ -104,6 +107,8 @@ impl Bed {
         let mut config = Config::default();
         config.keyboard.layouts = vec!["us".to_owned()];
         config.applications = vec![applications];
+        // Captures land in the test's own folder (5.8b).
+        config.pictures = Some(root.join("Images"));
         let hp = Headless::start_with_shell(
             HeadlessConfig {
                 outputs: vec!["1920x1080".parse()?],
@@ -742,5 +747,70 @@ fn an_image_copy_shows_its_thumbnail() -> anyhow::Result<()> {
     bed.press(KEY_ENTER);
     bed.closed()?;
     assert_eq!(bed.hp.clipboard_bytes().as_deref(), Some(RED_PNG));
+    Ok(())
+}
+
+/// A capture (5.8b, issue #528) is the history's first row, an image from
+/// "Capture d'écran", and pasting it from there gives the window its PNG,
+/// though the clipboard held something else meanwhile.
+#[test]
+fn a_capture_is_the_first_row_and_pastes_from_there() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    let editor = bed.window("test.editor", (640, 420))?;
+    bed.copy(&editor, "avant la capture")?;
+    // Print, then Enter: the area kept, a third of the screen.
+    let mark = bed.mark();
+    chord(&mut bed.hp, &[KEY_PRINT]);
+    wait(&mut bed.hp, Duration::from_millis(200))?;
+    chord(&mut bed.hp, &[KEY_ENTER]);
+    let taken = bed.hp.dispatch_until(WAIT, |hp| hp.captures().0 == 1)?;
+    anyhow::ensure!(taken, "nothing captured");
+    let file = bed
+        .hp
+        .captures()
+        .1
+        .ok_or_else(|| anyhow::anyhow!("no file"))?;
+    let png = std::fs::read(&file)?;
+    bed.logged_after(mark, "a capture for the history")?;
+    // The editor takes the clipboard with what the history does not keep.
+    bed.focus(&editor)?;
+    editor.client.commands.send(Command::Copy(Clip {
+        types: &["text/html"],
+        text: "<b>autre chose</b>",
+        hang: false,
+    }))?;
+    let copied = bed.hp.dispatch_until(WAIT, |_| {
+        editor.client.events.try_iter().any(|e| e == Event::Copied)
+    })?;
+    anyhow::ensure!(copied, "the clipboard was never taken");
+    assert_ne!(bed.hp.clipboard_bytes().as_deref(), Some(png.as_slice()));
+    keys(&editor);
+    let (_, line) = bed.super_v()?;
+    let shown = history(&line);
+    assert!(
+        shown.starts_with(
+            "RÉCENTS: [image] «Image · 640\u{a0}×\u{a0}360» Capture d'écran · maintenant \
+             (selected) [text] «avant la capture» Éditeur"
+        ),
+        "{shown}"
+    );
+    // Enter pastes it: the clipboard holds the capture's PNG again, and
+    // the editor gets Ctrl+V.
+    bed.press(KEY_ENTER);
+    bed.closed()?;
+    pasted(
+        &mut bed,
+        &editor,
+        &[
+            (KEY_LEFTCTRL, true),
+            (KEY_V, true),
+            (KEY_V, false),
+            (KEY_LEFTCTRL, false),
+        ],
+    )?;
+    assert_eq!(bed.hp.clipboard_bytes(), Some(png));
     Ok(())
 }

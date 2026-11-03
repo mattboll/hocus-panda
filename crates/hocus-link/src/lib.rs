@@ -347,6 +347,12 @@ pub enum ToShell {
     /// marked secret. Written `copied APP KIND DATA`, the application `-`
     /// for none, the data in base64.
     Copied { app: String, clip: Clip },
+    /// A capture (5.8b) for the clipboard's history: its PNG, the
+    /// compositor's `capture`th of the session. The history lists it as
+    /// copied from [`CAPTURE_APP`]; the same capture told again (its
+    /// annotated image, 5.9) replaces the item it made. Written
+    /// `capture-copied CAPTURE KIND DATA`, the data in base64.
+    CaptureCopied { capture: u64, clip: Clip },
     /// `Super+V` (5.6): the clipboard's history opens on `output`'s bar,
     /// the screen of the focused window, else the pointer's, its field
     /// holding the keyboard; open, it closes. Written `clipboard OUTPUT`.
@@ -454,6 +460,10 @@ impl ClipKind {
 
 /// The most a clip holds: a larger offer is not kept (5.6).
 pub const CLIP_MAX: usize = 8 * 1024 * 1024;
+
+/// The application the clipboard's history says a capture was copied from
+/// (5.8b): the history names it "Capture d'écran" / "Screenshot".
+pub const CAPTURE_APP: &str = "hocuspanda.capture";
 
 impl Clip {
     fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1280,6 +1290,10 @@ impl fmt::Display for ToShell {
                 write!(f, "copied {} ", if app.is_empty() { "-" } else { &app })?;
                 clip.write(f)
             }
+            Self::CaptureCopied { capture, clip } => {
+                write!(f, "capture-copied {capture} ")?;
+                clip.write(f)
+            }
             Self::Clipboard { output } => write!(f, "clipboard {output}"),
             Self::Emoji {
                 output,
@@ -1472,6 +1486,12 @@ impl FromStr for ToShell {
                     "-" => String::new(),
                     app => app.to_owned(),
                 },
+                clip: Clip::read(&mut words)?,
+            }),
+            Some("capture-copied") => Ok(Self::CaptureCopied {
+                capture: word(&mut words, "capture")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("capture: {e}")))?,
                 clip: Clip::read(&mut words)?,
             }),
             Some("clipboard") => Ok(Self::Clipboard {
@@ -1818,6 +1838,13 @@ mod tests {
                 clip: Clip {
                     kind: ClipKind::Text,
                     data: Vec::new(),
+                },
+            },
+            ToShell::CaptureCopied {
+                capture: 3,
+                clip: Clip {
+                    kind: ClipKind::Png,
+                    data: (0..=255).rev().collect(),
                 },
             },
             ToShell::Clipboard {

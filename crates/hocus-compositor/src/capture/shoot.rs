@@ -2,7 +2,7 @@
 //! needs drawn again into a buffer of its own at the screen's resolution
 //! (or the window alone, at its screen's), as the screen shows it but for
 //! the capture's own drawing, the toolbar and the toasts, the pointer only
-//! if asked, and read back. The headless backend's screenshots are read
+//! if asked (on a window, only when it is over it), and read back. The headless backend's screenshots are read
 //! the same way. What is drawn is handed to a thread ([`super::save`]).
 
 use anyhow::Context;
@@ -135,9 +135,15 @@ where
                 .window_output(*id)
                 .context("the window is on no screen")?;
             let scale = o.current_scale().fractional_scale();
-            let (elements, rect) = state
+            let (mut elements, rect) = state
                 .window_alone(renderer, *id, scale)
                 .context("the window went")?;
+            // The pointer in front, where it is on the window, when it is
+            // over it (5.8b).
+            if shot.pointer && state.pointer_over(*id) {
+                let cursor = state.cursor_elements_in(renderer, rect, scale);
+                elements.splice(0..0, cursor.into_iter().map(OutputElement::Cursor));
+            }
             let size: Size<i32, Physical> = rect.size.to_physical_precise_round(scale);
             let pixels = draw::<R, T>(renderer, size, scale, &elements, [0.0; 4])?;
             let piece = save::Piece {
