@@ -459,9 +459,15 @@ impl Headless {
     }
 
     /// The longest a frame's hand-over to PipeWire's thread took the loop
-    /// so far (5.11).
+    /// so far (5.11): a timing, to report.
     pub fn share_lend_most(&self) -> Duration {
         self.app.state.share.lend_most()
+    }
+
+    /// The bytes of shared frames' pixels copied on the loop so far
+    /// (5.11): its budget is 0.
+    pub fn share_copied_on_loop(&self) -> u64 {
+        self.app.state.share.copied_on_loop()
     }
 
     /// What the screen capture shows (5.8).

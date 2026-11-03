@@ -232,9 +232,10 @@ what is in use.
   versions); the sign shows under the
   clock, its popover says who sees what, and its button ends the share and
   closes the session; three notifications held, then one bubble summing
-  them up; a shared window closing ends its share; handing a 2560 × 1600
-  frame over costs the loop well under a millisecond (pixman, its buffer
-  lent); on GLES (Mesa's software device, never a GPU: the harness's
+  them up; a shared window closing ends its share; frames of 2560 × 1600
+  reach a consumer with none of their bytes copied on the loop (pixman,
+  its buffer lent; counted: the lent pixels read on the loop's thread,
+  0; how long a hand-over took is printed, never asserted); on GLES (Mesa's software device, never a GPU: the harness's
   `RendererChoice::GlesSoftware`), the read-back thread's frames come
   whole, upright and in the screen's colours. Unit tests for the
   lines, the chooser's words and its arrows, the cards' sizes, the
@@ -257,3 +258,62 @@ what is in use.
   restoring a share (`persist_mode`); the `Screenshot` and `RemoteDesktop`
   portals; xdg-foreign's parent windows (a Wayland application's window,
   which the portal names by its exported handle, is not looked up).
+
+### 5.11b, a portal left by a previous session (2026-11-03)
+
+Issue #538. The user's service manager outlives a graphical session
+(lingering, a terminal multiplexer, another login): after logging out of
+a previous session and into this one, `xdg-desktop-portal` can still be
+the process that session started, with its `XDG_CURRENT_DESKTOP` and
+`WAYLAND_DISPLAY`. It reads that session's `*-portals.conf` and sends the
+screen cast to a backend that is not ours, and never reads the variables
+again: an application's screen share failed while our backend was on the
+bus.
+
+- **When**: as the session starts (`--session`), on the thread that gives
+  the session's variables (`crates/hocus-compositor/src/session.rs`), right
+  after systemd's user manager has them; never on the loop, as it waits
+  for `systemctl`. Without systemd (its `import-environment` failing),
+  nothing more is done.
+- **Which units** (`session/portals.rs`): `xdg-desktop-portal.service`,
+  and its backends that run as units, whatever desktop they are for: the
+  running units matching `*xdg-desktop-portal-*.service`
+  (`xdg-desktop-portal-gtk.service`, …). Not the document portal nor the
+  permission store, which do not depend on the desktop.
+- **The rule**, for each of them that runs (`ActiveState=active`, a main
+  process): its process's environment (`/proc/PID/environ`, what it was
+  started with and reads its configuration by) is compared with the
+  session's, `XDG_CURRENT_DESKTOP` (`Hocuspanda`) and `WAYLAND_DISPLAY`
+  (the socket's name). Either different or unset: restarted. Both the
+  same: left, it serves this session. Its environment unreadable:
+  restarted if it became active (`ActiveEnterTimestampMonotonic`) before
+  the variables reached systemd, left otherwise. The environment comes
+  first, rather than when it started, because it is what the portal acts
+  on: one activated by an application started with the session, before
+  the variables reached systemd, is newer than the session but has the
+  previous one's variables; and one started by this desktop on the same
+  display (the session started again) serves it as it is.
+- **How**: `systemctl --user restart`, the backends first, then the
+  frontend, which, started again, finds them serving this session. Each
+  restart is logged (`restarted a portal left by a previous session`, the
+  unit, its old process and what it had), as a failure to. A unit not
+  running is left to D-Bus activation, which starts it with the variables
+  systemd now has.
+- **Measured**: unit tests for the rule (a previous session's portal, this
+  session's left however old, a newer one with the old variables, one
+  without them, a value read whole, an unreadable environment by its
+  start, a unit not running) and for reading `systemctl`'s output. In the
+  Debian VM (`scripts/vm/debian.sh`, its user manager lingering, never a
+  live session's): a previous session's compositor left running (headless,
+  its own runtime directory), and `xdg-desktop-portal` and
+  `xdg-desktop-portal-gtk` started by systemd with
+  `XDG_CURRENT_DESKTOP=Previous` and that compositor's display; then the
+  session on the virtual terminal (`hocuspanda --session`). Both were
+  restarted, the backend first, a second after the variables were given,
+  and ran with `XDG_CURRENT_DESKTOP=Hocuspanda` and `WAYLAND_DISPLAY` the
+  session's. An application's `CreateSession`, `SelectSources` and `Start`
+  through xdg-desktop-portal then reached our backend: the chooser
+  showed, Enter returned the screen's stream (1280 × 800 at 0, 0) and
+  `OpenPipeWireRemote` its remote. The session stopped and started again,
+  the portal already its own: nothing restarted (the same process), and a
+  screen cast went through it again.
