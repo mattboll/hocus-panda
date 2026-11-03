@@ -2,3 +2,10 @@
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# What cargo runs (the tests): Mesa's software device (llvmpipe), which
+# the tests of the compositor's shaders draw with without a GPU (#534), on
+# one thread. Else each of those tests takes every core, and the tests
+# running beside them miss their frames. One already set wins.
+[env]
+LP_NUM_THREADS = { value = "1", force = false }

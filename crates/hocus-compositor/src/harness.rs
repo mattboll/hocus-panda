@@ -60,6 +60,14 @@ impl Drop for ShellEnd {
     }
 }
 
+impl Drop for Headless {
+    /// With its shell and its programs still running: what drew on a GPU
+    /// holds its render node open now.
+    fn drop(&mut self) {
+        crate::test_gpu::check_none_open();
+    }
+}
+
 /// What a test can know about a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowInfo {
@@ -100,6 +108,8 @@ impl Headless {
         shell: Option<std::path::PathBuf>,
         bus: Option<String>,
     ) -> anyhow::Result<Self> {
+        // A GPU only when the developer named one (#534).
+        let headless = crate::test_gpu::resolve(headless)?;
         let started = crate::start(Options {
             backend: BackendKind::Headless(headless),
             runtime_dir: None,
@@ -388,6 +398,15 @@ impl Headless {
     /// Commits of the launcher's surfaces so far.
     pub fn launcher_commits(&self) -> u64 {
         self.app.state.panel.launcher_commits
+    }
+
+    /// Whether the launcher shows at rest in the last frame drawn: its
+    /// fade in over, which starts at the shell's first buffer, however
+    /// late that comes on a loaded machine.
+    pub fn launcher_at_rest(&self) -> bool {
+        let state = &self.app.state;
+        let drawn = state.drawn_at.get();
+        drawn.is_some_and(|at| state.panel.launchers.at_rest(at))
     }
 
     /// The launcher's surfaces as the shell placed them: their screen, and

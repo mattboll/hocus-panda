@@ -198,7 +198,16 @@ fn software_outputs(
     let renderer = unsafe { GlesRenderer::new(context) }.context("could not start GLES")?;
     state.shm_state.update_formats(renderer.shm_formats());
     dmabuf_global(state, renderer.dmabuf_formats(), None);
+    // Its shaders, the glass's and the halo's among them, as on a GPU.
+    state.blur = true;
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
+}
+
+/// Whether Mesa's software EGL device is there, for
+/// [`RendererChoice::GlesSoftware`]; listing the devices opens none.
+pub fn software_gles() -> bool {
+    egl_available()
+        && EGLDevice::enumerate().is_ok_and(|mut devices| devices.any(|d| d.is_software()))
 }
 
 /// A GLES renderer on the GPU of `render_node`, or on the first GPU with a

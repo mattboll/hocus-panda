@@ -26,9 +26,11 @@
 //! and none coming out while it is open (4.7b).
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
-//! as in CI. The tests of motion and of the streak run on a GPU when the
-//! machine has one, and are skipped otherwise. The shell runs away from the machine's services (no session
-//! bus, no system bus, no PipeWire).
+//! as in CI. The tests of the compositor's shaders (the streak, the halo)
+//! run on GLES: on the GPU `HOCUS_TEST_GPU` names, else on Mesa's software
+//! device, and are skipped without it. The tests of the shell's motion run
+//! on that GPU alone, and are skipped without it. The shell runs away from
+//! the machine's services (no session bus, no system bus, no PipeWire).
 
 mod common;
 
@@ -64,9 +66,10 @@ struct Machine {
     pane_pid: Option<u32>,
     /// The time the shell's clock reads as it starts (`HOCUS_CLOCK_AT`).
     clock_at: Option<&'static str>,
-    /// The compositor on this render node, the shell on its GPU (else
-    /// Pixman, the shell on the CPU).
-    gpu: Option<PathBuf>,
+    /// The compositor on GLES: on the GPU `HOCUS_TEST_GPU` names, the
+    /// shell on it too; else on Mesa's software device, the shell on the
+    /// CPU. Pixman otherwise, or without that device, the shell on the CPU.
+    gles: bool,
     reduced_motion: bool,
     /// The bar in its mini form (4.7).
     mini: bool,
@@ -307,11 +310,14 @@ fn start_in(
     let hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],
-            renderer: match machine.gpu {
-                Some(_) => RendererChoice::Gles,
-                None => RendererChoice::Pixman,
-            },
-            render_node: machine.gpu.clone(),
+            ..if machine.gles {
+                common::gles()
+            } else {
+                HeadlessConfig {
+                    renderer: RendererChoice::Pixman,
+                    ..HeadlessConfig::default()
+                }
+            }
         },
         config,
         Some(script),
@@ -1331,15 +1337,14 @@ fn motion_of(commits: &[Duration]) -> (usize, Duration) {
 
 /// On a GPU: a change slides the rows and hops the changed agent's panda,
 /// for 650 ms, then nothing moves; with reduced motion, it changes at
-/// once. Skipped without a render node.
+/// once. Skipped without a render node named in `HOCUS_TEST_GPU`.
 #[test]
 fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    let node = PathBuf::from("/dev/dri/renderD128");
-    if !node.exists() {
-        eprintln!("no render node: the shell would draw on the CPU, without motion");
+    if render_node().is_none() {
+        eprintln!("the shell would draw on the CPU, without motion: skipped");
         return Ok(());
     }
     for (reduced_motion, moves) in [(false, true), (true, false)] {
@@ -1347,7 +1352,7 @@ fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
             &shell,
             &hocus,
             &Machine {
-                gpu: Some(node.clone()),
+                gles: true,
                 reduced_motion,
                 ..Machine::default()
             },
@@ -1470,7 +1475,7 @@ fn near((x0, y0): (f64, f64), (x1, y1): (f64, f64), by: f64) -> bool {
     (x0 - x1).abs() <= by && (y0 - y1).abs() <= by
 }
 
-/// On a GPU: a row's click on the same desktop runs the streak from the
+/// On GLES: a row's click on the same desktop runs the streak from the
 /// row's left edge to the window's centre in the row's colour, for some
 /// 520 ms; the window has the keyboard, and its rim pulses with the ring
 /// as the streak lands; then nothing is drawn.
@@ -1479,16 +1484,13 @@ fn going_to_an_agent_runs_the_streak_then_pulses_its_rim_then_rests() -> anyhow:
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    let Some(node) = render_node() else {
-        return Ok(());
-    };
     // No minute changes for the test's while: the clock's odometer would
     // draw at rest.
     let mut bed = start(
         &shell,
         &hocus,
         &Machine {
-            gpu: Some(node),
+            gles: true,
             clock_at: Some("10:00:05"),
             ..Machine::default()
         },
@@ -1560,21 +1562,18 @@ fn going_to_an_agent_runs_the_streak_then_pulses_its_rim_then_rests() -> anyhow:
     Ok(())
 }
 
-/// On a GPU: the window on another desktop, the strip slides there first;
+/// On GLES: the window on another desktop, the strip slides there first;
 /// the streak runs once it has.
 #[test]
 fn going_to_an_agent_on_another_desktop_slides_there_first() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    let Some(node) = render_node() else {
-        return Ok(());
-    };
     let mut bed = start(
         &shell,
         &hocus,
         &Machine {
-            gpu: Some(node),
+            gles: true,
             ..Machine::default()
         },
     )?;
@@ -1609,7 +1608,7 @@ fn going_to_an_agent_on_another_desktop_slides_there_first() -> anyhow::Result<(
     Ok(())
 }
 
-/// With reduced motion (on a GPU), or a compositor on the CPU: no slide
+/// With reduced motion (on GLES), or a compositor on the CPU: no slide
 /// and no streak; the rim lights and fades, without its ring.
 #[test]
 fn with_reduced_motion_or_on_the_cpu_only_the_rim_lights() -> anyhow::Result<()> {
@@ -1617,14 +1616,14 @@ fn with_reduced_motion_or_on_the_cpu_only_the_rim_lights() -> anyhow::Result<()>
         return Ok(());
     };
     let machines = [
-        render_node().map(|node| Machine {
-            gpu: Some(node),
+        Machine {
+            gles: true,
             reduced_motion: true,
             ..Machine::default()
-        }),
-        Some(Machine::default()),
+        },
+        Machine::default(),
     ];
-    for machine in machines.into_iter().flatten() {
+    for machine in machines {
         let mut bed = start(&shell, &hocus, &machine)?;
         let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
         common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
@@ -1654,21 +1653,18 @@ fn with_reduced_motion_or_on_the_cpu_only_the_rim_lights() -> anyhow::Result<()>
     Ok(())
 }
 
-/// On a GPU: the streak takes its row's colour, read from the screen:
+/// On GLES: the streak takes its row's colour, read from the screen:
 /// amber to an agent that waits, the accent to one that works.
 #[test]
 fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    let Some(node) = render_node() else {
-        return Ok(());
-    };
     let mut bed = start(
         &shell,
         &hocus,
         &Machine {
-            gpu: Some(node),
+            gles: true,
             ..Machine::default()
         },
     )?;
@@ -1727,7 +1723,7 @@ fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// On a GPU: the streak starts from nothing at its row (issue #495). CSS's
+/// On GLES: the streak starts from nothing at its row (issue #495). CSS's
 /// shadow ignores the line's gradient: drawn as it is, its glow ringed the
 /// line's first pixels, still transparent, a dark core. Read from the
 /// screen against what it showed before the click: next to the row, and
@@ -1738,14 +1734,11 @@ fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    let Some(node) = render_node() else {
-        return Ok(());
-    };
     let mut bed = start(
         &shell,
         &hocus,
         &Machine {
-            gpu: Some(node),
+            gles: true,
             ..Machine::default()
         },
     )?;
@@ -1813,21 +1806,18 @@ fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// On a GPU: a second row clicked while the first streak runs replaces it
+/// On GLES: a second row clicked while the first streak runs replaces it
 /// at once: one streak, the second row's, from the second row.
 #[test]
 fn a_second_click_replaces_the_first_streak_at_once() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    let Some(node) = render_node() else {
-        return Ok(());
-    };
     let mut bed = start(
         &shell,
         &hocus,
         &Machine {
-            gpu: Some(node),
+            gles: true,
             ..Machine::default()
         },
     )?;
@@ -2428,22 +2418,19 @@ impl Bed {
     }
 }
 
-/// A bed on the GPU, the compositor drawing with GLES (the halo is its
-/// shaders'); `None`, and the test is skipped, without one. Its clock far
+/// A bed on GLES, the GPU's or Mesa's software device (the halo is its
+/// shaders'); `None`, and the test is skipped, without it. Its clock far
 /// from a minute's change: the clock's odometer would draw while nothing
 /// else should.
 fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
     let Some((shell, hocus)) = ready() else {
         return Ok(None);
     };
-    let Some(node) = render_node() else {
-        return Ok(None);
-    };
     let bed = start(
         &shell,
         &hocus,
         &Machine {
-            gpu: Some(node),
+            gles: true,
             reduced_motion,
             clock_at: Some("10:00:05"),
             ..Machine::default()
@@ -2465,7 +2452,7 @@ fn span(glimpses: &[Glimpse], shows: impl Fn(&Glimpse) -> bool) -> Duration {
     }
 }
 
-/// On a GPU: an agent waiting runs one wave down the bar, in amber, for
+/// On GLES: an agent waiting runs one wave down the bar, in amber, for
 /// some 600 ms, as the glow fades in; the glow stays, read from the screen
 /// beside the bar, and nothing is drawn at rest.
 #[test]
@@ -2522,7 +2509,7 @@ fn a_waiting_agent_runs_a_wave_then_glows_then_nothing_draws() -> anyhow::Result
     Ok(())
 }
 
-/// On a GPU: still waiting at its fifth minute (backdated to 4 min 59 s),
+/// On GLES: still waiting at its fifth minute (backdated to 4 min 59 s),
 /// the agent's reminder runs one more wave, by the loop's timer a second
 /// later; then never again.
 #[test]
@@ -2557,7 +2544,7 @@ fn the_reminder_wave_comes_once_after_five_minutes() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// On a GPU: a stuck agent lights the glow in orange, without a wave.
+/// On GLES: a stuck agent lights the glow in orange, without a wave.
 #[test]
 fn a_stuck_agent_glows_without_a_wave() -> anyhow::Result<()> {
     let Some(mut bed) = halo_bed(false)? else {
@@ -2584,7 +2571,7 @@ fn a_stuck_agent_glows_without_a_wave() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// On a GPU: a finished agent not seen yet lights a soft green glow,
+/// On GLES: a finished agent not seen yet lights a soft green glow,
 /// without a wave (variant B).
 #[test]
 fn a_finished_agent_not_seen_glows_softly_green() -> anyhow::Result<()> {
@@ -2649,7 +2636,7 @@ fn waiting_comes_before_stuck_before_to_see() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// On a GPU: answering the agent ends its halo, which fades out in some
+/// On GLES: answering the agent ends its halo, which fades out in some
 /// 500 ms; waiting again, going to it from its row does too, while it
 /// still waits. Then nothing is drawn.
 #[test]
@@ -2693,7 +2680,7 @@ fn acting_ends_the_halo_with_its_fade() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// With reduced motion, on a GPU: no wave; the glow is there within some
+/// With reduced motion, on GLES: no wave; the glow is there within some
 /// 200 ms.
 #[test]
 fn with_reduced_motion_no_wave_and_the_glow_fades_in_quickly() -> anyhow::Result<()> {
@@ -2828,7 +2815,7 @@ fn peek_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
         &shell,
         &hocus,
         &Machine {
-            gpu: render_node(),
+            gles: render_node().is_some(),
             reduced_motion,
             clock_at: Some("10:00:05"),
             ..Machine::default()
@@ -3175,9 +3162,9 @@ fn with_reduced_motion_or_on_the_cpu_the_peek_fades_in_place() -> anyhow::Result
         return Ok(());
     };
     let mut machines = vec![Machine::default()];
-    if let Some(node) = render_node() {
+    if render_node().is_some() {
         machines.push(Machine {
-            gpu: Some(node),
+            gles: true,
             reduced_motion: true,
             ..Machine::default()
         });
@@ -3341,21 +3328,22 @@ fn the_secretary_heads_the_group_with_her_line_in_the_moments_mood() -> anyhow::
 
 /// On a GPU: when someone starts waiting, her ear radiates twice and she
 /// hops twice, 1.2 s, once; then nothing moves. With reduced motion, she
-/// holds still. Skipped without a render node.
+/// holds still. Skipped without a render node named in `HOCUS_TEST_GPU`.
 #[test]
 fn the_secretary_radiates_once_when_someone_starts_waiting_then_rests() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    let Some(node) = render_node() else {
+    if render_node().is_none() {
+        eprintln!("the shell would draw on the CPU, without motion: skipped");
         return Ok(());
-    };
+    }
     for (reduced_motion, moves) in [(false, true), (true, false)] {
         let mut bed = start(
             &shell,
             &hocus,
             &Machine {
-                gpu: Some(node.clone()),
+                gles: true,
                 reduced_motion,
                 ..Machine::default()
             },
@@ -3935,7 +3923,7 @@ fn plugging_nothing_in_from_the_mini_forms_sources_hides_the_group_in_both_forms
 #[test]
 fn the_halo_and_the_peek_work_in_the_mini_form() -> anyhow::Result<()> {
     let Some(mut bed) = mini_bed(Machine {
-        gpu: render_node(),
+        gles: render_node().is_some(),
         clock_at: Some("10:00:05"),
         ..Machine::default()
     })?

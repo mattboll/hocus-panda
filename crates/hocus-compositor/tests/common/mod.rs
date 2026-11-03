@@ -150,17 +150,33 @@ pub fn shell_script(
     Ok(script)
 }
 
-/// The render node for the tests that need the compositor on a GPU (its
-/// shaders: the streak, the halo; the rim's ring); `None`, and the test is
-/// skipped or runs on the CPU alone, without one.
+/// The render node for the tests that need a GPU (the shell's motion on
+/// wgpu, timings): the one `HOCUS_TEST_GPU` names, never one found by
+/// itself, which may be the GPU of the session the tests run in (#534);
+/// `None`, and the test is skipped or runs on the CPU alone.
 pub fn render_node() -> Option<std::path::PathBuf> {
-    let node = std::path::PathBuf::from("/dev/dri/renderD128");
-    if node.exists() {
-        Some(node)
-    } else {
-        eprintln!("no render node: the compositor would draw on the CPU, without its shaders");
-        None
+    let node = hocus_compositor::test_gpu::node();
+    if node.is_none() {
+        eprintln!(
+            "no GPU: {} names no render node (HOCUS_TEST_GPU=/dev/dri/renderD128 to draw on one)",
+            hocus_compositor::test_gpu::ENV
+        );
     }
+    node
+}
+
+/// A compositor drawing with GLES, for the tests of its shaders (the
+/// streak, the halo, the glass, the rim's ring): on the GPU
+/// `HOCUS_TEST_GPU` names, else on Mesa's software device; with pixman
+/// without that, which those tests see in `renderer()` and skip.
+pub fn gles() -> HeadlessConfig {
+    let config = hocus_compositor::test_gpu::gles();
+    match (config.renderer, &config.render_node) {
+        (_, Some(node)) => eprintln!("GLES on the GPU {}", node.display()),
+        (RendererChoice::GlesSoftware, _) => eprintln!("GLES on Mesa's software device"),
+        _ => eprintln!("no GLES here, not even Mesa's software device: pixman"),
+    }
+    config
 }
 
 pub fn compositor() -> anyhow::Result<Headless> {
