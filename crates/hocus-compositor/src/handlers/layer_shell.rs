@@ -42,7 +42,9 @@ impl WlrLayerShellHandler for State {
         &mut self.layer_shell_state
     }
 
-    /// On the output asked for, or the one under the pointer.
+    /// On the output asked for; asked for on none, one of the bar's own
+    /// surfaces on a screen whose bar lacks it, any other surface on the
+    /// screen under the pointer.
     fn new_layer_surface(
         &mut self,
         surface: WlrLayerSurface,
@@ -54,7 +56,10 @@ impl WlrLayerShellHandler for State {
             // A screen unplugged as the client asked: its global is still
             // there a moment, disabled, but the surface would show nowhere.
             Some(asked) => Output::from_resource(asked).filter(|o| self.is_plugged(o)),
-            None => self.output_under_pointer(),
+            None => {
+                tracing::debug!(namespace, "a layer surface asked for on no screen");
+                self.screen_for(&namespace)
+            }
         };
         let Some(output) = output else {
             tracing::warn!(namespace, "a layer surface with no output");
@@ -91,7 +96,46 @@ impl WlrLayerShellHandler for State {
 }
 delegate_layer_shell!(State);
 
+/// The bar's own surfaces, one of each per bar.
+const BAR_PARTS: [&str; 7] = [
+    hocus_link::NAMESPACE,
+    hocus_link::CLOCK_NAMESPACE,
+    hocus_link::LEVELS_NAMESPACE,
+    hocus_link::CONNECTIONS_NAMESPACE,
+    hocus_link::DESKTOPS_NAMESPACE,
+    hocus_link::AGENTS_NAMESPACE,
+    hocus_link::FOOTER_NAMESPACE,
+];
+
 impl State {
+    /// The screen for a layer surface of `namespace` asked for on none.
+    /// One of the bar's own surfaces goes to a screen given a bar that
+    /// does not have that surface yet, the one under the pointer if it is
+    /// one of them: a screen just plugged in may get its bar's surfaces
+    /// before the shell knows its name (#540). On a screen that has its
+    /// own already it would be a second bar: it goes nowhere. Any other
+    /// surface goes under the pointer.
+    fn screen_for(&mut self, namespace: &str) -> Option<Output> {
+        if !BAR_PARTS.contains(&namespace) {
+            return self.output_under_pointer();
+        }
+        self.panel.asked_nowhere += 1;
+        let lacking: Vec<Output> = self
+            .space
+            .outputs()
+            .filter(|o| {
+                self.panel.bars.contains_key(&o.name())
+                    && !layer_map_for_output(o)
+                        .layers()
+                        .any(|l| l.namespace() == namespace)
+            })
+            .cloned()
+            .collect();
+        self.output_under_pointer()
+            .filter(|o| lacking.contains(o))
+            .or_else(|| lacking.into_iter().next())
+    }
+
     /// `layer`, unmapped, no longer shows: what showed it or depended on
     /// it lets it go.
     pub(crate) fn layer_gone(&mut self, layer: &LayerSurface) {
