@@ -409,13 +409,23 @@ fn the_delay_counts_down_and_the_capture_is_not_in_the_image() -> anyhow::Result
     bed.drag((x, y), (x + 300.0, y + 200.0))?;
     bed.hp.capture_ask(CaptureAsk::Delay);
     bed.hp.capture_ask(CaptureAsk::Shoot);
-    assert_eq!(bed.hp.capture(), CaptureShown::Counting(3));
+    assert_eq!(
+        bed.hp.capture(),
+        CaptureShown::Counting {
+            left: 3,
+            record: false
+        }
+    );
     wait(&mut bed.hp, Duration::from_millis(100))?;
     // Nothing darkened while it counts.
     assert_eq!(bed.shown(1900, 1060)?, shown_before);
-    let counted = bed
-        .hp
-        .dispatch_until(WAIT, |hp| hp.capture() == CaptureShown::Counting(2))?;
+    let counted = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.capture()
+            == CaptureShown::Counting {
+                left: 2,
+                record: false,
+            }
+    })?;
     assert!(counted, "the countdown did not go on");
     assert_eq!(bed.hp.captures().0, 0);
     let (_, image) = bed.taken(1)?;

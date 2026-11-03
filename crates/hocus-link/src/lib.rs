@@ -41,6 +41,7 @@
 use std::{fmt, str::FromStr, time::Duration};
 
 mod capture;
+mod record;
 mod share;
 pub use capture::{
     CAPTURE_DELAYS, CAPTURE_EDITOR_IN, CAPTURE_EDITOR_NAMESPACE, CAPTURE_THUMB_IN,
@@ -48,6 +49,7 @@ pub use capture::{
     CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE, CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar,
     CaptureMode, Captured,
 };
+pub use record::{RECORD_COUNTDOWN, RECORD_FPS, RecordAsk, RecordFormat, Recorded, RecordingShown};
 pub use share::{
     IN_USE_NAMESPACE, SHARE_CHOOSER_FROM, SHARE_CHOOSER_IN, SHARE_CHOOSER_NAMESPACE,
     SHARE_CHOOSER_RADIUS, SHARE_MONITOR, SHARE_THUMB_RADIUS, SHARE_THUMBS_EVERY, SHARE_WINDOW,
@@ -414,6 +416,15 @@ pub enum ToShell {
     /// changes; empty, nothing is ([`ShareShown`]). Written `shares`, then
     /// each after a tab.
     Shares(Vec<ShareShown>),
+    /// A recording under way (5.10): the bar's item, its time and whether
+    /// it is paused ([`RecordingShown`]); sent as it starts, pauses and
+    /// goes on, and as the shell connects.
+    Recording(RecordingShown),
+    /// No recording any more: the bar's item goes. Written
+    /// `recording-end`.
+    RecordingEnd,
+    /// A recording saved: its thumbnail ([`Recorded`]).
+    Recorded(Recorded),
     /// The activation token for the tray's click `ask`
     /// ([`ToCompositor::TrayClick`], 5.14b): the shell gives it to the
     /// item before activating it. Written `tray-token ASK TOKEN`.
@@ -1178,6 +1189,9 @@ pub enum ToCompositor {
     /// The chooser's thumbnails' places, what it chose, its cancel, a
     /// share stopped from the bar (5.11, [`ShareAsk`]).
     Share(ShareAsk),
+    /// The bar's item pauses, goes on with or stops the recording; a
+    /// recording's thumbnail deletes or drags it (5.10, [`RecordAsk`]).
+    Record(RecordAsk),
     /// The user clicked a tray icon (5.14b): the shell is about to call
     /// the item's `Activate` or `SecondaryActivate`. `pid` is the process
     /// of the item's D-Bus connection (0: not known). The compositor
@@ -1376,6 +1390,9 @@ impl fmt::Display for ToShell {
             Self::Capture(bar) => bar.write(f),
             Self::CaptureEnd => f.write_str("capture-end"),
             Self::Captured(captured) => captured.write(f),
+            Self::Recording(shown) => shown.write(f),
+            Self::RecordingEnd => f.write_str("recording-end"),
+            Self::Recorded(recorded) => recorded.write(f),
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -1494,6 +1511,9 @@ impl FromStr for ToShell {
         if line.starts_with("captured ") {
             return Captured::read(line).map(Self::Captured);
         }
+        if line.starts_with("recorded ") {
+            return Recorded::read(line).map(Self::Recorded);
+        }
         if let Some(fields) = line.strip_prefix("titles ") {
             let mut fields = fields.split('\t');
             let output = fields.next().unwrap_or_default();
@@ -1571,6 +1591,8 @@ impl FromStr for ToShell {
             }),
             Some("capture") => CaptureBar::read(&mut words).map(Self::Capture),
             Some("capture-end") => Ok(Self::CaptureEnd),
+            Some("recording") => RecordingShown::read(&mut words).map(Self::Recording),
+            Some("recording-end") => Ok(Self::RecordingEnd),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
@@ -1727,6 +1749,7 @@ impl fmt::Display for ToCompositor {
             Self::TrayClick { ask, pid } => write!(f, "tray-click {ask} {pid}"),
             Self::Capture(ask) => ask.write(f),
             Self::Share(ask) => ask.write(f),
+            Self::Record(ask) => ask.write(f),
             Self::Clip { paste, clip } => {
                 write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
                 clip.write(f)
@@ -1808,6 +1831,7 @@ impl FromStr for ToCompositor {
                 Ok(Self::TrayClick { ask, pid })
             }
             Some("capture") => CaptureAsk::read(&mut words).map(Self::Capture),
+            Some("record") => RecordAsk::read(&mut words).map(Self::Record),
             Some("clip") => Ok(Self::Clip {
                 paste: flag(words.next(), "paste", "copy")?,
                 clip: Clip::read(&mut words)?,

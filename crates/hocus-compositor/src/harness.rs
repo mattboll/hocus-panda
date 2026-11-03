@@ -470,6 +470,54 @@ impl Headless {
         self.app.state.share.copied_on_loop()
     }
 
+    /// The recording under way (5.10).
+    pub fn recording(&self) -> Option<crate::RecordInfo> {
+        self.app.state.record.info()
+    }
+
+    /// Whether recordings stopped are still being ended.
+    pub fn recording_ending(&self) -> bool {
+        self.app.state.record.ending()
+    }
+
+    /// The last recording saved: its file, its size, how long it lasts,
+    /// its first frame's picture and its encoder.
+    pub fn recorded(&self) -> Option<crate::record::encode::Saved> {
+        self.app.state.record.last_saved().cloned()
+    }
+
+    /// Why recordings failed, so far.
+    pub fn record_failures(&self) -> Vec<String> {
+        self.app.state.record.failures().to_vec()
+    }
+
+    /// The recording's frames handed to its recorder so far.
+    pub fn record_frames(&self) -> u64 {
+        self.app.state.record.frames_sent()
+    }
+
+    /// The longest a recording's frame's hand-over took the loop (a
+    /// timing: never a budget).
+    pub fn record_lend_most(&self) -> Duration {
+        self.app.state.record.lend_most()
+    }
+
+    /// The bytes of recorded frames copied on the loop: a budget of 0.
+    pub fn record_copied_on_loop(&self) -> u64 {
+        self.app.state.record.copied_on_loop()
+    }
+
+    /// The shell asks something of the recording, as its bar's item does.
+    pub fn record_ask(&mut self, ask: hocus_link::RecordAsk) {
+        self.app.state.record_asked(ask);
+    }
+
+    /// The session leaves its terminal, as the tty backend says when the
+    /// display manager's lock or another session shows (5.10's lock).
+    pub fn session_paused(&mut self) {
+        self.app.state.record_screen_locks();
+    }
+
     /// What the screen capture shows (5.8).
     pub fn capture(&self) -> crate::capture::Shown {
         self.app.state.capture.shown()

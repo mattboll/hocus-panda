@@ -62,6 +62,9 @@ pub enum Action {
     Capture,
     /// A capture taken at once, without choosing (5.8).
     CaptureNow(CaptureNow),
+    /// A recording with the last settings, or the one under way stopped
+    /// (5.10).
+    Record,
 }
 
 /// What `Shift+Print` and `Alt+Print` capture at once.
@@ -252,6 +255,7 @@ shortcuts! {
     capture: ["Print"] => Action::Capture,
     capture_screen: ["Shift+Print"] => Action::CaptureNow(CaptureNow::Screen),
     capture_window: ["Alt+Print"] => Action::CaptureNow(CaptureNow::Window),
+    record: ["Super+Shift+R"] => Action::Record,
 }
 
 impl Shortcuts {
@@ -370,6 +374,7 @@ impl State {
             Action::Emoji => self.toggle_emoji(),
             Action::Capture => self.open_capture(),
             Action::CaptureNow(what) => self.capture_now(what),
+            Action::Record => self.record_shortcut(),
         }
     }
 

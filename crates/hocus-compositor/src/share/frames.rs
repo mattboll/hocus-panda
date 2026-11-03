@@ -39,17 +39,12 @@ use smithay::{
     utils::{Buffer as BufferCoords, Physical, Size, Transform},
 };
 
-use super::{
-    glread,
-    lease::Lease,
-    stream::{StreamsSender, ToStreams},
-    thumbs::Job,
-};
+use super::{glread, lease::Lease, sink::FrameTo, thumbs::Job};
 use crate::{
     State,
     going::Shaders,
     model::WindowId,
-    render::{BACKGROUND, OutputElement, OutputElements, Purpose},
+    render::{BACKGROUND, OutputElements, Purpose},
     wobble::Bend,
 };
 
@@ -77,7 +72,7 @@ pub trait Lends<T>: Renderer + ExportMem {
         id: u64,
         buffer: &T,
         size: (u32, u32),
-        to: &StreamsSender,
+        to: &FrameTo,
     ) -> anyhow::Result<Handed>;
 
     /// What it keeps for the shares that `keep` says are gone goes.
@@ -93,7 +88,7 @@ impl Lends<GlesTexture> for GlesRenderer {
         id: u64,
         buffer: &GlesTexture,
         size: (u32, u32),
-        to: &StreamsSender,
+        to: &FrameTo,
     ) -> anyhow::Result<Handed> {
         Ok(match reader.read(self, id, buffer, size, to)? {
             glread::Asked::Sent => Handed::Sent,
@@ -115,7 +110,7 @@ impl Lends<pixman::Image<'static, 'static>> for PixmanRenderer {
         id: u64,
         buffer: &pixman::Image<'static, 'static>,
         size: (u32, u32),
-        to: &StreamsSender,
+        to: &FrameTo,
     ) -> anyhow::Result<Handed> {
         let len = buffer.stride() * buffer.height();
         // SAFETY: pixman's image owns `stride × height` bytes at `data`
@@ -129,13 +124,13 @@ impl Lends<pixman::Image<'static, 'static>> for PixmanRenderer {
             anyhow::ensure!(!data.is_null() && len > 0, "no pixels to lend");
             std::slice::from_raw_parts(data as *const u8, len)
         };
-        let lease = to.lend(bytes);
-        to.send(ToStreams::Frame {
+        let lease = to.lend(bytes, false);
+        to.frame(
             id,
-            lease: lease.clone(),
+            lease.clone(),
             size,
-            stride: u32::try_from(buffer.stride()).unwrap_or(u32::MAX),
-        });
+            u32::try_from(buffer.stride()).unwrap_or(u32::MAX),
+        );
         Ok(Handed::Lent(lease))
     }
 
@@ -192,12 +187,9 @@ impl<R: Lends<T>, T> std::fmt::Debug for Frames<R, T> {
 }
 
 impl<R: Lends<T>, T> Frames<R, T> {
-    /// What was given back may be drawn into again, or freed.
-    fn settle(
-        &mut self,
-        renderer: &mut R,
-        shares: &std::collections::BTreeMap<u64, super::Active>,
-    ) {
+    /// What was given back may be drawn into again, or freed; `live` says
+    /// which keys are still drawn for (a share's id, a recording's key).
+    fn settle(&mut self, renderer: &mut R, live: &dyn Fn(u64) -> bool) {
         self.retired
             .retain(|t| t.lent.as_ref().is_some_and(|l| !l.is_back()));
         for target in self.targets.values_mut() {
@@ -209,7 +201,7 @@ impl<R: Lends<T>, T> Frames<R, T> {
             .targets
             .keys()
             .copied()
-            .filter(|id| !shares.contains_key(id))
+            .filter(|id| !live(*id))
             .collect();
         for id in gone {
             if let Some(target) = self.targets.remove(&id)
@@ -218,12 +210,17 @@ impl<R: Lends<T>, T> Frames<R, T> {
                 self.retired.push(target);
             }
         }
-        renderer.forget(&mut self.reader, &|id| shares.contains_key(&id));
+        renderer.forget(&mut self.reader, live);
+    }
+
+    /// Whether key `key`'s buffer is lent still (the CPU's).
+    pub(crate) fn lent(&self, key: u64) -> bool {
+        self.targets.get(&key).is_some_and(|t| t.lent.is_some())
     }
 }
 
 /// What came of a share's frame.
-enum Drawn {
+pub(crate) enum Drawn {
     /// Handed over.
     Went,
     /// Nothing changed.
@@ -248,12 +245,22 @@ where
     R::TextureId: Send + Clone + Texture + 'static,
     R::Error: Send + Sync + 'static,
 {
-    frames.settle(renderer, &state.share.shares);
+    let recording = state.record.frames_key();
+    let shares = &state.share.shares;
+    frames.settle(renderer, &|key| {
+        shares.contains_key(&key) || Some(key) == recording
+    });
     thumbnails(renderer, state);
+    crate::record::frames::run(renderer, state, frames);
     if state.share.shares.is_empty() {
         return;
     }
-    let Some(to) = state.share.streams.as_ref().map(|s| s.sender().clone()) else {
+    let Some(to) = state
+        .share
+        .streams
+        .as_ref()
+        .map(|s| FrameTo::Stream(s.sender().clone()))
+    else {
         return;
     };
     let due = state.redraw || std::mem::take(&mut state.share.streams_due);
@@ -316,7 +323,7 @@ fn frame<R, T>(
     renderer: &mut R,
     state: &mut State,
     frames: &mut Frames<R, T>,
-    to: &StreamsSender,
+    to: &FrameTo,
     id: u64,
     source: &ShareSource,
     pointer: bool,
@@ -373,6 +380,39 @@ where
             (elements, scale, [0.0; 4])
         }
     };
+    let since = std::time::Instant::now();
+    let drawn = draw_and_hand(
+        renderer, frames, to, id, &elements, scale, clear, agreed, fresh,
+    )?;
+    if matches!(drawn, Drawn::Went) {
+        state.frame_handed(since);
+    }
+    Ok(drawn)
+}
+
+/// The frame of `key` (a share's id, a recording's key): `elements` drawn
+/// into its buffer, `size` pixels at `scale`, over `clear`, and handed
+/// over to `to` if something changed (or `fresh`: a frame is owed).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_and_hand<R, T, E>(
+    renderer: &mut R,
+    frames: &mut Frames<R, T>,
+    to: &FrameTo,
+    key: u64,
+    elements: &[E],
+    scale: f64,
+    clear: [f32; 4],
+    size: (u32, u32),
+    fresh: bool,
+) -> anyhow::Result<Drawn>
+where
+    R: Renderer + Offscreen<T> + Bind<T> + ExportMem + Lends<T>,
+    R::Error: Send + Sync + 'static,
+    E: smithay::backend::renderer::element::RenderElement<R>,
+{
+    use anyhow::Context;
+    let agreed = size;
+    let id = key;
     let size: Size<i32, Physical> = (agreed.0 as i32, agreed.1 as i32).into();
     anyhow::ensure!(size.w > 0 && size.h > 0, "nothing to draw");
     let Frames {
@@ -401,7 +441,6 @@ where
         }
     }
     let target = targets.get_mut(&id).context("the share's buffer")?;
-    let elements: &[OutputElement<R>] = &elements;
     {
         let mut framebuffer = renderer
             .bind(&mut target.buffer)
@@ -416,20 +455,15 @@ where
             return Ok(Drawn::Same);
         }
     }
-    let since = std::time::Instant::now();
     let handed = renderer.hand_over(reader, id, &target.buffer, agreed, to)?;
-    let drawn = match handed {
+    Ok(match handed {
         Handed::Sent => Drawn::Went,
         Handed::Lent(lease) => {
             target.lent = Some(lease);
             Drawn::Went
         }
         Handed::Busy => Drawn::Owed,
-    };
-    if matches!(drawn, Drawn::Went) {
-        state.frame_handed(since);
-    }
-    Ok(drawn)
+    })
 }
 
 /// Window `id`, shared, is told its frame was drawn, wherever it is.

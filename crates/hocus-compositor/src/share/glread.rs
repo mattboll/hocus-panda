@@ -30,7 +30,7 @@ use smithay::backend::{
     renderer::gles::{GlesRenderer, GlesTexture, ffi},
 };
 
-use super::stream::{FromStreams, StreamsSender, ToStreams};
+use super::sink::FrameTo;
 
 /// Buffers a share reads into at most: one drawn, one being copied, one
 /// spare.
@@ -56,7 +56,7 @@ struct Job {
     len: usize,
     size: (u32, u32),
     free: Arc<AtomicBool>,
-    to: StreamsSender,
+    to: FrameTo,
 }
 
 /// The loop's side: each share's buffers, and the thread.
@@ -93,7 +93,7 @@ impl Reader {
         id: u64,
         texture: &GlesTexture,
         size: (u32, u32),
-        to: &StreamsSender,
+        to: &FrameTo,
     ) -> anyhow::Result<Asked> {
         let thread = self.thread(renderer)?;
         let len = size.0 as usize * size.1 as usize * 4;
@@ -313,7 +313,7 @@ fn read_back(context: &EGLContext, jobs: &mpsc::Receiver<Job>) {
                     id = job.id,
                     "a frame's read-back never ended: dropped"
                 );
-                job.to.tell(FromStreams::Returned { id: job.id });
+                job.to.returned(job.id);
                 continue;
             }
         }
@@ -344,20 +344,16 @@ fn read_back(context: &EGLContext, jobs: &mpsc::Receiver<Job>) {
                     std::slice::from_raw_parts(mapped as *const u8, job.len)
                 }
             };
-            let lease = job.to.lend_quiet(pixels);
-            job.to.send(ToStreams::Frame {
-                id: job.id,
-                lease: lease.clone(),
-                size: job.size,
-                stride: job.size.0 * 4,
-            });
+            let lease = job.to.lend(pixels, true);
+            job.to
+                .frame(job.id, lease.clone(), job.size, job.size.0 * 4);
             if !lease.wait_back(WAIT) {
                 lease.revoke();
             }
             unmap(&gl, job.pbo);
         }
         job.free.store(true, Ordering::Release);
-        job.to.tell(FromStreams::Returned { id: job.id });
+        job.to.returned(job.id);
     }
 }
 

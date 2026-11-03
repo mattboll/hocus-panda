@@ -73,6 +73,14 @@ const EDITOR_FROST: crate::glass::Frost = crate::glass::Frost {
 /// The types a capture is dragged as.
 const URIS: &str = "text/uri-list";
 
+/// What is dragged: a capture (its address and its image), or a
+/// recording's file (its address alone).
+#[derive(Debug, Clone)]
+enum Dragged {
+    Capture(u64),
+    File(PathBuf),
+}
+
 /// A capture taken, as the compositor keeps it.
 #[derive(Debug, Clone)]
 struct Taken {
@@ -86,8 +94,9 @@ struct Taken {
 #[derive(Default)]
 pub struct After {
     taken: HashMap<u64, Taken>,
-    /// The capture being dragged into an application.
-    dragging: Option<u64>,
+    /// The capture being dragged into an application, or a recording's
+    /// file (5.10).
+    dragging: Option<Dragged>,
     thumb: Option<(LayerSurface, Duration)>,
     editor: Option<(LayerSurface, Duration)>,
     shadow: FrameIds,
@@ -255,9 +264,36 @@ impl State {
             return;
         }
         tracing::info!(id, "the capture is dragged");
-        self.capture.after.dragging = Some(id);
+        self.capture.after.dragging = Some(Dragged::Capture(id));
         let metadata = SourceMetadata {
             mime_types: vec![URIS.to_owned(), crate::clipboard::PNG.to_owned()],
+            dnd_action: DndAction::Copy,
+        };
+        let dh = self.display_handle.clone();
+        let seat = self.seat.clone();
+        data_device::start_dnd(&dh, &seat, self, serial, Some(start), None, metadata);
+    }
+
+    /// A recording's thumbnail dragged (5.10), the left button held: its
+    /// file is dragged from there, as its address.
+    pub(crate) fn drag_file(&mut self, file: PathBuf) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let (Some(start), Some(serial)) = (
+            pointer.grab_start_data(),
+            pointer.with_grab(|serial, _| serial),
+        ) else {
+            tracing::debug!("no button held: no drag");
+            return;
+        };
+        if start.button != crate::grabs::BTN_LEFT {
+            return;
+        }
+        tracing::info!(file = %file.display(), "a file is dragged");
+        self.capture.after.dragging = Some(Dragged::File(file));
+        let metadata = SourceMetadata {
+            mime_types: vec![URIS.to_owned()],
             dnd_action: DndAction::Copy,
         };
         let dh = self.display_handle.clone();
@@ -268,13 +304,17 @@ impl State {
     /// The application the capture was dropped on reads it as `mime`: its
     /// address, or its image, written on a thread.
     pub fn capture_drag_send(&mut self, mime: &str, fd: OwnedFd) {
-        let Some(file) = self
-            .capture
-            .after
-            .dragging
-            .and_then(|id| self.capture.after.taken.get(&id))
-            .and_then(|t| t.file.clone())
-        else {
+        let file = match &self.capture.after.dragging {
+            Some(Dragged::Capture(id)) => self
+                .capture
+                .after
+                .taken
+                .get(id)
+                .and_then(|t| t.file.clone()),
+            Some(Dragged::File(file)) if mime == URIS => Some(file.clone()),
+            _ => None,
+        };
+        let Some(file) = file else {
             return;
         };
         let mime = mime.to_owned();
