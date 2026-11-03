@@ -153,6 +153,15 @@
 # mute = "XF86AudioMute"
 # brightness-up = "XF86MonBrightnessUp"
 # brightness-down = "XF86MonBrightnessDown"
+# The screen capture (docs/design/screenshots.md): an area, a window, a
+# screen or all of them, chosen on every screen darkened, then copied and
+# saved in the pictures' folder ("Screenshots", "Captures d'écran" in
+# French).
+# capture = "Print"
+# The whole screen under the pointer, at once.
+# capture-screen = "Shift+Print"
+# The focused window, at once.
+# capture-window = "Alt+Print"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.

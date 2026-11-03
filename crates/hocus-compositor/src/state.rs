@@ -177,6 +177,8 @@ pub struct State {
     pub clipboard: crate::clipboard::Clipboard,
     /// The emoji picker's insertions, and the text inputs (5.7).
     pub emoji: crate::emoji::Emoji,
+    /// The screen capture (5.8).
+    pub capture: crate::capture::Capture,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -285,6 +287,7 @@ impl State {
         );
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let panel = crate::panel::Panel::load(config.state_dir.as_deref());
+        let capture = crate::capture::Capture::load(config.state_dir.as_deref());
 
         Ok(Self {
             display_handle: dh.clone(),
@@ -354,6 +357,7 @@ impl State {
             bubbles: crate::bubbles::Bubbles::default(),
             clipboard: crate::clipboard::Clipboard::default(),
             emoji: crate::emoji::Emoji::new(dh),
+            capture,
             swiping: None,
             switcher: None,
             switcher_out: None,

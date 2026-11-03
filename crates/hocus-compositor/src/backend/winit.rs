@@ -4,7 +4,11 @@
 use anyhow::Context;
 use smithay::{
     backend::{
-        renderer::{ImportDma, ImportMemWl, damage::OutputDamageTracker, gles::GlesRenderer},
+        renderer::{
+            ImportDma, ImportMemWl,
+            damage::OutputDamageTracker,
+            gles::{GlesRenderer, GlesTexture},
+        },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
     input::pointer::CursorIcon,
@@ -131,6 +135,10 @@ impl WinitBackend {
     /// Asks for a frame only when something changed: nothing is drawn at
     /// rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // A capture asked for (5.8): drawn for it, off the window.
+        if state.capture.has_pending() {
+            crate::capture::shoot::take::<_, GlesTexture>(self.backend.renderer(), state);
+        }
         if state.redraw {
             self.backend.window().request_redraw();
         }

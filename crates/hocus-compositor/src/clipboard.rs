@@ -282,18 +282,7 @@ impl State {
             kind = clip.kind.word(),
             "the clipboard takes a history's item"
         );
-        data_device::set_data_device_selection(
-            &self.display_handle,
-            &self.seat,
-            types.clone(),
-            Some(Arc::from(clip.data)),
-        );
-        // X11 clients see it offered too.
-        if let Some(xwm) = self.xwm.as_mut()
-            && let Err(err) = xwm.new_selection(SelectionTarget::Clipboard, Some(types))
-        {
-            tracing::warn!(?err, "could not offer the history's item to X11");
-        }
+        self.offer_clipboard(types, clip.data);
         if !paste {
             return;
         }
@@ -342,6 +331,23 @@ impl State {
                 });
         if let Err(err) = given_up {
             tracing::warn!(%err.error, "could not time the paste");
+        }
+    }
+
+    /// The clipboard takes `data`, offered as `types` to Wayland and X11
+    /// clients alike: an item of the history, a capture (5.8).
+    pub fn offer_clipboard(&mut self, types: Vec<String>, data: Vec<u8>) {
+        data_device::set_data_device_selection(
+            &self.display_handle,
+            &self.seat,
+            types.clone(),
+            Some(Arc::from(data)),
+        );
+        // X11 clients see it offered too.
+        if let Some(xwm) = self.xwm.as_mut()
+            && let Err(err) = xwm.new_selection(SelectionTarget::Clipboard, Some(types))
+        {
+            tracing::warn!(?err, "could not offer the clipboard to X11");
         }
     }
 

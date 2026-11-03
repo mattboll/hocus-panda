@@ -399,6 +399,7 @@ impl State {
             ToCompositor::Copy(text) => self.copy_text(text),
             ToCompositor::Clip { paste, clip } => self.clip_asked(paste, clip),
             ToCompositor::Emoji { keep, text } => self.emoji_asked(keep, text),
+            ToCompositor::Capture(ask) => self.capture_asked(ask),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
             ToCompositor::LogOut => {

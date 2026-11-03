@@ -52,6 +52,8 @@ enum Kept {
     Release,
     /// A key while Alt+Tab is held.
     Switch(SwitchKey),
+    /// A key while the capture is open (5.8).
+    Capture(crate::capture::Key),
 }
 
 /// The digit of a key of the keyboard's top row, whatever the layout puts
@@ -161,6 +163,18 @@ impl State {
                         FilterResult::Forward
                     };
                 }
+                // The capture open keeps the keys (5.8), the modifiers
+                // going on, as Alt+Tab's.
+                if this.capture.choosing() {
+                    let sym = keysym.modified_sym();
+                    if is_modifier(sym) {
+                        return FilterResult::Forward;
+                    }
+                    this.kept_keys.insert(code);
+                    return FilterResult::Intercept(Kept::Capture(crate::capture::Key::of(
+                        sym, mods.shift,
+                    )));
+                }
                 // No key is logged, not even at trace level: what is typed
                 // may be a password (a terminal's, the Wi-Fi's).
                 let sym = keysym.modified_sym().raw();
@@ -229,6 +243,7 @@ impl State {
                     self.repeat_switcher_key(code, key);
                 }
             }
+            Some(Kept::Capture(key)) => self.capture_key(key),
             Some(Kept::Release) | None => {}
         }
         // Alt let go: Alt+Tab goes to its selection.
@@ -320,6 +335,10 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // The capture open takes it, but over its toolbar (5.8).
+        if self.capture_motion(location, time) {
+            return;
+        }
         // Against a bar's edge, or out of the bar in front (#519): first,
         // as it decides what is under the pointer.
         self.bar_front_follow(location);
@@ -453,6 +472,10 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // The capture open takes it, but over its toolbar (5.8).
+        if self.capture_button(button, state, time) {
+            return;
+        }
         let serial = SERIAL_COUNTER.next_serial();
         let at = pointer.current_location();
         if state == ButtonState::Released && self.kept_buttons.remove(&button) {

@@ -101,7 +101,13 @@ impl Panes {
         self.0.remove(output);
         self.0.remove(&popover_pane(output));
         self.0.remove(&launcher_pane(output));
+        self.0.remove(&capture_pane(output));
     }
+}
+
+/// The name of the pane under the capture's toolbar on `output` (5.8).
+pub fn capture_pane(output: &str) -> String {
+    format!("{output} capture")
 }
 
 /// The name of the pane under the launcher on `output`.

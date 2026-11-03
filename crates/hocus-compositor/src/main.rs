@@ -142,6 +142,12 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| PathBuf::from("hocus"));
     config.agent_places = hocus_agents::tools::Places::from_env(hocus, config.state_dir.clone());
     config.applications = hocus_compositor::application_dirs();
+    config.pictures = hocus_compositor::pictures_dir();
+    config.french = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.is_empty())
+        .is_some_and(|locale| locale.starts_with("fr"));
     let shell = (!args.no_shell).then(|| {
         args.shell.unwrap_or_else(|| {
             std::env::current_exe()
