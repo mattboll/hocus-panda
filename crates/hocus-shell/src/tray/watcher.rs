@@ -50,14 +50,20 @@ type Props = HashMap<String, OwnedVariant>;
 /// What the thread acts on.
 enum Input {
     /// `RegisterStatusNotifierItem(service)` from `sender`.
-    Register { service: String, sender: String },
+    Register {
+        service: String,
+        sender: String,
+    },
     /// A bus name has no owner any more.
     Gone(String),
     /// An item's signal, or its menu's.
     Signal(Message),
     Ask(Ask),
     /// An item's properties, read (none: they could not be).
-    Read { key: u32, props: Option<Props> },
+    Read {
+        key: u32,
+        props: Option<Props>,
+    },
     /// An item whose menu could not be read: its own (`ContextMenu`).
     ContextMenu(u32),
 }
@@ -511,22 +517,15 @@ impl Tray {
     async fn owner_of(&self, bus: &str) -> Option<String> {
         let name = BusName::try_from(bus).ok()?;
         let proxy = DBusProxy::new(&self.connection).await.ok()?;
-        proxy
-            .get_name_owner(name)
-            .await
-            .ok()
-            .map(|o| o.to_string())
+        proxy.get_name_owner(name).await.ok().map(|o| o.to_string())
     }
 
     fn say_registered(&self) {
         *self
             .registered
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = self
-            .items
-            .iter()
-            .map(|i| i.registered.clone())
-            .collect();
+            .unwrap_or_else(PoisonError::into_inner) =
+            self.items.iter().map(|i| i.registered.clone()).collect();
     }
 
     async fn gone(&mut self, name: &str) {
@@ -914,7 +913,10 @@ mod tests {
         );
         assert_eq!(
             place("/org/ayatana/NotificationItem/slack", ":1.9"),
-            Some((":1.9".to_owned(), "/org/ayatana/NotificationItem/slack".to_owned()))
+            Some((
+                ":1.9".to_owned(),
+                "/org/ayatana/NotificationItem/slack".to_owned()
+            ))
         );
         assert_eq!(
             place(":1.3/StatusNotifierItem", ":1.3"),

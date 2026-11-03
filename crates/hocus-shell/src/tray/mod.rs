@@ -99,8 +99,7 @@ fn publish(mut items: Vec<Shown>) {
     };
     let names: Vec<String> = shown().iter().map(|s| s.name.clone()).collect();
     tracing::debug!(?names, "the tray's icons");
-    let rows_changed = rows;
-    if rows_changed {
+    if rows {
         change(Change::Rows);
     } else {
         tip::changed();
@@ -232,7 +231,11 @@ static CHANGES: Mutex<Option<UnboundedSender<Change>>> = Mutex::new(None);
 static TAKEN: Mutex<Option<UnboundedReceiver<Change>>> = Mutex::new(None);
 
 fn change(change: Change) {
-    if let Some(changes) = CHANGES.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+    if let Some(changes) = CHANGES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+    {
         let _ = changes.send(change);
     }
 }

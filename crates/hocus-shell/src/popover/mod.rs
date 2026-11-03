@@ -943,7 +943,12 @@ impl Controller {
         };
         item.opening();
         let size = (item.width(), item.height(bar, place.form, true));
-        let rect = placed(place, self.anchor(bar, item, from, size.1), size, item.on_bottom());
+        let rect = placed(
+            place,
+            self.anchor(bar, item, from, size.1),
+            size,
+            item.on_bottom(),
+        );
         let margin = margins(place, rect);
         let surface = window::Id::unique();
         tracing::debug!(?item, ?how, bar, "a popover opens");

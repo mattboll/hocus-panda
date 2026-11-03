@@ -93,7 +93,12 @@ pub fn parse(
     let Variant::Structure(entry) = value else {
         return None;
     };
-    let [Variant::I32(id), Variant::Dict(props), Variant::Array(children)] = entry.fields() else {
+    let [
+        Variant::I32(id),
+        Variant::Dict(props),
+        Variant::Array(children),
+    ] = entry.fields()
+    else {
         return None;
     };
     let props: HashMap<String, &Variant<'_>> = props
@@ -181,8 +186,11 @@ mod tests {
     ) -> Variant<'a> {
         let mut dict = Dict::new(&Signature::Str, &Signature::Variant);
         for (k, v) in props {
-            dict.append(Variant::from(*k), Variant::Variant(Box::new(v.try_clone().expect("a value"))))
-                .expect("an entry");
+            dict.append(
+                Variant::from(*k),
+                Variant::Variant(Box::new(v.try_clone().expect("a value"))),
+            )
+            .expect("an entry");
         }
         let mut array = Array::new(&Signature::Variant);
         for child in children {
@@ -219,7 +227,10 @@ mod tests {
                 ),
                 entry(
                     4,
-                    &[("label", Variant::from("Off")), ("enabled", Variant::Bool(false))],
+                    &[
+                        ("label", Variant::from("Off")),
+                        ("enabled", Variant::Bool(false)),
+                    ],
                     vec![],
                 ),
                 entry(5, &[("visible", Variant::Bool(false))], vec![]),
