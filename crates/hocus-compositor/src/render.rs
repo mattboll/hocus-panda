@@ -11,7 +11,8 @@ use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, RendererSuper, Texture,
         element::{
-            AsRenderElements, Kind, RenderElementStates, default_primary_scanout_output_compare,
+            AsRenderElements, Kind, RenderElementState, RenderElementStates,
+            default_primary_scanout_output_compare,
             memory::MemoryRenderBufferRenderElement,
             render_elements,
             solid::SolidColorRenderElement,
@@ -141,6 +142,21 @@ fn tell_scale(surface: &WlSurface, data: &SurfaceData, output: Option<&Output>) 
         scale.integer_scale(),
         output.current_transform(),
     );
+}
+
+/// `compare`, as a choice between two outputs for a surface's primary
+/// scan-out output: the closure's signature, made to hold for every
+/// lifetime.
+fn scanout_compare<F>(compare: F) -> F
+where
+    F: for<'a> Fn(
+        &'a Output,
+        &'a RenderElementState,
+        &'a Output,
+        &'a RenderElementState,
+    ) -> &'a Output,
+{
+    compare
 }
 
 /// How a window looks at a moment.
@@ -1336,22 +1352,27 @@ impl State {
         let now: Duration = self.clock.now().into();
         // Frames are paced by the backend, never throttled here.
         let throttle = Some(Duration::ZERO);
+        // A screen unplugged lives on a moment, its global disabled
+        // (`crate::screens`): it is no surface's screen any more.
         let primary = |surface: &_, data: &_| -> Option<Output> {
             match states {
-                Some(_) => surface_primary_scanout_output(surface, data),
+                Some(_) => {
+                    surface_primary_scanout_output(surface, data).filter(|o| self.is_plugged(o))
+                }
                 None => Some(output.clone()),
             }
         };
+        let compare = scanout_compare(|current, current_state, next, next_state| {
+            if self.is_plugged(current) {
+                default_primary_scanout_output_compare(current, current_state, next, next_state)
+            } else {
+                next
+            }
+        });
         for window in self.space.elements() {
             window.with_surfaces(|surface, data| {
                 if let Some(states) = states {
-                    update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        data,
-                        states,
-                        default_primary_scanout_output_compare,
-                    );
+                    update_surface_primary_scanout_output(surface, output, data, states, compare);
                 }
                 tell_scale(surface, data, primary(surface, data).as_ref());
             });

@@ -339,8 +339,7 @@ where
             .with_context(|| format!("no output {name}"))?;
         let gone = self.outputs.remove(at);
         tracing::info!(output = name, "output unplugged");
-        state.output_gone(&gone.output);
-        state.display_handle.remove_global::<State>(gone.global);
+        state.unplug_output(&gone.output, gone.global);
         self.unplugged
             .push((name.to_string(), gone.spec, gone.position));
         Ok(())

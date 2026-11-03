@@ -2,9 +2,23 @@
 //! screen unplugged go to one still there, each on the same-numbered
 //! desktop and in its state; when a screen of the same name comes back,
 //! those the user did not place meanwhile go back where they were.
+//!
+//! What clients are told when a screen goes comes in an order they rely
+//! on (#536): every surface leaves its `wl_output` before the global goes,
+//! and nothing names that output after. A client that drops its
+//! `wl_output` on `global_remove` (kitty) would otherwise get a
+//! `wl_surface.leave` naming an object it no longer has, which its
+//! libwayland hands it as null.
+
+use std::time::Duration;
 
 use smithay::{
+    desktop::{LayerSurface, layer_map_for_output, space::SpaceElement},
     output::Output,
+    reexports::{
+        calloop::timer::{TimeoutAction, Timer},
+        wayland_server::backend::GlobalId,
+    },
     utils::{Point, SERIAL_COUNTER},
 };
 
@@ -42,6 +56,12 @@ pub struct Put {
     rect: Option<Rect>,
 }
 
+/// How long an unplugged screen's `wl_output` global stays, disabled,
+/// before it is removed: a client binding it as it goes (its
+/// `global_remove` not read yet) still finds it, rather than being killed
+/// for binding a global that is no longer there.
+const GLOBAL_LINGERS: Duration = Duration::from_secs(5);
+
 /// `rect` moved by `by`'s corner, or back with `-1`.
 fn shifted(rect: Rect, by: Rect, sign: i32) -> Rect {
     Rect::new(
@@ -53,12 +73,28 @@ fn shifted(rect: Rect, by: Rect, sign: i32) -> Rect {
 }
 
 impl State {
+    /// Screen `output`, whose `wl_output` global is `global`, is unplugged
+    /// (by the tty backend, or by a test on the headless one): it leaves
+    /// the desktop as `output_gone` says, every surface on it is told it
+    /// left, and only then do clients learn that its global went
+    /// (docs/design/windows.md §12, "What clients are told").
+    pub fn unplug_output(&mut self, output: &Output, global: GlobalId) {
+        self.output_gone(output);
+        // Also when it had no place on the desktop, which `output_gone`
+        // then leaves as it is: nothing may be left on it.
+        self.leave_output(output);
+        self.close_layers_on(output);
+        self.retire_output_global(global);
+    }
+
     /// `output` leaves the desktop: a drag or a resize under way ends, and
-    /// Alt+Tab or a swipe on it; its windows go to the screen still there
-    /// nearest to it, on the same-numbered desktop and in the same state,
-    /// floating ones at their place across the screen, inside its work
-    /// area. The focus and the pointer end up on a screen still there.
-    pub fn output_gone(&mut self, output: &Output) {
+    /// Alt+Tab or a swipe on it; its layer surfaces are closed; its
+    /// windows go to the screen still there nearest to it, on the
+    /// same-numbered desktop and in the same state, floating ones at their
+    /// place across the screen, inside its work area. The focus and the
+    /// pointer end up on a screen still there. Every surface on it leaves
+    /// it, before its global goes.
+    fn output_gone(&mut self, output: &Output) {
         let name = output.name();
         let (Some(geometry), Some(area)) = (
             self.space.output_geometry(output).map(rect_of),
@@ -86,6 +122,10 @@ impl State {
             })
             .collect();
         self.space.unmap_output(output);
+        // The space would tell its windows they left at its next refresh,
+        // after the global is gone: they are told now.
+        self.leave_output(output);
+        self.close_layers_on(output);
         // Its bar goes to a screen still there, before its windows do.
         self.panel_refresh();
         self.panes.borrow_mut().forget(&name);
@@ -149,6 +189,64 @@ impl State {
         }
         self.rearrange();
         self.redraw = true;
+    }
+
+    /// Every window's surfaces, its subsurfaces and popups, leave `output`,
+    /// mapped or not: those that were not on it are not told anything.
+    fn leave_output(&self, output: &Output) {
+        let windows = self
+            .space
+            .elements()
+            .cloned()
+            .chain(self.windows.values().map(|m| m.window.clone()));
+        for window in windows {
+            // Also forgets the window's overlap with it, which the window
+            // would otherwise enter again on its next refresh.
+            SpaceElement::output_leave(&window, output);
+        }
+    }
+
+    /// The layer surfaces on `output` (bars, wallpapers, the shell's
+    /// overlays) are closed, as wlr-layer-shell asks when their output
+    /// goes; they leave it as they are unmapped.
+    fn close_layers_on(&mut self, output: &Output) {
+        let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        for layer in layers {
+            layer_map_for_output(output).unmap_layer(&layer);
+            tracing::debug!(
+                output = output.name(),
+                namespace = layer.namespace(),
+                "a layer surface closed: its screen went"
+            );
+            layer.layer_surface().send_close();
+            self.layer_gone(&layer);
+        }
+    }
+
+    /// `global`, an unplugged screen's `wl_output`, goes: clients are told
+    /// at once, and it is removed a while later.
+    fn retire_output_global(&mut self, global: GlobalId) {
+        self.display_handle.disable_global::<State>(global.clone());
+        let later = global.clone();
+        let inserted = self.loop_handle.insert_source(
+            Timer::from_duration(GLOBAL_LINGERS),
+            move |_, _, app| {
+                app.state
+                    .display_handle
+                    .remove_global::<State>(later.clone());
+                TimeoutAction::Drop
+            },
+        );
+        if let Err(err) = inserted {
+            tracing::warn!(%err.error, "could not wait to remove a screen's global: removed now");
+            self.display_handle.remove_global::<State>(global);
+        }
+    }
+
+    /// Whether `output` is one of the desktop's screens: an unplugged one
+    /// lives on a moment, its global disabled.
+    pub(crate) fn is_plugged(&self, output: &Output) -> bool {
+        self.space.outputs().any(|o| o == output)
     }
 
     /// `output` joined the desktop: the windows that left it go back where
@@ -323,6 +421,11 @@ impl State {
         managed.travel = None;
         managed.resizing = None;
         let window = managed.window.clone();
+        // What it may take is now the new screen's work area, in the
+        // configure that moves it there.
+        if let (Some(toplevel), Some(area)) = (window.toplevel(), self.work_area(output)) {
+            toplevel.with_pending_state(|p| p.bounds = Some((area.width, area.height).into()));
+        }
         self.model.set_desktop(id, desktop);
         self.model.set_restore(id, restore);
         self.model.set_hidden(id, desktop != current);
