@@ -368,6 +368,16 @@ fn record(
         }
     }
     drop(from_loop);
+    // The sound first, to its end: ffmpeg holds the last frames until the
+    // sound reaches them, and may wait for it before it reads them.
+    let sound = match sound {
+        Some(sound) if frames.written > 0 || frames.latest.is_some() => {
+            sound.finish();
+            tracing::debug!(id = job.id, "the recording's sound is all written");
+            None
+        }
+        other => other,
+    };
     // The last frames, then the end of the input: ffmpeg ends the file.
     let ended = went.and_then(|()| frames.until(length));
     frames.stdin = None;
@@ -392,10 +402,6 @@ fn record(
             Err(err) => anyhow::bail!("ffmpeg could not record: {err:#} {}", errors.trim()),
             Ok(()) => anyhow::bail!("nothing was recorded: it stopped before its first frame"),
         }
-    }
-    if let Some(sound) = sound {
-        sound.finish();
-        tracing::debug!(id = job.id, "the recording's sound is all written");
     }
     let status = wait(&mut child, Duration::from_secs(120));
     drop(pipes);

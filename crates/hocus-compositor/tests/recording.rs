@@ -748,6 +748,11 @@ struct ShellBed {
 
 impl ShellBed {
     fn start(output: &str, form: hocus_compositor::FormChoice) -> anyhow::Result<Option<Self>> {
+        // The recorder's steps, shown with a failure.
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("hocus_compositor::record=debug")
+            .with_writer(std::io::stderr)
+            .try_init();
         let Some(shell) = common::shell_program() else {
             eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
             return Ok(None);
@@ -859,9 +864,10 @@ impl ShellBed {
         })?;
         anyhow::ensure!(
             shown,
-            "no thumbnail ({:?}, {:?}):\n{}",
+            "no thumbnail ({:?}, {:?}, ending: {}):\n{}",
             self.hp.record_failures(),
             self.hp.recorded(),
+            self.hp.recording_ending(),
             self.log()
         );
         Ok(self.hp.capture_thumb_surfaces()[0].1)
