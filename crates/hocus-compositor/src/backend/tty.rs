@@ -81,6 +81,8 @@ pub struct TtyBackend {
     gpu: Gpu,
     /// The session is in the foreground: its terminal is the one shown.
     active: bool,
+    /// Screen sharing's frames (5.11), on the primary GPU.
+    share: crate::share::frames::Frames<GlesRenderer, GlesTexture>,
 }
 
 impl std::fmt::Debug for TtyBackend {
@@ -148,6 +150,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         render_node,
         gpu,
         active: true,
+        share: Default::default(),
     };
 
     handle
@@ -572,6 +575,14 @@ impl TtyBackend {
                     }
                 }
             }
+        }
+        // Screen sharing's thumbnails and frames (5.11): none while another
+        // terminal shows.
+        if self.active
+            && let Ok(mut renderer) = self.gpus.single_renderer(&self.render_node)
+        {
+            let gles: &mut GlesRenderer = renderer.as_mut();
+            crate::share::frames::run::<_, GlesTexture>(gles, state, &mut self.share);
         }
         if !state.redraw {
             return;

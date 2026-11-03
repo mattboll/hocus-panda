@@ -29,6 +29,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # the shell's clock reads it.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 libloading = "0.8.9"
+# Screen sharing's streams (5.11): PipeWire's own bindings (MIT); the
+# library itself at run time, its headers to build (libpipewire-0.3-dev).
+pipewire = { version = "0.10.1", features = ["v0_3_77"] }
 serde = { version = "1.0.229", features = ["derive"] }
 smithay = { version = "0.7.0", default-features = false, features = [
     "backend_winit",
@@ -46,6 +49,10 @@ smithay = { version = "0.7.0", default-features = false, features = [
     "xwayland",
 ] }
 tempfile = "3.27.0"
+# The screen cast portal (5.11), on the session bus, on a thread of its
+# own with its runtime, as the shell's D-Bus services.
+tokio = { version = "1.54.1", features = ["rt", "sync", "time"] }
+zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service"] }
 toml = "1.1.8"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

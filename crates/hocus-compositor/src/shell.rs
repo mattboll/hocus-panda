@@ -342,6 +342,7 @@ impl State {
         self.tell_agents();
         self.tell_bubbles_screen();
         self.hand_kept_levels();
+        self.tell_sharing_again();
     }
 
     /// The shell's connection ended.
@@ -400,6 +401,7 @@ impl State {
             ToCompositor::Clip { paste, clip } => self.clip_asked(paste, clip),
             ToCompositor::Emoji { keep, text } => self.emoji_asked(keep, text),
             ToCompositor::Capture(ask) => self.capture_asked(ask),
+            ToCompositor::Share(ask) => self.share_asked(ask),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
             ToCompositor::LogOut => {

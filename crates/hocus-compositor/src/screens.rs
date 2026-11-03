@@ -67,6 +67,7 @@ impl State {
             return;
         };
         self.end_on_output(output);
+        self.share_output_gone(&name);
         // Each window's place there, and where it came from first if it
         // came from another screen gone before and stayed where it was put.
         let leaving: Vec<(WindowId, Rect, Option<Rect>, Option<CameFrom>)> = self

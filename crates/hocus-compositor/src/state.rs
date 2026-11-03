@@ -179,6 +179,8 @@ pub struct State {
     pub emoji: crate::emoji::Emoji,
     /// The screen capture (5.8).
     pub capture: crate::capture::Capture,
+    /// Screen sharing (5.11).
+    pub share: crate::share::Sharing,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -358,6 +360,7 @@ impl State {
             clipboard: crate::clipboard::Clipboard::default(),
             emoji: crate::emoji::Emoji::new(dh),
             capture,
+            share: crate::share::Sharing::default(),
             swiping: None,
             switcher: None,
             switcher_out: None,

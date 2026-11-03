@@ -2613,6 +2613,13 @@ maintainer's spec (issue #396).
   (the launcher's results, the Sources popover's command) in the history;
   the primary selection.
 
+### 5.11, the sign of what is shared (2026-11-03)
+
+While the screen is shared, a sign shows under the clock (48 wide, in
+both forms, where the agents' group or item was, which move under it) and
+its popover stops the share: [sharing.md](sharing.md), as built. 5.12
+groups it with the microphone and the camera (issue #445).
+
 ### 5.14, the tray (2026-11-03)
 
 What the approved 5.14 mockup shows, variant A (always visible; the amber

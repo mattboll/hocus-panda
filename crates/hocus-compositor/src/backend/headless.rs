@@ -50,6 +50,9 @@ pub enum RendererChoice {
     Gles,
     /// The software renderer: slower, but the same pixels on every machine.
     Pixman,
+    /// GLES on Mesa's software EGL device (llvmpipe), never a GPU: tests of
+    /// what only GLES does, on a machine whose GPU must not be touched.
+    GlesSoftware,
 }
 
 /// What the headless backend draws.
@@ -68,6 +71,10 @@ pub struct HeadlessBackend {
     canvas: Canvas,
     /// The frame to come, once something changed.
     frame_timer: Option<RegistrationToken>,
+    /// Screen sharing's frames (5.11), with the renderer drawing.
+    gles_share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
+    pixman_share:
+        Box<crate::share::frames::Frames<PixmanRenderer, pixman::Image<'static, 'static>>>,
 }
 
 impl std::fmt::Debug for HeadlessBackend {
@@ -127,6 +134,7 @@ pub fn init(
             config.render_node.as_deref(),
             state,
         )?)),
+        RendererChoice::GlesSoftware => Canvas::Gles(Box::new(software_outputs(&specs, state)?)),
         RendererChoice::Auto => match gles_outputs(&specs, config.render_node.as_deref(), state) {
             Ok(gles) => Canvas::Gles(Box::new(gles)),
             Err(err) => {
@@ -138,6 +146,8 @@ pub fn init(
     let backend = HeadlessBackend {
         canvas,
         frame_timer: None,
+        gles_share: Default::default(),
+        pixman_share: Default::default(),
     };
     tracing::info!(renderer = backend.renderer(), "headless backend ready");
     Ok(backend)
@@ -165,6 +175,29 @@ fn gles_outputs(
     let device = render_node_of(renderer.egl_context().display());
     dmabuf_global(state, renderer.dmabuf_formats(), device);
     state.blur = true;
+    Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
+}
+
+/// GLES on Mesa's software EGL device: no render node is opened.
+fn software_outputs(
+    specs: &[OutputSpec],
+    state: &mut State,
+) -> anyhow::Result<Outputs<GlesRenderer, GlesTexture>> {
+    anyhow::ensure!(egl_available(), "libEGL.so.1 is not installed");
+    let device = EGLDevice::enumerate()
+        .context("could not list EGL devices")?
+        .find(EGLDevice::is_software)
+        .context("no software EGL device")?;
+    // SAFETY: nothing else in the process creates EGL displays, so smithay's
+    // tracking of them is accurate.
+    #[allow(unsafe_code)]
+    let display = unsafe { EGLDisplay::new(device) }.context("could not open the EGL display")?;
+    let context = EGLContext::new(&display).context("could not create an EGL context")?;
+    // SAFETY: the context was just created and is used on this thread only.
+    #[allow(unsafe_code)]
+    let renderer = unsafe { GlesRenderer::new(context) }.context("could not start GLES")?;
+    state.shm_state.update_formats(renderer.shm_formats());
+    dmabuf_global(state, renderer.dmabuf_formats(), None);
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 
@@ -482,6 +515,19 @@ impl HeadlessBackend {
     /// Schedules the next frame when something changed: nothing wakes up
     /// at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // Screen sharing's thumbnails and frames (5.11).
+        match &mut self.canvas {
+            Canvas::Gles(c) => crate::share::frames::run::<_, GlesTexture>(
+                &mut c.renderer,
+                state,
+                &mut self.gles_share,
+            ),
+            Canvas::Pixman(c) => crate::share::frames::run::<_, pixman::Image<'static, 'static>>(
+                &mut c.renderer,
+                state,
+                &mut self.pixman_share,
+            ),
+        }
         // A capture asked for (5.8): drawn for it before the next frame.
         if state.capture.has_pending() {
             match &mut self.canvas {

@@ -424,6 +424,27 @@ impl Headless {
         .and_then(|bytes| bytes.as_ref().map(|b| b.to_vec()))
     }
 
+    /// The shares under way (5.11).
+    pub fn shares(&self) -> Vec<crate::ShareInfo> {
+        self.app.state.share.info()
+    }
+
+    /// The request whose chooser shows (5.11).
+    pub fn share_choosing(&self) -> Option<u64> {
+        self.app.state.share.choosing()
+    }
+
+    /// The frames sharing handed to PipeWire so far (5.11).
+    pub fn share_frames(&self) -> u64 {
+        self.app.state.share.frames_sent()
+    }
+
+    /// The longest a frame's hand-over to PipeWire's thread took the loop
+    /// so far (5.11).
+    pub fn share_lend_most(&self) -> Duration {
+        self.app.state.share.lend_most()
+    }
+
     /// What the screen capture shows (5.8).
     pub fn capture(&self) -> crate::capture::Shown {
         self.app.state.capture.shown()

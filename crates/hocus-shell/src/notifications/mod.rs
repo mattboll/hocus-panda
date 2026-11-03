@@ -124,6 +124,12 @@ pub fn start(software: bool) {
     }
 }
 
+/// The screen is shared (5.11), or no longer is: bubbles are held
+/// meanwhile, then summed up.
+pub fn sharing(on: bool) {
+    input(Input::Sharing(on));
+}
+
 /// The history's panel opened (`open`) or closed.
 pub fn history_open(open: bool) {
     input(Input::History {
@@ -464,6 +470,10 @@ fn carry_out(effect: Effect) -> Vec<Message> {
         }
         Effect::SaveDnd(dnd) => {
             send_write(Write::Dnd(dnd));
+            Vec::new()
+        }
+        Effect::History(screen) => {
+            crate::popover::open_history(&screen);
             Vec::new()
         }
     }

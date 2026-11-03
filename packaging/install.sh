@@ -25,5 +25,11 @@ install -D -m 755 "$here/hocuspanda-session" "$destdir$prefix/bin/hocuspanda-ses
 # Where display managers (GDM, SDDM, greetd's greeters) look for sessions.
 install -D -m 644 "$here/hocuspanda.desktop" \
     "$destdir$prefix/share/wayland-sessions/hocuspanda.desktop"
+# Screen sharing's portal (docs/design/sharing.md): the compositor serves
+# it; xdg-desktop-portal finds it by these, in its own data directory.
+install -D -m 644 "$here/hocuspanda.portal" \
+    "$destdir$prefix/share/xdg-desktop-portal/portals/hocuspanda.portal"
+install -D -m 644 "$here/hocuspanda-portals.conf" \
+    "$destdir$prefix/share/xdg-desktop-portal/hocuspanda-portals.conf"
 # Every setting with its default, to copy to ~/.config/hocuspanda/.
 install -D -m 644 "$here/config.toml" "$destdir$prefix/share/doc/hocuspanda/config.toml"

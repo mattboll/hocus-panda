@@ -36,6 +36,8 @@ pub struct WinitBackend {
     presented: u64,
     /// The shape last asked of the host's cursor; none while hidden.
     host_cursor: Option<CursorIcon>,
+    /// Screen sharing's frames (5.11).
+    share: crate::share::frames::Frames<GlesRenderer, GlesTexture>,
 }
 
 impl std::fmt::Debug for WinitBackend {
@@ -97,6 +99,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         damage_tracker,
         presented: 0,
         host_cursor: Some(CursorIcon::Default),
+        share: Default::default(),
     })
 }
 
@@ -135,6 +138,12 @@ impl WinitBackend {
     /// Asks for a frame only when something changed: nothing is drawn at
     /// rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // Screen sharing's thumbnails and frames (5.11).
+        crate::share::frames::run::<_, GlesTexture>(
+            self.backend.renderer(),
+            state,
+            &mut self.share,
+        );
         // A capture asked for (5.8): drawn for it, off the window.
         if state.capture.has_pending() {
             crate::capture::shoot::take::<_, GlesTexture>(self.backend.renderer(), state);

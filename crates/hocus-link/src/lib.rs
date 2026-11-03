@@ -15,16 +15,17 @@
 //! tools and the agents, the agent whose panda peeks out of the bar,
 //! `Super+Space` for the launcher, what clients copy and `Super+V` for the
 //! clipboard's history, `Super+.` for the emoji picker and where it opens,
-//! what the screen capture's toolbar shows and what was captured, and the
-//! screen the notifications' bubbles show on;
+//! what the screen capture's toolbar shows and what was captured, the
+//! screen the notifications' bubbles show on, a request to share the screen
+//! and what is shared;
 //! the shell draws the bars, their popovers, the peek, the launcher and the
 //! bubbles, keeps the levels and the clipboard's history, and says when it
 //! draws on the CPU, when a popover, the launcher or a bubble closes, and
 //! when the user asks for the next layout, another desktop or a window,
 //! plugs a tool in or out, declines them, copies a text, pastes or copies
 //! an item of the clipboard's history, inserts an emoji, starts an
-//! application, clicks a bubble (its application's window), or the
-//! capture's toolbar.
+//! application, clicks a bubble (its application's window), the
+//! capture's toolbar, or chooses what to share.
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
@@ -37,11 +38,17 @@
 use std::{fmt, str::FromStr, time::Duration};
 
 mod capture;
+mod share;
 pub use capture::{
     CAPTURE_DELAYS, CAPTURE_EDITOR_IN, CAPTURE_EDITOR_NAMESPACE, CAPTURE_THUMB_IN,
     CAPTURE_THUMB_NAMESPACE, CAPTURE_THUMB_RADIUS, CAPTURE_THUMB_RISE, CAPTURE_TOOLBAR_BOTTOM,
     CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE, CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar,
     CaptureMode, Captured,
+};
+pub use share::{
+    IN_USE_NAMESPACE, SHARE_CHOOSER_FROM, SHARE_CHOOSER_IN, SHARE_CHOOSER_NAMESPACE,
+    SHARE_CHOOSER_RADIUS, SHARE_MONITOR, SHARE_THUMB_RADIUS, SHARE_THUMBS_EVERY, SHARE_WINDOW,
+    ShareAsk, ShareChoose, ShareScreen, ShareShown, ShareSource, ShareWindow, SharedThing,
 };
 
 /// The environment variable naming the compositor's socket for its shell.
@@ -394,6 +401,16 @@ pub enum ToShell {
     /// into its window, or could not: the picker takes the keyboard back.
     /// Written `emoji-inserted`.
     EmojiInserted,
+    /// A request to share the screen (5.11): the chooser opens on its
+    /// screen, or shows its sources anew ([`ShareChoose`]).
+    ShareChoose(ShareChoose),
+    /// The chooser of that request goes. Written `share-choose-end
+    /// REQUEST`.
+    ShareChooseEnd(u64),
+    /// What is shared now (5.11): sent as the shell connects and when it
+    /// changes; empty, nothing is ([`ShareShown`]). Written `shares`, then
+    /// each after a tab.
+    Shares(Vec<ShareShown>),
 }
 
 /// Where the emoji picker opens on its screen (logical pixels, from the
@@ -1151,6 +1168,9 @@ pub enum ToCompositor {
     Emoji { keep: bool, text: String },
     /// The user acts on the capture's toolbar (5.8, [`CaptureAsk`]).
     Capture(CaptureAsk),
+    /// The chooser's thumbnails' places, what it chose, its cancel, a
+    /// share stopped from the bar (5.11, [`ShareAsk`]).
+    Share(ShareAsk),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1328,6 +1348,15 @@ impl fmt::Display for ToShell {
                 }
             }
             Self::EmojiInserted => f.write_str("emoji-inserted"),
+            Self::ShareChoose(choose) => choose.write(f),
+            Self::ShareChooseEnd(request) => write!(f, "share-choose-end {request}"),
+            Self::Shares(shares) => {
+                f.write_str("shares")?;
+                for share in shares {
+                    share.write(f)?;
+                }
+                Ok(())
+            }
             Self::Capture(bar) => bar.write(f),
             Self::CaptureEnd => f.write_str("capture-end"),
             Self::Captured(captured) => captured.write(f),
@@ -1356,6 +1385,19 @@ impl FromStr for ToShell {
     type Err = BadLine;
 
     fn from_str(line: &str) -> Result<Self, Self::Err> {
+        if let Some(rest) = line.strip_prefix("share-choose ") {
+            return ShareChoose::read(rest).map(Self::ShareChoose);
+        }
+        if let Some(fields) = line.strip_prefix("shares")
+            && (fields.is_empty() || fields.starts_with('\t'))
+        {
+            return fields
+                .split('\t')
+                .skip(1)
+                .map(ShareShown::read)
+                .collect::<Result<_, BadLine>>()
+                .map(Self::Shares);
+        }
         if let Some(names) = line.strip_prefix("screens")
             && (names.is_empty() || names.starts_with('\t'))
         {
@@ -1552,6 +1594,11 @@ impl FromStr for ToShell {
                 })
             }
             Some("emoji-inserted") => Ok(Self::EmojiInserted),
+            Some("share-choose-end") => Ok(Self::ShareChooseEnd(
+                word(&mut words, "request")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("request: {e}")))?,
+            )),
             Some("launcher") => Ok(Self::Launcher {
                 output: word(&mut words, "output")?.to_owned(),
                 scale: word(&mut words, "scale")?
@@ -1652,6 +1699,7 @@ impl fmt::Display for ToCompositor {
             }
             Self::LogOut => f.write_str("log-out"),
             Self::Capture(ask) => ask.write(f),
+            Self::Share(ask) => ask.write(f),
             Self::Clip { paste, clip } => {
                 write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
                 clip.write(f)
@@ -1686,6 +1734,9 @@ impl FromStr for ToCompositor {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         if let Some(text) = line.strip_prefix("copy ") {
             return Ok(Self::Copy(text.to_owned()));
+        }
+        if let Some(rest) = line.strip_prefix("share ") {
+            return ShareAsk::read(rest).map(Self::Share);
         }
         if let Some(fields) = line.strip_prefix("launch\t") {
             let mut fields = fields.split('\t');
