@@ -110,6 +110,9 @@ pub struct Panel {
     pub popover_commits: u64,
     /// Commits of the peek's surfaces, for tests: none at rest.
     pub peek_commits: u64,
+    /// The bar's own surfaces asked for on no screen, for tests: the
+    /// shell names the screen of each (#540).
+    pub asked_nowhere: u64,
     /// The shell's popovers beside the bars, and their motion.
     pub popovers: crate::popover::Popovers,
     /// The shell's launcher, and its motion (5.1).

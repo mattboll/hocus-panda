@@ -401,6 +401,12 @@ impl Headless {
         self.layer_rects(hocus_link::AGENTS_NAMESPACE)
     }
 
+    /// The bar's own surfaces asked for on no screen so far: the shell
+    /// names one for each.
+    pub fn bar_parts_asked_nowhere(&self) -> u64 {
+        self.app.state.panel.asked_nowhere
+    }
+
     /// Commits of the desktops' surfaces so far.
     pub fn desktops_commits(&self) -> u64 {
         self.app.state.panel.desktops_commits

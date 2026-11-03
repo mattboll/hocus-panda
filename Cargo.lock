@@ -1667,6 +1667,7 @@ dependencies = [
  "udev",
  "unicode-normalization",
  "wayland-client",
+ "wayland-protocols",
  "wgpu",
  "zbus",
 ]

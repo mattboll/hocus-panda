@@ -20,10 +20,7 @@ use std::{
 
 use anyhow::Context;
 use common::{WAIT, wait};
-
-/// How long a real program (foot, kitty) may take to show its window.
-const PROGRAM_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
-use hocus_compositor::{Headless, HeadlessConfig, OutputSpec, Placed, RendererChoice};
+use hocus_compositor::{Headless, HeadlessConfig, OutputSpec, Placed, RendererChoice, model::Rect};
 use smithay_client_toolkit::reexports::protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
     zwlr_layer_surface_v1::{self, ZwlrLayerSurfaceV1},
@@ -51,6 +48,8 @@ use wayland_protocols::{
 const FIRST: &str = "HEADLESS-1";
 const SECOND: &str = "HEADLESS-2";
 const APP_ID: &str = "test.watcher";
+/// How long a real program (foot, kitty) may take to show its window.
+const PROGRAM_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 const LAYER: &str = "test.watcher-layer";
 
 /// 1920×1080 at scale 1, then 2560×1440 at scale 2 on its right: the
@@ -776,6 +775,221 @@ fn foot_keeps_running_on_an_unplugged_screen() -> anyhow::Result<()> {
     a_terminal_survives("foot", &["sleep", "600"], "foot")
 }
 
+/// A client that asks for layer surfaces of `namespaces` on no screen,
+/// in that order, and notes which are closed.
+struct Asking {
+    closed: Arc<Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Asking {
+    fn start(socket: &Path, namespaces: &[&str]) -> anyhow::Result<Self> {
+        let stream = UnixStream::connect(socket)
+            .with_context(|| format!("could not connect to {}", socket.display()))?;
+        stream.set_nonblocking(true)?;
+        let conn = Connection::from_socket(stream)?;
+        let closed = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let namespaces: Vec<String> = namespaces.iter().map(|n| (*n).to_owned()).collect();
+        let thread = std::thread::Builder::new().name("asker".into()).spawn({
+            let closed = closed.clone();
+            let stop = stop.clone();
+            move || {
+                if let Err(err) = ask(&conn, &namespaces, &closed, &stop) {
+                    eprintln!("asker: {err:#}");
+                }
+            }
+        })?;
+        Ok(Self {
+            closed,
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    fn closed(&self) -> Vec<String> {
+        self.closed.lock().map(|c| c.clone()).unwrap_or_default()
+    }
+}
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[derive(Default)]
+struct Asker {
+    compositor: Option<WlCompositor>,
+    layer_shell: Option<ZwlrLayerShellV1>,
+    closed: Arc<Mutex<Vec<String>>>,
+}
+
+fn ask(
+    conn: &Connection,
+    namespaces: &[String],
+    closed: &Arc<Mutex<Vec<String>>>,
+    stop: &AtomicBool,
+) -> anyhow::Result<()> {
+    let mut queue: EventQueue<Asker> = conn.new_event_queue();
+    let qh = queue.handle();
+    conn.display().get_registry(&qh, ());
+    let mut asker = Asker {
+        closed: closed.clone(),
+        ..Asker::default()
+    };
+    queue.roundtrip(&mut asker)?;
+    let compositor = asker.compositor.clone().context("no wl_compositor")?;
+    let layer_shell = asker.layer_shell.clone().context("no layer shell")?;
+    let mut kept = Vec::new();
+    for namespace in namespaces {
+        let surface = compositor.create_surface(&qh, ());
+        let layer = layer_shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            namespace.clone(),
+            &qh,
+            namespace.clone(),
+        );
+        layer.set_size(200, 30);
+        layer.set_anchor(zwlr_layer_surface_v1::Anchor::Top);
+        surface.commit();
+        // One at a time: each sees where the ones before it went.
+        queue.roundtrip(&mut asker)?;
+        kept.push((surface, layer));
+    }
+    while !stop.load(Ordering::Relaxed) {
+        queue.dispatch_pending(&mut asker)?;
+        queue.flush()?;
+        if let Some(guard) = queue.prepare_read() {
+            match guard.read() {
+                Ok(_) => {}
+                Err(wayland_client::backend::WaylandError::Io(err))
+                    if err.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for Asker {
+    fn event(
+        state: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        if let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        {
+            match interface.as_str() {
+                "wl_compositor" => {
+                    state.compositor = Some(registry.bind(name, version.min(4), qh, ()));
+                }
+                "zwlr_layer_shell_v1" => {
+                    state.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Dispatch<ZwlrLayerSurfaceV1, String> for Asker {
+    fn event(
+        state: &mut Self,
+        layer: &ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        namespace: &String,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_layer_surface_v1::Event::Configure { serial, .. } => layer.ack_configure(serial),
+            zwlr_layer_surface_v1::Event::Closed => {
+                if let Ok(mut closed) = state.closed.lock() {
+                    closed.push(namespace.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(Asker: WlCompositor);
+delegate_noop!(Asker: ignore WlSurface);
+delegate_noop!(Asker: ZwlrLayerShellV1);
+
+/// A bar's surface asked for on no screen goes to the screen given a bar
+/// that lacks it, not under the pointer; a second one, with no screen
+/// left that lacks it, is closed; any other surface is under the pointer
+/// (#540: the shell may ask before it knows a screen's name).
+#[test]
+fn a_bar_surface_asked_on_no_screen_goes_to_the_screen_lacking_it() -> anyhow::Result<()> {
+    let mut hp = screens()?;
+    assert_eq!(
+        hp.bars().iter().map(|b| b.0.as_str()).collect::<Vec<_>>(),
+        [FIRST],
+        "one bar, on the first screen"
+    );
+    let second = hp
+        .outputs()
+        .into_iter()
+        .find(|(n, _)| n == SECOND)
+        .map(|(_, r)| r)
+        .context("the second screen")?;
+    hp.pointer_move(
+        f64::from(second.x + second.width / 2),
+        f64::from(second.y + second.height / 2),
+    );
+    let other = "test.other";
+    let asking = Asking::start(
+        hp.socket(),
+        &[
+            hocus_link::NAMESPACE,
+            hocus_link::CLOCK_NAMESPACE,
+            hocus_link::NAMESPACE,
+            other,
+        ],
+    )?;
+    let on = |hp: &Headless, namespace: &str| -> Vec<String> {
+        hp.layer_rects(namespace)
+            .into_iter()
+            .map(|(o, _)| o)
+            .collect()
+    };
+    let placed = hp.dispatch_until(WAIT, |hp| {
+        !on(hp, other).is_empty() && asking.closed() == [hocus_link::NAMESPACE]
+    })?;
+    assert!(
+        placed,
+        "the surfaces placed: {:?} {:?} {:?}, closed {:?}",
+        on(&hp, hocus_link::NAMESPACE),
+        on(&hp, hocus_link::CLOCK_NAMESPACE),
+        on(&hp, other),
+        asking.closed()
+    );
+    assert_eq!(on(&hp, hocus_link::NAMESPACE), [FIRST], "the bar");
+    assert_eq!(on(&hp, hocus_link::CLOCK_NAMESPACE), [FIRST], "its clock");
+    assert_eq!(on(&hp, other), [SECOND], "the other, under the pointer");
+    assert_eq!(hp.bar_parts_asked_nowhere(), 3, "the bar's, counted");
+    Ok(())
+}
+
 /// The shell's bar on the screen unplugged is closed there and drawn on
 /// the screen left; plugged back, the bar is that screen's again. The
 /// shell stays linked throughout. Skipped without the shell built.
@@ -828,22 +1042,60 @@ fn the_shells_bar_closed_with_its_screen_is_drawn_on_the_other() -> anyhow::Resu
     wait(&mut hp, Duration::from_millis(300))?;
     assert!(hp.shell_connected(), "the shell went");
 
-    // Plugged back, the compositor gives the bar back to it and the shell
-    // draws one bar. Where the shell puts it is not checked: it may ask
-    // for the screen by a name it has not read yet, and then gets the one
-    // under the pointer (a race of its own, apart from what clients are
-    // told here).
+    // Plugged back with the pointer on the other screen: the bar is the
+    // screen's that came back (#540), never the one under the pointer,
+    // which the compositor would give a bar asked for on no screen.
+    let screen = |hp: &Headless, name: &str| {
+        hp.outputs()
+            .into_iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, r)| r)
+    };
+    let second = screen(&hp, SECOND).context("the second screen")?;
+    hp.pointer_move(
+        f64::from(second.x + second.width / 2),
+        f64::from(second.y + second.height / 2),
+    );
     hp.plug(FIRST)?;
+    let first = screen(&hp, FIRST).context("the first screen, back")?;
+    let (x, y) = hp.pointer();
+    let inside = |r: Rect| {
+        x >= f64::from(r.x)
+            && x < f64::from(r.x + r.width)
+            && y >= f64::from(r.y)
+            && y < f64::from(r.y + r.height)
+    };
+    assert!(
+        inside(second) && !inside(first),
+        "the pointer on the second screen: {:?} {:?}",
+        hp.pointer(),
+        hp.outputs()
+    );
+    // The second screen's bar goes as the first one's comes: one bar,
+    // on the first screen, and it stays there.
     let back = hp.dispatch_until(WAIT, |hp| {
-        hp.bars().iter().map(|b| b.0.as_str()).eq([FIRST]) && bar_on(hp).len() == 1
+        hp.bars().iter().map(|b| b.0.as_str()).eq([FIRST]) && bar_on(hp) == [FIRST]
     })?;
     assert!(
         back,
-        "one bar, for the first screen: {:?} {:?}",
+        "one bar, on the screen that came back: {:?} {:?}",
         hp.bars(),
         hp.bar_surfaces()
     );
     wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(
+        bar_on(&hp),
+        [FIRST],
+        "the bar stays on the screen that came back: {:?}",
+        hp.bar_surfaces()
+    );
+    // The shell named the screen itself: the compositor did not have to
+    // find one.
+    assert_eq!(
+        hp.bar_parts_asked_nowhere(),
+        0,
+        "the bar's surfaces asked for on no screen"
+    );
     assert!(hp.shell_connected(), "the shell went");
     Ok(())
 }
