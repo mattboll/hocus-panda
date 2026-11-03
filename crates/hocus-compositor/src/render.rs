@@ -588,13 +588,15 @@ impl State {
                     hocus_link::EMOJI_NAMESPACE => Some((own, hocus_link::EMOJI_RADIUS)),
                     ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
                     hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),
+                    hocus_link::TIP_NAMESPACE => Some((own, hocus_link::TIP_RADIUS)),
                     hocus_link::CLOCK_NAMESPACE
                     | hocus_link::LEVELS_NAMESPACE
                     | hocus_link::CONNECTIONS_NAMESPACE
                     | hocus_link::DESKTOPS_NAMESPACE
                     | hocus_link::AGENTS_NAMESPACE
                     | hocus_link::IN_USE_NAMESPACE
-                    | hocus_link::BELL_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
+                    | hocus_link::BELL_NAMESPACE
+                    | hocus_link::TRAY_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
                     _ => None,
                 };
                 if let Some((clip, radius)) = cut.filter(|_| self.shell.software) {

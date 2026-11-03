@@ -43,6 +43,7 @@ mod paste;
 mod popover;
 mod renderer;
 mod share;
+mod tray;
 mod user;
 
 use std::{
@@ -118,6 +119,7 @@ fn main() -> ExitCode {
     // After the notifications' wall clock, which its times read.
     clipboard::start();
     user::start();
+    tray::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -251,12 +253,13 @@ impl Bar {
     /// the keyboard layout's button.
     fn levels_size(&self) -> (u32, u32) {
         let mini = levels::draw::mini_surface(layouts::snapshot().shown().is_some());
+        // Over the tray (5.14): taller by what it takes in each form.
+        let lift = |form| tray::draw::lift(&self.output, form).ceil() as u32;
+        let full = levels::draw::FULL_SURFACE.1 + lift(Form::Full);
+        let mini = (mini.0, mini.1 + lift(Form::Mini));
         match (self.switch, self.form) {
-            (Some(_), _) => (
-                levels::draw::FULL_SURFACE.0,
-                levels::draw::FULL_SURFACE.1.max(mini.1),
-            ),
-            (None, Form::Full) => levels::draw::FULL_SURFACE,
+            (Some(_), _) => (levels::draw::FULL_SURFACE.0, full.max(mini.1)),
+            (None, Form::Full) => (levels::draw::FULL_SURFACE.0, full),
             (None, Form::Mini) => mini,
         }
     }
@@ -324,6 +327,9 @@ enum Message {
     /// The keyboard's layouts, as the compositor says them as the shell
     /// connects: the row comes (or goes), the surfaces to their sizes.
     Layouts(Vec<layouts::Layout>),
+    /// A tray icon came or went (5.14): the tray's surfaces, and the
+    /// groups over them, to their places.
+    Tray,
     Resized(window::Id, Size),
 }
 
@@ -379,6 +385,7 @@ impl Shell {
         subscriptions.push(Subscription::run(zone_changes));
         subscriptions.push(Subscription::run(popover::effects));
         subscriptions.push(Subscription::run(notifications::effects));
+        subscriptions.push(Subscription::run(tray::effects));
         subscriptions.push(bar_sizes());
         Subscription::batch(subscriptions)
     }
@@ -426,6 +433,12 @@ impl Shell {
                 Task::none()
             }
             Message::Levels => Task::none(),
+            Message::Tray => {
+                let ids: Vec<window::Id> = self.bars.keys().copied().collect();
+                let fitted = Task::batch(ids.into_iter().map(|id| self.fit(id)));
+                tray::placed();
+                fitted
+            }
             Message::Layouts(list) => {
                 layouts::set(list);
                 let ids: Vec<window::Id> = self.bars.keys().copied().collect();
@@ -459,6 +472,7 @@ impl Shell {
                 scale,
             } => {
                 popover::kit::set_scale(&output, scale as f32 / 120.0);
+                tray::scales_changed();
                 let start = (since != 0).then(|| instant_of(since));
                 match self.bars.iter().find(|(_, b)| b.output == output) {
                     Some((id, _)) => self.set_form(*id, form, start),
@@ -489,8 +503,10 @@ impl Shell {
                     agents::peek::forget(&bar.output);
                     footer::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
+                    let tray = tray::draw::forget(&bar.output);
                     Some(Task::batch([
                         sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
+                        Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
                         Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.agents)),
                         Task::done(Message::RemoveWindow(bar.desktops)),
@@ -811,7 +827,12 @@ impl Shell {
         let Some(bar) = self.bars.get_mut(&id) else {
             return Task::none();
         };
-        let mut tasks = Vec::new();
+        // The tray first: the groups over it go up by what it takes.
+        let mut tasks: Vec<Task<Message>> =
+            tray::draw::sync(&bar.output, bar.form, bar.switch.is_some())
+                .into_iter()
+                .map(Task::done)
+                .collect();
         let width = bar.surface_width();
         if bar.surface != width {
             bar.surface = width;
@@ -1066,6 +1087,37 @@ impl Shell {
         )
     }
 
+    /// The tray of the bar whose tray's surface is `id` (5.14).
+    fn tray_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self
+            .bars
+            .values()
+            .find(|b| tray::draw::surface(&b.output) == Some(id))?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = bar_height - 100.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = tray::draw::Tray {
+            id,
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            motion: self.look.motion,
+            backdrop,
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
     /// The share's chooser (5.11), if its surface is `id`.
     fn share_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !share::is_surface(id) {
@@ -1292,6 +1344,14 @@ impl Shell {
             .height(Length::Fill)
             .into(),
             // They open none.
+            popover::Item::Tray(key) => canvas(popover::tray::Panel {
+                id,
+                key,
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             popover::Item::Keyboard
             | popover::Item::Decline
             | popover::Item::Agent(_)
@@ -1311,6 +1371,8 @@ impl Shell {
                 .or_else(|| self.desktops_view(id))
                 .or_else(|| self.agents_view(id))
                 .or_else(|| self.footer_view(id))
+                .or_else(|| self.tray_view(id))
+                .or_else(|| tray::tip::view(id))
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))

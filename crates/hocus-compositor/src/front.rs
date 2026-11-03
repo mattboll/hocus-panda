@@ -62,6 +62,7 @@ pub fn in_the_bar(namespace: &str) -> bool {
             | hocus_link::AGENTS_NAMESPACE
             | hocus_link::FOOTER_NAMESPACE
             | hocus_link::IN_USE_NAMESPACE
+            | hocus_link::TRAY_NAMESPACE
     )
 }
 
@@ -252,11 +253,13 @@ mod tests {
             hocus_link::DESKTOPS_NAMESPACE,
             hocus_link::AGENTS_NAMESPACE,
             hocus_link::FOOTER_NAMESPACE,
+            hocus_link::TRAY_NAMESPACE,
         ] {
             assert!(in_the_bar(ns), "{ns}");
         }
         for ns in [
             hocus_link::POPOVER_NAMESPACE,
+            hocus_link::TIP_NAMESPACE,
             hocus_link::PEEK_NAMESPACE,
             hocus_link::LAUNCHER_NAMESPACE,
             hocus_link::LAUNCHER_TOAST_NAMESPACE,

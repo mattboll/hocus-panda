@@ -49,6 +49,7 @@ pub mod kit;
 pub mod session;
 pub mod sharing;
 pub mod sound;
+pub mod tray;
 pub mod wifi;
 
 use std::{
@@ -60,7 +61,7 @@ use std::{
 use hocus_link::{
     AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
     Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH,
-    ToCompositor,
+    TRAY_NAMESPACE, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -115,6 +116,9 @@ pub enum Item {
     /// The sign of what is in use, under the clock (5.11): who sees the
     /// screen, and stopping it.
     Sharing,
+    /// A tray icon (5.14), by its item's key: its menu, read before it
+    /// opens (a right click, or `Enter` while it holds the keyboard).
+    Tray(u32),
 }
 
 impl Item {
@@ -122,7 +126,12 @@ impl Item {
     fn clicks(self) -> bool {
         !matches!(
             self,
-            Self::Keyboard | Self::Desktop(_) | Self::Decline | Self::Agent(_) | Self::Menu
+            Self::Keyboard
+                | Self::Desktop(_)
+                | Self::Decline
+                | Self::Agent(_)
+                | Self::Menu
+                | Self::Tray(_)
         )
     }
 
@@ -146,7 +155,7 @@ impl Item {
             | Self::Notifications
             | Self::User
             | Self::Sharing => true,
-            Self::Keyboard | Self::Agent(_) | Self::Menu => false,
+            Self::Keyboard | Self::Agent(_) | Self::Menu | Self::Tray(_) => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
             _ => form == Form::Mini,
@@ -162,6 +171,7 @@ impl Item {
             Self::Clipboard => clipboard::WIDTH,
             Self::User => session::WIDTH,
             Self::Sharing => sharing::WIDTH,
+            Self::Tray(_) => tray::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -184,6 +194,7 @@ impl Item {
             Self::Clipboard => clipboard::height(),
             Self::User => session::height(),
             Self::Sharing => sharing::height(),
+            Self::Tray(key) => tray::height(key),
             Self::Keyboard | Self::Decline | Self::Agent(_) | Self::Menu => 0,
         }
     }
@@ -208,6 +219,7 @@ impl Item {
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
             Self::Menu | Self::User | Self::Sharing => {}
+            Self::Tray(_) => tray::opening(),
         }
     }
 
@@ -228,6 +240,7 @@ impl Item {
             | Self::Menu
             | Self::User
             | Self::Sharing
+            | Self::Tray(_)
             | Self::Clipboard => {}
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
@@ -251,6 +264,7 @@ impl Item {
                 FOOTER_NAMESPACE
             }
             (Self::Sharing, _) => IN_USE_NAMESPACE,
+            (Self::Tray(_), _) => TRAY_NAMESPACE,
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -270,7 +284,7 @@ impl Item {
     fn on_bottom(self) -> bool {
         !matches!(
             self,
-            Self::Sound | Self::Desktop(_) | Self::Secretary | Self::Sharing
+            Self::Sound | Self::Desktop(_) | Self::Secretary | Self::Sharing | Self::Tray(_)
         ) && !self.agents()
     }
 
@@ -283,6 +297,7 @@ impl Item {
             AGENTS_NAMESPACE => place.agents,
             FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
             IN_USE_NAMESPACE => place.in_use.unwrap_or(place.levels),
+            TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
             _ => place.connections,
         }
     }
@@ -312,6 +327,8 @@ pub struct Place {
     pub footer: Option<window::Id>,
     /// The sign of what is in use (5.11), while it shows.
     pub in_use: Option<window::Id>,
+    /// The tray's (5.14), while icons show.
+    pub tray: Option<window::Id>,
 }
 
 /// A bar's height until its surface's is known.
@@ -371,6 +388,13 @@ pub enum Event {
     /// The popover gives way to `item`'s, beside the same item (Sources'
     /// "Brancher": the consent popover; the briefing's "Sources").
     Replace(Item),
+    /// `item`'s popover opens, from `rect` on `bar`, as a click opens it,
+    /// what was open closing: a tray icon's menu, once read.
+    Open {
+        bar: String,
+        item: Item,
+        rect: Rectangle,
+    },
     /// A line of the popover names agent `id` (the briefing's): it closes,
     /// and the compositor goes to the agent, the streak from the line, at
     /// `row` in the popover.
@@ -442,6 +466,12 @@ pub enum Effect {
     Copy(String),
     /// The launcher opens on `bar`'s screen, or closes (the footer's menu).
     ToggleLauncher(String),
+    /// Tray icon `key`'s menu is read, then opens beside it at `rect`.
+    TrayMenu {
+        bar: String,
+        key: u32,
+        rect: Rectangle,
+    },
     /// A layer surface of the shell's beside `bar`, of `namespace` (the
     /// peek, 4.5): `size`, its margins from the screen's top right (top,
     /// right, bottom, left); it takes no keyboard.
@@ -588,6 +618,7 @@ impl Controller {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
         let footer = self.bars.get(bar).and_then(|p| p.footer);
         let in_use = self.bars.get(bar).and_then(|p| p.in_use);
+        let tray = self.bars.get(bar).and_then(|p| p.tray);
         let place = Place {
             form,
             height,
@@ -598,6 +629,7 @@ impl Controller {
             surface,
             footer,
             in_use,
+            tray,
         };
         self.bars.insert(bar.to_owned(), place);
     }
@@ -616,6 +648,13 @@ impl Controller {
         }
         if in_use.is_none() {
             self.items.remove(&(bar.to_owned(), IN_USE_NAMESPACE));
+        }
+    }
+
+    /// Bar `bar`'s tray's surface is `tray`, or it has none.
+    pub fn set_tray(&mut self, bar: &str, tray: Option<window::Id>) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.tray = tray;
         }
     }
 
@@ -866,6 +905,11 @@ impl Controller {
                     self.open(&bar, item, from, Opened::Click, &mut effects);
                 }
             }
+            Event::Open { bar, item, rect } => {
+                self.unfocus(&mut effects);
+                self.close(now, &mut effects);
+                self.open(&bar, item, rect, Opened::Click, &mut effects);
+            }
             Event::GoTo { id, row } => {
                 if let Phase::Open(open) = &self.phase {
                     let (bar, at) = (open.bar.clone(), open.rect.position());
@@ -933,7 +977,12 @@ impl Controller {
         };
         item.opening();
         let size = (item.width(), item.height(bar, place.form, true));
-        let rect = placed(place, self.anchor(bar, item, from), size, item.on_bottom());
+        let rect = placed(
+            place,
+            self.anchor(bar, item, from, size.1),
+            size,
+            item.on_bottom(),
+        );
         let margin = margins(place, rect);
         let surface = window::Id::unique();
         tracing::debug!(?item, ?how, bar, "a popover opens");
@@ -1070,7 +1119,7 @@ impl Controller {
         }
         let size = (open.item.width(), height);
         let before = margins(place, open.rect);
-        let anchor = anchor(&self.items, &open.bar, open.item, open.from);
+        let anchor = anchor(&self.items, &open.bar, open.item, open.from, height);
         open.rect = placed(place, anchor, size, open.item.on_bottom());
         let margin = margins(place, open.rect);
         tracing::debug!(height, "the popover's size changes");
@@ -1107,8 +1156,8 @@ impl Controller {
     }
 
     /// What a popover of `item` opened from `from` on `bar` lines up with.
-    fn anchor(&self, bar: &str, item: Item, from: Rectangle) -> Rectangle {
-        anchor(&self.items, bar, item, from)
+    fn anchor(&self, bar: &str, item: Item, from: Rectangle, height: u32) -> Rectangle {
+        anchor(&self.items, bar, item, from, height)
     }
 
     fn unfocus(&mut self, effects: &mut Vec<Effect>) {
@@ -1162,14 +1211,22 @@ impl Controller {
     }
 }
 
-/// What a popover of `item` opened from `from` on `bar` lines up with:
-/// the item, or for a desktop's list the tiles' top (their first row).
+/// What a popover of `item`, `height` tall, opened from `from` on `bar`
+/// lines up with: the item, or for a desktop's list the tiles' top (their
+/// first row); a tray icon's menu has its bottom on the icon's.
 fn anchor(
     items: &HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
     bar: &str,
     item: Item,
     from: Rectangle,
+    height: u32,
 ) -> Rectangle {
+    if matches!(item, Item::Tray(_)) {
+        return Rectangle {
+            y: from.y + from.height - height as f32,
+            ..from
+        };
+    }
     // The agents' popovers' top where the mockup has it.
     if item.agents() {
         return Rectangle {
@@ -1199,6 +1256,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Decline => Some(Effect::Decline),
         Item::Agent(id) => Some(Effect::GoToAgent { id, bar, row: rect }),
         Item::Menu => Some(Effect::ToggleLauncher(bar)),
+        Item::Tray(key) => Some(Effect::TrayMenu { bar, key, rect }),
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1514,6 +1572,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                 crate::launcher::deadline(),
                 crate::emoji::deadline(),
                 crate::capture::thumb::deadline(),
+                crate::tray::tip::deadline(),
             ]
             .into_iter()
             .flatten()
@@ -1531,6 +1590,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             due.extend(crate::launcher::tick(now));
                             due.extend(crate::emoji::tick(now));
                             due.extend(crate::capture::thumb::tick(now));
+                            due.extend(crate::tray::tip::tick(now));
                             Some(due)
                         }
                     }
@@ -1662,6 +1722,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Copy(text) => {
             tell(ToCompositor::Copy(text));
+            Vec::new()
+        }
+        Effect::TrayMenu { bar, key, rect } => {
+            crate::tray::ask(crate::tray::Ask::Menu { key, bar, rect });
             Vec::new()
         }
         Effect::ToggleLauncher(bar) => {
@@ -2263,6 +2327,7 @@ mod tests {
             surface: window::Id::unique(),
             footer: None,
             in_use: None,
+            tray: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -2290,6 +2355,7 @@ mod tests {
             surface: window::Id::unique(),
             footer: None,
             in_use: None,
+            tray: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
         let small = placed(place, item, (280, 332), false);

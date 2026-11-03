@@ -136,6 +136,17 @@ pub const BUBBLES_WAITING_NAMESPACE: &str = "hocus-bubbles-waiting";
 pub const FOOTER_NAMESPACE: &str = "hocus-bar-footer";
 /// The bell's (5.4), on the footer's surface since 5.5.
 pub const BELL_NAMESPACE: &str = FOOTER_NAMESPACE;
+/// The namespace of the tray (bar.md §4 group 11, 5.14): the
+/// applications' icons (StatusNotifierItem) just above the footer, a row
+/// in the full form, a column in the mini. Opened while an icon shows,
+/// none without: an icon's change draws that region alone.
+pub const TRAY_NAMESPACE: &str = "hocus-bar-tray";
+/// The namespace of a tray icon's tooltip (5.14), beside the bar: it
+/// takes no pointer and no keyboard, and stays over the windows as the
+/// popovers do.
+pub const TIP_NAMESPACE: &str = "hocus-bar-tip";
+/// The tooltip's corners, logical pixels.
+pub const TIP_RADIUS: f64 = 9.0;
 
 /// A bubble slides in from the bar's side over [`BUBBLE_IN`] (the 5.3
 /// mockup's `cubic-bezier(.2, .8, .2, 1)`), fading in, from this far

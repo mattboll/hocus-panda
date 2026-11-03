@@ -303,7 +303,11 @@ impl<Message> canvas::Program<Message> for Levels {
         }
         // The connections sit above the group: they follow its top.
         let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
-        crate::network::draw::levels_moved(&self.bar, group_tops(&levels, lines, state.keys()));
+        let (full, mini) = group_tops(&levels, lines, state.keys());
+        crate::network::draw::levels_moved(
+            &self.bar,
+            (full + self.lift(Form::Full), mini + self.lift(Form::Mini)),
+        );
         if state.zero.is_none()
             && let Ok(mut system) = iced::advanced::graphics::text::font_system().write()
         {
@@ -378,7 +382,7 @@ impl<Message> canvas::Program<Message> for Levels {
         }
         let gauges = state.gauges.map(|g| g.at(at));
         let (zero, zero_bold) = state.zero.unwrap_or((VALUE * 0.6, MINI_VALUE * 0.65));
-        let drawn = Drawn {
+        let mut drawn = Drawn {
             levels: &state.levels,
             status: state
                 .status
@@ -395,6 +399,7 @@ impl<Message> canvas::Program<Message> for Levels {
         };
         frame.with_clip(column, |f| {
             for &(form, alpha) in &self.forms {
+                drawn.bottom = bounds.height - self.lift(form);
                 match form {
                     Form::Full => drawn.full(f, alpha),
                     Form::Mini => drawn.mini(f, (left + right) / 2.0, alpha),
@@ -433,6 +438,8 @@ impl Levels {
         let right = size.width;
         let left = right + 2.0 - self.bar_width;
         let mut items = Vec::new();
+        // The group's foot, over the tray's (5.14).
+        let size = Size::new(size.width, size.height - self.lift(*form));
         match form {
             Form::Full => {
                 let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
@@ -504,6 +511,11 @@ impl Levels {
             }
         }
         items
+    }
+
+    /// How far `form`'s group goes up over the tray (5.14).
+    fn lift(&self, form: Form) -> f32 {
+        crate::tray::draw::lift(&self.bar, form)
     }
 
     /// A point of the surface (`size`) in the bar's frame: the surface's

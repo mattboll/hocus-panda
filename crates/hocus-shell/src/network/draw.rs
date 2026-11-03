@@ -493,7 +493,8 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Clipboard
                             | Item::Menu
                             | Item::User
-                            | Item::Sharing,
+                            | Item::Sharing
+                            | Item::Tray(_),
                             _,
                         ) => {}
                     }
