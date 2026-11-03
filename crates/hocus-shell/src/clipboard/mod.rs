@@ -126,6 +126,18 @@ impl History {
         change
     }
 
+    /// Item `old` replaced by `item`, copied at `now` (a capture
+    /// annotated, 5.9): `old` goes, `item` comes first with its pin.
+    pub fn replace(&mut self, old: u64, mut item: Item, now: i64) -> Change {
+        item.pinned = self.get(old).is_some_and(|i| i.pinned);
+        let gone = self.remove(old);
+        let mut change = self.add(item, now);
+        if gone {
+            change.gone.insert(0, old);
+        }
+        change
+    }
+
     /// The items read back from the disk, with those copied meanwhile:
     /// what does not stay.
     pub fn loaded(&mut self, items: Vec<Item>, now: i64) -> Vec<u64> {
@@ -239,6 +251,20 @@ pub fn start() {
 pub fn copied(app: String, clip: Clip) {
     store::ask(store::Ask::Copied {
         app,
+        clip,
+        at: crate::notifications::wall_ms(),
+    });
+}
+
+/// Capture `capture` of the compositor's session (its `capture-copied`,
+/// 5.8b), its PNG: an image copied from the capture
+/// ([`hocus_link::CAPTURE_APP`], "Capture d'écran" / "Screenshot"), first.
+/// The same capture again, its annotated image (5.9), replaces the item it
+/// made: the old one and its files go, the new one is first, pinned if the
+/// old one was.
+pub fn captured(capture: u64, clip: Clip) {
+    store::ask(store::Ask::Captured {
+        capture,
         clip,
         at: crate::notifications::wall_ms(),
     });
@@ -382,6 +408,26 @@ mod tests {
         h.pin(1);
         assert_eq!(h.clear(), [2]);
         assert_eq!(keys(&h), [1]);
+    }
+
+    #[test]
+    fn a_capture_replaced_goes_and_its_new_image_comes_first_with_its_pin() {
+        let mut h = History::default();
+        h.add(
+            text_item(1, "the capture", "hocuspanda.capture", 0),
+            NOW - 2000,
+        );
+        h.pin(1);
+        h.add(text_item(2, "a copy", "kitty", 0), NOW - 1000);
+        let change = h.replace(1, text_item(3, "annotated", "hocuspanda.capture", 0), NOW);
+        assert_eq!(change.new.as_ref().map(|i| i.key), Some(3));
+        assert_eq!(change.gone, [1]);
+        assert_eq!(keys(&h), [3, 2]);
+        assert!(h.get(3).is_some_and(|i| i.pinned));
+        // Gone meanwhile: the new one is only added.
+        let change = h.replace(9, text_item(4, "again", "", 0), NOW + 1);
+        assert!(change.gone.is_empty());
+        assert!(h.get(4).is_some_and(|i| !i.pinned));
     }
 
     #[test]

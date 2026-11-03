@@ -304,6 +304,74 @@ fn window_mode_takes_the_window_under_the_pointer() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// "Include the pointer" in window mode (5.8b, issue #528): on, the
+/// window's capture shows the pointer where it is on the window; off, it
+/// does not.
+#[test]
+fn a_window_capture_shows_the_pointer_when_asked() -> anyhow::Result<()> {
+    let mut bed = Bed::start(&["1920x1080"])?;
+    open(&mut bed.hp, "editor", (800, 600))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    let editor = common::rect_of(&bed.hp, "editor").context("no window")?;
+    // The pointer a third of the way into the window, away from its
+    // middle and its corners.
+    let at = (editor.width / 3, editor.height / 3);
+    let pointer = (
+        f64::from(editor.x + at.0) + 0.5,
+        f64::from(editor.y + at.1) + 0.5,
+    );
+    // The pixels of a 16 px square under the pointer's tip that are not
+    // the window's colour.
+    let under_the_tip = |image: &image::RgbaImage| -> usize {
+        let (x0, y0) = (
+            u32::try_from(at.0).unwrap_or(0),
+            u32::try_from(at.1).unwrap_or(0),
+        );
+        (y0..y0 + 16)
+            .flat_map(|y| (x0..x0 + 16).map(move |x| (x, y)))
+            .filter(|(x, y)| image.get_pixel(*x, *y).0 != WINDOW)
+            .count()
+    };
+    let take = |bed: &mut Bed, pointer_on: bool, n: u64| -> anyhow::Result<image::RgbaImage> {
+        bed.open()?;
+        bed.hp.capture_ask(CaptureAsk::Mode(CaptureMode::Window));
+        let shown = match bed.hp.capture() {
+            CaptureShown::Choosing { pointer, .. } => pointer,
+            _ => false,
+        };
+        if shown != pointer_on {
+            bed.hp.capture_ask(CaptureAsk::Pointer);
+        }
+        bed.hp.pointer_move(pointer.0 - 1.0, pointer.1);
+        bed.hp.pointer_move(pointer.0, pointer.1);
+        bed.hp.button(BTN_LEFT, true);
+        bed.hp.button(BTN_LEFT, false);
+        let (_, image) = bed.taken(n)?;
+        anyhow::ensure!(
+            image.dimensions() == (u32::try_from(editor.width)?, u32::try_from(editor.height)?),
+            "not the window: {:?}",
+            image.dimensions()
+        );
+        Ok(image)
+    };
+    let with = take(&mut bed, true, 1)?;
+    assert!(
+        under_the_tip(&with) > 20,
+        "no pointer drawn on the window: {} pixels",
+        under_the_tip(&with)
+    );
+    // Away from it, the window as it is.
+    let (w, h) = with.dimensions();
+    assert_eq!(with.get_pixel(w * 3 / 4, h * 3 / 4).0, WINDOW);
+    let without = take(&mut bed, false, 2)?;
+    assert_eq!(
+        under_the_tip(&without),
+        0,
+        "a pointer drawn though not asked"
+    );
+    Ok(())
+}
+
 /// Screen mode takes the screen under the pointer; all screens, one image
 /// of them as they are laid out.
 #[test]

@@ -211,6 +211,11 @@ impl Words {
         }
     }
 
+    /// Where a capture comes from (5.8b).
+    fn capture(self) -> &'static str {
+        self.pick("Capture d'écran", "Screenshot")
+    }
+
     fn image(self, width: u32, height: u32) -> String {
         format!("Image · {width}\u{a0}×\u{a0}{height}")
     }
@@ -316,6 +321,14 @@ fn fold(text: &str) -> String {
     crate::launcher::search::fold(text)
 }
 
+/// Where an item comes from: a capture (5.8b), else its application.
+fn source(app: &str, words: Words, names: &mut HashMap<String, String>) -> String {
+    if app == hocus_link::CAPTURE_APP {
+        return words.capture().to_owned();
+    }
+    app_name(app, names)
+}
+
 /// An application's name, as its desktop entry gives it (by its id, in
 /// any case, or its last part), else its id.
 fn app_name(app: &str, names: &mut HashMap<String, String>) -> String {
@@ -382,7 +395,7 @@ fn lay_out(
     let wanted = fold(query.trim());
     let shown: Vec<(&Item, String)> = items
         .iter()
-        .map(|item| (item, app_name(&item.app, &mut cache.names)))
+        .map(|item| (item, source(&item.app, words, &mut cache.names)))
         .filter(|(item, app)| {
             wanted.is_empty() || fold(&format!("{} {app}", item.text)).contains(&wanted)
         })
@@ -1379,6 +1392,33 @@ mod tests {
         );
         assert_eq!(empty.empty.as_deref(), Some("Nothing copied yet."));
         assert!(empty.heads.is_empty());
+    }
+
+    #[test]
+    fn a_capture_comes_from_the_screenshot_and_is_found_by_it() {
+        let now = now();
+        let ms = now.timestamp().as_millisecond();
+        let mut items = items(&now);
+        items.insert(0, text_item(9, "", hocus_link::CAPTURE_APP, ms));
+        for (lang, said, query) in [
+            (Lang::French, "Capture d'écran · maintenant", "ecran"),
+            (Lang::English, "Screenshot · now", "screens"),
+        ] {
+            let words = Words::new(lang);
+            let laid = lay_out(&items, "", words, &now, &mut Cache::default(), &mut measure);
+            assert_eq!(laid.rows[1].key, 9);
+            assert_eq!(laid.rows[1].meta, said);
+            let found = lay_out(
+                &items,
+                query,
+                words,
+                &now,
+                &mut Cache::default(),
+                &mut measure,
+            );
+            let keys: Vec<u64> = found.rows.iter().map(|r| r.key).collect();
+            assert_eq!(keys, [9]);
+        }
     }
 
     #[test]

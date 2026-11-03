@@ -174,5 +174,49 @@ at once. `Alt+Print`: the focused window, at once. All three are in
   display manager's until one is built; then nothing is captured while
   it shows); a protocol for windows to ask for protection (none is
   common to Wayland compositors: the password managers stand for it); the
-  pointer in a window's capture; the capture in the clipboard's history;
-  the screencopy protocols for other programs.
+  screencopy protocols for other programs. (The pointer in a window's
+  capture and the capture in the clipboard's history came with 5.8b,
+  below.)
+
+### 5.8b, the history and the pointer (2026-11-03)
+
+Decided by the maintainer after 5.8 (issue #528).
+
+- **Captures in the clipboard's history**: every capture (an area, a
+  window, a screen, all of them, `Shift+Print` and `Alt+Print`) is an
+  image of the history ([bar.md](bar.md), 5.6), as an image copied from
+  an application is: its thumbnail in its tile, "Image · 640 × 360", and
+  for its source "Capture d'écran" / "Screenshot" (the search finds it by
+  that word too), first. The clipboard offering a capture is the
+  compositor's own selection, which the history never reads back; so the
+  capture's thread, once the PNG is made, also makes the history's line
+  (`capture-copied CAPTURE png DATA`, the data in base64, off the loop as
+  a copy's line is), and the loop tells it to the shell after offering
+  the clipboard. Its application, kept with the item on disk, is
+  `hocuspanda.capture` (`hocus_link::CAPTURE_APP`). A capture larger than
+  the history keeps (8 MB of PNG) is copied and saved, not listed.
+- **Replacing it (for 5.9)**: each capture has a number, the session's
+  count of captures drawn (`Capture::numbered`, carried by the capture's
+  thread). The same number told again with another PNG (the annotated
+  image) replaces the item that capture made: the old item and its files
+  go, the new one comes first, pinned if the old one was; if the user
+  removed it meanwhile, the new one is only added. The compositor's way
+  is `clipboard::capture_line(number, &png)` on the thread that made the
+  PNG, then `State::capture_in_history(line)` on the loop; the shell's,
+  `clipboard::captured(number, clip)`. The shell keeps which item each
+  number made for the session only.
+- **The pointer in a window's capture**: with "include the pointer" on,
+  a window's capture shows the pointer when it is over that window (the
+  window under it, as window mode's hover finds it), drawn where it is on
+  the window, in front of its surfaces and popups; elsewhere, or with the
+  option off, none. `Alt+Print`, like `Shift+Print`, never includes it.
+- **Measured headless**: a window's capture with the option on has the
+  pointer under its tip and the window's colour elsewhere, and with it
+  off none (`tests/screenshots.rs`, pixman); with the real shell, a
+  capture is the history's first row, "[image] «Image · 640 × 360»
+  Capture d'écran · maintenant", above what was copied before, and
+  `Enter` gives the window it as the clipboard (`Ctrl+V`), its bytes the
+  saved PNG's, though a client had taken the clipboard since
+  (`tests/clipboard.rs`). Unit tests for the line, the source's words and
+  search, and an item replaced keeping its pin. On the Intel GPU, the
+  screenshot of the pull request.

@@ -15,11 +15,14 @@
 //!   toolbar, which gets it as any surface does.
 //! - **Taking it**: the image is drawn again for it, off the screen, at
 //!   the screens' own resolution, without what the capture shows (nor the
-//!   toolbar, nor a toast), the pointer only if asked, a password
-//!   manager's window black ([`shoot`]). Then a thread cuts or puts the
-//!   pieces together, encodes the PNG and writes it in the pictures'
-//!   folder ([`save`]); back on the loop, the clipboard offers it
-//!   (`image/png`) and the shell shows the toast.
+//!   toolbar, nor a toast), the pointer only if asked (in a window's,
+//!   where it is on it, when it is over it), a password manager's window
+//!   black ([`shoot`]). Then a thread cuts or puts the pieces together,
+//!   encodes the PNG and writes it in the pictures' folder ([`save`]), and
+//!   makes the line for the clipboard's history; back on the loop, the
+//!   clipboard offers it (`image/png`), the history lists it first, its
+//!   item known by the capture's number (5.8b), and the shell shows the
+//!   toast.
 //! - `Shift+Print` and `Alt+Print` take the screen under the pointer and
 //!   the focused window at once.
 //! - The area is kept in the state directory, written off the loop as the
@@ -157,6 +160,8 @@ enum Phase {
 struct Finished {
     shot: Shot,
     saved: Result<save::Saved, String>,
+    /// Its line for the clipboard's history (5.8b).
+    history: Option<String>,
 }
 
 /// The capture's state, owned by the loop.
@@ -181,6 +186,9 @@ pub struct Capture {
     /// The buttons pressed while it was open: their releases are its own.
     held: HashSet<u32>,
     done: Option<Sender<Finished>>,
+    /// Captures drawn: each one's number, which the clipboard's history
+    /// knows its item by (5.8b; 5.9 tells it the annotated image by it).
+    numbered: u64,
     /// Captures saved, and the last file written: for tests.
     taken: u64,
     last_file: Option<PathBuf>,
@@ -481,6 +489,19 @@ impl State {
             Target::Window(id) => self.window_output(*id).map(|o| o.name()),
             Target::All => None,
         }
+    }
+
+    /// Whether the pointer is over window `id`: its capture shows it then,
+    /// when asked (5.8b).
+    pub(crate) fn pointer_over(&self, id: WindowId) -> bool {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return false;
+        };
+        let at = pointer.current_location();
+        self.space
+            .element_under(at)
+            .and_then(|(window, _)| self.id_of(window))
+            == Some(id)
     }
 
     /// The screen most of window `id` is on.
@@ -903,9 +924,19 @@ impl State {
         let Some(done) = self.capture_done() else {
             return;
         };
+        self.capture.numbered += 1;
+        let number = self.capture.numbered;
         programs::on_a_thread("save the capture".to_owned(), move || {
             let saved = save::save(job).map_err(|err| format!("{err:#}"));
-            let _ = done.send(Finished { shot, saved });
+            let history = saved
+                .as_ref()
+                .ok()
+                .and_then(|saved| crate::clipboard::capture_line(number, &saved.png));
+            let _ = done.send(Finished {
+                shot,
+                saved,
+                history,
+            });
         });
     }
 
@@ -934,7 +965,11 @@ impl State {
 
     /// A capture made: the clipboard offers it, and the toast says so.
     fn capture_finished(&mut self, finished: Finished) {
-        let Finished { shot, saved } = finished;
+        let Finished {
+            shot,
+            saved,
+            history,
+        } = finished;
         let saved = match saved {
             Ok(saved) => saved,
             Err(err) => {
@@ -951,6 +986,9 @@ impl State {
         self.capture.taken += 1;
         self.capture.last_file.clone_from(&saved.file);
         self.offer_clipboard(ClipKind::Png.types(), saved.png);
+        if let Some(line) = history {
+            self.capture_in_history(line);
+        }
         self.tell_shell(ToShell::Captured(Captured {
             output: shot.toast,
             mode: shot.mode,

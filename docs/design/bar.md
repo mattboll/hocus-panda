@@ -2561,7 +2561,9 @@ maintainer's spec (issue #396).
   `text/plain`) or, offering no text, its `image/png`, through a pipe on a
   thread, 8 MB and 3 s at most, and tells the shell (`copied`: the
   application of the window focused as it was copied, and the bytes, in
-  base64). Copies the history itself makes are not read again. Never
+  base64). Copies the history itself makes are not read again. Screen
+  captures come in too (5.8b, [screenshots.md](screenshots.md)): their
+  PNG, from "Capture d'écran" / "Screenshot" (`capture-copied`). Never
   read, never told: a selection offering `x-kde-passwordManagerHint` that
   says `secret`, or `CLIPBOARD_STATE` that says `sensitive` (either unread
   in time counting as a secret), or copied from a window whose
