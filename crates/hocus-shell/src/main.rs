@@ -39,6 +39,7 @@ mod layouts;
 mod levels;
 mod network;
 mod notifications;
+mod outputs;
 mod paste;
 mod popover;
 mod renderer;
@@ -79,6 +80,10 @@ const ALONE: &str = "active";
 /// will be then, so that it keeps in step with what the compositor moves
 /// (the windows, the glass), which it draws as of the frame it shows.
 const AHEAD: Duration = Duration::from_millis(16);
+
+/// How often a bar waiting for its screen's name looks at the round trip
+/// ([`outputs`]): a few milliseconds each, for the few a plug takes.
+const SCREENS_LOOK: Duration = Duration::from_millis(4);
 
 // --- Theme tokens (§13) -------------------------------------------------------
 
@@ -132,6 +137,7 @@ fn main() -> ExitCode {
     let connection = match wayland_client::Connection::connect_to_env() {
         Ok(connection) => {
             paste::start(&connection);
+            outputs::start(&connection);
             Some(connection)
         }
         Err(err) => {
@@ -305,6 +311,9 @@ struct Shell {
     software: bool,
     look: Look,
     bars: HashMap<window::Id, Bar>,
+    /// Bars asked for on screens whose names may not have reached
+    /// iced_layershell yet ([`outputs`]), by screen.
+    waiting: HashMap<String, Waiting>,
     now: Instant,
     clock: clock::Style,
     wall: clock::time::Wall,
@@ -331,6 +340,18 @@ enum Message {
     /// groups over them, to their places.
     Tray,
     Resized(window::Id, Size),
+    /// While bars wait for their screens' names: a look at the screens'
+    /// round trip.
+    Screens,
+}
+
+/// A bar asked for and not opened yet: in what form, the round trips it
+/// has waited, and whether it came during one (which does not count).
+#[derive(Debug, Clone, Copy)]
+struct Waiting {
+    form: Form,
+    trips: u32,
+    late: bool,
 }
 
 impl Shell {
@@ -354,6 +375,7 @@ impl Shell {
                 motion: !software,
             },
             bars: HashMap::new(),
+            waiting: HashMap::new(),
             now: Instant::now(),
             clock: clock_style(&ClockLook::default()),
             wall: clock::time::Wall { zone, shift },
@@ -381,6 +403,11 @@ impl Shell {
         // which narrows its surface: at rest, nothing is drawn.
         if self.bars.values().any(|b| b.switch.is_some()) {
             subscriptions.push(window::frames().map(|_| Message::Frame));
+        }
+        // Only while a bar waits for its screen's name: iced's loop reads
+        // the round trip's answer, and nothing else tells the shell.
+        if !self.waiting.is_empty() {
+            subscriptions.push(iced::time::every(SCREENS_LOOK).map(|_| Message::Screens));
         }
         subscriptions.push(Subscription::run(zone_changes));
         subscriptions.push(Subscription::run(popover::effects));
@@ -444,6 +471,11 @@ impl Shell {
                 let ids: Vec<window::Id> = self.bars.keys().copied().collect();
                 Task::batch(ids.into_iter().map(|id| self.fit(id)))
             }
+            Message::Screens => match outputs::answered() {
+                outputs::Answer::Waiting => Task::none(),
+                outputs::Answer::Names(names) => self.after_round_trip(Some(&names)),
+                outputs::Answer::Unknowable => self.after_round_trip(None),
+            },
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -476,10 +508,11 @@ impl Shell {
                 let start = (since != 0).then(|| instant_of(since));
                 match self.bars.iter().find(|(_, b)| b.output == output) {
                     Some((id, _)) => self.set_form(*id, form, start),
-                    None => self.open_bar(OutputOption::OutputName(output.clone()), output, form),
+                    None => self.wait_for(output, form),
                 }
             }
             ToShell::NoBar { output } => {
+                self.waiting.remove(&output);
                 let gone: Vec<window::Id> = self
                     .bars
                     .iter()
@@ -630,6 +663,57 @@ impl Shell {
                 Task::none()
             }
         }
+    }
+
+    /// A bar for `output` opens once iced_layershell knows that screen by
+    /// its name ([`outputs::STEPS`]): asked for by a name it does not
+    /// know, it would be on no screen, and the compositor would put it
+    /// under the pointer (#540). Asked again while it waits, it takes the
+    /// new form.
+    fn wait_for(&mut self, output: String, form: Form) -> Task<Message> {
+        tracing::debug!(output, "a bar waits for its screen's name");
+        // A round trip under way may have gone before the screen was
+        // there: it does not count.
+        let late = !outputs::ask();
+        self.waiting
+            .entry(output)
+            .and_modify(|w| w.form = form)
+            .or_insert(Waiting {
+                form,
+                trips: 0,
+                late,
+            });
+        Task::none()
+    }
+
+    /// The bars that have waited long enough open, on their screen if
+    /// the compositor has given its name; those given up on are let go;
+    /// the others wait one more round trip.
+    fn after_round_trip(&mut self, names: Option<&[String]>) -> Task<Message> {
+        tracing::debug!(?names, "the screens' round trip");
+        let mut ready = Vec::new();
+        self.waiting.retain(|output, waiting| {
+            if std::mem::take(&mut waiting.late) {
+                return true;
+            }
+            waiting.trips += 1;
+            let known = names.is_none_or(|names| names.iter().any(|n| n == output));
+            if known && waiting.trips >= outputs::STEPS {
+                ready.push((output.clone(), waiting.form));
+                false
+            } else if waiting.trips >= outputs::MOST {
+                tracing::warn!(output, "no screen of that name: its bar does not open");
+                false
+            } else {
+                true
+            }
+        });
+        if !self.waiting.is_empty() {
+            outputs::ask();
+        }
+        Task::batch(ready.into_iter().map(|(output, form)| {
+            self.open_bar(OutputOption::OutputName(output.clone()), output, form)
+        }))
     }
 
     /// A bar's surface on `output`: against its right edge, its height
