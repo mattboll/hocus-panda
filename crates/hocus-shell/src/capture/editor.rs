@@ -656,6 +656,7 @@ mod tests {
                 folder: String::new(),
                 width,
                 height,
+                video: None,
             },
             image,
             shown: handle.clone(),

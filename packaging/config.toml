@@ -162,9 +162,19 @@
 # capture-screen = "Shift+Print"
 # The focused window, at once.
 # capture-window = "Alt+Print"
+# Records the screen with the last settings of the capture's Vidéo (an
+# area, a window or a screen, the computer's sound, the microphone), after
+# a countdown; while recording, stops it. Saved in the videos' folder
+# ("Screen recordings", "Enregistrements d'écran" in French).
+# record = "Super+Shift+R"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
+
+# [recording]
+# Screen recordings' format: "mp4" (H.264 and AAC) or "webm" (VP9 and
+# Opus). Encoded by ffmpeg, on the GPU through VA-API when it can.
+# format = "mp4"
 
 # [programs]
 # The terminal's command, run through sh -c, for example "foot" or

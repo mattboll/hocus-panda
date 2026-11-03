@@ -249,8 +249,15 @@ fn unused(dir: &Path, name: &str) -> PathBuf {
 /// `$XDG_CONFIG_HOME/user-dirs.dirs` says (xdg-user-dirs), else
 /// `~/Pictures`.
 pub fn pictures_dir() -> Option<PathBuf> {
+    xdg_dir("XDG_PICTURES_DIR", "Pictures")
+}
+
+/// The user's folder `key` (`XDG_PICTURES_DIR`, `XDG_VIDEOS_DIR`): the
+/// variable, else what `$XDG_CONFIG_HOME/user-dirs.dirs` says, else
+/// `fallback` in the home.
+pub(crate) fn xdg_dir(key: &str, fallback: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    if let Some(dir) = std::env::var_os("XDG_PICTURES_DIR")
+    if let Some(dir) = std::env::var_os(key)
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
     {
@@ -262,14 +269,14 @@ pub fn pictures_dir() -> Option<PathBuf> {
         .unwrap_or_else(|| home.join(".config"));
     let said = std::fs::read_to_string(config.join("user-dirs.dirs"))
         .ok()
-        .and_then(|text| user_dir(&text, "XDG_PICTURES_DIR", &home));
-    Some(said.unwrap_or_else(|| home.join("Pictures")))
+        .and_then(|text| user_dir(&text, key, &home));
+    Some(said.unwrap_or_else(|| home.join(fallback)))
 }
 
 /// The folder `key` names in a `user-dirs.dirs` file: `"$HOME/Images"` or
 /// an absolute path; the home itself means none (the specification's
 /// "disabled").
-fn user_dir(text: &str, key: &str, home: &Path) -> Option<PathBuf> {
+pub(crate) fn user_dir(text: &str, key: &str, home: &Path) -> Option<PathBuf> {
     let value = text.lines().find_map(|line| {
         let (name, value) = line.trim().split_once('=')?;
         (name.trim() == key).then(|| value.trim().trim_matches('"').to_owned())

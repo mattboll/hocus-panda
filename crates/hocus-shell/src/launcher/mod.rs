@@ -732,7 +732,7 @@ fn browse(url: &str) -> Option<Effect> {
 }
 
 /// Where `name` is in `PATH`, if it is there and runs.
-fn program(name: &str) -> Option<String> {
+pub(crate) fn program(name: &str) -> Option<String> {
     use std::os::unix::fs::PermissionsExt;
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)

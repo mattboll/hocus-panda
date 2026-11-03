@@ -29,9 +29,10 @@
 mod draw;
 pub mod frames;
 mod glread;
-mod lease;
+pub(crate) mod lease;
 mod portal;
 pub mod ring;
+pub(crate) mod sink;
 mod stream;
 mod thumbs;
 

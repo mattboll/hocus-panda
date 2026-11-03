@@ -66,7 +66,10 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # (each missing hides its row); for the launcher, xdg-open to open an
 # address or a web search; the emoji picker's colour emoji font; and
 # PipeWire's daemon, which screen sharing streams to, and the portals'
-# GTK backend (the file chooser, which saving a capture uses). Depends:
+# GTK backend (the file chooser, which saving a capture uses); ffmpeg,
+# which encodes screen recordings (a program of its own, never linked),
+# and a VA-API driver for it to encode on the GPU (without one, on the
+# CPU). Depends:
 # xdg-desktop-portal, through which applications ask to share the screen.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
@@ -80,7 +83,8 @@ Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  kitty | foot | alacritty | xterm,
  upower, power-profiles-daemon | tuned-ppd, pipewire-bin, wireplumber,
  network-manager, bluez, xdg-utils, fonts-noto-color-emoji,
- pipewire, xdg-desktop-portal-gtk
+ pipewire, xdg-desktop-portal-gtk,
+ ffmpeg, va-driver-all | va-driver
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda

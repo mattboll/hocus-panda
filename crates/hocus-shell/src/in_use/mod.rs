@@ -10,6 +10,12 @@
 //! under it ([`room`]). Hovering it (150 ms) or a click opens its popover
 //! ([`crate::popover::sharing`]): who sees what, the notifications held,
 //! and a button to stop each share.
+//!
+//! The recording (5.10) is one more use, its item over the sign's: the
+//! compositor says when it records, pauses and stops (`recording`); the
+//! item counts the time on from what it was told, and its buttons pause,
+//! go on and stop it. In the mini form it opens under the pointer, the
+//! agents moving under it; in the full form it is always open.
 
 pub mod draw;
 
@@ -18,26 +24,52 @@ use std::{
     sync::{Mutex, PoisonError},
 };
 
-use hocus_link::{EDGE, Form, IN_USE_NAMESPACE, ShareShown};
+use std::time::{Duration, Instant};
+
+use hocus_link::{EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown};
 use iced::window;
 
 use crate::popover::{self, Effect, Item};
 
-/// What is in use, by kind: the screen's shares, for now.
+/// What is in use, by kind: the screen's shares, and the recording.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Uses {
     pub shares: Vec<ShareShown>,
+    pub recording: Option<Rec>,
 }
 
-/// A kind of use, as the sign shows them.
+/// The recording under way, as the compositor told it, and when.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rec {
+    pub shown: RecordingShown,
+    pub at: Instant,
+}
+
+impl Rec {
+    /// How long it has recorded at `now`.
+    pub fn elapsed(&self, now: Instant) -> Duration {
+        let told = Duration::from_millis(self.shown.elapsed);
+        if self.shown.paused {
+            told
+        } else {
+            told + now.saturating_duration_since(self.at)
+        }
+    }
+}
+
+/// A kind of use, as the sign shows them, from the top.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Use {
+    Recording,
     Screen,
 }
 
 impl Uses {
     pub fn kinds(&self) -> Vec<Use> {
         let mut kinds = Vec::new();
+        if self.recording.is_some() {
+            kinds.push(Use::Recording);
+        }
         if !self.shares.is_empty() {
             kinds.push(Use::Screen);
         }
@@ -59,14 +91,88 @@ pub fn snapshot() -> Uses {
         .unwrap_or_default()
 }
 
-/// The room the sign takes under the clock, the 14 px after it included:
-/// none when nothing is in use.
-pub fn room() -> f32 {
+/// The room the sign takes under the clock in `form`, the 14 px after it
+/// included: none when nothing is in use.
+pub fn room(form: Form) -> f32 {
     if snapshot().any() {
-        draw::SIGN.height + draw::AFTER
+        draw::height(form) + draw::AFTER
     } else {
         0.0
     }
+}
+
+/// The recording's item opened by the pointer (the mini form).
+static OPEN: Mutex<bool> = Mutex::new(false);
+
+/// Whether the recording's item shows its buttons in `form`: always in the
+/// full form, under the pointer in the mini one.
+pub fn recording_open(form: Form) -> bool {
+    form == Form::Full || *OPEN.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The pointer comes onto the recording's item (`open`), or leaves it.
+pub fn open_recording(open: bool) {
+    {
+        let mut opened = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+        if *opened == open {
+            return;
+        }
+        *opened = open;
+    }
+    tracing::debug!(open, "the recording's item");
+    resized();
+}
+
+/// The sign's height changed: its surfaces and the agents follow.
+fn resized() {
+    let effects: Vec<Effect> = places(|places| {
+        places
+            .values()
+            .filter_map(|place| {
+                let id = place.id?;
+                let (size, margin) = placement(place.form, place.switching);
+                Some(Effect::Resize {
+                    id,
+                    size,
+                    margin: Some(margin),
+                })
+            })
+            .collect()
+    });
+    crate::agents::draw::moved();
+    let mut effects = effects;
+    effects.push(Effect::Wake(IN_USE_NAMESPACE));
+    popover::send(effects);
+}
+
+/// The compositor's `recording` (`Some`) and `recording-end`.
+pub fn set_recording(shown: Option<RecordingShown>) {
+    let now = Instant::now();
+    let (before, after) = {
+        let mut uses = USES.lock().unwrap_or_else(PoisonError::into_inner);
+        let uses = uses.get_or_insert_with(Uses::default);
+        let before = uses.clone();
+        uses.recording = shown.map(|shown| Rec { shown, at: now });
+        (before, uses.clone())
+    };
+    tracing::debug!(recording = ?after.recording.map(|r| r.shown), "the recording");
+    if after.recording.is_none() {
+        *OPEN.lock().unwrap_or_else(PoisonError::into_inner) = false;
+    }
+    let mut effects = Vec::new();
+    if before.any() != after.any() {
+        places(|places| {
+            for (bar, place) in places.iter_mut() {
+                effects.extend(place.show(bar, after.any()));
+            }
+        });
+        crate::agents::draw::moved();
+        popover::send(effects);
+    } else if before.recording.is_some() != after.recording.is_some() {
+        resized();
+        return;
+    }
+    popover::send(vec![Effect::Wake(IN_USE_NAMESPACE)]);
 }
 
 /// The compositor's `shares`.
@@ -271,6 +377,11 @@ impl Words {
         } else {
             "Stop sharing"
         }
+    }
+
+    /// The recording's time while it is paused (5.10).
+    pub fn paused(self) -> &'static str {
+        if self.fr { "pause" } else { "paused" }
     }
 }
 

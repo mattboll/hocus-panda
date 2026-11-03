@@ -82,8 +82,10 @@ impl FromStr for CaptureMode {
 
 /// The capture's toolbar as the compositor has it: on `output` (its scale
 /// in 120ths, as [`crate::ToShell::Bar`]'s), what is chosen, the delay in
-/// seconds, and whether the pointer is in the image. Written `capture
-/// OUTPUT SCALE MODE DELAY pointer|nopointer`: the toolbar opens there, or
+/// seconds, and whether the pointer is in the image; and (5.10) whether it
+/// takes a photo or records a video, with the computer's sound and the
+/// microphone. Written `capture OUTPUT SCALE MODE DELAY pointer|nopointer
+/// photo|video sound|nosound micro|nomicro`: the toolbar opens there, or
 /// shows what changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureBar {
@@ -92,18 +94,24 @@ pub struct CaptureBar {
     pub mode: CaptureMode,
     pub delay: u8,
     pub pointer: bool,
+    pub video: bool,
+    pub sound: bool,
+    pub micro: bool,
 }
 
 impl CaptureBar {
     pub(crate) fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "capture {} {} {} {} {}",
+            "capture {} {} {} {} {} {} {} {}",
             self.output,
             self.scale,
             self.mode.name(),
             self.delay,
-            if self.pointer { "pointer" } else { "nopointer" }
+            if self.pointer { "pointer" } else { "nopointer" },
+            if self.video { "video" } else { "photo" },
+            if self.sound { "sound" } else { "nosound" },
+            if self.micro { "micro" } else { "nomicro" },
         )
     }
 
@@ -121,19 +129,27 @@ impl CaptureBar {
             .filter(|d| CAPTURE_DELAYS.contains(d))
             .ok_or_else(|| BadLine(format!("not a delay: {delay}")))?;
         let pointer = flag(words.next(), "pointer", "nopointer")?;
+        let video = flag(words.next(), "video", "photo")?;
+        let sound = flag(words.next(), "sound", "nosound")?;
+        let micro = flag(words.next(), "micro", "nomicro")?;
         Ok(Self {
             output,
             scale,
             mode,
             delay,
             pointer,
+            video,
+            sound,
+            micro,
         })
     }
 }
 
 /// What the user does on the toolbar. Written `capture mode MODE`,
 /// `capture delay` (the next delay), `capture pointer` (in the image or
-/// not) and `capture shoot` (the green button).
+/// not) and `capture shoot` (the green button, or in Vidéo the red
+/// "Démarrer"). And (5.10) `capture photo` and `capture video` (the
+/// switch), `capture sound` and `capture micro` (on or off).
 ///
 /// And with a capture taken (5.9), by the [`Captured::id`] the compositor
 /// gave it: `capture forget ID` (its thumbnail's ✕, its editor's or its
@@ -148,6 +164,9 @@ pub enum CaptureAsk {
     Delay,
     Pointer,
     Shoot,
+    Video(bool),
+    Sound,
+    Micro,
     Forget(u64),
     Annotated(u64),
     Drag(u64),
@@ -160,6 +179,10 @@ impl CaptureAsk {
             Self::Delay => f.write_str("capture delay"),
             Self::Pointer => f.write_str("capture pointer"),
             Self::Shoot => f.write_str("capture shoot"),
+            Self::Video(true) => f.write_str("capture video"),
+            Self::Video(false) => f.write_str("capture photo"),
+            Self::Sound => f.write_str("capture sound"),
+            Self::Micro => f.write_str("capture micro"),
             Self::Forget(id) => write!(f, "capture forget {id}"),
             Self::Annotated(id) => write!(f, "capture annotated {id}"),
             Self::Drag(id) => write!(f, "capture drag {id}"),
@@ -177,6 +200,10 @@ impl CaptureAsk {
             "delay" => Ok(Self::Delay),
             "pointer" => Ok(Self::Pointer),
             "shoot" => Ok(Self::Shoot),
+            "video" => Ok(Self::Video(true)),
+            "photo" => Ok(Self::Video(false)),
+            "sound" => Ok(Self::Sound),
+            "micro" => Ok(Self::Micro),
             "forget" => Ok(Self::Forget(id(words)?)),
             "annotated" => Ok(Self::Annotated(id(words)?)),
             "drag" => Ok(Self::Drag(id(words)?)),
@@ -284,6 +311,9 @@ mod tests {
                 mode: CaptureMode::Area,
                 delay: 0,
                 pointer: false,
+                video: false,
+                sound: true,
+                micro: false,
             }),
             ToShell::Capture(CaptureBar {
                 output: "HDMI-A-1".into(),
@@ -291,6 +321,9 @@ mod tests {
                 mode: CaptureMode::All,
                 delay: 10,
                 pointer: true,
+                video: true,
+                sound: false,
+                micro: true,
             }),
             ToShell::CaptureEnd,
             ToShell::Captured(Captured {
@@ -320,6 +353,10 @@ mod tests {
             CaptureAsk::Delay,
             CaptureAsk::Pointer,
             CaptureAsk::Shoot,
+            CaptureAsk::Video(true),
+            CaptureAsk::Video(false),
+            CaptureAsk::Sound,
+            CaptureAsk::Micro,
             CaptureAsk::Forget(3),
             CaptureAsk::Annotated(4),
             CaptureAsk::Drag(u64::MAX),
@@ -333,8 +370,10 @@ mod tests {
     #[test]
     fn a_capture_line_that_does_not_read() {
         for bad in [
-            "capture eDP-1 120 area 5 pointer",
-            "capture eDP-1 120 zone 0 pointer",
+            "capture eDP-1 120 area 5 pointer photo sound nomicro",
+            "capture eDP-1 120 area 0 pointer",
+            "capture eDP-1 120 area 0 pointer film sound nomicro",
+            "capture eDP-1 120 zone 0 pointer photo sound nomicro",
             "capture eDP-1 120 area 0 maybe",
             "capture eDP-1",
             "captured eDP-1 area 600",

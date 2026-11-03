@@ -24,6 +24,7 @@ pub struct Config {
     pub appearance: Appearance,
     pub desktops: Desktops,
     pub panel: Panel,
+    pub recording: Recording,
     /// The system's keyboard (`/etc/default/keyboard`), used when
     /// `[keyboard] layouts` is empty. Not part of the file: the program
     /// reads it once at start.
@@ -72,6 +73,32 @@ pub struct Config {
     /// file.
     #[serde(skip)]
     pub pipewire_remote: Option<PathBuf>,
+    /// The videos' folder, where recordings are saved in a folder of their
+    /// own (5.10): `$XDG_VIDEOS_DIR`, else xdg-user-dirs', else `~/Videos`.
+    /// Not part of the file; `None` records nothing (tests, unless they
+    /// give one).
+    #[serde(skip)]
+    pub videos: Option<PathBuf>,
+    /// The program that encodes recordings; empty: `ffmpeg`, on the
+    /// `PATH`. Not part of the file.
+    #[serde(skip)]
+    pub ffmpeg: PathBuf,
+}
+
+/// Screen recording, `[recording]` (5.10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Recording {
+    /// `"mp4"` (H.264 and AAC) or `"webm"` (VP9 and Opus).
+    #[serde(deserialize_with = "record_format")]
+    pub format: hocus_link::RecordFormat,
+}
+
+fn record_format<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<hocus_link::RecordFormat, D::Error> {
+    hocus_link::RecordFormat::of(&String::deserialize(deserializer)?)
+        .map_err(serde::de::Error::custom)
 }
 
 /// The bar, `[panel]` (docs/design/bar.md §2, §3).

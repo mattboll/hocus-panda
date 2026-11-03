@@ -51,6 +51,26 @@ const BORDER: [f32; 4] = [
     1.0,
 ];
 const BORDER_WIDTH: f64 = 1.5 * Z;
+/// In Vidéo (5.10) the area's border is red, `#F2545B`, and so is the
+/// window's ring.
+const RED: [f32; 4] = [
+    0xF2 as f32 / 255.0,
+    0x54 as f32 / 255.0,
+    0x5B as f32 / 255.0,
+    1.0,
+];
+const RED_RING: BoxStyle = BoxStyle {
+    rim: [0xF2, 0x54, 0x5B, 0xFF],
+    ..RING
+};
+/// The recording's countdown's ring: `inset 0 0 0 2px rgba(242, 84, 91,
+/// 0.7)`.
+const COUNT_RING: BoxStyle = BoxStyle {
+    fill: [0; 4],
+    rim: [0xF2, 0x54, 0x5B, 179],
+    rim_width: (2.0 * Z * 1000.0) as u32,
+    radius: (DISC / 2.0 * 1000.0) as u32,
+};
 /// The window's green ring, on its corners.
 const RING: BoxStyle = BoxStyle {
     fill: [0; 4],
@@ -114,6 +134,7 @@ pub struct Drawn {
     handles: [[Id; 9]; 8],
     label: [Id; 9],
     disc: [Id; 9],
+    disc_ring: [Id; 9],
     shadow: FrameIds,
 }
 
@@ -138,6 +159,7 @@ impl Default for Drawn {
             handles: std::array::from_fn(|_| nine()),
             label: nine(),
             disc: nine(),
+            disc_ring: nine(),
             shadow: FrameIds::default(),
         }
     }
@@ -329,6 +351,7 @@ impl State {
                 if counting.output == name {
                     self.countdown(
                         renderer,
+                        matches!(counting.then, super::Then::Record(_)),
                         counting.left,
                         counting.since,
                         now,
@@ -401,9 +424,15 @@ impl State {
                         let edge = pixels(r, scale);
                         // An area just begun has no size: its sides none
                         // either (a negative one would not draw).
+                        let colour = if self.capture.video { RED } else { BORDER };
                         for (id, part) in drawn.border.iter().zip(border(edge, scale)) {
                             if part.size.w > 0 && part.size.h > 0 {
-                                out.push(OutputElements::Solid(solid(id, part, BORDER, 0)));
+                                out.push(OutputElements::Solid(solid(
+                                    id,
+                                    part,
+                                    colour,
+                                    usize::from(self.capture.video),
+                                )));
                             }
                         }
                     } else {
@@ -412,7 +441,7 @@ impl State {
                                 renderer,
                                 &self.textures,
                                 &drawn.ring,
-                                RING,
+                                if self.capture.video { RED_RING } else { RING },
                                 r,
                                 scale,
                                 1.0,
@@ -565,6 +594,7 @@ impl State {
     fn countdown<R>(
         &self,
         renderer: &mut R,
+        record: bool,
         left: u8,
         since: Duration,
         now: Duration,
@@ -607,6 +637,22 @@ impl State {
             (cx - DISC / 2.0, cy - DISC / 2.0).into(),
             (DISC, DISC).into(),
         );
+        // Before a recording, its red ring, over the disc.
+        if record {
+            out.extend(
+                box_elements(
+                    renderer,
+                    &self.textures,
+                    &drawn.disc_ring,
+                    COUNT_RING,
+                    disc,
+                    scale,
+                    alpha,
+                )
+                .into_iter()
+                .map(OutputElements::Frame),
+            );
+        }
         out.extend(
             box_elements(
                 renderer,

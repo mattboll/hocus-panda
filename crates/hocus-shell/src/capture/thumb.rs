@@ -10,6 +10,10 @@
 //! - Its time up, it goes, and the capture goes to the notifications'
 //!   history with its image and its actions.
 //!
+//! A recording's (5.10) is the same card: its first frame with a play
+//! sign and its length, "Enregistrée · MP4", **Ouvrir** (its default
+//! player) and ✕ (its file deleted); dragged, its file drops.
+//!
 //! A layer surface of its own ([`hocus_link::CAPTURE_THUMB_NAMESPACE`]), on the
 //! overlay layer, taking the pointer, never the keyboard. The compositor
 //! slides it in and draws its shadow; the shell draws its card, the
@@ -83,6 +87,16 @@ const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
 const CLOSE_COLOUR: Color = rgb(0xC9D0DC);
 const RUNNING: Color = Color::from_rgba8(108, 194, 135, 0.7);
 const PAUSED: Color = Color::from_rgba8(255, 255, 255, 0.35);
+/// A recording's play sign: a 40 px disc of `rgba(255,255,255,0.18)`, a
+/// white triangle of 16; its length in Martian Mono 10.5 px on
+/// `rgba(0,0,0,0.6)`, 1 px by 6 px in, radius 6, 6 px from the corner.
+const PLAY: f32 = 40.0 * Z;
+const PLAY_ICON: f32 = 16.0 * Z;
+const LENGTH: f32 = 10.5 * Z;
+const LENGTH_PAD: (f32, f32) = (6.0 * Z, 1.0 * Z);
+const LENGTH_RADIUS: f32 = 6.0 * Z;
+const LENGTH_IN: f32 = 6.0 * Z;
+const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 
 /// What its card shows of the capture, made on the thread that read it:
 /// the image at the size it shows (the screen's pixels), and the
@@ -110,6 +124,94 @@ impl Made {
             icon: icon(capture, (ICON * scale.max(1.0)).round() as u32),
         }
     }
+
+    /// What a recording's first frame shows at `scale`: its picture with
+    /// the play sign and the length's backing drawn into it (a picture is
+    /// drawn over the shapes of the card), `length` characters long.
+    pub fn of_recording(first: &marks::Image, scale: f32, length: usize) -> Self {
+        let room = (WIDTH - 2.0 * PAD) * scale;
+        let (w, h) = fit(first.dimensions(), (room, IMAGE * scale));
+        let mut small = resize(first, w, h);
+        let k = scale.max(0.1);
+        // The play sign in its middle.
+        let centre = (w as f32 / 2.0, h as f32 / 2.0);
+        let r = PLAY / 2.0 * k;
+        let sign = PLAY_ICON * k;
+        let o = (centre.0 - sign / 2.0, centre.1 - sign / 2.0);
+        let tri = [(8.0, 5.0), (19.0, 12.0), (8.0, 19.0)]
+            .map(|(x, y)| (o.0 + x / 24.0 * sign, o.1 + y / 24.0 * sign));
+        // The length's backing at its bottom right.
+        let badge = badge((w as f32 / k, h as f32 / k), length);
+        let badge = Rectangle::new(
+            Point::new(badge.x * k, badge.y * k),
+            Size::new(badge.width * k, badge.height * k),
+        );
+        let radius = LENGTH_RADIUS * k;
+        for (x, y, pixel) in small.enumerate_pixels_mut() {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut layers: Vec<([f32; 3], f32)> = Vec::new();
+            let d = (px - centre.0).hypot(py - centre.1);
+            let disc = (r + 0.5 - d).clamp(0.0, 1.0);
+            if disc > 0.0 {
+                layers.push(([1.0; 3], 0.18 * disc));
+            }
+            let inside = supersample(px, py, |x, y| in_triangle((x, y), tri));
+            if inside > 0.0 {
+                layers.push(([1.0; 3], inside));
+            }
+            let cx = px.clamp(badge.x + radius, badge.x + badge.width - radius);
+            let cy = py.clamp(badge.y + radius, badge.y + badge.height - radius);
+            let corner = (radius + 0.5 - (px - cx).hypot(py - cy)).clamp(0.0, 1.0);
+            let inside_badge = px >= badge.x
+                && px <= badge.x + badge.width
+                && py >= badge.y
+                && py <= badge.y + badge.height;
+            if inside_badge && corner > 0.0 {
+                layers.push(([0.0; 3], 0.6 * corner));
+            }
+            for (colour, a) in layers {
+                for (channel, c) in pixel.0.iter_mut().zip(colour) {
+                    let v = f32::from(*channel) / 255.0;
+                    *channel = ((v * (1.0 - a) + c * a) * 255.0).round() as u8;
+                }
+            }
+        }
+        Self {
+            image: Handle::from_rgba(w, h, small.clone().into_raw()),
+            size: (w, h),
+            scale: k,
+            icon: icon(first, (ICON * scale.max(1.0)).round() as u32),
+        }
+    }
+}
+
+/// A recording's length's backing in a picture `size` logical pixels
+/// large: `chars` characters of Martian Mono (each 0.62 of its size), 6
+/// px in, 6 px from its bottom right corner.
+pub fn badge(size: (f32, f32), chars: usize) -> Rectangle {
+    let w = chars as f32 * 0.62 * LENGTH + 2.0 * LENGTH_PAD.0;
+    let h = LENGTH * 1.3 + 2.0 * LENGTH_PAD.1;
+    Rectangle::new(
+        Point::new(size.0 - LENGTH_IN - w, size.1 - LENGTH_IN - h),
+        Size::new(w, h),
+    )
+}
+
+/// How much of the pixel at (`x`, `y`) `inside` covers, four samples.
+fn supersample(x: f32, y: f32, inside: impl Fn(f32, f32) -> bool) -> f32 {
+    let n = [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)]
+        .iter()
+        .filter(|(dx, dy)| inside(x + dx, y + dy))
+        .count();
+    n as f32 / 4.0
+}
+
+fn in_triangle(p: (f32, f32), [a, b, c]: [(f32, f32); 3]) -> bool {
+    let side = |u: (f32, f32), v: (f32, f32)| (v.0 - u.0) * (p.1 - u.1) - (v.1 - u.1) * (p.0 - u.0);
+    let (d1, d2, d3) = (side(a, b), side(b, c), side(c, a));
+    let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(neg && pos)
 }
 
 /// The history's icon side, logical pixels (5.4's).
@@ -304,11 +406,17 @@ struct Layout {
 }
 
 impl Layout {
-    fn of(words: Words) -> Self {
+    /// The card in `words`, a recording's (`video`) or a capture's.
+    fn of(words: Words, video: bool) -> Self {
         let image = Rectangle::new(Point::new(PAD, PAD), Size::new(WIDTH - 2.0 * PAD, IMAGE));
         let top = PAD + IMAGE + ROW_GAP;
         let close = Rectangle::new(Point::new(WIDTH - PAD - ROW, top), Size::new(ROW, ROW));
-        let label = kit::measure(words.annotate(), BUTTON_TEXT, MANROPE_BOLD);
+        let said = if video {
+            words.open()
+        } else {
+            words.annotate()
+        };
+        let label = kit::measure(said, BUTTON_TEXT, MANROPE_BOLD);
         let width = (label + 2.0 * BUTTON_PAD).ceil();
         let annotate = Rectangle::new(
             Point::new(close.x - BUTTON_GAP - width, top),
@@ -390,11 +498,25 @@ impl<Message> canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let shown = with(|t| t.as_ref().filter(|t| t.id == self.id).cloned());
+        let mut over = None;
         if let Some(thumb) = shown {
             let now = state.drawn.unwrap_or_else(Instant::now);
             self.draw_card(&mut frame, &thumb, now);
+            // A recording's play sign and length over its picture, on a
+            // layer of their own: a picture is drawn over the shapes of
+            // its own layer.
+            if let Some(video) = &thumb.shot.video {
+                let mut layer = Frame::new(renderer, bounds.size());
+                let place = Layout::of(self.words, true).image;
+                let (w, h) = thumb.made.size;
+                let scale = (place.width / w as f32)
+                    .min(place.height / h as f32)
+                    .min(1.0 / thumb.made.scale);
+                draw_play(&mut layer, fit_in(place, (w, h), scale), video);
+                over = Some(layer.into_geometry());
+            }
         }
-        vec![frame.into_geometry()]
+        std::iter::once(frame.into_geometry()).chain(over).collect()
     }
 
     fn mouse_interaction(
@@ -403,7 +525,7 @@ impl<Message> canvas::Program<Message> for View {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        let layout = Layout::of(self.words);
+        let layout = Layout::of(self.words, shows_video(self.id));
         match cursor.position_in(bounds).map(|at| layout.spot(at)) {
             Some(Spot::Image | Spot::Annotate | Spot::Close) => mouse::Interaction::Pointer,
             _ => mouse::Interaction::default(),
@@ -411,11 +533,19 @@ impl<Message> canvas::Program<Message> for View {
     }
 }
 
+/// Whether thumbnail `id` is a recording's.
+fn shows_video(id: window::Id) -> bool {
+    with(|t| {
+        t.as_ref()
+            .is_some_and(|t| t.id == id && t.shot.video.is_some())
+    })
+}
+
 /// What a click on the thumbnail does.
 enum Act {
     Edit(Thumb),
     Delete(Thumb),
-    Drag(u64),
+    Drag(Shot),
 }
 
 impl View {
@@ -425,7 +555,7 @@ impl View {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        let layout = Layout::of(self.words);
+        let layout = Layout::of(self.words, shows_video(self.id));
         let at = cursor.position_in(bounds);
         let spot = at.map(|p| layout.spot(p));
         let now = Instant::now();
@@ -452,7 +582,7 @@ impl View {
                         && (p.x - from.x).hypot(p.y - from.y) >= DRAG
                     {
                         thumb.dragged = true;
-                        act = Some(Act::Drag(thumb.shot.id));
+                        act = Some(Act::Drag(thumb.shot.clone()));
                     }
                     Some(changed)
                 }
@@ -492,9 +622,30 @@ impl View {
             crate::popover::send(Vec::new());
         }
         match act {
-            Some(Act::Drag(capture)) => {
-                tracing::debug!(capture, "the capture's thumbnail is dragged");
-                super::tell(CaptureAsk::Drag(capture));
+            Some(Act::Drag(shot)) => match shot.recording() {
+                Some(recording) => {
+                    tracing::debug!(recording, "the recording's thumbnail is dragged");
+                    crate::popover::tell(hocus_link::ToCompositor::Record(
+                        hocus_link::RecordAsk::Drag(recording),
+                    ));
+                }
+                None => {
+                    tracing::debug!(capture = shot.id, "the capture's thumbnail is dragged");
+                    super::tell(CaptureAsk::Drag(shot.id));
+                }
+            },
+            // A recording's opens in its player; it goes to the history.
+            Some(Act::Edit(shown)) if shown.shot.video.is_some() => {
+                if let Some(gone) = take(shown.id) {
+                    tracing::debug!(
+                        recording = ?shown.shot.recording(),
+                        "the recording's thumbnail opens it"
+                    );
+                    crate::popover::send(vec![Effect::Remove(shown.id)]);
+                    super::open_file(&gone.shot.file);
+                    to_history(&gone);
+                }
+                return Some(canvas::Action::capture());
             }
             Some(Act::Edit(shown)) => {
                 if take(shown.id).is_some() {
@@ -541,7 +692,8 @@ impl View {
             ),
             Stroke::default().with_color(RIM).with_width(BORDER),
         );
-        let layout = Layout::of(self.words);
+        let video = thumb.shot.video.as_ref();
+        let layout = Layout::of(self.words, video.is_some());
         // The image, scaled to fit, in the middle of its place.
         let place = layout.image;
         f.fill(&kit::rounded(place, IMAGE_RADIUS), IMAGE_BACK);
@@ -564,9 +716,14 @@ impl View {
             ),
             Stroke::default().with_color(IMAGE_RIM).with_width(1.0),
         );
-        // "Copiée · enregistrée", "Annoter", ✕.
+        // "Copiée · enregistrée", "Annoter", ✕; a recording's "Enregistrée ·
+        // MP4" and "Ouvrir".
+        let (status, button) = match video {
+            Some(video) => (self.words.recorded(video.format), self.words.open()),
+            None => (self.words.kept().to_owned(), self.words.annotate()),
+        };
         f.fill_text(kit::text(
-            self.words.kept().to_owned(),
+            status,
             Point::new(PAD, layout.row_middle),
             STATUS,
             STATUS_COLOUR,
@@ -580,7 +737,7 @@ impl View {
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
             kit::text(
-                self.words.annotate().to_owned(),
+                button.to_owned(),
                 annotate.center(),
                 BUTTON_TEXT,
                 TEXT,
@@ -607,6 +764,18 @@ impl View {
             );
         }
     }
+}
+
+/// A recording's length at the bottom right of its picture, `shown`
+/// (its play sign and the length's backing are in the picture).
+fn draw_play(f: &mut Frame, shown: Rectangle, video: &super::Video) {
+    let said = crate::in_use::draw::elapsed(video.duration);
+    let badge = badge((shown.width, shown.height), said.chars().count());
+    let centre = Point::new(shown.x + badge.center_x(), shown.y + badge.center_y());
+    f.fill_text(kit::text_in(
+        MONO,
+        kit::text(said, centre, LENGTH, TEXT, Alignment::Center),
+    ));
 }
 
 /// An image `size` pixels drawn `scale` logical pixels a pixel in the
@@ -657,7 +826,7 @@ mod tests {
     fn its_card_is_the_mockups_zoomed_its_buttons_on_its_row() {
         assert_eq!(WIDTH, 330.0);
         assert_eq!(HEIGHT, 267.0);
-        let layout = Layout::of(Words::new(Lang::French));
+        let layout = Layout::of(Words::new(Lang::French), false);
         assert_eq!(
             layout.image,
             Rectangle::new(Point::new(12.0, 12.0), Size::new(306.0, 192.0))

@@ -343,6 +343,9 @@ impl State {
         self.tell_bubbles_screen();
         self.hand_kept_levels();
         self.tell_sharing_again();
+        if self.record.recording() {
+            self.tell_recording();
+        }
     }
 
     /// The shell's connection ended.
@@ -402,6 +405,7 @@ impl State {
             ToCompositor::Emoji { keep, text } => self.emoji_asked(keep, text),
             ToCompositor::Capture(ask) => self.capture_asked(ask),
             ToCompositor::Share(ask) => self.share_asked(ask),
+            ToCompositor::Record(ask) => self.record_asked(ask),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
             ToCompositor::TrayClick { ask, pid } => self.tray_clicked(ask, pid),
