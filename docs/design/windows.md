@@ -447,7 +447,9 @@ they are built.
   `XDG_CURRENT_DESKTOP=Hocuspanda` and `XDG_SESSION_TYPE=wayland` to the
   session bus's activation environment and to systemd's user manager, so
   that portals and programs started by D-Bus show in the session; the
-  launcher takes them back from systemd when the session ends.
+  launcher takes them back from systemd when the session ends. A desktop
+  portal a previous session left running is restarted then (see
+  [sharing](sharing.md#511b-a-portal-left-by-a-previous-session-2026-11-03)).
 
 ## 15. Performance
 

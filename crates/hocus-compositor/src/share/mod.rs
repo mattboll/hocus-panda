@@ -182,9 +182,18 @@ impl Sharing {
         self.frames_sent
     }
 
-    /// The longest a frame's hand-over took the loop so far, for tests.
+    /// The longest a frame's hand-over took the loop so far, for tests
+    /// to report (a timing: never a budget).
     pub fn lend_most(&self) -> Duration {
         self.lend_most
+    }
+
+    /// The bytes of shared frames' pixels copied on the loop so far, for
+    /// tests: a budget of 0.
+    pub fn copied_on_loop(&self) -> u64 {
+        self.streams
+            .as_ref()
+            .map_or(0, |s| s.sender().copied_on_loop())
     }
 
     /// Whether `id` is shared.

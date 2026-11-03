@@ -75,7 +75,7 @@ impl Env {
                 hocus_agents::SOCKET_ENV,
                 hocus_agents::socket_path(&self.socket),
             )
-            .env("XDG_CURRENT_DESKTOP", "Hocuspanda")
+            .env("XDG_CURRENT_DESKTOP", crate::session::DESKTOP)
             .env("XCURSOR_THEME", &self.cursor.theme)
             .env("XCURSOR_SIZE", self.cursor.size.to_string())
             .env_remove("WAYLAND_SOCKET")

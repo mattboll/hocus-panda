@@ -32,6 +32,8 @@ libloading = "0.8.9"
 # Screen sharing's streams (5.11): PipeWire's own bindings (MIT); the
 # library itself at run time, its headers to build (libpipewire-0.3-dev).
 pipewire = { version = "0.10.1", features = ["v0_3_77"] }
+# CLOCK_MONOTONIC's microseconds, systemd's timestamps' clock (#538).
+rustix = { version = "1.1.6", features = ["time"] }
 serde = { version = "1.0.229", features = ["derive"] }
 smithay = { version = "0.7.0", default-features = false, features = [
     "backend_winit",
