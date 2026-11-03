@@ -24,7 +24,9 @@ head and her briefing (section 7 B; 4.6, issue #389), the mini form's
 agents' item (section 5; 4.7, issue #390), the footer (section 4
 group 11, section 5; 5.5, issue #395), and the bar under the windows,
 brought in front by the screen's edge (sections 2 and 3; 5.13, issue
-#519): see [as built](#as-built).
+#519), and the tray, the applications' icons over the footer (section 4
+group 11, section 5, section 9; 5.14, issue #531): see
+[as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -130,7 +132,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
-| 11 | Footer | Four 40 × 34 buttons spread evenly across the bar's inside (5.5, variant A): the clipboard, the notifications' bell (its badge counting what was not seen, 5.4), the menu (the launcher, on a click only) and the user's avatar (their initial on the accent's gradient); a 150 ms hover or a click opens the clipboard's, the bell's and the user's popovers (as built, 5.5) | 34 px |
+| 11 | Footer | Four 40 × 34 buttons spread evenly across the bar's inside (5.5, variant A): the clipboard, the notifications' bell (its badge counting what was not seen, 5.4), the menu (the launcher, on a click only) and the user's avatar (their initial on the accent's gradient); a 150 ms hover or a click opens the clipboard's, the bell's and the user's popovers (as built, 5.5). Just above it, the tray (5.14, variant A, always visible): the applications' icons (StatusNotifierItem), a row of 34 × 34 cells 4 px apart under a 1 px `rgba(255,255,255,0.08)` line, wrapping past four; none without an icon (as built, 5.14) | 34 px (+ 17 px and 38 px a row of icons) |
 
 ### 4.1 The clock (approved 2026-10-28, issues #359 and #332; sizes of #378, 2026-10-29)
 
@@ -344,7 +346,9 @@ above its percentage (Manrope 700, 14 px, `#7EE0A0`, amber or orange as in
 hover opens; the keyboard layout (3.8): its code alone (Manrope 700, 13 px,
 `text`) in a 44 × 30 button, radius 8, 14 px under the battery's
 percentage, which a click (not a hover) takes to the next layout, with two
-layouts or more; at the bottom, the bell (44 × 34, its badge) and, 2 px
+layouts or more; the tray (5.14): a column of the applications' icons in
+40 × 32 cells 2 px apart, under its line, 10 px over the bell, the items
+above going up by it; at the bottom, the bell (44 × 34, its badge) and, 2 px
 under it, last of all, the user's avatar (44 × 34, 24 px round), which
 opens the same popover as the full form's (5.5); the clipboard and the
 menu have their shortcuts instead (`Super+V`, 5.6; `Super+Space`).
@@ -672,7 +676,8 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   and power profile, phone (KDE Connect: battery, notifications, send a
   file, ring), clipboard history (5.6, as built),
   notifications (clear all), menu (apps,
-  settings, session). The keyboard layouts have none: their row goes to the
+  settings, session), a tray icon's menu (its application's, 5.14, as
+  built). The keyboard layouts have none: their row goes to the
   next layout (§4.3, 3.8).
 
 ## 10. Data sources
@@ -693,6 +698,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, whether it is the focused one or minimised, its id and its application's id, on the `desktops` line of `hocus-link`; the windows' titles on the `titles` line; a desktop asked with `desktop`, a window with `bring` (as built, 3.9, 3.9b, 3.9c) |
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications | the desktop's own server, `org.freedesktop.Notifications` on the session bus, in the shell ([notifications.md](notifications.md), 5.3); their history kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications` (5.4) | the bell's badge counts what was not seen; do not disturb holds the bubbles |
+| Applications' icons (the tray) | the desktop's own `org.kde.StatusNotifierWatcher` (and `org.freedesktop.StatusNotifierWatcher`), its host, on the notifications' session bus, in the shell; each item's properties and signals, its `com.canonical.dbusmenu` menu (as built, 5.14) | `Passive` items hidden; the attention icon while one `NeedsAttention` |
 | Clipboard | the compositor, which sees every selection | what clients copy (their text, else their PNG image), read off its loop, never what is marked secret, on the `copied` line of `hocus-link`; kept by the shell, sealed, in `$XDG_STATE_HOME/hocuspanda/clipboard` (as built, 5.6) |
 
 Every source is read off the event loop and pushes changes; nothing is
@@ -2606,3 +2612,102 @@ maintainer's spec (issue #396).
   footer (the spec keeps no trace of a secret); the shell's own copies
   (the launcher's results, the Sources popover's command) in the history;
   the primary selection.
+
+### 5.14, the tray (2026-11-03)
+
+What the approved 5.14 mockup shows, variant A (always visible; the amber
+ring left out), with the maintainer's spec (issue #531).
+
+- **Its place**: just above the footer, under a 1 px
+  `rgba(255,255,255,0.08)` line across the bar's inside, 6 px over the
+  cells; the cells' bottom 10 px over the footer's top (the mockup's gap).
+  The bar's groups above (the levels, and the connections and the
+  desktops over them) keep their 14 px over the line: they go up by the
+  cells' height and 17 px. Full form: a row of 34 × 34 cells 4 px apart
+  from the bar's inside left, four to a row, wrapping under. Mini form: a
+  column of 40 × 32 cells 2 px apart, centred. No icon: no surface, no
+  line, and the groups where they were.
+- **Its surface** (`hocus-bar-tray`, under the windows with the bar's
+  others, 5.13), opened after them while an icon shows, taking the pointer
+  on its cells only; an icon's change draws it alone, an icon coming or
+  going places the bar's groups again. While the bar switches its form, it
+  holds both forms' places, the two cross-fading.
+- **The icons**: 22 px, from `IconPixmap` (the smallest at least as large
+  as the icon's pixels, else the largest, scaled to them; ARGB32 in
+  network byte order), else `IconName`, looked for in the item's
+  `IconThemePath` (its files, then its `hicolor`), then as the launcher
+  looks for its icons; decoded on the tray's thread at the bars' screens'
+  largest scale, again when it changes. An item with neither shows its
+  name's letter on a colour of its own. The overlay (`OverlayIcon…`) is
+  drawn over the icon's bottom right, half its size. They pop in over
+  200 ms (from 80 %, fading in, `ease-out`), at once without motion or on
+  the CPU. A cell is lit `0.08` under the pointer and `0.10` while its menu
+  shows (the footer's buttons' radius 9 and colours), the keyboard's ring
+  while it holds it.
+- **What shows**: the icon as the application sends it, read again on
+  `NewIcon`, `NewAttentionIcon`, `NewOverlayIcon`, `NewStatus`, `NewTitle`
+  and `NewToolTip` (Slack's dots are its own pixels). `Passive` items are
+  left out; `NeedsAttention` shows the attention icon when there is one.
+- **Actions**: a left click sends `Activate(0, 0)`; an item that says
+  `ItemIsMenu`, or one whose `Activate` fails, opens its menu instead. A
+  middle click sends `SecondaryActivate(0, 0)`, the wheel `Scroll` (120 a
+  notch, up positive, `vertical` or `horizontal`). Wayland tells a client
+  no place on the screen, so the coordinates are 0.
+- **Its menu**: a right click (or `Enter` while the icon holds the
+  keyboard) reads the item's `com.canonical.dbusmenu` (`AboutToShow(0)`,
+  then `GetLayout(0, -1, [])`) and opens it as a popover, its bottom on the
+  icon's, 8 px from the bar as the others: 220 wide, 6 px inside; the
+  application's name over the rows (11 px bold capitals spaced 0.08 em,
+  `#7C8698`); 30 px rows (12.5 px, 8 px in, radius 8, lit `0.07`), 9 px
+  separators, entries that are off in `#6A7384` and inert, a check or a
+  radio's dot (`#6CC287`, a ring when off) in a column of their own, 16 px
+  icons (`icon-name`, `icon-data`), the labels' mnemonics' underscores
+  left out, hidden entries too. A submenu (`›`) opens in its place under
+  "‹ ITS NAME", which goes back. A click on a row sends
+  `Event(id, "clicked", 0, 0)`, then it closes. `LayoutUpdated` and
+  `ItemsPropertiesUpdated` while it shows read it again. The arrows and
+  `Tab` go through the rows that act, `Enter` or `Space` acts, `Esc` goes
+  back, then closes. An item without a menu is sent `ContextMenu(0, 0)`.
+  A second right click on the icon closes it.
+- **The tooltip** (`hocus-bar-tip`): after 400 ms on an icon, "Name ·
+  what it says" (12 px, the name bold), beside the bar 8 px from it,
+  centred on the icon, 7 px by 10 inside, radius 9,
+  `rgba(14,17,28,0.96)` in a 1 px `rgba(255,255,255,0.12)` rim; the name
+  is the item's `Title` (else its `Id`), what it says its `ToolTip`'s
+  title (else its text), left out when empty or the same as the name. It
+  takes no pointer, and goes as the pointer leaves the icon or presses it.
+- **The protocol**: the shell serves `org.kde.StatusNotifierWatcher` and
+  `org.freedesktop.StatusNotifierWatcher` at `/StatusNotifierWatcher`
+  (`RegisterStatusNotifierItem`, `RegisterStatusNotifierHost`,
+  `RegisteredStatusNotifierItems`, `IsStatusNotifierHostRegistered`,
+  `ProtocolVersion`, and their signals), owns both names and
+  `org.kde.StatusNotifierHost-PID`, on the bus the notifications use
+  (`--session-bus`, or the session's own on a virtual terminal; none,
+  no tray). An item registers by its bus name (its object at
+  `/StatusNotifierItem`) or its object's path (on the bus it calls from);
+  `org.kde.StatusNotifierItem` is read, else
+  `org.freedesktop.StatusNotifierItem`. It goes when its name's owner
+  does (`NameOwnerChanged`). Items keep the order in which they (by their
+  `Id`) first registered this session, a restarted application its
+  place. Everything is on the tray's thread; what the bar asks runs
+  aside, so that an item that does not answer holds nothing up.
+- **Measured headless** (`crates/hocus-compositor/tests/tray.rs`), the
+  real shell on the CPU, a D-Bus daemon of the test's own and an item of
+  the test's own (a StatusNotifierItem and its dbusmenu, in zbus): an item
+  registering shows its icon above the footer, the levels going up, in the
+  full form then the mini; `NewIcon` draws it again, the red dot of its
+  new pixmap with it; `Passive` hides it, `NeedsAttention` shows its
+  attention icon; a left click is `Activate`, a middle click
+  `SecondaryActivate`, the wheel `Scroll 120 vertical`; a right click
+  opens its menu beside the bar, its bottom on the icon's, its rows read
+  ("Ouvrir Slack" without its mnemonic, the separator, the check, the one
+  off), and a click on "Quitter Slack" sends `Event(5, "clicked")` and
+  closes it; the item's connection ending takes its icon away; resting on
+  it shows "Slack · Vous avez 2 notifications" after 400 ms, gone as the
+  pointer leaves. Unit tests for the places in both forms and while
+  switching, the pop-in, the pixmaps (the best size, ARGB, the square),
+  the item's own theme path, a layout's entries and mnemonics, the
+  registrations' places, the tooltip's words and its delay, the menu's
+  rows. On the CPU, the screenshots of the pull request.
+- **Not built**: the amber ring (left out of the approved spec); the
+  items' `AttentionMovieName`; names for screen readers (§11).
