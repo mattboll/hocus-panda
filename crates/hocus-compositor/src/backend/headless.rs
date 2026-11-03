@@ -482,6 +482,18 @@ impl HeadlessBackend {
     /// Schedules the next frame when something changed: nothing wakes up
     /// at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // A capture asked for (5.8): drawn for it before the next frame.
+        if state.capture.has_pending() {
+            match &mut self.canvas {
+                Canvas::Gles(c) => {
+                    crate::capture::shoot::take::<_, GlesTexture>(&mut c.renderer, state);
+                }
+                Canvas::Pixman(c) => crate::capture::shoot::take::<
+                    _,
+                    pixman::Image<'static, 'static>,
+                >(&mut c.renderer, state),
+            }
+        }
         if !state.redraw || self.frame_timer.is_some() {
             return;
         }

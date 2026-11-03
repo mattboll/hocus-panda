@@ -14,6 +14,7 @@ use smithay::{
             AsRenderElements, Kind, RenderElementStates, default_primary_scanout_output_compare,
             memory::MemoryRenderBufferRenderElement,
             render_elements,
+            solid::SolidColorRenderElement,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             texture::TextureRenderElement,
             utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
@@ -84,10 +85,44 @@ render_elements! {
     Shader = ShaderElement,
     /// The launcher's surface, its panel growing in or shrinking out.
     Scaled = RescaleRenderElement<WaylandSurfaceRenderElement<R>>,
+    /// The capture's darkening and its flash (5.8); a password manager's
+    /// window in a capture.
+    Solid = SolidColorRenderElement,
 }
+
+/// What an output's elements are drawn for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    /// The screen; `cursor`: the compositor draws the cursor (nested, the
+    /// host does).
+    Screen { cursor: bool },
+    /// A capture (5.8): without what the capture draws, its toolbar and
+    /// the toasts, a password manager's windows black; `cursor`: the
+    /// pointer asked in the image.
+    Capture { cursor: bool },
+}
+
+impl Purpose {
+    fn cursor(self) -> bool {
+        match self {
+            Self::Screen { cursor } | Self::Capture { cursor } => cursor,
+        }
+    }
+
+    fn screen(self) -> bool {
+        matches!(self, Self::Screen { .. })
+    }
+}
+
+/// A password manager's window is black in a capture, as the clipboard's
+/// history keeps none of its copies (5.6).
+const PROTECTED: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
 /// What an output shows, element by element.
 pub type OutputElement<R> = OutputElements<R>;
+
+/// A window drawn alone for a capture, and where it is (global).
+pub(crate) type Alone<R> = (Vec<OutputElement<R>>, Rectangle<f64, Logical>);
 
 /// Tells a surface the scale and transform of the output it shows most on:
 /// fractional-scale's, and wl_surface's preferred buffer scale for clients
@@ -419,6 +454,20 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        self.elements_for(renderer, output, Purpose::Screen { cursor })
+    }
+
+    /// What `output` shows for `purpose`, front first.
+    pub fn elements_for<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        purpose: Purpose,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
         self.grabber.ready(renderer);
         let now = self.now();
         self.drawn_at.set(Some(now));
@@ -429,13 +478,20 @@ impl State {
         let origin = area.loc.to_f64();
         let scale = output.current_scale().fractional_scale();
         let sc = Scale::from(scale);
-        if cursor {
+        if purpose.cursor() {
             elements.extend(
                 self.cursor_elements(renderer, output)
                     .into_iter()
                     .map(OutputElements::Cursor),
             );
         }
+        // The capture over everything but the cursor (5.8); its toolbar's
+        // glass goes in once what is behind it is known.
+        let capture_glass = if purpose.screen() {
+            self.capture_elements(renderer, output, now, &mut elements)
+        } else {
+            None
+        };
         // The surfaces of layer `which` that `pick` takes; where the bar's
         // first surface is drawn among `out`, if it is.
         let layers = |renderer: &mut R,
@@ -464,6 +520,7 @@ impl State {
                     hocus_link::PEEK_NAMESPACE
                         | hocus_link::LAUNCHER_NAMESPACE
                         | hocus_link::LAUNCHER_TOAST_NAMESPACE
+                        | hocus_link::CAPTURE_TOOLBAR_NAMESPACE
                 ) {
                     continue;
                 }
@@ -549,8 +606,11 @@ impl State {
         };
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
-        // The launcher's toast over the launcher fading out.
-        self.toast_elements(renderer, output, now, &mut elements);
+        // The launcher's toast over the launcher fading out; never in a
+        // capture.
+        if purpose.screen() {
+            self.toast_elements(renderer, output, now, &mut elements);
+        }
         // The launcher over the rest, the bar too; its glass goes right
         // under what darkens the desktop.
         let launcher = self
@@ -616,6 +676,18 @@ impl State {
                     )
                     .map(OutputElements::Frame),
                 );
+            }
+            if !purpose.screen() && self.protected(*id) {
+                let r = Rectangle::new(look.visual.loc - origin, look.visual.size);
+                windows.push(OutputElements::Solid(SolidColorRenderElement::new(
+                    // A capture's buffer is drawn whole, once: any id.
+                    smithay::backend::renderer::element::Id::new(),
+                    r.to_physical_precise_round(scale),
+                    0,
+                    PROTECTED,
+                    Kind::Unspecified,
+                )));
+                continue;
             }
             match self.bent_window(renderer, *id, look, origin, scale) {
                 Some(bent) => windows.push(OutputElements::Bent(bent)),
@@ -747,7 +819,54 @@ impl State {
         {
             elements.insert(at, pane);
         }
+        // In front of the launcher's: inserted after it.
+        if let Some(glass) = capture_glass
+            && let Some(pane) = self.capture_glass(renderer, output, glass, &elements[glass.at..])
+        {
+            elements.insert(glass.at, pane);
+        }
         elements
+    }
+
+    /// Window `id` alone, for a capture of it (5.8): its surfaces and its
+    /// popups at its place, at `scale`, without its frame or its shadow;
+    /// black for a password manager. Where it is (global).
+    pub(crate) fn window_alone<R>(
+        &self,
+        renderer: &mut R,
+        id: WindowId,
+        scale: f64,
+    ) -> Option<Alone<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let now = self.now();
+        let rect = crate::windows::rectangle(self.rect_of(id)?).to_f64();
+        let mut look = self.look(id, now)?;
+        look.visual = rect;
+        look.alpha = 1.0;
+        let mut out = Vec::new();
+        if self.protected(id) {
+            out.push(OutputElements::Solid(SolidColorRenderElement::new(
+                smithay::backend::renderer::element::Id::new(),
+                Rectangle::from_size(rect.size).to_physical_precise_round(scale),
+                0,
+                PROTECTED,
+                Kind::Unspecified,
+            )));
+        } else {
+            self.window_parts(renderer, id, &look, rect.loc, scale, &mut out);
+        }
+        Some((out, rect))
+    }
+
+    /// Whether window `id` is a password manager's: black in captures.
+    fn protected(&self, id: WindowId) -> bool {
+        self.windows
+            .get(&id)
+            .and_then(|m| crate::windows::app_id(&m.window))
+            .is_some_and(|app| crate::clipboard::password_manager(&app))
     }
 
     /// The launcher on `output` at `now` (5.1), front first: its surface,
@@ -1119,7 +1238,7 @@ impl State {
 
 /// The part of `blurred` over `pane` (physical, output-local), cut to
 /// corners `radius` round (logical), `alpha` opaque.
-fn glass_piece<R>(
+pub(crate) fn glass_piece<R>(
     renderer: &mut R,
     blurred: crate::glass::Blurred<R::TextureId>,
     pane: Rectangle<i32, Physical>,

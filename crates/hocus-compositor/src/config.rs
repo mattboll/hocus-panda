@@ -55,6 +55,17 @@ pub struct Config {
     /// unless they give their own).
     #[serde(skip)]
     pub applications: Vec<PathBuf>,
+    /// The pictures' folder, where captures are saved in a folder of
+    /// their own (5.8): `$XDG_PICTURES_DIR`, else xdg-user-dirs', else
+    /// `~/Pictures`. Not part of the file; `None` saves none, they are
+    /// only copied (tests, unless they give one).
+    #[serde(skip)]
+    pub pictures: Option<PathBuf>,
+    /// The user reads French (the messages' locale: `LC_ALL`,
+    /// `LC_MESSAGES`, `LANG`): the captures' folder and files are named in
+    /// it. Not part of the file.
+    #[serde(skip)]
+    pub french: bool,
 }
 
 /// The bar, `[panel]` (docs/design/bar.md §2, §3).

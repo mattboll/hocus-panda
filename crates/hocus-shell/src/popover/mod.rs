@@ -453,6 +453,13 @@ pub enum Effect {
     },
     /// A line to the compositor.
     Tell(ToCompositor),
+    /// The capture's toolbar on `output` (5.8), `size` large: at its
+    /// bottom, taking the pointer, never the keyboard.
+    CaptureBar {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1641,6 +1648,24 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             tell(message);
             Vec::new()
         }
+        Effect::CaptureBar { id, output, size } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Bottom,
+                exclusive_zone: Some(0),
+                margin: Some((0, 0, hocus_link::CAPTURE_TOOLBAR_BOTTOM.round() as i32, 0)),
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::CAPTURE_TOOLBAR_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
     }
 }
 

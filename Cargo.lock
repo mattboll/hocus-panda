@@ -1541,6 +1541,8 @@ dependencies = [
  "fontdue",
  "hocus-agents",
  "hocus-link",
+ "image",
+ "jiff",
  "libloading",
  "serde",
  "serde_json",

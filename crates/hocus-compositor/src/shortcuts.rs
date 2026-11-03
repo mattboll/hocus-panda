@@ -55,6 +55,19 @@ pub enum Action {
     /// The clipboard's history, on the focused window's screen; open, it
     /// closes (5.6).
     Clipboard,
+    /// The screen capture, on every screen (5.8).
+    Capture,
+    /// A capture taken at once, without choosing (5.8).
+    CaptureNow(CaptureNow),
+}
+
+/// What `Shift+Print` and `Alt+Print` capture at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureNow {
+    /// The whole screen under the pointer.
+    Screen,
+    /// The focused window.
+    Window,
 }
 
 /// Modifiers and a key, as `Super+Shift+E`. The key is the one of the
@@ -232,6 +245,9 @@ shortcuts! {
     mute: ["XF86AudioMute"] => Action::Level(LevelKey::Mute),
     brightness_up: ["XF86MonBrightnessUp"] => Action::Level(LevelKey::BrightnessUp),
     brightness_down: ["XF86MonBrightnessDown"] => Action::Level(LevelKey::BrightnessDown),
+    capture: ["Print"] => Action::Capture,
+    capture_screen: ["Shift+Print"] => Action::CaptureNow(CaptureNow::Screen),
+    capture_window: ["Alt+Print"] => Action::CaptureNow(CaptureNow::Window),
 }
 
 impl Shortcuts {
@@ -347,6 +363,8 @@ impl State {
             Action::Level(key) => self.level_key(key),
             Action::Launcher => self.toggle_launcher(),
             Action::Clipboard => self.toggle_clipboard(),
+            Action::Capture => self.open_capture(),
+            Action::CaptureNow(what) => self.capture_now(what),
         }
     }
 
@@ -512,6 +530,27 @@ mod tests {
             action(mods(true, false, false, false), Keysym::XF86_AudioMute),
             None
         );
+    }
+
+    #[test]
+    fn print_captures_and_with_shift_or_alt_at_once() {
+        let shortcuts = Shortcuts::default();
+        let action = |m, nested| shortcuts.action(&m, Keysym::Print, nested).map(|(a, _)| a);
+        for nested in [false, true] {
+            assert_eq!(
+                action(mods(false, false, false, false), nested),
+                Some(Action::Capture)
+            );
+            assert_eq!(
+                action(mods(false, true, false, false), nested),
+                Some(Action::CaptureNow(CaptureNow::Screen))
+            );
+            assert_eq!(
+                action(mods(false, false, false, true), nested),
+                Some(Action::CaptureNow(CaptureNow::Window))
+            );
+        }
+        assert_eq!(action(mods(true, false, false, false), false), None);
     }
 
     #[test]

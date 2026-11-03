@@ -111,7 +111,7 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
 the real screen; nested and headless take `--output`; `panel-form`),
 `[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
-`toggle-bar = "Super+B"`, `clipboard = "Super+V"`, the volume and brightness keys, and the
+`toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `capture = "Print"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
 (`screens`, `output`, `form`) and `[appearance]` (`reduced-motion`,
 `high-contrast`, `reduce-transparency`). `packaging/config.toml` lists every setting
@@ -136,6 +136,12 @@ The shell keeps the clipboard's history in `$XDG_STATE_HOME/hocuspanda/clipboard
 (bar.md, 5.6), its key in the keyring of the bus given with
 `--session-bus` only, else in `clipboard.key` beside it: next to a live
 session, give the nested compositor a fresh `HOME` (or `XDG_STATE_HOME`).
+
+Screen captures (`Print`, docs/design/screenshots.md) are saved in
+`$XDG_PICTURES_DIR` (else `user-dirs.dirs`', else `~/Pictures`): next to a
+live session, give the nested compositor a fresh `HOME` (or
+`XDG_PICTURES_DIR`). Its tests save in folders of their own
+(`Config::pictures`).
 
 Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
 docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`

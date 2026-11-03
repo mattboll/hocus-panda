@@ -10,6 +10,7 @@ mod agents;
 mod backdrop;
 mod backend;
 mod bubbles;
+mod capture;
 mod clipboard;
 mod config;
 mod cursor;
@@ -56,6 +57,7 @@ use anyhow::Context;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 pub use backend::headless::{HeadlessConfig, RendererChoice};
+pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
     Appearance, Config, Desktops, FormChoice, OutputSettings, PanelScreens, ScaleFrom,
@@ -69,7 +71,7 @@ pub use harness::{Headless, Placed, WindowInfo};
 /// The bar's forms.
 pub use hocus_link::Form as BarForm;
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
-pub use shortcuts::{Action, Chord, Ending, Shortcuts};
+pub use shortcuts::{Action, CaptureNow, Chord, Ending, Shortcuts};
 pub use state::State;
 
 use backend::Backend;
