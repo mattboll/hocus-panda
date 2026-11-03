@@ -386,12 +386,36 @@ impl Bed {
             hp.launcher_commits() > 0 && hp.launcher_surfaces().len() == 1
         })?;
         anyhow::ensure!(opened, "no launcher");
-        let shows = self.shows_after(from, "the launcher shows it")?;
+        let shows = self.icons_found_after(from)?;
         // Its motion over, in the frame the screen shows: it starts at the
         // shell's first buffer, which on a loaded machine comes well after
         // the shell said what it shows.
         let still = self.hp.dispatch_until(WAIT, Headless::launcher_at_rest)?;
         anyhow::ensure!(still, "the launcher still moves");
+        Ok(shows)
+    }
+
+    /// What the launcher shows after `from` once its tiles' icons are
+    /// found: the shell looks them up off its loop, its tiles saying "…"
+    /// meanwhile, which on a loaded machine outlasts its first frames.
+    fn icons_found_after(&mut self, from: usize) -> anyhow::Result<String> {
+        let log = self.log.clone();
+        let last = |log: &Path| {
+            let text = String::from_utf8_lossy(&std::fs::read(log).unwrap_or_default())
+                .chars()
+                .filter(|c| *c != '\u{1b}')
+                .collect::<String>();
+            text.get(from..)
+                .and_then(|l| l.lines().rfind(|l| l.contains("the launcher shows it")))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let found = self.hp.dispatch_until(WAIT, |_| {
+            let shows = last(&log);
+            !shows.is_empty() && !shows.contains("[…]")
+        })?;
+        let shows = last(&log);
+        anyhow::ensure!(found, "the launcher's icons never came: {shows}");
         Ok(shows)
     }
 
