@@ -11,9 +11,13 @@
 //! cancel response; the shared screen gets its ring, never in its
 //! stream's frames; the bar shows the sign, whose popover stops the share
 //! and ends the session; notifications are held while sharing and summed
-//! up at its end; a shared window closing ends its share.
+//! up at its end; a shared window closing ends its share. And the hard
+//! rule's budget: handing a 2560 × 1600 frame to the stream costs the loop
+//! well under a millisecond (its pixels are lent, never copied there).
 //!
-//! Pixman here, so the shell draws on the CPU (as in CI). Without the
+//! Pixman here (and GLES on Mesa's software device for the GPU's way of
+//! handing frames over), the shell on the CPU (tiny-skia): nothing here
+//! draws on a GPU, which may be the live session's. Without the
 //! shell built, dbus-daemon or pipewire, the tests skip; without
 //! WirePlumber, the frames' part of the ring's test does.
 
@@ -184,6 +188,13 @@ impl Drop for Bed {
 }
 
 fn start(shell: &Path) -> anyhow::Result<Bed> {
+    start_on(shell, SCREEN, RendererChoice::Pixman)
+}
+
+/// The bed on a screen `size` pixels large, at scale 1, drawn by
+/// `renderer`: pixman, or GLES on Mesa's software device. Never a GPU:
+/// this machine's may be the live session's.
+fn start_on(shell: &Path, size: (u32, u32), renderer: RendererChoice) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let home = dir.path().join("home");
     let state = dir.path().join("state");
@@ -203,7 +214,7 @@ fn start(shell: &Path) -> anyhow::Result<Bed> {
              LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{home}' \
              XDG_CONFIG_HOME='{home}/.config' XDG_CACHE_HOME='{home}/.cache' \
              XDG_DATA_HOME='{home}/.local/share' XDG_DATA_DIRS='{home}/none' \
-             XDG_STATE_HOME='{state}' TZ=UTC \
+             XDG_STATE_HOME='{state}' TZ=UTC ICED_BACKEND=tiny-skia \
              RUST_LOG=warn,hocuspanda_shell=debug\n\
              exec '{shell}' \"$@\" 2>>'{log}'\n",
             home = home.display(),
@@ -220,8 +231,8 @@ fn start(shell: &Path) -> anyhow::Result<Bed> {
     };
     let mut hp = Headless::start_on_bus(
         HeadlessConfig {
-            outputs: vec![format!("{}x{}", SCREEN.0, SCREEN.1).parse()?],
-            renderer: RendererChoice::Pixman,
+            outputs: vec![format!("{}x{}", size.0, size.1).parse()?],
+            renderer,
             render_node: None,
         },
         config,
@@ -792,6 +803,103 @@ fn the_shared_screen_has_its_ring_never_in_its_stream() -> anyhow::Result<()> {
     let at = (540 * w as usize + 300) * 4;
     let same = u32::from_be_bytes([0xff, pixels[at + 2], pixels[at + 1], pixels[at]]);
     assert_eq!(same & 0xffffff, screen & 0xffffff);
+    Ok(())
+}
+
+#[test]
+fn a_frame_costs_the_loop_well_under_a_millisecond() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    // The maintainer's screen: a frame is 16 MB.
+    let mut bed = start_on(&shell, (2560, 1600), RendererChoice::Pixman)?;
+    if bed.pipewire.policy.is_none() {
+        eprintln!("no WirePlumber to link a consumer: skipped");
+        return Ok(());
+    }
+    let (_, started) = bed.share_screen()?;
+    let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
+    let start = Instant::now();
+    let mut got = 0;
+    let mut x = 300.0;
+    while got < 5 {
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(20),
+            "{got} frames came (sent: {})",
+            bed.hp.share_frames()
+        );
+        // The pointer moves: each frame is new.
+        x += 40.0;
+        bed.hp.pointer_move(x, 800.0);
+        bed.idle(Duration::from_millis(60))?;
+        while let Ok(((w, h), pixels)) = consumer.frames.try_recv() {
+            assert_eq!((w, h), (2560, 1600));
+            assert!(pixels.len() >= 2560 * 1600 * 4);
+            got += 1;
+        }
+    }
+    // Handing a frame over is lending its pixels, never copying them.
+    let most = bed.hp.share_lend_most();
+    assert!(most < Duration::from_millis(1), "{most:?}");
+    Ok(())
+}
+
+/// The GPU's way (GLES): the frame read back into a pixel buffer, which a
+/// thread of its own maps and lends; on Mesa's software device, never a
+/// GPU. Its frames come whole and upright, in the screen's colours.
+#[test]
+fn on_gles_the_read_back_thread_hands_the_frames_over() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = match start_on(&shell, SCREEN, RendererChoice::GlesSoftware) {
+        Ok(bed) => bed,
+        Err(err) => {
+            eprintln!("no GLES on Mesa's software device ({err:#}): skipped");
+            return Ok(());
+        }
+    };
+    if bed.pipewire.policy.is_none() {
+        eprintln!("no WirePlumber to link a consumer: skipped");
+        return Ok(());
+    }
+    let (_, started) = bed.share_screen()?;
+    let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
+    let start = Instant::now();
+    let mut x = 300.0;
+    let frame = loop {
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(20),
+            "no frame came (sent: {})",
+            bed.hp.share_frames()
+        );
+        x += 20.0;
+        bed.hp.pointer_move(x, 800.0);
+        bed.idle(Duration::from_millis(80))?;
+        if let Ok(frame) = consumer.frames.try_recv() {
+            break frame;
+        }
+    };
+    let ((w, h), pixels) = frame;
+    assert_eq!((w, h), SCREEN);
+    // Upright and in its colours: a pixel of the screen's top and one of
+    // its bottom, as the screen shows them.
+    bed.hp.pointer_move(1500.0, 300.0);
+    bed.idle(Duration::from_millis(200))?;
+    for (px, py) in [(300usize, 40usize), (300, 1040)] {
+        let screen = bed.pixel(px, py)? & 0x00ff_ffff;
+        let at = (py * w as usize + px) * 4;
+        let streamed = u32::from_be_bytes([0, pixels[at + 2], pixels[at + 1], pixels[at]]);
+        let close = screen
+            .to_be_bytes()
+            .iter()
+            .zip(streamed.to_be_bytes())
+            .all(|(a, b)| a.abs_diff(b) <= 8);
+        assert!(
+            close,
+            "({px}, {py}): screen {screen:06x}, stream {streamed:06x}"
+        );
+    }
     Ok(())
 }
 

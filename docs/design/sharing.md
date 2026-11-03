@@ -107,7 +107,8 @@ what is in use.
   rest), which xdg-desktop-portal reads for `XDG_CURRENT_DESKTOP` =
   `Hocuspanda`, what `hocuspanda-session` sets and gives systemd's and
   D-Bus's activation environment. The .deb depends on
-  `xdg-desktop-portal`, recommends `pipewire`, and links
+  `xdg-desktop-portal`, recommends `pipewire` and `xdg-desktop-portal-gtk`
+  (the file chooser, which saving a capture uses), and links
   `libpipewire-0.3` (building needs `libpipewire-0.3-dev`).
 - **No `Screenshot` portal**: xdg-desktop-portal does not need one for the
   screen cast (checked in its sources and by running it, below), so none
@@ -153,16 +154,25 @@ what is in use.
   changed (its own damage, in a buffer kept from frame to frame), and no
   sooner than its pace, and at least once a second while a consumer
   streams (so that one which joined, or lost its first frames while
-  being linked, has a picture of a still screen): as the screen shows it but without the chooser,
-  the capture's drawing, the toasts and the ring, a password manager's
-  windows black, the pointer in it with "Montrer le pointeur"; a window
-  alone (its surfaces and popups), the pointer when it is over it. The
-  frame is copied out for reading as it is drawn, and its pixels taken at
-  the loop's next turn, 4 ms later (the GPU never waited for); then handed
-  to the streams' thread, which copies them into a free buffer, if one is
-  (else the frame is owed and drawn again at the next pace). A shared
-  window on another desktop, or minimised, is sent its frame callbacks so
-  that it keeps drawing.
+  being linked, has a picture of a still screen): as the screen shows it
+  but without the chooser, the capture's drawing, the toasts and the ring,
+  a password manager's windows black, the pointer in it with "Montrer le
+  pointeur"; a window alone (its surfaces and popups), the pointer when it
+  is over it. **The loop never copies a frame** (16 MB at 2560 × 1600):
+  on GLES it asks for the frame's pixels into a pixel buffer of its own
+  (`glReadPixels` into a PBO, then an EGL fence and `glFlush`) and goes
+  on; a thread of its own (`share/glread.rs`), with a context shared with
+  the renderer's and current there only, waits for the fence (a second at
+  most: else the buffer is dropped, never mapped), maps the buffer (where
+  Mesa copies, about 1.3 ms a frame on the Intel GPU, measured before
+  this was moved off the loop), lends its memory to the streams' thread
+  and unmaps it once given back (`share/lease.rs`); three buffers a share
+  at most, a frame owed when none is free. On the CPU renderer (pixman)
+  the share's own buffer is lent, and not drawn into again until given
+  back. The streams' thread copies the pixels into a free PipeWire buffer,
+  if one is (else the frame is owed and drawn again at the next pace). A
+  shared window on another desktop, or minimised, is sent its frame
+  callbacks so that it keeps drawing.
 - **The ring** (`share/ring.rs`): on GLES, a pixel shader of the mockup's
   `box-shadow`s (a 2 px ring outside the window's edge and its corners, the
   glow its box blurred, outside only), from `0.9, 18px, 0.45` to `0.6, 8px,
@@ -221,7 +231,11 @@ what is in use.
   linked by WirePlumber gets frames without it; the sign shows under the
   clock, its popover says who sees what, and its button ends the share and
   closes the session; three notifications held, then one bubble summing
-  them up; a shared window closing ends its share. Unit tests for the
+  them up; a shared window closing ends its share; handing a 2560 × 1600
+  frame over costs the loop well under a millisecond (pixman, its buffer
+  lent); on GLES (Mesa's software device, never a GPU: the harness's
+  `RendererChoice::GlesSoftware`), the read-back thread's frames come
+  whole, upright and in the screen's colours. Unit tests for the
   lines, the chooser's words and its arrows, the cards' sizes, the
   popover's rows, the sign's place, the summary's words and the stack's
   holding, the ring's breath, the pop, the thumbnails' shrinking and the
@@ -236,7 +250,9 @@ what is in use.
 - **Not built**: the lock screen stopping the shares (the desktop locks
   with the display manager's until it has its own lock screen; then it
   ends them); the cursor as metadata; DMA-BUF buffers (shared memory is
-  copied, a frame of 2560 × 1600 being 16 MB a frame); virtual screens;
+  copied, off the loop, a frame of 2560 × 1600 being 16 MB); the
+  chooser's thumbnails off the loop (drawn and read back there twice a
+  second while it shows, as the capture's screens are); virtual screens;
   restoring a share (`persist_mode`); the `Screenshot` and `RemoteDesktop`
   portals; xdg-foreign's parent windows (a Wayland application's window,
   which the portal names by its exported handle, is not looked up).

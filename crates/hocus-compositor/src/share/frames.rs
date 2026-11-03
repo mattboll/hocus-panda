@@ -5,11 +5,22 @@
 //!
 //! A share's frame is drawn into a buffer of its own, which keeps its
 //! pixels from one frame to the next (only what changed is drawn again,
-//! and nothing is sent when nothing did), then copied out for reading
-//! (the GPU does it while the loop goes on); its pixels are taken at the
-//! loop's next turn, a few milliseconds later, and handed to the
-//! streams' thread. A window shared on another desktop, or minimised, is
-//! told when its frame was drawn, so that it keeps drawing.
+//! and nothing is sent when nothing did). The loop then hands it over
+//! without copying it (16 MB a frame at 2560 × 1600: a hard rule's
+//! matter, [`super::lease`]):
+//!
+//! - **On the GPU** (GLES), it asks for the frame's pixels into a pixel
+//!   buffer and a fence after it, and goes on; the read-back thread waits
+//!   for the GPU, maps the buffer (where Mesa may copy), lends its memory
+//!   to the streams' thread and unmaps it once given back
+//!   ([`super::glread`]). The share's buffer can be drawn into again at
+//!   once.
+//! - **On the CPU** (pixman), the share's buffer itself is lent to the
+//!   streams' thread: it is not drawn into again until given back (a
+//!   frame owed waits for that).
+//!
+//! A window shared on another desktop, or minimised, is told when its
+//! frame was drawn, so that it keeps drawing.
 
 use std::{collections::HashMap, time::Duration};
 
@@ -20,12 +31,20 @@ use smithay::{
         renderer::{
             Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             damage::OutputDamageTracker,
+            gles::{GlesRenderer, GlesTexture},
+            pixman::PixmanRenderer,
         },
     },
-    utils::{Buffer as BufferCoords, Physical, Rectangle, Size, Transform},
+    reexports::pixman,
+    utils::{Buffer as BufferCoords, Physical, Size, Transform},
 };
 
-use super::thumbs::Job;
+use super::{
+    glread,
+    lease::Lease,
+    stream::{StreamsSender, ToStreams},
+    thumbs::Job,
+};
 use crate::{
     State,
     going::Shaders,
@@ -34,43 +53,183 @@ use crate::{
     wobble::Bend,
 };
 
-/// A share's buffer, and what it last drew.
+/// What came of handing a frame over.
+#[derive(Debug)]
+pub enum Handed {
+    /// The read-back thread has it.
+    Sent,
+    /// The share's buffer is lent, until this lease is back.
+    Lent(Lease),
+    /// Nothing free to read it into: owed.
+    Busy,
+}
+
+/// How a renderer hands a frame over without the loop copying it.
+pub trait Lends<T>: Renderer + ExportMem {
+    /// What it keeps for that (the GPU's pixel buffers and thread).
+    type Reader: Default + std::fmt::Debug;
+
+    /// Share `id`'s frame, just drawn into `buffer` (`size` pixels), to
+    /// the stream `to`.
+    fn hand_over(
+        &mut self,
+        reader: &mut Self::Reader,
+        id: u64,
+        buffer: &T,
+        size: (u32, u32),
+        to: &StreamsSender,
+    ) -> anyhow::Result<Handed>;
+
+    /// What it keeps for the shares that `keep` says are gone goes.
+    fn forget(&mut self, reader: &mut Self::Reader, keep: &dyn Fn(u64) -> bool);
+}
+
+impl Lends<GlesTexture> for GlesRenderer {
+    type Reader = glread::Reader;
+
+    fn hand_over(
+        &mut self,
+        reader: &mut Self::Reader,
+        id: u64,
+        buffer: &GlesTexture,
+        size: (u32, u32),
+        to: &StreamsSender,
+    ) -> anyhow::Result<Handed> {
+        Ok(match reader.read(self, id, buffer, size, to)? {
+            glread::Asked::Sent => Handed::Sent,
+            glread::Asked::Busy => Handed::Busy,
+        })
+    }
+
+    fn forget(&mut self, reader: &mut Self::Reader, keep: &dyn Fn(u64) -> bool) {
+        reader.forget(self, keep);
+    }
+}
+
+impl Lends<pixman::Image<'static, 'static>> for PixmanRenderer {
+    type Reader = ();
+
+    fn hand_over(
+        &mut self,
+        _reader: &mut (),
+        id: u64,
+        buffer: &pixman::Image<'static, 'static>,
+        size: (u32, u32),
+        to: &StreamsSender,
+    ) -> anyhow::Result<Handed> {
+        let len = buffer.stride() * buffer.height();
+        // SAFETY: pixman's image owns `stride × height` bytes at `data`
+        // (pixman's own pointer, read here, never kept apart from it),
+        // alive as long as `buffer`; the renderer drew into it
+        // synchronously, and the loop neither writes nor frees it while
+        // the lease made of the slice is out (`Target::lent`).
+        #[allow(unsafe_code)]
+        let bytes = unsafe {
+            let data = buffer.data();
+            anyhow::ensure!(!data.is_null() && len > 0, "no pixels to lend");
+            std::slice::from_raw_parts(data as *const u8, len)
+        };
+        let lease = Lease::new(bytes);
+        to.send(ToStreams::Frame {
+            id,
+            lease: lease.clone(),
+            size,
+            stride: u32::try_from(buffer.stride()).unwrap_or(u32::MAX),
+        });
+        Ok(Handed::Lent(lease))
+    }
+
+    fn forget(&mut self, _reader: &mut (), _keep: &dyn Fn(u64) -> bool) {}
+}
+
+/// A share's buffer, what it last drew, and the lease of its pixels while
+/// they are lent (the CPU's).
 struct Target<T> {
     buffer: T,
     damage: OutputDamageTracker,
     size: Size<i32, Physical>,
+    lent: Option<Lease>,
 }
 
-/// A frame copied out, its pixels to take.
-struct Reading<M> {
-    id: u64,
-    mapping: M,
-    size: (u32, u32),
-}
-
-/// The backend's part of sharing: each share's buffer, and the frames
-/// being read back.
-pub struct Frames<R: ExportMem, T> {
+/// The backend's part of sharing: each share's buffer, and what the
+/// renderer keeps to hand frames over.
+pub struct Frames<R: Lends<T>, T> {
     targets: HashMap<u64, Target<T>>,
-    reading: Vec<Reading<R::TextureMapping>>,
+    /// Buffers of shares gone (or of another size), still lent.
+    retired: Vec<Target<T>>,
+    reader: R::Reader,
 }
 
-impl<R: ExportMem, T> Default for Frames<R, T> {
+impl<R: Lends<T>, T> Default for Frames<R, T> {
     fn default() -> Self {
         Self {
             targets: HashMap::new(),
-            reading: Vec::new(),
+            retired: Vec::new(),
+            reader: R::Reader::default(),
         }
     }
 }
 
-impl<R: ExportMem, T> std::fmt::Debug for Frames<R, T> {
+impl<R: Lends<T>, T> Drop for Frames<R, T> {
+    /// The memory lent goes with them: taken back first.
+    fn drop(&mut self) {
+        for target in self.targets.values().chain(&self.retired) {
+            if let Some(lease) = &target.lent {
+                lease.revoke();
+            }
+        }
+    }
+}
+
+impl<R: Lends<T>, T> std::fmt::Debug for Frames<R, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Frames")
             .field("targets", &self.targets.len())
-            .field("reading", &self.reading.len())
+            .field("retired", &self.retired.len())
+            .field("reader", &self.reader)
             .finish()
     }
+}
+
+impl<R: Lends<T>, T> Frames<R, T> {
+    /// What was given back may be drawn into again, or freed.
+    fn settle(
+        &mut self,
+        renderer: &mut R,
+        shares: &std::collections::BTreeMap<u64, super::Active>,
+    ) {
+        self.retired
+            .retain(|t| t.lent.as_ref().is_some_and(|l| !l.is_back()));
+        for target in self.targets.values_mut() {
+            if target.lent.as_ref().is_some_and(Lease::is_back) {
+                target.lent = None;
+            }
+        }
+        let gone: Vec<u64> = self
+            .targets
+            .keys()
+            .copied()
+            .filter(|id| !shares.contains_key(id))
+            .collect();
+        for id in gone {
+            if let Some(target) = self.targets.remove(&id)
+                && target.lent.is_some()
+            {
+                self.retired.push(target);
+            }
+        }
+        renderer.forget(&mut self.reader, &|id| shares.contains_key(&id));
+    }
+}
+
+/// What came of a share's frame.
+enum Drawn {
+    /// Handed over.
+    Went,
+    /// Nothing changed.
+    Same,
+    /// Owed: nothing free to hand it over with.
+    Owed,
 }
 
 /// Draws what sharing needs now.
@@ -82,33 +241,21 @@ where
         + Offscreen<T>
         + Bind<T>
         + ExportMem
+        + Lends<T>
         + Bend
         + Shaders
         + crate::glass::Glass,
     R::TextureId: Send + Clone + Texture + 'static,
     R::Error: Send + Sync + 'static,
 {
-    // What was copied out at the last turn: its pixels, to the stream.
-    for reading in std::mem::take(&mut frames.reading) {
-        let bytes = match renderer.map_texture(&reading.mapping) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                tracing::warn!(?err, id = reading.id, "a share's frame could not be read");
-                continue;
-            }
-        };
-        let mut pixels = state.share.spare_buffer(bytes.len());
-        pixels.clear();
-        pixels.extend_from_slice(bytes);
-        state.send_frame(reading.id, pixels, reading.size);
-    }
-    frames
-        .targets
-        .retain(|id, _| state.share.shares.contains_key(id));
+    frames.settle(renderer, &state.share.shares);
     thumbnails(renderer, state);
     if state.share.shares.is_empty() {
         return;
     }
+    let Some(to) = state.share.streams.as_ref().map(|s| s.sender().clone()) else {
+        return;
+    };
     let due = state.redraw || std::mem::take(&mut state.share.streams_due);
     let now = state.now();
     let ids: Vec<u64> = state.share.shares.keys().copied().collect();
@@ -123,6 +270,10 @@ where
         if !due && !share.fresh {
             continue;
         }
+        // Its buffer lent still (the CPU's): drawn once it is back.
+        if frames.targets.get(&id).is_some_and(|t| t.lent.is_some()) {
+            continue;
+        }
         let every = Duration::from_micros(1_000_000 / u64::from(fps.max(1)));
         if let Some(last) = share.last
             && now < last + every
@@ -133,39 +284,45 @@ where
         let fresh = share.fresh;
         let source = share.source.clone();
         let pointer = share.pointer;
-        match frame::<R, T>(renderer, state, frames, id, &source, pointer, agreed, fresh) {
-            Ok(Some(reading)) => {
-                frames.reading.push(reading);
+        match frame::<R, T>(
+            renderer, state, frames, &to, id, &source, pointer, agreed, fresh,
+        ) {
+            Ok(Drawn::Went) => {
                 if let Some(share) = state.share.shares.get_mut(&id) {
                     share.last = Some(now);
                     share.fresh = false;
                 }
             }
-            Ok(None) => {}
-            Err(err) => tracing::warn!(id, "a share's frame could not be drawn: {err:#}"),
+            Ok(Drawn::Same) => {}
+            // Drawn already: sent once something is free (`Returned`).
+            Ok(Drawn::Owed) => {
+                if let Some(share) = state.share.shares.get_mut(&id) {
+                    share.fresh = true;
+                }
+            }
+            // Once, and the share ends: it would fail at every frame.
+            Err(err) => state.share_failed(id, &format!("{err:#}")),
         }
         if let ShareSource::Window(w) = source {
             window_drawn(state, WindowId(w));
         }
     }
-    if !frames.reading.is_empty() {
-        state.read_soon();
-    }
 }
 
 /// Share `id`'s frame drawn into its buffer, `agreed` pixels large, and
-/// copied out if something changed (or `fresh`: a frame is owed).
+/// handed over to `to` if something changed (or `fresh`: a frame is owed).
 #[allow(clippy::too_many_arguments)]
 fn frame<R, T>(
     renderer: &mut R,
     state: &mut State,
     frames: &mut Frames<R, T>,
+    to: &StreamsSender,
     id: u64,
     source: &ShareSource,
     pointer: bool,
     agreed: (u32, u32),
     fresh: bool,
-) -> anyhow::Result<Option<Reading<R::TextureMapping>>>
+) -> anyhow::Result<Drawn>
 where
     R: Renderer
         + ImportAll
@@ -173,6 +330,7 @@ where
         + Offscreen<T>
         + Bind<T>
         + ExportMem
+        + Lends<T>
         + Bend
         + Shaders
         + crate::glass::Glass,
@@ -217,44 +375,61 @@ where
     };
     let size: Size<i32, Physical> = (agreed.0 as i32, agreed.1 as i32).into();
     anyhow::ensure!(size.w > 0 && size.h > 0, "nothing to draw");
-    if frames.targets.get(&id).is_none_or(|t| t.size != size) {
+    let Frames {
+        targets,
+        retired,
+        reader,
+    } = frames;
+    if targets.get(&id).is_none_or(|t| t.size != size) {
         let buffer_size: Size<i32, BufferCoords> = (size.w, size.h).into();
+        // B, G, R, A in memory: what the CPU's buffer is lent as.
         let buffer = renderer
-            .create_buffer(Fourcc::Abgr8888, buffer_size)
-            .or_else(|_| renderer.create_buffer(Fourcc::Argb8888, buffer_size))
+            .create_buffer(Fourcc::Argb8888, buffer_size)
+            .or_else(|_| renderer.create_buffer(Fourcc::Abgr8888, buffer_size))
             .context("no buffer to draw the share into")?;
-        frames.targets.insert(
+        if let Some(old) = targets.insert(
             id,
             Target {
                 buffer,
                 damage: OutputDamageTracker::new(size, scale, Transform::Normal),
                 size,
+                lent: None,
             },
-        );
+        ) && old.lent.is_some()
+        {
+            retired.push(old);
+        }
     }
-    let target = frames.targets.get_mut(&id).context("the share's buffer")?;
+    let target = targets.get_mut(&id).context("the share's buffer")?;
     let elements: &[OutputElement<R>] = &elements;
-    let mut framebuffer = renderer
-        .bind(&mut target.buffer)
-        .context("could not bind")?;
-    let drawn = target
-        .damage
-        .render_output(renderer, &mut framebuffer, 1, elements, clear)
-        .map_err(|err| anyhow::anyhow!("{err:?}"))
-        .context("could not draw")?;
-    let changed = drawn.damage.is_some_and(|d| !d.is_empty());
-    if !changed && !fresh {
-        return Ok(None);
+    {
+        let mut framebuffer = renderer
+            .bind(&mut target.buffer)
+            .context("could not bind")?;
+        let drawn = target
+            .damage
+            .render_output(renderer, &mut framebuffer, 1, elements, clear)
+            .map_err(|err| anyhow::anyhow!("{err:?}"))
+            .context("could not draw")?;
+        let changed = drawn.damage.is_some_and(|d| !d.is_empty());
+        if !changed && !fresh {
+            return Ok(Drawn::Same);
+        }
     }
-    let region = Rectangle::from_size((size.w, size.h).into());
-    let mapping = renderer
-        .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
-        .context("could not copy the frame out")?;
-    Ok(Some(Reading {
-        id,
-        mapping,
-        size: agreed,
-    }))
+    let since = std::time::Instant::now();
+    let handed = renderer.hand_over(reader, id, &target.buffer, agreed, to)?;
+    let drawn = match handed {
+        Handed::Sent => Drawn::Went,
+        Handed::Lent(lease) => {
+            target.lent = Some(lease);
+            Drawn::Went
+        }
+        Handed::Busy => Drawn::Owed,
+    };
+    if matches!(drawn, Drawn::Went) {
+        state.frame_handed(since);
+    }
+    Ok(drawn)
 }
 
 /// Window `id`, shared, is told its frame was drawn, wherever it is.

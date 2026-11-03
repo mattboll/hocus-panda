@@ -36,10 +36,11 @@ pub enum ToStreams {
         id: u64,
         size: (u32, u32),
     },
-    /// A frame: rows of `stride` bytes, `size` pixels.
+    /// A frame: its pixels lent (rows of `stride` bytes, `size` pixels),
+    /// given back once copied.
     Frame {
         id: u64,
-        pixels: Vec<u8>,
+        lease: super::lease::Lease,
         size: (u32, u32),
         stride: u32,
     },
@@ -73,8 +74,11 @@ pub enum FromStreams {
         id: u64,
         on: bool,
     },
-    /// Pixels' memory to draw the next frames into.
-    Spare(Vec<u8>),
+    /// A frame's pixels lent are given back: its memory may be written
+    /// again.
+    Returned {
+        id: u64,
+    },
     /// A frame found no free buffer (the consumer was not ready, or is
     /// behind): one is owed.
     Dropped {
@@ -82,28 +86,52 @@ pub enum FromStreams {
     },
 }
 
-/// The thread, as the loop holds it.
-pub struct Streams {
+/// The way to the thread, and back to the loop: the read-back thread
+/// holds one too.
+#[derive(Clone)]
+pub struct StreamsSender {
     to: pw::channel::Sender<ToStreams>,
+    back: Sender<FromStreams>,
 }
 
-impl std::fmt::Debug for Streams {
+impl std::fmt::Debug for StreamsSender {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Streams")
+        f.write_str("StreamsSender")
     }
 }
 
-impl Streams {
+impl StreamsSender {
     pub fn send(&self, said: ToStreams) {
         if self.to.send(said).is_err() {
             tracing::warn!("the streams' thread is gone");
         }
     }
+
+    /// Tells the loop, as the streams' thread would.
+    pub fn tell(&self, said: FromStreams) {
+        let _ = self.back.send(said);
+    }
+}
+
+/// The thread, as the loop holds it: it ends with it.
+#[derive(Debug)]
+pub struct Streams {
+    sender: StreamsSender,
+}
+
+impl Streams {
+    pub fn send(&self, said: ToStreams) {
+        self.sender.send(said);
+    }
+
+    pub fn sender(&self) -> &StreamsSender {
+        &self.sender
+    }
 }
 
 impl Drop for Streams {
     fn drop(&mut self) {
-        let _ = self.to.send(ToStreams::Quit);
+        let _ = self.sender.to.send(ToStreams::Quit);
     }
 }
 
@@ -112,6 +140,7 @@ impl Drop for Streams {
 /// directory).
 pub fn start(remote: Option<PathBuf>, back: Sender<FromStreams>) -> Option<Streams> {
     let (to, from_loop) = pw::channel::channel::<ToStreams>();
+    let tell = back.clone();
     let started = std::thread::Builder::new()
         .name("screen cast streams".to_owned())
         .spawn(move || {
@@ -124,7 +153,9 @@ pub fn start(remote: Option<PathBuf>, back: Sender<FromStreams>) -> Option<Strea
             }
         });
     match started {
-        Ok(_) => Some(Streams { to }),
+        Ok(_) => Some(Streams {
+            sender: StreamsSender { to, back: tell },
+        }),
         Err(err) => {
             tracing::warn!(%err, "cannot start the streams' thread");
             None
@@ -183,16 +214,23 @@ fn run(
         }
         ToStreams::Frame {
             id,
-            pixels,
+            lease,
             size,
             stride,
         } => {
-            if let Some(live) = lives.borrow().get(&id)
-                && !queue(live, &pixels, size, stride)
-            {
+            let queued = lives.borrow().get(&id).is_some_and(|live| {
+                lease
+                    .with(|pixels| queue(live, pixels, size, stride))
+                    .unwrap_or(false)
+            });
+            lease.give_back();
+            // The read-back thread says it itself, once it unmapped them.
+            if !lease.is_quiet() {
+                let _ = back.send(FromStreams::Returned { id });
+            }
+            if !queued {
                 let _ = back.send(FromStreams::Dropped { id });
             }
-            let _ = back.send(FromStreams::Spare(pixels));
         }
         ToStreams::Destroy { id } => {
             if let Some(live) = lives.borrow_mut().remove(&id) {

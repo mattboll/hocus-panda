@@ -16,8 +16,10 @@
 //!   thread of its own. The loop draws a frame when something changed and
 //!   the consumer's pace allows ([`frames`]), as the screen shows it but
 //!   for what only the screen shows (the chooser, the capture's drawing,
-//!   the ring) and a password manager's windows black; it starts reading
-//!   it back, takes the pixels at its next turn, and hands them over.
+//!   the ring) and a password manager's windows black; it hands it over
+//!   without copying it: a GPU read-back that a thread of its own maps
+//!   and lends ([`glread`]), or the CPU renderer's buffer lent
+//!   ([`lease`]); the streams' thread copies it into PipeWire's buffer.
 //! - **While sharing**: the shared window, or screen, has a ring that
 //!   breathes ([`ring`]), never in the stream; the shell shows the bar's
 //!   sign (`shares`) and holds the notifications. Stopping from the bar,
@@ -26,6 +28,8 @@
 
 mod draw;
 pub mod frames;
+mod glread;
+mod lease;
 mod portal;
 pub mod ring;
 mod stream;
@@ -58,11 +62,6 @@ use stream::{FromStreams, Streams, ToStreams};
 
 use crate::{State, model::WindowId, shell::Bus};
 
-/// After drawing a frame, its pixels are taken this much later: the GPU
-/// has drawn and copied them by then, and the loop never waits for it.
-const READ_BACK: Duration = Duration::from_millis(4);
-/// Pixels' memory kept to draw the next frames into.
-const SPARE_KEPT: usize = 4;
 /// A stream that streams gets a frame at least this often, whatever
 /// changed: a consumer that joined, or one whose first frames were lost
 /// while it was being linked, gets a picture of a still screen.
@@ -136,12 +135,13 @@ pub struct Sharing {
     /// The rings' breath, and the streams' pace.
     breath: Option<RegistrationToken>,
     pace: Option<RegistrationToken>,
-    reading: Option<RegistrationToken>,
     /// While a consumer streams, a frame at least every [`KEEP`].
     keep: Option<RegistrationToken>,
     /// A stream waited for its pace: a frame is owed.
     streams_due: bool,
-    spare: Vec<Vec<u8>>,
+    /// The longest a frame's hand-over took the loop (its pixels lent to
+    /// the streams' thread), for tests.
+    lend_most: Duration,
     pub(crate) drawn: Drawn,
     /// Frames handed to PipeWire, for tests.
     frames_sent: u64,
@@ -182,6 +182,11 @@ impl Sharing {
         self.frames_sent
     }
 
+    /// The longest a frame's hand-over took the loop so far, for tests.
+    pub fn lend_most(&self) -> Duration {
+        self.lend_most
+    }
+
     /// Whether `id` is shared.
     pub fn window_shared(&self, id: WindowId) -> bool {
         self.shares
@@ -194,14 +199,6 @@ impl Sharing {
         self.shares
             .values()
             .any(|s| s.node.is_some() && matches!(&s.source, ShareSource::Screen(n) if n == name))
-    }
-
-    /// Pixels' memory of `len` bytes to draw a frame into.
-    fn spare_buffer(&mut self, len: usize) -> Vec<u8> {
-        match self.spare.iter().position(|b| b.capacity() >= len) {
-            Some(at) => self.spare.swap_remove(at),
-            None => Vec::with_capacity(len),
-        }
     }
 }
 
@@ -693,9 +690,11 @@ impl State {
                     self.pace_streams(every);
                 }
             }
-            FromStreams::Spare(pixels) => {
-                if self.share.spare.len() < SPARE_KEPT {
-                    self.share.spare.push(pixels);
+            // Its pixels' memory may be drawn into again: a frame put off
+            // for it is drawn.
+            FromStreams::Returned { id } => {
+                if self.share.shares.contains_key(&id) {
+                    self.share.streams_due = true;
                 }
             }
         }
@@ -728,7 +727,7 @@ impl State {
     }
 
     /// Share `id` could not stream: its request fails, or it ends.
-    fn share_failed(&mut self, id: u64, why: &str) {
+    pub(crate) fn share_failed(&mut self, id: u64, why: &str) {
         tracing::warn!(id, why, "a share could not stream");
         let starting = self.share.shares.get_mut(&id).and_then(|s| s.reply.take());
         match starting {
@@ -943,18 +942,11 @@ impl State {
         self.share.maker.as_ref()
     }
 
-    /// A frame of share `id`, read back, to its stream.
-    fn send_frame(&mut self, id: u64, pixels: Vec<u8>, size: (u32, u32)) {
-        let Some(streams) = &self.share.streams else {
-            return;
-        };
+    /// A frame of a share's was handed to its stream, from `since`: for
+    /// tests, how long that took the loop at most.
+    fn frame_handed(&mut self, since: std::time::Instant) {
         self.share.frames_sent += 1;
-        streams.send(ToStreams::Frame {
-            id,
-            pixels,
-            size,
-            stride: size.0 * 4,
-        });
+        self.share.lend_most = self.share.lend_most.max(since.elapsed());
     }
 
     /// While a consumer streams, a frame is owed when none went for
@@ -1024,24 +1016,6 @@ impl State {
         match inserted {
             Ok(token) => self.share.pace = Some(token),
             Err(err) => tracing::warn!(%err.error, "a stream's frame not paced"),
-        }
-    }
-
-    /// Frames are being read back: the loop turns again shortly to take
-    /// them.
-    fn read_soon(&mut self) {
-        if self.share.reading.is_some() {
-            return;
-        }
-        let inserted =
-            self.loop_handle
-                .insert_source(Timer::from_duration(READ_BACK), |_, _, app| {
-                    app.state.share.reading = None;
-                    TimeoutAction::Drop
-                });
-        match inserted {
-            Ok(token) => self.share.reading = Some(token),
-            Err(err) => tracing::warn!(%err.error, "a stream's frame waits"),
         }
     }
 }

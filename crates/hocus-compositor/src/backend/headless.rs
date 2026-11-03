@@ -50,6 +50,9 @@ pub enum RendererChoice {
     Gles,
     /// The software renderer: slower, but the same pixels on every machine.
     Pixman,
+    /// GLES on Mesa's software EGL device (llvmpipe), never a GPU: tests of
+    /// what only GLES does, on a machine whose GPU must not be touched.
+    GlesSoftware,
 }
 
 /// What the headless backend draws.
@@ -131,6 +134,7 @@ pub fn init(
             config.render_node.as_deref(),
             state,
         )?)),
+        RendererChoice::GlesSoftware => Canvas::Gles(Box::new(software_outputs(&specs, state)?)),
         RendererChoice::Auto => match gles_outputs(&specs, config.render_node.as_deref(), state) {
             Ok(gles) => Canvas::Gles(Box::new(gles)),
             Err(err) => {
@@ -171,6 +175,29 @@ fn gles_outputs(
     let device = render_node_of(renderer.egl_context().display());
     dmabuf_global(state, renderer.dmabuf_formats(), device);
     state.blur = true;
+    Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
+}
+
+/// GLES on Mesa's software EGL device: no render node is opened.
+fn software_outputs(
+    specs: &[OutputSpec],
+    state: &mut State,
+) -> anyhow::Result<Outputs<GlesRenderer, GlesTexture>> {
+    anyhow::ensure!(egl_available(), "libEGL.so.1 is not installed");
+    let device = EGLDevice::enumerate()
+        .context("could not list EGL devices")?
+        .find(EGLDevice::is_software)
+        .context("no software EGL device")?;
+    // SAFETY: nothing else in the process creates EGL displays, so smithay's
+    // tracking of them is accurate.
+    #[allow(unsafe_code)]
+    let display = unsafe { EGLDisplay::new(device) }.context("could not open the EGL display")?;
+    let context = EGLContext::new(&display).context("could not create an EGL context")?;
+    // SAFETY: the context was just created and is used on this thread only.
+    #[allow(unsafe_code)]
+    let renderer = unsafe { GlesRenderer::new(context) }.context("could not start GLES")?;
+    state.shm_state.update_formats(renderer.shm_formats());
+    dmabuf_global(state, renderer.dmabuf_formats(), None);
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 
