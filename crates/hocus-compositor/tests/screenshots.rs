@@ -576,8 +576,9 @@ fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
         hp.button(BTN_LEFT, false);
         Ok(())
     };
-    // The second mode, "Fenêtre", after "Zone".
-    click(&mut hp, bar.x + 150)?;
+    // The second mode, "Fenêtre", after "Zone", both after the Photo /
+    // Vidéo switch (5.10).
+    click(&mut hp, bar.x + 380)?;
     let window = hp.dispatch_until(WAIT, |hp| {
         matches!(
             hp.capture(),
@@ -593,7 +594,7 @@ fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
         hp.capture()
     );
     // Back to the area, then the green button, at its right end.
-    click(&mut hp, bar.x + 40)?;
+    click(&mut hp, bar.x + 250)?;
     let area = hp.dispatch_until(WAIT, |hp| {
         matches!(
             hp.capture(),
