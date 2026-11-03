@@ -34,7 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, KEY_ESC};
+use common::{KEY_ESC, WAIT};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use zbus::{MatchRule, MessageStream, OwnedVariant, Variant};
 
@@ -81,38 +81,6 @@ fn ready() -> Option<PathBuf> {
     Some(shell)
 }
 
-/// A D-Bus daemon of the test's own in `dir`, and its address.
-fn private_bus(dir: &Path) -> anyhow::Result<(Child, String)> {
-    let socket = dir.join("bus");
-    let config = dir.join("bus.conf");
-    std::fs::write(
-        &config,
-        format!(
-            "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
-             \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
-             <busconfig><type>session</type><listen>unix:path={}</listen>\
-             <policy context=\"default\"><allow send_destination=\"*\"/>\
-             <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
-            socket.display()
-        ),
-    )?;
-    let bus = Command::new("dbus-daemon")
-        .arg(format!("--config-file={}", config.display()))
-        .arg("--nofork")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let start = Instant::now();
-    while !socket.exists() {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(10), "no bus");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    Ok((bus, format!("unix:path={}", socket.display())))
-}
-
 /// The bed: the compositor on a 1920×1080 screen (the full bar), its shell
 /// serving the notifications on the test's bus; `config` changes the
 /// compositor's configuration (the agents' tools' places).
@@ -138,7 +106,7 @@ fn start_with(
         std::fs::create_dir_all(sub)?;
     }
     std::fs::write(state.join("hocuspanda/notifications"), kept)?;
-    let (bus, address) = private_bus(dir.path())?;
+    let (bus, address) = common::private_bus(dir.path())?;
     let log = dir.path().join("shell.log");
     let pid = dir.path().join("shell.pid");
     let script = dir.path().join("shell");
@@ -329,12 +297,17 @@ impl Bed {
 
     /// Waits until `n` bubbles show and are drawn; their cards.
     fn shows(&mut self, n: usize) -> anyhow::Result<Vec<Rect>> {
+        // Each drawn at its place: the shell sizes and places a bubble as
+        // it draws it, which on a loaded machine comes well after its
+        // surface.
         let done = self.hp.dispatch_until(Duration::from_secs(10), |hp| {
-            hp.bubble_surfaces().len() == n && hp.bubble_commits() >= n as u64
+            let bubbles = hp.bubble_surfaces();
+            bubbles.len() == n
+                && bubbles
+                    .iter()
+                    .all(|(namespace, _, r)| hp.drawn_layers(namespace).iter().any(|(_, d)| d == r))
         })?;
-        anyhow::ensure!(done, "not {n} bubbles: {:?}", self.bubbles());
-        // Their surfaces at their size.
-        self.idle(Duration::from_millis(200))?;
+        anyhow::ensure!(done, "not {n} bubbles drawn: {:?}", self.bubbles());
         Ok(self.bubbles())
     }
 
@@ -392,10 +365,10 @@ impl Bed {
         anyhow::bail!("the shell did not log {what:?}:\n{}", self.log())
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
     }
 
     /// Waits until notification `id`'s bubble went after its time: its
@@ -449,9 +422,10 @@ impl Bed {
     /// second button (5.5), 40 × 34, 11 px and 6 px into its surface, the
     /// buttons 4 px apart.
     fn bell(&mut self) -> anyhow::Result<(f64, f64)> {
-        let shown = self
-            .hp
-            .dispatch_until(Duration::from_secs(10), |hp| hp.bell_surfaces().len() == 1)?;
+        // Drawn: the shell started again shows its bell anew.
+        let shown = self.hp.dispatch_until(Duration::from_secs(10), |hp| {
+            hp.drawn_layers(hocus_link::BELL_NAMESPACE).len() == 1
+        })?;
         anyhow::ensure!(shown, "no bell");
         let (_, at) = self.hp.bell_surfaces()[0];
         Ok((f64::from(at.x + 11 + 44 + 20), f64::from(at.y + 6 + 17)))
@@ -462,16 +436,16 @@ impl Bed {
     fn open_history(&mut self) -> anyhow::Result<String> {
         let bell = self.bell()?;
         let mark = self.mark();
-        self.hp.pointer_move(bell.0, bell.1);
+        common::point(&mut self.hp, bell)?;
         self.idle(Duration::from_millis(100))?;
-        self.click(bell);
+        self.click(bell)?;
         let shows = self.logged_since(mark, "the history shows")?;
         self.logged_since(mark, "the history's items")?;
-        let open = self.hp.dispatch_until(Duration::from_secs(5), |hp| {
-            hp.popover_surfaces().len() == 1
-        })?;
+        // Drawn at its place: its place and size before, 0 × 0.
+        let open = self
+            .hp
+            .dispatch_until(WAIT, |hp| common::drawn_popovers(hp).len() == 1)?;
         anyhow::ensure!(open, "the history did not open");
-        self.idle(Duration::from_millis(200))?;
         Ok(shows)
     }
 
@@ -601,8 +575,10 @@ fn hovering_a_bubble_pauses_its_countdown() -> anyhow::Result<()> {
         ..Notice::default()
     })?;
     let card = bed.shows(1)?[0];
-    bed.hp
-        .pointer_move(f64::from(card.x + 60), f64::from(card.y + 30));
+    common::point(
+        &mut bed.hp,
+        (f64::from(card.x + 60), f64::from(card.y + 30)),
+    )?;
     bed.logged("paused=true")?;
     bed.idle(Duration::from_millis(2500))?;
     assert_eq!(bed.bubbles().len(), 1, "it went while hovered");
@@ -634,7 +610,7 @@ fn a_critical_one_stays_until_closed() -> anyhow::Result<()> {
     assert_eq!(bed.bubbles().len(), 1);
     assert!(bed.heard().is_empty(), "{:?}", bed.heard());
     // Its ✕ closes it, dismissed by the user.
-    bed.click(close_of(card));
+    bed.click(close_of(card))?;
     bed.hears(&format!("closed {id} 2"))?;
     Ok(())
 }
@@ -724,14 +700,26 @@ fn more_than_three_wait_their_turn_under_a_chip() -> anyhow::Result<()> {
     assert_eq!(cards[1].y, cards[0].y + cards[0].height + 8);
     assert_eq!(cards[2].y, cards[1].y + cards[1].height + 8);
     bed.logged("the waiting chip n=2")?;
-    let chip = bed.hp.bubbles_waiting_surfaces();
-    assert_eq!(chip.len(), 1);
+    // Drawn at its place: 0 × 0 before its first buffer; placed with the
+    // stack as the bubbles' places settle.
+    let mut seen = Vec::new();
+    bed.hp.dispatch_until(WAIT, |hp| {
+        let chip = hp.drawn_layers(hocus_link::BUBBLES_WAITING_NAMESPACE);
+        if seen.last() != Some(&chip) {
+            seen.push(chip.clone());
+        }
+        chip.first().is_some_and(|(_, r)| {
+            r.y == cards[2].y + cards[2].height + 8 && r.x + r.width == CARDS_RIGHT
+        })
+    })?;
+    let chip = bed.hp.drawn_layers(hocus_link::BUBBLES_WAITING_NAMESPACE);
+    assert_eq!(chip.len(), 1, "{seen:?}");
     let (_, chip) = chip[0];
     // Under the stack, on its right.
     assert_eq!(chip.y, cards[2].y + cards[2].height + 8);
     assert_eq!(chip.x + chip.width, CARDS_RIGHT);
     // One closed: the next takes its turn.
-    bed.click(close_of(cards[0]));
+    bed.click(close_of(cards[0]))?;
     bed.hears(&format!("closed {} 2", ids[0]))?;
     bed.logged("title=\"Noah\"")?;
     let cards = bed.shows(3)?;
@@ -764,7 +752,7 @@ fn an_action_the_card_and_the_close_say_what_they_should() -> anyhow::Result<()>
         f64::from(card.x + 56 + 10),
         f64::from(card.y + card.height - 1 - 12 - 14),
     );
-    bed.click(action);
+    bed.click(action)?;
     bed.hears(&format!("action {id} reply"))?;
     bed.hears(&format!("closed {id} 2"))?;
     let gone = bed
@@ -777,7 +765,7 @@ fn an_action_the_card_and_the_close_say_what_they_should() -> anyhow::Result<()>
         ..Notice::default()
     })?;
     let card = bed.shows(1)?[0];
-    bed.click((f64::from(card.x + 150), f64::from(card.y + 30)));
+    bed.click((f64::from(card.x + 150), f64::from(card.y + 30)))?;
     bed.hears(&format!("action {id} default"))?;
     bed.hears(&format!("closed {id} 2"))?;
     assert_eq!(
@@ -795,7 +783,7 @@ fn an_action_the_card_and_the_close_say_what_they_should() -> anyhow::Result<()>
         ..Notice::default()
     })?;
     let card = bed.shows(1)?[0];
-    bed.click(close_of(card));
+    bed.click(close_of(card))?;
     bed.hears(&format!("closed {id} 2"))?;
     assert!(!bed.heard().contains(&format!("action {id} default")));
     // Closed by its application.
@@ -876,6 +864,8 @@ fn the_history_lists_by_sections_newest_first() -> anyhow::Result<()> {
         + &kept("Calendrier", "Point produit", 40, false);
     let mut bed = start_with(&shell, |_, _| {}, &history)?;
     bed.logged("the history read kept=3 dropped=0")?;
+    // Read, its icons found, then the history has it: a while after.
+    bed.logged("the history read back kept=3")?;
     bed.notify(Notice {
         summary: "Camille dans #design",
         urgency: Some(0),
@@ -930,9 +920,9 @@ fn a_click_in_the_history_invokes_its_default_raises_and_removes_it() -> anyhow:
     // The older: Slack's.
     let item = bed.history_item(&items[1])?;
     let mark = bed.mark();
-    bed.hp.pointer_move(item.0, item.1);
+    common::point(&mut bed.hp, item)?;
     bed.idle(Duration::from_millis(100))?;
-    bed.click(item);
+    bed.click(item)?;
     // Its default invoked, its window asked for, then it goes: its sender
     // hears it closed by the user, and the history closes.
     bed.hears(&format!("action {id} default"))?;
@@ -963,13 +953,13 @@ fn its_close_removes_one_and_clear_all_empties_it() -> anyhow::Result<()> {
     assert_eq!(items.len(), 3);
     // The ✕ of the first, under the pointer.
     let first = bed.history_item(&items[0])?;
-    bed.hp.pointer_move(first.0, first.1);
+    common::point(&mut bed.hp, first)?;
     bed.idle(Duration::from_millis(100))?;
     let close = bed.history_item(&items[0].replace("Item", "Close"))?;
     let mark = bed.mark();
-    bed.hp.pointer_move(close.0, close.1);
+    common::point(&mut bed.hp, close)?;
     bed.idle(Duration::from_millis(100))?;
-    bed.click(close);
+    bed.click(close)?;
     let shows = bed.logged_since(mark, "the history shows")?;
     assert!(!shows.contains("Firefox"), "{shows}");
     assert!(
@@ -979,9 +969,9 @@ fn its_close_removes_one_and_clear_all_empties_it() -> anyhow::Result<()> {
     // "Clear all": empty, the resting panda's words, nothing to clear.
     let clear = bed.history_item("Clear")?;
     let mark = bed.mark();
-    bed.hp.pointer_move(clear.0, clear.1);
+    common::point(&mut bed.hp, clear)?;
     bed.idle(Duration::from_millis(100))?;
-    bed.click(clear);
+    bed.click(clear)?;
     let shows = bed.logged_since(mark, "the history shows")?;
     assert!(shows.contains("history=Rien de neuf"), "{shows}");
     let items = bed.logged_since(mark, "the history's items")?;
@@ -1011,8 +1001,10 @@ fn the_badge_counts_what_was_not_seen_and_opening_the_history_resets_it() -> any
         ..Notice::default()
     })?;
     let card = bed.shows(1)?[0];
-    bed.hp
-        .pointer_move(f64::from(card.x + 60), f64::from(card.y + 30));
+    common::point(
+        &mut bed.hp,
+        (f64::from(card.x + 60), f64::from(card.y + 30)),
+    )?;
     bed.logged("paused=true")?;
     bed.hp.pointer_move(400.0, 600.0);
     bed.expires(id)?;
@@ -1064,9 +1056,9 @@ fn do_not_disturb_holds_a_normal_bubble_but_lets_a_critical_one_show() -> anyhow
     bed.open_history()?;
     let switch = bed.history_item("Switch")?;
     let mark = bed.mark();
-    bed.hp.pointer_move(switch.0, switch.1);
+    common::point(&mut bed.hp, switch)?;
     bed.idle(Duration::from_millis(100))?;
-    bed.click(switch);
+    bed.click(switch)?;
     // On for an hour, the default; the bell slashed.
     bed.logged_since(mark, "do not disturb on=true choice=Some(Hour)")?;
     let shows = bed.logged_since(mark, "the history shows")?;
@@ -1101,6 +1093,8 @@ fn the_history_survives_a_restart_of_the_shell_without_what_is_older_than_seven_
         + &kept("Slack", "Inès dans #général", 25 * 60, true);
     let mut bed = start_with(&shell, |_, _| {}, &history)?;
     bed.logged("the history read kept=1 dropped=1")?;
+    // Read, its icons found, then the history has it: a while after.
+    bed.logged("the history read back kept=1")?;
     let mark = bed.mark();
     bed.notify(Notice {
         app: "Spotify",
@@ -1112,10 +1106,10 @@ fn the_history_survives_a_restart_of_the_shell_without_what_is_older_than_seven_
     // Do not disturb, on in this session.
     bed.open_history()?;
     let switch = bed.history_item("Switch")?;
-    bed.hp.pointer_move(switch.0, switch.1);
+    common::point(&mut bed.hp, switch)?;
     bed.idle(Duration::from_millis(100))?;
     let mark = bed.mark();
-    bed.click(switch);
+    bed.click(switch)?;
     bed.logged_since(mark, "do not disturb on=true")?;
     bed.close_history()?;
     // The shell ends (by its process id, its script's); the compositor
@@ -1167,9 +1161,9 @@ fn an_expired_bubbles_action_is_invoked_from_the_history() -> anyhow::Result<()>
         })
         .ok_or_else(|| anyhow::anyhow!("no action listed:\n{log}"))?;
     let at = bed.history_item(&action)?;
-    bed.hp.pointer_move(at.0, at.1);
+    common::point(&mut bed.hp, at)?;
     bed.idle(Duration::from_millis(100))?;
-    bed.click(at);
+    bed.click(at)?;
     // Invoked, then closed by the user.
     bed.hears(&format!("action {id} reply"))?;
     bed.hears(&format!("closed {id} 2"))?;

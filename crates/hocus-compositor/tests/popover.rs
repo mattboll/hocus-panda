@@ -118,6 +118,15 @@ fn start_on(fakes: &Fakes, shell: &std::path::Path, height: i32) -> anyhow::Resu
         "the connections over the sound's row: {:?}",
         hp.connections_surfaces()
     );
+    // The desktops' surface above follows the levels' group up too, a
+    // moment later: until then a click on the row is the desktops' (#527).
+    common::over(
+        &mut hp,
+        (ROW.0, f64::from(row)),
+        hocus_link::LEVELS_NAMESPACE,
+    )?;
+    // Off the bar again, where the tests start from.
+    hp.pointer_move(600.0, 500.0);
     Ok(hp)
 }
 
@@ -125,20 +134,21 @@ fn popovers(hp: &Headless) -> Vec<Rect> {
     hp.popover_surfaces().into_iter().map(|(_, r)| r).collect()
 }
 
-/// Waits until the popover is at `rect`, or gone (`None`).
+/// Waits until the popover is at `rect`, drawn there (else it takes no
+/// click yet), or gone (`None`).
 fn popover_is(hp: &mut Headless, rect: Option<Rect>) -> anyhow::Result<()> {
     let want: Vec<Rect> = rect.into_iter().collect();
-    let done = hp.dispatch_until(WAIT, |hp| popovers(hp) == want)?;
+    let done = hp.dispatch_until(WAIT, |hp| {
+        popovers(hp) == want && common::drawn_popovers(hp) == want
+    })?;
     anyhow::ensure!(done, "popovers {:?}, not {want:?}", popovers(hp));
     Ok(())
 }
 
-fn click(hp: &mut Headless, (x, y): (f64, f64)) {
-    // Twice: the first move may only enter the surface.
-    hp.pointer_move(x - 1.0, y);
-    hp.pointer_move(x, y);
-    hp.button(BTN_LEFT, true);
-    hp.button(BTN_LEFT, false);
+/// A click there, once the shell's surfaces there are drawn
+/// ([`common::click`]).
+fn click(hp: &mut Headless, at: (f64, f64)) -> anyhow::Result<()> {
+    common::click(hp, at)
 }
 
 /// A point of the popover at `rect`.
@@ -221,7 +231,7 @@ fn a_click_opens_it_and_it_stays_until_a_click_outside_a_second_click_or_esc() -
     let first = common::rect_of(&hp, "first").expect("first");
 
     // A click on the row: it opens beside the bar, and takes the keyboard.
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(POPOVER))?;
     let held = hp.dispatch_until(WAIT, |hp| {
         hp.keyboard_layer().as_deref() == Some("hocus-bar-popover")
@@ -234,7 +244,7 @@ fn a_click_opens_it_and_it_stays_until_a_click_outside_a_second_click_or_esc() -
     assert_eq!(popovers(&hp), vec![POPOVER]);
 
     // A click on a window closes it, and goes no further: a menu's.
-    click(&mut hp, (f64::from(first.x + 50), f64::from(first.y + 50)));
+    click(&mut hp, (f64::from(first.x + 50), f64::from(first.y + 50)))?;
     popover_is(&mut hp, None)?;
     wait(&mut hp, Duration::from_millis(100))?;
     assert_eq!(focused(&hp).as_deref(), Some("second"));
@@ -265,15 +275,15 @@ fn a_click_opens_it_and_it_stays_until_a_click_outside_a_second_click_or_esc() -
     assert!(gone, "the keyboard is on {:?}", hp.keyboard_layer());
 
     // A second click on the row closes it.
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(POPOVER))?;
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, None)?;
 
     // Esc closes it, and the row holds the keyboard; Enter opens it again;
     // Esc twice lets the keyboard go. (The click, and a move away that the
     // shell reads with it, open it all the same.)
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     hp.pointer_move(600.0, 500.0);
     popover_is(&mut hp, Some(POPOVER))?;
     hp.dispatch_until(WAIT, |hp| {
@@ -349,12 +359,12 @@ fn in_the_mini_form_hovering_the_gauge_opens_it_and_leaving_closes_it() -> anyho
     eprintln!("closed {:?} after leaving", left.elapsed());
 
     // A click on the gauge opens it as in the full form: it stays.
-    click(&mut hp, MINI_GAUGE);
+    click(&mut hp, MINI_GAUGE)?;
     popover_is(&mut hp, Some(MINI_POPOVER))?;
     hp.pointer_move(800.0, 300.0);
     wait(&mut hp, Duration::from_millis(700))?;
     assert_eq!(popovers(&hp), vec![MINI_POPOVER]);
-    click(&mut hp, (800.0, 300.0));
+    click(&mut hp, (800.0, 300.0))?;
     popover_is(&mut hp, None)?;
 
     // Opened by hovering, then a click on the gauge: it stays, and takes
@@ -417,7 +427,7 @@ fn the_wheel_the_slider_the_mute_button_and_the_outputs_change_the_sound() -> an
 
     // The slider: a click at a third, then a drag to the end and back to
     // the middle; the bar's gauge follows.
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(POPOVER))?;
     let (from, to, y) = SLIDER;
     let x = |share: f64| f64::from(from) + f64::from(to - from) * share;
@@ -452,9 +462,9 @@ fn the_wheel_the_slider_the_mute_button_and_the_outputs_change_the_sound() -> an
     volume(&mut hp, &fakes, SPEAKERS, (0.45, false))?;
 
     // The mute button.
-    click(&mut hp, at(POPOVER, MUTE));
+    click(&mut hp, at(POPOVER, MUTE))?;
     volume(&mut hp, &fakes, SPEAKERS, (0.45, true))?;
-    click(&mut hp, at(POPOVER, MUTE));
+    click(&mut hp, at(POPOVER, MUTE))?;
     volume(&mut hp, &fakes, SPEAKERS, (0.45, false))?;
 
     // Another output: the headset is the default, at its own 30 %, which
@@ -463,7 +473,7 @@ fn the_wheel_the_slider_the_mute_button_and_the_outputs_change_the_sound() -> an
     // the track at 30 %.
     let slider_at_40 = (POPOVER.x + 119, POPOVER.y + y);
     until(&mut hp, slider_at_40, blue)?;
-    click(&mut hp, at(POPOVER, (140, OUTPUT_Y[1])));
+    click(&mut hp, at(POPOVER, (140, OUTPUT_Y[1])))?;
     let chosen = hp.dispatch_until(WAIT, |_| {
         fakes.default_sink_name().ok().as_deref() == Some(HEADSET)
     })?;
@@ -506,7 +516,7 @@ fn nothing_draws_at_rest_and_a_change_draws_the_popover_alone() -> anyhow::Resul
     assert_eq!(rest(&mut hp)?, (0, 0, 0));
     // Open, the pointer in it and still: nothing draws.
     let bars = hp.bar_commits();
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(POPOVER))?;
     let inside = at(POPOVER, (140, 20));
     hp.pointer_move(inside.0 - 1.0, inside.1);
@@ -559,7 +569,7 @@ fn with_one_output_it_is_shorter_and_on_a_taller_screen_still_at_the_bottom() ->
     let fakes = Fakes::start_with(&OUTPUTS[..1])?;
     // The bar's height is the screen's less 16 px: its row, 120 px lower.
     let mut hp = start_on(&fakes, &shell, 1200)?;
-    click(&mut hp, (ROW.0, ROW.1 + 120.0));
+    click(&mut hp, (ROW.0, ROW.1 + 120.0))?;
     let rect = Rect::new(POPOVER.x, 1200 - 8 - 256, 280, 256);
     popover_is(&mut hp, Some(rect))?;
     Ok(())
@@ -612,15 +622,15 @@ fn the_microphone_its_mute_its_volume_and_which_one() -> anyhow::Result<()> {
     let mut hp = start(&fakes, &shell)?;
     // Its section: its row, and the two to choose from.
     let rect = popover(495);
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(rect))?;
     // Muted, then unmuted by its slider, as the master's.
-    click(&mut hp, at(rect, (31, MIC_ROW)));
+    click(&mut hp, at(rect, (31, MIC_ROW)))?;
     volume(&mut hp, &fakes, MIC, (0.70, true))?;
     // Once the shell has read it too.
     wait(&mut hp, Duration::from_millis(300))?;
     let (left, right, _) = SLIDER;
-    click(&mut hp, at(rect, ((left + right) / 2, MIC_ROW)));
+    click(&mut hp, at(rect, ((left + right) / 2, MIC_ROW)))?;
     volume(&mut hp, &fakes, MIC, (0.50, false))?;
     // The keyboard: Tab to its slider (the mute button, the master's
     // slider, the three outputs, its mute button, it), Right: 5 % up.
@@ -630,7 +640,7 @@ fn the_microphone_its_mute_its_volume_and_which_one() -> anyhow::Result<()> {
     press(&mut hp, KEY_RIGHT);
     volume(&mut hp, &fakes, MIC, (0.55, false))?;
     // The headset's: the default now, its own volume kept.
-    click(&mut hp, at(rect, (140, MIC_Y[1])));
+    click(&mut hp, at(rect, (140, MIC_Y[1])))?;
     let chosen = hp.dispatch_until(WAIT, |_| {
         default_source(&fakes).as_deref() == Some(HEADSET_MIC)
     })?;
@@ -648,7 +658,7 @@ fn one_microphone_has_no_list_and_none_hides_its_section() -> anyhow::Result<()>
     };
     let fakes = Fakes::start_with_sources(&OUTPUTS, &MICROPHONES[..1])?;
     let mut hp = start(&fakes, &shell)?;
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(popover(415)))?;
     Ok(())
 }
@@ -669,7 +679,7 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
     let mut hp = start(&fakes, &shell)?;
     // Two rows: Firefox's (its two tabs), the music's; not the paused one.
     let two = popover(405);
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(two))?;
 
     // At rest with streams playing, nothing draws.
@@ -687,13 +697,13 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
 
     // Firefox's tile mutes both its streams; again, unmutes them.
     let tile = |row: usize| at(two, (TILE_AT.0, APP_TOP[row] + TILE_AT.1));
-    click(&mut hp, tile(0));
+    click(&mut hp, tile(0))?;
     for tab in ["hocus-test-tab-1", "hocus-test-tab-2"] {
         volume(&mut hp, &fakes, tab, (1.0, true))?;
     }
     // Once the shell has read it too.
     wait(&mut hp, Duration::from_millis(300))?;
-    click(&mut hp, tile(0));
+    click(&mut hp, tile(0))?;
     for tab in ["hocus-test-tab-1", "hocus-test-tab-2"] {
         volume(&mut hp, &fakes, tab, (1.0, false))?;
     }
@@ -728,9 +738,9 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
     popover_is(&mut hp, Some(two))?;
     // Opened again: the playing ones only.
     fakes.pause("hocus-test-music", true)?;
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, None)?;
-    click(&mut hp, ROW);
+    click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(popover(353)))?;
     Ok(())
 }

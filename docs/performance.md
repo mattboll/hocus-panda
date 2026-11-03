@@ -20,8 +20,9 @@ So, unless `HOCUS_TEST_GPU` names a render node:
   they draw with pixman and skip what only GLES draws. llvmpipe draws on
   one thread (`LP_NUM_THREADS=1`, in `.cargo/config.toml`). With a thread
   per core, each of those tests took every core, and the tests running
-  beside them missed their frames. The tests wait on a virtual clock, so
-  one thread costs them no time;
+  beside them missed their frames. The tests that measure a motion
+  step the compositor's clock held (below), so one thread costs them no
+  time;
 - the shells they start draw with tiny-skia (`ICED_BACKEND=tiny-skia`),
   since the compositor has no GPU to give them;
 - the tests of the shell's motion on wgpu (the clock's minute, the agents'
@@ -56,3 +57,49 @@ HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor --test 
 With the variable set, the compositor of a test of its shaders draws on
 that node, and the shell it starts draws there with wgpu. Every other test
 still draws with pixman, and its shell with tiny-skia.
+
+## Tests on a loaded machine wait on conditions, never on time
+
+A test acts and reads on the machine it runs on, which may be busy:
+CI draws on its CPU, and a developer's machine runs other builds and tests
+beside it (issue #533). To find these races as CI's runner shows them,
+without loading the rest of the machine, the suite runs on four cores
+with more test threads than that, and passes three full runs in a row:
+
+```sh
+taskset -c 0-3 env NEXTEST_TEST_THREADS=8 cargo nextest run --workspace
+```
+
+A test waits for what it needs, with a generous timeout that only fails
+when that never comes. It does not sleep a guessed time:
+
+- **A shell surface takes a click once it is drawn.** A layer surface has
+  its place from its first commit, before any buffer. Until the shell
+  draws it at that size, it shows nothing and takes no input, and a press
+  goes to what is under it. `common::click` and `common::point` wait
+  until every layer surface placed under the pointer is drawn
+  (`Headless::undrawn_at`). `common::over` also waits until the surface
+  of the namespace asked for takes the pointer there, for a surface that
+  the shell moves after another one. A surface's place is read from
+  `Headless::drawn_layers`, so a 0 × 0 place before the first buffer is
+  never read.
+- **Pixels are read once the screen is at rest.** A frame is drawn only
+  after the loop turns, so on a loaded machine it can come long after a
+  motion's end. `common::at_rest` waits until no motion is under way as
+  of the last frame drawn, and no frame is asked for since
+  (`Headless::at_rest`).
+- **A motion is measured on the held clock.** `Headless::hold_clock`
+  stops the motions' time. `Headless::step` moves it on by one refresh
+  and draws a frame at that time. `common::sample` reads each step's
+  frame. A streak, a halo or a pulse is then seen at the same moments
+  however late the frames come. Frame callbacks and presentation times
+  stay on the real clock.
+- **A private daemon is used once it listens.** Its socket's file comes
+  as the daemon binds it, a moment before it listens, and a connection
+  then is refused. `common::private_bus` waits for `dbus-daemon` to print
+  its address (`--print-address`). `common::wait_accepts` waits for
+  PipeWire's socket to take a connection.
+- **What the shell does off its loop is waited for by what it says.** An
+  icon looked up or a paste read from the clipboard lands later: the test
+  waits for the line the shell logs, or for the pixels, before it acts on
+  them.

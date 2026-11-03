@@ -42,7 +42,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, WAIT, render_node, wait};
+use common::{WAIT, render_node, wait};
 use hocus_agents::tools::Places;
 use hocus_compositor::{
     Config, FormChoice, Headless, HeadlessConfig, RendererChoice,
@@ -491,11 +491,10 @@ impl Bed {
         Ok(())
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
     }
 
     /// The popover, once it shows.
@@ -547,7 +546,7 @@ impl Bed {
     /// The secretary's briefing, opened by a click on her, once it shows.
     fn open_briefing(&mut self) -> anyhow::Result<Rect> {
         let secretary = self.item("Secretary")?;
-        self.click(secretary);
+        self.click(secretary)?;
         let shown = self.hp.dispatch_until(WAIT, |hp| {
             hp.popover_surfaces()
                 .iter()
@@ -567,7 +566,7 @@ impl Bed {
     fn open_sources(&mut self) -> anyhow::Result<Rect> {
         let briefing = self.open_briefing()?;
         let sources = self.briefing_item(briefing, "Sources")?;
-        self.click(sources);
+        self.click(sources)?;
         let shown = self.hp.dispatch_until(WAIT, |hp| {
             let popovers = hp.popover_surfaces();
             popovers.len() == 1 && popovers[0].1.width == 300 && popovers[0].1.height > 0
@@ -674,7 +673,7 @@ fn plugging_in_writes_the_hooks_after_the_click_and_keeps_a_copy() -> anyhow::Re
     // "Brancher" opens the consent popover; nothing is written yet.
     let from = bed.mark();
     let plug = bed.item("Plug(ClaudeCode)")?;
-    bed.click(plug);
+    bed.click(plug)?;
     let popover = bed.popover()?;
     bed.logged_after(from, &["the agents' popover shows it"])?;
     assert_eq!(std::fs::read_to_string(&settings)?, ORIGINAL);
@@ -683,7 +682,7 @@ fn plugging_in_writes_the_hooks_after_the_click_and_keeps_a_copy() -> anyhow::Re
         f64::from(popover.x + popover.width - 15 - 6),
         f64::from(popover.y + popover.height - 15 - 15),
     );
-    bed.click(confirm);
+    bed.click(confirm)?;
     bed.tool_becomes("claude-code", ToolState::Plugged)?;
     let text = std::fs::read_to_string(&settings)?;
     assert!(
@@ -717,12 +716,12 @@ fn unplugging_puts_the_file_back_as_it_was() -> anyhow::Result<()> {
     )?;
     let settings = bed.home().join(".claude/settings.json");
     let plug = bed.item("Plug(ClaudeCode)")?;
-    bed.click(plug);
+    bed.click(plug)?;
     let popover = bed.popover()?;
     bed.click((
         f64::from(popover.x + popover.width - 21),
         f64::from(popover.y + popover.height - 30),
-    ));
+    ))?;
     bed.tool_becomes("claude-code", ToolState::Plugged)?;
     // Plugged, nothing running: "Aucun agent en cours."
     bed.logged("shows=Aucun agent en cours. Suivis\u{a0}: Claude Code.")?;
@@ -730,7 +729,7 @@ fn unplugging_puts_the_file_back_as_it_was() -> anyhow::Result<()> {
     // Sources' first row: "Débrancher".
     let popover = bed.open_sources()?;
     bed.logged("Branché")?;
-    bed.click((f64::from(popover.x + 270), f64::from(popover.y + 51 + 20)));
+    bed.click((f64::from(popover.x + 270), f64::from(popover.y + 51 + 20)))?;
     bed.tool_becomes("claude-code", ToolState::Found)?;
     assert_eq!(std::fs::read_to_string(&settings)?, ORIGINAL);
     assert!(
@@ -758,7 +757,7 @@ fn plugging_nothing_in_hides_the_group_and_is_remembered() -> anyhow::Result<()>
     )?;
     let from = bed.mark();
     let decline = bed.item("Decline")?;
-    bed.click(decline);
+    bed.click(decline)?;
     bed.tool_becomes("codex", ToolState::Declined)?;
     bed.logged_after(from, &["shows=nothing"])?;
     // One pixel, letting the pointer through.
@@ -802,7 +801,7 @@ fn plugging_nothing_in_with_herdr_running_hides_the_group_too() -> anyhow::Resul
     anyhow::ensure!(done, "{:?}", bed.hp.agents());
     let from = bed.mark();
     let decline = bed.item("Decline")?;
-    bed.click(decline);
+    bed.click(decline)?;
     bed.tool_becomes("herdr", ToolState::Ignored)?;
     bed.logged_after(from, &["shows=nothing"])?;
     assert!(bed.hp.agents().is_empty(), "{:?}", bed.hp.agents());
@@ -828,16 +827,16 @@ fn a_declined_herdr_is_followed_again_from_sources() -> anyhow::Result<()> {
     bed.tool_becomes("herdr", ToolState::Running)?;
     // Claude Code plugged in, then the rest declined, herdr with it.
     let plug = bed.item("Plug(ClaudeCode)")?;
-    bed.click(plug);
+    bed.click(plug)?;
     let popover = bed.popover()?;
     bed.click((
         f64::from(popover.x + popover.width - 21),
         f64::from(popover.y + popover.height - 30),
-    ));
+    ))?;
     bed.tool_becomes("claude-code", ToolState::Plugged)?;
     bed.settle()?;
     let decline = bed.item("Decline")?;
-    bed.click(decline);
+    bed.click(decline)?;
     bed.tool_becomes("herdr", ToolState::Ignored)?;
     bed.logged("shows=Aucun agent en cours. Suivis\u{a0}: Claude Code.")?;
     bed.settle()?;
@@ -847,7 +846,7 @@ fn a_declined_herdr_is_followed_again_from_sources() -> anyhow::Result<()> {
     bed.click((
         f64::from(popover.x + 270),
         f64::from(popover.y + 51 + 2 * 46 + 20),
-    ));
+    ))?;
     bed.tool_becomes("herdr", ToolState::Running)?;
     bed.logged("En marche · suivi tout seul")?;
     let done = bed.hp.dispatch_until(WAIT, |hp| {
@@ -875,7 +874,7 @@ fn a_tool_installed_later_brings_the_card_back_for_it_alone() -> anyhow::Result<
         },
     )?;
     let decline = bed.item("Decline")?;
-    bed.click(decline);
+    bed.click(decline)?;
     bed.tool_becomes("claude-code", ToolState::Declined)?;
     let from = bed.mark();
     // Codex installed: its program appears in PATH.
@@ -1261,7 +1260,7 @@ fn a_rows_click_goes_to_the_agents_window_on_its_desktop() -> anyhow::Result<()>
     bed.agent_becomes("build", Some("done"))?;
     bed.settle()?;
     let row = bed.row("build")?;
-    bed.click(row);
+    bed.click(row)?;
     // Its desktop, its window with the keyboard, and it is seen.
     let there = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (0, 0.0))?;
     anyhow::ensure!(there, "{:?}", bed.hp.desktop());
@@ -1405,28 +1404,61 @@ struct Sample {
 }
 
 impl Bed {
-    /// Clicks agent `name`'s row, then samples each frame for `time`, the
-    /// pulse being `app_id`'s.
+    /// Clicks agent `name`'s row, then samples a frame a refresh for
+    /// `time` from the go-to (the pulse being `app_id`'s), on the motions'
+    /// clock held ([`common::sample`]): a loaded machine draws few frames,
+    /// and late, the shell's word of the click coming late too.
     fn go_to(&mut self, name: &str, app_id: &str, time: Duration) -> anyhow::Result<Vec<Sample>> {
         let row = self.row(name)?;
-        let start = Instant::now();
-        self.click(row);
-        let mut frames = self.hp.frames();
-        let mut out = Vec::new();
-        while start.elapsed() < time {
-            self.hp.dispatch(Duration::from_millis(2))?;
-            let now = self.hp.frames();
-            if now != frames {
-                frames = now;
-                out.push(Sample {
-                    at: start.elapsed(),
-                    streak: self.hp.streak(),
-                    landing: self.hp.pulse(app_id),
-                    strip: self.hp.desktop(),
-                });
+        self.hp.hold_clock();
+        let seen = self.click(row).and_then(|()| {
+            // The go-to set: the pulse is there from it, the streak's and
+            // the slide's start times too.
+            let gone = self
+                .hp
+                .dispatch_until(WAIT, |hp| hp.pulse(app_id).is_some())?;
+            anyhow::ensure!(gone, "never gone to {name}");
+            common::sample(&mut self.hp, time, |hp| Sample {
+                at: Duration::ZERO,
+                streak: hp.streak(),
+                landing: hp.pulse(app_id),
+                strip: hp.desktop(),
+            })
+        });
+        self.hp.release_clock();
+        Ok(seen?
+            .into_iter()
+            .map(|(at, sample)| Sample { at, ..sample })
+            .collect())
+    }
+
+    /// Clicks the row at `row`, and steps the motions' clock held a
+    /// refresh at a time from the go-to (to `app_id`'s window) until a
+    /// frame shows the streak well on its way, at its full alpha: on a
+    /// loaded machine, frames drawn as they come may all miss it. The
+    /// clock stays held, that frame on the screen: the caller lets it go.
+    fn streak_on_its_way(&mut self, row: (f64, f64), app_id: &str) -> anyhow::Result<Streak> {
+        self.hp.hold_clock();
+        self.click(row)?;
+        let gone = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.pulse(app_id).is_some())?;
+        anyhow::ensure!(gone, "never gone to {app_id}");
+        let start = self.hp.now();
+        loop {
+            self.hp.step(common::STEP)?;
+            let seen = self
+                .hp
+                .streak()
+                .filter(|s| s.alpha == 1.0 && !near(s.from, s.head, 250.0));
+            if let Some(streak) = seen {
+                return Ok(streak);
             }
+            anyhow::ensure!(
+                self.hp.now() - start < Duration::from_secs(1),
+                "no streak on its way to {app_id}"
+            );
         }
-        Ok(out)
     }
 
     /// The centre of the window of `app_id`, global.
@@ -1680,29 +1712,21 @@ fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
     bed.settle()?;
     for (name, colour) in [("infra", [0xF5, 0xB4, 0x4A]), ("build", [0x6C, 0xC2, 0x87])] {
         let row = bed.row(name)?;
-        bed.click(row);
         // A frame of the streak well on its way: three quarters along it,
         // the line is that much of its colour.
-        let mut seen = None;
-        let found = bed.hp.dispatch_until(WAIT, |hp| {
-            seen = hp
-                .streak()
-                .filter(|s| s.alpha == 1.0 && !near(s.from, s.head, 250.0));
-            seen.is_some()
-        })?;
-        anyhow::ensure!(found, "no streak to {name}");
         let Streak {
             from,
             head,
             colour: told,
             ..
-        } = seen.unwrap_or_default();
+        } = bed.streak_on_its_way(row, "test.terminal")?;
         assert_eq!(told, colour, "{name}");
         let at = (
             from.0 + 0.7 * (head.0 - from.0),
             from.1 + 0.7 * (head.1 - from.1),
         );
         let [r, g, b] = pixel(&mut bed.hp, at)?;
+        bed.hp.release_clock();
         if name == "infra" {
             assert!(
                 r > 110 && r > g + 15 && g > b + 15,
@@ -1755,18 +1779,10 @@ fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
     bed.hp.pointer_move(row.0, row.1);
     bed.settle()?;
     let (width, _, before) = bed.hp.screenshot(0)?;
-    bed.click(row);
     // A frame of the streak well on its way, at its full alpha.
-    let mut seen = None;
-    let found = bed.hp.dispatch_until(WAIT, |hp| {
-        seen = hp
-            .streak()
-            .filter(|s| s.alpha == 1.0 && !near(s.from, s.head, 250.0));
-        seen.is_some()
-    })?;
-    anyhow::ensure!(found, "no streak");
-    let Streak { from, head, .. } = seen.unwrap_or_default();
+    let Streak { from, head, .. } = bed.streak_on_its_way(row, "test.terminal")?;
     let (_, _, after) = bed.hp.screenshot(0)?;
+    bed.hp.release_clock();
     let len = ((head.0 - from.0).powi(2) + (head.1 - from.1).powi(2)).sqrt();
     let u = ((head.0 - from.0) / len, (head.1 - from.1) / len);
     // How much the streak changed the pixel `along` its line from its
@@ -1834,12 +1850,12 @@ fn a_second_click_replaces_the_first_streak_at_once() -> anyhow::Result<()> {
     let (infra, build) = (bed.row("infra")?, bed.row("build")?);
     let amber = [0xF5, 0xB4, 0x4A];
     let accent = [0x6C, 0xC2, 0x87];
-    bed.click(infra);
+    bed.click(infra)?;
     let first = bed
         .hp
         .dispatch_until(WAIT, |hp| hp.streak().is_some_and(|s| s.colour == amber))?;
     anyhow::ensure!(first, "no streak to infra");
-    bed.click(build);
+    bed.click(build)?;
     bed.hp.dispatch(Duration::from_millis(2))?;
     let mut streaks = Vec::new();
     let start = Instant::now();
@@ -1882,7 +1898,7 @@ fn going_to_a_herdr_agent_selects_its_pane() -> anyhow::Result<()> {
     bed.agent_becomes("refacto", Some("working"))?;
     bed.settle()?;
     let row = bed.row("refacto")?;
-    bed.click(row);
+    bed.click(row)?;
     let heard = bed.herdr_heard.clone();
     let selected = bed.hp.dispatch_until(WAIT, |_| {
         heard
@@ -2252,7 +2268,7 @@ fn a_herdr_agents_row_brings_the_terminal_running_herdrs_client() -> anyhow::Res
     anyhow::ensure!(away, "{:?}", bed.hp.desktop());
     bed.settle()?;
     let row = bed.row("refacto")?;
-    bed.click(row);
+    bed.click(row)?;
     bed.keyboard_goes_to("test.terminal")?;
     assert_eq!(bed.hp.desktop(), (0, 0.0));
     bed.herdr_focuses("w1:p1")?;
@@ -2330,16 +2346,16 @@ fn of_the_terminals_windows_the_one_titled_herdr_is_gone_to() -> anyhow::Result<
     bed.herdr_tree()?;
     bed.keyboard_goes_to("test.shell")?;
     // herdr's window with the keyboard: the pane it shows is seen.
-    bed.click(bed.centre("test.herdr")?);
+    bed.click(bed.centre("test.herdr")?)?;
     bed.keyboard_goes_to("test.herdr")?;
     bed.agent_becomes("revue", Some("seen"))?;
     bed.agent_becomes("refacto", Some("done"))?;
     // The other window focused last, then the row of the pane not shown.
-    bed.click(bed.centre("test.shell")?);
+    bed.click(bed.centre("test.shell")?)?;
     bed.keyboard_goes_to("test.shell")?;
     bed.settle()?;
     let row = bed.row("refacto")?;
-    bed.click(row);
+    bed.click(row)?;
     bed.keyboard_goes_to("test.herdr")?;
     bed.herdr_focuses("w1:p1")?;
     bed.agent_becomes("refacto", Some("seen"))?;
@@ -2367,7 +2383,33 @@ impl Glimpse {
 }
 
 impl Bed {
-    /// The halo at each frame drawn for `time`.
+    /// The halo a refresh at a time for `time` once `act` changed what it
+    /// shows (its concern), on the motions' clock held from before `act`
+    /// ([`common::sample`]): the change starts at the same moment of the
+    /// samples however late the loop reads it.
+    fn halo_after(
+        &mut self,
+        act: impl FnOnce(&mut Self) -> anyhow::Result<()>,
+        time: Duration,
+    ) -> anyhow::Result<Vec<Glimpse>> {
+        let before = self.hp.halo_concern();
+        self.hp.hold_clock();
+        let glimpses = act(self).and_then(|()| {
+            let changed = self
+                .hp
+                .dispatch_until(WAIT, |hp| hp.halo_concern() != before)?;
+            anyhow::ensure!(changed, "the halo still shows {before:?}");
+            common::sample(&mut self.hp, time, Headless::halo)
+        });
+        self.hp.release_clock();
+        Ok(glimpses?
+            .into_iter()
+            .map(|(at, shown)| Glimpse { at, shown })
+            .collect())
+    }
+
+    /// The halo at each frame drawn for `time`, in real time: for what a
+    /// timer of the loop's starts.
     fn halo_for(&mut self, time: Duration) -> anyhow::Result<Vec<Glimpse>> {
         let start = Instant::now();
         let mut frames = self.hp.frames();
@@ -2465,8 +2507,10 @@ fn a_waiting_agent_runs_a_wave_then_glows_then_nothing_draws() -> anyhow::Result
     assert!(bed.hp.halo().is_none());
     let beside = bed.beside_the_bar();
     let before = pixel(&mut bed.hp, beside)?;
-    bed.hocus(&["agent", "build", "waiting"], None)?;
-    let glimpses = bed.halo_for(Duration::from_millis(1500))?;
+    let glimpses = bed.halo_after(
+        |bed| bed.hocus(&["agent", "build", "waiting"], None),
+        Duration::from_millis(1500),
+    )?;
     let waving: Vec<(Duration, f64)> = glimpses
         .iter()
         .filter_map(|g| g.wave().map(|top| (g.at, top)))
@@ -2554,8 +2598,10 @@ fn a_stuck_agent_glows_without_a_wave() -> anyhow::Result<()> {
     bed.settle()?;
     let beside = bed.beside_the_bar();
     let before = pixel(&mut bed.hp, beside)?;
-    bed.hocus(&["agent", "build", "failed"], None)?;
-    let glimpses = bed.halo_for(Duration::from_millis(1200))?;
+    let glimpses = bed.halo_after(
+        |bed| bed.hocus(&["agent", "build", "failed"], None),
+        Duration::from_millis(1200),
+    )?;
     assert!(glimpses.iter().any(|g| g.shown.is_some()), "{glimpses:?}");
     assert!(glimpses.iter().all(|g| g.wave().is_none()), "{glimpses:?}");
     bed.rests()?;
@@ -2582,8 +2628,10 @@ fn a_finished_agent_not_seen_glows_softly_green() -> anyhow::Result<()> {
     bed.settle()?;
     let beside = bed.beside_the_bar();
     let before = pixel(&mut bed.hp, beside)?;
-    bed.hocus(&["agent", "build", "done"], None)?;
-    let glimpses = bed.halo_for(Duration::from_millis(1200))?;
+    let glimpses = bed.halo_after(
+        |bed| bed.hocus(&["agent", "build", "done"], None),
+        Duration::from_millis(1200),
+    )?;
     assert!(glimpses.iter().all(|g| g.wave().is_none()), "{glimpses:?}");
     bed.rests()?;
     let soft = Concern::ToSee.glow();
@@ -2628,7 +2676,7 @@ fn waiting_comes_before_stuck_before_to_see() -> anyhow::Result<()> {
     assert_eq!(bed.hp.halo_concern(), Some(Concern::ToSee));
     bed.settle()?;
     let row = bed.row("api")?;
-    bed.click(row);
+    bed.click(row)?;
     bed.agent_becomes("api", Some("seen"))?;
     assert_eq!(bed.hp.halo_concern(), None);
     assert_eq!(bed.hp.renderer(), "pixman");
@@ -2648,13 +2696,15 @@ fn acting_ends_the_halo_with_its_fade() -> anyhow::Result<()> {
         bed.agent_is("build", "waiting")?;
         bed.settle()?;
         assert!(bed.hp.halo().is_some(), "{way}");
-        if way == "answered" {
-            bed.hocus(&["agent", "build", "working"], None)?;
-        } else {
-            let row = bed.row("build")?;
-            bed.click(row);
-        }
-        let glimpses = bed.halo_for(Duration::from_millis(1200))?;
+        let act = |bed: &mut Bed| {
+            if way == "answered" {
+                bed.hocus(&["agent", "build", "working"], None)
+            } else {
+                let row = bed.row("build")?;
+                bed.click(row)
+            }
+        };
+        let glimpses = bed.halo_after(act, Duration::from_millis(1200))?;
         let fading: Vec<f32> = glimpses
             .iter()
             .filter(|g| g.shown.is_some_and(|s| s.concern.is_none()))
@@ -2689,8 +2739,10 @@ fn with_reduced_motion_no_wave_and_the_glow_fades_in_quickly() -> anyhow::Result
     };
     bed.agent_is("build", "working")?;
     bed.settle()?;
-    bed.hocus(&["agent", "build", "waiting"], None)?;
-    let glimpses = bed.halo_for(Duration::from_millis(1000))?;
+    let glimpses = bed.halo_after(
+        |bed| bed.hocus(&["agent", "build", "waiting"], None),
+        Duration::from_millis(1000),
+    )?;
     assert!(glimpses.iter().all(|g| g.wave().is_none()), "{glimpses:?}");
     let full = Concern::Waiting.glow();
     assert!(
@@ -3020,7 +3072,7 @@ fn a_click_on_the_peek_goes_to_the_agent_and_sends_it_back() -> anyhow::Result<(
     let surface = bed.peek_surface()?;
     bed.peek_out_still()?;
     let (_, panda) = bed.peek_parts(surface);
-    bed.click(middle_of(panda));
+    bed.click(middle_of(panda))?;
     let back = bed
         .hp
         .dispatch_until(WAIT, |hp| hp.peek_out().is_none_or(|(_, _, back)| back))?;
@@ -3045,7 +3097,7 @@ fn a_click_on_the_peek_goes_to_the_agent_and_sends_it_back() -> anyhow::Result<(
     let surface = bed.peek_surface()?;
     bed.peek_out_still()?;
     let (bubble, _) = bed.peek_parts(surface);
-    bed.click(middle_of(bubble));
+    bed.click(middle_of(bubble))?;
     bed.agent_becomes("api", Some("seen"))?;
     bed.peek_gone()?;
     Ok(())
@@ -3103,7 +3155,7 @@ fn her_briefing_sends_the_peek_back_and_none_comes_out_while_it_is_open() -> any
     bed.peek_out_still()?;
     let secretary = bed.item("Secretary")?;
     let start = Instant::now();
-    bed.click(secretary);
+    bed.click(secretary)?;
     let samples = bed.peek_until(start, Duration::from_millis(1500))?;
     let leaving = samples
         .iter()
@@ -3189,7 +3241,7 @@ fn with_reduced_motion_or_on_the_cpu_the_peek_fades_in_place() -> anyhow::Result
         );
         let surface = bed.peek_surface()?;
         let (bubble, _) = bed.peek_parts(surface);
-        bed.click(middle_of(bubble));
+        bed.click(middle_of(bubble))?;
         let start = Instant::now();
         let going = bed.peek_until(start, Duration::from_millis(600))?;
         let shown: Vec<Look> = going.iter().filter_map(|s| s.look).collect();
@@ -3238,7 +3290,7 @@ fn the_peek_takes_the_pointer_only_where_it_draws() -> anyhow::Result<()> {
         assert_ne!(on(&mut bed, at), peek, "{at:?}");
     }
     let target = middle_of(bubble);
-    bed.click(target);
+    bed.click(target)?;
     bed.peek_gone()?;
     assert_ne!(on(&mut bed, target), peek);
     Ok(())
@@ -3510,7 +3562,7 @@ fn a_line_of_her_briefing_goes_to_its_agent() -> anyhow::Result<()> {
     let id = bed.id_of("build")?;
     let briefing = bed.open_briefing()?;
     let line = bed.briefing_item(briefing, &format!("Agent({id})"))?;
-    bed.click(line);
+    bed.click(line)?;
     // The briefing closes; its desktop, its window with the keyboard.
     let closed = bed
         .hp
@@ -3784,7 +3836,7 @@ fn hovering_or_clicking_the_mini_item_opens_her_briefing_with_who_works_and_rest
     anyhow::ensure!(closed, "{:?}", bed.hp.popover_surfaces());
     // A click opens it at once, and it stays away from the pointer.
     let from = bed.mark();
-    bed.click((x + 24.0, y + 30.0));
+    bed.click((x + 24.0, y + 30.0))?;
     bed.briefing_shows(from)?;
     bed.hp.pointer_move(600.0, 500.0);
     wait(&mut bed.hp, Duration::from_millis(600))?;
@@ -3808,10 +3860,10 @@ fn a_line_of_the_mini_briefing_goes_to_its_agent() -> anyhow::Result<()> {
     let id = bed.id_of("build")?;
     let (x, y) = bed.mini_item("Secretary")?;
     let from = bed.mark();
-    bed.click((x + 24.0, y + 30.0));
+    bed.click((x + 24.0, y + 30.0))?;
     let briefing = bed.briefing_shows(from)?;
     let line = bed.briefing_item(briefing, &format!("Agent({id})"))?;
-    bed.click(line);
+    bed.click(line)?;
     let closed = bed
         .hp
         .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
@@ -3854,7 +3906,7 @@ fn the_mini_item_hides_and_proposes_to_plug_in_as_the_group_does() -> anyhow::Re
     assert!((y - (8.0 + MINI_TOP + 25.0)).abs() < 0.6, "{y}");
     assert_eq!(bed.surface().height, 60);
     let from = bed.mark();
-    bed.click((x, y));
+    bed.click((x, y))?;
     let shown = bed.hp.dispatch_until(WAIT, |hp| {
         hp.popover_surfaces()
             .iter()
@@ -3888,12 +3940,12 @@ fn plugging_nothing_in_from_the_mini_forms_sources_hides_the_group_in_both_forms
     bed.settle()?;
     let plus = bed.item("Sources")?;
     let from = bed.mark();
-    bed.click(plus);
+    bed.click(plus)?;
     let sources = bed.popover()?;
     bed.logged_after(from, &["the agents' popover's items", "Decline@"])?;
     let decline = bed.popover_item(sources, "the agents' popover's items", "Decline")?;
     let from = bed.mark();
-    bed.click(decline);
+    bed.click(decline)?;
     bed.tool_becomes("claude-code", ToolState::Declined)?;
     bed.tool_becomes("codex", ToolState::Declined)?;
     bed.logged_after(from, &["shows=nothing"])?;
@@ -3969,7 +4021,7 @@ fn nothing_commits_at_rest_in_the_mini_form() -> anyhow::Result<()> {
     bed.agent_is("notes", "idle")?;
     let (x, y) = bed.mini_item("Secretary")?;
     let from = bed.mark();
-    bed.click((x + 24.0, y + 30.0));
+    bed.click((x + 24.0, y + 30.0))?;
     bed.briefing_shows(from)?;
     bed.settle()?;
     let before = bed.counts();

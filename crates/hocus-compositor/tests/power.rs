@@ -164,11 +164,17 @@ impl Bed {
         )
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
+    }
+
+    /// A click on a row of the levels, once they take the pointer there:
+    /// the surfaces above follow their group up as it grows, a moment
+    /// later, and cover its top rows until then (#527).
+    fn click_row(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click_on(&mut self.hp, at, hocus_link::LEVELS_NAMESPACE)
     }
 
     fn press(&mut self, key: u32) {
@@ -187,23 +193,26 @@ impl Bed {
     /// The popover, once one shows (drawn, so that a click finds its
     /// parts).
     fn opened(&mut self) -> anyhow::Result<Rect> {
+        // Drawn at its place, its fade in over in the frame shown.
         let done = self
             .hp
-            .dispatch_until(WAIT, |hp| hp.popover_surfaces().len() == 1)?;
-        anyhow::ensure!(done, "no popover");
-        wait(&mut self.hp, Duration::from_millis(300))?;
+            .dispatch_until(WAIT, |hp| common::drawn_popovers(hp).len() == 1)?;
+        anyhow::ensure!(done, "no popover: {:?}", self.popovers());
+        common::at_rest(&mut self.hp)?;
         Ok(self.popovers()[0])
     }
 
     /// Waits until the popover is at `rect`, or gone.
     fn popover_is(&mut self, rect: Option<Rect>) -> anyhow::Result<()> {
         let want: Vec<Rect> = rect.into_iter().collect();
+        // Drawn there too: else a click on it is lost.
         let done = self.hp.dispatch_until(WAIT, |hp| {
             hp.popover_surfaces()
                 .into_iter()
                 .map(|(_, r)| r)
                 .collect::<Vec<_>>()
                 == want
+                && common::drawn_popovers(hp) == want
         })?;
         anyhow::ensure!(done, "popovers {:?}, not {want:?}", self.popovers());
         Ok(())
@@ -330,7 +339,7 @@ fn both_rows_open_their_popovers_and_the_keyboard_goes_through_them() -> anyhow:
     let mut bed = start_full(&shell, |_| {})?;
     // The brightness's row: its popover, without a keyboard's row nor a
     // screen's line, its bottom on the bar's; it takes the keyboard.
-    bed.click(LIGHT_ROW);
+    bed.click_row(LIGHT_ROW)?;
     bed.popover_is(Some(popover(LIGHT)))?;
     bed.logged("keyboard=None")?;
     bed.logged("screens=[]")?;
@@ -347,7 +356,7 @@ fn both_rows_open_their_popovers_and_the_keyboard_goes_through_them() -> anyhow:
     bed.keyboard_on(None)?;
 
     // The battery's row: the battery, the modes, the health.
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     let rect = bed.opened()?;
     assert_eq!(
         (rect.x, rect.y + rect.height),
@@ -371,16 +380,16 @@ fn both_rows_open_their_popovers_and_the_keyboard_goes_through_them() -> anyhow:
     bed.press(KEY_LEFT);
     bed.asked(|p| p.profile == "balanced")?;
     // A click outside closes it; a second click on the row too.
-    bed.click((600.0, 500.0));
+    bed.click((600.0, 500.0))?;
     bed.popover_is(None)?;
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     bed.popover_is(Some(rect))?;
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     bed.popover_is(None)?;
     // A click on one row while the other's is open: the other's.
-    bed.click(LIGHT_ROW);
+    bed.click_row(LIGHT_ROW)?;
     bed.popover_is(Some(popover(LIGHT)))?;
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     bed.popover_is(Some(rect))?;
     Ok(())
 }
@@ -404,14 +413,14 @@ fn the_mini_forms_battery_opens_by_hovering_and_by_a_click() -> anyhow::Result<(
     bed.hp.pointer_move(800.0, 300.0);
     bed.popover_is(None)?;
     // A click keeps it.
-    bed.click(MINI_BATTERY);
+    bed.click(MINI_BATTERY)?;
     bed.popover_is(Some(rect))?;
     bed.hp.pointer_move(800.0, 300.0);
     wait(&mut bed.hp, Duration::from_millis(700))?;
     assert_eq!(bed.popovers(), vec![rect]);
     bed.keyboard_on(Some("hocus-bar-popover"))?;
     // A tile chosen in it.
-    bed.click(at(rect, (TILE_X[2], TILES_TOP + 29.0)));
+    bed.click(at(rect, (TILE_X[2], TILES_TOP + 29.0)))?;
     bed.asked(|p| p.profile == "performance")?;
     Ok(())
 }
@@ -469,7 +478,7 @@ fn the_slider_the_wheel_and_the_arrows_reach_logind_coalesced_never_below_5() ->
         .brightness_delay
         .lock()
         .map_err(|_| anyhow::anyhow!("poisoned"))? = Duration::from_millis(300);
-    bed.click(LIGHT_ROW);
+    bed.click_row(LIGHT_ROW)?;
     bed.popover_is(Some(popover(LIGHT)))?;
     let rect = popover(LIGHT);
     wait(&mut bed.hp, Duration::from_millis(300))?;
@@ -548,13 +557,13 @@ fn the_keyboards_backlight_by_its_levels_or_a_slider() -> anyhow::Result<()> {
     };
     // Three levels: off, low, high; at low.
     let mut bed = start_full(&shell, |p| p.keyboard = Some((1, 2)))?;
-    bed.click(LIGHT_ROW);
+    bed.click_row(LIGHT_ROW)?;
     bed.popover_is(Some(popover(WITH_KEYS)))?;
     let rect = popover(WITH_KEYS);
     bed.logged("keyboard=Some(Keyboard { level: 1, max: 2 })")?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     // "Fort": its last third.
-    bed.click(at(rect, (229.0, f64::from(KEYS_Y))));
+    bed.click(at(rect, (229.0, f64::from(KEYS_Y))))?;
     bed.asked(|p| p.keyboard_set == [2])?;
     bed.logged("keyboard=Some(Keyboard { level: 2, max: 2 })")?;
     // Its keys change it: the popover follows.
@@ -572,19 +581,19 @@ fn the_keyboards_backlight_by_its_levels_or_a_slider() -> anyhow::Result<()> {
 
     // Two: off, on.
     let mut bed = start_full(&shell, |p| p.keyboard = Some((0, 1)))?;
-    bed.click(LIGHT_ROW);
+    bed.click_row(LIGHT_ROW)?;
     bed.popover_is(Some(popover(WITH_KEYS)))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
-    bed.click(at(rect, (212.0, f64::from(KEYS_Y))));
+    bed.click(at(rect, (212.0, f64::from(KEYS_Y))))?;
     bed.asked(|p| p.keyboard_set == [1])?;
     drop(bed);
 
     // Six: a slider, a level each sixth of it.
     let mut bed = start_full(&shell, |p| p.keyboard = Some((2, 5)))?;
-    bed.click(LIGHT_ROW);
+    bed.click_row(LIGHT_ROW)?;
     bed.popover_is(Some(popover(WITH_KEYS)))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
-    bed.click(at(rect, (SLIDER.1, f64::from(KEYS_Y))));
+    bed.click(at(rect, (SLIDER.1, f64::from(KEYS_Y))))?;
     bed.asked(|p| p.keyboard_set.last() == Some(&5))?;
     bed.press(KEY_TAB);
     bed.press(KEY_TAB);
@@ -605,7 +614,7 @@ fn another_screen_is_said_to_be_set_with_its_own_buttons() -> anyhow::Result<()>
         FormChoice::Full,
         |_| {},
     )?;
-    bed.click(LIGHT_ROW);
+    bed.click_row(LIGHT_ROW)?;
     let rect = bed.opened()?;
     bed.logged("screens=[\"L'écran HEADLESS-2 se règle avec ses propres boutons.\"]")?;
     assert!(rect.height > LIGHT, "{rect:?}");
@@ -629,7 +638,7 @@ fn the_batterys_states_their_words_their_colours_and_the_bolt_on_ac() -> anyhow:
     let icon = |bed: &mut Bed| bed.count(BATTERY_ICON, (18, 18), green);
     // On battery: no bolt.
     assert_eq!(icon(&mut bed)?, 0, "a bolt on battery");
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     let rect = bed.opened()?;
     let line = (rect.x + 69, rect.y + STATE_TOP as i32);
     let line_size = (190, 18);
@@ -695,18 +704,18 @@ fn the_profiles_switch_and_a_missing_one_is_greyed_with_its_line() -> anyhow::Re
     let mut bed = start_full(&shell, |p| {
         p.profiles = vec!["power-saver", "balanced"];
     })?;
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     let rect = bed.opened()?;
     bed.logged("notes=[\"Le mode performance n'existe pas sur cet ordinateur.\"]")?;
     // The active tile's border, green.
     let edge = |i: usize| (rect.x + TILE_X[i] as i32, rect.y + (TILES_TOP + 0.5) as i32);
     bed.until_count(edge(1), (1, 1), green, (1, 1))?;
     // The missing one does nothing.
-    bed.click(at(rect, (TILE_X[2], TILES_TOP + 29.0)));
+    bed.click(at(rect, (TILE_X[2], TILES_TOP + 29.0)))?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     assert!(bed.fakes.power_now().profiles_set.is_empty());
     // The saver: asked, chosen, lit.
-    bed.click(at(rect, (TILE_X[0], TILES_TOP + 29.0)));
+    bed.click(at(rect, (TILE_X[0], TILES_TOP + 29.0)))?;
     bed.asked(|p| p.profile == "power-saver")?;
     bed.until_count(edge(0), (1, 1), green, (1, 1))?;
     bed.until_count(edge(1), (1, 1), green, (0, 0))?;
@@ -725,7 +734,7 @@ fn the_profiles_switch_and_a_missing_one_is_greyed_with_its_line() -> anyhow::Re
         p.profile = "performance".to_owned();
         p.degraded = "high-operating-temperature".to_owned();
     })?;
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     bed.opened()?;
     bed.logged("notes=[\"Performance réduite")?;
     bed.logged("l'ordinateur est trop chaud.\"]")?;
@@ -738,10 +747,10 @@ fn without_a_battery_the_status_line_opens_the_modes_alone() -> anyhow::Result<(
         return Ok(());
     };
     let mut bed = start_full(&shell, |p| p.present = false)?;
-    bed.click(STATUS);
+    bed.click(STATUS)?;
     bed.popover_is(Some(popover(MODES)))?;
     bed.logged("title=Énergie plugged=None line=None")?;
-    bed.click(at(popover(MODES), (TILE_X[0], 53.0 + 29.0)));
+    bed.click(at(popover(MODES), (TILE_X[0], 53.0 + 29.0)))?;
     bed.asked(|p| p.profile == "power-saver")?;
     Ok(())
 }
@@ -798,7 +807,7 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
     assert_eq!(rest(&mut bed)?, (0, 0, 0, 0));
     let bars = bed.hp.bar_commits();
     for row in [LIGHT_ROW, BATTERY_ROW] {
-        bed.click(row);
+        bed.click(row)?;
         let rect = bed.opened()?;
         let inside = at(rect, (140.0, 20.0));
         bed.hp.pointer_move(inside.0 - 1.0, inside.1);
@@ -813,7 +822,7 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
 
     // A tile under the pointer: the popover alone draws, its rectangle
     // only.
-    bed.click(BATTERY_ROW);
+    bed.click_row(BATTERY_ROW)?;
     let rect = bed.opened()?;
     // Off the row first: the row's light goes with it.
     let inside = at(rect, (140.0, 20.0));

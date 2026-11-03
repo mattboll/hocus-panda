@@ -48,6 +48,8 @@ use wayland_protocols::{
 const FIRST: &str = "HEADLESS-1";
 const SECOND: &str = "HEADLESS-2";
 const APP_ID: &str = "test.watcher";
+/// How long a real program (foot, kitty) may take to show its window.
+const PROGRAM_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 const LAYER: &str = "test.watcher-layer";
 
 /// 1920×1080 at scale 1, then 2560×1440 at scale 2 on its right: the
@@ -582,7 +584,22 @@ fn a_screen_unplugged_its_surfaces_leave_it_before_its_global_goes() -> anyhow::
     let moved = hp.dispatch_until(WAIT, |hp| {
         on(hp, APP_ID).as_deref() == Some(FIRST) && watching.has_seen("toplevel enter HEADLESS-1")
     })?;
-    wait(&mut hp, Duration::from_millis(200))?;
+    // Until the client has been told all of the move: the second's global
+    // gone, the first's bounds and scale. On a loaded machine they come
+    // over several turns of its loop.
+    let first_bounds = format!("toplevel bounds {}x{}", area.width, area.height);
+    let last = |seen: &[String], what: &str| {
+        seen.iter()
+            .rfind(|s| s.starts_with(what))
+            .cloned()
+            .unwrap_or_default()
+    };
+    hp.dispatch_until(WAIT, |_| {
+        let report = watching.report();
+        report.at("global_remove HEADLESS-2").is_some()
+            && last(&report.seen, "toplevel bounds ") == first_bounds
+            && last(&report.seen, "toplevel fractional ") == "toplevel fractional 120"
+    })?;
     let report = watching.report();
     assert!(moved, "the window moved to the first screen: {report:#?}");
     assert!(report.wrong.is_empty(), "{report:#?}");
@@ -607,7 +624,6 @@ fn a_screen_unplugged_its_surfaces_leave_it_before_its_global_goes() -> anyhow::
         .seen
         .iter()
         .rfind(|s| s.starts_with("toplevel bounds "));
-    let first_bounds = format!("toplevel bounds {}x{}", area.width, area.height);
     assert_eq!(bounds, Some(&first_bounds), "{report:#?}");
     // It is told the first screen's scale (1), never the second's (2)
     // again (wl_surface's preferred scale too, should the compositor
@@ -730,7 +746,9 @@ fn a_terminal_survives(program: &str, args: &[&str], app_id: &str) -> anyhow::Re
         let lines: Vec<&str> = text.lines().collect();
         lines[lines.len().saturating_sub(40)..].join("\n")
     };
-    let shown = hp.dispatch_until(WAIT, |hp| on(hp, app_id).as_deref() == Some(SECOND))?;
+    // A real program starting: on a loaded machine, with its GL on the
+    // CPU, well over the tests' usual wait.
+    let shown = hp.dispatch_until(PROGRAM_WAIT, |hp| on(hp, app_id).as_deref() == Some(SECOND))?;
     assert!(shown, "{program} on the second screen: {}", tail(&log));
     wait(&mut hp, Duration::from_millis(300))?;
 

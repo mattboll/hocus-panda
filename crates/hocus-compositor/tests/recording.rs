@@ -822,8 +822,9 @@ impl ShellBed {
     }
 
     fn click(&mut self, x: i32, y: i32) -> anyhow::Result<()> {
-        self.hp.pointer_move(f64::from(x) - 1.0, f64::from(y));
-        self.hp.pointer_move(f64::from(x), f64::from(y));
+        // Once the shell's surfaces there are drawn: else the press goes
+        // to what is under them.
+        common::point(&mut self.hp, (f64::from(x), f64::from(y)))?;
         wait(&mut self.hp, Duration::from_millis(120))?;
         self.hp.button(common::BTN_LEFT, true);
         self.hp.button(common::BTN_LEFT, false);
@@ -887,12 +888,13 @@ impl ShellBed {
         x: i32,
     ) -> anyhow::Result<hocus_compositor::model::Rect> {
         self.click(x, sign.y + sign.height / 2)?;
+        // Drawn, and come to rest: its buttons take the pointer.
         let open = self
             .hp
-            .dispatch_until(WAIT, |hp| !hp.popover_surfaces().is_empty())?;
+            .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
         anyhow::ensure!(open, "no popover:\n{}", self.log());
-        wait(&mut self.hp, Duration::from_millis(300))?;
-        Ok(self.hp.popover_surfaces()[0].1)
+        common::at_rest(&mut self.hp)?;
+        Ok(common::drawn_popovers(&self.hp)[0])
     }
 }
 
@@ -979,7 +981,7 @@ fn the_toolbar_in_video_has_the_switch_son_micro_and_demarrer() -> anyhow::Resul
     let started = bed.hp.dispatch_until(SLOW, |hp| {
         hp.recording().is_some_and(|r| r.started) && hp.record_frames() > 0
     })?;
-    assert!(started);
+    assert!(started, "not started: {:?}", bed.hp.record_failures());
     bed.hp.record_ask(RecordAsk::Stop);
     bed.thumbnail()?;
     Ok(())

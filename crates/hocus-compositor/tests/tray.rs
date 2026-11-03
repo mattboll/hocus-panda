@@ -351,7 +351,7 @@ impl Bed {
         for sub in ["home", "config", "cache", "state", "data"] {
             std::fs::create_dir_all(root.join(sub))?;
         }
-        let (bus, address) = private_bus(root)?;
+        let (bus, address) = common::private_bus(root)?;
         let log = root.join("shell.log");
         let at = |sub: &str| root.join(sub).display().to_string();
         let script = common::shell_script(
@@ -398,9 +398,9 @@ impl Bed {
             address,
             runtime,
         };
-        let up = bed
-            .hp
-            .dispatch_until(Duration::from_secs(20), |hp| !hp.bell_surfaces().is_empty())?;
+        let up = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
+            !hp.drawn_layers(hocus_link::BELL_NAMESPACE).is_empty()
+        })?;
         anyhow::ensure!(up, "no footer");
         bed.logged("the tray is served")?;
         bed.hp.pointer_move(400.0, 300.0);
@@ -512,13 +512,11 @@ impl Bed {
 
     /// The tray's surface, once it shows.
     fn tray(&mut self) -> anyhow::Result<Rect> {
-        let shows = self.hp.dispatch_until(WAIT, |hp| {
-            !hp.layer_rects(hocus_link::TRAY_NAMESPACE).is_empty()
-        })?;
-        anyhow::ensure!(shows, "no tray");
-        // Drawn.
-        wait(&mut self.hp, Duration::from_millis(400))?;
-        Ok(self.hp.layer_rects(hocus_link::TRAY_NAMESPACE)[0].1)
+        // Drawn at its place, and the frame shown at rest: else its
+        // place and pixels are not its own yet.
+        let tray = common::drawn(&mut self.hp, hocus_link::TRAY_NAMESPACE)?;
+        common::at_rest(&mut self.hp)?;
+        Ok(tray[0].1)
     }
 
     fn no_tray(&mut self) -> anyhow::Result<()> {
@@ -598,38 +596,6 @@ fn near(a: [u8; 3], b: [u8; 3]) -> bool {
     a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 24)
 }
 
-/// A D-Bus daemon of the test's own in `dir`, and its address.
-fn private_bus(dir: &Path) -> anyhow::Result<(Child, String)> {
-    let socket = dir.join("bus");
-    let config = dir.join("bus.conf");
-    std::fs::write(
-        &config,
-        format!(
-            "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
-             \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
-             <busconfig><type>session</type><listen>unix:path={}</listen>\
-             <policy context=\"default\"><allow send_destination=\"*\"/>\
-             <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
-            socket.display()
-        ),
-    )?;
-    let bus = Command::new("dbus-daemon")
-        .arg(format!("--config-file={}", config.display()))
-        .arg("--nofork")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let start = Instant::now();
-    while !socket.exists() {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(10), "no bus");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    Ok((bus, format!("unix:path={}", socket.display())))
-}
-
 /// The shell's log, without its colours' escape sequences.
 fn plain(log: &Path) -> String {
     let text = String::from_utf8_lossy(&std::fs::read(log).unwrap_or_default()).into_owned();
@@ -654,7 +620,7 @@ fn an_item_registers_and_its_icon_shows_in_both_forms() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FormChoice::Full)? else {
         return Ok(());
     };
-    let levels_before = bed.hp.levels_surfaces()[0].1;
+    let levels_before = common::drawn(&mut bed.hp, hocus_link::LEVELS_NAMESPACE)?[0].1;
     let _item = bed.item("Active", pixmap(MAGENTA, None))?;
     let tray = bed.tray()?;
     // Just above the footer, across the bar's inside, a row of one.
@@ -664,9 +630,14 @@ fn an_item_registers_and_its_icon_shows_in_both_forms() -> anyhow::Result<()> {
     let icon = bed.icon(tray);
     bed.shows(icon, MAGENTA)?;
     bed.logged("the tray shows it")?;
-    // The levels above it went up, taller by what it takes.
-    let levels = bed.hp.levels_surfaces()[0].1;
-    assert!(levels.height > levels_before.height, "{levels:?}");
+    // The levels above it went up, taller by what it takes: once the
+    // shell has drawn them again, which may come after the tray.
+    let taller = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::LEVELS_NAMESPACE)
+            .first()
+            .is_some_and(|(_, r)| r.height > levels_before.height)
+    })?;
+    assert!(taller, "{:?}", bed.hp.levels_surfaces());
     // The mini form: a column, the icon in it.
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_B]);
     let mini = bed.hp.dispatch_until(WAIT, |hp| {
@@ -857,7 +828,8 @@ fn resting_on_an_icon_400_ms_shows_its_tooltip() -> anyhow::Result<()> {
         line.contains("Slack") && line.contains("Vous avez 2 notifications"),
         "{line}"
     );
-    let tip = bed.hp.layer_rects(hocus_link::TIP_NAMESPACE)[0].1;
+    // Where it is drawn: 0 × 0 at its anchor before its first buffer.
+    let tip = common::drawn(&mut bed.hp, hocus_link::TIP_NAMESPACE)?[0].1;
     assert!(tip.x + tip.width <= tray.x - 6, "{tip:?} {tray:?}");
     // The pointer leaving the icon takes it away.
     bed.hp.pointer_move(400.0, 300.0);

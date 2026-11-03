@@ -34,7 +34,7 @@ use std::{
 };
 
 use anyhow::Context;
-use common::{BTN_LEFT, WAIT, shell_program, wait};
+use common::{WAIT, shell_program, wait};
 use fakes::{FakeSink, Fakes, TWO_SINKS};
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use zbus::{
@@ -242,11 +242,7 @@ impl Bed {
         self.logged_since(mark, "the in-use sign is drawn at rest", |l| {
             l.contains(&want)
         })?;
-        let shown = self.hp.dispatch_until(WAIT, |hp| {
-            !hp.layer_rects(hocus_link::IN_USE_NAMESPACE).is_empty()
-        })?;
-        anyhow::ensure!(shown, "no sign's surface");
-        Ok(self.hp.layer_rects(hocus_link::IN_USE_NAMESPACE)[0].1)
+        Ok(common::drawn(&mut self.hp, hocus_link::IN_USE_NAMESPACE)?[0].1)
     }
 
     /// A microphone's stream of `app` (its program `binary`, its media
@@ -302,13 +298,9 @@ impl Bed {
         anyhow::bail!("the source is not muted={muted}:\n{}", self.log())
     }
 
+    /// A click at `(x, y)`, once what is there is drawn.
     fn click(&mut self, (x, y): (i32, i32)) -> anyhow::Result<()> {
-        self.hp.pointer_move(f64::from(x) - 1.0, f64::from(y));
-        self.hp.pointer_move(f64::from(x), f64::from(y));
-        wait(&mut self.hp, Duration::from_millis(120))?;
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
-        wait(&mut self.hp, Duration::from_millis(60))
+        common::click(&mut self.hp, (f64::from(x), f64::from(y)))
     }
 
     /// The popover, opened by hovering the sign at `sign`: its surface.
@@ -321,11 +313,12 @@ impl Bed {
         )?;
         let open = self
             .hp
-            .dispatch_until(WAIT, |hp| !hp.popover_surfaces().is_empty())?;
+            .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
         anyhow::ensure!(open, "no popover:\n{}", self.log());
         self.logged("the in-use popover shows it", |_| true)?;
-        wait(&mut self.hp, Duration::from_millis(300))?;
-        Ok(self.hp.popover_surfaces()[0].1)
+        // Come to rest: its buttons take the pointer where they are drawn.
+        common::at_rest(&mut self.hp)?;
+        Ok(common::drawn_popovers(&self.hp)[0])
     }
 
     fn call(
@@ -422,6 +415,7 @@ impl Bed {
     /// The tiles' colours, as their brightest pixel says, in the sign of
     /// the surface at `surface` with `kinds` tiles in `form`.
     fn tiles(&mut self, surface: Rect, form: FormChoice, kinds: i32) -> anyhow::Result<Vec<Ink>> {
+        common::at_rest(&mut self.hp)?;
         let (w, _, pixels) = self.hp.screenshot(0)?;
         let tile = |i: i32| match form {
             // Stacked, 9 px in from the 48 px sign 3 px into the surface.
@@ -863,7 +857,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     };
     std::fs::create_dir_all(&out)?;
     let shoot = |bed: &mut Bed, name: &str, crop: (i32, i32, i32, i32)| -> anyhow::Result<()> {
-        wait(&mut bed.hp, Duration::from_millis(400))?;
+        common::at_rest(&mut bed.hp)?;
         let (w, h, px) = bed.hp.screenshot(0)?;
         let rgba: Vec<u8> = px
             .as_chunks::<4>()
