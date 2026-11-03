@@ -368,8 +368,13 @@ fn record(
         }
     }
     drop(from_loop);
+    // Whatever happens next, ffmpeg (the recorder's own child, not reaped
+    // before the last frames are written) is stopped if they are not
+    // written within `LAST`: the recording's end never waits for ever.
+    let watchdog = watch(job.id, child.id());
     // The sound first, to its end: ffmpeg holds the last frames until the
-    // sound reaches them, and may wait for it before it reads them.
+    // sound reaches them, and ffmpeg 6.1 (Ubuntu 24.04's) reads no frame
+    // before it has the sound's first second, or its end (#550).
     let sound = match sound {
         Some(sound) if frames.written > 0 || frames.latest.is_some() => {
             sound.finish();
@@ -381,6 +386,7 @@ fn record(
     // The last frames, then the end of the input: ffmpeg ends the file.
     let ended = went.and_then(|()| frames.until(length));
     frames.stdin = None;
+    drop(watchdog);
     tracing::debug!(
         id = job.id,
         frames = frames.written,
@@ -437,6 +443,32 @@ fn record(
         poster,
         encoder: video.name(),
     })
+}
+
+/// How long the last frames may take to be written once stopped.
+const LAST: Duration = Duration::from_secs(30);
+
+/// A thread that kills ffmpeg (process `pid`, the recorder's child) unless
+/// the returned sender is dropped within [`LAST`].
+fn watch(id: u64, pid: u32) -> mpsc::Sender<()> {
+    let (written, wait) = mpsc::channel::<()>();
+    let spawned = std::thread::Builder::new()
+        .name("recording's end".to_owned())
+        .spawn(move || {
+            if wait.recv_timeout(LAST) == Err(mpsc::RecvTimeoutError::Timeout) {
+                tracing::warn!(id, pid, "ffmpeg reads no more of the recording: stopped");
+                let pid = i32::try_from(pid)
+                    .ok()
+                    .and_then(rustix::process::Pid::from_raw);
+                if let Some(pid) = pid {
+                    let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "no watch over the recording's end");
+    }
+    written
 }
 
 /// What ffmpeg says on its errors' output, kept (the last lines) for the

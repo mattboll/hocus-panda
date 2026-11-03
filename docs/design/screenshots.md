@@ -612,7 +612,13 @@ the 5.10 mockup: the indicator in the bar.
   ffmpeg, which has nothing to end, is stopped and its sound left (the
   same toast); and the sound's mixer, finishing, waits 2 s at most for
   ffmpeg to read what is left, since the pipe it writes is its own to read
-  as well and so is never broken, only full. One at a time: Démarrer while one records does nothing
+  as well and so is never broken, only full. Once stopped, the sound is
+  ended first, then the last frames are written: ffmpeg 6.1 (Ubuntu
+  24.04's) reads no frame before it has the sound's first second or its
+  end, so a recording stopped within its first second, its last frames
+  written first, waited for ever (#550, v2's CI). The sound always comes
+  (silence when PipeWire gives nothing), and ffmpeg is killed if the last
+  frames are not written within 30 s. One at a time: Démarrer while one records does nothing
   (the capture stays open for a photo).
 - **Choices made here** (to confirm on the machine): ffmpeg as a program
   rather than a library (below); the pointer is always in the video
