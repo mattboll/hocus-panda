@@ -27,6 +27,7 @@
 
 mod agents;
 mod bluetooth;
+mod capture;
 mod clipboard;
 mod clock;
 mod desktops;
@@ -559,6 +560,18 @@ impl Shell {
                 popover::toggle_clipboard(&output);
                 Task::none()
             }
+            ToShell::Capture(bar) => {
+                capture::set(bar);
+                Task::none()
+            }
+            ToShell::CaptureEnd => {
+                capture::end();
+                Task::none()
+            }
+            ToShell::Captured(captured) => {
+                capture::captured(captured);
+                Task::none()
+            }
         }
     }
 
@@ -1020,6 +1033,23 @@ impl Shell {
         )
     }
 
+    /// The capture's toolbar (5.8), if its surface is `id`.
+    fn capture_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !capture::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(capture::draw::View {
+                id,
+                words: capture::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The popover whose surface is `id`.
     fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let item = popover::with(|c| c.item_of(id))?;
@@ -1142,6 +1172,7 @@ impl Shell {
                 .or_else(|| self.footer_view(id))
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
+                .or_else(|| self.capture_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .unwrap_or_else(|| Space::new().into());
@@ -1474,6 +1505,20 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Clipboard { output }) => {
                             popover::toggle_clipboard(&output);
+                            continue;
+                        }
+                        // The capture's toolbar, and its toast: their own
+                        // surfaces (5.8).
+                        Ok(ToShell::Capture(bar)) => {
+                            capture::set(bar);
+                            continue;
+                        }
+                        Ok(ToShell::CaptureEnd) => {
+                            capture::end();
+                            continue;
+                        }
+                        Ok(ToShell::Captured(captured)) => {
+                            capture::captured(captured);
                             continue;
                         }
                         _ => {}

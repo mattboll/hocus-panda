@@ -14,14 +14,15 @@
 //! their windows, their applications and their titles, the agents'
 //! tools and the agents, the agent whose panda peeks out of the bar,
 //! `Super+Space` for the launcher, what clients copy and `Super+V` for the
-//! clipboard's history, and the screen the notifications' bubbles show on;
+//! clipboard's history, what the screen capture's toolbar shows and what
+//! was captured, and the screen the notifications' bubbles show on;
 //! the shell draws the bars, their popovers, the peek, the launcher and the
 //! bubbles, keeps the levels and the clipboard's history, and says when it
 //! draws on the CPU, when a popover, the launcher or a bubble closes, and
 //! when the user asks for the next layout, another desktop or a window,
 //! plugs a tool in or out, declines them, copies a text, pastes or copies
-//! an item of the clipboard's history, starts an application, or clicks a
-//! bubble (its application's window).
+//! an item of the clipboard's history, starts an application, clicks a
+//! bubble (its application's window), or the capture's toolbar.
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question.
@@ -32,6 +33,12 @@
 //! draws the bar, each in its own frames, with no message per frame.
 
 use std::{fmt, str::FromStr, time::Duration};
+
+mod capture;
+pub use capture::{
+    CAPTURE_DELAYS, CAPTURE_TOOLBAR_BOTTOM, CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE,
+    CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar, CaptureMode, Captured,
+};
 
 /// The environment variable naming the compositor's socket for its shell.
 pub const SOCKET_ENV: &str = "HOCUS_SHELL_SOCKET";
@@ -317,6 +324,14 @@ pub enum ToShell {
     /// the screen of the focused window, else the pointer's, its field
     /// holding the keyboard; open, it closes. Written `clipboard OUTPUT`.
     Clipboard { output: String },
+    /// The screen capture is open (5.8), or what its toolbar shows changed
+    /// ([`CaptureBar`]).
+    Capture(CaptureBar),
+    /// The capture's toolbar goes: the capture is taken, counts down, or
+    /// was cancelled. Written `capture-end`.
+    CaptureEnd,
+    /// A capture was taken, copied and saved: its toast ([`Captured`]).
+    Captured(Captured),
 }
 
 /// What the clipboard's history keeps of a selection (5.6): its text (the
@@ -1041,6 +1056,8 @@ pub enum ToCompositor {
     /// `Ctrl+V` (`Ctrl+Shift+V` in a terminal). Written `clip paste KIND
     /// DATA` or `clip copy KIND DATA`, the data in base64.
     Clip { paste: bool, clip: Clip },
+    /// The user acts on the capture's toolbar (5.8, [`CaptureAsk`]).
+    Capture(CaptureAsk),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1195,6 +1212,9 @@ impl fmt::Display for ToShell {
                 clip.write(f)
             }
             Self::Clipboard { output } => write!(f, "clipboard {output}"),
+            Self::Capture(bar) => bar.write(f),
+            Self::CaptureEnd => f.write_str("capture-end"),
+            Self::Captured(captured) => captured.write(f),
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -1297,6 +1317,9 @@ impl FromStr for ToShell {
                 .collect::<Result<_, BadLine>>()
                 .map(Self::Agents);
         }
+        if line.starts_with("captured ") {
+            return Captured::read(line).map(Self::Captured);
+        }
         if let Some(fields) = line.strip_prefix("titles ") {
             let mut fields = fields.split('\t');
             let output = fields.next().unwrap_or_default();
@@ -1366,6 +1389,8 @@ impl FromStr for ToShell {
             Some("clipboard") => Ok(Self::Clipboard {
                 output: word(&mut words, "output")?.to_owned(),
             }),
+            Some("capture") => CaptureBar::read(&mut words).map(Self::Capture),
+            Some("capture-end") => Ok(Self::CaptureEnd),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("launcher") => Ok(Self::Launcher {
                 output: word(&mut words, "output")?.to_owned(),
@@ -1466,6 +1491,7 @@ impl fmt::Display for ToCompositor {
                 write!(f, "raise {pid} {}", if app.is_empty() { "-" } else { &app })
             }
             Self::LogOut => f.write_str("log-out"),
+            Self::Capture(ask) => ask.write(f),
             Self::Clip { paste, clip } => {
                 write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
                 clip.write(f)
@@ -1529,6 +1555,7 @@ impl FromStr for ToCompositor {
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
             Some("log-out") => Ok(Self::LogOut),
+            Some("capture") => CaptureAsk::read(&mut words).map(Self::Capture),
             Some("clip") => Ok(Self::Clip {
                 paste: flag(words.next(), "paste", "copy")?,
                 clip: Clip::read(&mut words)?,

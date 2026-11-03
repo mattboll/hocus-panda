@@ -28,7 +28,7 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             ImportDma, ImportMemWl,
-            gles::GlesRenderer,
+            gles::{GlesRenderer, GlesTexture},
             multigpu::{GpuManager, gbm::GbmGlesBackend},
         },
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
@@ -554,6 +554,25 @@ impl TtyBackend {
 
     /// Draws the screens that changed and are free to take a frame.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // A capture asked for (5.8): drawn for it on the primary GPU, which
+        // draws every screen; none while another terminal shows.
+        if state.capture.has_pending() {
+            if !self.active {
+                tracing::info!("the session is in the background: nothing captured");
+                state.capture.take_pending();
+            } else {
+                match self.gpus.single_renderer(&self.render_node) {
+                    Ok(mut renderer) => {
+                        let gles: &mut GlesRenderer = renderer.as_mut();
+                        crate::capture::shoot::take::<_, GlesTexture>(gles, state);
+                    }
+                    Err(err) => {
+                        tracing::warn!(%err, "no renderer: nothing captured");
+                        state.capture.take_pending();
+                    }
+                }
+            }
+        }
         if !state.redraw {
             return;
         }

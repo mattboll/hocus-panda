@@ -424,6 +424,33 @@ impl Headless {
         .and_then(|bytes| bytes.as_ref().map(|b| b.to_vec()))
     }
 
+    /// What the screen capture shows (5.8).
+    pub fn capture(&self) -> crate::capture::Shown {
+        self.app.state.capture.shown()
+    }
+
+    /// What the shell's capture toolbar says when clicked, as if it was.
+    pub fn capture_ask(&mut self, ask: hocus_link::CaptureAsk) {
+        self.app.state.capture_asked(ask);
+    }
+
+    /// Captures made so far, and the last file written.
+    pub fn captures(&self) -> (u64, Option<std::path::PathBuf>) {
+        self.app.state.capture.taken()
+    }
+
+    /// The capture's toolbar's surfaces, by output name, and where they
+    /// are (global).
+    pub fn capture_toolbar_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::CAPTURE_TOOLBAR_NAMESPACE)
+    }
+
+    /// The cursor the compositor shows over a frame, a grip or the
+    /// capture, by its name (`crosshair`, `move`, `nwse-resize`…).
+    pub fn frame_cursor(&self) -> Option<String> {
+        self.app.state.frame_cursor.map(|c| c.name().to_owned())
+    }
+
     /// The keyboard's active layout (XKB's group).
     pub fn layout(&self) -> u32 {
         self.app

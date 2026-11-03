@@ -22,6 +22,12 @@ calloop = { version = "0.14.5", features = ["signals"] }
 clap = { version = "4.6.7", features = ["derive"] }
 # The titles of Alt+Tab's panel (MIT, Apache-2.0 or Zlib).
 fontdue = "0.9.3"
+# The screen capture (5.8): its PNG, cut and put together off the loop;
+# PNG alone of the codecs, as the shell's (MIT or Apache-2.0).
+image = { version = "0.25", default-features = false, features = ["png"] }
+# The capture's file names say when, in local time (MIT or Unlicense), as
+# the shell's clock reads it.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 libloading = "0.8.9"
 serde = { version = "1.0.229", features = ["derive"] }
 smithay = { version = "0.7.0", default-features = false, features = [
