@@ -437,9 +437,8 @@ impl TtyBackend {
                 tracing::debug!(%err, "could not clear the screen");
             }
         });
-        // Its windows go to a screen still there.
-        state.output_gone(&screen.output);
-        state.display_handle.remove_global::<State>(screen.global);
+        // Its windows go to a screen still there, then its global.
+        state.unplug_output(&screen.output, screen.global);
         for token in [screen.health, screen.pace].into_iter().flatten() {
             state.loop_handle.remove(token);
         }

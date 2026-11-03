@@ -50,10 +50,12 @@ impl WlrLayerShellHandler for State {
         _layer: Layer,
         namespace: String,
     ) {
-        let output = output
-            .as_ref()
-            .and_then(Output::from_resource)
-            .or_else(|| self.output_under_pointer());
+        let output = match output.as_ref() {
+            // A screen unplugged as the client asked: its global is still
+            // there a moment, disabled, but the surface would show nowhere.
+            Some(asked) => Output::from_resource(asked).filter(|o| self.is_plugged(o)),
+            None => self.output_under_pointer(),
+        };
         let Some(output) = output else {
             tracing::warn!(namespace, "a layer surface with no output");
             surface.send_close();
@@ -76,15 +78,7 @@ impl WlrLayerShellHandler for State {
             if let Some(layer) = gone {
                 map.unmap_layer(&layer);
                 drop(map);
-                self.popover_gone(&layer);
-                self.launcher_gone(&layer);
-                self.capture_toolbar_gone(&layer);
-                self.share_chooser_gone(&layer);
-                self.capture_after_gone(&layer);
-                self.peek_gone(&layer);
-                self.bubble_gone(&layer);
-                self.layer_keyboard();
-                self.redraw = true;
+                self.layer_gone(&layer);
             }
         }
     }
@@ -96,6 +90,22 @@ impl WlrLayerShellHandler for State {
     }
 }
 delegate_layer_shell!(State);
+
+impl State {
+    /// `layer`, unmapped, no longer shows: what showed it or depended on
+    /// it lets it go.
+    pub(crate) fn layer_gone(&mut self, layer: &LayerSurface) {
+        self.popover_gone(layer);
+        self.launcher_gone(layer);
+        self.capture_toolbar_gone(layer);
+        self.share_chooser_gone(layer);
+        self.capture_after_gone(layer);
+        self.peek_gone(layer);
+        self.bubble_gone(layer);
+        self.layer_keyboard();
+        self.redraw = true;
+    }
+}
 
 /// A commit of a layer surface: arranged again, configured the first time.
 pub fn handle_commit(state: &mut State, surface: &WlSurface) {

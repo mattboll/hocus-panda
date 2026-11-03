@@ -350,7 +350,32 @@ Keyboard:
   that comes then shows those on it where they were, and takes those on
   none in the middle of its work area.
 - The real screens (tty) and the headless backend's outputs (in tests)
-  come and go; the nested window is one output that never goes.
+  come and go, through the same code; the nested window is one output
+  that never goes.
+
+#### What clients are told
+
+As built (#536), in this order, in the same turn of the loop:
+
+1. every surface on the screen, windows (mapped or not, with their
+   subsurfaces and popups) and layer surfaces, gets `wl_surface.leave`
+   for its `wl_output`;
+2. its layer surfaces (bars, wallpapers, the shell's overlays) get
+   `zwlr_layer_surface_v1.closed`; the shell is told its bar there went;
+3. each window gets a configure for the screen it moves to, its bounds
+   that screen's work area;
+4. the screen's `wl_output` global is disabled: clients get
+   `wl_registry.global_remove`. It is removed 5 s later, so that a client
+   binding it meanwhile is not killed for it;
+5. the windows then enter the screen they moved to, and are told its
+   scale.
+
+Nothing names the screen's `wl_output` after its `global_remove`: a
+client that drops it then (kitty does) gets such an event's output as
+null, and kitty crashed on it. A layer surface asked for on that output
+meanwhile is closed at once. `tests/unplug_clients.rs` checks the order
+with a client bound to every output, and runs kitty and foot when they
+are installed.
 
 ## 13. Shortcuts
 
