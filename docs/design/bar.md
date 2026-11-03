@@ -2660,6 +2660,32 @@ ring left out), with the maintainer's spec (issue #531).
   middle click sends `SecondaryActivate(0, 0)`, the wheel `Scroll` (120 a
   notch, up positive, `vertical` or `horizontal`). Wayland tells a client
   no place on the screen, so the coordinates are 0.
+- **Its application comes forward** (5.14b, issue #537): the click is the
+  user's input, but on the bar's surface, so the application never had
+  the keyboard and the token it makes for itself would only pulse its
+  rim (§4). Before `Activate` and `SecondaryActivate`, the tray's thread
+  asks the item's process of the bus (`GetConnectionUnixProcessID`) and
+  tells the compositor (`tray-click ASK PID`); the compositor answers at
+  once with an activation token made for the click (`tray-token ASK
+  TOKEN`, waited for 500 ms at most, on the tray's thread only), which
+  the item is given with `ProvideXdgActivationToken(token)`, its answer
+  waited for (250 ms at most) before `Activate`, since an item may serve
+  its calls side by side; an item without it says so at once. Qt's and KDE's
+  applications activate with it, a token that focuses as one the
+  desktop gives a program it starts. For those that ignore it
+  (Electron's, Slack), the click also lets the item's application focus
+  one window within 2 s on the compositor's clock: a window asking with
+  any token, or the first it maps (an application hidden in the tray that
+  opens its window on `Activate`). The token used, or the one focus
+  given, spends the click. The application is the Wayland client's
+  process when it is the item's, one the item's started (Chromium's
+  helpers, a launcher script's program) or one that started it (a tray
+  helper), or, sandboxed, one of the same application unit
+  (`app-….scope`, `app-….service`, `snap.….scope`: Flatpak's D-Bus goes
+  through a proxy beside the application); never by process group, nor
+  through the compositor or its parents, nor by the compositor's own
+  unit: what it starts shares its group and its unit, and everything
+  descends from it.
 - **Its menu**: a right click (or `Enter` while the icon holds the
   keyboard) reads the item's `com.canonical.dbusmenu` (`AboutToShow(0)`,
   then `GetLayout(0, -1, [])`) and opens it as a popover, its bottom on the
@@ -2705,7 +2731,15 @@ ring left out), with the maintainer's spec (issue #531).
   full form then the mini; `NewIcon` draws it again, the red dot of its
   new pixmap with it; `Passive` hides it, `NeedsAttention` shows its
   attention icon; a left click is `Activate`, a middle click
-  `SecondaryActivate`, the wheel `Scroll 120 vertical`; a right click
+  `SecondaryActivate`, the wheel `Scroll 120 vertical`; with the item's
+  application's window behind another program's, which has the keyboard
+  (5.14b): an item that takes the token is given it before `Activate`,
+  and the window comes forward with it even past the 2 s; an item without
+  `ProvideXdgActivationToken` whose window asks with a token of its own
+  comes forward; without a click it only pulses; 2 s after the click it
+  only pulses, and the click lets it come forward once, a second request
+  pulsing; an application with no window that opens one on `Activate`
+  has it focused, in front; a right click
   opens its menu beside the bar, its bottom on the icon's, its rows read
   ("Ouvrir Slack" without its mnemonic, the separator, the check, the one
   off), and a click on "Quitter Slack" sends `Event(5, "clicked")` and
@@ -2713,6 +2747,9 @@ ring left out), with the maintainer's spec (issue #531).
   it shows "Slack · Vous avez 2 notifications" after 400 ms, gone as the
   pointer leaves. Unit tests for the places in both forms and while
   switching, the pop-in, the pixmaps (the best size, ARGB, the square),
+  the rule matching the item's process to the window's (its own, a child,
+  a parent, a Flatpak's proxy; not a sibling, the compositor, its
+  parents),
   the item's own theme path, a layout's entries and mnemonics, the
   registrations' places, the tooltip's words and its delay, the menu's
   rows. On the CPU, the screenshots of the pull request.

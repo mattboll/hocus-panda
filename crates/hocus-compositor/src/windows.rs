@@ -580,8 +580,9 @@ impl State {
     /// Whether a new window takes the focus (§4): it does when the user
     /// started it, which shows as its application having the focus (a
     /// dialog, a new window of it), being started from the application
-    /// with the focus (a terminal's command), or by the desktop's own
-    /// shortcut a moment ago; and when nothing has the focus. Otherwise it
+    /// with the focus (a terminal's command), by the desktop's own
+    /// shortcut a moment ago, or by a click on its tray icon just before;
+    /// and when nothing has the focus. Otherwise it
     /// opens behind, and its activation token, if it shows one, brings it
     /// forward.
     fn takes_focus(&mut self, window: &Window) -> bool {
@@ -590,6 +591,15 @@ impl State {
             && let Some(at) = self.activate_on_map.iter().position(|s| *s == *surface)
         {
             self.activate_on_map.remove(at);
+            return true;
+        }
+        // Mapped just after a click on its tray icon: a hidden
+        // application's window (5.14b).
+        let pid = match window.x11_surface() {
+            Some(x11) => x11.pid(),
+            None => window.wl_surface().and_then(|s| self.client_pid(&s)),
+        };
+        if self.tray_click_focuses(pid) {
             return true;
         }
         let now = self.now();

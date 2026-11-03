@@ -404,6 +404,7 @@ impl State {
             ToCompositor::Share(ask) => self.share_asked(ask),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
+            ToCompositor::TrayClick { ask, pid } => self.tray_clicked(ask, pid),
             ToCompositor::LogOut => {
                 tracing::info!("the shell logs out");
                 self.end(crate::Ending::LoggedOut);

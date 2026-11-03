@@ -16,6 +16,12 @@
 //! (`com.canonical.dbusmenu`, [`menu`]) read before its popover opens
 //! ([`crate::popover::tray`]). Hovering an icon 400 ms shows its tooltip
 //! ([`tip`]).
+//!
+//! Before `Activate` or `SecondaryActivate`, the thread asks the compositor
+//! for an activation token for the click ([`clicked`]), naming the item's
+//! process, and gives the token to the item
+//! (`ProvideXdgActivationToken`): its window then comes forward although
+//! the bar, not it, had the keyboard (5.14b).
 
 pub mod draw;
 pub mod menu;
@@ -24,13 +30,19 @@ pub mod tip;
 mod watcher;
 
 use std::{
-    sync::{Mutex, PoisonError},
-    time::Instant,
+    sync::{
+        Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 use hocus_link::{TRAY_NAMESPACE, ToCompositor};
 use iced::{Rectangle, advanced::image};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    oneshot,
+};
 
 use crate::Message;
 
@@ -188,6 +200,54 @@ pub fn scales_changed() {
         *was = now;
         drop(was);
         ask(Ask::Rescale);
+    }
+}
+
+// --- A click's token ---------------------------------------------------------------
+
+/// How long the tray waits for the compositor's token before it activates
+/// the item without one. The compositor answers on its next turn.
+const TOKEN_WAIT: Duration = Duration::from_millis(500);
+
+/// The clicks waiting for their token, by their number.
+static TOKENS: Mutex<Vec<(u64, oneshot::Sender<String>)>> = Mutex::new(Vec::new());
+static CLICKS: AtomicU64 = AtomicU64::new(0);
+
+fn tokens() -> std::sync::MutexGuard<'static, Vec<(u64, oneshot::Sender<String>)>> {
+    TOKENS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The user clicked the icon of an item of process `pid` (0: not known):
+/// the compositor is told, and its token for that click waited for, on the
+/// tray's thread. `None` without a compositor, or if it did not answer.
+async fn clicked(pid: u32) -> Option<String> {
+    let ask = CLICKS.fetch_add(1, Ordering::Relaxed) + 1;
+    let (sender, answer) = oneshot::channel();
+    tokens().push((ask, sender));
+    let token = if crate::popover::tell(ToCompositor::TrayClick { ask, pid }) {
+        tokio::time::timeout(TOKEN_WAIT, answer)
+            .await
+            .ok()
+            .and_then(Result::ok)
+    } else {
+        None
+    };
+    tokens().retain(|(a, _)| *a != ask);
+    if token.is_none() {
+        tracing::debug!(ask, "no token for the tray's click");
+    }
+    token
+}
+
+/// The compositor's token for click `ask`.
+pub fn token(ask: u64, token: String) {
+    let waiting = {
+        let mut tokens = tokens();
+        let at = tokens.iter().position(|(a, _)| *a == ask);
+        at.map(|at| tokens.swap_remove(at).1)
+    };
+    if let Some(waiting) = waiting {
+        let _ = waiting.send(token);
     }
 }
 

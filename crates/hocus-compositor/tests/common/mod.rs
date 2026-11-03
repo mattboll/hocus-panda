@@ -8,6 +8,7 @@ use std::{os::unix::net::UnixStream, path::Path, sync::mpsc, time::Duration};
 use anyhow::Context;
 use hocus_compositor::{Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect};
 use smithay_client_toolkit::{
+    activation::{ActivationHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState},
     data_device_manager::{
         DataDeviceManagerState, WritePipe,
@@ -15,9 +16,9 @@ use smithay_client_toolkit::{
         data_offer::{DataOfferHandler, DragOffer},
         data_source::{CopyPasteSource, DataSourceHandler},
     },
-    delegate_compositor, delegate_data_device, delegate_layer, delegate_output, delegate_pointer,
-    delegate_registry, delegate_seat, delegate_shm, delegate_xdg_popup, delegate_xdg_shell,
-    delegate_xdg_window,
+    delegate_activation, delegate_compositor, delegate_data_device, delegate_layer,
+    delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
+    delegate_xdg_popup, delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -254,7 +255,7 @@ pub enum Shows {
 }
 
 /// What the test asks of a client.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Fullscreen(bool),
     /// Takes the clipboard (it must hold the keyboard), then says
@@ -268,6 +269,15 @@ pub enum Command {
     Title(&'static str),
     /// Reads the clipboard's text, as `Ctrl+V` does: [`Event::Pasted`].
     ReadClipboard,
+    /// Asks for its window to be activated (`xdg_activation_v1`) with this
+    /// token; without one, with a token it asks for itself, without the
+    /// user's input, as an application does that was activated over D-Bus.
+    Activate(Option<String>),
+    /// Opens a window, as an application hidden in the tray shows one.
+    Open {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
 }
 
 /// What a client puts on the clipboard: its types, and the text it writes
@@ -382,6 +392,7 @@ fn run_client(
         committing: None,
         ctrl: false,
         writing: false,
+        activation: ActivationState::bind(&globals, &qh).ok(),
     };
     match shows {
         Some(Shows::Window {
@@ -558,6 +569,35 @@ fn run_client(
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}
                 (Command::ReadClipboard, _) => client.read_clipboard(),
+                (Command::Activate(token), Some(window)) => {
+                    let surface = window.wl_surface().clone();
+                    match (&client.activation, token) {
+                        (Some(activation), Some(token)) => {
+                            activation.activate::<Client>(&surface, token);
+                        }
+                        (Some(activation), None) => activation.request_token(
+                            &qh,
+                            RequestData {
+                                app_id: None,
+                                seat_and_serial: None,
+                                surface: Some(surface),
+                            },
+                        ),
+                        (None, _) => {}
+                    }
+                }
+                (Command::Activate(_), None) => {}
+                (Command::Open { app_id, size }, _) => {
+                    if let Some(xdg) = &client.xdg {
+                        let surface = client.compositor.create_surface(&qh);
+                        let window =
+                            xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+                        window.set_app_id(app_id);
+                        window.commit();
+                        client.size = size;
+                        client.window = Some(window);
+                    }
+                }
             }
         }
         queue.flush()?;
@@ -618,6 +658,7 @@ struct Client {
     committing: Option<String>,
     ctrl: bool,
     writing: bool,
+    activation: Option<ActivationState>,
 }
 
 impl Client {
@@ -929,6 +970,18 @@ delegate_xdg_popup!(Client);
 delegate_layer!(Client);
 delegate_registry!(Client);
 delegate_data_device!(Client);
+delegate_activation!(Client);
+
+impl ActivationHandler for Client {
+    type RequestData = RequestData;
+
+    /// The token it asked for: its window asks for the focus with it.
+    fn new_token(&mut self, token: String, data: &RequestData) {
+        if let (Some(activation), Some(surface)) = (&self.activation, &data.surface) {
+            activation.activate::<Client>(surface, token);
+        }
+    }
+}
 
 /// A typing client's keyboard: its modifiers' group.
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {

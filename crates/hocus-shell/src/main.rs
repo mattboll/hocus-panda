@@ -621,6 +621,10 @@ impl Shell {
                 share::end(request);
                 Task::none()
             }
+            ToShell::TrayToken { ask, token } => {
+                tray::token(ask, token);
+                Task::none()
+            }
             ToShell::Shares(shares) => {
                 in_use::set_shares(shares);
                 Task::none()
@@ -1758,6 +1762,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Shares(shares)) => {
                             in_use::set_shares(shares);
+                            continue;
+                        }
+                        // A tray click's token: to the tray's thread.
+                        Ok(ToShell::TrayToken { ask, token }) => {
+                            tray::token(ask, token);
                             continue;
                         }
                         _ => {}

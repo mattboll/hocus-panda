@@ -125,6 +125,9 @@ pub struct State {
     pub spawned_at: Option<Duration>,
     /// Windows not mapped yet that asked for the focus with a valid token.
     pub activate_on_map: Vec<WlSurface>,
+    /// The last click on a tray icon, while its application may still
+    /// focus a window with it (5.14b).
+    pub tray_click: Option<crate::tray::TrayClick>,
     /// Windows not mapped yet that asked to open maximised or fullscreen
     /// (§10): they show so from their first frame.
     pub opens_as: Vec<(WlSurface, model::Mode)>,
@@ -329,6 +332,7 @@ impl State {
             activation_tokens: HashMap::new(),
             spawned_at: None,
             activate_on_map: Vec::new(),
+            tray_click: None,
             opens_as: Vec::new(),
             textures: Textures::default(),
             grabber: Grabber::default(),

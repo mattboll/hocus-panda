@@ -12,6 +12,14 @@
 //! row sends `Event("clicked")` then closes it; the item's owner going
 //! takes its icon away; resting 400 ms on it shows its tooltip.
 //!
+//! And a click on its icon brings its application forward (5.14b, issue
+//! #537): the item and the application's window are this program's, behind
+//! the window of another program, which has the keyboard. With an item
+//! that takes the click's token (`ProvideXdgActivationToken`), and with one
+//! that ignores it and makes its own; without a click, its rim only pulses;
+//! the click lets it focus once, within 2 s; an application hidden in the
+//! tray opens its window focused.
+//!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
 mod common;
@@ -24,7 +32,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, KEY_LEFTMETA, WAIT, chord, wait};
+use common::{BTN_LEFT, ClientHandle, Command as Do, KEY_LEFTMETA, Shows, WAIT, chord, wait};
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use zbus::{
     Array, Dict, OwnedObjectPath, OwnedVariant, Signature, Structure, Variant, names::BusName,
@@ -81,12 +89,67 @@ fn hear(heard: &Heard, what: String) {
 struct Item {
     said: Arc<Mutex<Said>>,
     heard: Heard,
+    app: Option<App>,
+}
+
+/// The application behind an item: its Wayland client, whether its item
+/// takes the click's token, and what it does when activated.
+struct App {
+    commands: std::sync::mpsc::Sender<Do>,
+    takes_token: bool,
+    reacts: Reacts,
+    token: Mutex<Option<String>>,
+}
+
+/// What an application does when its item is activated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reacts {
+    /// Nothing yet: the test has it ask later.
+    Waits,
+    /// Its window asks for the focus, with the token it was given, else
+    /// with one of its own.
+    Activates,
+    /// It opens its window, hidden until then.
+    Opens,
 }
 
 #[zbus::interface(name = "org.kde.StatusNotifierItem")]
 impl Item {
     fn activate(&self, x: i32, y: i32) {
         hear(&self.heard, format!("Activate {x} {y}"));
+        let Some(app) = &self.app else {
+            return;
+        };
+        let _ = match app.reacts {
+            Reacts::Waits => Ok(()),
+            Reacts::Activates => {
+                let token = app
+                    .token
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take();
+                app.commands.send(Do::Activate(token))
+            }
+            Reacts::Opens => app.commands.send(Do::Open {
+                app_id: APP,
+                size: (400, 300),
+            }),
+        };
+    }
+
+    /// Kept for its `Activate`; an item that ignores it has no such
+    /// method, as Electron's.
+    fn provide_xdg_activation_token(&self, token: String) -> zbus::fdo::Result<()> {
+        match &self.app {
+            Some(app) if app.takes_token => {
+                hear(&self.heard, format!("ProvideXdgActivationToken {token}"));
+                *app.token.lock().unwrap_or_else(PoisonError::into_inner) = Some(token);
+                Ok(())
+            }
+            _ => Err(zbus::fdo::Error::UnknownMethod(
+                "ProvideXdgActivationToken".to_owned(),
+            )),
+        }
     }
 
     fn secondary_activate(&self, x: i32, y: i32) {
@@ -370,6 +433,11 @@ impl Bed {
 
     /// An item registers, `status` and showing `icon`.
     fn item(&mut self, status: &str, icon: Pixmaps) -> anyhow::Result<Client> {
+        self.item_of(status, icon, None)
+    }
+
+    /// The same, `app`'s.
+    fn item_of(&mut self, status: &str, icon: Pixmaps, app: Option<App>) -> anyhow::Result<Client> {
         let said = Arc::new(Mutex::new(Said {
             status: status.to_owned(),
             icon,
@@ -380,6 +448,7 @@ impl Bed {
         let item = Item {
             said: said.clone(),
             heard: heard.clone(),
+            app,
         };
         let menu = Menu {
             heard: heard.clone(),
@@ -797,4 +866,305 @@ fn resting_on_an_icon_400_ms_shows_its_tooltip() -> anyhow::Result<()> {
     })?;
     anyhow::ensure!(gone, "the tooltip stayed");
     Ok(())
+}
+
+// --- A click brings its application forward (5.14b, issue #537) ------------------
+
+/// The application's window.
+const APP: &str = "test.app";
+/// The other program's window, in front with the keyboard.
+const FRONT: &str = "test.front";
+
+/// Run by the tests below as a process of its own, given the compositor's
+/// socket in `HOCUS_TEST_FRONT`: a window of another program, until the
+/// compositor goes. Run alone, it does nothing.
+#[test]
+fn a_window_of_another_program() -> anyhow::Result<()> {
+    let Some(socket) = std::env::var_os("HOCUS_TEST_FRONT") else {
+        return Ok(());
+    };
+    let shows = Shows::Window {
+        app_id: FRONT,
+        size: (900, 700),
+        popup: false,
+    };
+    let client = common::client(Path::new(&socket), Some(shows))?;
+    // Its events end with its connection, as the compositor goes.
+    while client.events.recv().is_ok() {}
+    Ok(())
+}
+
+/// The other program, stopped by its own PID when the test ends.
+struct Front(Child);
+
+impl Drop for Front {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The scene: the other program's window with the keyboard; the
+/// application's behind it (none, `hidden`), with its tray item, which
+/// takes the click's token or not and `reacts` so; the tray's icon.
+struct Scene {
+    bed: Bed,
+    _front: Front,
+    app: ClientHandle,
+    item: Client,
+    tray: Rect,
+}
+
+impl Scene {
+    fn start(takes_token: bool, reacts: Reacts, hidden: bool) -> anyhow::Result<Option<Self>> {
+        let Some(mut bed) = Bed::start(FormChoice::Full)? else {
+            return Ok(None);
+        };
+        let child = Command::new(std::env::current_exe()?)
+            .args(["--exact", "a_window_of_another_program", "--nocapture"])
+            .env("HOCUS_TEST_FRONT", bed.hp.socket())
+            .stdout(Stdio::null())
+            .spawn()?;
+        let front = Front(child);
+        let shown = bed.hp.dispatch_until(WAIT, |hp| has_keyboard(hp, FRONT))?;
+        anyhow::ensure!(shown, "the other program's window: {:?}", bed.hp.windows());
+        let app = if hidden {
+            common::client(bed.hp.socket(), None)?
+        } else {
+            let shows = Shows::Window {
+                app_id: APP,
+                size: (400, 300),
+                popup: false,
+            };
+            let (_, app) = common::open_showing(&mut bed.hp, APP, shows)?;
+            app
+        };
+        let item = bed.item_of(
+            "Active",
+            pixmap(MAGENTA, None),
+            Some(App {
+                commands: app.commands.clone(),
+                takes_token,
+                reacts,
+                token: Mutex::new(None),
+            }),
+        )?;
+        let tray = bed.tray()?;
+        let scene = Self {
+            bed,
+            _front: front,
+            app,
+            item,
+            tray,
+        };
+        if !hidden {
+            scene.behind()?;
+        }
+        Ok(Some(scene))
+    }
+
+    /// A left click on the item's icon, once its item heard it: when.
+    fn click(&mut self) -> anyhow::Result<Instant> {
+        let before = self.heard("Activate ");
+        self.bed.over_icon(self.tray)?;
+        let at = Instant::now();
+        self.bed.press(BTN_LEFT);
+        let item = self.item.heard.clone();
+        let heard = self
+            .bed
+            .hp
+            .dispatch_until(WAIT, |_| count(&item, "Activate ") > before)?;
+        anyhow::ensure!(heard, "the item never heard the click");
+        Ok(at)
+    }
+
+    /// How many times the item heard `what`.
+    fn heard(&self, what: &str) -> usize {
+        count(&self.item.heard, what)
+    }
+
+    /// The application's window comes forward, with the keyboard.
+    fn forward(&mut self) -> anyhow::Result<()> {
+        let came = self.bed.hp.dispatch_until(WAIT, |hp| {
+            has_keyboard(hp, APP)
+                && hp
+                    .windows()
+                    .last()
+                    .and_then(|w| w.app_id.clone())
+                    .as_deref()
+                    == Some(APP)
+        })?;
+        anyhow::ensure!(came, "it stayed behind: {:?}", self.bed.hp.windows());
+        Ok(())
+    }
+
+    /// The application's window stays behind, its rim pulsing.
+    fn pulses(&mut self) -> anyhow::Result<()> {
+        let pulsed = self
+            .bed
+            .hp
+            .dispatch_until(WAIT, |hp| hp.pulse(APP).is_some())?;
+        anyhow::ensure!(pulsed, "no pulse: {:?}", self.bed.hp.windows());
+        self.behind()
+    }
+
+    /// The application's window behind the other's, which has the
+    /// keyboard.
+    fn behind(&self) -> anyhow::Result<()> {
+        let windows = self.bed.hp.windows();
+        let at = |app: &str| {
+            windows
+                .iter()
+                .position(|w| w.app_id.as_deref() == Some(app))
+        };
+        anyhow::ensure!(
+            at(APP).is_some() && at(APP) < at(FRONT),
+            "not behind: {windows:?}"
+        );
+        anyhow::ensure!(has_keyboard(&self.bed.hp, FRONT), "{windows:?}");
+        Ok(())
+    }
+
+    /// The application asks for the focus (`token`, else one of its own).
+    fn activate(&self, token: Option<String>) {
+        let _ = self.app.commands.send(Do::Activate(token));
+    }
+
+    /// A click on the other program's window, where the application's is
+    /// not: it takes the keyboard back.
+    fn back_to_front(&mut self) -> anyhow::Result<()> {
+        let windows = self.bed.hp.windows();
+        let rect = |app: &str| {
+            windows
+                .iter()
+                .find(|w| w.app_id.as_deref() == Some(app))
+                .map(|w| w.rect)
+        };
+        let (Some(front), Some(app)) = (rect(FRONT), rect(APP)) else {
+            anyhow::bail!("{windows:?}");
+        };
+        let inside = |r: Rect, (x, y): (i32, i32)| {
+            x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+        };
+        let at = [
+            (front.x + 20, front.y + 20),
+            (front.x + front.width - 20, front.y + 20),
+            (front.x + 20, front.y + front.height - 20),
+            (front.x + front.width - 20, front.y + front.height - 20),
+        ]
+        .into_iter()
+        .find(|p| !inside(app, *p))
+        .ok_or_else(|| anyhow::anyhow!("{front:?} under {app:?}"))?;
+        self.bed.hp.pointer_move(f64::from(at.0), f64::from(at.1));
+        self.bed.press(BTN_LEFT);
+        let back = self
+            .bed
+            .hp
+            .dispatch_until(WAIT, |hp| has_keyboard(hp, FRONT))?;
+        anyhow::ensure!(back, "{:?}", self.bed.hp.windows());
+        Ok(())
+    }
+}
+
+fn has_keyboard(hp: &Headless, app: &str) -> bool {
+    hp.windows()
+        .iter()
+        .any(|w| w.app_id.as_deref() == Some(app) && w.focused && w.keyboard)
+}
+
+fn count(heard: &Heard, what: &str) -> usize {
+    heard
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .filter(|h| h.starts_with(what))
+        .count()
+}
+
+/// Longer than a click's 2 s.
+const PAST_THE_CLICK: Duration = Duration::from_millis(2300);
+
+#[test]
+fn a_click_gives_its_token_to_an_item_that_takes_it() -> anyhow::Result<()> {
+    let Some(mut scene) = Scene::start(true, Reacts::Waits, false)? else {
+        return Ok(());
+    };
+    scene.click()?;
+    // The token first, then `Activate`.
+    let heard = scene
+        .item
+        .heard
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let given = heard
+        .iter()
+        .position(|h| h.starts_with("ProvideXdgActivationToken "));
+    let activated = heard.iter().position(|h| h.starts_with("Activate "));
+    assert!(given.is_some() && given < activated, "{heard:?}");
+    let token = heard[given.unwrap_or_default()]
+        .trim_start_matches("ProvideXdgActivationToken ")
+        .to_owned();
+    // The token alone is enough: used past the click's 2 s, it still
+    // brings the window forward.
+    wait(&mut scene.bed.hp, PAST_THE_CLICK)?;
+    scene.behind()?;
+    scene.activate(Some(token));
+    scene.forward()
+}
+
+#[test]
+fn a_click_brings_forward_an_application_that_makes_its_own_token() -> anyhow::Result<()> {
+    let Some(mut scene) = Scene::start(false, Reacts::Activates, false)? else {
+        return Ok(());
+    };
+    scene.click()?;
+    scene.forward()?;
+    assert_eq!(scene.heard("ProvideXdgActivationToken"), 0);
+    Ok(())
+}
+
+#[test]
+fn without_a_click_its_rim_only_pulses() -> anyhow::Result<()> {
+    let Some(mut scene) = Scene::start(false, Reacts::Activates, false)? else {
+        return Ok(());
+    };
+    scene.activate(None);
+    scene.pulses()
+}
+
+#[test]
+fn a_click_lets_it_take_the_focus_once_within_2_s() -> anyhow::Result<()> {
+    let Some(mut scene) = Scene::start(false, Reacts::Waits, false)? else {
+        return Ok(());
+    };
+    // Asked 2 s after the click: too late.
+    scene.click()?;
+    wait(&mut scene.bed.hp, PAST_THE_CLICK)?;
+    scene.activate(None);
+    scene.pulses()?;
+    // Asked at once: it comes; asked again, from behind, within the 2 s:
+    // only its rim.
+    let clicked = scene.click()?;
+    scene.activate(None);
+    scene.forward()?;
+    scene.back_to_front()?;
+    scene.activate(None);
+    scene.pulses()?;
+    assert!(
+        clicked.elapsed() < Duration::from_secs(2),
+        "too slow to tell: {:?}",
+        clicked.elapsed()
+    );
+    Ok(())
+}
+
+#[test]
+fn an_application_hidden_in_the_tray_opens_its_window_focused() -> anyhow::Result<()> {
+    let Some(mut scene) = Scene::start(false, Reacts::Opens, true)? else {
+        return Ok(());
+    };
+    assert!(common::rect_of(&scene.bed.hp, APP).is_none());
+    scene.click()?;
+    scene.forward()
 }
