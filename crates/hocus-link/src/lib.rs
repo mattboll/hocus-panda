@@ -28,7 +28,10 @@
 //! capture's toolbar, or chooses what to share.
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
-//! question.
+//! question. One request has an answer: a click on a tray icon asks for an
+//! activation token, which the compositor sends at once; only the tray's
+//! own thread waits for it, briefly, never the loop nor the shell's
+//! surfaces.
 //!
 //! The form switch is one motion, which both sides compute from the same
 //! start on the same clock (`CLOCK_MONOTONIC`, in microseconds): the
@@ -411,6 +414,10 @@ pub enum ToShell {
     /// changes; empty, nothing is ([`ShareShown`]). Written `shares`, then
     /// each after a tab.
     Shares(Vec<ShareShown>),
+    /// The activation token for the tray's click `ask`
+    /// ([`ToCompositor::TrayClick`], 5.14b): the shell gives it to the
+    /// item before activating it. Written `tray-token ASK TOKEN`.
+    TrayToken { ask: u64, token: String },
 }
 
 /// Where the emoji picker opens on its screen (logical pixels, from the
@@ -1171,6 +1178,14 @@ pub enum ToCompositor {
     /// The chooser's thumbnails' places, what it chose, its cancel, a
     /// share stopped from the bar (5.11, [`ShareAsk`]).
     Share(ShareAsk),
+    /// The user clicked a tray icon (5.14b): the shell is about to call
+    /// the item's `Activate` or `SecondaryActivate`. `pid` is the process
+    /// of the item's D-Bus connection (0: not known). The compositor
+    /// answers at once with an activation token made for that click
+    /// ([`ToShell::TrayToken`]), and lets that process's application
+    /// focus one window shortly after, with a token of its own or none.
+    /// Written `tray-click ASK PID`.
+    TrayClick { ask: u64, pid: u32 },
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1350,6 +1365,7 @@ impl fmt::Display for ToShell {
             Self::EmojiInserted => f.write_str("emoji-inserted"),
             Self::ShareChoose(choose) => choose.write(f),
             Self::ShareChooseEnd(request) => write!(f, "share-choose-end {request}"),
+            Self::TrayToken { ask, token } => write!(f, "tray-token {ask} {token}"),
             Self::Shares(shares) => {
                 f.write_str("shares")?;
                 for share in shares {
@@ -1594,6 +1610,16 @@ impl FromStr for ToShell {
                 })
             }
             Some("emoji-inserted") => Ok(Self::EmojiInserted),
+            Some("tray-token") => {
+                let ask = word(&mut words, "click")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("click: {e}")))?;
+                let token = word(&mut words, "token")?.to_owned();
+                if words.next().is_some() {
+                    return Err(BadLine(format!("a token on one word: {line:?}")));
+                }
+                Ok(Self::TrayToken { ask, token })
+            }
             Some("share-choose-end") => Ok(Self::ShareChooseEnd(
                 word(&mut words, "request")?
                     .parse()
@@ -1698,6 +1724,7 @@ impl fmt::Display for ToCompositor {
                 write!(f, "raise {pid} {}", if app.is_empty() { "-" } else { &app })
             }
             Self::LogOut => f.write_str("log-out"),
+            Self::TrayClick { ask, pid } => write!(f, "tray-click {ask} {pid}"),
             Self::Capture(ask) => ask.write(f),
             Self::Share(ask) => ask.write(f),
             Self::Clip { paste, clip } => {
@@ -1769,6 +1796,17 @@ impl FromStr for ToCompositor {
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
             Some("log-out") => Ok(Self::LogOut),
+            Some("tray-click") => {
+                let mut number = |what: &str| -> Result<u64, BadLine> {
+                    word(&mut words, what)?
+                        .parse()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                let ask = number("click")?;
+                let pid = u32::try_from(number("process")?)
+                    .map_err(|e| BadLine(format!("process: {e}")))?;
+                Ok(Self::TrayClick { ask, pid })
+            }
             Some("capture") => CaptureAsk::read(&mut words).map(Self::Capture),
             Some("clip") => Ok(Self::Clip {
                 paste: flag(words.next(), "paste", "copy")?,
@@ -1949,9 +1987,15 @@ mod tests {
                 at: EmojiAt::Screen,
             },
             ToShell::EmojiInserted,
+            ToShell::TrayToken {
+                ask: 7,
+                token: "Xq3vZk0aPAbtUJjJ2hF0cO1DzQ9m4wKe".into(),
+            },
         ] {
             assert_eq!(line.to_string().parse::<ToShell>(), Ok(line));
         }
+        assert!("tray-token 7".parse::<ToShell>().is_err());
+        assert!("tray-token 7 a b".parse::<ToShell>().is_err());
         for line in [
             ToCompositor::Emoji {
                 keep: false,
@@ -2180,6 +2224,8 @@ mod tests {
                 pid: 0,
                 app: String::new(),
             },
+            ToCompositor::TrayClick { ask: 3, pid: 4242 },
+            ToCompositor::TrayClick { ask: 4, pid: 0 },
             ToCompositor::Launch(Launch {
                 id: "org.mozilla.firefox".into(),
                 terminal: false,
@@ -2196,6 +2242,8 @@ mod tests {
             assert_eq!(message.to_string().parse::<ToCompositor>(), Ok(message));
         }
         assert!("wake".parse::<ToCompositor>().is_err());
+        assert!("tray-click 3".parse::<ToCompositor>().is_err());
+        assert!("tray-click 3 -1".parse::<ToCompositor>().is_err());
         assert!("closing".parse::<ToCompositor>().is_err());
         assert!("briefing".parse::<ToCompositor>().is_err());
         assert!("briefing shut".parse::<ToCompositor>().is_err());

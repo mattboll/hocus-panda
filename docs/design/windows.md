@@ -55,7 +55,10 @@ open on), agents' badges on windows (slice 3).
   ring at 55 %, then the ring grows to 14 px as both fade, by 600 ms.
   With reduced motion, or a compositor on the CPU, the 2 px rim lights
   and fades without its ring. A window asking for the focus without a
-  token pulses the same way. Its pulse ends when it gets the focus.
+  token pulses the same way. Its pulse ends when it gets the focus. A
+  click on an application's tray icon is the user's too: its application
+  may focus one window within 2 s, asking or opening it (bar.md, as
+  built, 5.14b).
 - Focus moves with Alt+Tab (section 11) and the pointer. Focusing the
   window on a side is an action of `[shortcuts]` (`focus-left`,
   `focus-right`, `focus-up`, `focus-down`) with no default key:

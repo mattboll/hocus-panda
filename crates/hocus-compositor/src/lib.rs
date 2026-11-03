@@ -50,6 +50,7 @@ mod socket;
 mod state;
 mod switcher;
 mod text_input;
+mod tray;
 mod windows;
 mod wobble;
 mod xwayland;

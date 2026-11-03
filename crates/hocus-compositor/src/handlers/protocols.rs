@@ -43,8 +43,9 @@ impl XdgActivationHandler for State {
     }
 
     /// A window asks for the focus: with a token from the user's input (or
-    /// one the desktop gave a program it started), it comes forward;
-    /// otherwise its rim pulses (§4).
+    /// one the desktop gave a program it started, or a tray click's), or
+    /// just after a click on its application's tray icon (5.14b), it comes
+    /// forward; otherwise its rim pulses (§4).
     fn request_activation(
         &mut self,
         token: XdgActivationToken,
@@ -52,11 +53,18 @@ impl XdgActivationHandler for State {
         surface: WlSurface,
     ) {
         let now: std::time::Duration = self.clock.now().into();
-        let allowed = self
+        let by_token = self
             .activation_tokens
             .remove(token.as_str())
             .is_some_and(|(made, valid)| valid && now.saturating_sub(made) < TOKEN_FOCUSES);
         self.activation_state.remove_token(&token);
+        let allowed = if by_token {
+            self.tray_token_used(token.as_str());
+            true
+        } else {
+            let pid = self.client_pid(&surface);
+            self.tray_click_focuses(pid)
+        };
         let window = self.window_for(&surface).and_then(|w| self.id_of(&w));
         tracing::debug!(allowed, ?window, "activation asked");
         match window {

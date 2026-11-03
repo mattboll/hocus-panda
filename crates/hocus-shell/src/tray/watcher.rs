@@ -717,22 +717,31 @@ impl Tray {
                 );
                 let inputs = self.inputs.clone();
                 tokio::spawn(async move {
-                    let done = connection
-                        .call_method(
-                            Some(owner.as_str()),
-                            path.as_str(),
-                            Some(interface),
-                            "Activate",
-                            &(0i32, 0i32),
-                        )
-                        .await;
+                    let done = activate(&connection, &owner, &path, interface, "Activate").await;
                     if let Err(err) = done {
                         tracing::debug!(%err, key, "the item does not activate: its menu");
                         let _ = inputs.send(Input::Ask(Ask::Menu { key, bar, rect }));
                     }
                 });
             }
-            Ask::Secondary { key } => self.call(key, "SecondaryActivate", (0i32, 0i32)),
+            Ask::Secondary { key } => {
+                let Some(item) = self.items.iter().find(|i| i.key == key) else {
+                    return;
+                };
+                let (connection, owner, path, interface) = (
+                    self.connection.clone(),
+                    item.owner.clone(),
+                    item.path.clone(),
+                    item.interface,
+                );
+                tokio::spawn(async move {
+                    let method = "SecondaryActivate";
+                    let done = activate(&connection, &owner, &path, interface, method).await;
+                    if let Err(err) = done {
+                        tracing::debug!(%err, key, "a tray item's second action failed");
+                    }
+                });
+            }
             Ask::Scroll {
                 key,
                 delta,
@@ -890,6 +899,70 @@ impl Tray {
                 (_, None) => {}
             }
         });
+    }
+}
+
+/// Calls the item's `method` (`Activate`, `SecondaryActivate`) for the
+/// user's click: the compositor told first, naming the item's process,
+/// and its token for the click given to the item, so that its window may
+/// come forward (5.14b).
+async fn activate(
+    connection: &Connection,
+    owner: &str,
+    path: &str,
+    interface: &'static str,
+    method: &'static str,
+) -> zbus::Result<()> {
+    let pid = pid_of(connection, owner).await.unwrap_or(0);
+    if let Some(token) = super::clicked(pid).await {
+        provide_token(connection, owner, path, interface, &token).await;
+    }
+    connection
+        .call_method(Some(owner), path, Some(interface), method, &(0i32, 0i32))
+        .await
+        .map(|_| ())
+}
+
+/// The process of the connection `owner`, as the bus knows it.
+async fn pid_of(connection: &Connection, owner: &str) -> Option<u32> {
+    let name = BusName::try_from(owner).ok()?;
+    let bus = DBusProxy::new(connection).await.ok()?;
+    match bus.get_connection_unix_process_id(name).await {
+        Ok(pid) => Some(pid),
+        Err(err) => {
+            tracing::debug!(%err, owner, "a tray item's process not known");
+            None
+        }
+    }
+}
+
+/// How long an item may take to take the click's token before it is
+/// activated all the same.
+const TOKEN_TAKEN: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// `ProvideXdgActivationToken(token)`, its answer waited for before
+/// `Activate`: an item may serve its calls side by side (zbus's do), and
+/// must have the token first. An item without the method (Electron's)
+/// says so at once.
+async fn provide_token(
+    connection: &Connection,
+    owner: &str,
+    path: &str,
+    interface: &'static str,
+    token: &str,
+) {
+    let body = (token,);
+    let call = connection.call_method(
+        Some(owner),
+        path,
+        Some(interface),
+        "ProvideXdgActivationToken",
+        &body,
+    );
+    match tokio::time::timeout(TOKEN_TAKEN, call).await {
+        Ok(Ok(_)) => tracing::debug!(owner, "a tray item took its click's token"),
+        Ok(Err(err)) => tracing::debug!(%err, owner, "a tray item without a click's token"),
+        Err(_) => tracing::debug!(owner, "a tray item slow to take its click's token"),
     }
 }
 
