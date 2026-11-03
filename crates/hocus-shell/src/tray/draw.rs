@@ -631,10 +631,9 @@ impl canvas::Program<Message> for Tray {
                     );
                     let opacity = alpha * p;
                     match &item.icon {
-                        Some(handle) => f.draw_image(
-                            icon,
-                            canvas::Image::new(handle.clone()).opacity(opacity),
-                        ),
+                        Some(handle) => {
+                            f.draw_image(icon, canvas::Image::new(handle.clone()).opacity(opacity))
+                        }
                         None => kit::app_tile(
                             f,
                             icon,

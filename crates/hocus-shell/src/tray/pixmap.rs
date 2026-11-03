@@ -48,8 +48,8 @@ fn rgba((w, h, bytes): &Pixmap) -> Option<::image::RgbaImage> {
     let (w, h) = (w.unsigned_abs(), h.unsigned_abs());
     let n = (w * h) as usize;
     let mut out = Vec::with_capacity(n * 4);
-    for argb in bytes.chunks_exact(4).take(n) {
-        out.extend_from_slice(&[argb[1], argb[2], argb[3], argb[0]]);
+    for [a, r, g, b] in bytes.as_chunks::<4>().0.iter().take(n) {
+        out.extend_from_slice(&[*r, *g, *b, *a]);
     }
     ::image::RgbaImage::from_raw(w, h, out)
 }
@@ -65,12 +65,8 @@ fn fitted(image: ::image::RgbaImage, px: u32) -> ::image::RgbaImage {
         ((w as f32 * k).round() as u32).clamp(1, px),
         ((h as f32 * k).round() as u32).clamp(1, px),
     );
-    let scaled = ::image::imageops::resize(
-        &image,
-        nw,
-        nh,
-        ::image::imageops::FilterType::CatmullRom,
-    );
+    let scaled =
+        ::image::imageops::resize(&image, nw, nh, ::image::imageops::FilterType::CatmullRom);
     let mut square = ::image::RgbaImage::new(px, px);
     ::image::imageops::overlay(
         &mut square,
@@ -129,7 +125,11 @@ fn in_theme_path(dir: &Path, name: &str, px: u32) -> Option<PathBuf> {
     if !dir.is_absolute() || name.contains('/') {
         return None;
     }
-    let files = [format!("{name}.png"), format!("{name}.svg"), name.to_owned()];
+    let files = [
+        format!("{name}.png"),
+        format!("{name}.svg"),
+        name.to_owned(),
+    ];
     if let Some(file) = files.iter().map(|f| dir.join(f)).find(|f| f.is_file()) {
         return Some(file);
     }
@@ -152,7 +152,12 @@ fn in_theme_path(dir: &Path, name: &str, px: u32) -> Option<PathBuf> {
                 .map(|f| (side, f))
         })
         .collect();
-    found.sort_by_key(|(side, _)| (*side < px, if *side >= px { *side } else { u32::MAX - side }));
+    found.sort_by_key(|(side, _)| {
+        (
+            *side < px,
+            if *side >= px { *side } else { u32::MAX - side },
+        )
+    });
     found.into_iter().next().map(|(_, f)| f)
 }
 

@@ -72,7 +72,10 @@ struct Said {
 type Heard = Arc<Mutex<Vec<String>>>;
 
 fn hear(heard: &Heard, what: String) {
-    heard.lock().unwrap_or_else(PoisonError::into_inner).push(what);
+    heard
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(what);
 }
 
 struct Item {
@@ -162,11 +165,18 @@ impl Item {
 }
 
 /// An entry of the menu: `(ia{sv}av)`.
-fn entry(id: i32, props: &[(&str, Variant<'static>)], children: Vec<Variant<'static>>) -> Variant<'static> {
+fn entry(
+    id: i32,
+    props: &[(&str, Variant<'static>)],
+    children: Vec<Variant<'static>>,
+) -> Variant<'static> {
     let mut dict = Dict::new(&Signature::Str, &Signature::Variant);
     for (k, v) in props {
         let value = v.try_clone().unwrap_or_else(|_| Variant::from(""));
-        let _ = dict.append(Variant::from((*k).to_owned()), Variant::Variant(Box::new(value)));
+        let _ = dict.append(
+            Variant::from((*k).to_owned()),
+            Variant::Variant(Box::new(value)),
+        );
     }
     let mut array = Array::new(&Signature::Variant);
     for child in children {
@@ -194,7 +204,11 @@ impl Menu {
         let label = |l: &str| ("label", Variant::from(l.to_owned()));
         let rows = vec![
             entry(1, &[label("_Ouvrir Slack")], vec![]),
-            entry(2, &[("type", Variant::from("separator".to_owned()))], vec![]),
+            entry(
+                2,
+                &[("type", Variant::from("separator".to_owned()))],
+                vec![],
+            ),
             entry(
                 3,
                 &[
@@ -204,7 +218,11 @@ impl Menu {
                 ],
                 vec![],
             ),
-            entry(4, &[label("Préférences…"), ("enabled", Variant::Bool(false))], vec![]),
+            entry(
+                4,
+                &[label("Préférences…"), ("enabled", Variant::Bool(false))],
+                vec![],
+            ),
             entry(5, &[label("Quitter Slack")], vec![]),
         ];
         let children = rows
@@ -289,10 +307,8 @@ impl Bed {
             ],
         )?;
         // Its errors to the log.
-        let text = std::fs::read_to_string(&script)?.replace(
-            "\"$@\"\n",
-            &format!("\"$@\" 2>>'{}'\n", log.display()),
-        );
+        let text = std::fs::read_to_string(&script)?
+            .replace("\"$@\"\n", &format!("\"$@\" 2>>'{}'\n", log.display()));
         std::fs::write(&script, text)?;
         let mut config = Config::default();
         config.keyboard.layouts = vec!["us".to_owned()];
@@ -408,7 +424,13 @@ impl Bed {
         self.runtime.block_on(async {
             if member == "NewStatus" {
                 connection
-                    .emit_signal(None::<BusName<'_>>, ITEM_PATH, ITEM, member, &(status.as_str(),))
+                    .emit_signal(
+                        None::<BusName<'_>>,
+                        ITEM_PATH,
+                        ITEM,
+                        member,
+                        &(status.as_str(),),
+                    )
                     .await
             } else {
                 connection
@@ -604,7 +626,10 @@ fn a_new_icon_draws_it_again_its_dot_with_it() -> anyhow::Result<()> {
     let dot = (x + 7, y - 7);
     bed.shows((x, y), GREEN)?;
     bed.shows(dot, GREEN)?;
-    item.said.lock().unwrap_or_else(PoisonError::into_inner).icon = pixmap(GREEN, Some(RED));
+    item.said
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .icon = pixmap(GREEN, Some(RED));
     bed.signal(&item, "NewIcon")?;
     bed.shows(dot, RED)?;
     bed.shows((x - 5, y + 5), GREEN)?;
@@ -618,10 +643,16 @@ fn passive_hides_it_and_needing_attention_shows_its_attention_icon() -> anyhow::
     };
     let item = bed.item("Active", pixmap(MAGENTA, None))?;
     bed.tray()?;
-    item.said.lock().unwrap_or_else(PoisonError::into_inner).status = "Passive".to_owned();
+    item.said
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .status = "Passive".to_owned();
     bed.signal(&item, "NewStatus")?;
     bed.no_tray()?;
-    item.said.lock().unwrap_or_else(PoisonError::into_inner).status = "NeedsAttention".to_owned();
+    item.said
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .status = "NeedsAttention".to_owned();
     bed.signal(&item, "NewStatus")?;
     let tray = bed.tray()?;
     let icon = bed.icon(tray);
@@ -643,8 +674,16 @@ fn clicks_and_the_wheel_go_to_the_item() -> anyhow::Result<()> {
     bed.heard(&item, "SecondaryActivate")?;
     bed.hp.wheel(1);
     bed.heard(&item, "Scroll ")?;
-    let heard = item.heard.lock().unwrap_or_else(PoisonError::into_inner).clone();
-    let scroll = heard.iter().find(|h| h.starts_with("Scroll")).cloned().unwrap_or_default();
+    let heard = item
+        .heard
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let scroll = heard
+        .iter()
+        .find(|h| h.starts_with("Scroll"))
+        .cloned()
+        .unwrap_or_default();
     assert!(scroll.ends_with(" vertical"), "{scroll}");
     let delta: i32 = scroll.split(' ').nth(1).unwrap_or("0").parse()?;
     assert_eq!(delta.abs(), 120, "{scroll}");
@@ -669,13 +708,22 @@ fn a_right_click_opens_its_menu_and_a_row_sends_clicked() -> anyhow::Result<()> 
     anyhow::ensure!(open, "no menu");
     let line = bed.logged_after(from, "the tray's menu shows it")?;
     // Its rows, the separator, the one off, the mnemonic's mark gone.
-    for row in ["Ouvrir Slack@", "—", "Ne pas déranger@", "Préférences…@", "Quitter Slack@"] {
+    for row in [
+        "Ouvrir Slack@",
+        "—",
+        "Ne pas déranger@",
+        "Préférences…@",
+        "Quitter Slack@",
+    ] {
         assert!(line.contains(row), "{row} in {line}");
     }
     wait(&mut bed.hp, Duration::from_millis(300))?;
     let popover = bed.hp.popover_surfaces()[0].1;
     // Beside the bar, its bottom on the icon's.
-    assert!(popover.x + popover.width <= tray.x - 6, "{popover:?} {tray:?}");
+    assert!(
+        popover.x + popover.width <= tray.x - 6,
+        "{popover:?} {tray:?}"
+    );
     let icon_bottom = bed.icon(tray).1 + 17;
     assert!(
         (popover.y + popover.height - icon_bottom).abs() <= 2,
@@ -730,9 +778,16 @@ fn resting_on_an_icon_400_ms_shows_its_tooltip() -> anyhow::Result<()> {
     })?;
     anyhow::ensure!(shows, "no tooltip");
     // The pointer came to rest at most 30 ms before `over` saw it there.
-    assert!(rested.elapsed() >= Duration::from_millis(340), "{:?}", rested.elapsed());
+    assert!(
+        rested.elapsed() >= Duration::from_millis(340),
+        "{:?}",
+        rested.elapsed()
+    );
     let line = bed.logged("the tray's tooltip shows")?;
-    assert!(line.contains("Slack") && line.contains("Vous avez 2 notifications"), "{line}");
+    assert!(
+        line.contains("Slack") && line.contains("Vous avez 2 notifications"),
+        "{line}"
+    );
     let tip = bed.hp.layer_rects(hocus_link::TIP_NAMESPACE)[0].1;
     assert!(tip.x + tip.width <= tray.x - 6, "{tip:?} {tray:?}");
     // The pointer leaving the icon takes it away.

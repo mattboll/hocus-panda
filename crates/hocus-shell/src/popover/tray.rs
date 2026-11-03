@@ -27,7 +27,7 @@ use super::{
     kit::{self, Input, Pointer, text, text_in},
 };
 use crate::{
-    levels::draw::{ACCENT, DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, ring, rgb},
+    levels::draw::{ACCENT, DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring},
     tray::menu::{Entry, Kind, Toggle},
 };
 
@@ -238,7 +238,11 @@ impl Panel {
         }
     }
 
-    fn key<Message>(&self, state: &mut State, pressed: &Pressed) -> Option<canvas::Action<Message>> {
+    fn key<Message>(
+        &self,
+        state: &mut State,
+        pressed: &Pressed,
+    ) -> Option<canvas::Action<Message>> {
         use keyboard::{Key, key::Named};
         let root = crate::tray::menu(self.key);
         let targets = root
@@ -328,9 +332,8 @@ impl<Message> canvas::Program<Message> for Panel {
         };
         let level = level(&root);
         let f = &mut frame;
-        let lit = |target: Target| {
-            state.pointer.hover == Some(target) || state.focus == Some(target)
-        };
+        let lit =
+            |target: Target| state.pointer.hover == Some(target) || state.focus == Some(target);
         // The title, spaced, or the way back.
         let title = title_rect();
         if lit(Target::Back) {
@@ -349,7 +352,13 @@ impl<Message> canvas::Program<Message> for Panel {
             }
             f.fill_text(text_in(
                 MANROPE_BOLD,
-                text(ch, Point::new(x, title.center_y()), TITLE, TITLE_INK, Alignment::Left),
+                text(
+                    ch,
+                    Point::new(x, title.center_y()),
+                    TITLE,
+                    TITLE_INK,
+                    Alignment::Left,
+                ),
             ));
             x += w + TITLE_SPACING;
         }
@@ -375,25 +384,39 @@ impl<Message> canvas::Program<Message> for Panel {
             let middle = rect.center_y();
             let mut x = rect.x + ROW_IN;
             if toggles {
-                toggle(f, entry.toggle, Point::new(x + TOGGLE / 2.0 - 2.0, middle), ink);
+                toggle(
+                    f,
+                    entry.toggle,
+                    Point::new(x + TOGGLE / 2.0 - 2.0, middle),
+                    ink,
+                );
                 x += TOGGLE;
             }
             if icons {
                 if let Some(icon) = &entry.icon {
                     f.draw_image(
-                        Rectangle::new(
-                            Point::new(x, middle - ICON / 2.0),
-                            Size::new(ICON, ICON),
-                        ),
-                        canvas::Image::new(icon.clone()).opacity(if entry.enabled { 1.0_f32 } else { 0.5 }),
+                        Rectangle::new(Point::new(x, middle - ICON / 2.0), Size::new(ICON, ICON)),
+                        canvas::Image::new(icon.clone()).opacity(if entry.enabled {
+                            1.0_f32
+                        } else {
+                            0.5
+                        }),
                     );
                 }
                 x += ICON + ICON_GAP;
             }
             let chevron = entry.submenu().then_some("›");
             let right = rect.x + rect.width - ROW_IN - if chevron.is_some() { 12.0 } else { 0.0 };
-            let label = kit::elide(&entry.label, right - x, |t| kit::measure(t, ROW_TEXT, MANROPE));
-            f.fill_text(text(label, Point::new(x, middle), ROW_TEXT, ink, Alignment::Left));
+            let label = kit::elide(&entry.label, right - x, |t| {
+                kit::measure(t, ROW_TEXT, MANROPE)
+            });
+            f.fill_text(text(
+                label,
+                Point::new(x, middle),
+                ROW_TEXT,
+                ink,
+                Alignment::Left,
+            ));
             if let Some(chevron) = chevron {
                 f.fill_text(text(
                     chevron.to_owned(),
@@ -436,7 +459,10 @@ fn toggle(f: &mut Frame, toggle: Toggle, at: Point, ink: Color) {
                     .with_line_join(canvas::LineJoin::Round),
             );
         }
-        Toggle::Radio(true) => f.fill(&Path::circle(at, 3.5), if ink == TEXT { ACCENT } else { ink }),
+        Toggle::Radio(true) => f.fill(
+            &Path::circle(at, 3.5),
+            if ink == TEXT { ACCENT } else { ink },
+        ),
         Toggle::Radio(false) => f.stroke(
             &Path::circle(at, 4.0),
             Stroke::default().with_color(DIM).with_width(1.2),
