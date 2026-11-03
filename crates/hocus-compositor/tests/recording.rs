@@ -868,10 +868,40 @@ impl ShellBed {
     }
 }
 
-/// The recording's item's height closed (6 + 10 + 4 + 16 + 6) and open
-/// (and its buttons), with the surface's 5 px around it.
-const ITEM_CLOSED: i32 = 42 + 10;
-const ITEM_OPEN: i32 = 112 + 10;
+/// The sign of what is in use (5.12), the recording its screen's tile: 6
+/// + 24 + 6, with the surface's 5 px around it.
+const SIGN: i32 = 36 + 10;
+
+impl ShellBed {
+    /// The sign's popover, opened by a click on the sign at `x` (the
+    /// bar's middle) in the surface at `sign`: its surface.
+    fn popover(
+        &mut self,
+        sign: hocus_compositor::model::Rect,
+        x: i32,
+    ) -> anyhow::Result<hocus_compositor::model::Rect> {
+        self.click(x, sign.y + sign.height / 2)?;
+        let open = self
+            .hp
+            .dispatch_until(WAIT, |hp| !hp.popover_surfaces().is_empty())?;
+        anyhow::ensure!(open, "no popover:\n{}", self.log());
+        wait(&mut self.hp, Duration::from_millis(300))?;
+        Ok(self.hp.popover_surfaces()[0].1)
+    }
+}
+
+/// The popover's last row, the recording's: its pause (at its left) and its
+/// stop (the rest).
+fn pause_at(popover: hocus_compositor::model::Rect) -> (i32, i32) {
+    (popover.x + 13 + 18, popover.y + popover.height - 13 - 15)
+}
+
+fn stop_at(popover: hocus_compositor::model::Rect) -> (i32, i32) {
+    (
+        popover.x + popover.width / 2 + 20,
+        popover.y + popover.height - 13 - 15,
+    )
+}
 
 #[test]
 fn the_toolbar_in_video_has_the_switch_son_micro_and_demarrer() -> anyhow::Result<()> {
@@ -948,21 +978,19 @@ fn the_toolbar_in_video_has_the_switch_son_micro_and_demarrer() -> anyhow::Resul
 }
 
 #[test]
-fn the_bar_item_opens_on_hover_pauses_and_stops_then_the_thumbnail() -> anyhow::Result<()> {
+fn the_signs_popover_pauses_and_stops_it_then_the_thumbnail() -> anyhow::Result<()> {
     let Some(mut bed) = ShellBed::start("1920x1080", hocus_compositor::FormChoice::Mini)? else {
         return Ok(());
     };
     bed.hp.pointer_move(400.0, 300.0);
     bed.record_screen()?;
-    // Under the clock, closed: its dot and its time.
-    let item = bed.item(ITEM_CLOSED)?;
-    let x = item.x + 27;
-    // Hovered: it opens, the agents moving under it.
-    bed.hp.pointer_move(f64::from(x), f64::from(item.y + 20));
-    let item = bed.item(ITEM_OPEN)?;
-    wait(&mut bed.hp, Duration::from_millis(150))?;
+    // Under the clock, the sign of what is in use (5.12): the screen's
+    // tile; its popover has the recording's line and buttons.
+    let item = bed.item(SIGN)?;
+    let popover = bed.popover(item, item.x + 27)?;
+    let (px, py) = pause_at(popover);
     // Pause.
-    bed.click(x, item.y + 5 + 42 + 15)?;
+    bed.click(px, py)?;
     let paused = bed
         .hp
         .dispatch_until(WAIT, |hp| hp.recording().is_some_and(|r| r.paused))?;
@@ -971,13 +999,14 @@ fn the_bar_item_opens_on_hover_pauses_and_stops_then_the_thumbnail() -> anyhow::
     let told = bed.log();
     assert!(told.contains("paused: true"), "{told}");
     // Again: it goes on.
-    bed.click(x, item.y + 5 + 42 + 15)?;
+    bed.click(px, py)?;
     let on = bed
         .hp
         .dispatch_until(WAIT, |hp| hp.recording().is_some_and(|r| !r.paused))?;
     assert!(on, "not on again");
-    // Stop: the item goes, the thumbnail comes.
-    bed.click(x, item.y + 5 + 76 + 15)?;
+    // Stop: the thumbnail comes, the sign goes once it has lingered.
+    let (sx, sy) = stop_at(popover);
+    bed.click(sx, sy)?;
     let stopped = bed.hp.dispatch_until(WAIT, |hp| hp.recording().is_none())?;
     assert!(stopped, "not stopped:\n{}", bed.log());
     bed.thumbnail()?;
@@ -998,18 +1027,17 @@ fn the_bar_item_opens_on_hover_pauses_and_stops_then_the_thumbnail() -> anyhow::
 }
 
 #[test]
-fn in_the_full_form_the_item_shows_its_buttons_always() -> anyhow::Result<()> {
+fn in_the_full_form_the_sign_and_its_popover_stop_it_too() -> anyhow::Result<()> {
     let Some(mut bed) = ShellBed::start("1920x1080", hocus_compositor::FormChoice::Full)? else {
         return Ok(());
     };
     bed.hp.pointer_move(400.0, 300.0);
     bed.record_screen()?;
-    let item = bed.item(ITEM_OPEN)?;
-    // Its stop, without hovering first: centred in the 196 px bar.
-    let x = item.x + 97;
-    bed.hp
-        .pointer_move(f64::from(x), f64::from(item.y + 5 + 76 + 15));
-    bed.click(x, item.y + 5 + 76 + 15)?;
+    let item = bed.item(SIGN)?;
+    // Centred in the 196 px bar.
+    let popover = bed.popover(item, item.x + 97)?;
+    let (x, y) = stop_at(popover);
+    bed.click(x, y)?;
     let stopped = bed.hp.dispatch_until(WAIT, |hp| hp.recording().is_none())?;
     assert!(stopped, "not stopped:\n{}", bed.log());
     bed.thumbnail()?;
@@ -1145,25 +1173,19 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
             bed.record_screen()?;
             wait(&mut bed.hp, Duration::from_millis(2200))?;
         }
-        let bar = (2560 - 260, 0, 260, 520);
-        let closed = if form == hocus_compositor::FormChoice::Full {
-            ITEM_OPEN
-        } else {
-            ITEM_CLOSED
-        };
-        let item = bed.item(closed)?;
+        let bar = (2560 - 640, 0, 640, 560);
+        let item = bed.item(SIGN)?;
         shoot(&mut bed, name("bar-recording"), Some(bar))?;
         let x = if form == hocus_compositor::FormChoice::Full {
             item.x + 97
         } else {
             item.x + 27
         };
-        bed.hp.pointer_move(f64::from(x), f64::from(item.y + 20));
-        let item = bed.item(ITEM_OPEN)?;
-        bed.hp
-            .pointer_move(f64::from(x), f64::from(item.y + 5 + 42 + 15));
+        let popover = bed.popover(item, x)?;
+        let (px, py) = pause_at(popover);
+        bed.hp.pointer_move(f64::from(px), f64::from(py));
         shoot(&mut bed, name("bar-hovered"), Some(bar))?;
-        bed.click(x, item.y + 5 + 42 + 15)?;
+        bed.click(px, py)?;
         let paused = bed
             .hp
             .dispatch_until(WAIT, |hp| hp.recording().is_some_and(|r| r.paused))?;
@@ -1172,9 +1194,10 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         if form == hocus_compositor::FormChoice::Mini {
             shoot(&mut bed, out.join("recording-paused.png"), None)?;
         }
-        bed.click(x, item.y + 5 + 42 + 15)?;
+        bed.click(px, py)?;
         wait(&mut bed.hp, Duration::from_millis(1500))?;
-        bed.click(x, item.y + 5 + 76 + 15)?;
+        let (sx, sy) = stop_at(popover);
+        bed.click(sx, sy)?;
         let thumb = bed.thumbnail()?;
         let file = bed.hp.recorded().context("saved")?.file;
         if form == hocus_compositor::FormChoice::Mini {

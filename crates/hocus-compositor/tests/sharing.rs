@@ -996,17 +996,21 @@ fn the_bars_sign_shows_and_stopping_ends_the_session() -> anyhow::Result<()> {
         !hp.popover_surfaces().is_empty()
     })?;
     anyhow::ensure!(open, "no popover:\n{}", bed.log());
-    bed.logged("the sharing popover shows it")?;
+    // Its line in the sign's popover (5.12): who, what, since when.
+    bed.logged("the in-use popover shows it")?;
     let log = bed.log();
-    assert!(log.contains("Firefox voit ton écran"), "{log}");
-    assert!(log.contains("Tu partages l'écran « HEADLESS-1 »"), "{log}");
+    assert!(log.contains("\"Firefox\""), "{log}");
+    assert!(
+        log.contains("Écran · partage l'écran « HEADLESS-1 » · depuis "),
+        "{log}"
+    );
     assert!(log.contains("Les notifications attendent la fin"), "{log}");
     bed.idle(Duration::from_millis(300))?;
     let (_, popover) = bed.hp.popover_surfaces()[0].clone();
     // Its button, the last of it.
     bed.click((
         f64::from(popover.x + popover.width / 2),
-        f64::from(popover.y + popover.height - 13 - 16),
+        f64::from(popover.y + popover.height - 13 - 15),
     ));
     bed.closed(&session)?;
     let gone = bed.hp.dispatch_until(Duration::from_secs(10), |hp| {

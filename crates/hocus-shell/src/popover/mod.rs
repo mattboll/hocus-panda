@@ -45,9 +45,9 @@ pub mod brightness;
 pub mod clipboard;
 pub mod desktop;
 pub mod history;
+pub mod in_use;
 pub mod kit;
 pub mod session;
-pub mod sharing;
 pub mod sound;
 pub mod tray;
 pub mod wifi;
@@ -113,9 +113,10 @@ pub enum Item {
     /// The footer's user (5.5): their name and logging out (the session's
     /// menu, 7.4).
     User,
-    /// The sign of what is in use, under the clock (5.11): who sees the
-    /// screen, and stopping it.
-    Sharing,
+    /// The sign of what is in use, under the clock (5.11, 5.12): who uses
+    /// the microphone, the camera or the screen; muting the microphone,
+    /// stopping a share or the recording.
+    InUse,
     /// A tray icon (5.14), by its item's key: its menu, read before it
     /// opens (a right click, or `Enter` while it holds the keyboard).
     Tray(u32),
@@ -150,11 +151,9 @@ impl Item {
     /// screen-wide launcher must not open on the way past.
     fn hovers(self, form: Form) -> bool {
         match self {
-            Self::Desktop(_)
-            | Self::Clipboard
-            | Self::Notifications
-            | Self::User
-            | Self::Sharing => true,
+            Self::Desktop(_) | Self::Clipboard | Self::Notifications | Self::User | Self::InUse => {
+                true
+            }
             Self::Keyboard | Self::Agent(_) | Self::Menu | Self::Tray(_) => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
@@ -170,7 +169,7 @@ impl Item {
             Self::Notifications => history::WIDTH,
             Self::Clipboard => clipboard::WIDTH,
             Self::User => session::WIDTH,
-            Self::Sharing => sharing::WIDTH,
+            Self::InUse => in_use::WIDTH,
             Self::Tray(_) => tray::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
@@ -193,7 +192,7 @@ impl Item {
             Self::Notifications => history::height(),
             Self::Clipboard => clipboard::height(),
             Self::User => session::height(),
-            Self::Sharing => sharing::height(),
+            Self::InUse => in_use::height(),
             Self::Tray(key) => tray::height(key),
             Self::Keyboard | Self::Decline | Self::Agent(_) | Self::Menu => 0,
         }
@@ -218,7 +217,7 @@ impl Item {
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
-            Self::Menu | Self::User | Self::Sharing => {}
+            Self::Menu | Self::User | Self::InUse => {}
             Self::Tray(_) => tray::opening(),
         }
     }
@@ -239,7 +238,7 @@ impl Item {
             | Self::Secretary
             | Self::Menu
             | Self::User
-            | Self::Sharing
+            | Self::InUse
             | Self::Tray(_)
             | Self::Clipboard => {}
             Self::Wifi => wifi::closing(),
@@ -263,7 +262,7 @@ impl Item {
             (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
                 FOOTER_NAMESPACE
             }
-            (Self::Sharing, _) => IN_USE_NAMESPACE,
+            (Self::InUse, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
             (
                 Self::Sources
@@ -284,7 +283,7 @@ impl Item {
     fn on_bottom(self) -> bool {
         !matches!(
             self,
-            Self::Sound | Self::Desktop(_) | Self::Secretary | Self::Sharing | Self::Tray(_)
+            Self::Sound | Self::Desktop(_) | Self::Secretary | Self::InUse | Self::Tray(_)
         ) && !self.agents()
     }
 
@@ -1269,7 +1268,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Notifications
         | Item::Clipboard
         | Item::User
-        | Item::Sharing => None,
+        | Item::InUse => None,
     }
 }
 

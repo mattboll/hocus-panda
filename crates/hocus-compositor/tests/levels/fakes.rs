@@ -637,12 +637,19 @@ impl Fakes {
                 .form_factor
                 .map(|f| format!(" device.form-factor = {f}"))
                 .unwrap_or_default();
+            // A source's sound comes out of its monitor's ports, which an
+            // application's capture stream is linked to (5.12).
+            let monitor = if class == "Audio/Source" {
+                " monitor = true"
+            } else {
+                ""
+            };
             // Its ports made at once, as WirePlumber would: streams link
             // to them.
             objects.push_str(&format!(
                 "{{ factory = adapter args = {{ factory.name = support.null-audio-sink node.name = {}\n\
                    node.description = \"{}\"{form} media.class = {class} audio.position = [ FL FR ] \
-                   object.linger = true adapter.auto-port-config = {{ mode = dsp position = preserve }} }} }}\n",
+                   object.linger = true adapter.auto-port-config = {{ mode = dsp{monitor} position = preserve }} }} }}\n",
                 sink.name, sink.description
             ));
         }
@@ -767,6 +774,63 @@ impl Fakes {
             || self.state(id).as_deref() == Some("running"),
             "the stream running",
         )?;
+        Ok(id)
+    }
+
+    /// A null node `node` of media class `class` with `props` (SPA's
+    /// `key = value` pairs), made in PipeWire itself, its monitor's ports
+    /// out when `monitor`; its id once its ports are there.
+    pub fn node(
+        &mut self,
+        node: &str,
+        class: &str,
+        props: &str,
+        monitor: bool,
+    ) -> anyhow::Result<u32> {
+        let props = format!(
+            "{{ factory.name = support.null-audio-sink node.name = {node} \
+             media.class = {class} {props} audio.position = [ FL FR ] object.linger = true \
+             adapter.auto-port-config = {{ mode = dsp monitor = {monitor} position = preserve }} }}"
+        );
+        let status = self
+            .pw("pw-cli")
+            .args(["create-node", "adapter", &props])
+            .stdout(Stdio::null())
+            .status()
+            .context("pw-cli")?;
+        anyhow::ensure!(status.success(), "pw-cli create-node: {status}");
+        self.streams.push(node.to_owned());
+        let prefix = if monitor { "monitor" } else { "" };
+        wait_for(|| self.ports(node, prefix).len() >= 2, "the node's ports")?;
+        self.sink(node)
+    }
+
+    /// An application's capture stream (a microphone's `Stream/Input/Audio`
+    /// or a camera's `Stream/Input/Video`): node `node` with `props`,
+    /// linked from `from`'s monitor's ports as a session manager would
+    /// link it; its id.
+    pub fn capture(
+        &mut self,
+        node: &str,
+        class: &str,
+        props: &str,
+        from: &str,
+    ) -> anyhow::Result<u32> {
+        let id = self.node(node, class, props, false)?;
+        let outs = self.ports(from, "monitor");
+        let ins = self.ports(node, "input");
+        anyhow::ensure!(
+            outs.len() == 2 && ins.len() == 2,
+            "{from}: {outs:?}, {node}: {ins:?}"
+        );
+        for (out, into) in outs.iter().zip(&ins) {
+            let status = self
+                .pw("pw-link")
+                .args([out, into])
+                .stdout(Stdio::null())
+                .status()?;
+            anyhow::ensure!(status.success(), "pw-link {out} {into}: {status}");
+        }
         Ok(id)
     }
 
