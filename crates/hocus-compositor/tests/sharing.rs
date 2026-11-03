@@ -1,8 +1,8 @@
 //! Screen sharing (5.11, issue #443): the desktop's screen cast portal
 //! (`org.freedesktop.impl.portal.ScreenCast`), called by the test as
 //! xdg-desktop-portal calls it, on a D-Bus daemon of the test's own; the
-//! streams on a PipeWire of the test's own (and its WirePlumber, which
-//! links a consumer to them), in a fresh short runtime directory; the real
+//! streams on a PipeWire of the test's own, in a fresh short runtime
+//! directory, its consumer linked to them by the test itself; the real
 //! shell showing the chooser and the bar's sign. Each daemon is stopped by
 //! its own process id; never the session's.
 //!
@@ -18,16 +18,23 @@
 //! Pixman here (and GLES on Mesa's software device for the GPU's way of
 //! handing frames over), the shell on the CPU (tiny-skia): nothing here
 //! draws on a GPU, which may be the live session's. Without the
-//! shell built, dbus-daemon or pipewire, the tests skip; without
-//! WirePlumber, the frames' part of the ring's test does.
+//! shell built, dbus-daemon or pipewire, the tests skip.
+//!
+//! No session manager: the consumer asks for no linking and the test
+//! links it to the stream's node itself (PipeWire's link factory), as
+//! `pw-link` does. WirePlumber's policy is not what is tested, and it
+//! differs between versions: 0.4 (Ubuntu 24.04's) reads `target.object` as
+//! an object's serial, 0.5 as a serial or a node's id.
 
 mod common;
 
 use std::{
+    cell::RefCell,
     collections::HashMap,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    rc::Rc,
     sync::{Arc, Mutex, PoisonError, mpsc},
     time::{Duration, Instant},
 };
@@ -104,11 +111,10 @@ fn wait_file(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A PipeWire of the test's own, and its WirePlumber when there is one,
-/// in a short runtime directory of their own (a socket's path is short).
+/// A PipeWire of the test's own, in a short runtime directory of its own
+/// (a socket's path is short).
 struct Pipewire {
     daemon: Child,
-    policy: Option<Child>,
     socket: PathBuf,
     _dir: tempfile::TempDir,
 }
@@ -138,14 +144,8 @@ impl Pipewire {
         let daemon = spawn("pipewire")?;
         let socket = run.join("pipewire-0");
         wait_file(&socket)?;
-        let policy = if has("wireplumber") {
-            Some(spawn("wireplumber")?)
-        } else {
-            None
-        };
         Ok(Self {
             daemon,
-            policy,
             socket,
             _dir: dir,
         })
@@ -154,13 +154,8 @@ impl Pipewire {
 
 impl Drop for Pipewire {
     fn drop(&mut self) {
-        for child in [self.policy.as_mut(), Some(&mut self.daemon)]
-            .into_iter()
-            .flatten()
-        {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        let _ = self.daemon.kill();
+        let _ = self.daemon.wait();
     }
 }
 
@@ -616,6 +611,55 @@ impl Drop for Consumer {
     }
 }
 
+/// The consumer's node's name, to find it in the registry.
+const CONSUMER: &str = "hocus-test-consumer";
+
+/// The ports the consumer's registry announced, by node, and its link once
+/// made.
+#[derive(Default)]
+struct Ports {
+    consumer: Option<u32>,
+    /// (node, port), output then input.
+    outputs: Vec<(u32, u32)>,
+    inputs: Vec<(u32, u32)>,
+    link: Option<pipewire::link::Link>,
+}
+
+impl Ports {
+    fn heard(
+        &mut self,
+        global: &pipewire::registry::GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+    ) {
+        use pipewire::types::ObjectType;
+        let Some(props) = global.props else { return };
+        match global.type_ {
+            ObjectType::Node if props.get("node.name") == Some(CONSUMER) => {
+                self.consumer = Some(global.id);
+            }
+            ObjectType::Port => {
+                let Some(node) = props.get("node.id").and_then(|n| n.parse().ok()) else {
+                    return;
+                };
+                match props.get("port.direction") {
+                    Some("out") => self.outputs.push((node, global.id)),
+                    Some("in") => self.inputs.push((node, global.id)),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The consumer's input port (its node, the port) and node `from`'s
+    /// output port, once both are known.
+    fn pair(&self, from: u32) -> Option<((u32, u32), u32)> {
+        let consumer = self.consumer?;
+        let input = *self.inputs.iter().find(|(n, _)| *n == consumer)?;
+        let output = self.outputs.iter().find(|(n, _)| *n == from)?.1;
+        Some((input, output))
+    }
+}
+
 fn consume(remote: &Path, node: u32) -> anyhow::Result<Consumer> {
     use pipewire as pw;
     use pw::spa::{
@@ -634,15 +678,44 @@ fn consume(remote: &Path, node: u32) -> anyhow::Result<Consumer> {
             *pw::keys::REMOTE_NAME => remote,
         }))?;
         let stream = pw::stream::StreamRc::new(
-            core,
+            core.clone(),
             "test-consumer",
             pw::properties::properties! {
+                *pw::keys::NODE_NAME => CONSUMER,
                 *pw::keys::MEDIA_TYPE => "Video",
                 *pw::keys::MEDIA_CATEGORY => "Capture",
                 *pw::keys::MEDIA_ROLE => "Screen",
-                *pw::keys::TARGET_OBJECT => node.to_string(),
             },
         )?;
+        // The share's node's output port linked to the consumer's input
+        // port once the registry has announced both, as `pw-link` does.
+        let ports = Rc::new(RefCell::new(Ports::default()));
+        let registry = core.get_registry_rc()?;
+        let _registry = registry
+            .add_listener_local()
+            .global(move |global| {
+                let mut ports = ports.borrow_mut();
+                ports.heard(global);
+                if ports.link.is_some() {
+                    return;
+                }
+                let Some((input, output)) = ports.pair(node) else {
+                    return;
+                };
+                match core.create_object::<pw::link::Link>(
+                    "link-factory",
+                    &pw::properties::properties! {
+                        *pw::keys::LINK_OUTPUT_NODE => node.to_string(),
+                        *pw::keys::LINK_OUTPUT_PORT => output.to_string(),
+                        *pw::keys::LINK_INPUT_NODE => input.0.to_string(),
+                        *pw::keys::LINK_INPUT_PORT => input.1.to_string(),
+                    },
+                ) {
+                    Ok(link) => ports.link = Some(link),
+                    Err(e) => eprintln!("the consumer could not be linked to node {node}: {e}"),
+                }
+            })
+            .register();
         let size = Arc::new(Mutex::new((0u32, 0u32)));
         let seen = size.clone();
         let _listener = stream
@@ -744,10 +817,8 @@ fn consume(remote: &Path, node: u32) -> anyhow::Result<Consumer> {
         };
         stream.connect(
             spa::utils::Direction::Input,
-            Some(node),
-            pw::stream::StreamFlags::AUTOCONNECT
-                | pw::stream::StreamFlags::MAP_BUFFERS
-                | pw::stream::StreamFlags::DONT_RECONNECT,
+            None,
+            pw::stream::StreamFlags::MAP_BUFFERS,
             &mut [pod],
         )?;
         let weak = mainloop.downgrade();
@@ -773,10 +844,6 @@ fn the_shared_screen_has_its_ring_never_in_its_stream() -> anyhow::Result<()> {
     // The ring, 2 px around the screen's edge, on the screen.
     let edge = bed.pixel(1, 540)?;
     assert!(blue(edge), "{edge:08x}");
-    if bed.pipewire.policy.is_none() {
-        eprintln!("no WirePlumber to link a consumer: the stream's frames are not looked at");
-        return Ok(());
-    }
     let node = started.streams[0].0;
     let consumer = consume(&bed.pipewire.socket, node)?;
     let start = Instant::now();
@@ -813,10 +880,6 @@ fn a_frame_costs_the_loop_well_under_a_millisecond() -> anyhow::Result<()> {
     };
     // The maintainer's screen: a frame is 16 MB.
     let mut bed = start_on(&shell, (2560, 1600), RendererChoice::Pixman)?;
-    if bed.pipewire.policy.is_none() {
-        eprintln!("no WirePlumber to link a consumer: skipped");
-        return Ok(());
-    }
     let (_, started) = bed.share_screen()?;
     let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
     let start = Instant::now();
@@ -859,10 +922,6 @@ fn on_gles_the_read_back_thread_hands_the_frames_over() -> anyhow::Result<()> {
             return Ok(());
         }
     };
-    if bed.pipewire.policy.is_none() {
-        eprintln!("no WirePlumber to link a consumer: skipped");
-        return Ok(());
-    }
     let (_, started) = bed.share_screen()?;
     let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
     let start = Instant::now();

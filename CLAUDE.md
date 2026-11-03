@@ -152,9 +152,9 @@ terminal; none otherwise), and streams to PipeWire's default socket
 (`PIPEWIRE_REMOTE`, else `pipewire-0` in the runtime directory): next to a
 live session, give the nested compositor a PipeWire of its own, or its
 streams appear on your real PipeWire. Its tests
-(`crates/hocus-compositor/tests/sharing.rs`) start a dbus-daemon, a
-PipeWire and a WirePlumber of their own (`Config::pipewire_remote`), and
-skip without them.
+(`crates/hocus-compositor/tests/sharing.rs`) start a dbus-daemon and a
+PipeWire of their own (`Config::pipewire_remote`), link their consumer
+themselves (no WirePlumber), and skip without them.
 
 Screen captures (`Print`, docs/design/screenshots.md) are saved in
 `$XDG_PICTURES_DIR` (else `user-dirs.dirs`', else `~/Pictures`): next to a

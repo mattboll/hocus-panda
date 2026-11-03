@@ -220,15 +220,16 @@ what is in use.
   not honoured (each share asks again).
 - **Measured headless** (`crates/hocus-compositor/tests/sharing.rs`): the
   real shell on the CPU, the test calling the portal as xdg-desktop-portal
-  does, on a D-Bus daemon of its own, a PipeWire and a WirePlumber of its
-  own in a short runtime directory of their own, each stopped by its
-  process id: a request for screens shows the chooser (its words, its
+  does, on a D-Bus daemon of its own, a PipeWire of its own in a short
+  runtime directory of its own, each stopped by its process id: a request for screens shows the chooser (its words, its
   Screens tab, the screen selected, the pointer's box ticked) and `Enter`
   returns the screen's stream (its node, its type, its size and place);
   one for windows returns the window's, the pointer off as asked, and the
   window has its ring on the screen; `Escape` returns the cancel
   response; a shared screen has its ring at its edges and a consumer
-  linked by WirePlumber gets frames without it; the sign shows under the
+  linked to its node gets frames without it (the test links it, as
+  `pw-link` does: no session manager, whose policy differs between
+  versions); the sign shows under the
   clock, its popover says who sees what, and its button ends the share and
   closes the session; three notifications held, then one bubble summing
   them up; a shared window closing ends its share; handing a 2560 × 1600
