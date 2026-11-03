@@ -175,6 +175,8 @@ pub struct State {
     pub bubbles: crate::bubbles::Bubbles,
     /// The clipboard's history's copies and pastes (5.6).
     pub clipboard: crate::clipboard::Clipboard,
+    /// The emoji picker's insertions, and the text inputs (5.7).
+    pub emoji: crate::emoji::Emoji,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -351,6 +353,7 @@ impl State {
             peek: crate::peek::Peeks::default(),
             bubbles: crate::bubbles::Bubbles::default(),
             clipboard: crate::clipboard::Clipboard::default(),
+            emoji: crate::emoji::Emoji::new(dh),
             swiping: None,
             switcher: None,
             switcher_out: None,

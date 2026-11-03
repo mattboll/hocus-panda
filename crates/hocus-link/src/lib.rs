@@ -14,13 +14,15 @@
 //! their windows, their applications and their titles, the agents'
 //! tools and the agents, the agent whose panda peeks out of the bar,
 //! `Super+Space` for the launcher, what clients copy and `Super+V` for the
-//! clipboard's history, and the screen the notifications' bubbles show on;
+//! clipboard's history, `Super+.` for the emoji picker and where it opens,
+//! and the screen the notifications' bubbles show on;
 //! the shell draws the bars, their popovers, the peek, the launcher and the
 //! bubbles, keeps the levels and the clipboard's history, and says when it
 //! draws on the CPU, when a popover, the launcher or a bubble closes, and
 //! when the user asks for the next layout, another desktop or a window,
 //! plugs a tool in or out, declines them, copies a text, pastes or copies
-//! an item of the clipboard's history, starts an application, or clicks a
+//! an item of the clipboard's history, inserts an emoji, starts an
+//! application, or clicks a
 //! bubble (its application's window).
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
@@ -77,6 +79,31 @@ pub const LAUNCHER_NAMESPACE: &str = "hocus-launcher";
 pub const LAUNCHER_TOAST_NAMESPACE: &str = "hocus-launcher-toast";
 /// How long the launcher's toast shows, its fades included.
 pub const LAUNCHER_TOAST: Duration = Duration::from_millis(1800);
+/// The namespace of the emoji picker's layer surface (5.7): under the
+/// focused application's caret, else centred on its window or the screen,
+/// holding the keyboard while it is open. The shell draws it; the
+/// compositor blurs behind it, draws its shadow and moves it in and out, as
+/// a popover's ([`EMOJI_RISE`]).
+pub const EMOJI_NAMESPACE: &str = "hocus-emoji";
+/// The emoji picker is drawn this many times its mockup's sizes, the
+/// launcher's (5.1b).
+pub const EMOJI_ZOOM: f64 = LAUNCHER_ZOOM;
+/// Its corners, logical pixels: the mockup's 14 px, zoomed.
+pub const EMOJI_RADIUS: f64 = 14.0 * EMOJI_ZOOM;
+/// It comes down this far (logical pixels) as it fades in, over
+/// [`POPOVER_OPEN`], and goes back up as it fades out: the mockup's
+/// `translateY(-6px)`, zoomed.
+pub const EMOJI_RISE: f64 = 6.0 * EMOJI_ZOOM;
+/// The most bytes an emoji inserted holds (a family with its tones is 35).
+pub const EMOJI_MAX: usize = 64;
+
+/// Whether `text` can be an emoji inserted: on one word, without spaces
+/// nor control characters, [`EMOJI_MAX`] bytes at most.
+pub fn emoji_text(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= EMOJI_MAX
+        && !text.chars().any(|c| c.is_whitespace() || c.is_control())
+}
 
 /// The namespaces of a notification's bubble (5.3), one surface each, its
 /// number after the prefix ([`bubble_namespace`]): the compositor moves
@@ -317,6 +344,41 @@ pub enum ToShell {
     /// the screen of the focused window, else the pointer's, its field
     /// holding the keyboard; open, it closes. Written `clipboard OUTPUT`.
     Clipboard { output: String },
+    /// The emoji picker's shortcut (5.7, `Super+.`): it opens on `output`
+    /// (its scale in 120ths, its size `width` × `height` logical pixels)
+    /// at `at`, or closes when it is open. Written `emoji OUTPUT SCALE
+    /// WIDTH HEIGHT caret X Y W H`, `… window X Y W H` or `… screen`.
+    Emoji {
+        output: String,
+        scale: u32,
+        width: i32,
+        height: i32,
+        at: EmojiAt,
+    },
+    /// An emoji inserted with the picker kept open (`Shift+Enter`) went
+    /// into its window, or could not: the picker takes the keyboard back.
+    /// Written `emoji-inserted`.
+    EmojiInserted,
+}
+
+/// Where the emoji picker opens on its screen (logical pixels, from the
+/// screen's top left corner): under the focused application's caret, as
+/// its text input says it; centred on the focused window; or centred on
+/// the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmojiAt {
+    Caret(Rect),
+    Window(Rect),
+    Screen,
+}
+
+/// A rectangle, logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 /// What the clipboard's history keeps of a selection (5.6): its text (the
@@ -1041,6 +1103,13 @@ pub enum ToCompositor {
     /// `Ctrl+V` (`Ctrl+Shift+V` in a terminal). Written `clip paste KIND
     /// DATA` or `clip copy KIND DATA`, the data in base64.
     Clip { paste: bool, clip: Clip },
+    /// An emoji chosen in the picker or the launcher (5.7): it goes into
+    /// the window that had the keyboard, through its text input when it
+    /// has one, else pasted, the clipboard given back after. With `keep`
+    /// the picker stays open, and is told when it is in
+    /// ([`ToShell::EmojiInserted`]). Written `emoji insert TEXT` or `emoji
+    /// keep TEXT`.
+    Emoji { keep: bool, text: String },
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1195,6 +1264,25 @@ impl fmt::Display for ToShell {
                 clip.write(f)
             }
             Self::Clipboard { output } => write!(f, "clipboard {output}"),
+            Self::Emoji {
+                output,
+                scale,
+                width,
+                height,
+                at,
+            } => {
+                write!(f, "emoji {output} {scale} {width} {height} ")?;
+                match at {
+                    EmojiAt::Caret(r) => {
+                        write!(f, "caret {} {} {} {}", r.x, r.y, r.width, r.height)
+                    }
+                    EmojiAt::Window(r) => {
+                        write!(f, "window {} {} {} {}", r.x, r.y, r.width, r.height)
+                    }
+                    EmojiAt::Screen => f.write_str("screen"),
+                }
+            }
+            Self::EmojiInserted => f.write_str("emoji-inserted"),
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -1367,6 +1455,44 @@ impl FromStr for ToShell {
                 output: word(&mut words, "output")?.to_owned(),
             }),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
+            Some("emoji") => {
+                let output = word(&mut words, "output")?.to_owned();
+                let mut number = |what: &str| -> Result<i32, BadLine> {
+                    word(&mut words, what)?
+                        .parse()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                let scale = number("scale")?;
+                let (width, height) = (number("width")?, number("height")?);
+                let place = word(&mut words, "place")?;
+                let mut rect = || -> Result<Rect, BadLine> {
+                    let mut number = |what: &str| -> Result<i32, BadLine> {
+                        word(&mut words, what)?
+                            .parse()
+                            .map_err(|e| BadLine(format!("{what}: {e}")))
+                    };
+                    Ok(Rect {
+                        x: number("x")?,
+                        y: number("y")?,
+                        width: number("width")?,
+                        height: number("height")?,
+                    })
+                };
+                let at = match place {
+                    "caret" => EmojiAt::Caret(rect()?),
+                    "window" => EmojiAt::Window(rect()?),
+                    "screen" => EmojiAt::Screen,
+                    other => return Err(BadLine(format!("{other:?}: caret, window or screen"))),
+                };
+                Ok(Self::Emoji {
+                    output,
+                    scale: u32::try_from(scale).map_err(|e| BadLine(format!("scale: {e}")))?,
+                    width,
+                    height,
+                    at,
+                })
+            }
+            Some("emoji-inserted") => Ok(Self::EmojiInserted),
             Some("launcher") => Ok(Self::Launcher {
                 output: word(&mut words, "output")?.to_owned(),
                 scale: word(&mut words, "scale")?
@@ -1470,6 +1596,9 @@ impl fmt::Display for ToCompositor {
                 write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
                 clip.write(f)
             }
+            Self::Emoji { keep, text } => {
+                write!(f, "emoji {} {text}", if *keep { "keep" } else { "insert" })
+            }
             Self::Launch(launch) => {
                 write!(
                     f,
@@ -1533,6 +1662,17 @@ impl FromStr for ToCompositor {
                 paste: flag(words.next(), "paste", "copy")?,
                 clip: Clip::read(&mut words)?,
             }),
+            Some("emoji") => {
+                let keep = flag(words.next(), "keep", "insert")?;
+                let text = word(&mut words, "emoji")?;
+                if !emoji_text(text) || words.next().is_some() {
+                    return Err(BadLine("not an emoji".to_owned()));
+                }
+                Ok(Self::Emoji {
+                    keep,
+                    text: text.to_owned(),
+                })
+            }
             Some("desktop") => {
                 let output = word(&mut words, "output")?.to_owned();
                 let to = match word(&mut words, "desktop")? {
@@ -1657,6 +1797,82 @@ mod tests {
                 output: "eDP-1".into(),
             },
         ]
+    }
+
+    #[test]
+    fn the_emoji_pickers_lines_read_back_as_written() {
+        let rect = Rect {
+            x: 120,
+            y: -4,
+            width: 2,
+            height: 18,
+        };
+        for line in [
+            ToShell::Emoji {
+                output: "eDP-1".into(),
+                scale: 180,
+                width: 1707,
+                height: 1067,
+                at: EmojiAt::Caret(rect),
+            },
+            ToShell::Emoji {
+                output: "HDMI-A-1".into(),
+                scale: 120,
+                width: 1920,
+                height: 1080,
+                at: EmojiAt::Window(rect),
+            },
+            ToShell::Emoji {
+                output: "HDMI-A-1".into(),
+                scale: 120,
+                width: 1920,
+                height: 1080,
+                at: EmojiAt::Screen,
+            },
+            ToShell::EmojiInserted,
+        ] {
+            assert_eq!(line.to_string().parse::<ToShell>(), Ok(line));
+        }
+        for line in [
+            ToCompositor::Emoji {
+                keep: false,
+                text: "🐱".into(),
+            },
+            ToCompositor::Emoji {
+                keep: true,
+                text: "🧑🏿‍🤝‍🧑🏿".into(),
+            },
+        ] {
+            assert_eq!(line.to_string().parse::<ToCompositor>(), Ok(line));
+        }
+        assert_eq!(
+            "emoji eDP-1 120 1920 1080 caret 1 2 3 4".parse::<ToShell>(),
+            Ok(ToShell::Emoji {
+                output: "eDP-1".into(),
+                scale: 120,
+                width: 1920,
+                height: 1080,
+                at: EmojiAt::Caret(Rect {
+                    x: 1,
+                    y: 2,
+                    width: 3,
+                    height: 4
+                }),
+            })
+        );
+        for bad in [
+            "emoji eDP-1 120 1920 1080",
+            "emoji eDP-1 120 1920 1080 caret 1 2",
+            "emoji eDP-1 120 1920 1080 middle",
+        ] {
+            assert!(bad.parse::<ToShell>().is_err(), "{bad}");
+        }
+        for bad in ["emoji insert", "emoji maybe 🐱", "emoji insert 🐱 🐶"] {
+            assert!(bad.parse::<ToCompositor>().is_err(), "{bad}");
+        }
+        let long = "😀".repeat(20);
+        assert!(!emoji_text(&long));
+        assert!(!emoji_text("a\u{7}"));
     }
 
     #[test]

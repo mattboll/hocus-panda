@@ -451,6 +451,15 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
     },
+    /// The emoji picker's surface on `output` (5.7): `size`, its margins
+    /// from the screen's top left corner (top, right, bottom, left),
+    /// holding the keyboard.
+    Emoji {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+        margin: (i32, i32, i32, i32),
+    },
     /// A line to the compositor.
     Tell(ToCompositor),
 }
@@ -1240,7 +1249,7 @@ pub fn key(
     text: Option<&str>,
 ) -> bool {
     use iced::keyboard::{Key, key::Named};
-    if crate::launcher::key(key, modifiers, text) {
+    if crate::launcher::key(key, modifiers, text) || crate::emoji::key(key, modifiers, text) {
         return true;
     }
     let (menu, focused) = with(|c| {
@@ -1402,10 +1411,14 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
         *EFFECTS.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
         loop {
             let deadline = with(|c| c.deadline());
-            let deadline = match (deadline, crate::launcher::deadline()) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            };
+            let deadline = [
+                deadline,
+                crate::launcher::deadline(),
+                crate::emoji::deadline(),
+            ]
+            .into_iter()
+            .flatten()
+            .min();
             let effects = match deadline {
                 Some(at) => {
                     use iced::futures::future::{Either, select};
@@ -1417,6 +1430,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             let now = Instant::now();
                             let mut due = with(|c| c.tick(now));
                             due.extend(crate::launcher::tick(now));
+                            due.extend(crate::emoji::tick(now));
                             Some(due)
                         }
                     }
@@ -1634,6 +1648,31 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: true,
                 namespace: Some(hocus_link::LAUNCHER_TOAST_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::Emoji {
+            id,
+            output,
+            size,
+            margin,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Left,
+                // Its margins from the screen's corner, whatever other
+                // surfaces keep.
+                exclusive_zone: Some(-1),
+                margin: Some(margin),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::EMOJI_NAMESPACE.to_owned()),
             },
             id,
         }],

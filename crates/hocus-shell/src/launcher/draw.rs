@@ -121,6 +121,21 @@ const CARD_SUB: f32 = z(12.0);
 const CARD_LINES_GAP: f32 = z(2.0);
 const CARD_HINT: f32 = z(11.5);
 const MONO: iced::Font = iced::Font::with_name("Martian Mono");
+/// The emoji row of a `:` query (5.7): a card 12 px by 16 px in, its
+/// heading (11 px 700 capitals spaced 0.08 em, `#8FE0A8`), 8 px, its
+/// emoji in 44 px cells 6 px apart (radius 10, the emoji 26 px), the
+/// selected one in the green border and tint, the others on
+/// `rgba(255,255,255,0.04)`.
+const EMOJI_PAD: Size = Size::new(z(16.0), z(12.0));
+const EMOJI_HEAD: f32 = z(11.0);
+const EMOJI_HEAD_LINE: f32 = z(15.0);
+const EMOJI_HEAD_GAP: f32 = z(8.0);
+const EMOJI_CELL: f32 = z(44.0);
+const EMOJI_CELL_GAP: f32 = z(6.0);
+const EMOJI_CELL_RADIUS: f32 = z(10.0);
+const EMOJI_SIZE: f32 = z(26.0);
+const EMOJI_CARD: f32 = EMOJI_PAD.height * 2.0 + EMOJI_HEAD_LINE + EMOJI_HEAD_GAP + EMOJI_CELL;
+const EMOJI_CARD_FILL: Color = Color::from_rgba8(108, 194, 135, 0.10);
 
 const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
 const FIELD_RIM: Color = Color::from_rgba8(108, 194, 135, 0.45);
@@ -219,6 +234,7 @@ fn height_of(row: &Row) -> f32 {
         Row::Head(_) => HEAD,
         Row::Tiles(_) => TILE_ROW,
         Row::Card(card, _) => card.row(),
+        Row::Emoji(_) => EMOJI_CARD + CARD_UNDER,
     }
 }
 
@@ -288,6 +304,8 @@ pub struct Layout {
     pub tiles: Vec<(usize, Rectangle)>,
     /// The cards shown: their place in the grid's order, and where.
     pub cards: Vec<(usize, Card, Rectangle)>,
+    /// The emoji row's card, and its emoji: their places, and where.
+    pub emoji: Option<(Rectangle, Vec<(usize, Rectangle)>)>,
     /// The scroll mark, when the grid overflows.
     pub mark: Option<Rectangle>,
 }
@@ -299,6 +317,7 @@ impl Layout {
         let mut heads = Vec::new();
         let mut tiles = Vec::new();
         let mut cards = Vec::new();
+        let mut emoji = None;
         let left = area.x + PANEL_PAD;
         // A card is as wide as the tiles' columns.
         let card_width = grid.columns as f32 * TILE.width;
@@ -323,6 +342,27 @@ impl Layout {
                         Size::new(card_width, card.row() - CARD_UNDER),
                     ),
                 )),
+                Row::Emoji(places) => {
+                    let card =
+                        Rectangle::new(Point::new(left, y), Size::new(card_width, EMOJI_CARD));
+                    let top = y + EMOJI_PAD.height + EMOJI_HEAD_LINE + EMOJI_HEAD_GAP;
+                    let cells = places
+                        .iter()
+                        .enumerate()
+                        .map(|(i, at)| {
+                            let x =
+                                left + EMOJI_PAD.width + i as f32 * (EMOJI_CELL + EMOJI_CELL_GAP);
+                            (
+                                *at,
+                                Rectangle::new(
+                                    Point::new(x, top),
+                                    Size::new(EMOJI_CELL, EMOJI_CELL),
+                                ),
+                            )
+                        })
+                        .collect();
+                    emoji = Some((card, cells));
+                }
             }
             y += height_of(row);
         }
@@ -343,6 +383,7 @@ impl Layout {
             heads,
             tiles,
             cards,
+            emoji,
             mark,
         }
     }
@@ -358,6 +399,13 @@ impl Layout {
                     .iter()
                     .find(|(_, _, rect)| rect.contains(at))
                     .map(|(i, ..)| *i)
+            })
+            .or_else(|| {
+                let (_, cells) = self.emoji.as_ref()?;
+                cells
+                    .iter()
+                    .find(|(_, rect)| rect.contains(at))
+                    .map(|(i, _)| *i)
             })
     }
 
@@ -662,9 +710,23 @@ impl View {
             })
             .collect();
         let tooltip = tooltip_of(open).map(|(_, name)| name).unwrap_or_default();
+        let tone = crate::emoji::store::kept().tone;
+        let table = crate::emoji::data::table();
+        let emoji: Vec<String> = layout
+            .emoji
+            .iter()
+            .flat_map(|(_, cells)| cells)
+            .filter_map(|(at, _)| {
+                let super::Item::Emoji(e) = open.grid.flat.get(*at)? else {
+                    return None;
+                };
+                let mark = if *at == open.selected { "*" } else { "" };
+                Some(format!("{mark}{}", table.emoji.get(*e)?.with_tone(tone)))
+            })
+            .collect();
         format!(
             "query={:?} heads={rows:?} tiles={lines:?} cards={cards:?} offset={} mark={} \
-             tooltip=\"{tooltip}\"",
+             tooltip=\"{tooltip}\" emoji={emoji:?}",
             open.query,
             open.offset,
             layout.mark.is_some(),
@@ -830,6 +892,9 @@ impl View {
         for (at, card, rect) in &layout.cards {
             self.draw_card(f, open, *card, *rect, *at == open.selected);
         }
+        if let Some((card, cells)) = &layout.emoji {
+            self.draw_emoji(f, open, *card, cells);
+        }
         if let Some(mark) = layout.mark {
             f.fill(&kit::rounded(mark, MARK_WIDTH / 2.0), MARK);
         }
@@ -926,6 +991,66 @@ impl View {
             CARD_SUB_INK,
             Alignment::Left,
         ));
+    }
+
+    /// The emoji row's card (5.7): green while one of its emoji is
+    /// selected.
+    fn draw_emoji(
+        &self,
+        f: &mut Frame,
+        open: &Open,
+        card: Rectangle,
+        cells: &[(usize, Rectangle)],
+    ) {
+        let chosen = cells.iter().any(|(at, _)| *at == open.selected);
+        let (fill, rim) = if chosen {
+            (EMOJI_CARD_FILL, SELECTED_RIM)
+        } else {
+            (CARD_FILL, CARD_RIM)
+        };
+        f.fill(&kit::rounded(card, CARD_RADIUS), fill);
+        f.stroke(
+            &kit::rounded(inset(card, 0.5), CARD_RADIUS - 0.5),
+            Stroke::default().with_color(rim).with_width(1.0),
+        );
+        let heading = crate::emoji::Words::new(self.words.lang()).launcher_row();
+        let mut x = card.x + EMOJI_PAD.width;
+        let middle = card.y + EMOJI_PAD.height + EMOJI_HEAD_LINE / 2.0;
+        for ch in heading.to_uppercase().chars() {
+            let letter = ch.to_string();
+            let width = kit::measure(&letter, EMOJI_HEAD, MANROPE_BOLD);
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                kit::text(
+                    letter,
+                    Point::new(x, middle),
+                    EMOJI_HEAD,
+                    CARD_HINT_INK,
+                    Alignment::Left,
+                ),
+            ));
+            x += width + 0.08 * EMOJI_HEAD;
+        }
+        let tone = crate::emoji::store::kept().tone;
+        let table = crate::emoji::data::table();
+        for (at, rect) in cells {
+            let Some(super::Item::Emoji(e)) = open.grid.flat.get(*at) else {
+                continue;
+            };
+            let Some(emoji) = table.emoji.get(*e) else {
+                continue;
+            };
+            if *at == open.selected {
+                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), SELECTED_FILL);
+                f.stroke(
+                    &kit::rounded(inset(*rect, 0.5), EMOJI_CELL_RADIUS - 0.5),
+                    Stroke::default().with_color(SELECTED_RIM).with_width(1.0),
+                );
+            } else {
+                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), CARD_FILL);
+            }
+            crate::emoji::draw::emoji(f, &emoji.with_tone(tone), rect.center(), EMOJI_SIZE, 1.0);
+        }
     }
 
     fn draw_field(&self, f: &mut Frame, state: &State, layout: &Layout) {

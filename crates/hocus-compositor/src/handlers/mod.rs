@@ -54,6 +54,7 @@ impl SeatHandler for State {
         set_data_device_focus(&self.display_handle, seat, client.clone());
         set_primary_focus(&self.display_handle, seat, client);
         self.clipboard_focus_changed();
+        self.emoji_focus_changed(focused);
     }
 }
 delegate_seat!(State);
@@ -96,6 +97,8 @@ impl SelectionHandler for State {
         user_data: &Option<std::sync::Arc<[u8]>>,
     ) {
         if let Some(bytes) = user_data {
+            // The emoji picker's paste, read: the clipboard goes back.
+            self.emoji_read(bytes);
             // Written on a thread: the reader may be slow, or never read.
             let bytes = bytes.clone();
             crate::programs::on_a_thread("write the clipboard".to_owned(), move || {

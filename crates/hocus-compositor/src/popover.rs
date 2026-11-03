@@ -18,10 +18,17 @@
 //! does not. One opened by hovering does not hold the keyboard: the press
 //! goes on to what is under it. The shell sees the presses on its own
 //! surfaces itself, which keeps a second click on the item a toggle.
+//!
+//! The emoji picker (5.7, [`EMOJI_NAMESPACE`]) is drawn and moved as a
+//! popover, with its own corners and shadow, the mockup's: it fades in
+//! coming down [`EMOJI_RISE`] rather than sliding from the bar.
 
 use std::time::Duration;
 
-use hocus_link::{POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_OPEN, POPOVER_SHIFT, ToShell};
+use hocus_link::{
+    EMOJI_NAMESPACE, EMOJI_RADIUS, EMOJI_RISE, EMOJI_ZOOM, POPOVER_CLOSE, POPOVER_NAMESPACE,
+    POPOVER_OPEN, POPOVER_SHIFT, ToShell,
+};
 use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
     desktop::{LayerSurface, layer_map_for_output},
@@ -45,6 +52,15 @@ pub const SHADOW: ShadowStyle = ShadowStyle {
     radius: hocus_link::RADIUS,
 };
 
+/// The emoji picker's: the mockup's `0 18px 50px rgba(0, 0, 0, 0.5)`,
+/// zoomed.
+pub const EMOJI_SHADOW: ShadowStyle = ShadowStyle {
+    dy: 18.0 * EMOJI_ZOOM,
+    blur: 50.0 * EMOJI_ZOOM,
+    alpha: 0.5,
+    radius: EMOJI_RADIUS,
+};
+
 /// The popovers shown, with their motion.
 #[derive(Debug, Default)]
 pub struct Popovers {
@@ -60,14 +76,17 @@ pub struct Shown {
     closing: Option<Duration>,
     /// Its shadow's pieces.
     pub ids: FrameIds,
+    /// The emoji picker, not a popover of the bar's.
+    emoji: bool,
 }
 
-/// How a popover is drawn at a moment: how opaque, and how far toward the
-/// bar from where it is (logical pixels).
+/// How a popover is drawn at a moment: how opaque, how far toward the
+/// bar from where it is, and how far above it (logical pixels).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Look {
     pub alpha: f32,
     pub shift: f64,
+    pub rise: f64,
 }
 
 /// How a popover opened at `opened` (and closing since `closing`) is drawn
@@ -84,10 +103,30 @@ fn look(opened: Duration, closing: Option<Duration>, now: Duration, motion: bool
     Look {
         alpha: shown as f32,
         shift: POPOVER_SHIFT * (1.0 - shown),
+        rise: 0.0,
     }
 }
 
 impl Shown {
+    /// Its shadow.
+    pub fn shadow(&self) -> ShadowStyle {
+        if self.emoji { EMOJI_SHADOW } else { SHADOW }
+    }
+
+    /// Its corners' radius.
+    pub fn radius(&self) -> f64 {
+        if self.emoji {
+            EMOJI_RADIUS
+        } else {
+            hocus_link::RADIUS
+        }
+    }
+
+    /// How far it comes down from as it opens (and goes back up to).
+    pub fn reach(&self) -> f64 {
+        if self.emoji { EMOJI_RISE } else { 0.0 }
+    }
+
     fn moving(&self, now: Duration) -> bool {
         match self.closing {
             Some(since) => now < since + POPOVER_CLOSE,
@@ -100,7 +139,20 @@ impl Popovers {
     /// The popover `layer`, if it shows, and how.
     pub fn look(&self, layer: &LayerSurface, now: Duration, motion: bool) -> Option<Look> {
         let shown = self.shown(layer)?;
-        Some(look(shown.opened, shown.closing, now, motion))
+        let look = look(shown.opened, shown.closing, now, motion);
+        Some(if shown.emoji {
+            Look {
+                alpha: look.alpha,
+                shift: 0.0,
+                rise: if motion {
+                    EMOJI_RISE * f64::from(1.0 - look.alpha)
+                } else {
+                    0.0
+                },
+            }
+        } else {
+            look
+        })
     }
 
     pub fn shown(&self, layer: &LayerSurface) -> Option<&Shown> {
@@ -141,18 +193,21 @@ impl State {
             opened,
             closing: None,
             ids: FrameIds::default(),
+            emoji: layer.namespace() == EMOJI_NAMESPACE,
         });
         self.redraw = true;
     }
 
     /// The shell says its popovers of `namespace` close.
     pub fn popovers_closing(&mut self, namespace: &str) {
-        if namespace != POPOVER_NAMESPACE {
+        if namespace != POPOVER_NAMESPACE && namespace != EMOJI_NAMESPACE {
             return;
         }
         let now = self.now();
         for shown in &mut self.panel.popovers.shown {
-            shown.closing.get_or_insert(now);
+            if shown.layer.namespace() == namespace {
+                shown.closing.get_or_insert(now);
+            }
         }
         self.redraw = true;
     }
@@ -209,7 +264,11 @@ impl State {
         self.space.outputs().find_map(|output| {
             let map = layer_map_for_output(output);
             map.layers()
-                .find(|l| l.wl_surface() == &surface && l.namespace().starts_with("hocus-bar"))
+                .find(|l| {
+                    l.wl_surface() == &surface
+                        && (l.namespace().starts_with("hocus-bar")
+                            || l.namespace() == EMOJI_NAMESPACE)
+                })
                 .cloned()
         })
     }
@@ -237,7 +296,8 @@ mod tests {
             at(1000, None, 1160, true),
             Look {
                 alpha: 1.0,
-                shift: 0.0
+                shift: 0.0,
+                rise: 0.0
             }
         );
         // Closing, ease-in: little gone at first, gone at 120 ms.

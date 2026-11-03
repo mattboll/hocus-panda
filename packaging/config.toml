@@ -141,6 +141,10 @@
 # The clipboard's history, from the bar of the focused window's screen, its
 # search holding the keyboard; again, it closes (docs/design/bar.md, 5.6).
 # clipboard = "Super+V"
+# The emoji picker, under the focused application's caret; again, it closes
+# (docs/design/emoji.md). The key is the one typing `.`, with Shift on
+# layouts that need it (AZERTY).
+# emoji = "Super+period"
 # The keyboard's sound and brightness keys: 5 % a press, stepping on while
 # held; up stops at 100 %, brightness down at 5 %, so that the screen never
 # goes black. A volume key unmutes. Only the bar's gauges show it.

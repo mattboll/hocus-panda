@@ -8,6 +8,7 @@ follow each screen's scale. **Since 5.1b (issue #518), the launcher is
 drawn ×1.5 of every size below**, as the approved mockup showed it on
 the maintainer's 2560 × 1600 screen at scale 1 (see
 [as built, 5.1b](#51b-the-launcher-larger-its-backdrop-in-the-bars-tint-2026-11-02)).
+The `:` prefix (5.7) shows emoji first: see [as built, 5.7](#57-the-emoji-row-2026-11-03).
 Later in the same field: files and AI; room is left for other kinds of
 results.
 
@@ -339,3 +340,33 @@ bar's.
   (eight on 1366 × 768, seven at 1.25, the arrows going down them); unit
   tests for the column count, the layout, the tint's pixels and the
   icons' sizes. On the Intel GPU, the screenshots of the pull request.
+
+### 5.7, the emoji row (2026-11-03)
+
+What the approved 5.7 spec (issue #397, docs/design/emoji.md §5) adds to
+the field.
+
+- **A query starting with `:`** and something after it (`:chat`) shows a
+  row of emoji first, up to eight, found as the emoji picker finds them
+  (names and keywords in the shell's language and in English), with the
+  skin tone chosen there. Then the rest as before: the web row last.
+  Nothing found, or `:` alone: no row.
+- **The row** is the 5.7 mockup's card, as wide as the columns, ×1.5:
+  18 by 24 px in, radius 21, its heading "Emoji · Entrée insère le
+  premier, les flèches choisissent" / "Emoji · Enter inserts the first,
+  the arrows choose" (16.5 px 700 capitals spaced 0.08 em, `#8FE0A8`),
+  12 px, its emoji in 66 px cells 9 px apart (radius 15, the emoji 39 px
+  in Noto Color Emoji); green (`rgba(108,194,135,0.10)` in
+  `rgba(108,194,135,0.6)`) while one of its emoji is selected, the first
+  one at first, as the mockup's, the card's style otherwise; the selected
+  emoji in the green border and tint, the others on
+  `rgba(255,255,255,0.04)`.
+- **The keys**: the row is a row of the grid, so the arrows go across it
+  and down to the web row; hover selects an emoji. `Enter` or a click
+  closes the launcher and inserts the emoji into the window that had the
+  keyboard before it opened, as the picker does (`emoji insert`); it
+  goes to the top of the picker's recent ones.
+- **Measured headless** (`crates/hocus-compositor/tests/emoji.rs`): `:chat`
+  shows the row, a cat selected, the web row last, and `Enter` commits it
+  to the test window's text input. A unit test for the row, the arrows,
+  `:` alone and nothing found.

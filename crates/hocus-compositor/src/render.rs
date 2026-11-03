@@ -472,22 +472,27 @@ impl State {
                 };
                 // A popover moves in and out, and a notification's bubble;
                 // they show from their first frame.
-                let popover = layer.namespace() == hocus_link::POPOVER_NAMESPACE;
+                // The emoji picker too (5.7).
+                let popover = matches!(
+                    layer.namespace(),
+                    hocus_link::POPOVER_NAMESPACE | hocus_link::EMOJI_NAMESPACE
+                );
                 let look = if popover {
                     self.panel
                         .popovers
                         .look(&layer, now, self.popover_motion())
-                        .map(|l| (l.alpha, l.shift))
+                        .map(|l| (l.alpha, l.shift, l.rise))
                 } else if hocus_link::is_bubble(layer.namespace()) {
                     self.bubbles
                         .look(&layer, now, self.bubbles_slide())
-                        .map(|l| (l.alpha, l.shift))
+                        .map(|l| (l.alpha, l.shift, 0.0))
                 } else {
-                    Some((1.0, 0.0))
+                    Some((1.0, 0.0, 0.0))
                 };
                 let alpha = match look {
-                    Some((alpha, shift)) if alpha > 0.0 => {
+                    Some((alpha, shift, rise)) if alpha > 0.0 => {
                         geometry.loc.x += shift.round() as i32;
+                        geometry.loc.y -= rise.round() as i32;
                         alpha
                     }
                     _ => continue,
@@ -509,6 +514,7 @@ impl State {
                     hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => {
                         Some((own, hocus_link::RADIUS))
                     }
+                    hocus_link::EMOJI_NAMESPACE => Some((own, hocus_link::EMOJI_RADIUS)),
                     ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
                     hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),
                     hocus_link::CLOCK_NAMESPACE
@@ -535,7 +541,7 @@ impl State {
                             renderer,
                             &self.textures,
                             &shown.ids,
-                            crate::popover::SHADOW,
+                            shown.shadow(),
                             geometry.to_f64(),
                             scale,
                             alpha,
@@ -1068,12 +1074,14 @@ impl State {
         let map = layer_map_for_output(output);
         let mut panes = Vec::new();
         for layer in map.layers() {
-            let (Some(look), Some(geometry)) = (
+            let (Some(look), Some(shown), Some(geometry)) = (
                 self.panel.popovers.look(layer, now, motion),
+                self.panel.popovers.shown(layer),
                 map.layer_geometry(layer),
             ) else {
                 continue;
             };
+            let rise = shown.reach();
             if look.alpha <= 0.0 {
                 continue;
             }
@@ -1081,10 +1089,10 @@ impl State {
             let rect = geometry.to_f64();
             let screen = Rectangle::<f64, Logical>::from_size(size.to_f64());
             let Some(around) = Rectangle::<f64, Logical>::new(
-                (rect.loc.x - reach, rect.loc.y - reach).into(),
+                (rect.loc.x - reach, rect.loc.y - reach - rise).into(),
                 (
                     rect.size.w + hocus_link::POPOVER_SHIFT + 2.0 * reach,
-                    rect.size.h + 2.0 * reach,
+                    rect.size.h + 2.0 * reach + rise,
                 )
                     .into(),
             )
@@ -1093,7 +1101,11 @@ impl State {
             };
             let Some(blurred) = renderer.frost(
                 &mut self.panes.borrow_mut(),
-                &crate::glass::popover_pane(&output.name()),
+                &if layer.namespace() == hocus_link::EMOJI_NAMESPACE {
+                    crate::glass::emoji_pane(&output.name())
+                } else {
+                    crate::glass::popover_pane(&output.name())
+                },
                 around.to_physical_precise_round(scale),
                 scale,
                 crate::glass::Frost::BAR,
@@ -1103,6 +1115,7 @@ impl State {
             };
             let mut at = rect;
             at.loc.x += look.shift.round();
+            at.loc.y -= look.rise.round();
             let pane: Rectangle<i32, Physical> = at.to_physical_precise_round(scale);
             panes.extend(glass_piece(
                 renderer,
@@ -1110,7 +1123,7 @@ impl State {
                 pane,
                 scale,
                 look.alpha,
-                hocus_link::RADIUS,
+                shown.radius(),
             ));
         }
         panes
