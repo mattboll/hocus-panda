@@ -33,6 +33,10 @@ system, so a package built on a release installs on that release and later
 ones (`libpipewire-0.3` among them, for screen sharing: building needs
 `libpipewire-0.3-dev`). EGL is opened at run time and is listed by hand;
 so is `xdg-desktop-portal`, which applications ask to share the screen.
+Screen recordings are encoded by `ffmpeg`, run as a program of its own
+(never linked: its codecs' licences stay its own, and an encoder or a GPU
+driver that fails ends the recording, not the session): the package
+recommends it, and a VA-API driver for it to encode on the GPU.
 
 GDM reads the sessions when its login screen starts: after installing,
 log out (or restart GDM) and the gear under the password field lists

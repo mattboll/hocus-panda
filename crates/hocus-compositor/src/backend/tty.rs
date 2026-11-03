@@ -289,6 +289,9 @@ fn on_session(app: &mut App, event: SessionEvent) {
         SessionEvent::PauseSession => {
             tracing::info!("session paused: another terminal is shown");
             tty.active = false;
+            // The display manager's lock, or another user's session: a
+            // recording stops, saved (5.10).
+            state.record_screen_locks();
             tty.libinput.suspend();
             tty.gpu.outputs.pause();
         }

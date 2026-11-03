@@ -505,6 +505,8 @@ impl State {
         // ring around a screen shared (5.11): on the screen only.
         if purpose.screen() {
             self.share_elements(renderer, output, now, &mut elements);
+            // The recorded area's frame (5.10).
+            self.record_elements(output, &mut elements);
         }
         // The capture over everything but the cursor (5.8); its toolbar's
         // glass goes in once what is behind it is known.
@@ -539,6 +541,11 @@ impl State {
                     )
                 });
             for layer in on.into_iter().filter(|l| pick.takes(l.namespace())) {
+                // The bar's item of what is in use and of the recording
+                // (5.10, 5.11) is never in a recording, a capture or a share.
+                if !purpose.screen() && layer.namespace() == hocus_link::IN_USE_NAMESPACE {
+                    continue;
+                }
                 // The peek goes under the bar's surfaces (`peek_elements`),
                 // the launcher and its toast over everything
                 // (`launcher_elements`, `toast_elements`).

@@ -39,6 +39,7 @@ pub mod peek;
 mod popover;
 mod popups;
 mod programs;
+pub mod record;
 mod render;
 mod screens;
 mod session;
@@ -65,7 +66,7 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    Appearance, Config, Desktops, FormChoice, OutputSettings, PanelScreens, ScaleFrom,
+    Appearance, Config, Desktops, FormChoice, OutputSettings, PanelScreens, Recording, ScaleFrom,
     SystemKeyboard,
 };
 pub use cursor::CursorEnv;
@@ -76,6 +77,7 @@ pub use harness::{Headless, Placed, WindowInfo};
 /// The bar's forms.
 pub use hocus_link::Form as BarForm;
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
+pub use record::{RecordInfo, Source as RecordSource};
 pub use share::ShareInfo;
 pub use shortcuts::{Action, CaptureNow, Chord, Ending, Shortcuts};
 pub use state::State;

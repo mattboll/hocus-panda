@@ -1,4 +1,4 @@
-# Screenshots — specification (5.8, 5.9)
+# Screenshots and screen recording — specification (5.8, 5.9, 5.10)
 
 Status: approved 2026-11-02 (issue #398), variant A of the 5.8 mockup:
 choose, then capture, with working handles. Built since 2026-11-03: see
@@ -6,7 +6,8 @@ choose, then capture, with working handles. Built since 2026-11-03: see
 launcher's, they are drawn × 1.5 (`hocus_link::LAUNCHER_ZOOM`), as the
 mockup showed them on the maintainer's 2560 × 1600 screen at scale 1.
 What comes after the capture, its thumbnail and its annotator, is 5.9
-([below](#59-the-thumbnail-and-the-annotator)).
+([below](#59-the-thumbnail-and-the-annotator)); recording the screen from
+the same toolbar is 5.10 ([below](#510-screen-recording)).
 
 ## 1. Opening
 
@@ -421,3 +422,248 @@ All encoding and writing happen off the loop.
 - **Not built**: a drag icon; the keyboard on the thumbnail; a portal's
   file chooser tried by hand (no portal answers in the tests: the copy is
   saved beside, as without one).
+
+## 5.10: screen recording
+
+### The approved spec
+
+Approved by the maintainer on 2026-11-03 (issue #400), variant **A** of
+the 5.10 mockup: the indicator in the bar.
+
+**Starting**
+
+- **From the capture**: 5.8's toolbar gets a **Photo / Vidéo** switch at
+  its left. Vidéo turns the area's frame red and the main button into
+  **Démarrer** / **Start** (red, with a white dot).
+- **Modes**: Zone / Fenêtre / Écran (no "all screens" for video).
+- **Toggles**: **Son** / **Sound** (the computer's output, on by default)
+  and **Micro** (off by default).
+- **Countdown**: Démarrer runs a 3-2-1 countdown (as 5.8's delay, with a
+  red ring) and the capture UI leaves.
+- **Shortcut**: `Super+Shift+R` (`[shortcuts] record`) starts with the
+  last settings and stops a running recording.
+
+**While recording**
+
+- **The bar**: under the clock, a 48-wide item (radius 12,
+  `rgba(242,84,91,0.16)` with a 1 px `rgba(242,84,91,0.55)` ring) with a
+  red dot that beats (1.4 s) and the elapsed time (Martian Mono 12 px,
+  `#FFD9DB`).
+  - Hovering it shows **pause** and **stop** under it.
+  - Paused, the dot turns amber and stops beating, and the time reads
+    "pause".
+  - In the full form the same item sits under the clock, with the time
+    and both buttons always shown.
+- **The frame**: the recorded area keeps a 2 px red dashed frame, 3 px
+  outside it, which is never in the video. It is dimmed while paused.
+- **Never recorded**: the bar's item, the frame, the capture UI and the
+  cursor's own indicator.
+
+**The file**
+
+- **Format**: MP4, H.264 + AAC, at 30 fps, at the area's real resolution
+  (even sizes). WebM (VP9 + Opus) is a setting (`[recording] format`) for
+  the settings sprint.
+- **Encoding** runs off the loop: frames from the compositor's own
+  rendering, read back without stalling the loop; audio from PipeWire (the
+  default sink's monitor and/or the default source). Prefer the GPU's
+  encoder through VA-API when there is one, else software.
+- **Saved** in `$XDG_VIDEOS_DIR/Enregistrements d'écran/` (`Screen
+  recordings/` in English) as "Enregistrement du 2026-11-03 à
+  14-32-05.mp4".
+
+**Stopping**
+
+- Stop, or `Super+Shift+R`, ends the file.
+- 5.9's thumbnail follows, with the first frame, the duration and
+  "Enregistrée · MP4". Its buttons are **Ouvrir** / **Open** (the default
+  player) and ✕ (delete), and its drag drops the file.
+- After that it goes to the notifications' history as a capture does.
+
+**Limits**
+
+- One recording at a time.
+- Locking the screen stops and saves it.
+- A screen unplugged during a recording of that screen stops and saves
+  it.
+
+### As built (5.10, 2026-11-03)
+
+- **Who does what.** The compositor records (`crates/hocus-compositor/src/record/`):
+  what is chosen, the countdown, the frame on the screen, the frames, the
+  encoder, the file. The shell draws the toolbar in Vidéo, the bar's item
+  and the thumbnail. The lines (`crates/hocus-link/src/record.rs`):
+  `capture … photo|video sound|nosound micro|nomicro` (the toolbar's
+  state, 5.8's line with three more words), `capture photo|video|sound|micro`
+  (its clicks); `recording ID running|paused ELAPSED` and `recording-end`
+  (the bar's item: the shell counts the time on from what it was told);
+  `recorded ID OUTPUT WIDTH HEIGHT DURATION FORMAT`, the folder, the file
+  and the first frame's picture after tabs (the thumbnail; an empty file:
+  it could not be saved, a toast says so); from the shell `record
+  pause|resume|stop` (the item) and `record forget|drag ID` (the
+  thumbnail).
+- **The toolbar** (`crates/hocus-shell/src/capture/draw.rs`): the switch
+  first, its tint `rgba(255,255,255,0.06)` 3 px around its tabs (30 tall,
+  12 px in, 12.5 px bold, radius 8; Photo chosen `#EEF1F6` on `#0B1020`,
+  Vidéo chosen white on `#F2545B`, the other `#C9D0DC`), 4 px before the
+  modes. In Vidéo: Zone, Fenêtre, Écran (5.8's buttons, their icons
+  kept), the separator, Son and Micro (the mockup's icons, 16 px; on, the
+  green tint and ring; off, at 0.6 of their opacity), then **Démarrer**
+  (14 px in, a 10 px white dot 7 px before the word, `#F2545B`). The
+  toolbar's surface takes the size of what it shows: switching resizes it,
+  still centred. The compositor turns the area's border and the window's
+  ring `#F2545B` in Vidéo. "Tous les écrans" asked in Vidéo is the screen.
+- **The countdown** is 5.8's disc and number, with a 2 px
+  `rgba(242,84,91,0.7)` ring inside its edge, always 3 s (the toolbar's
+  delay is Photo's), on the screen recorded. Cancelled by `Super+Shift+R`
+  or the screen locking.
+- **The frames** (`record/frames.rs`): as a share's (5.11, `share::frames`):
+  the backend draws the recording's frame at each turn of its loop when
+  something changed, at most 30 a second, into a buffer of its own, as the
+  screen shows it but for what only the screen shows (`Purpose::Capture`:
+  the capture's UI and toasts, the recording's frame, the share's ring; and
+  the bar's item, `hocus-bar-in-use`, which no capture, share or recording
+  shows any more), the pointer in it. An area: its screen drawn moved by
+  the area's corner, into a buffer of its size; a window: the window alone
+  (its surfaces and popups), the pointer when it is over it, into a buffer
+  of the size it had as the recording started (cut, or black around it,
+  when it changes). The loop never copies a frame: the CPU renderer's
+  buffer is lent to the recorder's thread, the GPU's read back into a
+  pixel buffer that the read-back thread maps and lends
+  (`share::glread`, which now hands frames to a sink, `share::sink`: a
+  share's stream or a recording). A recording's frames are counted apart
+  from the shares' (a key of its own).
+- **The recorder** (`record/encode.rs`), a thread of its own per
+  recording: it names and makes the file, starts **ffmpeg** (a program of
+  its own, `Config::ffmpeg`, `ffmpeg` on the `PATH`), copies each frame lent
+  into a frame of its own and gives it back at once, and writes ffmpeg
+  exactly 30 frames a second of the recording's time, its pauses left out
+  (the last frame again while nothing changed): the file's pace is the
+  recording's, whatever the loop's. Raw `bgr0` frames on ffmpeg's input;
+  H.264 through VA-API (`h264_vaapi`) on the render node the compositor
+  draws on when it draws on a GPU and ffmpeg encodes there (tried once, on
+  a fifth of a second of black), else `libx264` (`veryfast`,
+  `zerolatency`, CRF 23), else `libopenh264`; AAC at 160 kb/s; a keyframe
+  every 2 s; MP4. WebM (`[recording] format = "webm"`): VP9 (`vp9_vaapi`,
+  else `libvpx-vp9`, real time) and Opus. Once stopped, the last frames
+  are written, ffmpeg's input closed, and it ends the file (2 min at
+  most, then it is killed: its process is the recorder's own); a file
+  ffmpeg could not end is removed. Then a picture of the first frame (640
+  px wide at most, PNG, in the runtime directory) for the thumbnail.
+- **The sound** (`record/audio.rs`): with Son, a PipeWire capture stream
+  `hocuspanda-recording-sound` with `stream.capture.sink = true` (the
+  session manager links it to the default sink's monitor); with Micro,
+  `hocuspanda-recording-micro` (the default source); raw 32-bit floats, 48
+  kHz, stereo (PipeWire converts), on a thread of their own with
+  PipeWire's loop. A mixer thread sums them and writes them to a pipe
+  ffmpeg reads (a FIFO in a directory of its own in the runtime
+  directory, never waited on: opened to read and write, written without
+  blocking), at the recording's pace: as many samples as it has lasted,
+  silence where nothing came (nothing playing, no microphone, no
+  PipeWire), none while paused. The sound is 100 ms late on its capture
+  (PipeWire's buffers): the frames are put as late in the file
+  (`-itsoffset`), so that they meet. Without Son nor Micro, no sound track.
+- **The frame on the screen** (`record/draw.rs`): dashes of 8 every 16 (× 1.5,
+  as the capture's sizes), 2 px (3), 3 px (4.5) outside the area or the
+  window (which it follows), `rgba(242,84,91,0.9)`, half as opaque while
+  paused; a whole screen's just inside its edges. Solid rectangles, on the
+  screen only.
+- **The bar's item** (`crates/hocus-shell/src/in_use/`): one more use of
+  5.11's sign, over the sharing one (10 px between them), on the same
+  surface; the agents move under both. 48 wide, 6 px in, its 10 px dot 4
+  px over its time's 16 px line (Martian Mono 12 px, `#FFD9DB`); the dot
+  `#F2545B` beating from 1 to 0.35 of its opacity and back over 1.4 s
+  (ease-in-out, drawn again every 50 ms; still with reduced motion or on
+  the CPU, where it draws again every 250 ms for the time); paused, amber
+  `#F5B44A` and still, the time "pause" ("paused" in English). Opened, 6
+  px more, then pause (or ▶ to go on, `rgba(255,255,255,0.06)`) and stop
+  (`rgba(242,84,91,0.85)`, a white square), 36 × 30, radius 8, 4 px apart,
+  lit `rgba(255,255,255,0.10)` under the pointer. In the mini form it opens
+  under the pointer (the surface grows, the agents move down) and closes
+  as it leaves; in the full form it is always open. The time reads
+  "0:12", "12:04", "1:02:03".
+- **The thumbnail** is 5.9's card: the first frame fitted in its place, a
+  40 px disc `rgba(255,255,255,0.18)` with a white play triangle in its
+  middle, the length at its bottom right (Martian Mono 10.5 px on
+  `rgba(0,0,0,0.6)`, radius 6; the disc, the triangle and the length's
+  backing are drawn into the picture on the thread that makes it, since
+  the shell's renderer draws pictures over a card's shapes), "Enregistrée
+  · MP4" / "Saved · MP4",
+  **Ouvrir** / **Open** (green tint) and ✕; its countdown and its hold as
+  5.9's. Ouvrir, or a click on the picture, gives the file to `xdg-open`
+  (found in the shell's `PATH`, started by the compositor) and sends it
+  to the history; ✕ deletes the file (`record forget`, on a thread of the
+  compositor's); dragged, its file drops (`text/uri-list`, the
+  compositor's drag). Its time up, the history keeps it as a capture's:
+  "Enregistrement d'écran" / "Screen recording", its file's name, its
+  length and folder, its first frame as its icon, **Ouvrir**, **Ouvrir le
+  dossier** and **Supprimer**.
+- **Where it goes**: `$XDG_VIDEOS_DIR`, else `XDG_VIDEOS_DIR` in
+  `user-dirs.dirs`, else `~/Videos`; in it `Enregistrements d'écran` or
+  `Screen recordings` by the messages' locale; "Enregistrement du
+  2026-11-03 à 14-32-05.mp4" / "Screen recording from 2026-11-03
+  14-32-05.mp4" in local time, " (2)" when taken.
+- **It stops** from the bar's item, `Super+Shift+R`, the screen locking
+  (for now: the session leaving its virtual terminal, as the display
+  manager's lock or another user's session shows: the tty backend's
+  pause), its screen unplugged, its window closed, a frame that cannot be
+  drawn, or ffmpeg failing (the toast "L'enregistrement n'a pas pu être
+  enregistré"). One at a time: Démarrer while one records does nothing
+  (the capture stays open for a photo).
+- **Choices made here** (to confirm on the machine): ffmpeg as a program
+  rather than a library (below); the pointer is always in the video
+  (the toolbar's "include the pointer" is Photo's); a window's recording
+  keeps the window's first size; a whole screen's frame runs inside its
+  edges; the countdown is 3 s whatever Photo's delay; `Super+Shift+R`
+  during the countdown cancels it, and while the capture is open starts
+  with what it shows; the mode is shared by Photo and Vidéo (all screens
+  becomes the screen); Micro is "Mic" in English; paused reads "paused"
+  in English; the time goes past an hour as "1:02:03"; the bar's item and
+  the sharing sign are one surface, the item first; the thumbnail keeps
+  5.9's card and sizes (the mockup drew the picture 120 tall); Ouvrir
+  sends the recording to the history; the frame's corners are square;
+  the sound is put 100 ms on the frames.
+- **ffmpeg, not a library.** No crate that `cargo deny` accepts encodes
+  H.264 and AAC (an AAC encoder in Rust is missing; `fdk-aac`'s licence is
+  not permissive), let alone through VA-API. So the encoding is ffmpeg's,
+  the system's own program, which the .deb recommends: never linked, its
+  codecs' licences stay its own (Debian's is GPL with libx264), building
+  needs nothing more, and a codec or a VA-API driver that crashes ends the
+  recording, never the session (in the compositor's process a GPU
+  driver's fault would end every window). Frames go to it on a pipe from
+  the recorder's thread, written straight from the frame it copied.
+- **Measured headless** (`crates/hocus-compositor/tests/recording.rs`),
+  pixman, the encoder libx264 on the CPU, the files decoded by ffmpeg and
+  read by ffprobe, each test's videos' folder, runtime directory and
+  PipeWire its own: Vidéo turns the area's border red, Son on and Micro
+  off by default, the modes without all screens; Démarrer counts 3, 2, 1
+  with the red ring, nothing darkened, then records; `Super+Shift+R`
+  stops, and again starts with the same area and settings, then stops; an
+  area of 451 × 301 recorded at 450 × 300, H.264 at 30/1 in an MP4 in
+  `Screen recordings`, named for when, no red pixel in any of its decoded
+  frames (the frame is on the screen, outside the area), the window's
+  colour in it, and none of its frames' bytes copied on the loop (a
+  hand-over's time printed, never asserted); a window recorded alone at
+  its even size, its frame never in it; a pause left out of the file's
+  length, its frame dimmed on the screen, and no frame sent while paused;
+  with Son, Micro or both an AAC track (a PipeWire of the test's own, no
+  session manager: silence), without them none; WebM as VP9 and Opus;
+  one recording at a time; the screen locking and the screen unplugged
+  stop and save it; the thumbnail's delete removes the file. With the
+  real shell: the toolbar's Vidéo tab, its new size still centred, Micro
+  on and off, Démarrer and the countdown; the bar's item closed then open
+  under the pointer (its surface's height), pause, go on and stop by its
+  buttons, then the thumbnail in `Vidéos/Enregistrements d'écran`; in the
+  full form its buttons without hovering; Ouvrir giving the file to
+  `xdg-open` (the test's own) and sending it to the history, ✕ deleting
+  the next one. Unit tests for the lines, the names and folders, ffmpeg's
+  arguments and its encoders' list, the even sizes, the timeline, the
+  mixer, the streams' properties, the frame's dashes, the toolbar's
+  layouts, the item's time, beat and buttons.
+- **Not built**: a lock screen of the desktop's own (the session leaving
+  its terminal stands for it); the cursor's own indicator (none is drawn
+  yet); the WebM setting in the settings' UI (the settings sprint);
+  DMA-BUF frames (shared memory, copied off the loop); a recording's
+  frame of its own size following a window that changes size; VA-API
+  measured on a real GPU (left to the maintainer's machine: tests never
+  draw on one).

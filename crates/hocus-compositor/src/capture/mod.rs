@@ -33,7 +33,7 @@
 mod after;
 mod draw;
 pub mod geometry;
-mod save;
+pub(crate) mod save;
 pub mod shoot;
 
 use std::{
@@ -139,9 +139,17 @@ struct Choosing {
     hovered: Option<WindowId>,
 }
 
+/// What a countdown ends in: a capture taken, or (5.10) a recording
+/// started.
+#[derive(Debug, Clone)]
+pub(crate) enum Then {
+    Shoot(Shot),
+    Record(crate::record::Plan),
+}
+
 #[derive(Debug)]
 struct Counting {
-    shot: Shot,
+    then: Then,
     /// The number shown, and since when.
     left: u8,
     since: Duration,
@@ -189,6 +197,10 @@ pub struct Capture {
     mode: CaptureMode,
     delay: u8,
     pointer: bool,
+    /// Vidéo chosen (5.10), with the computer's sound and the microphone.
+    video: bool,
+    sound: bool,
+    micro: bool,
     /// The area, on its screen.
     area: Option<(String, Area)>,
     /// Where the area is kept, and what was last written there.
@@ -227,9 +239,16 @@ pub enum Shown {
         area: Option<(String, Area)>,
         hovered: Option<WindowId>,
         toolbar: String,
+        /// Vidéo (5.10), and its sound and microphone.
+        video: bool,
+        sound: bool,
+        micro: bool,
     },
-    /// Counting down, this number shown.
-    Counting(u8),
+    /// Counting down, this number shown; `record`: before a recording.
+    Counting {
+        left: u8,
+        record: bool,
+    },
 }
 
 /// A key while the capture is open.
@@ -277,6 +296,9 @@ impl Capture {
             file,
             kept: area.clone(),
             area,
+            // The computer's sound is recorded by default, not the
+            // microphone (5.10).
+            sound: true,
             ..Self::default()
         }
     }
@@ -296,8 +318,14 @@ impl Capture {
                 area: self.area.clone(),
                 hovered: c.hovered,
                 toolbar: c.toolbar.clone(),
+                video: self.video,
+                sound: self.sound,
+                micro: self.micro,
             },
-            Phase::Counting(c) => Shown::Counting(c.left),
+            Phase::Counting(c) => Shown::Counting {
+                left: c.left,
+                record: matches!(c.then, Then::Record(_)),
+            },
         }
     }
 
@@ -410,6 +438,9 @@ impl State {
             mode: self.capture.mode,
             delay: self.capture.delay,
             pointer: self.capture.pointer,
+            video: self.capture.video,
+            sound: self.capture.sound,
+            micro: self.capture.micro,
         };
         self.tell_shell(ToShell::Capture(bar));
     }
@@ -427,6 +458,8 @@ impl State {
             return;
         }
         match ask {
+            // No "all screens" for a video: its screen instead.
+            CaptureAsk::Mode(CaptureMode::All) if self.capture.video => {}
             CaptureAsk::Mode(mode) => {
                 self.capture.mode = mode;
                 if let Phase::Choosing(c) = &mut self.capture.phase {
@@ -446,6 +479,14 @@ impl State {
                 self.capture.delay = CAPTURE_DELAYS[(at + 1) % CAPTURE_DELAYS.len()];
             }
             CaptureAsk::Pointer => self.capture.pointer = !self.capture.pointer,
+            CaptureAsk::Video(video) => {
+                self.capture.video = video;
+                if video && self.capture.mode == CaptureMode::All {
+                    self.capture.mode = CaptureMode::Screen;
+                }
+            }
+            CaptureAsk::Sound => self.capture.sound = !self.capture.sound,
+            CaptureAsk::Micro => self.capture.micro = !self.capture.micro,
             CaptureAsk::Shoot => {
                 self.capture_shoot();
                 return;
@@ -456,6 +497,9 @@ impl State {
             mode = self.capture.mode.name(),
             delay = self.capture.delay,
             pointer = self.capture.pointer,
+            video = self.capture.video,
+            sound = self.capture.sound,
+            micro = self.capture.micro,
             "the capture's toolbar"
         );
         self.tell_capture_bar();
@@ -468,6 +512,10 @@ impl State {
         let Phase::Choosing(choosing) = &self.capture.phase else {
             return;
         };
+        if self.capture.video {
+            let hovered = choosing.hovered;
+            return self.record_from_capture(hovered);
+        }
         let pointer_output = self.output_under_pointer().map(|o| o.name());
         let target = match self.capture.mode {
             CaptureMode::Area => self
@@ -505,9 +553,78 @@ impl State {
         if delay == 0 {
             self.capture.pending = Some(shot);
         } else {
-            self.count_down(shot, delay);
+            let output = self
+                .target_output(&shot.target)
+                .unwrap_or_else(|| shot.toast.clone());
+            self.count_down(Then::Shoot(shot), delay, output);
         }
         self.redraw = true;
+    }
+
+    /// Démarrer (5.10): what is chosen is recorded once counted down, with
+    /// the sound and the microphone as chosen; the capture's UI goes.
+    fn record_from_capture(&mut self, hovered: Option<WindowId>) {
+        if self.record.recording() {
+            tracing::info!("a recording is under way: one at a time");
+            return;
+        }
+        let Some(plan) = self.record_plan(hovered) else {
+            tracing::info!(mode = self.capture.mode.name(), "nothing chosen to record");
+            return;
+        };
+        self.close_capture();
+        self.record_count_down(plan);
+        self.redraw = true;
+    }
+
+    /// What the capture's settings record now: the area, the window
+    /// (`hovered`, else the focused one) or the screen under the pointer.
+    pub(crate) fn record_plan(&self, hovered: Option<WindowId>) -> Option<crate::record::Plan> {
+        use crate::record::Source;
+        let source = match self.capture.mode {
+            CaptureMode::Area => self
+                .capture
+                .area
+                .clone()
+                .map(|(output, area)| Source::Area {
+                    output,
+                    area: area.rounded(),
+                }),
+            CaptureMode::Window => hovered
+                .or_else(|| self.model.focused())
+                .filter(|id| self.windows.contains_key(id))
+                .map(|id| Source::Window(id.0)),
+            CaptureMode::Screen | CaptureMode::All => self
+                .output_under_pointer()
+                .map(|o| Source::Screen(o.name())),
+        }?;
+        Some(crate::record::Plan {
+            source,
+            sound: self.capture.sound,
+            micro: self.capture.micro,
+        })
+    }
+
+    /// The capture's countdown before recording `plan` (5.10): three
+    /// seconds, in the middle of the screen recorded, with a red ring.
+    pub(crate) fn record_count_down(&mut self, plan: crate::record::Plan) {
+        let output = self.record_output(&plan.source).unwrap_or_default();
+        self.count_down(Then::Record(plan), hocus_link::RECORD_COUNTDOWN, output);
+    }
+
+    /// Whether the capture counts down to a recording.
+    pub(crate) fn counting_to_record(&self) -> bool {
+        matches!(&self.capture.phase, Phase::Counting(c) if matches!(c.then, Then::Record(_)))
+    }
+
+    /// Whether the capture is open, choosing (its UI shows).
+    pub(crate) fn capture_open(&self) -> bool {
+        self.capture.choosing()
+    }
+
+    /// The capture's UI goes, or its countdown, nothing taken.
+    pub(crate) fn capture_away(&mut self) {
+        self.close_capture();
     }
 
     /// The screen a capture of `target` is on: an area's, the window's
@@ -544,12 +661,9 @@ impl State {
             .cloned()
     }
 
-    /// The capture's countdown from `delay` seconds, in the middle of the
-    /// screen taken, a timer each second.
-    fn count_down(&mut self, shot: Shot, delay: u8) {
-        let output = self
-            .target_output(&shot.target)
-            .unwrap_or_else(|| shot.toast.clone());
+    /// The capture's countdown from `delay` seconds, in the middle of
+    /// `output`, a timer each second.
+    fn count_down(&mut self, then: Then, delay: u8, output: String) {
         let timer = self
             .loop_handle
             .insert_source(Timer::from_duration(SECOND), |_, _, app| {
@@ -558,14 +672,17 @@ impl State {
         let timer = match timer {
             Ok(token) => Some(token),
             Err(err) => {
-                tracing::warn!(%err.error, "no countdown: taken at once");
-                self.capture.pending = Some(shot);
+                tracing::warn!(%err.error, "no countdown: at once");
+                match then {
+                    Then::Shoot(shot) => self.capture.pending = Some(shot),
+                    Then::Record(plan) => self.record_start(plan),
+                }
                 return;
             }
         };
         tracing::info!(delay, "the capture counts down");
         self.capture.phase = Phase::Counting(Counting {
-            shot,
+            then,
             left: delay,
             since: self.now(),
             output,
@@ -586,9 +703,12 @@ impl State {
             return TimeoutAction::ToDuration(SECOND);
         }
         counting.timer = None;
-        let shot = counting.shot.clone();
+        let then = counting.then.clone();
         self.capture.phase = Phase::Closed;
-        self.capture.pending = Some(shot);
+        match then {
+            Then::Shoot(shot) => self.capture.pending = Some(shot),
+            Then::Record(plan) => self.record_start(plan),
+        }
         TimeoutAction::Drop
     }
 
