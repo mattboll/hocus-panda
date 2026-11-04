@@ -252,6 +252,8 @@ pub struct State {
     /// The keymap's layouts' XKB codes (`fr`, `fr(bepo)`), by group, for
     /// the bar's row; empty when XKB refused them and took its defaults.
     pub layout_codes: Vec<String>,
+    /// The lock screen (7.1, docs/design/lock.md).
+    pub lock: crate::lock::Lock,
     /// Set once the compositor is asked to end, and why.
     pub ending: Option<Ending>,
 }
@@ -419,6 +421,7 @@ impl State {
             session: None,
             kept_keys: HashSet::new(),
             layout_codes,
+            lock: crate::lock::Lock::new(dh),
             ending: None,
         })
     }
@@ -486,6 +489,10 @@ impl State {
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
         use crate::handlers::layer_shell::Stand;
+        // Locked (7.1): the lock's surface, nothing else.
+        if self.locked() {
+            return self.lock_surface_under(pos);
+        }
         let layer = |stand| self.layer_surface_under(pos, stand).map(|(s, p, _)| (s, p));
         layer(Stand::Above)
             .or_else(|| {
@@ -503,6 +510,9 @@ impl State {
     /// The window under `pos`, if no layer surface above the windows is.
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<WindowId> {
         use crate::handlers::layer_shell::Stand;
+        if self.locked() {
+            return None;
+        }
         if self.layer_surface_under(pos, Stand::Above).is_some() {
             return None;
         }
@@ -515,6 +525,10 @@ impl State {
 #[derive(Debug, Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// The shell's own connection, which the compositor made and handed
+    /// it as it started it (`WAYLAND_SOCKET`): its lock surfaces are the
+    /// only ones shown (7.1).
+    pub shell: bool,
 }
 
 impl ClientData for ClientState {

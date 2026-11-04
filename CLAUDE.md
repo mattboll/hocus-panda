@@ -221,6 +221,19 @@ without them. The capture's editor (5.9) asks the desktop
 portal's file chooser only on the bus given with `--session-bus` (or the
 session's own on a virtual terminal), else saves beside the capture.
 
+The lock screen (docs/design/lock.md): `State::lock_now()` locks (the
+tests' `Headless::lock`, `hocus msg lock`); the password is checked by PAM (the package's
+`/etc/pam.d/hocuspanda`, else `login`), so a compositor run by hand
+checks your real password. Tests use a password of their own
+(`Authenticator::test`, the crate's `test-auth` feature, which only its
+tests turn on); a build with that feature takes `HOCUS_TEST_AUTH=PASSWORD`
+instead of PAM, for screenshots, and is never packaged. The lock's
+screenshots:
+
+```sh
+HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor --test lock_shots --run-ignored only
+```
+
 Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
 docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`
 which Claude Code's and Codex's hooks run once plugged in from the bar.
@@ -230,6 +243,7 @@ It writes to the compositor's control socket, `<socket>.control`
 ```sh
 target/debug/hocus --socket <runtime dir>/hocus-0.control agent build working
 target/debug/hocus --socket <runtime dir>/hocus-0.control msg idle   # idle state, what holds it
+target/debug/hocus --socket <runtime dir>/hocus-0.control msg lock   # lock the session now
 ```
 
 Idle (docs/design/idle.md): the compositor serves

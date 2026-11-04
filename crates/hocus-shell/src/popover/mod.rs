@@ -683,6 +683,12 @@ pub enum Effect {
     /// What the to-do list's group does (Day.4): the field opens, a box
     /// ticks.
     Tasks(crate::tasks::Act),
+    /// The lock's surface on `output` (7.1): all of it, over everything,
+    /// never the keyboard (the compositor keeps it while locked).
+    LockSurface {
+        id: window::Id,
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2267,6 +2273,24 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: false,
                 namespace: Some(hocus_link::CAPTURE_EDITOR_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::LockSurface { id, output } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some((0, 0)),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+                exclusive_zone: Some(-1),
+                margin: Some((0, 0, 0, 0)),
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::LOCK_NAMESPACE.to_owned()),
             },
             id,
         }],

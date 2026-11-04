@@ -818,6 +818,8 @@ impl Headless {
         // What falls due on the way: the idle countdown runs on this
         // clock, its timer on the real one.
         state.idle_check();
+        // The lock's wait counts on this clock, its timer on the real one.
+        state.lock_wait_tick();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.
@@ -825,6 +827,109 @@ impl Headless {
             hp.app.state.drawn_at.get() == at
         })?;
         anyhow::ensure!(drawn, "no frame drawn at {at:?}");
+        Ok(())
+    }
+
+    /// Locks the session now, as `Super+L` or the idle will (7.1).
+    pub fn lock(&mut self) {
+        self.app.state.lock_now();
+    }
+
+    /// Where the lock is.
+    pub fn lock_state(&self) -> crate::LockState {
+        self.app.state.lock_state()
+    }
+
+    /// Whether every screen shows the lock, its fade over.
+    pub fn lock_drawn(&self) -> bool {
+        self.app.state.lock_drawn()
+    }
+
+    /// What the shell was last told of the lock.
+    pub fn lock_shown(&self) -> Option<hocus_link::LockShown> {
+        self.app.state.lock.told().cloned()
+    }
+
+    /// How many characters the lock's field holds (never what they are).
+    pub fn lock_typed(&self) -> Option<usize> {
+        self.app.state.lock_typed()
+    }
+
+    /// Commits of the shell's lock surfaces so far, and the passwords
+    /// checked.
+    pub fn lock_commits(&self) -> u64 {
+        self.app.state.lock.commits
+    }
+
+    pub fn lock_checks(&self) -> u64 {
+        self.app.state.lock.checks
+    }
+
+    /// The shell's lock surfaces' places, by screen: those the compositor
+    /// takes as the shell's (of its own connection) and has drawn.
+    pub fn lock_surfaces(&self) -> Vec<(String, Rect)> {
+        let state = &self.app.state;
+        state
+            .space
+            .outputs()
+            .filter_map(|output| {
+                let layer = state.shell_lock_layer(output)?;
+                let origin = state.space.output_geometry(output)?.loc;
+                let g = smithay::desktop::layer_map_for_output(output).layer_geometry(&layer)?;
+                Some((
+                    output.name(),
+                    Rect {
+                        x: origin.x + g.loc.x,
+                        y: origin.y + g.loc.y,
+                        width: g.size.w,
+                        height: g.size.h,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// Whether an ext-session-lock client holds the lock.
+    pub fn lock_external(&self) -> bool {
+        self.app
+            .state
+            .lock
+            .locked_state()
+            .is_some_and(|l| matches!(l.holder, crate::lock::Holder::External(_)))
+    }
+
+    /// The screens where the shell's lock has drawn since it locked (its
+    /// fade started there).
+    pub fn lock_drawn_on(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .app
+            .state
+            .lock
+            .locked_state()
+            .map(|l| l.shown_at.keys().cloned().collect())
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    /// The shell's process, as the compositor started it.
+    pub fn shell_pid(&self) -> Option<i32> {
+        // Not its connection's credentials: the compositor made that
+        // connection, they are its own.
+        let pid = self.app.state.shell.running.pid()?;
+        i32::try_from(pid).ok()
+    }
+
+    /// Ends the shell at once (`SIGKILL`), as a crash would: the process
+    /// of its Wayland connection, which the test started.
+    pub fn kill_shell(&self) -> anyhow::Result<()> {
+        use rustix::process::{Pid, Signal, kill_process};
+        let pid = self
+            .shell_pid()
+            .filter(|pid| u32::try_from(*pid).ok() != Some(std::process::id()))
+            .and_then(Pid::from_raw)
+            .context("no shell")?;
+        kill_process(pid, Signal::KILL).with_context(|| format!("killing the shell ({pid:?})"))?;
         Ok(())
     }
 
@@ -986,22 +1091,11 @@ impl Headless {
     /// drew the bars' surfaces, which the test started.
     pub fn hold_shell(&self, held: bool) -> anyhow::Result<()> {
         use rustix::process::{Pid, Signal, kill_process};
-        use smithay::reexports::wayland_server::Resource;
-        let state = &self.app.state;
-        let pid = state
-            .space
-            .outputs()
-            .find_map(|output| {
-                let map = smithay::desktop::layer_map_for_output(output);
-                let client = map
-                    .layers()
-                    .find(|l| l.namespace() == hocus_link::NAMESPACE)?
-                    .wl_surface()
-                    .client()?;
-                let credentials = client.get_credentials(&state.display_handle).ok()?;
-                Pid::from_raw(credentials.pid)
-            })
-            .context("no bar, so no shell")?;
+        let pid = self
+            .shell_pid()
+            .filter(|pid| u32::try_from(*pid).ok() != Some(std::process::id()))
+            .and_then(Pid::from_raw)
+            .context("no shell")?;
         let signal = if held { Signal::STOP } else { Signal::CONT };
         kill_process(pid, signal).with_context(|| format!("signalling the shell ({pid:?})"))?;
         Ok(())

@@ -131,6 +131,8 @@ fn main() -> ExitCode {
         config.system_keyboard = SystemKeyboard::read(Path::new(SystemKeyboard::PATH));
     }
     config.cursor_env = CursorEnv::from_process();
+    // PAM; a test's password only in a build for tests (docs/design/lock.md).
+    config.lock_auth = hocus_compositor::Authenticator::from_env();
     config.state_dir = Config::default_state_dir();
     // The hooks run the `hocus` beside this program, else the one in PATH.
     let hocus = std::env::current_exe()

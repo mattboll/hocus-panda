@@ -559,6 +559,17 @@ impl TtyBackend {
 
     /// Draws the screens that changed and are free to take a frame.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // The desktop's last frame as it locks (7.1), before anything else
+        // draws it locked; none while another terminal shows.
+        if state.lock.wants_freeze() {
+            match self.gpus.single_renderer(&self.render_node) {
+                Ok(mut renderer) if self.active => {
+                    let gles: &mut GlesRenderer = renderer.as_mut();
+                    crate::lock::draw::freeze::<_, GlesTexture>(gles, state);
+                }
+                _ => crate::lock::draw::no_freeze(state),
+            }
+        }
         // A capture asked for (5.8): drawn for it on the primary GPU, which
         // draws every screen; none while another terminal shows.
         if state.capture.has_pending() {

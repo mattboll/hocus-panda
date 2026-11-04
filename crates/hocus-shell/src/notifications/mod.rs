@@ -147,6 +147,11 @@ pub fn sharing(on: bool) {
     input(Input::Sharing(on));
 }
 
+/// The session locked, or unlocked (7.1): new bubbles wait meanwhile.
+pub fn locked(on: bool) {
+    input(Input::Locked(on));
+}
+
 /// The history's panel opened (`open`) or closed.
 pub fn history_open(open: bool) {
     input(Input::History {

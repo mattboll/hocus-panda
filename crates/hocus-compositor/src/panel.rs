@@ -95,7 +95,7 @@ pub struct Panel {
     chosen: BTreeMap<String, Form>,
     /// The screen the rule took when none was named and no built-in panel
     /// was there: the bar comes back to it when it comes back.
-    home: Option<String>,
+    pub(crate) home: Option<String>,
     /// Commits of the bars' surfaces, for tests: none at rest.
     pub commits: u64,
     /// Commits of the clocks' surfaces, for tests: one a second at rest.
@@ -295,6 +295,10 @@ impl State {
             self.redraw = true;
         }
         self.tell_screens(false);
+        // Locked (7.1): the form may move to another screen; an external
+        // locker's surfaces take their screens' sizes.
+        self.tell_lock();
+        self.external_screens_changed();
     }
 
     /// Tells the shell the other screens' names (bar.md §9, the

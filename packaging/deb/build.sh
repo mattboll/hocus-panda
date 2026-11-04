@@ -23,6 +23,14 @@ trap 'rm -rf "$work"' EXIT
 # own.
 root="$work/src/debian/hocuspanda"
 
+# The lock's test authenticator (HOCUS_TEST_AUTH) is only built for the
+# compositor's own tests (its `test-auth` feature): a binary holding it
+# is never packaged (docs/design/lock.md).
+if grep -q HOCUS_TEST_AUTH "$target/release/hocuspanda"; then
+    echo "target/release/hocuspanda was built with the lock's test authenticator: not packaged" >&2
+    exit 1
+fi
+
 PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
 
 # Debian's place for the licence, in its machine-readable format.
@@ -52,6 +60,8 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
 # dpkg-shlibdeps runs in a source tree that names the package. EGL is
 # opened at run time: no binary links it, it is added below.
 mkdir -p "$root/DEBIAN"
+# The lock's PAM service is the administrator's to change, kept on upgrade.
+printf '/etc/pam.d/hocuspanda\n' > "$root/DEBIAN/conffiles"
 printf 'Source: hocuspanda\n\nPackage: hocuspanda\nArchitecture: any\n' \
     > "$work/src/debian/control"
 (cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda \
@@ -81,7 +91,7 @@ Version: $version-$revision
 Architecture: $arch
 Maintainer: Matthieu Bollot <m.bollot@code-troopers.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$root" | cut -f 1)
-Depends: $depends, libegl1, xdg-desktop-portal
+Depends: $depends, libegl1, libpam0g, libpam-modules, xdg-desktop-portal
 Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  dbus-user-session,
  kitty | foot | alacritty | xterm,

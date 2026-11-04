@@ -43,6 +43,9 @@ pub enum Question {
     /// The session's idle state, its time left and what holds it off
     /// (docs/design/idle.md).
     Idle,
+    /// Lock the session now (docs/design/lock.md), as `Super+L` will;
+    /// answered once it is locked.
+    Lock,
 }
 
 impl Question {
@@ -50,6 +53,7 @@ impl Question {
     pub fn line(self) -> &'static str {
         match self {
             Self::Idle => "msg idle",
+            Self::Lock => "msg lock",
         }
     }
 
@@ -57,6 +61,7 @@ impl Question {
     pub fn of(line: &str) -> Option<Self> {
         match line.trim_end_matches(['\n', '\r']) {
             "msg idle" => Some(Self::Idle),
+            "msg lock" => Some(Self::Lock),
             _ => None,
         }
     }
@@ -336,6 +341,7 @@ mod tests {
         assert!(Question::Idle.line().parse::<Report>().is_err());
         assert_eq!(Question::of("agent command k idle - k"), None);
         assert_eq!(Question::of("msg"), None);
+        assert_eq!(Question::of(Question::Lock.line()), Some(Question::Lock));
     }
 
     #[test]

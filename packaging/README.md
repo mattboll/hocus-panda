@@ -15,6 +15,7 @@ What the package of Hocuspanda holds, and how it is built.
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
 | [`hocuspanda.portal`](hocuspanda.portal) | `/usr/share/xdg-desktop-portal/portals` | Screen sharing: the desktop's portal backend, `org.freedesktop.impl.portal.ScreenCast`, which the compositor serves on the session bus ([docs/design/sharing.md](../docs/design/sharing.md)) |
 | [`hocuspanda-portals.conf`](hocuspanda-portals.conf) | `/usr/share/xdg-desktop-portal` | Makes xdg-desktop-portal use it in this session (`XDG_CURRENT_DESKTOP=Hocuspanda`), GTK's backend for the other portals |
+| [`pam-hocuspanda`](pam-hocuspanda) | `/etc/pam.d/hocuspanda` | The lock screen's PAM service: the system's `common-auth` and `common-account` ([docs/design/lock.md](../docs/design/lock.md)); a conffile |
 | [`config.toml`](config.toml) | `/usr/share/doc/hocuspanda` | Every setting with its default, to copy to `~/.config/hocuspanda/` |
 | `LICENSE` | `/usr/share/doc/hocuspanda/copyright` | MIT, and the SIL Open Font License of the fonts the shell and the Settings carry in their binaries (Martian Mono, Manrope: `crates/hocus-shell/fonts`; the compositor carries Martian Mono too, for the capture's sizes and countdown) |
 

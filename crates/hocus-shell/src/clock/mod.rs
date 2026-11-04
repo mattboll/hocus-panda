@@ -244,6 +244,10 @@ impl<Message> canvas::Program<Message> for Clock {
         let iced::Event::Window(window::Event::RedrawRequested(now)) = event else {
             return None;
         };
+        // Locked (7.1): not shown, it waits; the lock wakes it as it goes.
+        if crate::lock::active() {
+            return None;
+        }
         let now = *now;
         let time = self.wall.now();
         let shown = Shown::at(&time, self.lang);

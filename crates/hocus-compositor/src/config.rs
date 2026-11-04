@@ -89,6 +89,10 @@ pub struct Config {
     /// shell reads none (tests, unless they give one).
     #[serde(skip)]
     pub file: Option<PathBuf>,
+    /// Who checks the lock's password (7.1): PAM. Not part of the file;
+    /// a test's own only in the crate's tests (`test-auth`).
+    #[serde(skip)]
+    pub lock_auth: crate::lock::Authenticator,
 }
 
 /// Screen recording, `[recording]` (5.10).

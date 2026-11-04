@@ -1,0 +1,7 @@
+#%PAM-1.0
+# Hocuspanda's lock screen (docs/design/lock.md): the password checked as
+# the system's login checks it, with its own modules. The compositor runs
+# as the user, not root: pam_unix checks through its helper, and no
+# module that keeps a tally as root (pam_faillock) can count here.
+@include common-auth
+@include common-account

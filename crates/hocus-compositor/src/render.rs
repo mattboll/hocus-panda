@@ -19,7 +19,7 @@ use smithay::{
             solid::SolidColorRenderElement,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             texture::TextureRenderElement,
-            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+            utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
         },
     },
     desktop::{
@@ -92,6 +92,8 @@ render_elements! {
     Solid = SolidColorRenderElement,
     /// The strokes and the laser drawn on a screen (docs/design/ink.md).
     Ink = crate::ink::InkElement<R>,
+    /// A half of the lock opening (7.1).
+    Part = Keyed<RelocateRenderElement<CropRenderElement<WaylandSurfaceRenderElement<R>>>>,
 }
 
 /// What an output's elements are drawn for.
@@ -104,16 +106,20 @@ pub enum Purpose {
     /// the toasts, a password manager's windows black; `cursor`: the
     /// pointer asked in the image.
     Capture { cursor: bool },
+    /// The desktop's last frame as the session locks (7.1): what the lock
+    /// fades in over, drawn as a capture is, the lock not yet in it.
+    Freeze,
 }
 
 impl Purpose {
     fn cursor(self) -> bool {
         match self {
             Self::Screen { cursor } | Self::Capture { cursor } => cursor,
+            Self::Freeze => false,
         }
     }
 
-    fn screen(self) -> bool {
+    pub(crate) fn screen(self) -> bool {
         matches!(self, Self::Screen { .. })
     }
 }
@@ -504,6 +510,20 @@ impl State {
                     .map(OutputElements::Cursor),
             );
         }
+        // Locked (7.1): the lock alone, whatever the purpose but its own
+        // last look at the desktop.
+        if purpose != Purpose::Freeze
+            && let Some(mut lock) = self.lock_elements(renderer, output, purpose, now)
+        {
+            elements.append(&mut lock);
+            return elements;
+        }
+        // Opening: its halves over everything (on the screen; a capture
+        // sees the desktop it opens on).
+        if purpose.screen() {
+            let mut parting = self.lock_parting_elements(renderer, output, now);
+            elements.append(&mut parting);
+        }
         // The authentication dialog and its dim over everything but the
         // cursor (7.5): on the screen only.
         if purpose.screen() {
@@ -559,7 +579,8 @@ impl State {
                 // (`launcher_elements`, `toast_elements`).
                 if matches!(
                     layer.namespace(),
-                    hocus_link::PEEK_NAMESPACE
+                    hocus_link::LOCK_NAMESPACE
+                        | hocus_link::PEEK_NAMESPACE
                         | hocus_link::LAUNCHER_NAMESPACE
                         | hocus_link::LAUNCHER_TOAST_NAMESPACE
                         | hocus_link::CAPTURE_TOOLBAR_NAMESPACE
@@ -920,7 +941,8 @@ impl State {
         look.visual = rect;
         look.alpha = 1.0;
         let mut out = Vec::new();
-        if self.protected(id) {
+        // Locked (7.1), a window shared or recorded shows black.
+        if self.locked() || self.protected(id) {
             out.push(OutputElements::Solid(SolidColorRenderElement::new(
                 smithay::backend::renderer::element::Id::new(),
                 Rectangle::from_size(rect.size).to_physical_precise_round(scale),
@@ -1393,7 +1415,9 @@ impl State {
                 next
             }
         });
-        for window in self.space.elements() {
+        // Locked (7.1), only the lock's surfaces draw: the others wait.
+        let locked = self.locked();
+        for window in self.space.elements().filter(|_| !locked) {
             window.with_surfaces(|surface, data| {
                 if let Some(states) = states {
                     update_surface_primary_scanout_output(surface, output, data, states, compare);
@@ -1403,8 +1427,14 @@ impl State {
             window.send_frame(output, now, throttle, primary);
         }
         for layer in layer_map_for_output(output).layers() {
+            if !self.lock_frames_for(layer.wl_surface()) {
+                continue;
+            }
             layer.with_surfaces(|surface, data| tell_scale(surface, data, Some(output)));
             layer.send_frame(output, now, throttle, |_, _| Some(output.clone()));
+        }
+        if let Some(surface) = self.external_surface_on(output) {
+            send_frames_surface_tree(&surface, output, now, throttle, |_, _| Some(output.clone()));
         }
         if let CursorImageStatus::Surface(cursor) = &self.cursor {
             send_frames_surface_tree(cursor, output, now, throttle, |_, _| Some(output.clone()));

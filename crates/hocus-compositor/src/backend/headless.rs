@@ -523,6 +523,21 @@ impl HeadlessBackend {
     /// Schedules the next frame when something changed: nothing wakes up
     /// at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // The desktop's last frame as it locks (7.1), before anything else
+        // draws it locked.
+        if state.lock.wants_freeze() {
+            match &mut self.canvas {
+                Canvas::Gles(c) => {
+                    crate::lock::draw::freeze::<_, GlesTexture>(&mut c.renderer, state);
+                }
+                Canvas::Pixman(c) => {
+                    crate::lock::draw::freeze::<_, pixman::Image<'static, 'static>>(
+                        &mut c.renderer,
+                        state,
+                    )
+                }
+            }
+        }
         // Screen sharing's thumbnails and frames (5.11).
         match &mut self.canvas {
             Canvas::Gles(c) => crate::share::frames::run::<_, GlesTexture>(
