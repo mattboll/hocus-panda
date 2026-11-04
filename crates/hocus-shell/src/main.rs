@@ -46,6 +46,7 @@ mod outputs;
 mod paste;
 mod pointer;
 mod popover;
+mod reminder;
 mod renderer;
 mod share;
 mod today;
@@ -128,6 +129,8 @@ fn main() -> ExitCode {
     // After the notifications' wall clock, which the day is read against.
     day::start();
     meeting::start();
+    // After the day's start, which it follows.
+    reminder::start(software);
     today::start();
     // After the notifications' wall clock, which its times read.
     clipboard::start();
@@ -428,6 +431,7 @@ impl Shell {
         subscriptions.push(Subscription::run(popover::effects));
         subscriptions.push(Subscription::run(notifications::effects));
         subscriptions.push(Subscription::run(tray::effects));
+        subscriptions.push(Subscription::run(reminder::effects));
         subscriptions.push(bar_sizes());
         Subscription::batch(subscriptions)
     }
@@ -473,6 +477,7 @@ impl Shell {
                 tracing::info!(zone = zone.iana_name(), "the time zone changed");
                 notifications::set_zone(zone.clone());
                 self.wall.zone = zone;
+                reminder::zone_changed();
                 Task::none()
             }
             Message::Levels => Task::none(),
@@ -551,6 +556,7 @@ impl Shell {
                     footer::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
                     let card = meeting::forget(&bar.output);
+                    reminder::forget(&bar.output);
                     let today = today::forget(&bar.output);
                     let tray = tray::draw::forget(&bar.output);
                     Some(Task::batch([
@@ -693,7 +699,22 @@ impl Shell {
                 Task::none()
             }
             ToShell::Day(ask) => {
+                if let hocus_link::DayAsk::Slept(seconds) = ask {
+                    self.slept(seconds);
+                }
                 day::ask(ask);
+                Task::none()
+            }
+            ToShell::Join => {
+                reminder::join_key();
+                Task::none()
+            }
+            ToShell::Fullscreen(screens) => {
+                reminder::set_fullscreen(screens);
+                Task::none()
+            }
+            ToShell::SharedScreens(screens) => {
+                reminder::set_shared(screens);
                 Task::none()
             }
         }
@@ -872,6 +893,7 @@ impl Shell {
             after.extend(in_use::bar_opened(&output, form));
             after.extend(meeting::bar_opened(&output, form));
             after.extend(today::bar_opened(&output, form));
+            reminder::bar_opened(&output, form);
         }
         open.chain(open_clock)
             .chain(open_levels)
@@ -903,6 +925,21 @@ impl Shell {
 
     /// `form` for bar `id`, switching from where it is since `start`; at
     /// once without motion.
+    /// `day slept SECONDS` (tests): the machine slept that long, its wall
+    /// clock moved on while the monotonic clock did not. Only when the
+    /// clock reads a time of its own (`HOCUS_CLOCK_AT`): the system's clock
+    /// is never touched.
+    fn slept(&mut self, seconds: u64) {
+        if std::env::var_os("HOCUS_CLOCK_AT").is_none() {
+            tracing::warn!("day slept: only with HOCUS_CLOCK_AT");
+            return;
+        }
+        let slept = jiff::SignedDuration::from_secs(i64::try_from(seconds).unwrap_or(i64::MAX));
+        self.wall.shift = self.wall.shift.saturating_add(slept);
+        notifications::shift_by(slept);
+        tracing::info!(seconds, "slept: the clock moves on");
+    }
+
     fn set_form(&mut self, id: window::Id, form: Form, start: Option<Instant>) -> Task<Message> {
         let now = self.now;
         let motion = self.look.motion;
@@ -990,6 +1027,7 @@ impl Shell {
         let output = bar.output.clone();
         let form = bar.form;
         today::form(&output, form, switching);
+        reminder::form(&output, form);
         Task::batch(tasks)
     }
 
@@ -1576,6 +1614,7 @@ impl Shell {
                 .or_else(|| self.today_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
+                .or_else(|| reminder::view(id, self.look.glass))
                 .unwrap_or_else(|| Space::new().into());
         };
         let width = bar.width(self.now + AHEAD);

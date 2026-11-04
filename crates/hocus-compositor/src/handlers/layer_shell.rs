@@ -193,6 +193,10 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.capture_after_committed(&layer);
             }
             ns if hocus_link::is_bubble(ns) => state.bubble_committed(&layer),
+            ns if hocus_link::is_reminder(ns) => {
+                state.panel.reminder_commits += 1;
+                state.bubble_committed(&layer);
+            }
             _ => {}
         }
         let before = state.work_area(&output);

@@ -309,6 +309,36 @@ impl Headless {
         self.app.state.panel.meeting_commits
     }
 
+    /// The commits of the meetings' reminders' tabs (Day.6), all bars'.
+    pub fn reminder_commits(&self) -> u64 {
+        self.app.state.panel.reminder_commits
+    }
+
+    /// The meetings' reminders' tabs (Day.6): their namespace, screen and
+    /// place (global logical pixels), top first.
+    pub fn reminder_surfaces(&self) -> Vec<(String, String, Rect)> {
+        let state = &self.app.state;
+        let mut surfaces = Vec::new();
+        for output in state.space.outputs() {
+            let Some(origin) = state.space.output_geometry(output).map(|g| g.loc) else {
+                continue;
+            };
+            let map = smithay::desktop::layer_map_for_output(output);
+            for layer in map.layers() {
+                if !hocus_link::is_reminder(layer.namespace()) {
+                    continue;
+                }
+                if let Some(g) = map.layer_geometry(layer) {
+                    let rect =
+                        Rect::new(origin.x + g.loc.x, origin.y + g.loc.y, g.size.w, g.size.h);
+                    surfaces.push((layer.namespace().to_owned(), output.name(), rect));
+                }
+            }
+        }
+        surfaces.sort_by_key(|(_, _, r)| r.y);
+        surfaces
+    }
+
     /// Commits of the connections' surfaces so far.
     pub fn connections_commits(&self) -> u64 {
         self.app.state.panel.connections_commits

@@ -15,6 +15,7 @@ mod http;
 pub mod local;
 pub mod model;
 pub mod planka;
+pub mod reminders;
 pub mod secrets;
 pub mod snapshot;
 pub mod source;

@@ -232,7 +232,7 @@ impl State {
     }
 
     /// Whether the window in front on `output`'s desktop is fullscreen.
-    fn fullscreen_in_front(&self, output: &Output) -> bool {
+    pub(crate) fn fullscreen_in_front(&self, output: &Output) -> bool {
         self.windows_on(output)
             .into_iter()
             .rev()

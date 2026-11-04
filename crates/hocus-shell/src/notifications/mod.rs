@@ -97,6 +97,14 @@ pub fn wall_ms() -> i64 {
     wall().timestamp().as_millisecond()
 }
 
+/// The wall clock moved on by `by`, the system's clock untouched (tests:
+/// `day slept`).
+pub fn shift_by(by: jiff::SignedDuration) {
+    if let Some(wall) = WALL.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+        wall.shift = wall.shift.saturating_add(by);
+    }
+}
+
 /// The system's time zone changed.
 pub fn set_zone(zone: jiff::tz::TimeZone) {
     if let Some(wall) = WALL.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
@@ -508,6 +516,16 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             Vec::new()
         }
         Effect::Signal(server::Signal::Closed { id, .. }) if capture_of(id).is_some() => Vec::new(),
+        // A meeting's reminder's (Day.6) is the shell's own too: its link.
+        Effect::Signal(server::Signal::Action { id, .. }) if reminder_of(id).is_some() => {
+            if let Some(serial) = reminder_of(id) {
+                crate::reminder::from_history(serial);
+            }
+            Vec::new()
+        }
+        Effect::Signal(server::Signal::Closed { id, .. }) if reminder_of(id).is_some() => {
+            Vec::new()
+        }
         Effect::Signal(signal) => {
             server::signal(signal);
             Vec::new()
@@ -614,6 +632,70 @@ pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::ico
 /// Capture `capture` deleted: out of the history.
 pub fn forget_capture(capture: u64) {
     input(Input::Close(capture_id(capture)));
+}
+
+// --- The meetings' reminders in the history (Day.6) -----------------------------------
+
+/// The ids of the meetings' reminders in the history: past any the server
+/// gives, apart from the captures'.
+const REMINDERS_FROM: u32 = 0x8000_0000;
+const SHELLS_OWN: u32 = 0xC000_0000;
+
+/// Reminder `serial`'s id in the history.
+pub fn reminder_id(serial: u64) -> u32 {
+    REMINDERS_FROM | (serial as u32 & !SHELLS_OWN)
+}
+
+/// The reminder whose id in the history is `id`, if it is one.
+pub fn reminder_of(id: u32) -> Option<u64> {
+    (id & SHELLS_OWN == REMINDERS_FROM).then(|| u64::from(id & !SHELLS_OWN))
+}
+
+/// A meeting's reminder that stayed its time goes to the history, the
+/// newest: from `app` ("Agenda"), saying `summary` ("Revue de sprint · a
+/// commencé à 10:00"), `join` its action (and its click) while the meeting
+/// runs; kept at `at` (the wall clock's milliseconds: when its tab went).
+/// Seen: its tab showed.
+pub fn keep_reminder(serial: u64, app: &str, summary: String, join: Option<&str>, at: i64) {
+    input(Input::Keep(Box::new(reminder_note(
+        serial, app, summary, join, at,
+    ))));
+}
+
+/// Its meeting ended: its action goes, in its place.
+pub fn reminder_ended(serial: u64, app: &str, summary: String, at: i64) {
+    input(Input::Update(Box::new(reminder_note(
+        serial, app, summary, None, at,
+    ))));
+}
+
+fn reminder_note(
+    serial: u64,
+    app: &str,
+    summary: String,
+    join: Option<&str>,
+    at: i64,
+) -> note::Note {
+    note::Note {
+        id: reminder_id(serial),
+        app: app.to_owned(),
+        entry: None,
+        icon: None,
+        summary,
+        body: String::new(),
+        actions: join
+            .map(|label| vec![("join".to_owned(), label.to_owned())])
+            .unwrap_or_default(),
+        default: join.is_some(),
+        urgency: note::Urgency::Normal,
+        timeout: note::Timeout::After(note::LIFE),
+        progress: None,
+        resident: false,
+        pid: 0,
+        agent: false,
+        icon_from: note::IconFrom::default(),
+        at,
+    }
 }
 
 /// What surface `id` shows, if it is one of the notifications': a bubble,

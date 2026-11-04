@@ -829,6 +829,7 @@ impl State {
             })
             .collect();
         self.tell_shell(ToShell::Shares(shown));
+        self.tell_shared_screens();
     }
 
     /// The shell connected again: what is shared, and the chooser.

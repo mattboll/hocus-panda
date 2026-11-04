@@ -579,7 +579,7 @@ impl State {
                         .popovers
                         .look(&layer, now, self.popover_motion())
                         .map(|l| (l.alpha, l.shift, l.rise))
-                } else if hocus_link::is_bubble(layer.namespace()) {
+                } else if hocus_link::slides_in(layer.namespace()) {
                     self.bubbles
                         .look(&layer, now, self.bubbles_slide())
                         .map(|l| (l.alpha, l.shift, 0.0))
@@ -613,6 +613,7 @@ impl State {
                     }
                     hocus_link::EMOJI_NAMESPACE => Some((own, hocus_link::EMOJI_RADIUS)),
                     ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
+                    ns if hocus_link::is_reminder(ns) => Some((own, hocus_link::REMINDER_RADIUS)),
                     hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),
                     hocus_link::TIP_NAMESPACE => Some((own, hocus_link::TIP_RADIUS)),
                     hocus_link::CLOCK_NAMESPACE
