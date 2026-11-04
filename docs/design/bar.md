@@ -2434,7 +2434,8 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   bell's colour (the spec says `text.dim`; the mockup and 5.4's bell use
   this one). The avatar: 24 px round, the name's first letter (Manrope
   700, 12 px, `#0B1020`) on the accent's gradient (`#6CC287` to
-  `#3E8FBF`, top left to bottom right). The badge is 5.4's, its right
+  `#3E8FBF`, top left to bottom right); since 7.4 the account's photo,
+  else the panda on that gradient (below). The badge is 5.4's, its right
   2 px inside the button's and its top 1 px under it (the mockup's).
 - **Opening**: the clipboard, the bell and the user open their popovers
   by a 150 ms hover or a click, in both forms (the mockup's; the bar's
@@ -2445,24 +2446,17 @@ the maintainer's spec (§4 group 11, §5; issue #395).
 - **The clipboard's popover**: its history since 5.6 (below). Until
   then, a 280 wide popover showed what the clipboard held, read by the
   shell as a client.
-- **The user's popover**, until the session's menu (7.4): 280 wide, the
-  user's name as the title, and one 44 px row, a log-out glyph in its
-  tile and "Se déconnecter" / "Log out" (lit `0.06` under the pointer).
-  Logging out takes two steps, so that a slip loses no open work: a
-  click turns the row into "Confirmer la déconnexion" / "Confirm log out"
-  in amber (`#F5C46E` on `rgba(245,196,110,0.12)`) for 4 s; a second
-  click within that time ends the session as `Super+Shift+E` does (the
-  shell's `log-out` line; the shortcut still ends it at once). `Esc`, the
-  pointer leaving the popover, or the 4 s running out bring "Se
-  déconnecter" back; `Esc` again closes. No "Verrouiller" / "Lock": the
-  desktop has no lock of its own yet. `Tab` gives the row the keyboard,
-  `Enter` or `Space` act as a click.
+- **The user's popover**: until 7.4, 280 wide, the user's name as the
+  title and one "Se déconnecter" row that took a second click within 4 s
+  to log out, `Super+Shift+E` ending the session at once. The session
+  menu (7.4, below) replaced it: lock, suspend, log out, restart and shut
+  down, the last three confirmed with a 10 s countdown.
 - **"Réglages" / "Settings"** (6.1, docs/design/settings.md): a row of the
   user's popover above "Se déconnecter", its sliders glyph in the same
   tile; a click, or `Enter` or `Space` once `Tab` gave it the keyboard,
   starts `hocus-settings` (in `PATH`, else beside the shell) through the
   compositor, with an activation token, and closes the popover; an open
-  Settings window comes forward. `Tab` and the arrows go round both rows.
+  Settings window comes forward. Since 7.4 it is the menu's first row.
 - **The user's name**: their account entry's (`getent passwd UID`, else
   `/etc/passwd`), its GECOS field's first part, else their login; looked
   up on a thread as the shell starts, the session's `USER` standing in
@@ -2478,9 +2472,7 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   buttons drawn in a row, their names in order; the clipboard's history
   saying "nothing", then the text a window copied; the bell opening the
   history, the menu the launcher over the whole screen, the user's
-  popover with "Alex" and "Se déconnecter", a click asking to confirm,
-  the 4 s running out and `Esc` ending nothing, a second click within
-  4 s ending the session; the
+  popover with "Alex" and its rows (7.4's tests below); the
   menu opening nothing after 600 ms of hovering, the bell beside it
   opening its history, and a click opening the launcher with the
   keyboard; the mini form's bell over the avatar at the bar's bottom, the
@@ -2488,9 +2480,9 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   badge drawn on the footer's bell (`tests/notifications.rs`). Unit tests
   for the places, the names, the user's name from an entry and its
   initial. On the Intel GPU, the screenshots of the pull request.
-- **Not built**: the session's menu (7.4), the account's picture from
-  AccountsService; names for screen readers (§11: the names are said in
-  the log only).
+- **Not built**: names for screen readers (§11: the names are said in
+  the log only). The session's menu and the account's picture came with
+  7.4.
 
 ### 5.13, the bar under the windows (2026-11-02)
 
@@ -3824,3 +3816,121 @@ agents goes under the to-do list, in both forms.
   Unit tests: the order, the tops and the room shared (`column`), the
   agents' rows and To do's lines that fit. On the CPU, the screenshots of
   the pull request (`HOCUS_SHOTS=dir`).
+
+### 7.4, the session menu (2026-11-04)
+
+The approved spec is issue #415's last comment (variant A, mockup
+<https://claude.ai/artifact/YYrHQz2rMPhjogPJMqPSZw>), with its decisions:
+`Super+Shift+E` opens the log-out confirmation; a window that does not
+close within 5 s is listed as holding it back, with "Revenir à …" and
+"Fermer quand même"; restart and shut down that need the password open
+7.5's dialog as they are chosen; the avatar is 7.1's.
+
+- **Who does what.** The compositor decides and keeps the time
+  (`crates/hocus-compositor/src/leave/`): the countdown, the windows asked
+  to close and the 5 s they are given, on the motions' clock
+  (`State::now`, which tests hold); logind on a thread of its own with its
+  runtime (`leave/logind.rs`), never on the loop. The shell draws what it
+  is told in the user's popover (`crates/hocus-shell/src/popover/session/`)
+  and says what is chosen. The lines are `hocus_link::leave`'s:
+  `leave-can`, `leave OUTPUT ACTION STEP…`, `leave-end`; from the shell
+  `leave open`, `leave ask ACTION OUTPUT`, `leave suspend`, `leave now`,
+  `leave cancel`, `leave force WINDOW`.
+- **logind's bus** is the one given with `--system-bus ADDRESS`, else the
+  system's on a virtual terminal only. Nested or headless without it,
+  there is no logind: suspend is hidden, restart and shut down greyed, and
+  the developer's machine is never asked to sleep or power off.
+- **The menu**: 280 wide, the header 40 px (the avatar 32 px: the
+  account's photo from AccountsService's `IconFile` as 7.1 reads it, else
+  the panda on the accent's gradient; the name, Manrope 700, 16 px), then
+  6 px and the rows, 44 px each, their 30 px tile (radius 8, `0.06`), its
+  17 px glyph (1.9 px strokes, `#C9D0DC`), the label 14 px 600, "Super+L"
+  on Lock's right (Martian Mono 11 px, `text.faint`), lit `0.06` under the
+  pointer: "Réglages" (6.1), a divider, "Verrouiller", "Mettre en
+  veille", a divider, "Se déconnecter", "Redémarrer", "Éteindre". 364 px
+  tall with every row (the spec's 305, "Réglages" and its divider, the
+  rim). `CanSuspend` read again as it opens hides suspend when it says no;
+  `CanReboot` and `CanPowerOff` saying no grey their rows
+  (`rgba(255,255,255,0.28)`, inert); `challenge` leaves them as they are.
+  The footer's avatar is the photo or the panda too (no longer the
+  initial).
+- **Lock** (and `Super+L`, a new `[shortcuts] lock`): `lock now`, the
+  popover closes. **Suspend**: the session locks, and logind's
+  `Suspend(true)` is called once every screen shows the lock
+  (`State::lock_drawn`), 2 s at most.
+- **The confirmation**, in place of the rows, the header kept: the amber
+  tile and the title (15 px), the sentence ("L’ordinateur s’éteint dans
+  10 s.", the number each second), the 4 px bar (draining smoothly on a
+  GPU with motion, a step a second on the CPU or with reduced motion),
+  "Éteindre maintenant" (`#F5C46E`) and "Annuler", 238 px tall, growing
+  upward from the bar's bottom. The keyboard is on "Annuler"; `Tab` to "…
+  maintenant"; `Esc` cancels, `Esc` again closes; a click outside, or the
+  popover closing, cancels. Chosen from a hover, the popover is held as a
+  click holds it: the pointer leaving does not close it. `Super+Shift+E`
+  opens it on the log-out confirmation, on the focused window's screen
+  (else the pointer's); without a shell, it logs out at once as before.
+- **The password first**: when logind says `challenge`, the compositor
+  asks polkit (`CheckAuthorization` with `AllowUserInteraction`, the
+  action logind checks: `…reboot` or `…power-off`, their
+  `-multiple-sessions` forms when another user has a session) before the
+  countdown; the session's agent (7.5) shows its dialog. Refused, the menu
+  shows its rows again. The call itself is `interactive` too, so polkit
+  asks again if the first answer is not kept (`auth_admin`).
+- **What holds it back**: logind's inhibitors in `block` mode holding
+  `shutdown` (`ListInhibitors`, read as the confirmation opens and every
+  second while it shows: logind says nothing when one comes or goes),
+  their `Who` and `Why`. `delay` ones are not listed: logind waits for
+  them itself. While one holds, the list shows ("Firefox retient
+  l’arrêt", the spec's sentence, a block each: the icon of its desktop
+  entry or its letter, its name, its reason, "Revenir à Firefox", which
+  brings the window of its process and closes the menu), "Éteindre quand
+  même" and "Annuler", and nothing counts; when the last lets go, the
+  countdown starts from 10 s. Logging out has no logind inhibitor; the
+  desktop portal's `Inhibit` is not served yet (docs/design/idle.md).
+- **Ending**: at 0, or "… maintenant", every window (Wayland's
+  `xdg_toplevel.close`, X11's `WM_DELETE_WINDOW`) is asked to close, and
+  given 5 s ("Fermeture des applications…"). Once none is left it
+  happens at once. Those still open are then listed as holding it back
+  (its title in its reason: "« Sans titre » ne s’est pas fermée.", or
+  "Sa fenêtre ne s’est pas fermée." without one), with
+  "Revenir à …" and "Fermer quand même", which cuts that window's client
+  off (an X11 window's process is killed); "Se déconnecter quand même"
+  goes on without them. Log out ends the compositor (`Ending::LoggedOut`)
+  and the session script after it; restart and shut down call logind's
+  `Reboot(true)` or `PowerOff(true)` and then end the compositor
+  (`Ending::Restarted`, `Ending::PoweredOff`). logind refusing (polkit
+  said no, an inhibitor) logs it and shows the rows again.
+- **The confirmation goes** when the session locks (by the idle, a
+  locker), or when the shell goes: nobody could cancel it any more.
+- **Choices made here** (to confirm on the machine): "Réglages" first,
+  over its own divider; the "Fermer quand même" button beside "Revenir à
+  …" in a window's block (and the list's "… quand même" button for them
+  all); "Ton mot de passe est demandé." while polkit asks, "Fermeture des
+  applications…" while the windows close, "Extinction…" (the mockup's)
+  once logind has it; the amber tile beside the list's title too; the
+  inhibitors read every second while the confirmation shows rather than
+  on logind's property changes.
+- **Measured headless** (`crates/hocus-compositor/tests/session_menu.rs`),
+  the real shell on the CPU, in French, its directories the test's own,
+  the compositor's system bus a private `dbus-daemon` with a fake logind
+  and polkit that record what they are asked:
+  `the_popover_shows_the_menus_rows_under_the_avatar_and_the_name` (and
+  suspend hidden, restart and shut down greyed as logind says);
+  `verrouiller_locks`, `super_l_locks`;
+  `mettre_en_veille_locks_then_suspends` (once the lock shows);
+  `eteindre_counts_ten_seconds_down_then_powers_off` (the held clock, the
+  sentence's seconds, the bar's pixels draining, `PowerOff(true)` at 10 s
+  and not before); `annuler_stops_the_countdown`;
+  `eteindre_maintenant_acts_at_once`; `redemarrer_maintenant_reboots`;
+  `an_inhibitors_reason_shows_and_holds_the_countdown` (a `delay` one not
+  listed, 12 s without a call, the countdown from 10 s once it goes);
+  `a_window_that_does_not_close_is_listed_and_fermer_quand_meme_closes_it`;
+  `super_shift_e_opens_the_log_out_confirmation`;
+  `logging_out_ends_the_compositor_once_the_windows_close`;
+  `the_keyboard_lands_on_annuler` (a stray `Enter` ends nothing);
+  `a_restart_that_needs_the_password_asks_polkit_first`;
+  `at_rest_the_menu_draws_nothing`. In `tests/session.rs`,
+  `super_shift_e_logs_out` without a shell. Unit tests: the lines read
+  back (`hocus-link`); the inhibitors kept and polkit's actions
+  (`leave/logind.rs`); the rows, the confirmation's and the list's
+  layouts, the holders' names, the words (`hocus-shell`).

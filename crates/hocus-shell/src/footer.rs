@@ -5,8 +5,8 @@
 //! user's avatar; in the mini form, the bell over the avatar, each 44 × 34,
 //! at the bottom of the column. Buttons have a radius of 9, lit `0.08`
 //! under the pointer and `0.10` while their popover shows, their glyphs
-//! 20 px strokes; the avatar is the user's name's first letter on the
-//! accent's gradient, 24 px round.
+//! 20 px strokes; the avatar is the account's photo, else the panda on
+//! the accent's gradient (7.4, as the lock's), 24 px round.
 //!
 //! The clipboard, the bell and the user open their popovers as the bar's
 //! items do, a hover of 150 ms or a click, in both forms
@@ -31,10 +31,7 @@ use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
     keyboard, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry, Path, gradient},
-        text::Alignment,
-    },
+    widget::canvas::{self, Frame, Geometry},
     window,
 };
 use iced_layershell::reexport::{
@@ -44,9 +41,9 @@ use iced_layershell::reexport::{
 use crate::{
     Message,
     clock::time::Lang,
-    levels::draw::{MANROPE_BOLD, faded, pointer, rgb},
+    levels::draw::pointer,
     notifications::bell::{self, INK},
-    popover::{self, Item, kit},
+    popover::{self, Item},
 };
 
 /// The buttons, in the full form and in the mini.
@@ -67,12 +64,8 @@ const MINI_GAP: f32 = 2.0;
 /// The surface's width: the bar inside its rim.
 const FULL_WIDTH: u32 = 194;
 const MINI_WIDTH: u32 = 54;
-/// The avatar: 24 px round, its letter 12 px bold.
+/// The avatar: 24 px round.
 const AVATAR: f32 = 24.0;
-const AVATAR_TEXT: f32 = 12.0;
-const AVATAR_FROM: Color = rgb(0x6CC287);
-const AVATAR_TO: Color = rgb(0x3E8FBF);
-const AVATAR_INK: Color = rgb(0x0B1020);
 
 /// How much room the mini form's footer takes over the bar's bottom, up to
 /// the top of its bell: the levels keep 14 px over it.
@@ -345,29 +338,16 @@ fn glyph(item: Item) -> Option<svg::Handle> {
     }
 }
 
-/// The avatar centred on `button`: `letter` on the accent's gradient (from
-/// the top left to the bottom right), `alpha` opaque.
-fn avatar(f: &mut Frame, button: Rectangle, letter: &str, alpha: f32) {
+/// The avatar centred on `button`, 24 px round: the account's photo,
+/// else the panda on the accent's gradient (7.4, as the lock's), `alpha`
+/// opaque.
+fn avatar(f: &mut Frame, button: Rectangle, alpha: f32) {
     let centre = button.center();
-    let from = Point::new(centre.x - AVATAR / 2.0, centre.y - AVATAR / 2.0);
-    let to = Point::new(centre.x + AVATAR / 2.0, centre.y + AVATAR / 2.0);
-    let fill = gradient::Linear::new(from, to)
-        .add_stop(0.0, faded(AVATAR_FROM, alpha))
-        .add_stop(1.0, faded(AVATAR_TO, alpha));
-    f.fill(
-        &Path::circle(centre, AVATAR / 2.0),
-        canvas::Fill::from(fill),
+    let rect = Rectangle::new(
+        Point::new(centre.x - AVATAR / 2.0, centre.y - AVATAR / 2.0),
+        Size::new(AVATAR, AVATAR),
     );
-    f.fill_text(kit::text_in(
-        MANROPE_BOLD,
-        kit::text(
-            letter.to_owned(),
-            centre,
-            AVATAR_TEXT,
-            faded(AVATAR_INK, alpha),
-            Alignment::Center,
-        ),
-    ));
+    crate::lock::draw::avatar_round(f, rect, alpha);
 }
 
 // --- The surface -------------------------------------------------------------------------
@@ -547,7 +527,6 @@ impl canvas::Program<Message> for Footer {
             .collect();
         popover::with(|c| c.set_items(&self.bar, FOOTER_NAMESPACE, in_bar));
         let (count, dnd) = crate::notifications::with(|c| (c.stack.badge(), c.stack.dnd.is_on()));
-        let letter = crate::user::initial(&crate::user::name());
         let still = self.forms.len() == 1;
         let bottom = self.bottom();
         // The bar's inside, as wide as it is while it switches.
@@ -581,7 +560,7 @@ impl canvas::Program<Message> for Footer {
                         ),
                         Item::User => {
                             bell::lit(f, button, open, hover, focused);
-                            avatar(f, button, &letter, alpha);
+                            avatar(f, button, alpha);
                         }
                         _ => {
                             bell::lit(f, button, open, hover, focused);

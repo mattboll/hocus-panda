@@ -1,4 +1,5 @@
-//! The lock's avatar (7.1, decided): the account's photo, as
+//! The lock's avatar (7.1, decided), the footer's and the session menu's
+//! too (7.4): the account's photo, as
 //! AccountsService has it (`org.freedesktop.Accounts` on the system bus,
 //! the user's `IconFile`), when it has one; else the panda on the accent's
 //! gradient.
@@ -61,6 +62,11 @@ pub fn start() {
                     crate::popover::tell(hocus_link::ToCompositor::Wake(
                         hocus_link::LOCK_NAMESPACE.to_owned(),
                     ));
+                    // The footer's and the session menu's avatars (7.4).
+                    crate::popover::tell(hocus_link::ToCompositor::Wake(
+                        hocus_link::FOOTER_NAMESPACE.to_owned(),
+                    ));
+                    crate::popover::changed(crate::popover::Item::User);
                 }
                 Err(why) => tracing::info!(why, "the account's photo does not read: the panda"),
             }
