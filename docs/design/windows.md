@@ -384,10 +384,12 @@ A screen plugged back gets its bar on it, wherever the pointer is
 (#540). The shell's toolkit finds a screen by its xdg-output name, which
 reaches it a few exchanges after the screen's global: asked for before,
 a surface would be on no screen, and the compositor would put it under
-the pointer. So the shell keeps a bar it is told to open until round
-trips on its own queue of the same connection have given the name time
-to arrive, and opens it once the compositor has given that name; it
-never asks for one on no screen. The compositor defends too: one of the
+the pointer. So the shell keeps a bar it is told to open until it knows
+that name itself, on a queue of its own on the same connection that
+takes the toolkit's steps (bind the screen, ask for its xdg-output, read
+its name), each request made after the toolkit's for the same step: the
+name reaches the shell after it reached the toolkit, with no round trip
+counted (#552). It never asks for a bar on no screen. The compositor defends too: one of the
 bar's own surfaces (the bar, its clock, levels, connections, desktops,
 agents and footer) asked for on no screen goes to a screen given a bar
 that lacks that surface, and is closed if none does, rather than making
