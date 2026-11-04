@@ -15,7 +15,9 @@
 //! detail and how long; its button muting the default source and back;
 //! its buttons stopping a share and a recording; nothing read nor drawn
 //! at rest; `/proc` read at most once a second while a camera's node
-//! exists. The timings of the linger and of the pop, on the shell's own
+//! exists. And 5.12b's (issue #561): the recording's red tile with its
+//! time, amber and "pause" while paused, before the share's blue one, in
+//! the full form's row too, and nothing drawn once it is paused or gone. The timings of the linger and of the pop, on the shell's own
 //! clock, are its unit tests (`in_use::tests`, `in_use::draw::tests`):
 //! here the shell says, from its monotonic clock, how long a use lingered.
 //!
@@ -415,53 +417,181 @@ impl Bed {
     /// The tiles' colours, as their brightest pixel says, in the sign of
     /// the surface at `surface` with `kinds` tiles in `form`.
     fn tiles(&mut self, surface: Rect, form: FormChoice, kinds: i32) -> anyhow::Result<Vec<Ink>> {
+        self.inks(surface, form, &vec![Tile::Kind; kinds as usize])
+    }
+
+    /// The same, with the recording's tile among them: its dot's colour,
+    /// read at its middle.
+    fn inks(
+        &mut self,
+        surface: Rect,
+        form: FormChoice,
+        tiles: &[Tile],
+    ) -> anyhow::Result<Vec<Ink>> {
         common::at_rest(&mut self.hp)?;
         let (w, _, pixels) = self.hp.screenshot(0)?;
-        let tile = |i: i32| match form {
-            // Stacked, 9 px in from the 48 px sign 3 px into the surface.
-            FormChoice::Mini => Rect::new(surface.x + 12, surface.y + 11 + i * 28, 30, 24),
-            // In a row, centred on the bar's middle (97 px into it).
-            _ => {
-                let width = 18 + kinds * 30 + (kinds - 1) * 4;
-                Rect::new(
-                    surface.x + 97 - width / 2 + 9 + i * 34,
-                    surface.y + 11,
-                    30,
-                    24,
-                )
-            }
+        let size = |t: &Tile| match t {
+            Tile::Kind => (30, 24),
+            Tile::Recording => (36, 42),
         };
-        Ok((0..kinds)
-            .map(|i| {
-                let r = tile(i);
-                let mut best = [0u8; 3];
-                for y in r.y..r.y + r.height {
-                    for x in r.x..r.x + r.width {
-                        let at = ((y * w + x) * 4) as usize;
-                        let rgb = [pixels[at + 2], pixels[at + 1], pixels[at]];
-                        let sum = |c: [u8; 3]| c.iter().map(|v| u32::from(*v)).sum::<u32>();
-                        if sum(rgb) > sum(best) {
-                            best = rgb;
+        let mut along = 0;
+        let rects: Vec<Rect> = tiles
+            .iter()
+            .map(|t| {
+                let (tw, th) = size(t);
+                let r = match form {
+                    // Stacked, centred in the 48 px sign 3 px into the
+                    // surface, 6 px under its top 5 px into it.
+                    FormChoice::Mini => Rect::new(
+                        surface.x + 3 + (48 - tw) / 2,
+                        surface.y + 11 + along,
+                        tw,
+                        th,
+                    ),
+                    // In a row, centred on the bar's middle (97 px into
+                    // it), each centred on the row's height.
+                    _ => {
+                        let width = 18
+                            + tiles.iter().map(|t| size(t).0).sum::<i32>()
+                            + (tiles.len() as i32 - 1) * 4;
+                        let row = tiles.iter().map(|t| size(t).1).max().unwrap_or(24);
+                        Rect::new(
+                            surface.x + 97 - width / 2 + 9 + along,
+                            surface.y + 11 + (row - th) / 2,
+                            tw,
+                            th,
+                        )
+                    }
+                };
+                along += 4 + if form == FormChoice::Mini { th } else { tw };
+                r
+            })
+            .collect();
+        let pixel = |x: i32, y: i32| {
+            let at = ((y * w + x) * 4) as usize;
+            [pixels[at + 2], pixels[at + 1], pixels[at]]
+        };
+        Ok(tiles
+            .iter()
+            .zip(rects)
+            .map(|(t, r)| match t {
+                // Its 10 px dot, 6 px under its top.
+                Tile::Recording => Ink::of_dot(pixel(r.x + 18, r.y + 11)),
+                Tile::Kind => {
+                    let mut best = [0u8; 3];
+                    for y in r.y..r.y + r.height {
+                        for x in r.x..r.x + r.width {
+                            let rgb = pixel(x, y);
+                            let sum = |c: [u8; 3]| c.iter().map(|v| u32::from(*v)).sum::<u32>();
+                            if sum(rgb) > sum(best) {
+                                best = rgb;
+                            }
                         }
                     }
+                    Ink::of(best)
                 }
-                Ink::of(best)
             })
             .collect())
     }
+
+    /// The screen recorded, as 5.10's tests do: `Print`, Vidéo, the
+    /// screen, Démarrer, until it records.
+    fn record_screen(&mut self) -> anyhow::Result<()> {
+        let pointer = self.hp.pointer();
+        self.hp.pointer_move(400.0, 300.0);
+        common::chord(&mut self.hp, &[KEY_PRINT]);
+        self.hp.capture_ask(hocus_link::CaptureAsk::Video(true));
+        self.hp.capture_ask(hocus_link::CaptureAsk::Mode(
+            hocus_link::CaptureMode::Screen,
+        ));
+        self.hp.capture_ask(hocus_link::CaptureAsk::Shoot);
+        let started = self.hp.dispatch_until(Duration::from_secs(30), |hp| {
+            hp.recording().is_some_and(|r| r.started)
+        })?;
+        anyhow::ensure!(started, "not recording: {:?}", self.hp.record_failures());
+        self.hp.pointer_move(pointer.0, pointer.1);
+        Ok(())
+    }
+
+    /// The recording paused (`paused`) or going on, as the compositor
+    /// says it.
+    fn pause(&mut self, paused: bool) -> anyhow::Result<()> {
+        self.hp.record_ask(if paused {
+            hocus_link::RecordAsk::Pause
+        } else {
+            hocus_link::RecordAsk::Resume
+        });
+        let done = self.hp.dispatch_until(WAIT, |hp| {
+            hp.recording().is_some_and(|r| r.paused == paused)
+        })?;
+        anyhow::ensure!(done, "not paused={paused}:\n{}", self.log());
+        Ok(())
+    }
+
+    /// Waits until the sign is drawn at rest with the recording `paused`
+    /// or not, said after `mark`.
+    fn rec_at_rest(&mut self, mark: usize, paused: bool) -> anyhow::Result<()> {
+        let want = format!("paused=Some({paused})");
+        self.logged_since(mark, "the in-use sign is drawn at rest", |l| {
+            l.contains(&want)
+        })?;
+        Ok(())
+    }
+
+    /// What the recording's tile reads after `mark` once `pass` takes it:
+    /// its time ("0:03"), or "pause".
+    fn rec_reads(&mut self, mark: usize, pass: impl Fn(&str) -> bool) -> anyhow::Result<String> {
+        let line = self.logged_since(mark, "the in-use sign's recording reads", |l| {
+            reads(l).is_some_and(&pass)
+        })?;
+        Ok(reads(&line).unwrap_or_default().to_owned())
+    }
 }
 
-/// A tile's colour, as its icon's brightest pixel reads.
+/// What a line of the recording's tile says it reads.
+fn reads(line: &str) -> Option<&str> {
+    line.split("time=").nth(1)?.split_whitespace().next()
+}
+
+/// "0:03" in seconds.
+fn seconds(time: &str) -> Option<u64> {
+    let (m, s) = time.split_once(':')?;
+    Some(m.parse::<u64>().ok()? * 60 + s.parse::<u64>().ok()?)
+}
+
+/// A tile of the sign: a kind's 30 × 24, or the recording's 36 × 42.
+#[derive(Debug, Clone, Copy)]
+enum Tile {
+    Kind,
+    Recording,
+}
+
+/// A tile's colour, as its icon's brightest pixel reads (the recording's,
+/// its dot).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ink {
     Orange,
     Green,
     Blue,
     Grey,
+    Red,
+    Amber,
     Other([u8; 3]),
 }
 
 impl Ink {
+    /// The recording's dot: `#F2545B`, or `#F5B44A` while paused.
+    fn of_dot([r, g, b]: [u8; 3]) -> Self {
+        let near = |a: u8, b: u8| a.abs_diff(b) <= 12;
+        if near(r, 0xF2) && near(g, 0x54) && near(b, 0x5B) {
+            Self::Red
+        } else if near(r, 0xF5) && near(g, 0xB4) && near(b, 0x4A) {
+            Self::Amber
+        } else {
+            Self::Other([r, g, b])
+        }
+    }
+
     fn of([r, g, b]: [u8; 3]) -> Self {
         let (r, g, b) = (i32::from(r), i32::from(g), i32::from(b));
         if r > b + 80 && r > g {
@@ -741,7 +871,7 @@ fn its_buttons_stop_the_share_and_the_recording() -> anyhow::Result<()> {
         hp.recording().is_some_and(|r| r.started)
     })?;
     anyhow::ensure!(started, "not recording: {:?}", bed.hp.record_failures());
-    let sign = bed.sign_since(mark, "Screen")?;
+    let sign = bed.sign_since(mark, "Recording")?;
     let popover = bed.popover(sign)?;
     bed.logged_since(mark, "the in-use popover shows it", |l| {
         l.contains("\"Enregistrement d'écran\"")
@@ -843,6 +973,183 @@ fn proc_is_read_at_most_once_a_second_while_a_cameras_node_exists() -> anyhow::R
     Ok(())
 }
 
+#[test]
+fn while_recording_its_red_tile_says_its_time_amber_and_pause_while_paused() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    if !has("ffmpeg") {
+        eprintln!("ffmpeg missing: skipped");
+        return Ok(());
+    }
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
+    let mark = bed.mark();
+    bed.record_screen()?;
+    // Its own tile, 5.10's item: 36 × 42 in the 48 px sign, 6 px around.
+    let sign = bed.sign_since(mark, "Recording")?;
+    assert_eq!((sign.width, sign.height), (54, 54 + 10), "{sign:?}");
+    assert_eq!(
+        bed.inks(sign, FormChoice::Mini, &[Tile::Recording])?,
+        [Ink::Red]
+    );
+    // Its time, "0:0N", and it moves on.
+    let first = bed.rec_reads(mark, |t| t.starts_with("0:0"))?;
+    let then = seconds(&first).context("a time")?;
+    let later = bed.rec_reads(mark, |t| seconds(t).is_some_and(|s| s > then))?;
+    eprintln!("the recording's tile read {first}, then {later}");
+    // Drawn again as its second changes, on the CPU without a beat: about
+    // once a second, never four times (5.10's 250 ms).
+    common::at_rest(&mut bed.hp)?;
+    let commits = bed.hp.in_use_commits();
+    let started = Instant::now();
+    wait(&mut bed.hp, Duration::from_secs(3))?;
+    let drawn = bed.hp.in_use_commits() - commits;
+    let bound = started.elapsed().as_secs() + 2;
+    eprintln!("{drawn} commits of the sign in {:?}", started.elapsed());
+    assert!(
+        (1..=bound).contains(&drawn),
+        "{drawn} commits in {:?}",
+        started.elapsed()
+    );
+    // Paused: the dot amber and still, "pause".
+    let mark = bed.mark();
+    bed.pause(true)?;
+    assert_eq!(bed.rec_reads(mark, |t| t == "pause")?, "pause");
+    bed.rec_at_rest(mark, true)?;
+    assert_eq!(
+        bed.inks(sign, FormChoice::Mini, &[Tile::Recording])?,
+        [Ink::Amber]
+    );
+    // Going on: red again, its time again.
+    let mark = bed.mark();
+    bed.pause(false)?;
+    bed.rec_reads(mark, |t| seconds(t).is_some())?;
+    bed.rec_at_rest(mark, false)?;
+    assert_eq!(
+        bed.inks(sign, FormChoice::Mini, &[Tile::Recording])?,
+        [Ink::Red]
+    );
+    // Stopped: the tile goes once it has lingered 5.12's 3 s.
+    let mark = bed.mark();
+    bed.hp.record_ask(hocus_link::RecordAsk::Stop);
+    let gone = bed.hp.dispatch_until(Duration::from_secs(30), |hp| {
+        hp.layer_rects(hocus_link::IN_USE_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(gone, "the sign stayed:\n{}", bed.log());
+    let line = bed.logged_since(mark, "the in-use sign goes", |_| true)?;
+    let lingered: u64 = line
+        .split("lingered_ms=")
+        .nth(1)
+        .and_then(|v| v.split_whitespace().next())
+        .context("no linger")?
+        .parse()?;
+    assert!(lingered >= 3000, "{line}");
+    Ok(())
+}
+
+#[test]
+fn with_a_share_and_a_recording_both_tiles_the_recordings_first() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    if !has("ffmpeg") {
+        eprintln!("ffmpeg missing: skipped");
+        return Ok(());
+    }
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
+    bed.share_screen()?;
+    bed.sign("Screen")?;
+    let mark = bed.mark();
+    bed.record_screen()?;
+    let sign = bed.sign_since(mark, "Recording, Screen")?;
+    // Stacked: 6 + 42 + 4 + 24 + 6, and the surface's 5 px around.
+    let grown = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.layer_rects(hocus_link::IN_USE_NAMESPACE)
+            .first()
+            .is_some_and(|(_, r)| r.height == 82 + 10)
+    })?;
+    assert!(
+        grown,
+        "{:?}",
+        bed.hp.layer_rects(hocus_link::IN_USE_NAMESPACE)
+    );
+    assert_eq!(
+        bed.inks(sign, FormChoice::Mini, &[Tile::Recording, Tile::Kind])?,
+        [Ink::Red, Ink::Blue]
+    );
+    Ok(())
+}
+
+#[test]
+fn in_the_full_form_the_recordings_tile_is_in_the_row() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    if !has("ffmpeg") {
+        eprintln!("ffmpeg missing: skipped");
+        return Ok(());
+    }
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Full)?;
+    bed.speak("hocus-test-meet", "Firefox", "firefox", "")?;
+    bed.sign("Microphone")?;
+    let mark = bed.mark();
+    bed.record_screen()?;
+    // After the microphone's, the row as tall as its tile.
+    let sign = bed.sign_since(mark, "Microphone, Recording")?;
+    let grown = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.layer_rects(hocus_link::IN_USE_NAMESPACE)
+            .first()
+            .is_some_and(|(_, r)| (r.width, r.height) == (194, 54 + 10))
+    })?;
+    assert!(
+        grown,
+        "{:?}",
+        bed.hp.layer_rects(hocus_link::IN_USE_NAMESPACE)
+    );
+    assert_eq!(
+        bed.inks(sign, FormChoice::Full, &[Tile::Kind, Tile::Recording])?,
+        [Ink::Orange, Ink::Red]
+    );
+    Ok(())
+}
+
+#[test]
+fn paused_or_gone_the_recording_draws_nothing_at_rest() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    if !has("ffmpeg") {
+        eprintln!("ffmpeg missing: skipped");
+        return Ok(());
+    }
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
+    bed.share_screen()?;
+    bed.sign("Screen")?;
+    let mark = bed.mark();
+    bed.record_screen()?;
+    bed.sign_since(mark, "Recording, Screen")?;
+    // Paused: its time still, nothing drawn.
+    let mark = bed.mark();
+    bed.pause(true)?;
+    bed.rec_at_rest(mark, true)?;
+    common::at_rest(&mut bed.hp)?;
+    let commits = bed.hp.in_use_commits();
+    wait(&mut bed.hp, Duration::from_secs(2))?;
+    assert_eq!(bed.hp.in_use_commits(), commits, "the sign drew, paused");
+    // Stopped, the share still on: once the recording's tile has gone,
+    // nothing wakes.
+    let mark = bed.mark();
+    bed.hp.record_ask(hocus_link::RecordAsk::Stop);
+    bed.sign_since(mark, "Screen")?;
+    common::at_rest(&mut bed.hp)?;
+    let commits = bed.hp.in_use_commits();
+    let reads = bed.lines("the in-use sign's recording reads").len();
+    wait(&mut bed.hp, Duration::from_secs(3))?;
+    assert_eq!(bed.hp.in_use_commits(), commits, "the sign drew at rest");
+    assert_eq!(bed.lines("the in-use sign's recording reads").len(), reads);
+    Ok(())
+}
+
 /// The pull request's screenshots, at 2560 × 1600 at scale 1, the shell on
 /// the CPU: written to `$HOCUS_SHOTS` when it names a folder. Run by hand
 /// (`--run-ignored only`).
@@ -915,6 +1222,94 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
             &format!("popover-{suffix}.png"),
             (2560 - 760, 0, 760, 760),
         )?;
+        drop(window);
+    }
+    Ok(())
+}
+
+/// 5.12b's screenshots (issue #561), at 2560 × 1600 at scale 1, the shell
+/// on the CPU: the bar, and the sign 3 × larger, while recording, paused,
+/// with a share, and with the four kinds; written to `$HOCUS_SHOTS` when
+/// it names a folder. Run by hand (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshots"]
+fn screenshots_of_the_recording_for_the_pull_request() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    if !has("ffmpeg") {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&out)?;
+    let shoot = |bed: &mut Bed, name: &str| -> anyhow::Result<()> {
+        common::at_rest(&mut bed.hp)?;
+        let sign = common::drawn(&mut bed.hp, hocus_link::IN_USE_NAMESPACE)?[0].1;
+        let (w, h, px) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let bar = image::imageops::crop_imm(&image, 2560 - 420, 0, 420, 560).to_image();
+        let file = out.join(format!("{name}.png"));
+        bar.save(&file)?;
+        eprintln!("{}", file.display());
+        let (x, y) = ((sign.x - 16).max(0) as u32, (sign.y - 16).max(0) as u32);
+        let (cw, ch) = ((sign.width + 32) as u32, (sign.height + 32) as u32);
+        let zoomed = image::imageops::resize(
+            &image::imageops::crop_imm(&image, x, y, cw, ch).to_image(),
+            cw * 3,
+            ch * 3,
+            image::imageops::FilterType::Nearest,
+        );
+        let file = out.join(format!("{name}-zoom.png"));
+        zoomed.save(&file)?;
+        eprintln!("{}", file.display());
+        Ok(())
+    };
+    for form in [FormChoice::Mini, FormChoice::Full] {
+        let suffix = if form == FormChoice::Full {
+            "full"
+        } else {
+            "mini"
+        };
+        let mut bed = Bed::start(&shell, (2560, 1600), form)?;
+        let (_, window) = common::open_with(&mut bed.hp, "firefox", (1400, 900), false)?;
+        window
+            .commands
+            .send(common::Command::Title("Réunion d'équipe — Meet"))?;
+        bed.hp.pointer_move(900.0, 700.0);
+        let mark = bed.mark();
+        bed.record_screen()?;
+        bed.sign_since(mark, "Recording")?;
+        bed.rec_reads(mark, |t| seconds(t).is_some_and(|s| s >= 3))?;
+        shoot(&mut bed, &format!("rec-{suffix}"))?;
+        let mark = bed.mark();
+        bed.pause(true)?;
+        bed.rec_at_rest(mark, true)?;
+        shoot(&mut bed, &format!("rec-paused-{suffix}"))?;
+        bed.pause(false)?;
+        let mark = bed.mark();
+        bed.share_screen()?;
+        bed.sign_since(mark, "Recording, Screen")?;
+        bed.hp.pointer_move(900.0, 700.0);
+        shoot(&mut bed, &format!("rec-share-{suffix}"))?;
+        let mark = bed.mark();
+        bed.speak("hocus-test-meet", "Firefox", "firefox", "")?;
+        bed.camera()?;
+        bed.film("hocus-test-cam", "Firefox")?;
+        bed.sign_since(mark, "Microphone, Camera, Recording, Screen")?;
+        shoot(&mut bed, &format!("rec-all-{suffix}"))?;
+        bed.hp.record_ask(hocus_link::RecordAsk::Stop);
+        let stopped = bed
+            .hp
+            .dispatch_until(Duration::from_secs(30), |hp| hp.recording().is_none())?;
+        anyhow::ensure!(stopped, "not stopped");
         drop(window);
     }
     Ok(())

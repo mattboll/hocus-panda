@@ -1162,6 +1162,7 @@ impl Shell {
             bar_width: bar.width(at),
             backdrop,
             motion: self.look.motion,
+            words: in_use::Words::new(clock::time::Lang::of_messages()),
         };
         Some(
             canvas(program)
