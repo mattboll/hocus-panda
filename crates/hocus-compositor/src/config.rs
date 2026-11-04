@@ -25,6 +25,7 @@ pub struct Config {
     pub desktops: Desktops,
     pub panel: Panel,
     pub recording: Recording,
+    pub idle: Idle,
     /// The system's keyboard (`/etc/default/keyboard`), used when
     /// `[keyboard] layouts` is empty. Not part of the file: the program
     /// reads it once at start.
@@ -104,6 +105,43 @@ fn record_format<'de, D: Deserializer<'de>>(
 ) -> Result<hocus_link::RecordFormat, D::Error> {
     hocus_link::RecordFormat::of(&String::deserialize(deserializer)?)
         .map_err(serde::de::Error::custom)
+}
+
+/// When the session is idle, `[idle]` (docs/design/idle.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Idle {
+    /// How long without input before the session is idle; `None`, `"off"`
+    /// in the file: never. Off by default until the lock (7.2) chooses one.
+    #[serde(deserialize_with = "idle_delay")]
+    pub delay: Option<std::time::Duration>,
+}
+
+/// The longest delay taken: a day, far beyond any use, so that a deadline
+/// never overflows the clock.
+const IDLE_MOST: u64 = 24 * 60 * 60;
+
+fn idle_delay<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<std::time::Duration>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Delay {
+        Seconds(u64),
+        Word(String),
+    }
+    match Delay::deserialize(deserializer)? {
+        Delay::Word(word) if word == "off" => Ok(None),
+        Delay::Seconds(seconds) if (1..=IDLE_MOST).contains(&seconds) => {
+            Ok(Some(std::time::Duration::from_secs(seconds)))
+        }
+        Delay::Seconds(seconds) => Err(serde::de::Error::custom(format!(
+            "an idle delay of {seconds} s: from 1 to {IDLE_MOST} seconds, or \"off\""
+        ))),
+        Delay::Word(word) => Err(serde::de::Error::custom(format!(
+            "an idle delay of {word:?}: a number of seconds, or \"off\""
+        ))),
+    }
 }
 
 /// The bar, `[panel]` (docs/design/bar.md §2, §3).
@@ -617,6 +655,16 @@ mod tests {
     #[test]
     fn desktops_are_from_1_to_9() -> anyhow::Result<()> {
         assert_eq!(Config::default().desktops.count, 4);
+        let idle: Config = toml::from_str("[idle]\ndelay = 300\n")?;
+        assert_eq!(idle.idle.delay, Some(std::time::Duration::from_secs(300)));
+        let off: Config = toml::from_str("[idle]\ndelay = \"off\"\n")?;
+        assert_eq!(off.idle.delay, None);
+        for bad in ["0", "\"5m\"", "-3", "86401"] {
+            assert!(
+                toml::from_str::<Config>(&format!("[idle]\ndelay = {bad}\n")).is_err(),
+                "{bad}"
+            );
+        }
         let six: Config = toml::from_str("[desktops]\ncount = 6\n")?;
         assert_eq!(six.desktops.count, 6);
         for bad in ["count = 0", "count = 10", "count = -1", "number = 3"] {

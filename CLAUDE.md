@@ -131,7 +131,8 @@ the real screen; nested and headless take `--output`; `panel-form`),
 `[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
 `toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, `record = "Super+Shift+R"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
-(`screens`, `output`, `form`), `[recording]` (`format`) and `[appearance]` (`reduced-motion`,
+(`screens`, `output`, `form`), `[recording]` (`format`), `[idle]` (`delay`,
+docs/design/idle.md) and `[appearance]` (`reduced-motion`,
 `high-contrast`, `reduce-transparency`); the shell reads `[day]` from the same file
 (`HOCUS_CONFIG`, which the compositor sets), the day's accounts (docs/design/day.md). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
@@ -203,7 +204,14 @@ It writes to the compositor's control socket, `<socket>.control`
 
 ```sh
 target/debug/hocus --socket <runtime dir>/hocus-0.control agent build working
+target/debug/hocus --socket <runtime dir>/hocus-0.control msg idle   # idle state, what holds it
 ```
+
+Idle (docs/design/idle.md): the compositor serves
+`org.freedesktop.ScreenSaver` (applications' `Inhibit`) on the same bus as
+the notifications, so only on a bus of your own next to a live session;
+its tests (`crates/hocus-compositor/tests/idle.rs`) start a dbus-daemon of
+their own.
 
 The tools are looked for, and plugged in, in the compositor's `HOME`
 (their settings), `PATH` (their programs) and `XDG_CONFIG_HOME` (herdr):

@@ -48,9 +48,21 @@ use wayland_client::{
     },
 };
 
-use wayland_protocols::wp::text_input::zv3::client::{
-    zwp_text_input_manager_v3::ZwpTextInputManagerV3,
-    zwp_text_input_v3::{self, ZwpTextInputV3},
+use wayland_protocols::{
+    ext::idle_notify::v1::client::{
+        ext_idle_notification_v1::{self, ExtIdleNotificationV1},
+        ext_idle_notifier_v1::ExtIdleNotifierV1,
+    },
+    wp::{
+        idle_inhibit::zv1::client::{
+            zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1,
+            zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
+        },
+        text_input::zv3::client::{
+            zwp_text_input_manager_v3::ZwpTextInputManagerV3,
+            zwp_text_input_v3::{self, ZwpTextInputV3},
+        },
+    },
 };
 
 pub const WAIT: Duration = Duration::from_secs(10);
@@ -394,6 +406,16 @@ pub enum Command {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// Holds idleness off with an idle inhibitor on its window's (or
+    /// layer's) surface, as a video player does; `false` destroys it.
+    Inhibit(bool),
+    /// Asks to be told when the seat is idle this long
+    /// (`ext_idle_notifier_v1`); with `input`, input alone counts
+    /// (`get_input_idle_notification`): [`Event::Idled`], [`Event::Resumed`].
+    IdleNotification {
+        timeout_ms: u32,
+        input: bool,
+    },
 }
 
 /// What a client puts on the clipboard: its types, and the text it writes
@@ -428,6 +450,14 @@ pub enum Event {
     Pasted(String),
     /// A pointing client's pointer got this.
     Pointer(Pointed),
+    /// Its idle notification (made with `input` or not) became idle.
+    Idled {
+        input: bool,
+    },
+    /// It is no longer idle.
+    Resumed {
+        input: bool,
+    },
 }
 
 /// What a pointing client's pointer got ([`Shows::Pointing`]).
@@ -523,6 +553,8 @@ fn run_client(
         ctrl: false,
         writing: false,
         activation: ActivationState::bind(&globals, &qh).ok(),
+        inhibitor: None,
+        notifications: Vec::new(),
     };
     match shows {
         Some(Shows::Window {
@@ -737,6 +769,33 @@ fn run_client(
                     }
                 }
                 (Command::Activate(_), None) => {}
+                (Command::Inhibit(true), _) => {
+                    let surface = match (&client.window, &client.layer) {
+                        (Some(window), _) => Some(window.wl_surface().clone()),
+                        (None, Some(layer)) => Some(layer.wl_surface().clone()),
+                        (None, None) => None,
+                    };
+                    let manager = globals.bind::<ZwpIdleInhibitManagerV1, _, _>(&qh, 1..=1, ());
+                    if let (Some(surface), Ok(manager)) = (surface, manager) {
+                        client.inhibitor = Some(manager.create_inhibitor(&surface, &qh, ()));
+                    }
+                }
+                (Command::Inhibit(false), _) => {
+                    if let Some(inhibitor) = client.inhibitor.take() {
+                        inhibitor.destroy();
+                    }
+                }
+                (Command::IdleNotification { timeout_ms, input }, _) => {
+                    let notifier = globals.bind::<ExtIdleNotifierV1, _, _>(&qh, 2..=2, ());
+                    if let (Ok(notifier), Some(seat)) = (notifier, client.seats.seats().next()) {
+                        let notification = if input {
+                            notifier.get_input_idle_notification(timeout_ms, &seat, &qh, input)
+                        } else {
+                            notifier.get_idle_notification(timeout_ms, &seat, &qh, input)
+                        };
+                        client.notifications.push(notification);
+                    }
+                }
                 (Command::Open { app_id, size }, _) => {
                     if let Some(xdg) = &client.xdg {
                         let surface = client.compositor.create_surface(&qh);
@@ -813,6 +872,8 @@ struct Client {
     ctrl: bool,
     writing: bool,
     activation: Option<ActivationState>,
+    inhibitor: Option<ZwpIdleInhibitorV1>,
+    notifications: Vec<ExtIdleNotificationV1>,
 }
 
 impl Client {
@@ -1570,5 +1631,60 @@ impl Dispatch<ZwpTextInputV3, ()> for Client {
             }
             _ => {}
         }
+    }
+}
+
+impl Dispatch<ZwpIdleInhibitManagerV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpIdleInhibitManagerV1,
+        _: <ZwpIdleInhibitManagerV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpIdleInhibitorV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZwpIdleInhibitorV1,
+        _: <ZwpIdleInhibitorV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ExtIdleNotifierV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ExtIdleNotifierV1,
+        _: <ExtIdleNotifierV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ExtIdleNotificationV1, bool> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ExtIdleNotificationV1,
+        event: ext_idle_notification_v1::Event,
+        input: &bool,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let input = *input;
+        let said = match event {
+            ext_idle_notification_v1::Event::Idled => Event::Idled { input },
+            ext_idle_notification_v1::Event::Resumed => Event::Resumed { input },
+            _ => return,
+        };
+        let _ = client.events.send(said);
     }
 }

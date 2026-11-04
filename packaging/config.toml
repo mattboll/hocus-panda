@@ -179,6 +179,16 @@
 # Opus). Encoded by ffmpeg, on the GPU through VA-API when it can.
 # format = "mp4"
 
+# [idle]
+# How long without input (keyboard, pointer, touchpad) before the session
+# is idle, in seconds, from 1 to 86400, or "off". A video playing or a
+# call (an application holding the screen on), and a window in full
+# screen with the focus, hold it off; the countdown starts again from zero
+# when they let go (docs/design/idle.md). Being idle shows nothing yet:
+# the lock screen will use it. Applications' own idle notifications work
+# either way.
+# delay = "off"
+
 # [programs]
 # The terminal's command, run through sh -c, for example "foot" or
 # "kitty --single-instance". Empty: the first of kitty, foot, alacritty

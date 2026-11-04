@@ -5,7 +5,8 @@
 //!   programs the compositor starts): `hocus agent` and the tools' hooks
 //!   (`hocus agent-hook`) write one line each. A thread of its own takes
 //!   the connections, reads the agent's process's ancestry in `/proc`, and
-//!   hands both to the loop.
+//!   hands both to the loop. A question (`hocus msg idle`) is handed to
+//!   the loop too, and its answer written back on the same connection.
 //! - **The tools' watcher** ([`hocus_agents::watch`]): which tools are on
 //!   the computer and plugged in, as they change; plugging in, unplugging
 //!   and declining, which write files, are done there.
@@ -36,7 +37,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Write},
     os::unix::net::UnixListener,
     path::PathBuf,
     sync::Arc,
@@ -45,7 +46,7 @@ use std::{
 
 use anyhow::Context;
 use hocus_agents::{
-    Report, Source, State,
+    Question, Report, Source, State,
     herdr::{self, News},
     tools::{Places, Tool},
     watch::{Ask, Snapshot, ToolState as Seen, Watcher},
@@ -71,6 +72,8 @@ const SEEN: &str = "seen";
 /// What a reporting connection may hold, lines, and how long it is read.
 const MOST_LINES: usize = 64;
 const READ: Duration = Duration::from_secs(1);
+/// How long a question waits for the loop's answer.
+const ANSWER: Duration = Duration::from_secs(2);
 
 /// What the sources hand the loop.
 #[derive(Debug)]
@@ -82,6 +85,9 @@ pub enum Heard {
     /// herdr's clients looked for again ([`herdr::terminal_processes`]),
     /// and the go-to that waited for them.
     Terminals(Vec<Vec<u32>>, Option<GoingTo>),
+    /// A question (`hocus msg`), and where its answer goes: the socket's
+    /// thread writes it back.
+    Asked(Question, std::sync::mpsc::Sender<String>),
 }
 
 /// A go-to waiting for herdr's terminal to be found: the agent, its row,
@@ -261,10 +267,26 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>) {
         if stream.set_read_timeout(Some(READ)).is_err() {
             continue;
         }
-        for line in BufReader::new(stream).lines().take(MOST_LINES) {
+        let Ok(reader) = stream.try_clone() else {
+            continue;
+        };
+        for line in BufReader::new(reader).lines().take(MOST_LINES) {
             let Ok(line) = line else {
                 break;
             };
+            if let Some(question) = Question::of(&line) {
+                // The loop answers; the answer is written back here, off
+                // the loop. One question a connection.
+                let (reply, answer) = std::sync::mpsc::channel();
+                if sender.send(Heard::Asked(question, reply)).is_err() {
+                    return;
+                }
+                if let Ok(text) = answer.recv_timeout(ANSWER) {
+                    let _ = stream.set_write_timeout(Some(READ));
+                    let _ = (&stream).write_all(text.as_bytes());
+                }
+                break;
+            }
             match line.parse::<Report>() {
                 Ok(report) => {
                     let ancestry = report
@@ -292,6 +314,17 @@ impl Compositor {
             }
             Heard::Herdr(news) => self.herdr_said(news),
             Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
+            Heard::Asked(question, reply) => {
+                let answer = match question {
+                    Question::Idle => {
+                        // What changed this turn, judged first.
+                        self.flush_idle();
+                        self.idle_said().to_string()
+                    }
+                };
+                let _ = reply.send(answer);
+                return;
+            }
         }
         self.agents.dirty = true;
     }

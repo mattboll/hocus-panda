@@ -25,6 +25,7 @@ mod grabs;
 pub mod halo;
 mod handlers;
 mod harness;
+pub mod idle;
 mod ink;
 mod input;
 mod launcher;
@@ -68,8 +69,8 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    Appearance, Config, Desktops, FormChoice, OutputSettings, PanelScreens, Recording, ScaleFrom,
-    SystemKeyboard,
+    Appearance, Config, Desktops, FormChoice, Idle as IdleSettings, OutputSettings, PanelScreens,
+    Recording, ScaleFrom, SystemKeyboard,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -202,6 +203,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     };
     shell::listen(&event_loop.handle(), &mut state)?;
     state.start_sharing();
+    state.start_idle();
     agents::start(&event_loop.handle(), &mut state)?;
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
@@ -302,6 +304,8 @@ impl App {
         state.flush_bubbles_screen();
         // The screens a fullscreen window covers, when they changed.
         state.flush_fullscreen();
+        // Whether something holds idleness off, when that changed.
+        state.flush_idle();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

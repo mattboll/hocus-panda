@@ -11,6 +11,9 @@
 //!   prints nothing a tool would take as an answer: a hook must not get in
 //!   the agent's way, desktop or not.
 //!
+//! - `hocus msg idle`: the session's idle state, its time left and what
+//!   holds it off (docs/design/idle.md), as the compositor says it.
+//!
 //! - `hocus day planka-token [ACCOUNT]`: a Planka board's access token,
 //!   on standard input, checked and kept where the bar reads it
 //!   (docs/design/day.md).
@@ -27,7 +30,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use hocus_agents::{Report, Source, State, hooks};
+use hocus_agents::{Question, Report, Source, State, hooks};
 
 mod day;
 
@@ -36,6 +39,8 @@ const MOST: u64 = 4 << 20;
 /// How long writing the line may take: a desktop that does not read is
 /// not waited for.
 const WRITE: Duration = Duration::from_millis(500);
+/// How long an answer may take.
+const ANSWER: Duration = Duration::from_secs(3);
 
 /// Tells the Hocuspanda desktop what an agent is doing.
 #[derive(Debug, Parser)]
@@ -77,6 +82,18 @@ enum Command {
         #[command(subcommand)]
         command: DayCommand,
     },
+    /// Asks the desktop what it knows.
+    Msg {
+        #[command(subcommand)]
+        question: MsgCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MsgCommand {
+    /// The session's idle state, its time left, and what holds it off
+    /// (docs/design/idle.md).
+    Idle,
 }
 
 #[derive(Debug, Subcommand)]
@@ -126,6 +143,21 @@ fn main() -> ExitCode {
             };
             match send(args.socket, &report) {
                 Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("hocus: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Command::Msg { question } => {
+            let question = match question {
+                MsgCommand::Idle => Question::Idle,
+            };
+            match ask(args.socket, question) {
+                Ok(answer) => {
+                    print!("{answer}");
+                    ExitCode::SUCCESS
+                }
                 Err(err) => {
                     eprintln!("hocus: {err}");
                     ExitCode::FAILURE
@@ -246,4 +278,24 @@ fn send(socket: Option<PathBuf>, report: &Report) -> Result<(), String> {
     stream
         .write_all(format!("{report}\n").as_bytes())
         .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Asks `question`, and reads the answer until the desktop closes the
+/// connection.
+fn ask(socket: Option<PathBuf>, question: Question) -> Result<String, String> {
+    let path = socket_path(socket)
+        .ok_or("no desktop to ask: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
+    let place = |e: std::io::Error| format!("{}: {e}", path.display());
+    let mut stream = UnixStream::connect(&path).map_err(place)?;
+    stream.set_write_timeout(Some(WRITE)).map_err(place)?;
+    stream.set_read_timeout(Some(ANSWER)).map_err(place)?;
+    stream
+        .write_all(format!("{}\n", question.line()).as_bytes())
+        .map_err(place)?;
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).map_err(place)?;
+    if answer.is_empty() {
+        return Err(format!("{}: no answer", path.display()));
+    }
+    Ok(answer)
 }

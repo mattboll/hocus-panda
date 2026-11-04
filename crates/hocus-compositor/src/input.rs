@@ -72,6 +72,14 @@ fn digit_key(code: smithay::input::keyboard::Keycode) -> Option<Keysym> {
 
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        // Any of the user's input, devices added and removed aside, is
+        // activity (7.3): it only notes the time.
+        if !matches!(
+            event,
+            InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. }
+        ) {
+            self.idle_input();
+        }
         match event {
             InputEvent::Keyboard { event } => {
                 self.key(event.key_code(), event.state(), event.time_msec());

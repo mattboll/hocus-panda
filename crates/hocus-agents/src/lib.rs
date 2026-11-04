@@ -35,6 +35,33 @@ pub fn socket_path(wayland: &std::path::Path) -> std::path::PathBuf {
     std::path::PathBuf::from(path)
 }
 
+/// A question to the compositor on its control socket (`hocus msg`): a
+/// line `msg WHAT`, answered with lines of text before the compositor
+/// closes the connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Question {
+    /// The session's idle state, its time left and what holds it off
+    /// (docs/design/idle.md).
+    Idle,
+}
+
+impl Question {
+    /// Its line, without the line break.
+    pub fn line(self) -> &'static str {
+        match self {
+            Self::Idle => "msg idle",
+        }
+    }
+
+    /// The question a line asks, if it is one.
+    pub fn of(line: &str) -> Option<Self> {
+        match line.trim_end_matches(['\n', '\r']) {
+            "msg idle" => Some(Self::Idle),
+            _ => None,
+        }
+    }
+}
+
 /// What an agent is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum State {
@@ -300,6 +327,16 @@ impl std::error::Error for BadLine {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A question is never an agent's report, nor a report a question.
+    #[test]
+    fn a_question_reads_back_and_is_no_report() {
+        assert_eq!(Question::of(Question::Idle.line()), Some(Question::Idle));
+        assert_eq!(Question::of("msg idle\n"), Some(Question::Idle));
+        assert!(Question::Idle.line().parse::<Report>().is_err());
+        assert_eq!(Question::of("agent command k idle - k"), None);
+        assert_eq!(Question::of("msg"), None);
+    }
 
     #[test]
     fn a_report_reads_back_as_written() {
