@@ -176,7 +176,9 @@ compares, so a dot or a tile coming and going as an element of its own
 would move every element under it, and the whole screen would be drawn
 again at each frame. Its damage is what changed: the pixels painted
 again, and each tile or dot that came, went, moved or faded, where it was
-and where it is. So a new segment redraws its bounds, the trail redraws
+and where it is. A tile is known by a serial never given twice: one made
+again where another was, after `Esc` or the fade, is a new piece whose
+whole place is damaged, so nothing of the old one stays on the screen. So a new segment redraws its bounds, the trail redraws
 the trail, and the fade redraws the drawing's tiles. The screen is drawn
 whole once when the ink first shows on it and once when it has gone (the
 element comes and goes). In between, no frame is asked for during the
@@ -205,7 +207,11 @@ fade and the trail:
 - `alt_drag_moves_a_window_and_super_drag_no_longer_does`;
 - `at_rest_after_the_fade_no_frame_and_no_wakeup` (on the real clock);
 - `a_segment_damages_its_bounds_and_the_fade_the_drawings` (the damage of
-  one more segment, and of a frame of the fade).
+  one more segment, and of a frame of the fade);
+- `a_stroke_cleared_by_escape_leaves_no_ink_when_another_is_drawn` and
+  `a_stroke_gone_by_its_fade_leaves_no_ink_when_another_is_drawn`: a
+  stroke drawn in the tiles of one gone leaves nothing of the first, on
+  the screen, on the next frame and in a capture.
 
 The tests that moved windows with `Super` + drag move them with `Alt` +
 drag. The pull request's screenshots: `screenshots_for_the_pull_request`

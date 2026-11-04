@@ -450,6 +450,88 @@ fn the_strokes_are_in_a_screenshot() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// No red left along `y` from `x0` to `x1`, on the screen.
+fn nothing_along(bed: &mut Bed, y: f64, (x0, x1): (f64, f64)) -> anyhow::Result<()> {
+    let mut x = x0;
+    while x <= x1 {
+        for dy in [-2.0, 0.0, 2.0] {
+            let p = bed.shown((x, y + dy))?;
+            anyhow::ensure!(!red(p), "ink left at {:?}: {p:?}", (x, y + dy));
+        }
+        x += 3.0;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_stroke_cleared_by_escape_leaves_no_ink_when_another_is_drawn() -> anyhow::Result<()> {
+    let mut bed = Bed::start()?;
+    // The second stroke in the same tiles as the first, apart from it,
+    // drawn before any frame shows the first gone.
+    bed.draw(&[KEY_LEFTMETA], &[(600.0, 400.0), (1000.0, 400.0)]);
+    common::at_rest(&mut bed.hp)?;
+    assert!(red(bed.shown((800.0, 400.0))?));
+    chord(&mut bed.hp, &[KEY_ESC]);
+    bed.draw(&[KEY_LEFTMETA], &[(600.0, 440.0), (1000.0, 440.0)]);
+    common::at_rest(&mut bed.hp)?;
+    assert!(red(bed.shown((800.0, 440.0))?));
+    nothing_along(&mut bed, 400.0, (590.0, 1010.0))?;
+    // The next frame too (the pointer moved), and the screen's capture.
+    bed.hp.pointer_move(1870.0, 1050.0);
+    common::at_rest(&mut bed.hp)?;
+    nothing_along(&mut bed, 400.0, (590.0, 1010.0))?;
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_PRINT]);
+    let image = bed.taken(1)?;
+    for x in (590..=1010).step_by(3) {
+        let [r, g, b, _] = image.get_pixel(x, 400).0;
+        assert!(
+            !red([r, g, b]),
+            "ink left in the capture at {x}: {:?}",
+            [r, g, b]
+        );
+    }
+    let [r, g, b, _] = image.get_pixel(800, 440).0;
+    assert!(red([r, g, b]));
+    // And with a frame drawn between `Esc` and the next stroke.
+    chord(&mut bed.hp, &[KEY_ESC]);
+    common::at_rest(&mut bed.hp)?;
+    bed.draw(&[KEY_LEFTMETA], &[(600.0, 400.0), (1000.0, 400.0)]);
+    common::at_rest(&mut bed.hp)?;
+    nothing_along(&mut bed, 440.0, (590.0, 1010.0))?;
+    assert!(red(bed.shown((800.0, 400.0))?));
+    Ok(())
+}
+
+#[test]
+fn a_stroke_gone_by_its_fade_leaves_no_ink_when_another_is_drawn() -> anyhow::Result<()> {
+    let mut bed = Bed::start()?;
+    bed.hp.hold_clock();
+    bed.draw(&[KEY_LEFTMETA], &[(600.0, 400.0), (1000.0, 400.0)]);
+    bed.hp.step(Duration::from_millis(16))?;
+    assert!(red(bed.shown((800.0, 400.0))?));
+    // Through the fade, frame by frame, to its end.
+    for _ in 0..(3700 / 50) {
+        bed.hp.step(Duration::from_millis(50))?;
+    }
+    bed.hp.step(Duration::from_millis(16))?;
+    assert_eq!(bed.hp.ink(), (false, false));
+    nothing_along(&mut bed, 400.0, (590.0, 1010.0))?;
+    bed.draw(&[KEY_LEFTMETA], &[(600.0, 440.0), (1000.0, 440.0)]);
+    bed.hp.step(Duration::from_millis(16))?;
+    assert!(red(bed.shown((800.0, 440.0))?));
+    nothing_along(&mut bed, 400.0, (590.0, 1010.0))?;
+    bed.hp.step(Duration::from_millis(16))?;
+    nothing_along(&mut bed, 400.0, (590.0, 1010.0))?;
+    // Gone in one step too, past the fade with no frame in it.
+    bed.hp.step(Duration::from_secs(4))?;
+    bed.hp.step(Duration::from_millis(16))?;
+    bed.draw(&[KEY_LEFTMETA], &[(600.0, 400.0), (1000.0, 400.0)]);
+    bed.hp.step(Duration::from_millis(16))?;
+    nothing_along(&mut bed, 440.0, (590.0, 1010.0))?;
+    assert!(red(bed.shown((800.0, 400.0))?));
+    Ok(())
+}
+
 #[test]
 fn alt_drag_moves_a_window_and_super_drag_no_longer_does() -> anyhow::Result<()> {
     let mut bed = Bed::start()?;

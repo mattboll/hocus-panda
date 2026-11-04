@@ -526,6 +526,10 @@ enum Drawn {
 #[derive(Debug)]
 struct Tile {
     buffer: MemoryRenderBuffer,
+    /// Never the same twice: a tile made again where another was (after
+    /// `Esc`, the fade, a new scale) is another piece of the scene, whose
+    /// whole place is damaged, not the same one kept as it was.
+    serial: u64,
     /// Its pixels with ink: none, and it goes.
     inked: usize,
 }
@@ -665,6 +669,7 @@ impl Canvas {
                     Transform::Normal,
                     None,
                 ),
+                serial: NEXT_TILE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 inked: 0,
             });
             paint(tile, side, origin, area, &near, &pen);
@@ -1048,7 +1053,7 @@ impl State {
                     Some((TILE, TILE).into()),
                     Kind::Unspecified,
                 ) {
-                    Ok(element) => pieces.push((Piece::Tile(tx, ty), element)),
+                    Ok(element) => pieces.push((Piece::Tile(tile.serial), element)),
                     Err(err) => tracing::debug!(?err, "a tile of ink could not be drawn"),
                 }
             }
@@ -1175,8 +1180,12 @@ impl State {
 enum Piece {
     Head,
     Dot(u64),
-    Tile(i32, i32),
+    /// A tile, by its serial.
+    Tile(u64),
 }
+
+/// The next tile's serial.
+static NEXT_TILE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// What a screen's ink element showed last, and the damage since.
 ///
