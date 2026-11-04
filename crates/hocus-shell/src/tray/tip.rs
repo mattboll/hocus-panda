@@ -4,7 +4,8 @@
 //! `rgba(14,17,28,0.96)` in a 1 px `rgba(255,255,255,0.12)` rim, the
 //! mockup's. A surface of its own that takes no pointer, gone as the
 //! pointer leaves the icon or presses it. Today's lines (Day.3) show theirs
-//! the same way, after 600 ms ([`hover_text`]).
+//! the same way, after 600 ms ([`hover_text`]); a meeting reminder's
+//! buttons theirs under them, after 500 ms ([`hover_under`], Day.6).
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -46,15 +47,25 @@ enum Says {
     Words(String, String),
 }
 
+/// Where a tooltip shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Place {
+    /// Beside the bar, centred on `rect` (the bar's frame).
+    Beside(Rectangle),
+    /// Its top `top` under the screen's, its middle `centre` from the
+    /// screen's right edge (logical pixels).
+    Under { top: f32, centre: f32 },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Phase {
     Idle,
-    /// The pointer rests on what `says` (at `rect`, `bar`'s frame), since
-    /// then, for `delay`.
+    /// The pointer rests on what `says` (shown at `place`, on `bar`'s
+    /// screen), since then, for `delay`.
     Waiting {
         bar: String,
         says: Says,
-        rect: Rectangle,
+        place: Place,
         since: Instant,
         delay: Duration,
     },
@@ -73,16 +84,28 @@ fn phase<T>(with: impl FnOnce(&mut Phase) -> T) -> T {
 /// The pointer is on icon `key` of `bar`, at `rect`: its tooltip shows in
 /// 400 ms.
 pub fn hover(bar: &str, key: u32, rect: Rectangle) {
-    wait(bar, Says::Icon(key), rect, DELAY);
+    wait(bar, Says::Icon(key), Place::Beside(rect), DELAY);
 }
 
 /// The pointer is on a line at `rect` of `bar`: "`name` · `tip`" shows in
 /// `delay`.
 pub fn hover_text(bar: &str, rect: Rectangle, delay: Duration, name: String, tip: String) {
-    wait(bar, Says::Words(name, tip), rect, delay);
+    wait(bar, Says::Words(name, tip), Place::Beside(rect), delay);
 }
 
-fn wait(bar: &str, says: Says, rect: Rectangle, delay: Duration) {
+/// The pointer is on a button of `bar`'s screen: `name` shows under it in
+/// `delay`, its top `top` under the screen's, its middle `centre` from the
+/// screen's right edge.
+pub fn hover_under(bar: &str, top: f32, centre: f32, delay: Duration, name: String) {
+    wait(
+        bar,
+        Says::Words(name, String::new()),
+        Place::Under { top, centre },
+        delay,
+    );
+}
+
+fn wait(bar: &str, says: Says, place: Place, delay: Duration) {
     let gone = phase(|p| {
         let gone = match p {
             Phase::Shown { id, .. } => Some(*id),
@@ -91,7 +114,7 @@ fn wait(bar: &str, says: Says, rect: Rectangle, delay: Duration) {
         *p = Phase::Waiting {
             bar: bar.to_owned(),
             says,
-            rect,
+            place,
             since: Instant::now(),
             delay,
         };
@@ -146,30 +169,38 @@ pub fn tick(now: Instant) -> Vec<Effect> {
         Phase::Waiting {
             bar,
             says,
-            rect,
+            place,
             since,
             delay,
-        } if *since + *delay <= now => Some((bar.clone(), says.clone(), *rect)),
+        } if *since + *delay <= now => Some((bar.clone(), says.clone(), *place)),
         _ => None,
     });
-    let Some((bar, says, rect)) = due else {
+    let Some((bar, says, place)) = due else {
         return Vec::new();
     };
     let Some((name, tip)) = said(&says) else {
         phase(|p| *p = Phase::Idle);
         return Vec::new();
     };
-    let form = popover::with(|c| c.bar_forms())
-        .into_iter()
-        .find(|(b, _)| *b == bar)
-        .map(|(_, f)| f);
-    let Some(form) = form else {
-        phase(|p| *p = Phase::Idle);
-        return Vec::new();
-    };
     let (w, h) = size(&name, &tip);
-    let top = (EDGE as f32 + rect.center_y() - h as f32 / 2.0).round() as i32;
-    let margin = (top.max(EDGE), EDGE + form.width() + EDGE, 0, 0);
+    let margin = match place {
+        Place::Beside(rect) => {
+            let form = popover::with(|c| c.bar_forms())
+                .into_iter()
+                .find(|(b, _)| *b == bar)
+                .map(|(_, f)| f);
+            let Some(form) = form else {
+                phase(|p| *p = Phase::Idle);
+                return Vec::new();
+            };
+            let top = (EDGE as f32 + rect.center_y() - h as f32 / 2.0).round() as i32;
+            (top.max(EDGE), EDGE + form.width() + EDGE, 0, 0)
+        }
+        Place::Under { top, centre } => {
+            let right = (centre - w as f32 / 2.0).round() as i32;
+            (top.round() as i32, right.max(0), 0, 0)
+        }
+    };
     let id = window::Id::unique();
     match &says {
         Says::Icon(_) => tracing::debug!(name, tip, "the tray's tooltip shows"),

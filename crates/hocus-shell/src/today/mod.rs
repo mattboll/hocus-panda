@@ -15,9 +15,9 @@
 //!   at the clock's minute change ([`minute`]) when a meeting ended, and as
 //!   the groups around it move ([`moved`]). Its lines say no minutes:
 //!   nothing draws between two changes.
-//! - **Clicks**: a line with a video link opens it, else the event's page
-//!   in its calendar (Day.5's popover is not built yet); "+ N" will open
-//!   Day.5's calendar on today, and opens nothing until then. Resting
+//! - **Clicks**: a line with a video link opens it, else the calendar
+//!   (Day.5) on today with its event chosen; "+ N" opens the calendar on
+//!   today. Resting
 //!   600 ms on a line shows its times and its whole title in a tooltip.
 //!
 //! Each bar has a surface of its own for it, opened while it shows and
@@ -379,35 +379,37 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 }
 
 /// Row `index` of bar `bar`, clicked (or `Enter` on it): an event's video
-/// call, else its page; "+ N", Day.5's calendar, not built yet.
+/// call, else the calendar (Day.5) on today, the event chosen; "+ N", the
+/// calendar on today.
 pub fn open(bar: &str, index: usize) -> Option<Effect> {
     let row = state(|s| s.places.get(bar).and_then(|p| p.rows.get(index).cloned()))?;
     match row {
-        Row::Event(line) => match (&line.video, &line.page) {
-            (Some(video), _) => {
+        Row::Event(line) => match &line.video {
+            Some(video) => {
                 tracing::info!(id = line.id, "a line of today opens its video call");
                 crate::launcher::browse(video)
             }
-            (None, Some(page)) => {
-                tracing::info!(id = line.id, "a line of today opens its page");
-                crate::launcher::browse(page)
-            }
-            (None, None) => {
-                tracing::info!(
-                    id = line.id,
-                    "a line of today has no link nor page: nothing opens"
-                );
-                None
+            None => {
+                tracing::info!(id = line.id, "a line of today opens the calendar");
+                Some(Effect::OpenCalendar {
+                    bar: bar.to_owned(),
+                    day: crate::notifications::wall().date(),
+                    event: Some(hocus_day::model::EventId::new(line.id)),
+                })
             }
         },
-        Row::More(_) => open_more(),
+        Row::More(_) => open_more(bar),
     }
 }
 
-/// "+ N autres aujourd'hui": Day.5's calendar on today, not built yet.
-pub fn open_more() -> Option<Effect> {
-    tracing::info!("today's \"+ N\": Day.5's calendar is not built, nothing opens");
-    None
+/// "+ N autres aujourd'hui", on `bar`: the calendar (Day.5) on today.
+pub fn open_more(bar: &str) -> Option<Effect> {
+    tracing::info!("today's \"+ N\" opens the calendar");
+    Some(Effect::OpenCalendar {
+        bar: bar.to_owned(),
+        day: crate::notifications::wall().date(),
+        event: None,
+    })
 }
 
 // --- Words ----------------------------------------------------------------------

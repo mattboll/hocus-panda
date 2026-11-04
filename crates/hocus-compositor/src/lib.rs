@@ -41,6 +41,7 @@ mod popover;
 mod popups;
 mod programs;
 pub mod record;
+mod reminders;
 mod render;
 mod screens;
 mod session;
@@ -299,6 +300,8 @@ impl App {
         state.flush_agents();
         // The screen the notifications' bubbles show on, when it changed.
         state.flush_bubbles_screen();
+        // The screens a fullscreen window covers, when they changed.
+        state.flush_fullscreen();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

@@ -12,7 +12,11 @@
 //! minute change the changed digits move ([`motion`]) inside their cells;
 //! the seconds change without motion. With reduced motion, or on the CPU,
 //! nothing moves.
+//!
+//! Its group (the clock and the date) is an item of the bar ([`item`]): a
+//! click opens the calendar.
 
+pub mod item;
 pub mod motion;
 pub mod time;
 
@@ -60,9 +64,9 @@ const FAINT: Color = Color::from_rgb8(0x8C, 0x96, 0xA8);
 /// form's padding (§5). The full form's 14 px are 2 px further, inside.
 pub const SURFACE_TOP: i32 = 12;
 /// The surface's sizes: the bar's width less its 1 px rim on each side,
-/// and as tall as the form's clock.
-pub const FULL_SURFACE: (u32, u32) = (194, 74);
-pub const MINI_SURFACE: (u32, u32) = (54, 40);
+/// and as tall as the form's clock with its group lit around it ([`item`]).
+pub const FULL_SURFACE: (u32, u32) = (194, 80);
+pub const MINI_SURFACE: (u32, u32) = (54, 46);
 
 /// Full form: `HH:MM` at 42 px, line height 1, in cells 1.05 em high; the
 /// seconds at 18 px, 4 px after, on the same baseline; the date 6 px below,
@@ -105,6 +109,8 @@ impl Style {
 /// The clock of one bar, as the shell sees it at its last update.
 #[derive(Debug, Clone)]
 pub struct Clock {
+    /// The bar's screen's name.
+    pub bar: String,
     pub style: Style,
     /// The digits may move (motion and a GPU).
     pub motion: bool,
@@ -131,6 +137,8 @@ pub struct State {
     at: Option<Instant>,
     /// Font measures by font and size.
     measures: HashMap<(Font, u32, u32), Measure>,
+    /// The group as an item: the pointer on it, its look.
+    item: item::ItemState,
 }
 
 /// Whether the digits move.
@@ -230,7 +238,7 @@ impl<Message> canvas::Program<Message> for Clock {
         &self,
         state: &mut State,
         event: &iced::Event,
-        _bounds: Rectangle,
+        bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         let iced::Event::Window(window::Event::RedrawRequested(now)) = event else {
@@ -264,6 +272,7 @@ impl<Message> canvas::Program<Message> for Clock {
         ] {
             state.remember(font, size, line);
         }
+        item::refresh(self, state, bounds.size());
         Some(match state.motion {
             Moving::Since { .. } => canvas::Action::request_redraw(),
             Moving::Still => canvas::Action::request_redraw_at(
@@ -284,6 +293,7 @@ impl<Message> canvas::Program<Message> for Clock {
         if let Some(colour) = self.backdrop {
             frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
         }
+        item::draw(self, state, &mut frame, bounds.size());
         let Some(shown) = &state.shown else {
             return vec![frame.into_geometry()];
         };

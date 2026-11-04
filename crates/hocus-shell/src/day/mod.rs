@@ -22,7 +22,9 @@ use std::{
 };
 
 use hocus_day::{
-    Change, Clock, Config, Day, Env, Update, Workers, google, model::TaskId, secrets::Secrets,
+    Change, Clock, Config, Day, Env, Update, Workers, google,
+    model::{EventId, TaskId},
+    secrets::Secrets,
 };
 use hocus_link::DayAsk;
 
@@ -282,7 +284,20 @@ pub fn ask(ask: DayAsk) {
             task: TaskId::new(task),
         }),
         DayAsk::Refresh => refresh(),
+        // The shell's clock already moved on (`Shell`): as logind says it.
+        DayAsk::Slept(_) => resumed(),
+        DayAsk::Calendar { day, event } => match day.parse() {
+            Ok(day) => crate::popover::calendar::open_on("", day, event.map(EventId::new)),
+            Err(err) => tracing::warn!(day, %err, "the calendar asked for a day that is not one"),
+        },
     }
+}
+
+/// The machine resumed: every account read again, and the meetings'
+/// reminders looked at on the wall clock again (Day.6).
+pub fn resumed() {
+    crate::reminder::resumed();
+    refresh();
 }
 
 /// Waits for the workers to finish what they were asked: before the shell
@@ -343,7 +358,7 @@ async fn resumes() {
         };
         if let Ok(false) = message.body().deserialize::<bool>() {
             tracing::info!("resumed: the day read again");
-            refresh();
+            resumed();
         }
     }
 }

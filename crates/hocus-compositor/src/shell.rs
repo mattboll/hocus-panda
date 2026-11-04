@@ -347,6 +347,7 @@ impl State {
         self.tell_desktops();
         self.tell_agents();
         self.tell_bubbles_screen();
+        self.tell_fullscreen_again();
         self.hand_kept_levels();
         self.tell_sharing_again();
         if self.record.recording() {
@@ -382,7 +383,7 @@ impl State {
                 self.tell_shell(self.bar_look());
             }
             ToCompositor::Wake(namespace) => self.wake_shell_surfaces(&namespace),
-            ToCompositor::Closing(namespace) if hocus_link::is_bubble(&namespace) => {
+            ToCompositor::Closing(namespace) if hocus_link::slides_in(&namespace) => {
                 self.bubble_closing(&namespace);
             }
             ToCompositor::Closing(namespace) => {
