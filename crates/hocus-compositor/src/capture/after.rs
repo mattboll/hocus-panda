@@ -100,6 +100,8 @@ pub struct After {
     thumb: Option<(LayerSurface, Duration)>,
     editor: Option<(LayerSurface, Duration)>,
     shadow: FrameIds,
+    /// Commits of the editor's surface, for tests (#594).
+    pub editor_commits: u64,
 }
 
 impl std::fmt::Debug for After {
@@ -341,6 +343,9 @@ impl State {
     /// starts its motion.
     pub fn capture_after_committed(&mut self, layer: &LayerSurface) {
         let now = self.now();
+        if layer.namespace() == CAPTURE_EDITOR_NAMESPACE {
+            self.capture.after.editor_commits += 1;
+        }
         let slot = match layer.namespace() {
             CAPTURE_THUMB_NAMESPACE => &mut self.capture.after.thumb,
             CAPTURE_EDITOR_NAMESPACE => &mut self.capture.after.editor,

@@ -665,6 +665,8 @@ pub struct Model {
     recent: Vec<WindowId>,
     /// Each application's last size, by app id (§5).
     sizes: HashMap<String, (i32, i32)>,
+    /// The dialogs' parents: a dialog stays above its parent (#595).
+    parents: BTreeMap<WindowId, WindowId>,
 }
 
 impl Model {
@@ -696,8 +698,50 @@ impl Model {
         id
     }
 
+    /// A new window, a dialog of `parent`: just above it and its other
+    /// dialogs, under the focused one if that is not its parent.
+    pub fn add_dialog(&mut self, parent: WindowId) -> WindowId {
+        let id = self.add();
+        self.parents.insert(id, parent);
+        self.stack.pop();
+        let above = self
+            .stack
+            .iter()
+            .rposition(|w| *w == parent || self.descends(*w, parent))
+            .map_or(self.stack.len(), |at| at + 1);
+        self.stack.insert(above, id);
+        id
+    }
+
+    /// `id` is a dialog of `parent`, or no one's.
+    pub fn set_parent(&mut self, id: WindowId, parent: Option<WindowId>) {
+        match parent {
+            Some(parent) if parent != id && !self.descends(parent, id) => {
+                self.parents.insert(id, parent);
+            }
+            _ => {
+                self.parents.remove(&id);
+            }
+        }
+    }
+
+    /// Whether `id` is a dialog of `ancestor`, or of one of its dialogs.
+    fn descends(&self, id: WindowId, ancestor: WindowId) -> bool {
+        let mut at = id;
+        // As many steps as there are windows: no loop goes on.
+        for _ in 0..=self.parents.len() {
+            match self.parents.get(&at) {
+                Some(parent) if *parent == ancestor => return true,
+                Some(parent) => at = *parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
     /// A window went; the focus goes to the one now on top that shows.
     pub fn remove(&mut self, id: WindowId) {
+        self.parents.retain(|w, p| *w != id && *p != id);
         self.stack.retain(|w| *w != id);
         self.placements.remove(&id);
         self.recent.retain(|w| *w != id);
@@ -775,11 +819,20 @@ impl Model {
         self.focused = id;
     }
 
-    /// Puts `id` on top without focusing it.
+    /// Puts `id` on top without focusing it, its dialogs above it, in
+    /// their order.
     pub fn raise(&mut self, id: WindowId) {
         if self.stack.contains(&id) {
-            self.stack.retain(|w| *w != id);
+            let (mut up, kept): (Vec<WindowId>, Vec<WindowId>) = self
+                .stack
+                .iter()
+                .copied()
+                .partition(|w| *w == id || self.descends(*w, id));
+            self.stack = kept;
+            // The window first, its dialogs after as they were.
+            up.retain(|w| *w != id);
             self.stack.push(id);
+            self.stack.extend(up);
         }
     }
 
@@ -1218,5 +1271,33 @@ mod tests {
         model.set_mode(a, Mode::Snapped(Zone::Maximized), Rect::default());
         assert_eq!(model.unsnap(a), Some(floating));
         assert_eq!(model.mode(a), Mode::Floating);
+    }
+
+    #[test]
+    fn a_dialog_opens_above_its_parent_and_stays_there() {
+        let mut model = Model::default();
+        let parent = model.add();
+        let other = model.add();
+        model.focus(Some(other));
+        // Its parent not focused: above its parent, under the focused one.
+        let dialog = model.add_dialog(parent);
+        assert_eq!(model.stack(), &[parent, dialog, other]);
+        // The parent raised takes its dialog above it.
+        model.focus(Some(parent));
+        assert_eq!(model.stack(), &[other, parent, dialog]);
+        // A dialog of the dialog, then the parent raised again: in order.
+        let inner = model.add_dialog(dialog);
+        model.focus(Some(other));
+        assert_eq!(model.stack(), &[parent, dialog, inner, other]);
+        model.raise(parent);
+        assert_eq!(model.stack(), &[other, parent, dialog, inner]);
+        // No loop: a parent made its dialog's dialog is refused.
+        model.set_parent(parent, Some(inner));
+        model.raise(inner);
+        assert_eq!(model.stack(), &[other, parent, dialog, inner]);
+        // Gone, the parent leaves its dialogs no one's.
+        model.remove(parent);
+        model.raise(other);
+        assert_eq!(model.stack(), &[dialog, inner, other]);
     }
 }

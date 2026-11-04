@@ -487,11 +487,17 @@ impl State {
             .collect();
         let (x, y) = model::place(area, (size.w, size.h), &same_app);
         let takes_focus = self.takes_focus(&window);
-        let id = if takes_focus {
-            self.model.add()
-        } else {
-            self.model.add_below_focus()
+        // A dialog opens above its parent (#595).
+        let parent = match window.wl_surface().and_then(|s| self.dialog_of(&s)) {
+            Some(crate::foreign::DialogOf::Window(parent)) => Some(parent),
+            _ => None,
         };
+        let id = match parent {
+            _ if takes_focus => self.model.add(),
+            Some(parent) => self.model.add_dialog(parent),
+            None => self.model.add_below_focus(),
+        };
+        self.model.set_parent(id, parent);
         // On the desktop its screen shows.
         let desktop = self.strip(&output).current();
         self.model.set_desktop(id, desktop);
@@ -586,7 +592,9 @@ impl State {
     /// dialog, a new window of it), being started from the application
     /// with the focus (a terminal's command), by the desktop's own
     /// shortcut a moment ago, or by a click on its tray icon just before;
-    /// and when nothing has the focus. Otherwise it
+    /// when it is a dialog of the window with the focus, or of the shell
+    /// (the desktop portal's, through xdg-foreign: #595); and when nothing
+    /// has the focus. Otherwise it
     /// opens behind, and its activation token, if it shows one, brings it
     /// forward.
     fn takes_focus(&mut self, window: &Window) -> bool {
@@ -595,6 +603,9 @@ impl State {
             && let Some(at) = self.activate_on_map.iter().position(|s| *s == *surface)
         {
             self.activate_on_map.remove(at);
+            return true;
+        }
+        if window.wl_surface().is_some_and(|s| self.dialog_focuses(&s)) {
             return true;
         }
         // Mapped just after a click on its tray icon: a hidden

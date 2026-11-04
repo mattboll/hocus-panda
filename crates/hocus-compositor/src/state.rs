@@ -134,6 +134,8 @@ pub struct State {
     pub window_commits: u64,
     /// Windows not mapped yet that asked for the focus with a valid token.
     pub activate_on_map: Vec<WlSurface>,
+    /// xdg-foreign's handles and the dialogs made through them (#595).
+    pub foreign: crate::foreign::Foreign,
     /// The last click on a tray icon, while its application may still
     /// focus a window with it (5.14b).
     pub tray_click: Option<crate::tray::TrayClick>,
@@ -319,6 +321,7 @@ impl State {
         let panel = crate::panel::Panel::load(config.state_dir.as_deref());
         let capture = crate::capture::Capture::load(config.state_dir.as_deref());
         let idle = crate::idle::Idleness::new(dh, config.idle.delay);
+        Self::foreign_globals(dh);
 
         Ok(Self {
             display_handle: dh.clone(),
@@ -361,6 +364,7 @@ impl State {
             spawned_at: None,
             window_commits: 0,
             activate_on_map: Vec::new(),
+            foreign: crate::foreign::Foreign::default(),
             tray_click: None,
             opens_as: Vec::new(),
             textures: Textures::default(),

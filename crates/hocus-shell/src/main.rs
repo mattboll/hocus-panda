@@ -36,6 +36,7 @@ mod desktops;
 mod emoji;
 mod ending;
 mod footer;
+mod foreign;
 mod in_use;
 mod launcher;
 mod layouts;
@@ -708,6 +709,10 @@ impl Shell {
             }
             ToShell::TrayToken { ask, token } => {
                 tray::token(ask, token);
+                Task::none()
+            }
+            ToShell::Exported { ask, handle } => {
+                foreign::exported(ask, handle);
                 Task::none()
             }
             ToShell::Shares(shares) => {
@@ -2174,6 +2179,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // A tray click's token: to the tray's thread.
                         Ok(ToShell::TrayToken { ask, token }) => {
                             tray::token(ask, token);
+                            continue;
+                        }
+                        // A portal dialog's parent: to the thread asking.
+                        Ok(ToShell::Exported { ask, handle }) => {
+                            foreign::exported(ask, handle);
                             continue;
                         }
                         _ => {}

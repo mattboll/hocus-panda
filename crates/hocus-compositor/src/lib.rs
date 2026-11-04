@@ -19,6 +19,7 @@ mod decoration;
 pub mod desktops;
 mod emoji;
 mod focus;
+mod foreign;
 mod front;
 mod glass;
 pub mod going;

@@ -30,10 +30,11 @@
 //! authentication dialog.
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
-//! question. One request has an answer: a click on a tray icon asks for an
-//! activation token, which the compositor sends at once; only the tray's
-//! own thread waits for it, briefly, never the loop nor the shell's
-//! surfaces.
+//! question. Two requests have an answer: a click on a tray icon asks for
+//! an activation token, and a dialog of the desktop portal's over a shell
+//! surface asks for that surface's xdg-foreign handle; the compositor
+//! sends either at once, and only the thread that asked waits for it,
+//! briefly, never the loop nor the shell's surfaces.
 //!
 //! The form switch is one motion, which both sides compute from the same
 //! start on the same clock (`CLOCK_MONOTONIC`, in microseconds): the
@@ -491,6 +492,12 @@ pub enum ToShell {
     /// ([`ToCompositor::TrayClick`], 5.14b): the shell gives it to the
     /// item before activating it. Written `tray-token ASK TOKEN`.
     TrayToken { ask: u64, token: String },
+    /// The xdg-foreign handle made for the shell's surface asked for in
+    /// `ask` ([`ToCompositor::Export`], #595), `None` without such a
+    /// surface: the shell names it to the desktop portal as its dialog's
+    /// parent (`wayland:HANDLE`). Written `exported ASK HANDLE`, `-` for
+    /// none.
+    Exported { ask: u64, handle: Option<String> },
     /// A change asked of the day's tasks, or a read of every account
     /// (docs/design/day.md): what the bar's own views ask, for tests and
     /// tools that have no view to click. Written `day add TITLE`, `day tick
@@ -1339,6 +1346,14 @@ pub enum ToCompositor {
     /// The lock's arrow or one of its buttons clicked, or the session
     /// menu's "Verrouiller" (7.1, 7.4, [`LockAsk`]).
     Lock(LockAsk),
+    /// The shell is about to ask the desktop portal for a dialog over its
+    /// surface of `namespace` (the capture's editor's "Enregistrer
+    /// sous…", #595). The compositor exports that surface through
+    /// xdg-foreign and answers at once with its handle
+    /// ([`ToShell::Exported`]); a window that the portal's backend maps as
+    /// that handle's child comes in front, with the keyboard. Written
+    /// `export ASK NAMESPACE`.
+    Export { ask: u64, namespace: String },
     /// The system's authentication dialog opens or fades out (7.5,
     /// [`AuthAsk`]).
     Auth(AuthAsk),
@@ -1539,6 +1554,9 @@ impl fmt::Display for ToShell {
             Self::AuthAt(at) => at.write(f),
             Self::CapsLock(on) => write!(f, "caps {}", if *on { "on" } else { "off" }),
             Self::TrayToken { ask, token } => write!(f, "tray-token {ask} {token}"),
+            Self::Exported { ask, handle } => {
+                write!(f, "exported {ask} {}", handle.as_deref().unwrap_or("-"))
+            }
             Self::Shares(shares) => {
                 f.write_str("shares")?;
                 for share in shares {
@@ -1876,6 +1894,17 @@ impl FromStr for ToShell {
                 }
                 Ok(Self::TrayToken { ask, token })
             }
+            Some("exported") => {
+                let ask = word(&mut words, "ask")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("ask: {e}")))?;
+                let handle = word(&mut words, "handle")?;
+                if words.next().is_some() {
+                    return Err(BadLine(format!("a handle on one word: {line:?}")));
+                }
+                let handle = (handle != "-").then(|| handle.to_owned());
+                Ok(Self::Exported { ask, handle })
+            }
             Some("share-choose-end") => Ok(Self::ShareChooseEnd(
                 word(&mut words, "request")?
                     .parse()
@@ -1986,6 +2015,7 @@ impl fmt::Display for ToCompositor {
             }
             Self::LogOut => f.write_str("log-out"),
             Self::TrayClick { ask, pid } => write!(f, "tray-click {ask} {pid}"),
+            Self::Export { ask, namespace } => write!(f, "export {ask} {namespace}"),
             Self::Capture(ask) => ask.write(f),
             Self::Share(ask) => ask.write(f),
             Self::Auth(ask) => ask.write(f),
@@ -2076,6 +2106,13 @@ impl FromStr for ToCompositor {
                 let pid = u32::try_from(number("process")?)
                     .map_err(|e| BadLine(format!("process: {e}")))?;
                 Ok(Self::TrayClick { ask, pid })
+            }
+            Some("export") => {
+                let ask = word(&mut words, "ask")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("ask: {e}")))?;
+                let namespace = word(&mut words, "namespace")?.to_owned();
+                Ok(Self::Export { ask, namespace })
             }
             Some("capture") => CaptureAsk::read(&mut words).map(Self::Capture),
             Some("record") => RecordAsk::read(&mut words).map(Self::Record),
@@ -2268,6 +2305,20 @@ mod tests {
             assert_eq!(line.to_string().parse::<ToShell>(), Ok(line));
         }
         assert!("tray-token 7".parse::<ToShell>().is_err());
+        for line in [
+            ToShell::Exported {
+                ask: 2,
+                handle: Some("Rk2v8QwZp0aPAbtUJjJ2hF0cO1DzQ9m4".into()),
+            },
+            ToShell::Exported {
+                ask: 3,
+                handle: None,
+            },
+        ] {
+            assert_eq!(line.to_string().parse::<ToShell>(), Ok(line));
+        }
+        assert!("exported 2".parse::<ToShell>().is_err());
+        assert!("exported 2 a b".parse::<ToShell>().is_err());
         assert!("tray-token 7 a b".parse::<ToShell>().is_err());
         for line in [
             ToCompositor::Emoji {
@@ -2557,6 +2608,10 @@ mod tests {
             },
             ToCompositor::TrayClick { ask: 3, pid: 4242 },
             ToCompositor::TrayClick { ask: 4, pid: 0 },
+            ToCompositor::Export {
+                ask: 5,
+                namespace: "hocus-capture-editor".into(),
+            },
             ToCompositor::Launch(Launch {
                 id: "org.mozilla.firefox".into(),
                 terminal: false,
@@ -2574,6 +2629,7 @@ mod tests {
         }
         assert!("wake".parse::<ToCompositor>().is_err());
         assert!("tray-click 3".parse::<ToCompositor>().is_err());
+        assert!("export 5".parse::<ToCompositor>().is_err());
         assert!("tray-click 3 -1".parse::<ToCompositor>().is_err());
         assert!("closing".parse::<ToCompositor>().is_err());
         assert!("briefing".parse::<ToCompositor>().is_err());

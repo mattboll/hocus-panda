@@ -43,9 +43,11 @@ impl XdgActivationHandler for State {
     }
 
     /// A window asks for the focus: with a token from the user's input (or
-    /// one the desktop gave a program it started, or a tray click's), or
-    /// just after a click on its application's tray icon (5.14b), it comes
-    /// forward; otherwise its rim pulses (§4).
+    /// one the desktop gave a program it started, or a tray click's), just
+    /// after a click on its application's tray icon (5.14b), or as the
+    /// dialog of the window with the focus or of the shell (the desktop
+    /// portal's, whose token comes from no input of its own: #595), it
+    /// comes forward; otherwise its rim pulses (§4).
     fn request_activation(
         &mut self,
         token: XdgActivationToken,
@@ -60,6 +62,8 @@ impl XdgActivationHandler for State {
         self.activation_state.remove_token(&token);
         let allowed = if by_token {
             self.tray_token_used(token.as_str());
+            true
+        } else if self.dialog_focuses(&surface) {
             true
         } else {
             let pid = self.client_pid(&surface);

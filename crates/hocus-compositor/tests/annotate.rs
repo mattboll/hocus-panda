@@ -4,9 +4,10 @@
 //! D-Bus daemon of the test's own (the history is served there, never the
 //! session's), its pictures', state and home folders the test's.
 //!
-//! Pixman here, so the shell draws on the CPU, as in CI. The capture is an
-//! area over a window of black and white squares of 3 pixels, as fine as
-//! small text; the editor shows it a pixel a pixel, so that the marks
+//! Pixman here, so the shell draws on the CPU, as in CI (and, for #594, on
+//! wgpu over Mesa's software Vulkan when it is installed). The capture is
+//! an area over a window of black and white squares of 3 pixels, as fine
+//! as small text; the editor shows it a pixel a pixel, so that the marks
 //! drawn on the screen land on the image's pixels under them.
 
 mod common;
@@ -39,7 +40,30 @@ struct Bed {
     log: PathBuf,
     /// The test's own D-Bus daemon, stopped by its process id.
     bus: Child,
+    /// The checkered window, where it is.
+    window: Rect,
     _window: common::ClientHandle,
+}
+
+/// How the shell draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Draws {
+    /// tiny-skia, as in CI.
+    Cpu,
+    /// wgpu, on Mesa's software Vulkan driver (lavapipe), its manifest:
+    /// iced's GPU renderer without a GPU.
+    SoftwareVulkan(&'static str),
+}
+
+/// Mesa's software Vulkan driver's manifest, where distributions put it.
+fn lavapipe() -> Option<&'static str> {
+    [
+        "/usr/share/vulkan/icd.d/lvp_icd.json",
+        "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
+        "/usr/share/vulkan/icd.d/lvp_icd.aarch64.json",
+    ]
+    .into_iter()
+    .find(|p| Path::new(p).exists())
 }
 
 impl Drop for Bed {
@@ -76,6 +100,11 @@ impl Bed {
     /// The compositor on a 1920×1080 screen (the full bar), the real shell
     /// in French on the test's bus, a checkered window under the area.
     fn start(shell: &Path) -> anyhow::Result<Self> {
+        Self::start_drawing(shell, Draws::Cpu)
+    }
+
+    /// The same, the shell drawing as `draws` says.
+    fn start_drawing(shell: &Path, draws: Draws) -> anyhow::Result<Self> {
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "state", "config", "cache"] {
@@ -85,6 +114,14 @@ impl Bed {
         let log = root.join("shell.log");
         let script = root.join("shell");
         let p = |s: &str| root.join(s).display().to_string();
+        // On the software Vulkan driver alone, never a GPU's.
+        let renderer = match draws {
+            Draws::Cpu => String::new(),
+            Draws::SoftwareVulkan(manifest) => format!(
+                "export ICED_BACKEND=wgpu WGPU_BACKEND=vulkan VK_DRIVER_FILES='{manifest}' \
+                 VK_ICD_FILENAMES='{manifest}'\n"
+            ),
+        };
         std::fs::write(
             &script,
             format!(
@@ -93,7 +130,7 @@ impl Bed {
                  PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' TZ=UTC \
-                 RUST_LOG=warn,hocuspanda_shell=debug\nexec '{}' \"$@\" 2>>'{}'\n",
+                 RUST_LOG=warn,hocuspanda_shell=debug\n{renderer}exec '{}' \"$@\" 2>>'{}'\n",
                 p("home"),
                 p("config"),
                 p("cache"),
@@ -121,7 +158,7 @@ impl Bed {
         )?;
         let up = hp.dispatch_until(Duration::from_secs(20), |hp| hp.bar_commits() > 0)?;
         anyhow::ensure!(up, "no bar");
-        let (_, window) = open_showing(
+        let (window_rect, window) = open_showing(
             &mut hp,
             "squares",
             Shows::Checkered {
@@ -134,6 +171,7 @@ impl Bed {
             dir,
             log,
             bus,
+            window: window_rect,
             _window: window,
         };
         bed.idle(Duration::from_millis(300))?;
@@ -219,11 +257,19 @@ impl Bed {
     /// `Print`, the area drawn over the window, `Enter`: the capture's file
     /// and its bytes, once its thumbnail shows.
     fn capture(&mut self) -> anyhow::Result<(PathBuf, Vec<u8>, Rect)> {
+        self.capture_area(AREA)
+    }
+
+    /// The same, of area `area`.
+    fn capture_area(
+        &mut self,
+        area: (f64, f64, f64, f64),
+    ) -> anyhow::Result<(PathBuf, Vec<u8>, Rect)> {
         let before = self.hp.captures().0;
         self.hp.pointer_move(300.0, 150.0);
         chord(&mut self.hp, &[KEY_PRINT]);
         self.idle(Duration::from_millis(100))?;
-        let (x, y, w, h) = AREA;
+        let (x, y, w, h) = area;
         self.drag((x, y), (x + w, y + h))?;
         chord(&mut self.hp, &[KEY_ENTER]);
         let taken = self
@@ -330,6 +376,17 @@ impl Places {
             .unwrap_or_else(|| panic!("no {name}"))
             .1;
         (n[0], n[1])
+    }
+
+    /// The image's place on the screen: x, y, width, height.
+    fn rect(&self, name: &str) -> (f64, f64, f64, f64) {
+        let n = &self
+            .0
+            .iter()
+            .find(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+            .1;
+        (n[0], n[1], n[2], n[3])
     }
 
     /// Point (`x`, `y`) of the image on the screen: shown a pixel a pixel.
@@ -664,6 +721,127 @@ fn copy_and_close_updates_the_file_and_the_clipboard() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Run by [`common::other_program`] as a process of its own: the portal's
+/// backend's dialog.
+#[test]
+fn another_program() -> anyhow::Result<()> {
+    common::as_other_program()
+}
+
+/// What the desktop portal's file chooser was asked: the dialog's parent,
+/// the request's path, who asked.
+type Asked = std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>;
+
+/// The desktop portal's file chooser, as the shell sees it on the test's
+/// bus: it says what it was asked, and answers when the test says.
+struct Chooser(Asked);
+
+#[zbus::interface(name = "org.freedesktop.portal.FileChooser")]
+impl Chooser {
+    fn save_file(
+        &self,
+        parent_window: String,
+        _title: String,
+        options: std::collections::HashMap<String, zbus::OwnedVariant>,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<zbus::OwnedObjectPath> {
+        let sender = header.sender().map(|s| s.to_string()).unwrap_or_default();
+        let token = options
+            .get("handle_token")
+            .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+            .unwrap_or_default();
+        let path = format!(
+            "/org/freedesktop/portal/desktop/request/{}/{token}",
+            sender.trim_start_matches(':').replace('.', "_")
+        );
+        self.0
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("poisoned".into()))?
+            .push((parent_window, path.clone(), sender));
+        zbus::OwnedObjectPath::try_from(path).map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+}
+
+/// "Enregistrer sous…" (#595): the portal's file chooser is the editor's
+/// child (`parent_window`, an xdg-foreign handle); its backend, another
+/// program, maps its dialog as that handle's child and asks for the focus
+/// with a token of its own, made from no input: the dialog comes in front
+/// with the keyboard, though another program's window (a terminal, as
+/// the maintainer had) had the focus. Chosen, the annotated copy is
+/// written there. The programs are processes of the test's: the desktop
+/// lets a program's window take the focus from the window of the program
+/// that started it, so the terminal is the dialog's sibling.
+#[test]
+fn save_as_shows_the_chooser_in_front_with_the_keyboard() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell)?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()?;
+    let asked = Asked::default();
+    let address = format!("unix:path={}", bed.dir.path().join("bus").display());
+    let portal = runtime.block_on(
+        zbus::connection::Builder::address(address.as_str())
+            .name("org.freedesktop.portal.Desktop")
+            .serve_at("/org/freedesktop/portal/desktop", Chooser(asked.clone()))
+            .build(),
+    )?;
+    let _terminal = common::other_program(&mut bed.hp, "test.terminal", false, None)?;
+    let (_, _, thumb) = bed.capture()?;
+    let places = bed.edit(thumb)?;
+    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    assert!(
+        bed.hp
+            .windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some("test.terminal") && w.focused),
+        "{:?}",
+        bed.hp.windows()
+    );
+    bed.click(places.at("save-as"))?;
+    let came = bed
+        .hp
+        .dispatch_until(WAIT, |_| asked.lock().is_ok_and(|a| !a.is_empty()))?;
+    anyhow::ensure!(came, "the file chooser was never asked");
+    let (parent, path, sender) = asked
+        .lock()
+        .map_err(|_| anyhow::anyhow!("poisoned"))?
+        .remove(0);
+    let handle = parent
+        .strip_prefix("wayland:")
+        .with_context(|| format!("no parent: {parent:?}"))?;
+    let _dialog = common::other_program(&mut bed.hp, "test.chooser", false, Some(handle))?;
+    let front = bed.hp.dispatch_until(WAIT, |hp| {
+        let windows = hp.windows();
+        windows
+            .last()
+            .is_some_and(|w| w.app_id.as_deref() == Some("test.chooser") && w.focused && w.keyboard)
+    })?;
+    assert!(front, "{:?}", bed.hp.windows());
+    // Chosen.
+    let chosen = bed.dir.path().join("chosen.png");
+    let mut results = std::collections::HashMap::new();
+    results.insert(
+        "uris",
+        zbus::Variant::from(vec![format!("file://{}", chosen.display())]),
+    );
+    let mark = bed.mark();
+    runtime.block_on(portal.emit_signal(
+        Some(sender.as_str()),
+        path.as_str(),
+        "org.freedesktop.portal.Request",
+        "Response",
+        &(0u32, results),
+    ))?;
+    bed.logged_since(mark, "the capture is saved as")?;
+    let saved = png(&std::fs::read(&chosen)?)?;
+    assert_eq!(saved.dimensions(), (AREA.2 as u32, AREA.3 as u32));
+    Ok(())
+}
+
 /// Closing with no marks changes nothing: the file as it was, the
 /// clipboard too. Undone back to nothing is no marks.
 #[test]
@@ -689,4 +867,161 @@ fn closing_with_no_marks_changes_nothing() -> anyhow::Result<()> {
     assert_eq!(std::fs::metadata(&file)?.modified()?, modified);
     assert_eq!(bed.hp.clipboard_bytes(), Some(before));
     Ok(())
+}
+
+/// Watches every frame the compositor draws: whether the editor's image
+/// shows the capture in it, its squares' grey, not the dark of its empty
+/// place.
+struct Frames {
+    /// The image's place inside, the screen's pixels (scale 1).
+    inside: (i32, i32, i32, i32),
+    frames: u64,
+    checked: u64,
+}
+
+impl Frames {
+    fn new(hp: &Headless, image: (f64, f64, f64, f64)) -> Self {
+        let (x, y, w, h) = image;
+        let inset = 24.0;
+        Self {
+            inside: (
+                (x + inset) as i32,
+                (y + inset) as i32,
+                (w - 2.0 * inset) as i32,
+                (h - 2.0 * inset) as i32,
+            ),
+            frames: hp.frames(),
+            checked: 0,
+        }
+    }
+
+    /// The picture is in the last frame drawn: the mean of its brightness.
+    fn check(&mut self, hp: &mut Headless, when: &str) -> anyhow::Result<()> {
+        let (width, _, pixels) = hp.screenshot(0)?;
+        let (x0, y0, w, h) = self.inside;
+        let (mut sum, mut n) = (0.0, 0.0);
+        for y in (y0..y0 + h).step_by(5) {
+            for x in (x0..x0 + w).step_by(5) {
+                let i = ((y * width + x) * 4) as usize;
+                let p = &pixels[i..i + 3];
+                sum += (f64::from(p[0]) + f64::from(p[1]) + f64::from(p[2])) / 3.0;
+                n += 1.0;
+            }
+        }
+        let mean = sum / n;
+        self.checked += 1;
+        // The squares, scaled down, are a grey around 128; the empty place
+        // is the panel's dark, under 30.
+        anyhow::ensure!(
+            mean > 70.0,
+            "frame {} ({when}): the picture is gone, its place {mean:.0} bright",
+            hp.frames()
+        );
+        Ok(())
+    }
+
+    /// Runs the compositor until `done` holds, every frame drawn checked.
+    fn until(
+        &mut self,
+        hp: &mut Headless,
+        when: &str,
+        mut done: impl FnMut(&Headless) -> bool,
+    ) -> anyhow::Result<()> {
+        let start = Instant::now();
+        loop {
+            if hp.frames() != self.frames {
+                self.frames = hp.frames();
+                self.check(hp, when)?;
+            }
+            if done(hp) {
+                return Ok(());
+            }
+            anyhow::ensure!(start.elapsed() < WAIT, "{when}: waited in vain");
+            hp.dispatch(Duration::from_millis(5))?;
+        }
+    }
+
+    /// Runs the compositor until the editor's surface has committed since
+    /// `commits` and the compositor drew it, every frame checked.
+    fn drawn_after(&mut self, hp: &mut Headless, commits: u64, when: &str) -> anyhow::Result<()> {
+        self.until(hp, when, |hp| hp.capture_editor_commits() > commits)?;
+        let frames = hp.frames();
+        self.until(hp, when, |hp| hp.frames() > frames)
+    }
+}
+
+/// The picture stays on the screen while an arrow is drawn on it, and once
+/// it is (#594): on every frame from the pointer's press to its release
+/// and after. The image is large enough (over 2 MiB of pixels) that iced's
+/// GPU renderer would upload it on a thread of its own.
+fn the_picture_stays_while_an_arrow_is_drawn(draws: Draws) -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start_drawing(&shell, draws)?;
+    let w = bed.window;
+    let area = (
+        f64::from(w.x + 25),
+        f64::from(w.y + 25),
+        f64::from(w.width - 50),
+        f64::from(w.height - 50),
+    );
+    let (_, _, thumb) = bed.capture_area(area)?;
+    let places = bed.edit(thumb)?;
+    let image = places.rect("image");
+    // Shown smaller than captured, and more than 2 MiB of pixels all the
+    // same.
+    assert!(image.2 < area.2 && image.2 * image.3 * 4.0 > 2.0 * 1024.0 * 1024.0);
+    let mut frames = Frames::new(&bed.hp, image);
+    frames.check(&mut bed.hp, "the editor open")?;
+    let at = |x: f64, y: f64| (image.0 + image.2 * x, image.1 + image.3 * y);
+    let (from, to) = (at(0.2, 0.3), at(0.7, 0.6));
+    let mark = bed.mark();
+    let commits = bed.hp.capture_editor_commits();
+    bed.hp.pointer_move(from.0, from.1);
+    frames.drawn_after(&mut bed.hp, commits, "the pointer on the image")?;
+    let commits = bed.hp.capture_editor_commits();
+    bed.hp.button(BTN_LEFT, true);
+    frames.drawn_after(&mut bed.hp, commits, "pressed")?;
+    for i in 1..=5 {
+        let t = f64::from(i) / 5.0;
+        let commits = bed.hp.capture_editor_commits();
+        bed.hp
+            .pointer_move(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+        frames.drawn_after(&mut bed.hp, commits, "dragged")?;
+    }
+    let commits = bed.hp.capture_editor_commits();
+    bed.hp.button(BTN_LEFT, false);
+    frames.drawn_after(&mut bed.hp, commits, "released")?;
+    bed.logged_since(mark, "a mark on the capture")?;
+    // After: the pointer onto a button, the editor drawn again.
+    let commits = bed.hp.capture_editor_commits();
+    let copy = places.at("copy");
+    bed.hp.pointer_move(copy.0, copy.1);
+    frames.drawn_after(&mut bed.hp, commits, "after")?;
+    frames.check(&mut bed.hp, "at the end")?;
+    // The arrow is on it, red, half-way along its line.
+    let (width, _, pixels) = bed.hp.screenshot(0)?;
+    let middle = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
+    let i = ((middle.1 as i32 * width + middle.0 as i32) * 4) as usize;
+    let (b, g, r) = (pixels[i], pixels[i + 1], pixels[i + 2]);
+    assert!(near([r, g, b, 255], RED), "{:?}", (r, g, b));
+    eprintln!("{} frames checked", frames.checked);
+    Ok(())
+}
+
+#[test]
+fn the_picture_stays_while_an_arrow_is_drawn_on_the_cpu() -> anyhow::Result<()> {
+    the_picture_stays_while_an_arrow_is_drawn(Draws::Cpu)
+}
+
+/// The same with iced's GPU renderer, wgpu, on Mesa's software Vulkan
+/// driver: the one that lost the picture (#594). Skipped without it.
+#[test]
+fn the_picture_stays_while_an_arrow_is_drawn_on_wgpu() -> anyhow::Result<()> {
+    let Some(manifest) = lavapipe() else {
+        eprintln!("no software Vulkan driver (Mesa's lavapipe): skipped");
+        return Ok(());
+    };
+    the_picture_stays_while_an_arrow_is_drawn(Draws::SoftwareVulkan(manifest))
 }
