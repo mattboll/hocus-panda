@@ -25,7 +25,7 @@
 //! [`SourceError::Gone`] (Planka says the same of a board not shared with
 //! the user); no answer, or a `5xx`, is [`SourceError::Offline`].
 
-use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt, time::Duration};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -395,23 +395,10 @@ impl fmt::Debug for Client {
 
 impl Client {
     fn new(server: Server) -> Self {
-        // rustls on ring, against the system's certificates.
-        let tls = ureq::tls::TlsConfig::builder()
-            .provider(ureq::tls::TlsProvider::Rustls)
-            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-            .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .build();
-        let agent = ureq::Agent::config_builder()
-            .tls_config(tls)
-            .timeout_global(Some(TIMEOUT))
-            .http_status_as_error(false)
-            // A redirect is a sign-in page in front of the API, not an
-            // answer: said, not followed.
-            .max_redirects(0)
-            .user_agent(concat!("hocuspanda/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .new_agent();
-        Self { server, agent }
+        Self {
+            server,
+            agent: crate::http::agent(TIMEOUT),
+        }
     }
 
     fn url(&self, path: &str) -> String {
@@ -504,19 +491,7 @@ fn read<T: for<'de> Deserialize<'de>>(
     path: &str,
     not: Not,
 ) -> Result<T> {
-    let mut response = answer.map_err(|err| match err {
-        ureq::Error::Tls(_) | ureq::Error::Rustls(_) => {
-            SourceError::Offline(format!("{path}: TLS: {err}"))
-        }
-        _ => SourceError::Offline(format!("{path}: {err}")),
-    })?;
-    let status = response.status().as_u16();
-    let text = response
-        .body_mut()
-        .with_config()
-        .limit(MOST)
-        .read_to_string()
-        .map_err(|err| SourceError::Offline(format!("{path}: {err}")))?;
+    let (status, text) = crate::http::read(answer, path, MOST)?;
     match status {
         200..=299 => serde_json::from_str(&text)
             .map_err(|err| SourceError::Invalid(format!("{path}: not Planka's answer: {err}"))),

@@ -16,7 +16,7 @@ use std::{
 };
 
 use hocus_day::{
-    Change, Clock, Day, Env, Login, Snapshot, SourceError, State, Workers, config,
+    Change, Clock, Day, Env, Login, Snapshot, SourceError, State, Update, Workers, config,
     model::TaskId,
     secrets::{Secrets, Token},
 };
@@ -403,7 +403,7 @@ fn answer(
 struct Running {
     workers: Workers,
     day: Day,
-    snapshots: mpsc::Receiver<Snapshot>,
+    snapshots: mpsc::Receiver<Update>,
     secrets: Secrets,
     account: hocus_day::model::AccountId,
     _dir: tempfile::TempDir,
@@ -429,6 +429,8 @@ fn start(day_toml: &str, token: Option<&str>) -> anyhow::Result<Running> {
         state_dir: Some(dir.path().join("state")),
         cache_dir: Some(dir.path().join("cache")),
         config_dir: Some(dir.path().to_path_buf()),
+        session_bus: None,
+        google_api: hocus_day::google::API.to_owned(),
     };
     let (out, snapshots) = mpsc::channel();
     let (workers, day) = Workers::start(&config, &env, &out);
@@ -449,13 +451,13 @@ impl Running {
             if let Some(tasks) = self.day.tasks().filter(|t| ok(t)) {
                 return Ok(tasks.clone());
             }
-            let snapshot = self
+            let update = self
                 .snapshots
                 .recv_timeout(Duration::from_secs(20))
                 .map_err(|_| {
                     anyhow::anyhow!("not as expected: {:?}", self.day.tasks().map(summary))
                 })?;
-            self.day.update(snapshot);
+            self.day.apply(update);
         }
     }
 

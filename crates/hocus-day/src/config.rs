@@ -197,6 +197,18 @@ impl TaskEntry {
     }
 }
 
+/// The account of Online Accounts' Google account `identity` (its
+/// e-mail), named `name` for the user: `google-calendars-<identity>`.
+pub fn google_account(identity: &str, name: String) -> Account {
+    account(
+        Kind::Google,
+        Holds::Calendars,
+        name,
+        identity,
+        &mut vec![local_account().id],
+    )
+}
+
 /// A file of the configuration's, relative to its folder.
 pub fn resolve(file: &Path, base: Option<&Path>) -> PathBuf {
     match base {
