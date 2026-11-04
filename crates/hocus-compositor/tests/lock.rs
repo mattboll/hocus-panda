@@ -747,6 +747,40 @@ fn at_rest_while_locked_nothing_wakes_but_the_minute() -> anyhow::Result<()> {
     unlock(&mut bed.hp)
 }
 
+/// `hocus msg lock` on the control socket locks, and says so once it has.
+#[test]
+fn hocus_msg_lock_locks() -> anyhow::Result<()> {
+    use std::io::{Read, Write};
+    let dir = tempfile::tempdir()?;
+    let mut hp = alone(&["1280x720"], dir.path())?;
+    let path = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    let (said, heard) = mpsc::channel();
+    std::thread::spawn(move || {
+        let asked = (|| -> std::io::Result<String> {
+            let mut stream = std::os::unix::net::UnixStream::connect(&path)?;
+            stream.set_read_timeout(Some(WAIT))?;
+            stream.write_all(b"msg lock\n")?;
+            let mut answer = String::new();
+            stream.read_to_string(&mut answer)?;
+            Ok(answer)
+        })();
+        let _ = said.send(asked);
+    });
+    let mut answer = None;
+    hp.dispatch_until(WAIT, |_| {
+        if answer.is_none() {
+            answer = heard.try_recv().ok();
+        }
+        answer.is_some()
+    })?;
+    assert_eq!(answer.context("no answer")??, "locked\n");
+    assert_eq!(hp.lock_state(), LockState::Locked);
+    unlock(&mut hp)
+}
+
 /// `Tab` goes from the field to the button, then to the layout's button
 /// (with two layouts): `Enter` there changes the layout, not the field.
 #[test]

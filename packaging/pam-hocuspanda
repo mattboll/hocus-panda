@@ -1,13 +1,7 @@
 #%PAM-1.0
 # Hocuspanda's lock screen (docs/design/lock.md): the password checked as
-# the system's login checks it (common-auth, a substack, so that its own
-# modules stay as they are), with pam_faillock around it: three wrong
-# passwords in a row and the account waits 30 s, which the lock says
-# ("Trop d'essais. Réessaie dans 30 s.").
-auth     requisite                     pam_faillock.so preauth deny=3 unlock_time=30
-auth     [success=1 default=ignore]    substack common-auth
-auth     [default=die]                 pam_faillock.so authfail deny=3 unlock_time=30
-auth     sufficient                    pam_faillock.so authsucc deny=3 unlock_time=30
-auth     requisite                     pam_deny.so
-account  required                      pam_faillock.so
+# the system's login checks it, with its own modules. The compositor runs
+# as the user, not root: pam_unix checks through its helper, and no
+# module that keeps a tally as root (pam_faillock) can count here.
+@include common-auth
 @include common-account

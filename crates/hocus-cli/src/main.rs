@@ -11,6 +11,8 @@
 //!   prints nothing a tool would take as an answer: a hook must not get in
 //!   the agent's way, desktop or not.
 //!
+//! - `hocus msg lock`: locks the session now (docs/design/lock.md).
+//!
 //! - `hocus msg idle`: the session's idle state, its time left and what
 //!   holds it off (docs/design/idle.md), as the compositor says it.
 //!
@@ -124,6 +126,8 @@ enum MsgCommand {
     /// The session's idle state, its time left, and what holds it off
     /// (docs/design/idle.md).
     Idle,
+    /// Locks the session now (docs/design/lock.md).
+    Lock,
 }
 
 #[derive(Debug, Subcommand)]
@@ -183,6 +187,7 @@ fn main() -> ExitCode {
         Command::Msg { question } => {
             let question = match question {
                 MsgCommand::Idle => Question::Idle,
+                MsgCommand::Lock => Question::Lock,
             };
             match ask(args.socket, question) {
                 Ok(answer) => {

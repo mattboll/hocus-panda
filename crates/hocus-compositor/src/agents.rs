@@ -321,6 +321,11 @@ impl Compositor {
                         self.flush_idle();
                         self.idle_said().to_string()
                     }
+                    Question::Lock => {
+                        tracing::info!("hocus msg lock: the session locks");
+                        self.lock_now();
+                        "locked\n".to_owned()
+                    }
                 };
                 let _ = reply.send(answer);
                 return;

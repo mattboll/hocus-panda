@@ -10,8 +10,9 @@ and what was decided on the way.
 **The entry point** is `State::lock_now()` (crate `hocus-compositor`,
 `src/lock/mod.rs`). 7.2 (idle, before suspend) and 7.4 (the session
 menu's "Verrouiller", `Super+L`) call it; the shell can ask it too
-(`lock now` on its line, `ToCompositor::Lock(LockAsk::Now)`). Locked
-already, it changes nothing.
+(`lock now` on its line, `ToCompositor::Lock(LockAsk::Now)`), and so can
+`hocus msg lock` on the control socket (any program of the session; a
+lock is no privilege). Locked already, it changes nothing.
 
 Its state, `State::lock_state()`:
 
@@ -79,25 +80,30 @@ While locked:
   (`getpwuid_r`), never `$USER`. Without libpam, or a broken service, the
   check fails as a wrong password: the session stays locked.
 - **The service** is `hocuspanda`, the package's `/etc/pam.d/hocuspanda`
-  (`packaging/pam-hocuspanda`, a conffile): the system's `common-auth`, as
-  a substack so that its own modules (LDAP, systemd-homed) stay as they
-  are, and `common-account`, with pam_faillock around it: three wrong
-  passwords in a row and the account waits 30 s. Without that file (a
-  build run by hand), the system's `login`.
+  (`packaging/pam-hocuspanda`, a conffile): the system's `common-auth` and
+  `common-account`, so that its own modules (LDAP, systemd-homed) work as
+  at login. Without that file (a build run by hand), the system's `login`.
 - **Too many attempts** is PAM's to say, not a count of ours: PAM refusing
-  before it asked for the password (faillock's `preauth`), or
+  before it asked for the password (as pam_faillock's `preauth` does), or
   `PAM_MAXTRIES`. The field then waits 30 s, counting down each second,
   taking nothing, then takes a password again (and if PAM still refuses,
-  another 30 s). With pam_faillock as packaged, three wrong passwords show
-  "Mot de passe incorrect." each, and the fourth attempt the wait.
+  another 30 s).
+- **What PAM can count here** (tried in the Debian VM, 2026-11-04): the
+  compositor runs as the user, not root, and pam_faillock keeps its tally
+  in `/run/faillock` as root: run by the user it cannot open it ("Error
+  opening the tally file"), so it counts nothing and never refuses. With
+  Debian's stock stack the wait therefore never comes; a wrong password
+  costs pam_unix's own delay (about 2 s, "Vérification…" meanwhile), each
+  time. A count of the lock's own, if wanted, is a choice to make (see
+  the pull request).
 
 ### The test authenticator
 
 The compositor's tests never use PAM nor anyone's password:
 `Authenticator::test("panda")` (`lock/auth.rs`) takes that password and,
-after three wrong ones in a row, refuses the next attempt as faillock
-does. It exists only when `hocus-compositor` is built with its `test-auth`
-feature, which only the crate's own tests turn on (a dev-dependency of the
+after three wrong ones in a row, refuses the next attempt without asking
+for it, as pam_faillock's `preauth` does where it can count. It exists
+only when `hocus-compositor` is built with its `test-auth` feature, which only the crate's own tests turn on (a dev-dependency of the
 crate on itself, `crates/hocus-compositor/Cargo.toml`); a build of the
 program (`cargo build --release -p hocus-compositor`, the package's) has
 none of it: `Config::lock_auth` is then `Pam` only. `HOCUS_TEST_AUTH=…`
@@ -228,6 +234,7 @@ it draws:
 | `a_shell_crash_keeps_the_session_locked` | The shell killed: locked, black, no key to a window; back, it draws the lock, which opens |
 | `unlocking_gives_the_desktop_back` | The shell told, its surfaces gone, the window drawn and holding the keyboard, the bar's clock drawing again |
 | `at_rest_while_locked_nothing_wakes_but_the_minute` | No frame, no commit of the lock or the bar at rest; the minute draws the lock once |
+| `hocus_msg_lock_locks` | `hocus msg lock` locks, answering once locked |
 | `tab_goes_round_and_the_layout_switches_while_locked` | `Tab`, `Shift+Tab`, `Enter` on the layout's button |
 | `a_locker_locks_with_its_surfaces_and_its_unlock_opens` | ext-session-lock: its surfaces alone, `locked`, its unlock |
 | `nothing_goes_round_a_lockers_lock` | A second locker refused, its unlock opening nothing; the locker's crash leaving the desktop's lock, which the password opens |

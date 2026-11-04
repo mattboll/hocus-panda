@@ -17,8 +17,11 @@ const BACKEND: &str = "ICED_BACKEND";
 const TINY_SKIA: &str = "tiny-skia";
 
 /// Whether the bar draws on the CPU. Does not return when the shell starts
-/// again with the CPU renderer.
-pub fn choose() -> bool {
+/// again with the CPU renderer, which is handed `wayland` again: the
+/// Wayland connection the compositor gave (`WAYLAND_SOCKET`), taken out of
+/// the environment before wgpu looks at the adapters, as a GL driver
+/// connecting to Wayland would take it for its own.
+pub fn choose(wayland: Option<std::os::fd::RawFd>) -> bool {
     if std::env::var(BACKEND).is_ok_and(|b| b == TINY_SKIA) {
         tracing::info!("drawing on the CPU (tiny-skia): bars are opaque");
         return true;
@@ -43,10 +46,14 @@ pub fn choose() -> bool {
             );
             let err = std::env::current_exe()
                 .map(|exe| {
-                    Command::new(exe)
+                    let mut command = Command::new(exe);
+                    command
                         .args(std::env::args_os().skip(1))
-                        .env(BACKEND, TINY_SKIA)
-                        .exec()
+                        .env(BACKEND, TINY_SKIA);
+                    if let Some(fd) = wayland {
+                        command.env(crate::wayland::SOCKET_ENV, fd.to_string());
+                    }
+                    command.exec()
                 })
                 .unwrap_or_else(|err| err);
             tracing::warn!(%err, "could not start again; staying on wgpu");

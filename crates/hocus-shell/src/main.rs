@@ -56,6 +56,7 @@ mod tasks;
 mod today;
 mod tray;
 mod user;
+mod wayland;
 
 use std::{
     borrow::Cow,
@@ -107,6 +108,8 @@ const OPAQUE_BOTTOM: Color = rgba(0x0E, 0x11, 0x1C, 1.0);
 const RIM: Color = rgba(255, 255, 255, 0.10);
 
 fn main() -> ExitCode {
+    // Before anything could take it for its own (docs/design/lock.md).
+    let handed = wayland::take_socket();
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "warn,hocuspanda_shell=info,hocus_day=info".into());
     // cosmic-text traces the text it shapes, a password shown with the eye
@@ -120,7 +123,7 @@ fn main() -> ExitCode {
         .with_env_filter(filter)
         .init();
     // On a CPU, the CPU renderer: this may start the program again.
-    let software = renderer::choose();
+    let software = renderer::choose(handed);
     // From here, SIGTERM ends it once what it keeps is written.
     ending::start();
     load_fonts();
@@ -158,7 +161,7 @@ fn main() -> ExitCode {
     }
     // The connection iced draws on, made here: the shell reads the
     // clipboard on it (paste), and iced's own clipboard is not needed.
-    let connection = match wayland_client::Connection::connect_to_env() {
+    let connection = match wayland::connect(handed) {
         Ok(connection) => {
             paste::start(&connection);
             outputs::start(&connection);
