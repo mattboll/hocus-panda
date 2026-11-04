@@ -1158,7 +1158,7 @@ impl Shell {
         )
     }
 
-    /// The sign of what is in use (5.11), if its surface is `id`.
+    /// The sign of what is in use (5.12), if its surface is `id`.
     fn in_use_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let output = in_use::bar_of(id)?;
         let bar = self.bars.values().find(|b| b.output == output)?;
@@ -1176,7 +1176,6 @@ impl Shell {
             bar: bar.output.clone(),
             forms: bar.forms(at),
             bar_width: bar.width(at),
-            words: in_use::Words::new(clock::time::Lang::of_messages()),
             backdrop,
             motion: self.look.motion,
         };
@@ -1428,7 +1427,7 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::Sharing => canvas(popover::sharing::Panel {
+            popover::Item::InUse => canvas(popover::in_use::Panel {
                 id,
                 words: in_use::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,

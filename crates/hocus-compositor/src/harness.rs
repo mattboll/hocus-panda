@@ -294,6 +294,11 @@ impl Headless {
         self.app.state.panel.levels_commits
     }
 
+    /// Commits of the signs of what is in use so far (5.12).
+    pub fn in_use_commits(&self) -> u64 {
+        self.app.state.panel.in_use_commits
+    }
+
     /// Commits of the connections' surfaces so far.
     pub fn connections_commits(&self) -> u64 {
         self.app.state.panel.connections_commits

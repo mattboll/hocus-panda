@@ -1,41 +1,87 @@
-//! What is in use, and the bar's sign that says so (5.11): so far the
-//! screen, shared through the desktop portal (`shares`, from the
-//! compositor). 5.12 adds the microphone and the camera, and groups them
-//! in one sign of tiles under the clock, the screen's being one kind of
-//! [`Use`]: the model here is theirs to grow, the sign's place too.
+//! What is in use, and the bar's sign that says so (5.12, variant A; 5.11
+//! and 5.10 before it): the microphone, the camera and the screen.
+//!
+//! - **The microphone**: PipeWire's `Stream/Input/Audio` nodes linked to a
+//!   source, from the sound's `pw-dump` ([`crate::levels::sound`]), which
+//!   writes the graph's changes as they come: nothing is polled. Grey while
+//!   the default source is muted.
+//! - **The camera**: `Stream/Input/Video` nodes linked to a camera's node,
+//!   from the same graph; and the processes holding `/dev/video*` open,
+//!   read from `/proc` off the loop ([`cameras`]), only while a camera's
+//!   node exists and at most once a second.
+//! - **The screen**: what the compositor says is shared through the
+//!   desktop portal (`shares`, 5.11) and its recording (`recording`, 5.10),
+//!   which join the sign as its screen, their lines and their buttons in
+//!   its popover.
+//!
+//! Each use shows from the moment it is seen and stays [`LINGER`] after it
+//! ends, so that a short one is not missed: a thread of its own wakes at
+//! the end of the linger, and sleeps without one (`linger`). The times are
+//! the monotonic clock's.
 //!
 //! The sign shows under the clock while something is in use, in both
 //! forms: a surface of its own on each bar, opened when the first use
-//! starts and removed when the last one ends; the agents' group moves
-//! under it ([`room`]). Hovering it (150 ms) or a click opens its popover
-//! ([`crate::popover::sharing`]): who sees what, the notifications held,
-//! and a button to stop each share.
-//!
-//! The recording (5.10) is one more use, its item over the sign's: the
-//! compositor says when it records, pauses and stops (`recording`); the
-//! item counts the time on from what it was told, and its buttons pause,
-//! go on and stop it. In the mini form it opens under the pointer, the
-//! agents moving under it; in the full form it is always open.
+//! starts and removed when the last one has lingered; the agents' group
+//! moves under it ([`room`]). One tile per kind in use ([`draw`]); hovering
+//! it (150 ms) or a click opens its popover ([`crate::popover::in_use`]).
 
+pub mod cameras;
 pub mod draw;
 
 use std::{
     collections::HashMap,
-    sync::{Mutex, PoisonError},
+    sync::{Mutex, PoisonError, mpsc},
+    time::{Duration, Instant},
 };
 
-use std::time::{Duration, Instant};
-
-use hocus_link::{EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown};
+use hocus_link::{EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown, SharedThing};
 use iced::window;
 
-use crate::popover::{self, Effect, Item};
+use crate::{
+    levels::icons::Icon,
+    popover::{self, Effect, Item},
+};
 
-/// What is in use, by kind: the screen's shares, and the recording.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Uses {
-    pub shares: Vec<ShareShown>,
-    pub recording: Option<Rec>,
+/// A use stays shown this long after it ends.
+pub const LINGER: Duration = Duration::from_secs(3);
+
+/// What the sign shows a tile for, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Kind {
+    Microphone,
+    Camera,
+    Screen,
+}
+
+/// An application using the microphone or the camera.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Media {
+    /// What tells it from another of the same kind: its application's key
+    /// (its streams taken together), or its process's.
+    pub key: String,
+    /// The name people know it by.
+    pub app: String,
+    pub icon: Option<Icon>,
+    /// The names its windows' application ids may go by, lower case: its
+    /// sandbox's app id, its own id, its program, its name.
+    pub ids: Vec<String>,
+    /// Its stream's `media.name`, if it says one.
+    pub media: Option<String>,
+}
+
+/// A use as the sign follows it: since when, and when it ended (it then
+/// lingers).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Seen<T> {
+    pub what: T,
+    pub since: Instant,
+    pub ended: Option<Instant>,
+}
+
+impl<T> Seen<T> {
+    pub fn live(&self) -> bool {
+        self.ended.is_none()
+    }
 }
 
 /// The recording under way, as the compositor told it, and when.
@@ -57,21 +103,31 @@ impl Rec {
     }
 }
 
-/// A kind of use, as the sign shows them, from the top.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Use {
-    Recording,
-    Screen,
+/// What is in use, and what lingers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Uses {
+    pub microphone: Vec<Seen<Media>>,
+    pub camera: Vec<Seen<Media>>,
+    pub shares: Vec<Seen<ShareShown>>,
+    pub recording: Option<Seen<Rec>>,
+    /// The default source is muted: the microphone's tile is grey.
+    pub muted: bool,
+    /// When the sign last appeared: it pops in from then.
+    pub appeared: Option<Instant>,
 }
 
 impl Uses {
-    pub fn kinds(&self) -> Vec<Use> {
+    /// The kinds shown, in the sign's order.
+    pub fn kinds(&self) -> Vec<Kind> {
         let mut kinds = Vec::new();
-        if self.recording.is_some() {
-            kinds.push(Use::Recording);
+        if !self.microphone.is_empty() {
+            kinds.push(Kind::Microphone);
         }
-        if !self.shares.is_empty() {
-            kinds.push(Use::Screen);
+        if !self.camera.is_empty() {
+            kinds.push(Kind::Camera);
+        }
+        if !self.shares.is_empty() || self.recording.is_some() {
+            kinds.push(Kind::Screen);
         }
         kinds
     }
@@ -79,135 +135,296 @@ impl Uses {
     pub fn any(&self) -> bool {
         !self.kinds().is_empty()
     }
+
+    /// The shares still on (not lingering).
+    pub fn live_shares(&self) -> impl Iterator<Item = &ShareShown> {
+        self.shares.iter().filter(|s| s.live()).map(|s| &s.what)
+    }
+
+    /// The recording still on.
+    pub fn live_recording(&self) -> Option<&Rec> {
+        self.recording
+            .as_ref()
+            .filter(|r| r.live())
+            .map(|r| &r.what)
+    }
+
+    /// When the next use to have lingered goes.
+    pub fn deadline(&self) -> Option<Instant> {
+        let ends = self
+            .microphone
+            .iter()
+            .chain(&self.camera)
+            .filter_map(|s| s.ended)
+            .chain(self.shares.iter().filter_map(|s| s.ended))
+            .chain(self.recording.iter().filter_map(|r| r.ended));
+        ends.min().map(|end| end + LINGER)
+    }
+
+    /// The uses that have lingered long enough at `now` go; when the last
+    /// of them had ended, if any went.
+    fn prune(&mut self, now: Instant) -> Option<Instant> {
+        let mut last = None;
+        let mut keep = |ended: Option<Instant>| match ended {
+            Some(end) if end + LINGER <= now => {
+                last = last.max(Some(end));
+                false
+            }
+            _ => true,
+        };
+        self.microphone.retain(|s| keep(s.ended));
+        self.camera.retain(|s| keep(s.ended));
+        self.shares.retain(|s| keep(s.ended));
+        if self.recording.as_ref().is_some_and(|r| !keep(r.ended)) {
+            self.recording = None;
+        }
+        last
+    }
 }
 
-static USES: Mutex<Option<Uses>> = Mutex::new(None);
+/// `seen` follows what is `now` in use (`live`, each with its key): a new
+/// one is seen from `at`, one gone ends at `at` (and lingers), one back
+/// before it went is on again, as it was since.
+fn follow<T, K: PartialEq>(
+    seen: &mut Vec<Seen<T>>,
+    live: Vec<T>,
+    key: impl Fn(&T) -> K,
+    at: Instant,
+) {
+    for kept in seen.iter_mut() {
+        if kept.ended.is_none() && !live.iter().any(|l| key(l) == key(&kept.what)) {
+            kept.ended = Some(at);
+        }
+    }
+    for what in live {
+        match seen.iter_mut().find(|s| key(&s.what) == key(&what)) {
+            Some(kept) => {
+                kept.what = what;
+                kept.ended = None;
+            }
+            None => seen.push(Seen {
+                what,
+                since: at,
+                ended: None,
+            }),
+        }
+    }
+}
+
+/// What the sources last said, and what the sign shows of it.
+#[derive(Debug, Default)]
+struct State {
+    uses: Uses,
+    /// The cameras' users: PipeWire's streams, and the processes holding
+    /// a device open.
+    camera_streams: Vec<Media>,
+    camera_holders: Vec<Media>,
+}
+
+impl State {
+    fn cameras(&self) -> Vec<Media> {
+        let mut all = self.camera_streams.clone();
+        for holder in &self.camera_holders {
+            if !all.iter().any(|m| m.app == holder.app) {
+                all.push(holder.clone());
+            }
+        }
+        all
+    }
+}
+
+static STATE: Mutex<Option<State>> = Mutex::new(None);
+
+fn state<T>(with: impl FnOnce(&mut State) -> T) -> T {
+    let mut state = STATE.lock().unwrap_or_else(PoisonError::into_inner);
+    with(state.get_or_insert_with(State::default))
+}
 
 /// What is in use now.
 pub fn snapshot() -> Uses {
-    USES.lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone()
-        .unwrap_or_default()
+    state(|s| s.uses.clone())
 }
 
 /// The room the sign takes under the clock in `form`, the 14 px after it
 /// included: none when nothing is in use.
 pub fn room(form: Form) -> f32 {
-    if snapshot().any() {
-        draw::height(form) + draw::AFTER
+    let kinds = snapshot().kinds().len();
+    if kinds > 0 {
+        draw::size(form, kinds).height + draw::AFTER
     } else {
         0.0
     }
 }
 
-/// The recording's item opened by the pointer (the mini form).
-static OPEN: Mutex<bool> = Mutex::new(false);
-
-/// Whether the recording's item shows its buttons in `form`: always in the
-/// full form, under the pointer in the mini one.
-pub fn recording_open(form: Form) -> bool {
-    form == Form::Full || *OPEN.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// The pointer comes onto the recording's item (`open`), or leaves it.
-pub fn open_recording(open: bool) {
-    {
-        let mut opened = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-        if *opened == open {
-            return;
+/// The uses change with `change` at `now` (the monotonic clock's), those
+/// that lingered enough go: the sign comes, changes or goes on every bar,
+/// its popover follows, and the linger's thread is told when to wake.
+fn update(now: Instant, change: impl FnOnce(&mut State)) {
+    let (before, after, lingered) = state(|s| {
+        let before = s.uses.clone();
+        change(s);
+        let lingered = s.uses.prune(now);
+        if before.kinds().is_empty() && s.uses.any() {
+            s.uses.appeared = Some(now);
         }
-        *opened = open;
-    }
-    tracing::debug!(open, "the recording's item");
-    resized();
-}
-
-/// The sign's height changed: its surfaces and the agents follow.
-fn resized() {
-    let effects: Vec<Effect> = places(|places| {
-        places
-            .values()
-            .filter_map(|place| {
-                let id = place.id?;
-                let (size, margin) = placement(place.form, place.switching);
-                Some(Effect::Resize {
-                    id,
-                    size,
-                    margin: Some(margin),
-                })
-            })
-            .collect()
+        (before, s.uses.clone(), lingered)
     });
-    crate::agents::draw::moved();
-    let mut effects = effects;
+    linger::wake_at(after.deadline());
+    if before == after {
+        return;
+    }
+    let (was, is) = (before.kinds(), after.kinds());
+    if is.is_empty() && !was.is_empty() {
+        draw::unsaid();
+        tracing::debug!(
+            lingered_ms = lingered.map(|end| now.saturating_duration_since(end).as_millis()),
+            "the in-use sign goes"
+        );
+    } else if was != is || before.muted != after.muted {
+        tracing::debug!(kinds = ?is, muted = after.muted, "the in-use sign shows");
+    }
+    let live = |u: &Uses| u.live_shares().count() > 0;
+    if live(&before) != live(&after) {
+        crate::notifications::sharing(live(&after));
+    }
+    let mut effects = Vec::new();
+    if was.is_empty() != is.is_empty() {
+        // The sign comes or goes on every bar, the agents move.
+        places(|places| {
+            for (bar, place) in places.iter_mut() {
+                effects.extend(place.show(bar, !is.is_empty()));
+            }
+        });
+        crate::agents::draw::moved();
+        if is.is_empty() && popover::with(|c| c.open_item()) == Some(Item::InUse) {
+            popover::event(popover::Event::Chosen);
+        }
+    } else if was.len() != is.len() {
+        // Another size: its surfaces and the agents follow.
+        effects.extend(places(|places| {
+            places
+                .values()
+                .filter_map(|place| {
+                    let id = place.id?;
+                    let (size, margin) = placement(place.form, place.switching);
+                    Some(Effect::Resize {
+                        id,
+                        size,
+                        margin: Some(margin),
+                    })
+                })
+                .collect::<Vec<_>>()
+        }));
+        crate::agents::draw::moved();
+    }
     effects.push(Effect::Wake(IN_USE_NAMESPACE));
     popover::send(effects);
+    popover::changed(Item::InUse);
+}
+
+/// The sound's graph: who uses the microphone (their streams linked to a
+/// source), whether the default source is muted, and who uses the
+/// cameras through PipeWire.
+pub fn set_media(microphone: Vec<Media>, muted: bool, camera: Vec<Media>) {
+    let now = Instant::now();
+    update(now, |s| {
+        s.uses.muted = muted;
+        follow(&mut s.uses.microphone, microphone, |m| m.key.clone(), now);
+        s.camera_streams = camera;
+        let all = s.cameras();
+        follow(&mut s.uses.camera, all, |m| m.key.clone(), now);
+    });
+}
+
+/// The processes holding a camera's device open ([`cameras`]).
+pub fn set_camera_holders(holders: Vec<Media>) {
+    let now = Instant::now();
+    update(now, |s| {
+        s.camera_holders = holders;
+        let all = s.cameras();
+        follow(&mut s.uses.camera, all, |m| m.key.clone(), now);
+    });
 }
 
 /// The compositor's `recording` (`Some`) and `recording-end`.
 pub fn set_recording(shown: Option<RecordingShown>) {
     let now = Instant::now();
-    let (before, after) = {
-        let mut uses = USES.lock().unwrap_or_else(PoisonError::into_inner);
-        let uses = uses.get_or_insert_with(Uses::default);
-        let before = uses.clone();
-        uses.recording = shown.map(|shown| Rec { shown, at: now });
-        (before, uses.clone())
-    };
-    tracing::debug!(recording = ?after.recording.map(|r| r.shown), "the recording");
-    if after.recording.is_none() {
-        *OPEN.lock().unwrap_or_else(PoisonError::into_inner) = false;
-    }
-    let mut effects = Vec::new();
-    if before.any() != after.any() {
-        places(|places| {
-            for (bar, place) in places.iter_mut() {
-                effects.extend(place.show(bar, after.any()));
-            }
-        });
-        crate::agents::draw::moved();
-        popover::send(effects);
-    } else if before.recording.is_some() != after.recording.is_some() {
-        resized();
-        return;
-    }
-    popover::send(vec![Effect::Wake(IN_USE_NAMESPACE)]);
+    tracing::debug!(recording = ?shown, "the recording");
+    update(now, |s| {
+        let live: Vec<Rec> = shown
+            .map(|shown| Rec { shown, at: now })
+            .into_iter()
+            .collect();
+        let mut seen: Vec<Seen<Rec>> = s.uses.recording.take().into_iter().collect();
+        follow(&mut seen, live, |r| r.shown.id, now);
+        // One at a time: the one on, else the newest.
+        s.uses.recording = seen.into_iter().max_by_key(|r| (r.live(), r.since));
+    });
 }
 
 /// The compositor's `shares`.
 pub fn set_shares(shares: Vec<ShareShown>) {
-    let (before, after) = {
-        let mut uses = USES.lock().unwrap_or_else(PoisonError::into_inner);
-        let uses = uses.get_or_insert_with(Uses::default);
-        let before = uses.clone();
-        uses.shares = shares;
-        (before, uses.clone())
-    };
-    if before == after {
-        return;
-    }
+    let now = Instant::now();
     tracing::debug!(
-        shares = ?after.shares.iter().map(|s| (s.id, s.app.clone())).collect::<Vec<_>>(),
-        "what is in use"
+        shares = ?shares.iter().map(|s| (s.id, s.app.clone())).collect::<Vec<_>>(),
+        "what is shared"
     );
-    crate::notifications::sharing(!after.shares.is_empty());
-    let mut effects = Vec::new();
-    if before.any() != after.any() {
-        // The sign comes or goes on every bar, the agents move.
-        places(|places| {
-            for (bar, place) in places.iter_mut() {
-                effects.extend(place.show(bar, after.any()));
+    update(now, |s| follow(&mut s.uses.shares, shares, |s| s.id, now));
+}
+
+/// The thread that wakes when a use has lingered enough: told each
+/// deadline, it sleeps until it, or without one until told one.
+mod linger {
+    use super::{Instant, Mutex, PoisonError, mpsc};
+
+    static WAKE: Mutex<Option<mpsc::Sender<Option<Instant>>>> = Mutex::new(None);
+
+    /// The next use to go goes at `at` (none: nothing lingers).
+    pub fn wake_at(at: Option<Instant>) {
+        let mut sender = WAKE.lock().unwrap_or_else(PoisonError::into_inner);
+        if sender.is_none() {
+            if at.is_none() {
+                return;
             }
-        });
-        crate::agents::draw::moved();
-        if !after.any() && popover::with(|c| c.open_item()) == Some(Item::Sharing) {
-            popover::event(popover::Event::Chosen);
+            let (tx, rx) = mpsc::channel();
+            let started = std::thread::Builder::new()
+                .name("in use: linger".to_owned())
+                .spawn(move || run(&rx));
+            match started {
+                Ok(_) => *sender = Some(tx),
+                Err(err) => {
+                    tracing::warn!(%err, "cannot time what is in use: it stays");
+                    return;
+                }
+            }
+        }
+        if let Some(tx) = sender.as_ref() {
+            let _ = tx.send(at);
         }
     }
-    effects.push(Effect::Wake(IN_USE_NAMESPACE));
-    popover::send(effects);
-    popover::changed(Item::Sharing);
+
+    fn run(told: &mpsc::Receiver<Option<Instant>>) {
+        let mut deadline: Option<Instant> = None;
+        loop {
+            let next = match deadline {
+                None => told.recv().ok(),
+                Some(at) => match told.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                    Ok(next) => Some(next),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        // What lingered goes; the next deadline comes back.
+                        deadline = None;
+                        super::update(Instant::now(), |_| {});
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => None,
+                },
+            };
+            match next {
+                Some(at) => deadline = at,
+                None => return,
+            }
+        }
+    }
 }
 
 /// The sign's surface on a bar.
@@ -255,7 +472,7 @@ fn places<T>(with: impl FnOnce(&mut HashMap<String, Place>) -> T) -> T {
 /// The surface's size and its margins in `form` (both forms' places while
 /// the bar switches).
 fn placement(form: Form, switching: bool) -> ((u32, u32), (i32, i32, i32, i32)) {
-    let ((w, h), top) = draw::placement(form, switching);
+    let ((w, h), top) = draw::placement(form, switching, snapshot().kinds().len());
     ((w, h), (EDGE + top.round() as i32, EDGE + 1, 0, 0))
 }
 
@@ -311,7 +528,7 @@ pub fn bar_of(id: window::Id) -> Option<String> {
     })
 }
 
-/// The share's words, for the sign and its popover.
+/// The words of the sign's popover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
     fr: bool,
@@ -324,42 +541,96 @@ impl Words {
         }
     }
 
-    pub fn sharing(self) -> &'static str {
-        if self.fr { "Partage" } else { "Sharing" }
+    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
+        if self.fr { fr } else { en }
     }
 
-    /// "Firefox voit ton écran".
-    pub fn sees(self, app: Option<&str>) -> String {
-        match (app, self.fr) {
-            (Some(app), true) => format!("{app} voit ton écran"),
-            (Some(app), false) => format!("{app} sees your screen"),
-            (None, true) => "Une application voit ton écran".to_owned(),
-            (None, false) => "An application sees your screen".to_owned(),
+    /// The popover's title.
+    pub fn right_now(self) -> &'static str {
+        self.pick("En ce moment", "Right now")
+    }
+
+    /// What is used, as a use's line starts.
+    pub fn kind(self, kind: Kind, muted: bool) -> &'static str {
+        match kind {
+            Kind::Microphone if muted => self.pick("Micro coupé", "Microphone muted"),
+            Kind::Microphone => self.pick("Micro", "Microphone"),
+            Kind::Camera => self.pick("Caméra", "Camera"),
+            Kind::Screen => self.pick("Écran", "Screen"),
         }
     }
 
-    /// "Tu partages la fenêtre « … »", or the screen.
-    pub fn shares(self, thing: &hocus_link::SharedThing) -> String {
-        use hocus_link::SharedThing;
+    /// "depuis 12 min": how long it has been used.
+    pub fn since(self, time: Duration) -> String {
+        let s = time.as_secs();
+        let (m, h) = (s / 60, s / 3600);
+        match (self.fr, h, m) {
+            (true, 0, 0) => format!("depuis {s} s"),
+            (false, 0, 0) => format!("for {s} s"),
+            (true, 0, m) => format!("depuis {m} min"),
+            (false, 0, m) => format!("for {m} min"),
+            (true, h, _) => format!("depuis {h} h {:02}", m % 60),
+            (false, h, _) => format!("for {h} h {} min", m % 60),
+        }
+    }
+
+    /// A use's line: "Micro · meet.google.com · depuis 12 min".
+    pub fn line(self, kind: Kind, muted: bool, detail: Option<&str>, since: Duration) -> String {
+        let mut line = self.kind(kind, muted).to_owned();
+        if let Some(detail) = detail.filter(|d| !d.is_empty()) {
+            line.push_str(" · ");
+            line.push_str(detail);
+        }
+        line.push_str(" · ");
+        line.push_str(&self.since(since));
+        line
+    }
+
+    /// A share's detail: "partage la fenêtre « … »", or the screen.
+    pub fn shares(self, thing: &SharedThing) -> String {
         match (thing, self.fr) {
-            (SharedThing::Window(title), true) => format!("Tu partages la fenêtre « {title} »"),
+            (SharedThing::Window(title), true) => format!("partage la fenêtre « {title} »"),
             (SharedThing::Window(title), false) => {
-                format!("You share the window \u{201c}{title}\u{201d}")
+                format!("sharing the window \u{201c}{title}\u{201d}")
             }
             (SharedThing::Screen(name), true) if name.is_empty() => {
-                "Tu partages l'écran du portable".to_owned()
+                "partage l'écran du portable".to_owned()
             }
             (SharedThing::Screen(name), false) if name.is_empty() => {
-                "You share the laptop screen".to_owned()
+                "sharing the laptop screen".to_owned()
             }
-            (SharedThing::Screen(name), true) => format!("Tu partages l'écran « {name} »"),
+            (SharedThing::Screen(name), true) => format!("partage l'écran « {name} »"),
             (SharedThing::Screen(name), false) => {
-                format!("You share the screen \u{201c}{name}\u{201d}")
+                format!("sharing the screen \u{201c}{name}\u{201d}")
             }
         }
     }
 
-    /// How many notifications wait for the end.
+    /// An application not known by name.
+    pub fn an_app(self) -> &'static str {
+        self.pick("Une application", "An application")
+    }
+
+    /// The recording's line's name (5.10).
+    pub fn recording(self) -> &'static str {
+        self.pick("Enregistrement d'écran", "Screen recording")
+    }
+
+    /// The recording's line: "Écran · enregistrement · 0:12".
+    pub fn recording_line(self, paused: bool, elapsed: Duration) -> String {
+        let state = if paused {
+            self.pick("en pause", "paused")
+        } else {
+            self.pick("enregistrement", "recording")
+        };
+        format!(
+            "{} · {state} · {}",
+            self.kind(Kind::Screen, false),
+            draw::elapsed(elapsed)
+        )
+    }
+
+    /// How many notifications wait for the end of the sharing.
     pub fn held(self, n: usize) -> String {
         match (n, self.fr) {
             (0, true) => "Les notifications attendent la fin".to_owned(),
@@ -371,17 +642,27 @@ impl Words {
         }
     }
 
-    pub fn stop(self) -> &'static str {
-        if self.fr {
-            "Arrêter le partage"
+    /// The microphone's button: muting the default source, or not.
+    pub fn mute(self, muted: bool) -> &'static str {
+        if muted {
+            self.pick("Rétablir le micro", "Unmute")
         } else {
-            "Stop sharing"
+            self.pick("Couper le micro", "Mute the microphone")
         }
     }
 
-    /// The recording's time while it is paused (5.10).
-    pub fn paused(self) -> &'static str {
-        if self.fr { "pause" } else { "paused" }
+    /// A share's button; with several, each names its application.
+    pub fn stop(self, app: Option<&str>) -> String {
+        match (app, self.fr) {
+            (None, true) => "Arrêter le partage".to_owned(),
+            (None, false) => "Stop sharing".to_owned(),
+            (Some(app), true) => format!("Arrêter le partage avec {app}"),
+            (Some(app), false) => format!("Stop sharing with {app}"),
+        }
+    }
+
+    pub fn stop_recording(self) -> &'static str {
+        self.pick("Arrêter l'enregistrement", "Stop recording")
     }
 }
 
@@ -389,27 +670,149 @@ impl Words {
 mod tests {
     use super::*;
     use crate::clock::time::Lang;
-    use hocus_link::SharedThing;
+
+    fn media(key: &str) -> Media {
+        Media {
+            key: key.to_owned(),
+            app: key.to_owned(),
+            icon: None,
+            ids: Vec::new(),
+            media: None,
+        }
+    }
+
+    fn key(m: &Media) -> String {
+        m.key.clone()
+    }
 
     #[test]
-    fn the_signs_words() {
+    fn a_use_shows_at_once_and_lingers_three_seconds_after_it_ends() {
+        let t0 = Instant::now();
+        let mut uses = Uses::default();
+        // Seen at once: no delay before it shows.
+        follow(&mut uses.microphone, vec![media("Firefox")], key, t0);
+        assert_eq!(uses.kinds(), [Kind::Microphone]);
+        assert_eq!(uses.microphone[0].since, t0);
+        assert_eq!(uses.deadline(), None);
+        // It ends at 5 s: still shown, until 8 s.
+        let end = t0 + Duration::from_secs(5);
+        follow(&mut uses.microphone, Vec::new(), key, end);
+        assert_eq!(uses.kinds(), [Kind::Microphone]);
+        assert!(!uses.microphone[0].live());
+        assert_eq!(uses.deadline(), Some(end + LINGER));
+        assert_eq!(uses.prune(end + Duration::from_millis(2999)), None);
+        assert_eq!(uses.kinds(), [Kind::Microphone]);
+        assert_eq!(uses.prune(end + LINGER), Some(end));
+        assert!(uses.kinds().is_empty());
+    }
+
+    #[test]
+    fn a_use_back_while_it_lingers_is_the_same_use_since_it_began() {
+        let t0 = Instant::now();
+        let mut uses = Uses::default();
+        follow(&mut uses.camera, vec![media("Zoom")], key, t0);
+        follow(
+            &mut uses.camera,
+            Vec::new(),
+            key,
+            t0 + Duration::from_secs(1),
+        );
+        follow(
+            &mut uses.camera,
+            vec![media("Zoom")],
+            key,
+            t0 + Duration::from_secs(2),
+        );
+        assert_eq!(uses.camera.len(), 1);
+        assert!(uses.camera[0].live());
+        assert_eq!(uses.camera[0].since, t0);
+        assert_eq!(uses.deadline(), None);
+    }
+
+    #[test]
+    fn the_kinds_side_by_side_in_their_order() {
+        let t0 = Instant::now();
+        let mut uses = Uses::default();
+        follow(
+            &mut uses.shares,
+            vec![ShareShown {
+                id: 1,
+                app: "org.mozilla.firefox".into(),
+                thing: SharedThing::Screen(String::new()),
+            }],
+            |s| s.id,
+            t0,
+        );
+        follow(&mut uses.camera, vec![media("Zoom")], key, t0);
+        follow(&mut uses.microphone, vec![media("Zoom")], key, t0);
+        assert_eq!(uses.kinds(), [Kind::Microphone, Kind::Camera, Kind::Screen]);
+        let rec = Uses {
+            recording: Some(Seen {
+                what: Rec {
+                    shown: RecordingShown {
+                        id: 1,
+                        paused: false,
+                        elapsed: 0,
+                    },
+                    at: t0,
+                },
+                since: t0,
+                ended: None,
+            }),
+            ..Uses::default()
+        };
+        assert_eq!(rec.kinds(), [Kind::Screen]);
+    }
+
+    #[test]
+    fn the_popovers_words() {
         let fr = Words::new(Lang::French);
         let en = Words::new(Lang::English);
-        assert_eq!(fr.sharing(), "Partage");
-        assert_eq!(fr.sees(Some("Firefox")), "Firefox voit ton écran");
-        assert_eq!(en.sees(Some("Firefox")), "Firefox sees your screen");
+        assert_eq!(fr.right_now(), "En ce moment");
+        assert_eq!(en.right_now(), "Right now");
+        let twelve = Duration::from_secs(12 * 60 + 5);
         assert_eq!(
-            fr.shares(&SharedThing::Window(
-                "hocus-panda — Visual Studio Code".into()
-            )),
-            "Tu partages la fenêtre « hocus-panda — Visual Studio Code »"
+            fr.line(Kind::Microphone, false, Some("meet.google.com"), twelve),
+            "Micro · meet.google.com · depuis 12 min"
+        );
+        assert_eq!(
+            en.line(Kind::Microphone, false, Some("meet.google.com"), twelve),
+            "Microphone · meet.google.com · for 12 min"
+        );
+        assert_eq!(
+            fr.line(Kind::Microphone, true, None, Duration::from_secs(4)),
+            "Micro coupé · depuis 4 s"
+        );
+        assert_eq!(
+            fr.line(Kind::Camera, false, None, Duration::from_secs(3900)),
+            "Caméra · depuis 1 h 05"
+        );
+        assert_eq!(en.since(Duration::from_secs(3900)), "for 1 h 5 min");
+        assert_eq!(
+            fr.shares(&SharedThing::Window("Visual Studio Code".into())),
+            "partage la fenêtre « Visual Studio Code »"
         );
         assert_eq!(
             en.shares(&SharedThing::Screen(String::new())),
-            "You share the laptop screen"
+            "sharing the laptop screen"
         );
+        assert_eq!(
+            fr.recording_line(false, Duration::from_secs(12)),
+            "Écran · enregistrement · 0:12"
+        );
+        assert_eq!(
+            en.recording_line(true, Duration::from_secs(724)),
+            "Screen · paused · 12:04"
+        );
+        assert_eq!(fr.mute(false), "Couper le micro");
+        assert_eq!(fr.mute(true), "Rétablir le micro");
+        assert_eq!(en.mute(false), "Mute the microphone");
+        assert_eq!(en.mute(true), "Unmute");
+        assert_eq!(fr.stop(None), "Arrêter le partage");
+        assert_eq!(en.stop(Some("Firefox")), "Stop sharing with Firefox");
+        assert_eq!(fr.stop_recording(), "Arrêter l'enregistrement");
+        assert_eq!(en.stop_recording(), "Stop recording");
         assert_eq!(fr.held(4), "4 notifications en attente");
         assert_eq!(en.held(0), "Notifications wait until the end");
-        assert_eq!(fr.stop(), "Arrêter le partage");
     }
 }
