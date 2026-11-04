@@ -533,6 +533,23 @@ impl Headless {
     }
 
     /// The request whose chooser shows (5.11).
+    /// The authentication dialog's surface's commits (7.5).
+    pub fn auth_commits(&self) -> u64 {
+        self.app.state.auth.commits
+    }
+
+    /// How the authentication dialog and its dim are drawn now, if it
+    /// shows (7.5).
+    pub fn auth_look(&self) -> Option<crate::auth::Look> {
+        self.app.state.auth_look()
+    }
+
+    /// Whether the authentication dialog holds the keyboard and the
+    /// pointer (7.5).
+    pub fn auth_holds(&self) -> bool {
+        self.app.state.auth_holds()
+    }
+
     pub fn share_choosing(&self) -> Option<u64> {
         self.app.state.share.choosing()
     }

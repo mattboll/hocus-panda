@@ -212,7 +212,12 @@ impl State {
         if pid == 0 {
             return None;
         }
-        let ancestry = hocus_agents::process::ancestry(pid);
+        self.window_of_ancestry(&hocus_agents::process::ancestry(pid))
+    }
+
+    /// The topmost window of the first process of `ancestry` (a process,
+    /// then its parents, nearest first) that has one.
+    pub(crate) fn window_of_ancestry(&self, ancestry: &[u32]) -> Option<WindowId> {
         let mut best: Option<(usize, WindowId)> = None;
         for id in self.model.stack().iter().copied() {
             let Some(window_pid) = self.windows.get(&id).and_then(|m| self.pid_of(&m.window))
