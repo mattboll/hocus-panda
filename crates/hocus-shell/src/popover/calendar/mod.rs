@@ -314,6 +314,7 @@ pub struct State {
     /// opening.
     asked: Option<(u64, Date)>,
     pointer: kit::Pointer<Target>,
+    wheel: kit::Wheel,
 }
 
 impl<Message> canvas::Program<Message> for Panel {
@@ -472,10 +473,7 @@ impl Panel {
                 redraw
             }
             mouse::Event::WheelScrolled { delta } if in_list => {
-                let by = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => -y * NOTCH,
-                    mouse::ScrollDelta::Pixels { y, .. } => -y,
-                };
+                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
                 view(|v| v.scroll = (v.scroll + by).max(0.0));
                 self.refresh::<Message>(state);
                 redraw

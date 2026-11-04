@@ -1,7 +1,8 @@
 //! The bar's levels (docs/design/bar.md §4 group 10, §5; issue #360): the
 //! real shell, against private fakes of its services ([`fakes`]): its
 //! gauges show them and follow them, the keyboard's level keys change them,
-//! a service missing hides its row until it comes, and a change draws only
+//! the wheel steps the sound a notch (a fast spin's each, at ×1 and ×2), a
+//! service missing hides its row until it comes, and a change draws only
 //! the levels' region.
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
@@ -14,7 +15,7 @@ use std::time::Duration;
 
 use common::{KEY_LEFTMETA, WAIT, chord, shell_program, wait};
 use fakes::Fakes;
-use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
 const KEY_B: u32 = 48;
 const KEY_MUTE: u32 = 113;
@@ -25,7 +26,7 @@ const KEY_BRIGHTNESSUP: u32 = 225;
 
 /// The levels' surfaces on a 1920×1080 screen: inside the bar's rim, 41 px
 /// above its bottom, 194 × 175 in the full form, 54 × 176 in the mini.
-const FULL: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
+const FULL: Rect = full_on(1920, 1080);
 const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 176, 54, 176);
 
 /// Where to look in the full form, a few pixels into each gauge (x), and
@@ -51,17 +52,37 @@ fn ready() -> Option<std::path::PathBuf> {
 }
 
 fn start(fakes: &Fakes, shell: &std::path::Path, lang: &str) -> anyhow::Result<Headless> {
+    start_on(fakes, shell, lang, "1920x1080", FULL)
+}
+
+/// The full form's levels on a screen of `width` × `height` logical
+/// pixels.
+const fn full_on(width: i32, height: i32) -> Rect {
+    Rect::new(width - 8 - 1 - 194, height - 8 - 41 - 175, 194, 175)
+}
+
+/// The shell on screen `output`, its levels at `full`.
+fn start_on(
+    fakes: &Fakes,
+    shell: &std::path::Path,
+    lang: &str,
+    output: &str,
+    full: Rect,
+) -> anyhow::Result<Headless> {
+    // The full form, on a screen too narrow to choose it too.
+    let mut config = Config::default();
+    config.panel.form = FormChoice::Full;
     let mut hp = Headless::start_with_shell(
         HeadlessConfig {
-            outputs: vec!["1920x1080".parse()?],
+            outputs: vec![output.parse()?],
             renderer: RendererChoice::Pixman,
             ..HeadlessConfig::default()
         },
-        Config::default(),
+        config,
         Some(fakes.shell(shell, lang)?),
     )?;
     let placed = hp.dispatch_until(Duration::from_secs(20), |hp| {
-        hp.levels_surfaces() == vec![("HEADLESS-1".to_owned(), FULL)] && hp.levels_commits() > 0
+        hp.levels_surfaces() == vec![("HEADLESS-1".to_owned(), full)] && hp.levels_commits() > 0
     })?;
     anyhow::ensure!(placed, "no levels: {:?}", hp.levels_surfaces());
     Ok(hp)
@@ -283,6 +304,56 @@ fn the_keys_change_the_sound_and_the_brightness() -> anyhow::Result<()> {
         calls.first().map(|c| (c.0.as_str(), c.1.as_str())),
         Some(("backlight", "intel_backlight"))
     );
+    Ok(())
+}
+
+#[test]
+fn a_fast_spin_over_the_sound_row_moves_it_a_step_a_notch() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    // On a ×2 screen, iced hands the notches multiplied by its scale.
+    for (output, scale, full) in [
+        ("1920x1080", 1, FULL),
+        ("2560x1600@2", 2, full_on(1280, 800)),
+    ] {
+        let fakes = Fakes::start()?;
+        let mut hp = start_on(&fakes, &shell, "en_US.UTF-8", output, full)?;
+        let row = (full.x + 40, full.y + 57);
+        // The screen's pixels are the scale's.
+        until(&mut hp, (row.0 * scale, row.1 * scale), blue)?;
+        let volume = |hp: &mut Headless, want: f32| -> anyhow::Result<()> {
+            let mut seen = None;
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_secs(10) {
+                let now = fakes.volume("hocus-test-sink")?;
+                if (now.0 - want).abs() < 0.005 {
+                    return Ok(());
+                }
+                seen = Some(now);
+                wait(hp, Duration::from_millis(50))?;
+            }
+            anyhow::bail!("on {output}, volume {seen:?}, not {want}")
+        };
+        let (x, y) = (f64::from(row.0), f64::from(row.1));
+        hp.pointer_move(x - 1.0, y);
+        hp.pointer_move(x, y);
+        wait(&mut hp, Duration::from_millis(200))?;
+        // Three notches in one event, up: three steps of 5 %, then down.
+        hp.wheel(-3);
+        volume(&mut hp, 0.77)?;
+        hp.wheel(3);
+        volume(&mut hp, 0.62)?;
+        // A single notch is still one, at ×2 too.
+        hp.wheel(-1);
+        volume(&mut hp, 0.67)?;
+        // A touchpad: 15 logical px a step.
+        hp.finger_scroll(-10.0);
+        wait(&mut hp, Duration::from_millis(300))?;
+        volume(&mut hp, 0.67)?;
+        hp.finger_scroll(-5.0);
+        volume(&mut hp, 0.72)?;
+    }
     Ok(())
 }
 
