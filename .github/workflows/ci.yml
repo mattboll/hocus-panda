@@ -47,14 +47,16 @@ jobs:
         # PipeWire: the bar's levels are tested against private ones, and
         # screen sharing streams to one (its library's headers to build).
         # ffmpeg: screen recordings are encoded by it, and their tests
-        # decode the files with it.
+        # decode the files with it. Mesa's Vulkan drivers: lavapipe, on the
+        # CPU, for the one test of the shell on wgpu (annotate.rs, #594).
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
             clang mold pkg-config fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg
+            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
+            mesa-vulkan-drivers libvulkan1
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:

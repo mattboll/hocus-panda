@@ -369,7 +369,13 @@ All encoding and writing happen off the loop.
   fontdue), at the screen's pixels, again as marks come and go; the mark
   being dragged and the text being typed (in its dashed field, 330 × 45)
   are drawn over it as shapes, a blur being dragged from the image
-  blurred once as the editor opens.
+  blurred once as the editor opens. The image shown and the blurred one
+  are loaded in the renderer's memory as the frame that shows them is
+  drawn, and held there while they show (#594): iced's GPU renderer
+  uploads an image of more than 2 MiB on a thread of its own and draws
+  nothing for it meanwhile, and the redraw it asks for once done never
+  comes (iced_layershell drops it), so each new mark took the picture
+  away until something else drew the editor again.
 - **Keys**: while typing, `Enter` keeps the text, `Escape` drops it,
   `Backspace` takes a character back; a click elsewhere on the image, a
   tool or a button keeps it. Otherwise `Ctrl+Z`, `Ctrl+Shift+Z`, and
@@ -405,6 +411,8 @@ All encoding and writing happen off the loop.
 - **Fixed on the way**: pressing to draw a new area and holding without
   moving drew a border of a negative size, which panicked the
   compositor's renderer (5.8); its sides are now at least nothing.
+  After an arrow (or any mark), the picture went for seconds on a GPU
+  (#594, above).
 - **Measured headless** (`crates/hocus-compositor/tests/annotate.rs`), the
   real shell on the CPU and a D-Bus daemon of the test's own, an area
   over a window of 3 px black and white squares: the thumbnail 330 ×
@@ -417,7 +425,12 @@ All encoding and writing happen off the loop.
   variance under 2 % of what it was, grey, not covered; `Ctrl+Z`,
   `Ctrl+Shift+Z`, the undo button and `Escape` on a text; "Copier et
   fermer" writing the file and the clipboard the same bytes; undone back
-  to nothing, the file and the clipboard untouched. Unit tests for the
+  to nothing, the file and the clipboard untouched; the picture (an
+  area of 1250 × 850, shown in more than 2 MiB of pixels) on every frame
+  the compositor draws from the editor's opening, through an arrow's
+  press, drag and release, to after it, with the shell on the CPU and on
+  wgpu over Mesa's software Vulkan driver (lavapipe; skipped without
+  it), where it went before #594's fix. Unit tests for the
   marks' pixels (an arrow's line and head, a box's frame, a text's colour
   and outline, a blur's variance, a blur over the marks before it), the
   thumbnail's and the editor's layouts and fit, the countdown, the

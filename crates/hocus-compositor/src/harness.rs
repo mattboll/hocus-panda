@@ -656,6 +656,11 @@ impl Headless {
         self.layer_rects(hocus_link::CAPTURE_EDITOR_NAMESPACE)
     }
 
+    /// Commits of the capture's editor's surface so far.
+    pub fn capture_editor_commits(&self) -> u64 {
+        self.app.state.capture.editor_commits()
+    }
+
     /// The cursor the compositor shows over a frame, a grip or the
     /// capture, by its name (`crosshair`, `move`, `nwse-resize`…).
     pub fn frame_cursor(&self) -> Option<String> {

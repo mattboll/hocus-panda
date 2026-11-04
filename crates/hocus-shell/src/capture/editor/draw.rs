@@ -4,7 +4,7 @@
 //! zoom, less on a screen too small for it.
 
 use hocus_link::LAUNCHER_ZOOM;
-use iced::advanced::svg;
+use iced::advanced::{image::Renderer as _, svg};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme, Vector, keyboard, mouse,
     widget::{
@@ -350,9 +350,11 @@ impl<Message> canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let shown = super::with(|e| {
-            e.as_ref()
-                .filter(|e| e.phase == Phase::Shown(self.id))
-                .cloned()
+            let e = e.as_mut().filter(|e| e.phase == Phase::Shown(self.id))?;
+            if self.layer == Layer::Panel {
+                hold(e, renderer);
+            }
+            Some(e.clone())
         });
         match (self.layer, shown) {
             (Layer::Panel, editor) => {
@@ -386,6 +388,30 @@ impl<Message> canvas::Program<Message> for View {
             Some(Target::Image) => mouse::Interaction::Crosshair,
             Some(_) => mouse::Interaction::Pointer,
             None => mouse::Interaction::default(),
+        }
+    }
+}
+
+/// The images the editor shows, in the renderer's memory before they are
+/// drawn (#594). iced's GPU renderer uploads an image of more than 2 MiB
+/// on a thread of its own and draws nothing for it until that is done; the
+/// redraw it then asks for is lost (iced_layershell does nothing with
+/// `RedrawAll`), so the picture shown again with a new mark stayed away
+/// until something else drew the editor again. Loaded here, it is uploaded
+/// before this frame, in the frame that shows it; held, it stays until a
+/// new one replaces it. On the CPU this decodes nothing more than drawing
+/// it would.
+pub fn hold(e: &mut Editor, renderer: &Renderer) {
+    let wanted = [e.shown.id(), e.blurred.id()];
+    e.held.retain(|a| wanted.contains(&a.handle().id()));
+    for handle in [e.shown.clone(), e.blurred.clone()] {
+        if e.held.iter().any(|a| a.handle().id() == handle.id()) {
+            continue;
+        }
+        match renderer.load_image(&handle) {
+            Ok(allocation) => e.held.push(allocation),
+            // Drawn as iced draws it, then: when it can.
+            Err(err) => tracing::debug!(%err, "the editor's image is not loaded"),
         }
     }
 }

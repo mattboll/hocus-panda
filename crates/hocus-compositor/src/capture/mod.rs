@@ -334,6 +334,11 @@ impl Capture {
         (self.taken, self.last_file.clone())
     }
 
+    /// Commits of the capture's editor's surface so far: for tests.
+    pub fn editor_commits(&self) -> u64 {
+        self.after.editor_commits
+    }
+
     /// Whether the backend has a capture to take.
     pub fn has_pending(&self) -> bool {
         self.pending.is_some()
