@@ -31,6 +31,7 @@ mod input;
 mod launcher;
 mod layouts;
 mod levels;
+pub mod lock;
 mod magnet;
 pub mod model;
 pub mod motion;
@@ -79,6 +80,7 @@ pub use cursor::theme::{TestImage, encode as encode_xcursor};
 pub use harness::{Headless, Placed, WindowInfo};
 /// The bar's forms.
 pub use hocus_link::Form as BarForm;
+pub use lock::{Authenticator, LockState};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use record::{RecordInfo, Source as RecordSource};
 pub use share::ShareInfo;
@@ -202,6 +204,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
         (None, _) => None,
     };
     shell::listen(&event_loop.handle(), &mut state)?;
+    lock::listen(&event_loop.handle(), &mut state)?;
     state.start_sharing();
     state.start_idle();
     agents::start(&event_loop.handle(), &mut state)?;
@@ -306,6 +309,9 @@ impl App {
         state.flush_fullscreen();
         // Whether something holds idleness off, when that changed.
         state.flush_idle();
+        // The lock (7.1): an external locker's unlock judged, the screens
+        // that drew it.
+        state.lock_after_turn();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

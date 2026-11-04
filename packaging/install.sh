@@ -31,5 +31,7 @@ install -D -m 644 "$here/hocuspanda.portal" \
     "$destdir$prefix/share/xdg-desktop-portal/portals/hocuspanda.portal"
 install -D -m 644 "$here/hocuspanda-portals.conf" \
     "$destdir$prefix/share/xdg-desktop-portal/hocuspanda-portals.conf"
+# The lock screen's PAM service (docs/design/lock.md), always under /etc.
+install -D -m 644 "$here/pam-hocuspanda" "$destdir/etc/pam.d/hocuspanda"
 # Every setting with its default, to copy to ~/.config/hocuspanda/.
 install -D -m 644 "$here/config.toml" "$destdir$prefix/share/doc/hocuspanda/config.toml"

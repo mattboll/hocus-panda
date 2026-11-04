@@ -44,7 +44,8 @@ const HANDLE_SLOP: f64 = 4.0;
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// What a key did, when the compositor kept it.
-enum Kept {
+#[derive(Debug)]
+pub(crate) enum Kept {
     /// Ctrl+Alt+F1…F12: another virtual terminal.
     Vt(i32),
     /// One of the `[shortcuts]`, and its chord as held.
@@ -57,6 +58,8 @@ enum Kept {
     Capture(crate::capture::Key),
     /// `Esc` while strokes show: they go (docs/design/ink.md).
     InkClear,
+    /// A key on the lock's form (7.1): the session is locked.
+    Lock(crate::lock::LockKey),
 }
 
 /// The digit of a key of the keyboard's top row, whatever the layout puts
@@ -144,6 +147,12 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let kept =
             keyboard.input::<Kept, _>(self, code, state, serial, time, |this, mods, keysym| {
+                // Locked (7.1): the lock decides first, every key.
+                if let Some(kept) =
+                    this.lock_key_filter(code, state == KeyState::Pressed, mods, &keysym)
+                {
+                    return kept;
+                }
                 // Another key than a modifier with `Super`+`Alt`: a
                 // shortcut's, not the laser.
                 if state == KeyState::Pressed
@@ -271,10 +280,17 @@ impl State {
             }
             Some(Kept::Capture(key)) => self.capture_key(key),
             Some(Kept::InkClear) => self.ink_clear(),
+            Some(Kept::Lock(key)) => self.lock_key(key),
             Some(Kept::Release) | None => {}
         }
-        // `Super`+`Alt` held: the laser.
         let mods = keyboard.modifier_state();
+        // Locked: Caps Lock as it is now, nothing else of the desktop's.
+        if self.locked() {
+            self.lock_modifiers(&mods);
+            self.layout_maybe_changed();
+            return;
+        }
+        // `Super`+`Alt` held: the laser.
         self.ink_modifiers(&mods);
         // Alt let go: Alt+Tab goes to its selection.
         if self.switcher.is_some() {
@@ -369,6 +385,11 @@ impl State {
     /// a window's frame or its grip, no client sees it: the cursor shows
     /// what a press there does.
     pub fn pointer_motion(&mut self, location: Point<f64, Logical>, time: u32) {
+        // Locked (7.1): to the lock's surface under it, nothing else.
+        if self.locked() {
+            self.lock_pointer_motion(location, time);
+            return;
+        }
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -527,6 +548,24 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // Locked (7.1): to the lock's surface under the pointer alone (its
+        // focus), the desktop doing nothing with it.
+        if self.locked() {
+            if state == ButtonState::Released && self.kept_buttons.remove(&button) {
+                return;
+            }
+            pointer.button(
+                self,
+                &ButtonEvent {
+                    button,
+                    state,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+            pointer.frame(self);
+            return;
+        }
         // The capture open takes it, but over its toolbar (5.8).
         if self.capture_button(button, state, time) {
             return;
@@ -675,6 +714,9 @@ impl State {
             return;
         };
         match gesture {
+            // Locked (7.1): no desktop swipe; the lock's surface has the
+            // pointer.
+            _ if self.locked() => {}
             Gesture::SwipeBegin { fingers: 3, .. } if !pointer.is_grabbed() => {
                 self.desktop_swipe_begin();
                 return;

@@ -978,6 +978,8 @@ impl Compositor {
             tracing::debug!(?agents, "the agents");
             self.agents.told = Some(agents.clone());
             self.tell_shell(ToShell::Agents(agents));
+            // The lock's count of who waits (7.1).
+            self.lock_agents_changed();
         }
         // The panda peeking out (4.5), after the agents' line: its agent is
         // there.

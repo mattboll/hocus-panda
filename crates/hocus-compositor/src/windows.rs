@@ -1208,6 +1208,14 @@ impl State {
             }
             (now, _) => (now, false),
         };
+        // Locked (7.1): the lock's own motion alone; nothing else is drawn.
+        if let Some(moving) = self.lock_tick(now) {
+            self.still = !moving && as_of_frame;
+            if moving {
+                self.redraw = true;
+            }
+            return;
+        }
         let mut moving = false;
         let mut next: Option<Duration> = None;
         let mut wake = |at: Duration| next = Some(next.map_or(at, |n: Duration| n.min(at)));

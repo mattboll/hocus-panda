@@ -199,6 +199,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.panel.reminder_commits += 1;
                 state.bubble_committed(&layer);
             }
+            hocus_link::LOCK_NAMESPACE => state.lock_layer_committed(&layer, &output),
             _ => {}
         }
         let before = state.work_area(&output);
@@ -251,7 +252,11 @@ impl State {
                 continue;
             }
             for surface in map.layers_on(layer).rev() {
-                if !pick.takes(surface.namespace()) {
+                // The lock's surfaces take the pointer through the lock
+                // alone, while it holds (7.1).
+                if !pick.takes(surface.namespace())
+                    || surface.namespace() == hocus_link::LOCK_NAMESPACE
+                {
                     continue;
                 }
                 let Some(geometry) = map.layer_geometry(surface) else {
@@ -282,6 +287,10 @@ impl State {
     /// A surface of the top or overlay layer asking for the keyboard always
     /// gets it; when none does any more, the focused window gets it back.
     pub fn layer_keyboard(&mut self) {
+        // Locked (7.1): the lock decides, nobody else.
+        if self.lock_keyboard() {
+            return;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
@@ -317,7 +326,8 @@ impl State {
     /// Whether a layer surface above the windows holds the keyboard for
     /// good: windows may not take it.
     pub fn keyboard_held_by_layer(&self) -> bool {
-        self.exclusive_layer().is_some()
+        // Locked (7.1): no window takes it either.
+        self.locked() || self.exclusive_layer().is_some()
     }
 
     /// The layer surface whose main surface is `surface`.

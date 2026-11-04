@@ -95,6 +95,9 @@ pub enum Input {
     Dnd(Dnd),
     /// The screen is shared (5.11), or no longer is.
     Sharing(bool),
+    /// The session is locked (7.1), or no longer is: new bubbles wait for
+    /// the unlock.
+    Locked(bool),
     /// What the history kept before the shell started again, and do not
     /// disturb as it was in this session.
     Restored { notes: Vec<(Note, Sight)>, dnd: Dnd },
@@ -263,6 +266,8 @@ pub struct Stack {
     /// While the screen is shared (5.11): the applications of the
     /// notifications held meanwhile, one each, in their order.
     sharing: Option<Vec<String>>,
+    /// The session is locked (7.1): bubbles wait in the queue.
+    locked: bool,
     /// What was kept before is read back: until then, nothing is written
     /// over it.
     restored: bool,
@@ -289,6 +294,7 @@ impl Stack {
             history: History::default(),
             dnd: Dnd::Off,
             sharing: None,
+            locked: false,
             restored: false,
             hovered: BTreeSet::new(),
             focus: None,
@@ -522,6 +528,14 @@ impl Stack {
                 if self.sharing.is_none() {
                     tracing::debug!("the screen is shared: bubbles are held");
                     self.sharing = Some(Vec::new());
+                }
+            }
+            Input::Locked(locked) => {
+                tracing::debug!(locked, "the lock: bubbles wait while locked");
+                self.locked = locked;
+                if !locked {
+                    self.fill(now);
+                    self.relayout(effects);
                 }
             }
             Input::Sharing(false) => {
@@ -783,6 +797,10 @@ impl Stack {
 
     /// Waiting ones show while there is room.
     fn fill(&mut self, now: Instant) {
+        // Locked: they wait for the unlock (7.1).
+        if self.locked {
+            return;
+        }
         let screen = match self.bubbles.first() {
             Some(first) => first.screen.clone(),
             None => self.focus_screen(),
@@ -1412,6 +1430,19 @@ mod tests {
         // The bubble on screen goes too.
         assert!(effects.contains(&Effect::Closing(bubble_namespace(1))));
         assert_eq!(signals(&effects).len(), 4);
+    }
+
+    #[test]
+    fn locked_bubbles_wait_for_the_unlock() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        s.handle(Input::Locked(true), t0);
+        assert!(
+            opened(&s.handle(notify(note(1)), t0)).is_empty(),
+            "it waits"
+        );
+        let effects = s.handle(Input::Locked(false), t0);
+        assert_eq!(opened(&effects).len(), 1, "shown once unlocked");
     }
 
     #[test]

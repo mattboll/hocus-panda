@@ -61,6 +61,10 @@ pub struct Shell {
     ended: Option<Sender<Duration>>,
     /// The shells started and not ended yet.
     pub running: Arc<Running>,
+    /// The shell's Wayland connection, made by the compositor and handed
+    /// to it as it starts (`WAYLAND_SOCKET`): the only client whose lock
+    /// surfaces show (7.1).
+    pub client: Option<smithay::reexports::wayland_server::backend::ClientId>,
 }
 
 /// The session bus the shell serves the notifications on (5.3).
@@ -88,6 +92,9 @@ impl Bus {
 pub struct Running {
     count: Mutex<usize>,
     changed: Condvar,
+    /// The shell's process while it runs: its Wayland connection's
+    /// credentials are the compositor's own, which made it.
+    pid: Mutex<Option<u32>>,
 }
 
 /// One shell, from before its thread starts until it ended (or its thread
@@ -98,6 +105,15 @@ impl Running {
     fn start(this: &Arc<Self>) -> Runs {
         *this.count.lock().unwrap_or_else(PoisonError::into_inner) += 1;
         Runs(this.clone())
+    }
+
+    /// The shell's process, while one runs.
+    pub fn pid(&self) -> Option<u32> {
+        *self.pid.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn set_pid(&self, pid: Option<u32>) {
+        *self.pid.lock().unwrap_or_else(PoisonError::into_inner) = pid;
     }
 
     /// Waits until no shell runs, `timeout` at most: whether none does.
@@ -201,11 +217,21 @@ impl State {
         let gpu = self.gpu;
         let bus = self.shell.bus.clone();
         let config = self.config.file.clone();
+        // Its Wayland connection, made here: the compositor knows it is the
+        // shell's, which no other client can claim to be (7.1).
+        let theirs = match self.shell_connection() {
+            Ok(theirs) => theirs,
+            Err(err) => {
+                tracing::warn!("could not make the shell's connection: {err:#}");
+                return;
+            }
+        };
         let runs = Running::start(&self.shell.running);
         programs::on_a_thread("shell".to_owned(), move || {
             let _runs = runs;
             let started = Instant::now();
             let mut command = env.command(&program);
+            hand_socket(&mut command, &theirs);
             command.env(hocus_link::SOCKET_ENV, &socket);
             match &bus {
                 Some(bus) => command.env(hocus_link::NOTIFICATIONS_BUS_ENV, bus.word()),
@@ -219,13 +245,18 @@ impl State {
             for (name, value) in gpu_env(gpu) {
                 command.env(name, value);
             }
-            match command.spawn() {
+            let spawned = command.spawn();
+            // Its copy is the child's now.
+            drop(theirs);
+            match spawned {
                 Ok(mut child) => {
                     tracing::info!(program = %program.display(), pid = child.id(), "shell started");
+                    _runs.0.set_pid(Some(child.id()));
                     match child.wait() {
                         Ok(status) => tracing::warn!(%status, "the shell ended"),
                         Err(err) => tracing::warn!(%err, "could not wait for the shell"),
                     }
+                    _runs.0.set_pid(None);
                 }
                 Err(err) => {
                     tracing::warn!(program = %program.display(), %err, "could not start the shell");
@@ -234,6 +265,30 @@ impl State {
             // The loop is gone when the compositor is: nothing to restart.
             let _ = ended.send(started.elapsed());
         });
+    }
+
+    /// The shell's Wayland connection: the compositor's end taken as a
+    /// client known to be the shell, the other end to hand it.
+    fn shell_connection(&mut self) -> anyhow::Result<UnixStream> {
+        let (ours, theirs) = UnixStream::pair().context("a socket pair")?;
+        let client = self
+            .display_handle
+            .insert_client(
+                ours,
+                std::sync::Arc::new(crate::state::ClientState {
+                    shell: true,
+                    ..Default::default()
+                }),
+            )
+            .context("the shell's client")?;
+        // One shell at a time: a former one's connection is no longer it.
+        if let Some(old) = self.shell.client.replace(client.id()) {
+            self.display_handle.backend_handle().kill_client(
+                old,
+                smithay::reexports::wayland_server::backend::DisconnectReason::ConnectionClosed,
+            );
+        }
+        Ok(theirs)
     }
 
     /// The shell ended after running `ran`: started again, later each time
@@ -353,6 +408,7 @@ impl State {
         if self.record.recording() {
             self.tell_recording();
         }
+        self.lock_shell_connected();
     }
 
     /// The shell's connection ended.
@@ -372,10 +428,18 @@ impl State {
             self.shell.software = false;
             self.redraw = true;
         }
+        self.lock_shell_gone();
     }
 
     fn shell_says(&mut self, message: ToCompositor) {
+        // Locked (7.1): nothing that shows or moves a window, starts or
+        // copies anything; the lock's own asks.
+        if self.locked() && !Self::lock_lets(&message) {
+            tracing::info!("the session is locked: the shell's ask is refused");
+            return;
+        }
         match message {
+            ToCompositor::Lock(ask) => self.lock_asked(ask),
             ToCompositor::Software => {
                 tracing::info!("the shell draws on the CPU: no glass behind its bars");
                 self.shell.software = true;
@@ -544,6 +608,27 @@ impl State {
                 PostAction::Remove
             }
         }
+    }
+}
+
+/// The shell's Wayland connection handed to it: `WAYLAND_SOCKET` names
+/// the descriptor, which stays open across `exec` in the child alone (the
+/// compositor's copy closes on exec, so no other program gets it).
+#[allow(unsafe_code)]
+fn hand_socket(command: &mut std::process::Command, socket: &UnixStream) {
+    use std::os::{fd::AsRawFd, unix::process::CommandExt};
+    let fd = socket.as_raw_fd();
+    command.env("WAYLAND_SOCKET", fd.to_string());
+    // SAFETY: the closure runs in the child between fork and exec, and only
+    // clears the descriptor's close-on-exec flag with fcntl, which is
+    // async-signal-safe and allocates nothing. `fd` is open in the child:
+    // the parent holds `socket` until `spawn` returns.
+    unsafe {
+        command.pre_exec(move || {
+            let fd = rustix::fd::BorrowedFd::borrow_raw(fd);
+            rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::empty())?;
+            Ok(())
+        });
     }
 }
 

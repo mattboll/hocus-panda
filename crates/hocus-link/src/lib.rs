@@ -40,7 +40,9 @@
 
 use std::{fmt, str::FromStr, time::Duration};
 
+pub mod backdrop;
 mod capture;
+mod lock;
 mod record;
 mod share;
 pub use capture::{
@@ -48,6 +50,10 @@ pub use capture::{
     CAPTURE_THUMB_NAMESPACE, CAPTURE_THUMB_RADIUS, CAPTURE_THUMB_RISE, CAPTURE_TOOLBAR_BOTTOM,
     CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE, CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar,
     CaptureMode, Captured,
+};
+pub use lock::{
+    LOCK_FADE, LOCK_FADE_REDUCED, LOCK_NAMESPACE, LOCK_PART, LOCK_SHAKE, LOCK_WAIT, LockAsk,
+    LockFocus, LockPhase, LockShown,
 };
 pub use record::{RECORD_COUNTDOWN, RECORD_FPS, RecordAsk, RecordFormat, Recorded, RecordingShown};
 pub use share::{
@@ -493,6 +499,13 @@ pub enum ToShell {
     /// [`ToShell::Shares`]. Written `shared-screens`, then each name after
     /// a tab.
     SharedScreens(Vec<String>),
+    /// The session is locked (7.1, [`LockShown`]): the lock's surfaces on
+    /// every screen, as told. Sent as it locks, on each change, and as the
+    /// shell connects while it is locked.
+    Lock(LockShown),
+    /// The lock opened and its motion ended: its surfaces go. Written
+    /// `unlocked`.
+    Unlocked,
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1311,6 +1324,9 @@ pub enum ToCompositor {
     /// focus one window shortly after, with a token of its own or none.
     /// Written `tray-click ASK PID`.
     TrayClick { ask: u64, pid: u32 },
+    /// The lock's arrow or one of its buttons clicked, or the session
+    /// menu's "Verrouiller" (7.1, 7.4, [`LockAsk`]).
+    Lock(LockAsk),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1519,6 +1535,8 @@ impl fmt::Display for ToShell {
             Self::Recording(shown) => shown.write(f),
             Self::RecordingEnd => f.write_str("recording-end"),
             Self::Recorded(recorded) => recorded.write(f),
+            Self::Lock(shown) => shown.write(f),
+            Self::Unlocked => f.write_str("unlocked"),
             Self::Day(ask) => match ask {
                 DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
@@ -1785,6 +1803,8 @@ impl FromStr for ToShell {
             Some("capture-end") => Ok(Self::CaptureEnd),
             Some("recording") => RecordingShown::read(&mut words).map(Self::Recording),
             Some("recording-end") => Ok(Self::RecordingEnd),
+            Some("lock") => LockShown::read(&mut words).map(Self::Lock),
+            Some("unlocked") => Ok(Self::Unlocked),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
@@ -1948,6 +1968,7 @@ impl fmt::Display for ToCompositor {
             Self::Capture(ask) => ask.write(f),
             Self::Share(ask) => ask.write(f),
             Self::Record(ask) => ask.write(f),
+            Self::Lock(ask) => ask.write(f),
             Self::Clip { paste, clip } => {
                 write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
                 clip.write(f)
@@ -2036,6 +2057,7 @@ impl FromStr for ToCompositor {
             }
             Some("capture") => CaptureAsk::read(&mut words).map(Self::Capture),
             Some("record") => RecordAsk::read(&mut words).map(Self::Record),
+            Some("lock") => LockAsk::read(&mut words).map(Self::Lock),
             Some("clip") => Ok(Self::Clip {
                 paste: flag(words.next(), "paste", "copy")?,
                 clip: Clip::read(&mut words)?,
@@ -2364,6 +2386,29 @@ mod tests {
             ]),
             ToShell::Layout(0),
             ToShell::Layout(2),
+            ToShell::Lock(LockShown {
+                phase: LockPhase::Waiting(27),
+                chars: 0,
+                caps: true,
+                shake: 3,
+                focus: LockFocus::Layout,
+                agents: 2,
+                wallpaper: true,
+                motion: false,
+                output: "eDP-1".into(),
+            }),
+            ToShell::Lock(LockShown {
+                phase: LockPhase::Typing,
+                chars: 7,
+                caps: false,
+                shake: 0,
+                focus: LockFocus::Field,
+                agents: 0,
+                wallpaper: false,
+                motion: true,
+                output: "HDMI-A-1".into(),
+            }),
+            ToShell::Unlocked,
         ];
         let desktops = [
             ToShell::Desktops(Desktops {
@@ -2427,6 +2472,9 @@ mod tests {
             ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned()),
             ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()),
             ToCompositor::NextLayout,
+            ToCompositor::Lock(LockAsk::Submit),
+            ToCompositor::Lock(LockAsk::Focus(LockFocus::Button)),
+            ToCompositor::Lock(LockAsk::Now),
             ToCompositor::Desktop {
                 output: "eDP-1".into(),
                 to: DesktopTo::At(3),

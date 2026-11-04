@@ -138,6 +138,9 @@ impl WinitBackend {
     /// Asks for a frame only when something changed: nothing is drawn at
     /// rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // The desktop's last frame as it locks (7.1), before anything else
+        // draws it locked.
+        crate::lock::draw::freeze::<_, GlesTexture>(self.backend.renderer(), state);
         // Screen sharing's thumbnails and frames (5.11).
         crate::share::frames::run::<_, GlesTexture>(
             self.backend.renderer(),

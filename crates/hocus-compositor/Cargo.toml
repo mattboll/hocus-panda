@@ -29,6 +29,11 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # the shell's clock reads it.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 libloading = "0.8.9"
+# The lock's PAM conversation (7.1): the C allocator PAM frees its answers
+# with, and the user's account (getpwuid_r).
+libc = "0.2.191"
+# The lock's password zeroed once checked (MIT or Apache-2.0).
+zeroize = "1.9.1"
 # Screen sharing's streams (5.11): PipeWire's own bindings (MIT); the
 # library itself at run time, its headers to build (libpipewire-0.3-dev).
 pipewire = { version = "0.10.1", features = ["v0_3_77"] }
@@ -63,7 +68,14 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # Cursor themes' files (MIT).
 xcursor = "0.3.11"
 
+[features]
+# The lock's test authenticator (7.1, docs/design/lock.md): a password of
+# the tests' own instead of PAM. Only this crate's tests turn it on (the
+# dev-dependency on itself below); a release build has none of it.
+test-auth = []
+
 [dev-dependencies]
+hocus-compositor = { path = ".", features = ["test-auth"] }
 smithay-client-toolkit = { version = "0.19.2", default-features = false }
 wayland-client = "0.31.15"
 # text-input-v3 for a test window's text field (the emoji picker, 5.7);

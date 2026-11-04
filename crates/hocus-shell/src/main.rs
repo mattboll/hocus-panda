@@ -39,6 +39,7 @@ mod in_use;
 mod launcher;
 mod layouts;
 mod levels;
+mod lock;
 mod meeting;
 mod network;
 mod notifications;
@@ -142,6 +143,8 @@ fn main() -> ExitCode {
     // After the notifications' wall clock, which its times read.
     clipboard::start();
     user::start();
+    // The lock's avatar: the account's photo, if AccountsService has one.
+    lock::avatar::start();
     tray::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
@@ -728,6 +731,15 @@ impl Shell {
                 reminder::set_shared(screens);
                 Task::none()
             }
+            ToShell::Lock(shown) => {
+                let screens = outputs::step();
+                let effects = lock::set(shown, &screens);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
+            }
+            ToShell::Unlocked => {
+                let effects = lock::end();
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
+            }
         }
     }
 
@@ -747,8 +759,14 @@ impl Shell {
     /// the bars waiting for a screen now named open on it.
     fn screens_named(&mut self) -> Task<Message> {
         let known = outputs::step();
+        // Locked (7.1): a screen plugged in gets the clock.
+        let lock = Task::batch(
+            popover::messages(lock::screens_known(&known))
+                .into_iter()
+                .map(Task::done),
+        );
         if self.waiting.is_empty() {
-            return Task::none();
+            return lock;
         }
         tracing::debug!(?known, "the screens' names");
         let ready: Vec<(String, Form)> = match known {
@@ -758,9 +776,10 @@ impl Shell {
                 .collect(),
             outputs::Known::Unknowable => self.waiting.drain().collect(),
         };
-        Task::batch(ready.into_iter().map(|(output, form)| {
+        let bars = Task::batch(ready.into_iter().map(|(output, form)| {
             self.open_bar(OutputOption::OutputName(output.clone()), output, form)
-        }))
+        }));
+        lock.chain(bars)
     }
 
     /// A bar's surface on `output`: against its right edge, its height
@@ -1383,6 +1402,25 @@ impl Shell {
         )
     }
 
+    /// The lock (7.1), if its surface is `id`.
+    fn lock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = lock::output_of(id)?;
+        let layer = |layer| {
+            canvas(lock::draw::View {
+                layer,
+                id,
+                output: output.clone(),
+                wall: self.wall.clone(),
+                lang: self.lang,
+                words: lock::words(),
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+        };
+        use lock::draw::Layer;
+        Some(stack![layer(Layer::Back), layer(Layer::Front)].into())
+    }
+
     /// The share's chooser (5.11), if its surface is `id`.
     fn share_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !share::is_surface(id) {
@@ -1690,6 +1728,7 @@ impl Shell {
                 .or_else(|| self.emoji_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.share_view(id))
+                .or_else(|| self.lock_view(id))
                 .or_else(|| self.in_use_view(id))
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))
