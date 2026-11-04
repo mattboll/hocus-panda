@@ -7,9 +7,10 @@
 //!
 //! The history is kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications`
 //! and do not disturb for the session, in its runtime directory: read back
-//! as the shell starts and written as they change, on threads of their own;
-//! only where notifications are served, never by a nested desktop beside
-//! the live session's.
+//! as the shell starts and written as they change, on threads of their own,
+//! the last change written before the shell ends ([`flush`]); only where
+//! notifications are served, never by a nested desktop beside the live
+//! session's.
 //!
 //! The server runs on a thread of its own and hands each notification,
 //! owned, to [`input`]; so do the bubbles' surfaces with what the pointer
@@ -58,8 +59,16 @@ pub struct Center {
 }
 
 static CENTER: Mutex<Option<Center>> = Mutex::new(None);
-static INPUTS: Mutex<Option<UnboundedSender<Input>>> = Mutex::new(None);
-static TAKEN: Mutex<Option<UnboundedReceiver<Input>>> = Mutex::new(None);
+static INPUTS: Mutex<Option<UnboundedSender<Come>>> = Mutex::new(None);
+static TAKEN: Mutex<Option<UnboundedReceiver<Come>>> = Mutex::new(None);
+
+/// What the stack's stream takes, in the order it comes.
+enum Come {
+    Input(Input),
+    /// Told once all that came before is handled, and what it changed
+    /// written ([`flush`]).
+    Flush(mpsc::Sender<()>),
+}
 
 /// `with` on the stack.
 pub fn with<T>(with: impl FnOnce(&mut Center) -> T) -> T {
@@ -144,6 +153,8 @@ pub fn history_open(open: bool) {
 enum Write {
     History(Vec<Record>),
     Dnd(Dnd),
+    /// Told once what was sent before is written.
+    Flush(mpsc::Sender<()>),
 }
 
 static WRITE: Mutex<Option<mpsc::Sender<Write>>> = Mutex::new(None);
@@ -203,11 +214,12 @@ fn keep() {
             input(Input::Restored { notes, dnd });
             while let Ok(first) = writes.recv() {
                 // The latest of each sent meanwhile.
-                let (mut records, mut dnd) = (None, None);
+                let (mut records, mut dnd, mut flushes) = (None, None, Vec::new());
                 for write in std::iter::once(first).chain(writes.try_iter()) {
                     match write {
                         Write::History(r) => records = Some(r),
                         Write::Dnd(d) => dnd = Some(d),
+                        Write::Flush(done) => flushes.push(done),
                     }
                 }
                 if let (Some(records), Some(file)) = (records, &history) {
@@ -229,6 +241,9 @@ fn keep() {
                     if let Err(err) = done {
                         tracing::warn!(file = %file.display(), %err, "do not disturb not written");
                     }
+                }
+                for done in flushes {
+                    let _ = done.send(());
                 }
             }
         });
@@ -304,8 +319,42 @@ pub fn input(input: Input) {
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
     {
-        let _ = sender.send(input);
+        let _ = sender.send(Come::Input(input));
     }
+}
+
+/// The shell ends: returns once what the stack was told before is handled
+/// and what it changed is on disk, the history and do not disturb. A panel
+/// closed just before has its notifications seen, which a shell ended at
+/// once would lose. Through the stack's stream while it runs, behind what
+/// it has yet to handle; else (iced ended, or never ran it) straight to the
+/// writer, behind what it has yet to write.
+pub fn flush() {
+    let (done, written) = mpsc::channel();
+    let mut flush = Come::Flush(done);
+    let running = TAKEN
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_none();
+    if running
+        && let Some(sender) = INPUTS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+    {
+        match sender.send(flush) {
+            Ok(()) => {
+                let _ = written.recv();
+                return;
+            }
+            Err(gone) => flush = gone.0,
+        }
+    }
+    if let Come::Flush(done) = flush {
+        send_write(Write::Flush(done));
+    }
+    // At once if nothing writes: the sender is dropped.
+    let _ = written.recv();
 }
 
 /// The compositor says the focused window's screen.
@@ -328,6 +377,15 @@ pub fn effects() -> impl iced::futures::Stream<Item = Message> {
             std::future::pending::<()>().await;
             return;
         };
+        let handle = |come: Come| match come {
+            Come::Input(input) => with(|c| c.stack.handle(input, Instant::now())),
+            // Behind the writes of what came before, which are sent as
+            // their effects are carried out, before this is taken.
+            Come::Flush(done) => {
+                send_write(Write::Flush(done));
+                Vec::new()
+            }
+        };
         loop {
             let deadline = with(|c| c.stack.deadline());
             let effects = match deadline {
@@ -336,15 +394,13 @@ pub fn effects() -> impl iced::futures::Stream<Item = Message> {
                     let due = std::pin::pin!(tokio::time::sleep_until(at.into()));
                     let next = std::pin::pin!(inputs.recv());
                     match select(next, due).await {
-                        Either::Left((Some(input), _)) => {
-                            with(|c| c.stack.handle(input, Instant::now()))
-                        }
+                        Either::Left((Some(come), _)) => handle(come),
                         Either::Left((None, _)) => return,
                         Either::Right(((), _)) => with(|c| c.stack.tick(Instant::now())),
                     }
                 }
                 None => match inputs.recv().await {
-                    Some(input) => with(|c| c.stack.handle(input, Instant::now())),
+                    Some(come) => handle(come),
                     None => return,
                 },
             };

@@ -437,7 +437,10 @@ Approved by the maintainer on 2026-11-02 (issue #394), variant B: by time.
   few seconds at most; an image sent as pixels is not kept: the letter
   tile then); the stack writes nothing until it is read back. Then the
   same thread writes it after each change, the latest of those sent
-  meanwhile. What is older than 7 days also goes as notifications come
+  meanwhile. The shell ends (`SIGTERM`, as a session that ends sends it,
+  or its compositor gone) only once what it was told before is handled and
+  written: the history closed just before has what it listed seen on disk
+  too (#557). What is older than 7 days also goes as notifications come
   and as the history opens. A notification read back is held by no one:
   no actions, no default.
 - **Only where notifications are served**: a shell given no bus (a nested

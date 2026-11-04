@@ -32,6 +32,7 @@ mod clipboard;
 mod clock;
 mod desktops;
 mod emoji;
+mod ending;
 mod footer;
 mod in_use;
 mod launcher;
@@ -112,6 +113,8 @@ fn main() -> ExitCode {
         .init();
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose();
+    // From here, SIGTERM ends it once what it keeps is written.
+    ending::start();
     levels::start();
     network::start();
     bluetooth::start();
@@ -166,6 +169,7 @@ fn main() -> ExitCode {
     .run();
     levels::sound::stop();
     bluetooth::stop();
+    notifications::flush();
     match started {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

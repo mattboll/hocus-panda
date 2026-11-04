@@ -43,7 +43,8 @@ jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-sy
 # CLOCK_MONOTONIC, the compositor's clock, to start a form switch when it
 # does; inotify, to see the time zone change; the user's id, for their name.
 rustix = { version = "1.1.6", features = ["time", "fs", "event", "process"] }
-tokio = { version = "1.54.1", features = ["net", "io-util", "rt", "sync", "time"] }
+# `signal`: SIGTERM ends the shell once what it keeps is written.
+tokio = { version = "1.54.1", features = ["net", "io-util", "rt", "signal", "sync", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The levels: UPower, power-profiles-daemon and logind on the system bus
