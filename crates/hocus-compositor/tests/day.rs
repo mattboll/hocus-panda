@@ -351,8 +351,9 @@ fn at_rest_nothing_wakes_and_a_change_of_the_day_draws_nothing() -> anyhow::Resu
     );
     assert!(bed.lines_since(mark, "the day").is_empty(), "{}", bed.log());
     assert_eq!(bed.commits(), commits, "the shell drew at rest");
-    // The day changes: said, and nothing drawn for it (no view shows it
-    // yet; the loop is not woken).
+    // The day changes: said, and nothing drawn for it on these surfaces
+    // (the next meeting's card and Today have their own, Day.2 and Day.3,
+    // measured in their tests).
     std::fs::write(&bed.fixture, FIXTURE.replace("Revue de sprint", "Démo"))?;
     bed.day_since(mark, &["16:00 «Démo»"], &[])?;
     common::wait(&mut bed.hp, Duration::from_millis(500))?;

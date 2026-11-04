@@ -196,6 +196,12 @@ fn group_height() -> f32 {
     layout().map_or(0.0, |l| l.height)
 }
 
+/// The full form's group's height as it shows (0: hidden), for Today under
+/// it (Day.3).
+pub fn group_height_shown() -> f32 {
+    group_height()
+}
+
 /// The surface's top under the bar's in `form`: the group's, or the mini
 /// item's (4.7), less the ring's room; the mini item's while the form
 /// switches, the surface then holding both.
@@ -297,11 +303,18 @@ pub fn moved() {
     if !effects.is_empty() {
         popover::send(effects);
     }
+    // Today under it follows (Day.3).
+    crate::today::moved();
 }
 
 /// The group was laid out again: every bar's surface to its height.
 pub fn laid_out(layout: Layout) {
-    *LAYOUT.lock().unwrap_or_else(PoisonError::into_inner) = Some(layout);
+    let height = layout.height;
+    let before = LAYOUT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .replace(layout)
+        .map(|l| l.height);
     let effects: Vec<popover::Effect> = places(|places| {
         places
             .values_mut()
@@ -315,6 +328,10 @@ pub fn laid_out(layout: Layout) {
     });
     if !effects.is_empty() {
         popover::send(effects);
+    }
+    // Today, 14 px under the group, follows its height (Day.3).
+    if before != Some(height) {
+        crate::today::moved();
     }
 }
 

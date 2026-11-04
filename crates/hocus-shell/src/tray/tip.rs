@@ -3,7 +3,8 @@
 //! popovers are, centred on the icon: 7 px by 10 inside, radius 9,
 //! `rgba(14,17,28,0.96)` in a 1 px `rgba(255,255,255,0.12)` rim, the
 //! mockup's. A surface of its own that takes no pointer, gone as the
-//! pointer leaves the icon or presses it.
+//! pointer leaves the icon or presses it. Today's lines (Day.3) show theirs
+//! the same way, after 600 ms ([`hover_text`]).
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -36,20 +37,30 @@ const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
 /// What comes between the name and what the item says.
 const BETWEEN: &str = " · ";
 
+/// What a tooltip says.
+#[derive(Debug, Clone, PartialEq)]
+enum Says {
+    /// Tray icon `key`'s name and tooltip, as they are when it draws.
+    Icon(u32),
+    /// Its words, in bold then after " · " (a line of Today's).
+    Words(String, String),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Phase {
     Idle,
-    /// The pointer rests on icon `key` of `bar` (at `rect`, the bar's
-    /// frame), since then.
+    /// The pointer rests on what `says` (at `rect`, `bar`'s frame), since
+    /// then, for `delay`.
     Waiting {
         bar: String,
-        key: u32,
+        says: Says,
         rect: Rectangle,
         since: Instant,
+        delay: Duration,
     },
     Shown {
         id: window::Id,
-        key: u32,
+        says: Says,
     },
 }
 
@@ -62,6 +73,16 @@ fn phase<T>(with: impl FnOnce(&mut Phase) -> T) -> T {
 /// The pointer is on icon `key` of `bar`, at `rect`: its tooltip shows in
 /// 400 ms.
 pub fn hover(bar: &str, key: u32, rect: Rectangle) {
+    wait(bar, Says::Icon(key), rect, DELAY);
+}
+
+/// The pointer is on a line at `rect` of `bar`: "`name` · `tip`" shows in
+/// `delay`.
+pub fn hover_text(bar: &str, rect: Rectangle, delay: Duration, name: String, tip: String) {
+    wait(bar, Says::Words(name, tip), rect, delay);
+}
+
+fn wait(bar: &str, says: Says, rect: Rectangle, delay: Duration) {
     let gone = phase(|p| {
         let gone = match p {
             Phase::Shown { id, .. } => Some(*id),
@@ -69,9 +90,10 @@ pub fn hover(bar: &str, key: u32, rect: Rectangle) {
         };
         *p = Phase::Waiting {
             bar: bar.to_owned(),
-            key,
+            says,
             rect,
             since: Instant::now(),
+            delay,
         };
         gone
     });
@@ -91,17 +113,20 @@ pub fn leave() {
 /// When the tooltip is due.
 pub fn deadline() -> Option<Instant> {
     phase(|p| match p {
-        Phase::Waiting { since, .. } => Some(*since + DELAY),
+        Phase::Waiting { since, delay, .. } => Some(*since + *delay),
         _ => None,
     })
 }
 
-/// What its icon's tooltip says: its name, and what it says after.
-fn said(key: u32) -> Option<(String, String)> {
-    super::shown()
-        .into_iter()
-        .find(|s| s.key == key)
-        .map(|s| (s.name, s.tip))
+/// What a tooltip says: its name, and what it says after.
+fn said(says: &Says) -> Option<(String, String)> {
+    match says {
+        Says::Icon(key) => super::shown()
+            .into_iter()
+            .find(|s| s.key == *key)
+            .map(|s| (s.name, s.tip)),
+        Says::Words(name, tip) => Some((name.clone(), tip.clone())),
+    }
 }
 
 /// The tooltip's size for `name` and `tip`.
@@ -120,16 +145,17 @@ pub fn tick(now: Instant) -> Vec<Effect> {
     let due = phase(|p| match p {
         Phase::Waiting {
             bar,
-            key,
+            says,
             rect,
             since,
-        } if *since + DELAY <= now => Some((bar.clone(), *key, *rect)),
+            delay,
+        } if *since + *delay <= now => Some((bar.clone(), says.clone(), *rect)),
         _ => None,
     });
-    let Some((bar, key, rect)) = due else {
+    let Some((bar, says, rect)) = due else {
         return Vec::new();
     };
-    let Some((name, tip)) = said(key) else {
+    let Some((name, tip)) = said(&says) else {
         phase(|p| *p = Phase::Idle);
         return Vec::new();
     };
@@ -145,8 +171,11 @@ pub fn tick(now: Instant) -> Vec<Effect> {
     let top = (EDGE as f32 + rect.center_y() - h as f32 / 2.0).round() as i32;
     let margin = (top.max(EDGE), EDGE + form.width() + EDGE, 0, 0);
     let id = window::Id::unique();
-    phase(|p| *p = Phase::Shown { id, key });
-    tracing::debug!(name, tip, "the tray's tooltip shows");
+    match &says {
+        Says::Icon(_) => tracing::debug!(name, tip, "the tray's tooltip shows"),
+        Says::Words(..) => tracing::debug!(name, tip, "a tooltip shows"),
+    }
+    phase(|p| *p = Phase::Shown { id, says });
     vec![
         Effect::Layer {
             id,
@@ -171,12 +200,12 @@ pub fn changed() {
 
 /// The tooltip, if its surface is `id`.
 pub fn view<'a>(id: window::Id) -> Option<Element<'a, Message>> {
-    let key = phase(|p| match p {
-        Phase::Shown { id: shown, key } if *shown == id => Some(*key),
+    let says = phase(|p| match p {
+        Phase::Shown { id: shown, says } if *shown == id => Some(says.clone()),
         _ => None,
     })?;
     Some(
-        iced::widget::canvas(Tip { key })
+        iced::widget::canvas(Tip { says })
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
@@ -184,7 +213,7 @@ pub fn view<'a>(id: window::Id) -> Option<Element<'a, Message>> {
 }
 
 struct Tip {
-    key: u32,
+    says: Says,
 }
 
 impl canvas::Program<Message> for Tip {
@@ -213,7 +242,7 @@ impl canvas::Program<Message> for Tip {
             ),
             Stroke::default().with_color(RIM).with_width(BORDER),
         );
-        let Some((name, tip)) = said(self.key) else {
+        let Some((name, tip)) = said(&self.says) else {
             return vec![frame.into_geometry()];
         };
         let middle = size.height / 2.0;

@@ -48,6 +48,7 @@ mod pointer;
 mod popover;
 mod renderer;
 mod share;
+mod today;
 mod tray;
 mod user;
 
@@ -127,6 +128,7 @@ fn main() -> ExitCode {
     // After the notifications' wall clock, which the day is read against.
     day::start();
     meeting::start();
+    today::start();
     // After the notifications' wall clock, which its times read.
     clipboard::start();
     user::start();
@@ -490,6 +492,8 @@ impl Shell {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
                     self.place_popovers(id);
+                    // Today's room is the bar's height less its groups'.
+                    today::moved();
                 }
                 Task::none()
             }
@@ -547,10 +551,12 @@ impl Shell {
                     footer::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
                     let card = meeting::forget(&bar.output);
+                    let today = today::forget(&bar.output);
                     let tray = tray::draw::forget(&bar.output);
                     Some(Task::batch([
                         sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
                         card.map_or_else(Task::none, |c| Task::done(Message::RemoveWindow(c))),
+                        today.map_or_else(Task::none, |t| Task::done(Message::RemoveWindow(t))),
                         Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
                         Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.agents)),
@@ -865,6 +871,7 @@ impl Shell {
         if let Some((output, form)) = output {
             after.extend(in_use::bar_opened(&output, form));
             after.extend(meeting::bar_opened(&output, form));
+            after.extend(today::bar_opened(&output, form));
         }
         open.chain(open_clock)
             .chain(open_levels)
@@ -980,6 +987,9 @@ impl Shell {
         );
         popover::send(in_use::form(&bar.output, bar.form, switching));
         popover::send(meeting::form(&bar.output, bar.form, switching));
+        let output = bar.output.clone();
+        let form = bar.form;
+        today::form(&output, form, switching);
         Task::batch(tasks)
     }
 
@@ -1214,6 +1224,35 @@ impl Shell {
             backdrop,
             motion: self.look.motion,
             words: meeting::Words::new(clock::time::Lang::of_messages()),
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// Today (Day.3), if its surface is `id`.
+    fn today_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = today::bar_of(id)?;
+        let bar = self.bars.values().find(|b| b.output == output)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = today::shown(&output).1 + 40.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = today::draw::View {
+            bar: bar.output.clone(),
+            forms: bar.forms(at),
+            backdrop,
+            motion: self.look.motion,
+            words: today::Words::new(clock::time::Lang::of_messages()),
         };
         Some(
             canvas(program)
@@ -1501,7 +1540,9 @@ impl Shell {
             | popover::Item::Agent(_)
             | popover::Item::Menu
             | popover::Item::Meeting
-            | popover::Item::Join => {
+            | popover::Item::Join
+            | popover::Item::TodayLine(_)
+            | popover::Item::TodayMore => {
                 return None;
             }
         };
@@ -1532,6 +1573,7 @@ impl Shell {
                 .or_else(|| self.share_view(id))
                 .or_else(|| self.in_use_view(id))
                 .or_else(|| self.meeting_view(id))
+                .or_else(|| self.today_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .unwrap_or_else(|| Space::new().into());

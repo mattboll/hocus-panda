@@ -252,6 +252,8 @@ impl<Message> canvas::Program<Message> for Clock {
             crate::agents::minute();
             // The next meeting's minutes, line and colours (Day.2).
             crate::meeting::minute();
+            // Today's lines, if a meeting ended (Day.3).
+            crate::today::minute();
         }
         state.shown = Some(shown);
         state.at = Some(now);
