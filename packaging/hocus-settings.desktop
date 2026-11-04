@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Settings
+Name[fr]=Réglages
+GenericName=Desktop settings
+GenericName[fr]=Réglages du bureau
+Comment=Set the Hocuspanda desktop: what is chosen is saved at once
+Comment[fr]=Régler le bureau Hocuspanda : ce qui est choisi est enregistré aussitôt
+Exec=hocus-settings
+Icon=preferences-system
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=settings;preferences;configuration;power;sleep;réglages;préférences;énergie;veille;
+OnlyShowIn=Hocuspanda;
+StartupNotify=true
+StartupWMClass=hocus-settings

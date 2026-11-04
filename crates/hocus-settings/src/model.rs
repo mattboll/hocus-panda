@@ -1,0 +1,777 @@
+//! The settings' model: the 17 sections in their 5 groups, and every
+//! setting a section holds, with what the window needs to show it, find
+//! it and write it.
+//!
+//! Each section's ticket (6.2 to 6.17) fills its section: a module like
+//! [`crate::power`] returns its settings ([`Setting`]), listed in
+//! [`settings_of`]. A setting says
+//!
+//! - its id (`power.suspend-after`), its section and the group of rows it
+//!   sits in on its page;
+//! - its name and the line under it, in French and in English;
+//! - a few nearby words in both languages, for the search;
+//! - its kind: a switch, a menu of choices, a slider or a text;
+//! - where it is written ([`Places`]): one key of the file, or one per
+//!   power source (on battery, on AC), each with how its value is written
+//!   ([`Codec`]) and the value that applies when the file says none.
+//!
+//! The window does the rest: it reads the file, shows each value (or warns
+//! that one is not understood), writes a change at once with its undo, and
+//! finds settings by their words and their keys.
+
+use crate::lang::{Lang, Words, w};
+
+/// The five groups of the sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Group {
+    Personalisation,
+    Devices,
+    Connections,
+    Work,
+    System,
+}
+
+impl Group {
+    pub const ALL: [Self; 5] = [
+        Self::Personalisation,
+        Self::Devices,
+        Self::Connections,
+        Self::Work,
+        Self::System,
+    ];
+
+    pub fn label(self) -> Words {
+        match self {
+            Self::Personalisation => w("PERSONNALISATION", "PERSONALISATION"),
+            Self::Devices => w("APPAREILS", "DEVICES"),
+            Self::Connections => w("CONNEXIONS", "CONNECTIONS"),
+            Self::Work => w("TRAVAIL", "WORK"),
+            Self::System => w("SYSTÈME", "SYSTEM"),
+        }
+    }
+}
+
+/// The seventeen sections, in the sidebar's order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SectionId {
+    Appearance,
+    Wallpaper,
+    Bar,
+    Agenda,
+    Screens,
+    Sound,
+    Keyboard,
+    Mouse,
+    Network,
+    Bluetooth,
+    Desktops,
+    Apps,
+    Agents,
+    Captures,
+    Power,
+    Account,
+    DateTime,
+}
+
+/// A section: its page and its row in the sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Section {
+    pub id: SectionId,
+    /// Its name on the command line and in the log: `hocus settings power`.
+    pub slug: &'static str,
+    pub group: Group,
+    pub name: Words,
+    /// What its page is for, under its title.
+    pub line: Words,
+    pub icon: Icon,
+    /// The ticket that fills it.
+    pub ticket: &'static str,
+}
+
+impl SectionId {
+    pub const ALL: [Self; 17] = [
+        Self::Appearance,
+        Self::Wallpaper,
+        Self::Bar,
+        Self::Agenda,
+        Self::Screens,
+        Self::Sound,
+        Self::Keyboard,
+        Self::Mouse,
+        Self::Network,
+        Self::Bluetooth,
+        Self::Desktops,
+        Self::Apps,
+        Self::Agents,
+        Self::Captures,
+        Self::Power,
+        Self::Account,
+        Self::DateTime,
+    ];
+
+    pub fn section(self) -> Section {
+        let s = |slug, group, name, line, icon, ticket| Section {
+            id: self,
+            slug,
+            group,
+            name,
+            line,
+            icon,
+            ticket,
+        };
+        use Group::*;
+        match self {
+            Self::Appearance => s(
+                "appearance",
+                Personalisation,
+                w("Apparence et langue", "Appearance and language"),
+                w(
+                    "Le thème, la couleur d’accent, le texte et la langue de tout le bureau.",
+                    "The theme, the accent colour, the text and the language of the whole desktop.",
+                ),
+                Icon::Appearance,
+                "6.2",
+            ),
+            Self::Wallpaper => s(
+                "wallpaper",
+                Personalisation,
+                w("Fond d’écran", "Wallpaper"),
+                w(
+                    "Une image par écran, ou une couleur unie.",
+                    "A picture per screen, or a plain colour.",
+                ),
+                Icon::Wallpaper,
+                "6.3",
+            ),
+            Self::Bar => s(
+                "bar",
+                Personalisation,
+                w("La barre", "The bar"),
+                w(
+                    "Ce que la barre montre, dans quel ordre, et quand elle passe en forme mini.",
+                    "What the bar shows, in which order, and when it turns mini.",
+                ),
+                Icon::Bar,
+                "6.4",
+            ),
+            Self::Agenda => s(
+                "agenda",
+                Personalisation,
+                w("Agenda et tâches", "Calendar and tasks"),
+                w(
+                    "Ce que la barre montre de ta journée : tes réunions, tes rendez-vous et ce qu’il reste à faire.",
+                    "What the bar shows of your day: your meetings, your appointments and what is left to do.",
+                ),
+                Icon::Agenda,
+                "Day.1",
+            ),
+            Self::Screens => s(
+                "screens",
+                Devices,
+                w("Écrans", "Screens"),
+                w(
+                    "La résolution, l’échelle et la place de chaque écran.",
+                    "Each screen's resolution, scale and place.",
+                ),
+                Icon::Screens,
+                "6.9",
+            ),
+            Self::Sound => s(
+                "sound",
+                Devices,
+                w("Son", "Sound"),
+                w(
+                    "Les sorties, les entrées et leurs profils.",
+                    "The outputs, the inputs and their profiles.",
+                ),
+                Icon::Sound,
+                "6.5",
+            ),
+            Self::Keyboard => s(
+                "keyboard",
+                Devices,
+                w("Clavier et raccourcis", "Keyboard and shortcuts"),
+                w(
+                    "Les dispositions, la répétition des touches et les raccourcis.",
+                    "The layouts, the keys' repeat and the shortcuts.",
+                ),
+                Icon::Keyboard,
+                "6.8",
+            ),
+            Self::Mouse => s(
+                "mouse",
+                Devices,
+                w("Souris et pavé tactile", "Mouse and touchpad"),
+                w(
+                    "Le pavé tactile et la souris.",
+                    "The touchpad and the mouse.",
+                ),
+                Icon::Mouse,
+                "6.12",
+            ),
+            Self::Network => s(
+                "network",
+                Connections,
+                w("Réseau", "Network"),
+                w(
+                    "Les réseaux enregistrés, les VPN et le mode avion.",
+                    "The saved networks, the VPNs and airplane mode.",
+                ),
+                Icon::Network,
+                "6.6",
+            ),
+            Self::Bluetooth => s(
+                "bluetooth",
+                Connections,
+                w("Bluetooth", "Bluetooth"),
+                w(
+                    "Appairer un appareil, en oublier un.",
+                    "Pair a device, forget one.",
+                ),
+                Icon::Bluetooth,
+                "6.7",
+            ),
+            Self::Desktops => s(
+                "desktops",
+                Work,
+                w("Bureaux et fenêtres", "Desktops and windows"),
+                w(
+                    "Les bureaux, Alt+Tab et ce que chaque application fait en s’ouvrant.",
+                    "The desktops, Alt+Tab and what each application does as it opens.",
+                ),
+                Icon::Desktops,
+                "6.14",
+            ),
+            Self::Apps => s(
+                "applications",
+                Work,
+                w("Applications", "Applications"),
+                w(
+                    "Les applications par défaut et celles qui démarrent avec la session.",
+                    "The default applications and those that start with the session.",
+                ),
+                Icon::Apps,
+                "6.15",
+            ),
+            Self::Agents => s(
+                "agents",
+                Work,
+                w("Agents", "Agents"),
+                w(
+                    "Où lire l’état des agents, quels outils suivre, le halo et les pandas.",
+                    "Where the agents' states are read, which tools to follow, the halo and the pandas.",
+                ),
+                Icon::Agents,
+                "6.16",
+            ),
+            Self::Captures => s(
+                "captures",
+                Work,
+                w("Captures et presse-papiers", "Screenshots and clipboard"),
+                w(
+                    "Où vont les captures et les enregistrements ; ce que garde le presse-papiers.",
+                    "Where screenshots and recordings go; what the clipboard keeps.",
+                ),
+                Icon::Captures,
+                "6.17",
+            ),
+            Self::Power => s(
+                "power",
+                System,
+                w("Énergie", "Power"),
+                w(
+                    "Quand l’écran s’éteint, quand la session se verrouille et quand l’ordinateur se met en veille ; le couvercle et le bouton d’alimentation.",
+                    "When the screen turns off, when the session locks and when the computer sleeps; the lid and the power button.",
+                ),
+                Icon::Power,
+                "6.10",
+            ),
+            Self::Account => s(
+                "account",
+                System,
+                w("Compte", "Account"),
+                w(
+                    "Ton nom, ton avatar et ton mot de passe.",
+                    "Your name, your picture and your password.",
+                ),
+                Icon::Account,
+                "6.11",
+            ),
+            Self::DateTime => s(
+                "date-and-time",
+                System,
+                w("Date et heure", "Date and time"),
+                w(
+                    "Le fuseau horaire et le format de l’heure.",
+                    "The time zone and the time's format.",
+                ),
+                Icon::DateTime,
+                "6.11",
+            ),
+        }
+    }
+
+    /// The section named `slug` on the command line.
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.section().slug == slug)
+    }
+
+    pub fn name(self, lang: Lang) -> &'static str {
+        self.section().name.get(lang)
+    }
+}
+
+/// The sections' icons: the mockup's 24 px stroke paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Icon {
+    Appearance,
+    Wallpaper,
+    Bar,
+    Agenda,
+    Screens,
+    Sound,
+    Keyboard,
+    Mouse,
+    Network,
+    Bluetooth,
+    Desktops,
+    Apps,
+    Agents,
+    Captures,
+    Power,
+    Account,
+    DateTime,
+    Home,
+    Search,
+    Sliders,
+    Warning,
+    Close,
+    Chevron,
+    Check,
+}
+
+impl Icon {
+    /// Its path in a 24 × 24 box, drawn with round 1.8 px strokes.
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Appearance => {
+                "M12 3 A9 9 0 1 0 12 21 A9 9 0 1 0 12 3 Z M12 3 V21 M12 7.5 H17.5 M12 12 H20.8 M12 16.5 H17.5"
+            }
+            Self::Wallpaper => {
+                "M3.5 5 H20.5 V19 H3.5 Z M3.5 15.5 L8.5 10.5 L13 15 L15.5 12.5 L20.5 17.5"
+            }
+            Self::Bar => "M3.5 4.5 H20.5 V19.5 H3.5 Z M15 4.5 V19.5 M17 8 H18.5 M17 11 H18.5",
+            Self::Agenda => {
+                "M4 6 H20 V20 H4 Z M4 10 H20 M8.5 3.5 V7.5 M15.5 3.5 V7.5 M8 14 H11 M13 14 H16 M8 17 H11"
+            }
+            Self::Screens => "M3 4.5 H21 V16 H3 Z M8 20 H16 M12 16 V20",
+            Self::Sound => {
+                "M4 9.5 H7.5 L12 5.5 V18.5 L7.5 14.5 H4 Z M15.5 9 A4 4 0 0 1 15.5 15 M18 6.5 A7.5 7.5 0 0 1 18 17.5"
+            }
+            Self::Keyboard => {
+                "M3 6.5 H21 V17.5 H3 Z M6.5 10 H7.5 M10 10 H11 M13 10 H14 M16.5 10 H17.5 M7.5 14 H16.5"
+            }
+            Self::Mouse => {
+                "M12 3 A6 6 0 0 0 6 9 V15 A6 6 0 0 0 18 15 V9 A6 6 0 0 0 12 3 Z M12 6.5 V10.5"
+            }
+            Self::Network => {
+                "M2.5 9 A14 14 0 0 1 21.5 9 M5.5 12.5 A9.5 9.5 0 0 1 18.5 12.5 M8.5 16 A5 5 0 0 1 15.5 16 M12 19.5 V19.6"
+            }
+            Self::Bluetooth => "M7 7.5 L17 16.5 L12 20.5 V3.5 L17 7.5 L7 16.5",
+            Self::Desktops => {
+                "M3.5 5 H10.5 V11 H3.5 Z M13.5 5 H20.5 V11 H13.5 Z M3.5 13 H10.5 V19 H3.5 Z M13.5 13 H20.5 V19 H13.5 Z"
+            }
+            Self::Apps => {
+                "M4 4 H10 V10 H4 Z M14 4 H20 V10 H14 Z M4 14 H10 V20 H4 Z M17 14 V20 M14 17 H20"
+            }
+            Self::Agents => {
+                "M12 20.5 A7.5 7.5 0 1 0 12 5.5 A7.5 7.5 0 1 0 12 20.5 Z M5.2 9 A2.6 2.6 0 1 1 8.6 5.6 M18.8 9 A2.6 2.6 0 1 0 15.4 5.6 M9.5 12.5 V13.5 M14.5 12.5 V13.5"
+            }
+            Self::Captures => {
+                "M3.5 8 H7 L9 5 H15 L17 8 H20.5 V19 H3.5 Z M12 16.2 A3 3 0 1 0 12 10.2 A3 3 0 1 0 12 16.2 Z"
+            }
+            Self::Power => "M3 7.5 H17.5 V16.5 H3 Z M20.5 10.5 V13.5 M10.8 9 L8.8 12 H11.8 L9.8 15",
+            Self::Account => {
+                "M12 12 A4 4 0 1 0 12 4 A4 4 0 1 0 12 12 Z M4.5 20.5 A7.5 7.5 0 0 1 19.5 20.5"
+            }
+            Self::DateTime => "M12 21 A9 9 0 1 0 12 3 A9 9 0 1 0 12 21 Z M12 7.5 V12 L15 14",
+            Self::Home => "M3.5 11 L12 4 L20.5 11 M6 9.5 V20 H18 V9.5 M10 20 V14.5 H14 V20",
+            Self::Search => {
+                "M10.5 17.5 A7 7 0 1 0 10.5 3.5 A7 7 0 1 0 10.5 17.5 Z M15.6 15.6 L20.5 20.5"
+            }
+            Self::Sliders => "M4 7 H13 M17 7 H20 M15 4.5 V9.5 M4 17 H7 M11 17 H20 M9 14.5 V19.5",
+            Self::Warning => "M12 4 L21 19.5 H3 Z M12 10 V14 M12 16.8 V17",
+            Self::Close => "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5",
+            Self::Chevron => "M7 10 L12 15 L17 10",
+            Self::Check => "M5 12.5 L10 17 L19 7.5",
+        }
+    }
+}
+
+/// A power source: settings that hold one value on battery and one on AC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Source {
+    Battery,
+    Ac,
+}
+
+impl Source {
+    pub fn name(self) -> Words {
+        match self {
+            Self::Battery => w("Sur batterie", "On battery"),
+            Self::Ac => w("Sur secteur", "On AC"),
+        }
+    }
+
+    /// As the toast says it: ", sur batterie".
+    pub fn aside(self) -> Words {
+        match self {
+            Self::Battery => w(", sur batterie", ", on battery"),
+            Self::Ac => w(", sur secteur", ", on AC"),
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Battery => "battery",
+            Self::Ac => "ac",
+        }
+    }
+}
+
+/// A value a setting takes, as the window holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    Bool(bool),
+    Int(i64),
+    /// A delay; `None`: never.
+    Seconds(Option<u64>),
+    /// One of a few words (`"suspend"`).
+    Word(&'static str),
+    Text(String),
+}
+
+/// How a value is written in the file, and read back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Codec {
+    /// `true` or `false`.
+    Bool,
+    /// A whole number from `min` to `max`.
+    Int { min: i64, max: i64 },
+    /// A number of seconds from 1 to 86400, or `"off"`: `[idle] delay`
+    /// (docs/design/idle.md).
+    IdleSeconds,
+    /// `"0s"`, `"5m"`, `"1h"`, or `"never"`: 6.10's delays.
+    Delay,
+    /// One of these words.
+    Word(&'static [&'static str]),
+    /// Any text.
+    Text,
+}
+
+/// The longest idle delay the compositor takes (docs/design/idle.md).
+const IDLE_MOST: u64 = 24 * 60 * 60;
+
+impl Codec {
+    /// What `item` (a value of the file) means, or `None` when it is not
+    /// understood.
+    pub fn read(self, item: &toml_edit::Value) -> Option<Value> {
+        match self {
+            Self::Bool => item.as_bool().map(Value::Bool),
+            Self::Int { min, max } => item
+                .as_integer()
+                .filter(|n| (min..=max).contains(n))
+                .map(Value::Int),
+            Self::IdleSeconds => match (item.as_str(), item.as_integer()) {
+                (Some("off"), _) => Some(Value::Seconds(None)),
+                (_, Some(n)) => u64::try_from(n)
+                    .ok()
+                    .filter(|n| (1..=IDLE_MOST).contains(n))
+                    .map(|n| Value::Seconds(Some(n))),
+                _ => None,
+            },
+            Self::Delay => item.as_str().and_then(parse_delay).map(Value::Seconds),
+            Self::Word(words) => item
+                .as_str()
+                .and_then(|s| words.iter().find(|w| **w == s))
+                .map(|w| Value::Word(w)),
+            Self::Text => item.as_str().map(|s| Value::Text(s.to_owned())),
+        }
+    }
+
+    /// `value` as the file says it; `None` when this codec cannot say it.
+    pub fn write(self, value: &Value) -> Option<toml_edit::Value> {
+        Some(match (self, value) {
+            (Self::Bool, Value::Bool(b)) => (*b).into(),
+            (Self::Int { min, max }, Value::Int(n)) if (min..=max).contains(n) => (*n).into(),
+            (Self::IdleSeconds, Value::Seconds(None)) => "off".into(),
+            (Self::IdleSeconds, Value::Seconds(Some(n))) if (1..=IDLE_MOST).contains(n) => {
+                i64::try_from(*n).ok()?.into()
+            }
+            (Self::Delay, Value::Seconds(s)) => delay_word(*s).into(),
+            (Self::Word(words), Value::Word(word)) if words.contains(word) => (*word).into(),
+            (Self::Text, Value::Text(t)) => t.as_str().into(),
+            _ => return None,
+        })
+    }
+}
+
+/// `"5m"`, `"90s"`, `"1h"`, `"never"`: seconds, `None` for never.
+pub fn parse_delay(text: &str) -> Option<Option<u64>> {
+    if text == "never" {
+        return Some(None);
+    }
+    let (number, unit) = text.split_at(text.find(|c: char| !c.is_ascii_digit())?);
+    let n: u64 = number.parse().ok()?;
+    let by = match unit {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        _ => return None,
+    };
+    n.checked_mul(by).filter(|s| *s <= IDLE_MOST).map(Some)
+}
+
+/// A delay as 6.10's keys write it: the largest whole unit.
+pub fn delay_word(seconds: Option<u64>) -> String {
+    match seconds {
+        None => "never".to_owned(),
+        Some(s) if s > 0 && s % 3600 == 0 => format!("{}h", s / 3600),
+        Some(s) if s > 0 && s % 60 == 0 => format!("{}m", s / 60),
+        Some(s) => format!("{s}s"),
+    }
+}
+
+/// One key of the file: where a value is, how it is written, and what
+/// applies when the file does not say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    /// Its tables then its name: `["power", "battery", "suspend-after"]`.
+    pub key: &'static [&'static str],
+    pub codec: Codec,
+    pub default: Value,
+}
+
+impl Place {
+    /// `[power.battery] suspend-after`, as the file shows it.
+    pub fn shown(&self) -> String {
+        match self.key.split_last() {
+            Some((name, [])) => (*name).to_owned(),
+            Some((name, tables)) => format!("[{}] {name}", tables.join(".")),
+            None => String::new(),
+        }
+    }
+
+    /// `power.battery.suspend-after`, for the search.
+    pub fn dotted(&self) -> String {
+        self.key.join(".")
+    }
+}
+
+/// Where a setting is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Places {
+    One(Place),
+    /// One value on battery, one on AC.
+    PerSource {
+        battery: Place,
+        ac: Place,
+    },
+}
+
+impl Places {
+    /// The place of the value for `source` (ignored by a setting with one).
+    pub fn of(&self, source: Source) -> &Place {
+        match self {
+            Self::One(place) => place,
+            Self::PerSource { battery, ac } => match source {
+                Source::Battery => battery,
+                Source::Ac => ac,
+            },
+        }
+    }
+
+    pub fn per_source(&self) -> bool {
+        matches!(self, Self::PerSource { .. })
+    }
+
+    pub fn all(&self) -> Vec<&Place> {
+        match self {
+            Self::One(place) => vec![place],
+            Self::PerSource { battery, ac } => vec![battery, ac],
+        }
+    }
+}
+
+/// A menu's choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Choice {
+    pub label: Words,
+    pub value: Value,
+}
+
+/// How a setting is changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+    Switch,
+    Menu(Vec<Choice>),
+    /// From `min` to `max` by `step`, its value followed by `unit` (` %`).
+    Slider {
+        min: i64,
+        max: i64,
+        step: i64,
+        unit: &'static str,
+    },
+    Text,
+}
+
+/// A group of rows on a section's page: its label, in capitals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowGroup {
+    pub label: Words,
+    /// Its rows hold one value per power source: a segmented control on
+    /// its right chooses which one they show.
+    pub per_source: bool,
+}
+
+/// A setting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Setting {
+    /// `power.suspend-after`.
+    pub id: &'static str,
+    pub section: SectionId,
+    pub group: RowGroup,
+    pub name: Words,
+    /// The line under its name.
+    pub line: Option<Words>,
+    /// Nearby words, French then English.
+    pub keywords: (&'static [&'static str], &'static [&'static str]),
+    pub kind: Kind,
+    pub places: Places,
+    /// The switch it depends on: while that one is off, it does not apply
+    /// and its control is inert.
+    pub needs: Option<&'static str>,
+}
+
+impl Setting {
+    /// What `value` reads as on its row and in the toast.
+    pub fn say(&self, value: &Value, lang: Lang) -> String {
+        if let Kind::Menu(choices) = &self.kind
+            && let Some(choice) = choices.iter().find(|c| &c.value == value)
+        {
+            return choice.label.get(lang).to_owned();
+        }
+        let fr = lang.fr();
+        match value {
+            Value::Bool(true) => if fr { "oui" } else { "on" }.to_owned(),
+            Value::Bool(false) => if fr { "non" } else { "off" }.to_owned(),
+            Value::Int(n) => match &self.kind {
+                Kind::Slider { unit, .. } => format!("{n}{unit}"),
+                _ => n.to_string(),
+            },
+            Value::Seconds(None) => if fr { "Jamais" } else { "Never" }.to_owned(),
+            Value::Seconds(Some(s)) => say_seconds(*s, lang),
+            Value::Word(word) => (*word).to_owned(),
+            Value::Text(text) => text.clone(),
+        }
+    }
+}
+
+/// `90 s`, `7 min`, `1 h 30`.
+pub fn say_seconds(s: u64, lang: Lang) -> String {
+    match s {
+        0 => if lang.fr() { "Aussitôt" } else { "At once" }.to_owned(),
+        s if s < 60 => format!("{s} s"),
+        s if s % 3600 == 0 => format!("{} h", s / 3600),
+        s if s < 3600 => format!("{} min", s / 60),
+        s => format!("{} h {:02}", s / 3600, (s % 3600) / 60),
+    }
+}
+
+/// The settings of `section`, in their page's order (none until its
+/// ticket fills it).
+pub fn settings_of(section: SectionId) -> &'static [Setting] {
+    match section {
+        SectionId::Power => crate::power::settings(),
+        _ => &[],
+    }
+}
+
+/// Every setting, section after section.
+pub fn all_settings() -> impl Iterator<Item = &'static Setting> {
+    SectionId::ALL
+        .into_iter()
+        .flat_map(|section| settings_of(section).iter())
+}
+
+/// The setting `id`.
+pub fn setting(id: &str) -> Option<&'static Setting> {
+    all_settings().find(|s| s.id == id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seventeen_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 17);
+        let count = |g| {
+            SectionId::ALL
+                .iter()
+                .filter(|s| s.section().group == g)
+                .count()
+        };
+        assert_eq!(
+            Group::ALL.map(count),
+            [4, 4, 2, 4, 3],
+            "the mockup's groups"
+        );
+        // Each group's sections come together, in the groups' order.
+        let groups: Vec<Group> = SectionId::ALL.iter().map(|s| s.section().group).collect();
+        let mut seen = groups.clone();
+        seen.dedup();
+        assert_eq!(seen, Group::ALL.to_vec());
+        for id in SectionId::ALL {
+            assert_eq!(SectionId::from_slug(id.section().slug), Some(id));
+        }
+    }
+
+    #[test]
+    fn delays_read_and_write_both_ways() {
+        assert_eq!(parse_delay("5m"), Some(Some(300)));
+        assert_eq!(parse_delay("1h"), Some(Some(3600)));
+        assert_eq!(parse_delay("0s"), Some(Some(0)));
+        assert_eq!(parse_delay("never"), Some(None));
+        for bad in ["3 heures", "5", "m", "-1m", "2d", ""] {
+            assert_eq!(parse_delay(bad), None, "{bad}");
+        }
+        assert_eq!(delay_word(Some(900)), "15m");
+        assert_eq!(delay_word(Some(7200)), "2h");
+        assert_eq!(delay_word(Some(0)), "0s");
+        assert_eq!(delay_word(None), "never");
+        let idle = Codec::IdleSeconds;
+        let v = |text: &str| text.parse::<toml_edit::Value>().ok();
+        let read = |text: &str| v(text).and_then(|v| idle.read(&v));
+        assert_eq!(read("300"), Some(Value::Seconds(Some(300))));
+        assert_eq!(read("\"off\""), Some(Value::Seconds(None)));
+        assert_eq!(read("0"), None);
+        assert_eq!(read("\"5m\""), None);
+        assert_eq!(
+            idle.write(&Value::Seconds(Some(600)))
+                .map(|v| v.to_string()),
+            Some("600".to_owned())
+        );
+        assert_eq!(
+            idle.write(&Value::Seconds(None)).map(|v| v.to_string()),
+            Some("\"off\"".to_owned())
+        );
+    }
+
+    #[test]
+    fn values_are_said_in_both_languages() {
+        assert_eq!(say_seconds(420, Lang::French), "7 min");
+        assert_eq!(say_seconds(5400, Lang::English), "1 h 30");
+        assert_eq!(say_seconds(0, Lang::French), "Aussitôt");
+    }
+}

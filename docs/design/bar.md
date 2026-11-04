@@ -2430,6 +2430,12 @@ the maintainer's spec (§4 group 11, §5; issue #395).
   déconnecter" back; `Esc` again closes. No "Verrouiller" / "Lock": the
   desktop has no lock of its own yet. `Tab` gives the row the keyboard,
   `Enter` or `Space` act as a click.
+- **"Réglages" / "Settings"** (6.1, docs/design/settings.md): a row of the
+  user's popover above "Se déconnecter", its sliders glyph in the same
+  tile; a click, or `Enter` or `Space` once `Tab` gave it the keyboard,
+  starts `hocus-settings` (in `PATH`, else beside the shell) through the
+  compositor, with an activation token, and closes the popover; an open
+  Settings window comes forward. `Tab` and the arrows go round both rows.
 - **The user's name**: their account entry's (`getent passwd UID`, else
   `/etc/passwd`), its GECOS field's first part, else their login; looked
   up on a thread as the shell starts, the session's `USER` standing in
