@@ -25,7 +25,11 @@ use std::{
 };
 
 use hocus_link::CaptureAsk;
-use iced::{Point, Rectangle, advanced::image::Handle, keyboard, window};
+use iced::{
+    Point, Rectangle,
+    advanced::image::{Allocation, Handle},
+    keyboard, window,
+};
 
 use super::{Shot, marks, marks::Mark, words};
 use crate::popover::Effect;
@@ -112,6 +116,9 @@ pub struct Editor {
     pub shown: Handle,
     pub plain: Arc<marks::Image>,
     pub blurred: Handle,
+    /// `shown` and `blurred` in the renderer's memory, for as long as they
+    /// show ([`draw::hold`]).
+    pub held: Vec<Allocation>,
     /// The screen's scale.
     pub scale: f32,
     pub tool: Tool,
@@ -216,6 +223,7 @@ fn shown(shot: Shot, image: Arc<marks::Image>, made: Made, scale: f32) {
             shown: Handle::from_rgba(made.plain.width(), made.plain.height(), made.plain.to_vec()),
             plain: made.plain,
             blurred: made.blurred,
+            held: Vec::new(),
             scale,
             tool: Tool::Arrow,
             colour: 0,
@@ -662,6 +670,7 @@ mod tests {
             shown: handle.clone(),
             plain: Arc::new(marks::Image::new(1, 1)),
             blurred: handle,
+            held: Vec::new(),
             scale: 1.0,
             tool: Tool::Arrow,
             colour: 0,
