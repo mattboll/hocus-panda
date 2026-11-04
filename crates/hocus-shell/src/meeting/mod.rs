@@ -5,8 +5,9 @@
 //! - **Which meeting**: the first of today's events that take time
 //!   ([`hocus_day::model::Event::takes_time`]: timed, neither cancelled,
 //!   declined nor free) that has not ended. One in progress keeps the card
-//!   until its end. Nothing left today: no card, and the agents' group (and
-//!   the sign of what is in use) back under the clock.
+//!   until its end. Nothing left today: no card, and the column under it
+//!   (the sign of what is in use, Today, the to-do list, the agents'
+//!   group: `crate::column`) back under the clock.
 //! - **When it changes**: as the day changes ([`crate::day::on_change`],
 //!   on the day's thread), and at the clock's minute change ([`minute`]):
 //!   the card's minutes, its line and its colours change then, nothing
@@ -351,8 +352,8 @@ pub fn refresh() {
         None => tracing::debug!("no meeting left today: no card"),
     }
     if moved {
-        crate::agents::draw::moved();
         crate::in_use::moved();
+        crate::column::moved();
         if card.is_none() && popover::with(|c| c.open_item()) == Some(Item::MeetingMark) {
             popover::event(popover::Event::Chosen);
         }
@@ -849,8 +850,9 @@ mod tests {
 
     #[test]
     fn the_room_it_takes_under_the_clock() {
-        // The agents' group moves up 58 px (the card and its gap) without
-        // one; the mini form's item 30 (the mark's button and its gap).
+        // The column under it moves up 58 px (the card and its gap)
+        // without one; the mini form's items 30 (the mark's button and its
+        // gap).
         assert_eq!(CARD_HEIGHT + AFTER, 58.0);
         assert_eq!(MARK_HEIGHT + AFTER, 30.0);
     }

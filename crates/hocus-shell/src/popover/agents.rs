@@ -41,7 +41,9 @@ use crate::{
 
 /// Their width.
 pub const WIDTH: u32 = 300;
-/// Their top under the bar's.
+/// Their top under the bar's when the agents' group is first under the
+/// clock (`crate::column::start`): beside it, higher by as much wherever
+/// the column puts it.
 pub const TOP: f32 = 62.0;
 const BORDER: f32 = 1.0;
 const PAD_TOP: f32 = 12.0;

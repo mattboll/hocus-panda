@@ -420,8 +420,10 @@ fn the_card_is_todays_first_meeting_left_with_its_minutes_and_its_join_button() 
     let fill = over(bar, WHITE, 0.05);
     bed.pixel_near(CARD_FILL, fill)?;
     bed.pixel_near(JOIN_FILL, over(fill, WHITE, 0.09))?;
-    // The agents' group under it, 58 px lower than under the clock.
-    bed.agents_at(8 + 100 + 58 - 5)?;
+    // The column under it (#599): Today's header and its line (the
+    // 16:00 review) 14 px under the card, the agents' group 14 px under
+    // Today.
+    bed.agents_at(8 + 100 + 58 + 18 + 20 + 14 - 5)?;
     // No halo more than 10 min ahead.
     assert_eq!(bed.hp.halo_concern(), None);
     Ok(())

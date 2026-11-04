@@ -323,7 +323,7 @@ const LINE_X: i32 = 1920 - 8 - 196 + 12;
 const DOT_X: i32 = LINE_X + 38 + 7 + 3;
 
 #[test]
-fn today_lists_the_events_after_the_card_in_order_under_the_agents_group() -> anyhow::Result<()> {
+fn today_lists_the_events_after_the_card_in_order_under_the_card() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
@@ -348,8 +348,8 @@ fn today_lists_the_events_after_the_card_in_order_under_the_agents_group() -> an
         ),
         "{line}"
     );
-    // 14 px under where the agents' group goes (no agent: right under the
-    // card), 18 px and 20 a line.
+    // 14 px under the card, the first of the day's groups (#599), 18 px
+    // and 20 a line.
     let surface = bed.surface()?;
     assert_eq!(
         (surface.x, surface.y, surface.width, surface.height),

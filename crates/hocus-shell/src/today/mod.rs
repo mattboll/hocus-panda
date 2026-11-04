@@ -1,14 +1,15 @@
 //! Today (bar.md §4 group 4; Day.3, variant A): today's events after the
-//! next meeting's card, in plain lines, 14 px under the agents' group, in
-//! the full form only.
+//! next meeting's card, in plain lines, first of the day's groups under
+//! the card and the sign of what is in use (`crate::column`), in the full
+//! form only; the to-do list and the agents' group under it.
 //!
 //! - **What it lists**: today's events that take time and have not ended
 //!   ([`crate::meeting::ahead`]), the card's own left out, in order of
 //!   start. Nothing after the card: no group.
-//! - **Room**: what the spacer would otherwise have, between the groups
-//!   above it (the clock, the card, the sign of what is in use, the agents)
-//!   and the desktops' group under it, 14 px from each. When some lines do
-//!   not fit, the last line that fits says how many more ("+ 5 autres
+//! - **Room**: what the spacer would otherwise have: the column's down to
+//!   14 px over the desktops' group, less what the to-do list and the
+//!   agents' group under it take ([`crate::column::room`]). When some lines
+//!   do not fit, the last line that fits says how many more ("+ 5 autres
 //!   aujourd'hui"); with no room for even one line, no group: Today gives
 //!   way first (§4).
 //! - **When it changes**: as the day changes ([`crate::day::on_change`]),
@@ -40,11 +41,9 @@ use crate::{
     popover::{self, Effect},
 };
 
-/// The header's height, a line's, and the room kept between Today and the
-/// groups above and under it.
+/// The header's height, a line's.
 pub const HEADER: f32 = 18.0;
 pub const LINE: f32 = 20.0;
-pub const GAP: f32 = 14.0;
 
 /// An event of Today's.
 #[derive(Debug, Clone, PartialEq)]
@@ -171,20 +170,15 @@ pub fn shown(bar: &str) -> (Vec<Row>, f32) {
     })
 }
 
-/// The group's top under the bar's: 14 px under the agents' group, or
-/// where it would be when it does not show.
-fn top() -> f32 {
-    let agents = crate::agents::draw::group_height_shown();
-    crate::agents::draw::full_top() + if agents > 0.0 { agents + GAP } else { 0.0 }
+/// Bar `bar`'s group's top under the bar's, in its column.
+fn top(bar: &str) -> f32 {
+    crate::column::top(bar, Form::Full, crate::column::Part::Today)
 }
 
-/// Bar `bar`'s room for Today from `top`: down to 14 px over its desktops'
-/// group.
-fn room(bar: &str, top: f32) -> f32 {
-    let height = popover::with(|c| c.bar_height(bar));
-    let under = crate::desktops::draw::top_above_bottom(bar).unwrap_or(height);
-    // The to-do list under Today keeps its own room (Day.4).
-    height - under - GAP - top - crate::tasks::draw::room_taken(bar)
+/// Bar `bar`'s room for Today: what the to-do list and the agents' group
+/// under it leave, down to 14 px over its desktops' group.
+fn room(bar: &str) -> f32 {
+    crate::column::room(bar, crate::column::Part::Today)
 }
 
 /// Starts following the day: woken by it on its thread.
@@ -202,9 +196,9 @@ pub fn minute() {
 }
 
 /// The groups around it moved, or a bar changed height: each bar's rows
-/// again.
+/// again (the column's [`crate::column::moved`] moves those under it).
 pub fn moved() {
-    place_all(false);
+    place_all();
 }
 
 /// Today's events as the day and the clock say now: if they changed, every
@@ -220,21 +214,21 @@ pub fn refresh() {
         true
     });
     if changed {
-        place_all(true);
+        crate::column::moved();
+        popover::send(vec![Effect::Wake(TODAY_NAMESPACE)]);
     }
 }
 
 /// Every bar's rows for the lines and the room now: its surface comes,
 /// goes, moves or draws again as they change.
-fn place_all(lines_changed: bool) {
+fn place_all() {
     let bars: Vec<String> = state(|s| s.places.keys().cloned().collect());
     // Measured outside the lock: the agents', the desktops' and the
     // popovers' own locks.
     let tops: Vec<(String, f32, f32)> = bars
         .into_iter()
         .map(|bar| {
-            let top = top();
-            let room = room(&bar, top);
+            let (top, room) = (top(&bar), room(&bar));
             (bar, top, room)
         })
         .collect();
@@ -269,14 +263,12 @@ fn place_all(lines_changed: bool) {
             }
         });
     }
-    if redraw || lines_changed {
+    if redraw {
         effects.push(Effect::Wake(TODAY_NAMESPACE));
     }
     if !effects.is_empty() {
         popover::send(effects);
     }
-    // The to-do list, 14 px under Today, follows it (Day.4).
-    crate::tasks::draw::moved();
 }
 
 impl Place {
@@ -322,8 +314,7 @@ impl Place {
 /// Bar `bar` opened in `form`: its rows, its surface if they show (to
 /// open after the bar's own).
 pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
-    let top = top();
-    let room = room(bar, top);
+    let (top, room) = (top(bar), room(bar));
     let mut placed = Vec::new();
     let effects = state(|s| {
         let rows = if form == Form::Full {
@@ -347,20 +338,15 @@ pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
     effects
 }
 
-/// Bar `bar` in `form`, switching or not.
+/// Bar `bar` in `form`, switching or not: its rows follow as the column
+/// moves next (`crate::column::moved`).
 pub fn form(bar: &str, form: Form, switching: bool) {
-    let changed = state(|s| {
-        let Some(place) = s.places.get_mut(bar) else {
-            return false;
-        };
-        let changed = place.form != Some(form) || place.switching != switching;
-        place.form = Some(form);
-        place.switching = switching;
-        changed
+    state(|s| {
+        if let Some(place) = s.places.get_mut(bar) {
+            place.form = Some(form);
+            place.switching = switching;
+        }
     });
-    if changed {
-        place_all(false);
-    }
 }
 
 /// Bar `bar` went: its surface, to remove.

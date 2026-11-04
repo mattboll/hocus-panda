@@ -119,12 +119,10 @@ pub fn relative_style(look: Look) -> (Color, iced::Font) {
     }
 }
 
-/// The surface's top under the bar's in `form`: right under the clock.
+/// The surface's top under the bar's in `form`: right under the clock,
+/// first of the column (`crate::column`).
 fn top(form: Form) -> f32 {
-    match form {
-        Form::Full => crate::agents::draw::TOP,
-        Form::Mini => crate::agents::MINI_TOP,
-    }
+    crate::column::shared_top(form, crate::column::Part::Meeting)
 }
 
 /// Its surface's size and its top under the bar's, in `form` (both forms'

@@ -187,10 +187,11 @@ notifications held and **Arrêter le partage** are in that sign's popover
   ring alone, steady. Never in a stream nor a capture.
 - **The bar's sign** (`crates/hocus-shell/src/in_use/`): a surface of its
   own on each bar (`hocus-bar-in-use`), opened as the first share starts
-  and removed as the last ends, where the agents' group was (its top 100
-  px under the bar's in the full form, 68 in the mini), centred; the
-  agents' group and the mini form's agents' item move under it (its height
-  and 14 px). `in_use::Uses` is the model of what is in use, by kind (the
+  and removed as the last ends, under the clock (its top 100 px under
+  the bar's in the full form, 68 in the mini, under the next meeting's
+  card or mark when it shows), centred; the column under it (Today, To do,
+  the agents' group, or the mini form's items: bar.md, "The column's
+  order") moves under it (its height and 14 px). `in_use::Uses` is the model of what is in use, by kind (the
   screen's shares for now): 5.12 adds the microphone and the camera to it
   and draws its tiles in the same sign. The sign is lit under the pointer
   and while its popover shows; a 150 ms hover or a click opens its

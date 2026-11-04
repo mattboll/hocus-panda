@@ -164,15 +164,10 @@ pub fn tiles(rect: Rectangle, form: Form, kinds: &[Kind]) -> Vec<Rectangle> {
         .collect()
 }
 
-/// The sign's top under the bar's in `form`: where the agents' group (the
-/// full form) or the agents' item (the mini) was, under the next meeting's
-/// card when it shows (Day.2).
+/// The sign's top under the bar's in `form`: under the next meeting's
+/// card when it shows (Day.2), else under the clock (`crate::column`).
 fn top(form: Form) -> f32 {
-    crate::meeting::room(form)
-        + match form {
-            Form::Full => crate::agents::draw::TOP,
-            Form::Mini => crate::agents::MINI_TOP,
-        }
+    crate::column::shared_top(form, crate::column::Part::InUse)
 }
 
 /// Its surface's size and its top under the bar's, in `form` (both forms'
@@ -819,21 +814,21 @@ mod tests {
     }
 
     #[test]
-    fn the_sign_sits_where_the_agents_started_and_they_move_under_it() {
+    fn the_sign_sits_under_the_clock_its_surface_holding_both_forms_while_switching() {
         let ((w, h), top) = placement(Form::Mini, false, &[MIC]);
         assert_eq!(w, 54);
-        assert_eq!(top, crate::agents::MINI_TOP - ROOM);
+        assert_eq!(top, crate::column::MINI_TOP - ROOM);
         assert_eq!(h, 36 + 10);
         let ((_, h3), _) = placement(Form::Mini, false, &[MIC, CAM, SCR]);
         assert_eq!(h3, 92 + 10);
         let ((w, h), top) = placement(Form::Full, false, &[MIC, CAM, SCR]);
-        assert_eq!((w, h, top), (194, 46, crate::agents::draw::TOP - ROOM));
+        assert_eq!((w, h, top), (194, 46, crate::column::TOP - ROOM));
         let ((_, h), _) = placement(Form::Mini, false, &[REC]);
         assert_eq!(h, 54 + 10);
         // While switching, both forms' places on one surface.
         let ((_, h), top) = placement(Form::Full, true, &[MIC, CAM]);
-        assert_eq!(top, crate::agents::MINI_TOP - ROOM);
-        assert!(top + h as f32 >= crate::agents::draw::TOP + size(Form::Full, &[MIC, CAM]).height);
+        assert_eq!(top, crate::column::MINI_TOP - ROOM);
+        assert!(top + h as f32 >= crate::column::TOP + size(Form::Full, &[MIC, CAM]).height);
     }
 
     #[test]

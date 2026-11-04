@@ -1,12 +1,14 @@
-//! The agents' group's surface, under the clock, as the approved 4.0 and
-//! 4.1 mockups draw it (bar.md §4 group 3), and in the mini form its item
-//! (§5, 4.7).
+//! The agents' group's surface, last of the bar's column (`crate::column`)
+//! under the to-do list, as the approved 4.0 and 4.1 mockups draw it
+//! (bar.md §4 group 3), and in the mini form its item (§5, 4.7).
 //!
-//! Its top 14 px under the clock's group, 100 px under the bar's top; as
-//! tall as what the group shows, and one pixel, taking no pointer, when it
-//! shows nothing (hidden). In the mini form it is the item's, 68 px under
-//! the bar's top; while the form switches, it holds both. A change of what
-//! it shows resizes it (layer-shell actions) and draws it alone.
+//! Its top 14 px under the to-do list, or where it would be (100 px under
+//! the bar's top with nothing above it but the clock); as tall as what the
+//! group shows, and one pixel, taking no pointer, when it shows nothing
+//! (hidden). On a short bar its rows give way last, folding into "+ N"
+//! ([`fit_rows`]). In the mini form it is the item's, under the to-do
+//! item; while the form switches, it holds both. A change of what it
+//! shows resizes it (layer-shell actions) and draws it alone.
 //!
 //! The mini item (4.7, variant A): her head, her ear in the moment's
 //! colour, a badge with how many agents need the user (none at 0), and how
@@ -56,8 +58,7 @@ use super::{
     AGENT_NAME, AGENT_ROW, AGENT_WORD, BADGE, BADGE_TEXT, BUTTON, BUTTON_TEXT, CARD_RADIUS,
     FOLLOWED, HEAD, HEAD_GAP, HEAD_TOP, HEADER, HEADER_RADIUS, IDLE, INTRO, INTRO_LINE, LABEL,
     LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM, MINI_RADIUS,
-    MINI_TEXT, MINI_TOP, MORE_TEXT, MOST_ROWS, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD, ROW_RADIUS,
-    Row, SAYS, Words,
+    MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD, ROW_RADIUS, Row, SAYS, Words,
 };
 use crate::{
     clock::motion::bezier,
@@ -70,9 +71,6 @@ const FULL_WIDTH: u32 = 194;
 const MINI_SURFACE: u32 = 54;
 /// Around the group: the keyboard's ring, 2 px out and 3 px wide.
 const ROOM: f32 = 5.0;
-/// The group's top under the bar's: 14 px of padding, the clock's 72 px
-/// and the 14 px between groups.
-pub const TOP: f32 = 100.0;
 
 const CARD: Color = Color::from_rgba8(255, 255, 255, 0.05);
 /// The rows' tints and words (4.1), and a row under the pointer.
@@ -139,6 +137,9 @@ struct Place {
     id: window::Id,
     form: Form,
     switching: bool,
+    /// The group's top under the bar's in its column, and the mini item's.
+    top: f32,
+    mini_top: f32,
     /// Its size and margins as last asked for: what it draws for.
     asked: Option<((u32, u32), Margin)>,
     input: Option<bool>,
@@ -147,41 +148,35 @@ struct Place {
 /// A layer surface's margins: top, right, bottom, left.
 type Margin = (i32, i32, i32, i32);
 
-/// The group's top under the bar's in the full form, and the mini item's:
-/// under the next meeting's card (Day.2) and the sign of what is in use
-/// (5.11) when they show, else under the clock.
-pub fn full_top() -> f32 {
-    TOP + crate::meeting::room(Form::Full) + crate::in_use::room(Form::Full)
+/// Bar `bar`'s group's top under the bar's in the full form, and its mini
+/// item's: last of the column, under the to-do list (`crate::column`).
+fn column_top(bar: &str, form: Form) -> f32 {
+    crate::column::top(bar, form, crate::column::Part::Agents)
 }
 
-pub fn mini_top() -> f32 {
-    MINI_TOP + crate::meeting::room(Form::Mini) + crate::in_use::room(Form::Mini)
+/// Bar `bar`'s group's top (`form` full) or mini item's, as last placed.
+pub fn top(bar: &str, form: Form) -> f32 {
+    places(|places| {
+        places.get(bar).map(|p| match form {
+            Form::Full => p.top,
+            Form::Mini => p.mini_top,
+        })
+    })
+    .unwrap_or_else(|| column_top(bar, form))
 }
 
-/// Where the group under the agents' starts in `form` (the to-do list's,
-/// Day.4): 14 px under their group (or their mini item), or where theirs
-/// would be when it shows nothing.
-pub fn next_top(form: Form) -> f32 {
+/// What the group takes in `form` as laid out, its 14 px after it left
+/// out: the full form's group, or the mini item; 0 when it is hidden.
+pub fn height(form: Form) -> f32 {
     let laid = layout();
-    let (top, height) = match form {
-        Form::Full => (full_top(), laid.as_ref().map_or(0.0, |l| l.height)),
-        Form::Mini => (
-            mini_top(),
-            laid.as_ref()
-                .filter(|l| l.height > 0.0)
-                .and_then(|l| l.mini.as_ref())
-                .map_or(0.0, |m| m.height),
-        ),
+    let Some(laid) = laid.as_ref().filter(|l| l.height > 0.0) else {
+        return 0.0;
     };
-    if height > 0.0 {
-        top + height + NEXT_GAP
-    } else {
-        top
+    match form {
+        Form::Full => laid.height,
+        Form::Mini => laid.mini.as_ref().map_or(0.0, |m| m.height),
     }
 }
-
-/// Between the bar's groups, and the mini form's items.
-const NEXT_GAP: f32 = 14.0;
 
 /// Bar `bar`'s surface's top under the bar's, as last asked for.
 fn top_of(bar: &str) -> f32 {
@@ -189,8 +184,9 @@ fn top_of(bar: &str) -> f32 {
         places
             .get(bar)
             .and_then(|p| p.asked)
-            .map_or(full_top() - ROOM, |(_, margin)| (margin.0 - EDGE) as f32)
+            .map(|(_, margin)| (margin.0 - EDGE) as f32)
     })
+    .unwrap_or_else(|| column_top(bar, Form::Full) - ROOM)
 }
 
 static PLACES: Mutex<Option<HashMap<String, Place>>> = Mutex::new(None);
@@ -221,35 +217,25 @@ fn group_height() -> f32 {
     layout().map_or(0.0, |l| l.height)
 }
 
-/// The full form's group's height as it shows (0: hidden), for Today under
-/// it (Day.3).
-pub fn group_height_shown() -> f32 {
-    group_height()
-}
-
-/// The surface's top under the bar's in `form`: the group's, or the mini
-/// item's (4.7), less the ring's room; the mini item's while the form
-/// switches, the surface then holding both.
-fn surface_top(form: Form, switching: bool) -> f32 {
-    match (switching, form) {
-        (false, Form::Full) => full_top() - ROOM,
-        _ => mini_top() - ROOM,
+/// The surface's top under the bar's in `form` for `place`: the group's,
+/// or the mini item's (4.7), less the ring's room; the higher of the two
+/// while the form switches, the surface then holding both.
+fn surface_top(place: &Place) -> f32 {
+    match (place.switching, place.form) {
+        (false, Form::Full) => place.top - ROOM,
+        (false, Form::Mini) => place.mini_top - ROOM,
+        (true, _) => place.top.min(place.mini_top) - ROOM,
     }
 }
 
-/// The surface's size in `form` (the full one's width while switching, as
-/// tall as both forms' items).
-fn size_of(form: Form, switching: bool) -> (u32, u32) {
-    let laid = layout();
-    let full = laid.as_ref().map_or(0.0, |l| l.height);
-    let mini = laid
-        .as_ref()
-        .and_then(|l| l.mini.as_ref())
-        .map_or(0.0, |m| m.height);
+/// The surface's size for `place` (the full one's width while switching,
+/// as tall as both forms' items).
+fn size_of(place: &Place) -> (u32, u32) {
+    let (full, mini) = (height(Form::Full), height(Form::Mini));
     let tall = |height: f32| (height + 2.0 * ROOM).ceil() as u32;
-    match (switching, form) {
+    match (place.switching, place.form) {
         _ if full <= 0.0 => (
-            if form == Form::Mini && !switching {
+            if place.form == Form::Mini && !place.switching {
                 MINI_SURFACE
             } else {
                 FULL_WIDTH
@@ -258,32 +244,34 @@ fn size_of(form: Form, switching: bool) -> (u32, u32) {
         ),
         (false, Form::Mini) => (MINI_SURFACE, tall(mini)),
         (false, Form::Full) => (FULL_WIDTH, tall(full)),
-        (true, _) => (FULL_WIDTH, tall((TOP - MINI_TOP + full).max(mini))),
+        (true, _) => {
+            let top = place.top.min(place.mini_top);
+            let bottom = (place.top + full).max(place.mini_top + mini);
+            (FULL_WIDTH, tall(bottom - top))
+        }
     }
 }
 
-/// Its layer-shell margins in `form`: under the clock.
-fn margin(form: Form, switching: bool) -> (i32, i32, i32, i32) {
-    (EDGE + surface_top(form, switching) as i32, EDGE + 1, 0, 0)
+/// Its layer-shell margins for `place`: its top in the column.
+fn margin(place: &Place) -> Margin {
+    (EDGE + surface_top(place).round() as i32, EDGE + 1, 0, 0)
 }
 
 /// Bar `bar`'s surface `id` opens in `form`: its size and margins.
 pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, i32, i32)) {
-    let size = size_of(form, false);
-    let margin = margin(form, false);
-    places(|places| {
-        places.insert(
-            bar.to_owned(),
-            Place {
-                id,
-                form,
-                switching: false,
-                asked: Some((size, margin)),
-                input: None,
-            },
-        );
-    });
-    (size, margin)
+    let mut place = Place {
+        id,
+        form,
+        switching: false,
+        top: column_top(bar, Form::Full),
+        mini_top: column_top(bar, Form::Mini),
+        asked: None,
+        input: None,
+    };
+    let asked = (size_of(&place), margin(&place));
+    place.asked = Some(asked);
+    places(|places| places.insert(bar.to_owned(), place));
+    asked
 }
 
 pub fn forget(bar: &str) {
@@ -291,33 +279,47 @@ pub fn forget(bar: &str) {
 }
 
 fn refit(place: &mut Place) -> Option<crate::network::draw::Placed> {
-    let size = size_of(place.form, place.switching);
-    let margin = margin(place.form, place.switching);
-    if place.asked == Some((size, margin)) {
+    let asked = (size_of(place), margin(place));
+    if place.asked == Some(asked) {
         return None;
     }
-    place.asked = Some((size, margin));
-    Some((place.id, size, margin))
+    place.asked = Some(asked);
+    Some((place.id, asked.0, asked.1))
 }
 
 /// Bar `bar` in `form`, switching or not: the surface's new size, if it
 /// changes.
 pub fn form(bar: &str, form: Form, switching: bool) -> Option<crate::network::draw::Placed> {
+    let tops = (column_top(bar, Form::Full), column_top(bar, Form::Mini));
     places(|places| {
         let place = places.get_mut(bar)?;
         place.form = form;
         place.switching = switching;
+        (place.top, place.mini_top) = tops;
         refit(place)
     })
 }
 
-/// The sign of what is in use (5.11) or the next meeting's card (Day.2)
-/// came or went: every bar's surface moves under them, or back up.
+/// The column above it moved (the card, the sign, Today or the to-do list
+/// came, went or changed height), or the group did: every bar's surface
+/// to its place, last of the column.
 pub fn moved() {
-    let effects: Vec<popover::Effect> = places(|places| {
-        places
-            .values_mut()
-            .filter_map(refit)
+    // The column's tops read first: not under this lock.
+    let bars: Vec<String> = places(|places| places.keys().cloned().collect());
+    let tops: Vec<(String, f32, f32)> = bars
+        .into_iter()
+        .map(|bar| {
+            let tops = (column_top(&bar, Form::Full), column_top(&bar, Form::Mini));
+            (bar, tops.0, tops.1)
+        })
+        .collect();
+    let mut effects: Vec<popover::Effect> = places(|places| {
+        tops.iter()
+            .filter_map(|(bar, top, mini_top)| {
+                let place = places.get_mut(bar)?;
+                (place.top, place.mini_top) = (*top, *mini_top);
+                refit(place)
+            })
             .map(|(id, size, margin)| popover::Effect::Resize {
                 id,
                 size,
@@ -326,20 +328,51 @@ pub fn moved() {
             .collect()
     });
     if !effects.is_empty() {
+        // Drawn again where it goes: on the CPU its backdrop is the bar's
+        // colour there.
+        effects.push(popover::Effect::Wake(AGENTS_NAMESPACE));
         popover::send(effects);
     }
-    // Today under it follows (Day.3).
-    crate::today::moved();
 }
 
-/// The group was laid out again: every bar's surface to its height.
+/// The room the column leaves its rows (`crate::column::room`): on the
+/// shortest bar in the full form, as many as fit there, the others in
+/// "+ N" (§4: the agents' rows give way last). When that changes what the
+/// group shows, it is laid out again.
+pub fn fit_rows() {
+    let bars: Vec<String> = places(|places| {
+        places
+            .iter()
+            .filter(|(_, p)| p.form == Form::Full || p.switching)
+            .map(|(bar, _)| bar.clone())
+            .collect()
+    });
+    let room = bars
+        .iter()
+        .map(|bar| crate::column::room(bar, crate::column::Part::Agents))
+        .reduce(f32::min)
+        .unwrap_or(f32::INFINITY);
+    if super::set_rows_room(room) {
+        let words = super::Words::new(crate::clock::time::Lang::of_messages());
+        tracing::debug!(
+            room,
+            rows = super::rows_shown(),
+            shows = %words.said(&super::said().shows(super::now_us())),
+            "the agents' rows' room"
+        );
+        stale();
+        popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
+    }
+}
+
+/// The group was laid out again: every bar's surface to its height, and
+/// the column with it.
 pub fn laid_out(layout: Layout) {
-    let height = layout.height;
     let before = LAYOUT
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .replace(layout)
-        .map(|l| l.height);
+        .replace(layout.clone())
+        .map(|l| (l.height, l.mini.map(|m| m.height)));
     let effects: Vec<popover::Effect> = places(|places| {
         places
             .values_mut()
@@ -354,12 +387,10 @@ pub fn laid_out(layout: Layout) {
     if !effects.is_empty() {
         popover::send(effects);
     }
-    // Today, 14 px under the group, follows its height (Day.3).
-    if before != Some(height) {
-        crate::today::moved();
+    // Today and the to-do list over it keep the room it leaves them.
+    if before != Some((layout.height, layout.mini.as_ref().map(|m| m.height))) {
+        crate::column::moved();
     }
-    // The to-do list under them follows (Day.4).
-    crate::tasks::draw::moved();
 }
 
 /// Bar `bar`'s surface takes the pointer (`takes`), or lets it through.
@@ -387,11 +418,28 @@ pub struct Group {
     /// The bar's width as drawn now.
     pub bar_width: f32,
     pub words: Words,
-    /// Without glass: the bar's opaque colour behind.
-    pub backdrop: Option<Color>,
+    /// Without glass: the bar's opaque gradient behind.
+    pub backdrop: Option<Backdrop>,
     pub bar: String,
     /// The rows move when they change (else they change at once).
     pub motion: bool,
+}
+
+/// The bar's opaque gradient, from its top to its bottom: the surface
+/// fills with its colour where the group is as it draws, on the bar as
+/// tall as it is then (the column moves the group without the shell's
+/// view being built again).
+#[derive(Debug, Clone, Copy)]
+pub struct Backdrop {
+    pub top: Color,
+    pub bottom: Color,
+}
+
+impl Backdrop {
+    /// Its colour `y` under the top of a bar `height` tall.
+    pub fn at(self, y: f32, height: f32) -> Color {
+        mix(self.top, self.bottom, (y / height.max(1.0)).clamp(0.0, 1.0))
+    }
 }
 
 /// What the surface keeps between draws.
@@ -570,9 +618,10 @@ fn ear_rings(f: &mut Frame, head: Rectangle, share: f32, alpha: f32) {
     }
 }
 
-/// Where a row hidden under the "+ N" line is: the place of the sixth.
-fn hidden_y() -> f32 {
-    HEADER + super::GAP + MOST_ROWS as f32 * AGENT_ROW
+/// Where a row hidden under the "+ N" line is: the place of the row
+/// after the last shown in `layout`.
+fn hidden_y(layout: &Layout) -> f32 {
+    HEADER + super::GAP + layout.rows.len() as f32 * AGENT_ROW
 }
 
 impl State {
@@ -624,7 +673,7 @@ impl State {
                 // From under the "+ N" line, fading in.
                 None if known.contains(&row.id) => Moving {
                     since: now,
-                    from_y: hidden_y(),
+                    from_y: hidden_y(layout),
                     from_tint: Color::TRANSPARENT,
                     from_alpha: 0.0,
                     to_alpha: 1.0,
@@ -652,7 +701,7 @@ impl State {
             }
             let (y, tint, alpha) = drawn(was, self.moving.get(&was.id));
             let mut gone = was.clone();
-            gone.rect.y = hidden_y();
+            gone.rect.y = hidden_y(layout);
             self.leaving.push((
                 gone,
                 Moving {
@@ -766,8 +815,12 @@ impl<Message> canvas::Program<Message> for Group {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
+        if let Some(backdrop) = self.backdrop {
+            // At the group's (or the mini item's) middle, where it is now.
+            let form = self.alone().unwrap_or(Form::Full);
+            let middle = top(&self.bar, form) + height(form) / 2.0;
+            let bar = popover::with(|c| c.bar_height(&self.bar));
+            frame.fill_rectangle(Point::ORIGIN, bounds.size(), backdrop.at(middle, bar));
         }
         let size = bounds.size();
         let items = self.items(size);
@@ -872,14 +925,17 @@ impl Group {
     /// The group's top left on the surface.
     fn origin(&self, size: Size) -> Point {
         let left = size.width + 2.0 - self.bar_width;
-        Point::new(left + SIDE, full_top() - top_of(&self.bar))
+        Point::new(left + SIDE, top(&self.bar, Form::Full) - top_of(&self.bar))
     }
 
     /// The mini item's top left on the surface: its button centred in the
     /// bar as wide as it is drawn now.
     fn mini_origin(&self, size: Size) -> Point {
         let centre = size.width + 1.0 - self.bar_width / 2.0;
-        Point::new(centre - MINI_ITEM / 2.0, mini_top() - top_of(&self.bar))
+        Point::new(
+            centre - MINI_ITEM / 2.0,
+            top(&self.bar, Form::Mini) - top_of(&self.bar),
+        )
     }
 
     /// The group's items and where they are on the surface, in a form

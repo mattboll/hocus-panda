@@ -1181,7 +1181,7 @@ impl Controller {
         let size = (item.width(), item.height(bar, place.form, true));
         let rect = placed(
             place,
-            self.anchor(bar, item, from, size.1),
+            self.anchor(bar, place.form, item, from, size.1),
             size,
             item.on_bottom(),
         );
@@ -1352,7 +1352,14 @@ impl Controller {
         }
         let size = (open.item.width(), height);
         let before = margins(place, open.rect);
-        let anchor = anchor(&self.items, &open.bar, open.item, open.from, height);
+        let anchor = anchor(
+            &self.items,
+            &open.bar,
+            place.form,
+            open.item,
+            open.from,
+            height,
+        );
         open.rect = placed(place, anchor, size, open.item.on_bottom());
         let margin = margins(place, open.rect);
         tracing::debug!(height, "the popover's size changes");
@@ -1389,8 +1396,8 @@ impl Controller {
     }
 
     /// What a popover of `item` opened from `from` on `bar` lines up with.
-    fn anchor(&self, bar: &str, item: Item, from: Rectangle, height: u32) -> Rectangle {
-        anchor(&self.items, bar, item, from, height)
+    fn anchor(&self, bar: &str, form: Form, item: Item, from: Rectangle, height: u32) -> Rectangle {
+        anchor(&self.items, bar, form, item, from, height)
     }
 
     fn unfocus(&mut self, effects: &mut Vec<Effect>) {
@@ -1451,6 +1458,7 @@ impl Controller {
 fn anchor(
     items: &HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
     bar: &str,
+    form: Form,
     item: Item,
     from: Rectangle,
     height: u32,
@@ -1461,10 +1469,16 @@ fn anchor(
             ..from
         };
     }
-    // The agents' popovers' top where the mockup has it.
+    // The agents' popovers' top where the mockup has it beside their
+    // group, wherever the bar's column puts the group (its first item's
+    // top: her row, or the mini item).
     if item.agents() {
+        let group = items
+            .get(&(bar.to_owned(), AGENTS_NAMESPACE))
+            .and_then(|items| items.iter().map(|(_, r)| r.y).reduce(f32::min))
+            .unwrap_or_else(|| crate::column::start(form));
         return Rectangle {
-            y: agents::TOP,
+            y: group + agents::TOP - crate::column::start(form),
             ..from
         };
     }

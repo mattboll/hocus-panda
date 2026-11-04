@@ -91,12 +91,13 @@ pub const CONNECTIONS_NAMESPACE: &str = "hocus-bar-connections";
 /// the mini form), above the connections: a desktop's change draws only
 /// that region, and nothing else's draws it.
 pub const DESKTOPS_NAMESPACE: &str = "hocus-bar-desktops";
-/// The namespace of the agents' group's surface, under the clock (bar.md
-/// §4 group 3, 4.0): the agents' changes draw only that region.
+/// The namespace of the agents' group's surface, under the to-do list
+/// (bar.md §4 group 3, 4.0; #599): the agents' changes draw only that
+/// region.
 pub const AGENTS_NAMESPACE: &str = "hocus-bar-agents";
 /// The namespace of the to-do list's surface (bar.md §4 group 5, Day.4):
-/// the group under the agents' in the full form, its item under theirs in
-/// the mini form. A change of the tasks draws only that region; its field
+/// the group under Today in the full form, its item under the meeting's
+/// mark in the mini form, the agents' over them (#599). A change of the tasks draws only that region; its field
 /// takes the keyboard while the user types a task.
 pub const TASKS_NAMESPACE: &str = "hocus-bar-tasks";
 /// The namespace of a popover's layer surface, beside the bar (bar.md §9):
@@ -174,7 +175,8 @@ pub const TIP_NAMESPACE: &str = "hocus-bar-tip";
 /// while a meeting is left today, none without.
 pub const MEETING_NAMESPACE: &str = "hocus-bar-meeting";
 /// The namespace of Today (bar.md §4 group 4; Day.3): today's events after
-/// the next meeting's, under the agents' group, in the full form. Opened
+/// the next meeting's, under its card, over the to-do list and the
+/// agents' group, in the full form. Opened
 /// while it lists something, none without.
 pub const TODAY_NAMESPACE: &str = "hocus-bar-today";
 /// The tooltip's corners, logical pixels.

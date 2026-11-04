@@ -213,19 +213,19 @@ fn out<T>(with: impl FnOnce(&mut Option<Out>) -> T) -> T {
     with(&mut OUT.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
-/// The panda's middle, in the bar's frame, for agent `id`: its row's, as
-/// the group lays it out now; the secretary's when it has none shown
-/// (under the "+ N" line); in the mini form, which has no rows, her head's
-/// in its item (4.7).
-fn middle(id: u64, form: Form) -> f32 {
+/// The panda's middle, in bar `bar`'s frame, for agent `id`: its row's,
+/// as the group lays it out now where the bar's column puts it; the
+/// secretary's when it has none shown (under the "+ N" line); in the mini
+/// form, which has no rows, her head's in its item (4.7).
+fn middle(bar: &str, id: u64, form: Form) -> f32 {
+    let top = super::draw::top(bar, form);
     if form == Form::Mini {
-        return super::draw::mini_top() + super::MINI_PAD_TOP + super::HEAD / 2.0;
+        return top + super::MINI_PAD_TOP + super::HEAD / 2.0;
     }
     let row = match super::said().shows(now_us()) {
         super::Shows::Lines(lines) => lines.rows.iter().position(|r| r.id == id),
         _ => None,
     };
-    let top = super::draw::full_top();
     match row {
         Some(i) => top + super::HEADER + super::GAP + (i as f32 + 0.5) * super::AGENT_ROW,
         None => top + super::HEADER / 2.0,
@@ -246,7 +246,7 @@ pub fn peek(peek: Peek) {
         let mut before = out.take().map(|o| o.surfaces).unwrap_or_default();
         let mut surfaces = HashMap::new();
         for (bar, form) in bars {
-            let placed = placed(form, middle(peek.id, form), said.width, card());
+            let placed = placed(form, middle(&bar, peek.id, form), said.width, card());
             let id = match before.remove(&bar) {
                 Some((id, _)) => {
                     effects.push(Effect::Resize {
@@ -325,11 +325,19 @@ pub fn forget(bar: &str) {
     }
 }
 
+/// The agents' group moved in the bar's column: each bar's peek's surface
+/// stays beside its row.
+pub fn moved() {
+    for (bar, form) in popover::with(|c| c.bar_forms()) {
+        self::form(&bar, form);
+    }
+}
+
 /// Bar `bar` is now in `form`: its peek's surface stays beside it.
 pub fn form(bar: &str, form: Form) {
     let moved = out(|out| {
         let out = out.as_mut()?;
-        let placed = placed(form, middle(out.peek.id, form), out.said.width, card());
+        let placed = placed(form, middle(bar, out.peek.id, form), out.said.width, card());
         let (id, was) = out.surfaces.get_mut(bar)?;
         (*was != placed)
             .then(|| {

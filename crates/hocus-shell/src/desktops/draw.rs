@@ -271,13 +271,13 @@ fn resize(placed: Option<crate::network::draw::Placed>) {
             size,
             margin: Some(margin),
         }]);
-        // Today's room ends over the desktops (Day.3).
-        crate::today::moved();
+        // The column's room ends over the desktops (Day.3).
+        crate::column::moved();
     }
 }
 
 /// How far above bar `bar`'s bottom its desktops' group's top is, in the
-/// full form (Today's room ends 14 px over it, Day.3).
+/// full form (the column's room ends 14 px over it, `crate::column`).
 pub fn top_above_bottom(bar: &str) -> Option<f32> {
     places(|places| {
         let place = places.get(bar)?;
