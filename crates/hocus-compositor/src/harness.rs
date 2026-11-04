@@ -776,6 +776,9 @@ impl Headless {
         let state = &mut self.app.state;
         let at = state.held_clock.map(|t| t + by);
         state.held_clock = at;
+        // What falls due on the way: the idle countdown runs on this
+        // clock, its timer on the real one.
+        state.idle_check();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.
@@ -791,6 +794,16 @@ impl Headless {
     pub fn ink(&self) -> (bool, bool) {
         let ink = &self.app.state.ink;
         (ink.shows(), ink.laser_shown())
+    }
+
+    /// The session's idleness now, as `hocus msg idle` says it (7.3).
+    pub fn idle(&self) -> crate::idle::Said {
+        self.app.state.idle_said()
+    }
+
+    /// The idle timer's work so far.
+    pub fn idle_counts(&self) -> crate::idle::Counts {
+        self.app.state.idle_counts()
     }
 
     /// When a frame is asked for after a pause, if one is: a wakeup to
@@ -981,12 +994,14 @@ impl Headless {
     }
 
     pub fn pointer_move(&mut self, x: f64, y: f64) {
+        self.app.state.idle_input();
         self.time += 10;
         let time = self.time;
         self.app.state.pointer_motion(Point::from((x, y)), time);
     }
 
     pub fn button(&mut self, button: u32, pressed: bool) {
+        self.app.state.idle_input();
         self.time += 10;
         let state = if pressed {
             ButtonState::Pressed
@@ -1019,6 +1034,7 @@ impl Headless {
         v120: Option<i32>,
     ) {
         use smithay::{backend::input::Axis, input::pointer::AxisFrame};
+        self.app.state.idle_input();
         self.time += 10;
         let mut frame = AxisFrame::new(self.time)
             .source(source)
@@ -1035,6 +1051,7 @@ impl Headless {
 
     /// A key by its evdev code.
     pub fn key(&mut self, code: u32, pressed: bool) {
+        self.app.state.idle_input();
         self.time += 10;
         let state = if pressed {
             KeyState::Pressed

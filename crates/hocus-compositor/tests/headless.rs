@@ -132,6 +132,8 @@ fn the_protocols_of_the_base_are_offered() -> anyhow::Result<()> {
         "zwp_primary_selection_device_manager_v1",
         "zwp_pointer_gestures_v1",
         "zwp_relative_pointer_manager_v1",
+        "zwp_idle_inhibit_manager_v1",
+        "ext_idle_notifier_v1",
     ] {
         assert!(has(name), "{name} is not offered: {seen:?}");
     }

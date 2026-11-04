@@ -225,6 +225,8 @@ pub struct State {
     pub shell: crate::shell::Shell,
     /// The agents and their sources (4.0).
     pub agents: crate::agents::Agents,
+    /// When the session is idle, and what holds it off (7.3).
+    pub idle: crate::idle::Idleness,
     /// The render node of the GPU the compositor draws with, which the
     /// shell draws with too; `None` without one.
     pub gpu: Option<crate::backend::DevId>,
@@ -310,6 +312,7 @@ impl State {
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let panel = crate::panel::Panel::load(config.state_dir.as_deref());
         let capture = crate::capture::Capture::load(config.state_dir.as_deref());
+        let idle = crate::idle::Idleness::new(dh, config.idle.delay);
 
         Ok(Self {
             display_handle: dh.clone(),
@@ -398,6 +401,7 @@ impl State {
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
+            idle,
             gpu: None,
             blur: false,
             panes: std::cell::RefCell::default(),
