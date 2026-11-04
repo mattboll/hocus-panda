@@ -144,6 +144,7 @@ impl State {
         self.launcher_gone(layer);
         self.capture_toolbar_gone(layer);
         self.share_chooser_gone(layer);
+        self.auth_gone(layer);
         self.capture_after_gone(layer);
         self.peek_gone(layer);
         self.bubble_gone(layer);
@@ -191,6 +192,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             hocus_link::LAUNCHER_TOAST_NAMESPACE => state.launcher_toast_committed(&layer),
             hocus_link::CAPTURE_TOOLBAR_NAMESPACE => state.capture_toolbar_committed(&layer),
             hocus_link::SHARE_CHOOSER_NAMESPACE => state.share_chooser_committed(&layer),
+            hocus_link::AUTH_NAMESPACE => state.auth_committed(&layer, &output),
             hocus_link::CAPTURE_THUMB_NAMESPACE | hocus_link::CAPTURE_EDITOR_NAMESPACE => {
                 state.capture_after_committed(&layer);
             }
@@ -268,6 +270,10 @@ impl State {
 
     /// The top or overlay surface that wants the keyboard always.
     fn exclusive_layer(&self) -> Option<LayerSurface> {
+        // The authentication dialog first, whatever else asks (7.5).
+        if let Some(layer) = self.auth_layer() {
+            return Some(layer);
+        }
         self.space.outputs().find_map(|output| {
             let map = layer_map_for_output(output);
             ABOVE

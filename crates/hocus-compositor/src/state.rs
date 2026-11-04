@@ -196,6 +196,8 @@ pub struct State {
     pub capture: crate::capture::Capture,
     /// Screen sharing (5.11).
     pub share: crate::share::Sharing,
+    /// The system's authentication dialog (7.5).
+    pub auth: crate::auth::Auth,
     /// Screen recording (5.10).
     pub record: crate::record::Recording,
     /// The strokes, the arrows and the laser drawn on the screens
@@ -389,6 +391,7 @@ impl State {
             emoji: crate::emoji::Emoji::new(dh),
             capture,
             share: crate::share::Sharing::default(),
+            auth: crate::auth::Auth::default(),
             record: crate::record::Recording::default(),
             ink: crate::ink::Ink::default(),
             swiping: None,

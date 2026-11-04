@@ -52,6 +52,9 @@ pub struct Shell {
     link: Option<Link>,
     /// It draws on the CPU: its bars are opaque.
     pub software: bool,
+    /// It is the session's polkit agent (7.5): the compositor is the
+    /// session.
+    pub auth_agent: bool,
     /// The active keyboard layout as last told; `None`: not told yet.
     pub layout: Option<u32>,
     /// The bars' screens' desktops as last told.
@@ -200,6 +203,7 @@ impl State {
         let env = programs::Env::of(self);
         let gpu = self.gpu;
         let bus = self.shell.bus.clone();
+        let auth_agent = self.shell.auth_agent;
         let config = self.config.file.clone();
         let runs = Running::start(&self.shell.running);
         programs::on_a_thread("shell".to_owned(), move || {
@@ -211,6 +215,11 @@ impl State {
                 Some(bus) => command.env(hocus_link::NOTIFICATIONS_BUS_ENV, bus.word()),
                 None => command.env_remove(hocus_link::NOTIFICATIONS_BUS_ENV),
             };
+            if auth_agent {
+                command.env(hocus_link::AUTH_AGENT_ENV, "1");
+            } else {
+                command.env_remove(hocus_link::AUTH_AGENT_ENV);
+            }
             // Empty: no file, never the one the shell would look for.
             command.env(
                 hocus_link::CONFIG_ENV,
@@ -350,6 +359,7 @@ impl State {
         self.tell_fullscreen_again();
         self.hand_kept_levels();
         self.tell_sharing_again();
+        self.auth_tell_caps();
         if self.record.recording() {
             self.tell_recording();
         }
@@ -365,6 +375,7 @@ impl State {
             tracing::info!("the shell is gone; its bars' space stays");
         }
         self.peek_shell_gone();
+        self.auth_shell_gone();
         // The meeting's halo is the shell's to say: its next one says it
         // again.
         self.meeting_near(None);
@@ -422,6 +433,7 @@ impl State {
             ToCompositor::Emoji { keep, text } => self.emoji_asked(keep, text),
             ToCompositor::Capture(ask) => self.capture_asked(ask),
             ToCompositor::Share(ask) => self.share_asked(ask),
+            ToCompositor::Auth(ask) => self.auth_asked(ask),
             ToCompositor::Record(ask) => self.record_asked(ask),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),

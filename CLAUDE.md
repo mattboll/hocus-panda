@@ -181,6 +181,14 @@ streams appear on your real PipeWire. Its tests
 PipeWire of their own (`Config::pipewire_remote`), link their consumer
 themselves (no WirePlumber), and skip without them.
 
+The system's authentication dialog (docs/design/polkit.md): the shell is
+the session's polkit agent on the system bus only with `HOCUS_AUTH_AGENT`
+set, which the compositor sets on a virtual terminal, never nested. Its
+tests (`crates/hocus-compositor/tests/polkit.rs`) run a dbus-daemon of
+their own with a fake polkit authority, a fake helper
+(`HOCUS_POLKIT_HELPER`; with it set, polkit's socket is never used) and
+accounts of their own (`HOCUS_AUTH_ETC`).
+
 Screen captures (`Print`, docs/design/screenshots.md) are saved in
 `$XDG_PICTURES_DIR` (else `user-dirs.dirs`', else `~/Pictures`): next to a
 live session, give the nested compositor a fresh `HOME` (or
