@@ -183,7 +183,8 @@ fn top() -> f32 {
 fn room(bar: &str, top: f32) -> f32 {
     let height = popover::with(|c| c.bar_height(bar));
     let under = crate::desktops::draw::top_above_bottom(bar).unwrap_or(height);
-    height - under - GAP - top
+    // The to-do list under Today keeps its own room (Day.4).
+    height - under - GAP - top - crate::tasks::draw::room_taken(bar)
 }
 
 /// Starts following the day: woken by it on its thread.
@@ -274,6 +275,8 @@ fn place_all(lines_changed: bool) {
     if !effects.is_empty() {
         popover::send(effects);
     }
+    // The to-do list, 14 px under Today, follows it (Day.4).
+    crate::tasks::draw::moved();
 }
 
 impl Place {

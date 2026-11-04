@@ -114,6 +114,9 @@ pub struct Panel {
     pub connections_commits: u64,
     /// Commits of the desktops' surfaces, for tests: none at rest.
     pub desktops_commits: u64,
+    /// Commits of the to-do list's surfaces (Day.4), for tests: none at
+    /// rest.
+    pub tasks_commits: u64,
     /// Commits of the popovers' surfaces, for tests: none at rest.
     pub popover_commits: u64,
     /// Commits of the peek's surfaces, for tests: none at rest.

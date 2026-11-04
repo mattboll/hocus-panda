@@ -131,7 +131,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 2 | Next meeting | Card (Day.2, variant B): 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`; a click opens the meeting, a button joins its call. Hidden when nothing remains today (as built, Day.2) | 44 px |
 | 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
 | 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
-| 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
+| 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines, each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
 | 6 | Spacer | Takes what is left | flexible |
 | 7 | Secretary | Moved to the head of group 3 (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
@@ -331,6 +331,12 @@ when) and "AU REPOS" / "RESTING" (each name); each line goes to its
 agent. The group's rules hold: no item when the group is hidden (4.0); in
 the card's place, she is alone with a green "+" badge, and opens Sources.
 The halo and the peek work as in the full form, the peek at her head;
+the to-do item (approved 2026-11-04, issue #428, variant C; as built,
+Day.4), 14 px under the agents' item: 44 × 34, radius 10, a 16 px box
+(`text.dim`) and how many tasks are open (Martian Mono 11 px; no number
+at 0), lit `0.06` under the pointer and `0.08` while its popover shows; a
+150 ms hover or a click opens the tasks' popover (§9); no board and no
+local task, no item;
 spacer, the desktops (3.9, variant
 A): a dot per desktop (18 × 13, radius 4), two to a row, 4 px apart, 14 px
 above the connections' buttons: the current one filled with the accent,
@@ -679,6 +685,13 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   modes only, under "Énergie" / "Power" (no divider, no label). Without
   power profiles, the battery alone. The keyboard: `Tab` through the tiles
   the machine has, the arrows choose the next, `Enter` or `Space` chooses.
+- **The tasks'** (Day.4, issue #428, variant C), from the mini form's
+  to-do item and from the full form's "+ N autres", its top on what
+  opened it: "À faire" / "To do" (14 px, bold), the count of open tasks
+  (12 px, `text.dim`) and a `+` as the group's; the field to add a task as
+  its first line when open (30 px, radius 8); up to 6 tasks on 30 px
+  lines, which tick as the group's; past 6 the list scrolls and "+ N
+  autres" under it says how many are past the six; none: "Rien à faire."
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
@@ -3123,3 +3136,137 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
 - **Not built**: Day.5's calendar popover (the lines open the event's
   page until then, "+ N" nothing); To do (Day.4), which will sit under it;
   names for screen readers (§11).
+
+### Day.4, the to-do list (2026-11-04)
+
+What the approved Day.4 mockup shows, variant C (A's group in the full
+form, an item and its popover in the mini form), with the maintainer's
+spec (issue #428).
+
+- **Its place**: the full form's group 14 px under Today (Day.3) when it
+  lists something, else under the agents' group, or where that group
+  would be when it does not show; Today keeps the group's room under it
+  as it fits its lines; the mini form's item 14 px under the agents' item, or in
+  its place. Its surface (`hocus-bar-tasks`, under the windows with the
+  bar's others, 5.13) is the bar inside its rim, 5 px around what it
+  draws for the keyboard's ring, as tall as the group (18 px, 22 px a
+  line, 20 px for "+ N", 30 px for the field) or the item (34 px), one
+  pixel taking no pointer when nothing shows. Today or the agents' group
+  laid out again (or the meeting card, the sign of what is in use coming)
+  moves it. While the bar
+  switches its form, it holds both forms, the two cross-fading.
+- **What shows**: the day's tasks' account (`Day::tasks()`, docs/design/
+  day.md): the cards of the board's tasks' column chosen in Day.1, else
+  the local list, in the column's order. No board set and no local task:
+  no group and no item. A board with nothing open: the header and "Rien
+  à faire." (13 px, `text.faint`). The group shows 3 lines; "+ 4 autres"
+  / "+ 1 autre" (12.5 px, `text.faint`, a button lit under the pointer
+  6 px past its text) opens the tasks' popover. A title too long is cut
+  with an ellipsis; resting 600 ms on it shows it whole in the bar's
+  tooltip (5.14, as Today's lines), beside the bar.
+- **Ticking**: a click on the box (or `Space`, `Enter` while it holds the
+  keyboard) ticks it at once: `#6CC287`, a dark check (`#0b1020`), the
+  title `text.faint` and struck through. The source is told at once
+  (`day::change`, its account's worker off the loop). The line stays
+  1.5 s, as the shell measures it; a second click within them unticks it
+  and tells the source again (back where it was in its column). Then the
+  line goes: with motion it fades and closes over 300 ms (`ease-in`), the
+  lines under it moving up, the next task fading in at the bottom; with
+  reduced motion or on the CPU, at once. A task the source no longer
+  lists (ticked, its card moved to the done column) stays in its place
+  for its 1.5 s; one unticked shows in its place until the source lists
+  it again.
+- **Refused**: a change the source refuses (offline, a conflict:
+  `Pending::refused`) unticks the box (an untick refused ticks it) and
+  says "Pas enregistré" / "Not saved" (12 px, `#F7A77A`) in the title's
+  place for 3 s; the change stays queued, tried again when the source
+  answers again (the workers' own retries).
+- **Adding**: `+` (or `Enter` while it holds the keyboard) opens the field
+  as the first line, 26 px with 2 px above and under, radius 7,
+  `rgba(255,255,255,0.06)`, a 1 px `rgba(108,194,135,0.65)` border, 13 px,
+  "Nouvelle tâche…" / "New task…" while empty, a caret (it does not
+  blink: nothing draws at rest). The group's surface takes the keyboard
+  (exclusively, while the field holds it). `Enter` adds the task at the top
+  of the board's add column (`Change::Add`, no due date) and closes the
+  field; empty, it adds nothing. `Esc` closes it; a click elsewhere closes
+  it when empty, else keeps it and its text and lets the keyboard go; a
+  click in it takes the keyboard again. `Ctrl+V` and `Shift+Insert` paste
+  the clipboard's text at its end, its line breaks and other control
+  characters dropped, whole or not at all (200 characters at most), as
+  3.5b. A task added shows at the top, its box inert, until the source
+  made its card; with 3 tasks shown, the third goes into "+ N".
+- **The mini item**: 44 × 34, radius 10, the mockup's 16 px box and check
+  (`text.dim`), 5 px before how many tasks are open (Martian Mono 11 px,
+  `text`; no number at 0); lit `0.06` under the pointer, `0.08` while the
+  popover shows. A 150 ms hover or a click opens the tasks' popover (§9's
+  mechanics: the pointer leaving closes it 300 ms later, `Esc` closes).
+- **The tasks' popover** (§9): 280 wide, the popovers' glass, 8 px left of
+  the bar, its top on the item or the line that opened it. "À faire" (14 px
+  bold), the count (12 px, `text.dim`), the `+`; the field as its first
+  line (30 px, radius 8, 13.5 px); up to 6 tasks on 30 px lines (the box in
+  a 26 × 26 button, the title 13.5 px), ticking as the group's; past 6 the
+  wheel scrolls the list (a 6 px thumb) and "+ N autres" under it says how
+  many are past the six. Opened by hovering, it takes the keyboard when
+  its field opens. `Tab` goes through the `+` and each box, `Space` or
+  `Enter` acts, `Esc` closes the field, then the popover.
+- **The keyboard in the bar**: the `+`, each box and "+ N autres" are the
+  bar's items: `Tab` and `Shift+Tab` (or the arrows) go through them with
+  the bar's others, from the `+` down; `Space` or `Enter` on a box ticks
+  it, on the `+` opens the field, which takes the keys (its ring stays on
+  the `+`, which has the keyboard again as the field closes).
+- **Names** (said in the shell's log, for screen readers to come, §11):
+  "Ajouter une tâche" / "Add a task"; a box "Cocher « … »" / "Décocher
+  « … »" ("Tick "…"" / "Untick "…""); the mini item "À faire : 7 tâches"
+  / "To do: 7 tasks".
+- **Waking**: the day's changes wake the group's surfaces and the open
+  popover only when the tasks' account's tasks or pending changes
+  changed (`day::on_change`); the
+  1.5 s, the 300 ms and the 3 s are deadlines of the popovers' effects
+  stream. At rest nothing wakes or draws.
+- **Measured headless** (`crates/hocus-compositor/tests/tasks.rs`), the
+  real shell on the CPU, a fixture's board of the test's own, in French:
+  three tasks in the column's order and "+ 4 autres", the surface 18 + 3 ×
+  22 + 20 px (and 5 px around) 14 px under the agents' place, a cut
+  title whole in the tooltip, "+ 4 autres" opening the popover (6 rows,
+  "+ 1 autre", 280 wide, its top on the line)
+  (`the_group_shows_three_tasks_in_the_columns_order_and_the_rest_in_its_popover`);
+  a tick reaching the fixture at once, the line going 1.5 s after as the
+  shell measured it, the next task coming in
+  (`a_tick_reaches_the_source_at_once_and_its_line_goes_after_1_5_s`); a
+  second click within 1.5 s unticking, the card back first, the line
+  staying (`a_second_click_within_1_5_s_unticks_and_tells_the_source_again`);
+  a fixture refusing changes: the box unticked, "Pas enregistré" for 3 s,
+  then the title, the change still pending
+  (`a_refused_change_unticks_and_says_not_saved_for_3_s`); the field
+  taking the keyboard, `Enter` adding at the top and the third going into
+  "+ 5 autres", `Esc`, a click elsewhere on an empty field and on one
+  with text, a click back in it
+  (`enter_adds_the_task_at_the_top_and_esc_or_a_click_elsewhere_closes_the_empty_field`);
+  `Ctrl+V` from a window's clipboard, its line breaks dropped
+  (`ctrl_v_pastes_the_clipboards_text_into_the_field_without_its_line_breaks`);
+  the mini item 44 × 34 counting 7, its popover after a 150 ms hover as
+  the shell measured it, a box ticked there counting 6, the pointer
+  leaving closing it
+  (`the_mini_item_counts_the_open_tasks_and_opens_the_popover_after_150_ms`);
+  `Esc` in the popover giving the keyboard to "+ 4 autres", `Shift+Tab`
+  up through the boxes to the `+`, `Tab`, `Space` ticking, `Enter` on the
+  `+` opening the field
+  (`tab_goes_through_the_add_and_each_box_space_ticks_and_enter_opens_the_field`);
+  with a meeting card and two events, the group 14 px under Today
+  (`the_group_goes_14_px_under_today_when_today_lists_something`);
+  no board, no group (a one-pixel surface), an empty board "Rien à
+  faire." (`no_board_no_group_and_an_empty_board_says_nothing_to_do`); at
+  rest no commit, an event's change none either, a task's change one
+  draw (`at_rest_the_list_draws_nothing_and_another_change_of_the_day_neither`).
+  Unit tests for the group's and the popover's sizes, the `+`'s and the
+  boxes' places, the words in both languages. On the CPU, the
+  screenshots of the pull request.
+- **Choices the spec did not settle**: the group shows when a board is
+  set, or the local list has a task (hidden with only an empty local
+  list, as no task source is chosen); a task added shows at once, its
+  box inert, until its card is made; past 6 in the popover, "+ N autres"
+  counts those past the first six and the wheel scrolls; the tooltip
+  shows only for a title that is cut; an untick refused ticks the box
+  again with "Pas enregistré"; the field takes 200 characters at most.
+- **Not built**: names for screen readers (§11); the motion of the
+  line's close is drawn only on a GPU, so the tests check its CPU path.

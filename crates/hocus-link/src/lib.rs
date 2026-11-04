@@ -80,6 +80,11 @@ pub const DESKTOPS_NAMESPACE: &str = "hocus-bar-desktops";
 /// The namespace of the agents' group's surface, under the clock (bar.md
 /// §4 group 3, 4.0): the agents' changes draw only that region.
 pub const AGENTS_NAMESPACE: &str = "hocus-bar-agents";
+/// The namespace of the to-do list's surface (bar.md §4 group 5, Day.4):
+/// the group under the agents' in the full form, its item under theirs in
+/// the mini form. A change of the tasks draws only that region; its field
+/// takes the keyboard while the user types a task.
+pub const TASKS_NAMESPACE: &str = "hocus-bar-tasks";
 /// The namespace of a popover's layer surface, beside the bar (bar.md §9):
 /// one at a time. The compositor blurs behind it as behind the bar, draws
 /// its shadow, and moves it in and out ([`POPOVER_OPEN`], [`POPOVER_CLOSE`]).
