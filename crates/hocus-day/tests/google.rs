@@ -514,7 +514,9 @@ fn an_account_added_in_online_accounts_starts_its_worker_and_one_removed_stops_i
         bed.account(ALEX).map(|s| s.calendars[0].colour),
         Some(colour)
     );
-    assert_eq!(threads("day: google"), 1);
+    // One worker (a thread it starts without a name of its own, as the
+    // HTTP client's name lookup, bears its name a moment).
+    wait_for(|| threads("day: google") == 1)?;
     // Its calendar switched off: it stops; on: it starts again.
     bed.goa.set_calendar("account_1", false)?;
     bed.until("Alex's calendar off", |d| d.accounts().len() == 1)?;
