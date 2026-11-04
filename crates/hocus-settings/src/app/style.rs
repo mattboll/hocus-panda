@@ -162,7 +162,8 @@ pub fn search(_: &Theme, status: text_input::Status) -> text_input::Style {
 
 /// An icon in `color`, its strokes `width` wide.
 pub fn icon(icon: Icon, color: Color, width: f32) -> svg::Handle {
-    static CACHE: OnceLock<Mutex<HashMap<(Icon, [u8; 4], u32), svg::Handle>>> = OnceLock::new();
+    type Drawn = HashMap<(Icon, [u8; 4], u32), svg::Handle>;
+    static CACHE: OnceLock<Mutex<Drawn>> = OnceLock::new();
     let rgba = color.into_rgba8();
     let key = (icon, rgba, width.to_bits());
     let mut cache = CACHE
@@ -205,7 +206,8 @@ pub fn load_fonts() {
 /// `text`'s width in `font` at `size`, measured once.
 pub fn measure(text: &str, size: f32, font: Font) -> f32 {
     use iced::advanced::graphics::text::cosmic_text;
-    static MEASURED: OnceLock<Mutex<HashMap<(String, u32, Font), f32>>> = OnceLock::new();
+    type Widths = HashMap<(String, u32, Font), f32>;
+    static MEASURED: OnceLock<Mutex<Widths>> = OnceLock::new();
     let key = (text.to_owned(), size.to_bits(), font);
     let mut measured = MEASURED
         .get_or_init(Mutex::default)

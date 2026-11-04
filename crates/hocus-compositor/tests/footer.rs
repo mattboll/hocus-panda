@@ -40,9 +40,22 @@ impl Bed {
         };
         let dir = tempfile::tempdir()?;
         let root = dir.path();
-        for sub in ["home", "config", "cache", "state", "data"] {
+        for sub in ["home", "config", "cache", "state", "data", "bin"] {
             std::fs::create_dir_all(root.join(sub))?;
         }
+        // The Settings the user's popover starts: they write down that they
+        // were.
+        let settings = root.join("bin/hocus-settings");
+        std::fs::write(
+            &settings,
+            format!(
+                "#!/bin/sh
+echo \"$@\" > '{}'
+",
+                root.join("settings-started").display()
+            ),
+        )?;
+        std::fs::set_permissions(&settings, std::fs::Permissions::from_mode(0o755))?;
         let log = root.join("shell.log");
         let script = root.join("shell");
         let at = |sub: &str| root.join(sub).display().to_string();
@@ -54,7 +67,8 @@ impl Bed {
                  PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
-                 XDG_DATA_DIRS='{}' HOCUS_USER_NAME=Alex RUST_LOG=warn,hocuspanda_shell=debug\n\
+                 XDG_DATA_DIRS='{}' HOCUS_USER_NAME=Alex RUST_LOG=warn,hocuspanda_shell=debug \
+                 PATH='{}':\"$PATH\"\n\
                  exec '{}' \"$@\" 2>>'{}'\n",
                 at("home"),
                 at("config"),
@@ -62,6 +76,7 @@ impl Bed {
                 at("state"),
                 at("data"),
                 at("data"),
+                at("bin"),
                 shell.display(),
                 log.display()
             ),
@@ -377,6 +392,32 @@ fn each_footer_button_opens_its_thing() -> anyhow::Result<()> {
     let ended = bed.hp.dispatch_until(WAIT, |hp| hp.ending().is_some())?;
     anyhow::ensure!(ended, "the session did not end");
     assert_eq!(bed.hp.ending(), Some(Ending::LoggedOut));
+    Ok(())
+}
+
+/// The user's popover's "Réglages" (6.1): its first row starts the
+/// Settings and closes the popover.
+#[test]
+fn the_users_popover_opens_the_settings() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start((1920, 1080))? else {
+        return Ok(());
+    };
+    bed.click(bed.button(3))?;
+    let session = bed.popover()?;
+    bed.logged("the session's popover shows it")?;
+    // Its first row: 49 px down, 44 px tall.
+    bed.click((
+        f64::from(session.x + 9 + 131),
+        f64::from(session.y + 49 + 22),
+    ))?;
+    bed.logged("the Settings open from the footer")?;
+    let started = bed._dir.path().join("settings-started");
+    let done = bed.hp.dispatch_until(WAIT, |_| started.exists())?;
+    anyhow::ensure!(done, "the Settings never started");
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "the popover stayed");
     Ok(())
 }
 

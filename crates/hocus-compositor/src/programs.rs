@@ -314,7 +314,20 @@ mod tests {
             activation: None,
             cursor: crate::cursor::Choice::of(None, None, &crate::CursorEnv::default()),
             session_bus: None,
+            config: Some(PathBuf::from("/home/alex/.config/hocuspanda/config.toml")),
         };
+        // The Settings it starts write the file it read.
+        let command = env("/run/user/1000/hocus-0").command("hocus-settings");
+        let config = command
+            .get_envs()
+            .find(|(name, _)| *name == hocus_link::CONFIG_ENV)
+            .and_then(|(_, value)| value);
+        assert_eq!(
+            config,
+            Some(std::ffi::OsStr::new(
+                "/home/alex/.config/hocuspanda/config.toml"
+            ))
+        );
         assert_eq!(env("/run/user/1000/hocus-0").wayland_display(), "hocus-0");
         assert_eq!(env("/tmp/hp/hocus-0").wayland_display(), "/tmp/hp/hocus-0");
         assert_eq!(env("/tmp/hp/hocus-0").display().as_deref(), Some(":1"));
