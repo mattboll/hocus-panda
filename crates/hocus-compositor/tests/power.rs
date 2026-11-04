@@ -456,6 +456,73 @@ fn the_pointer_is_a_hand_over_the_rows_and_an_arrow_off_them() -> anyhow::Result
     Ok(())
 }
 
+/// The hand over a row, the window's own pointer (none) over a window,
+/// and the hand again once the pointer is back on the row (#553). The
+/// shell is held still while the pointer is away, so that it reads the
+/// leave and the enter at once, as a busy shell does: the shape its
+/// widgets ask for is then the one it set last, and the enter must set it
+/// again all the same.
+#[test]
+fn the_hand_is_set_again_when_the_pointer_comes_back_over_a_row() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start_full(&shell, |_| {})?;
+    let (window, _client) = common::open_showing(
+        &mut bed.hp,
+        "hider",
+        common::Shows::Hiding {
+            app_id: "hider",
+            size: (400, 300),
+        },
+    )?;
+    let middle = (
+        f64::from(window.x + window.width / 2),
+        f64::from(window.y + window.height / 2),
+    );
+    let hand = |hp: &Headless| {
+        matches!(
+            hp.state().cursor,
+            CursorImageStatus::Named(CursorIcon::Pointer)
+        )
+    };
+    let hidden = |hp: &Headless| matches!(hp.state().cursor, CursorImageStatus::Hidden);
+    for round in 0..3 {
+        common::point(&mut bed.hp, LIGHT_ROW)?;
+        let shows = bed.hp.dispatch_until(WAIT, hand)?;
+        anyhow::ensure!(
+            shows,
+            "round {round}: no hand over the row: {:?}",
+            bed.hp.state().cursor
+        );
+        // Everything the shell had to do done before it is held.
+        common::at_rest(&mut bed.hp)?;
+        bed.hp.hold_shell(true)?;
+        bed.hp.pointer_move(middle.0, middle.1);
+        let shows = bed.hp.dispatch_until(WAIT, hidden);
+        let back = shows.and_then(|shows| {
+            anyhow::ensure!(
+                shows,
+                "round {round}: the window's pointer: {:?}",
+                bed.hp.state().cursor
+            );
+            bed.hp.pointer_move(LIGHT_ROW.0, LIGHT_ROW.1);
+            // One turn, which sends the enter before the shell reads
+            // anything.
+            bed.hp.dispatch(Duration::ZERO)
+        });
+        bed.hp.hold_shell(false)?;
+        back?;
+        let shows = bed.hp.dispatch_until(WAIT, hand)?;
+        anyhow::ensure!(
+            shows,
+            "round {round}: no hand back over the row: {:?}",
+            bed.hp.state().cursor
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn the_slider_the_wheel_and_the_arrows_reach_logind_coalesced_never_below_5() -> anyhow::Result<()>
 {
