@@ -186,6 +186,32 @@ pub fn is_bubble(namespace: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// The namespaces of a meeting's reminder (Day.6): its tab beside a bar,
+/// one surface for each tab on each bar, its number after the prefix
+/// ([`reminder_namespace`]). Above the windows, a fullscreen one too; the
+/// compositor moves each in and out as a bubble ([`slides_in`]).
+pub const REMINDER_PREFIX: &str = "hocus-reminder-";
+/// A reminder's corners, logical pixels.
+pub const REMINDER_RADIUS: f64 = 12.0;
+
+/// Reminder tab `n`'s namespace.
+pub fn reminder_namespace(n: u64) -> String {
+    format!("{REMINDER_PREFIX}{n}")
+}
+
+/// Whether `namespace` is a reminder's.
+pub fn is_reminder(namespace: &str) -> bool {
+    namespace
+        .strip_prefix(REMINDER_PREFIX)
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether the compositor moves a surface of `namespace` in and out as a
+/// bubble ([`BUBBLE_IN`], [`BUBBLE_OUT`]): a bubble's, or a reminder's.
+pub fn slides_in(namespace: &str) -> bool {
+    is_bubble(namespace) || is_reminder(namespace)
+}
+
 /// The environment variable naming the session bus the shell serves the
 /// notifications on (`org.freedesktop.Notifications`), set by the
 /// compositor: the bus given with `--session-bus`, else as the session,
@@ -450,8 +476,23 @@ pub enum ToShell {
     /// A change asked of the day's tasks, or a read of every account
     /// (docs/design/day.md): what the bar's own views ask, for tests and
     /// tools that have no view to click. Written `day add TITLE`, `day tick
-    /// ID`, `day untick ID`, `day refresh`, `day calendar DATE [EVENT]`.
+    /// ID`, `day untick ID`, `day refresh`, `day slept SECONDS`, `day calendar
+    /// DATE [EVENT]`.
     Day(DayAsk),
+    /// `Super+J` (`[shortcuts] join`, Day.6): the meeting whose reminder
+    /// shows is joined, else the one starting next within 10 min; nothing
+    /// without one. Written `join`.
+    Join,
+    /// The screens whose front window is full screen, which covers their
+    /// bar (Day.6: a meeting's reminder then shows at the screen's edge):
+    /// sent as the shell connects and when they change. Written
+    /// `fullscreen`, then each screen's name after a tab.
+    Fullscreen(Vec<String>),
+    /// The screens shared now (5.11), by their connectors' names: a
+    /// meeting's reminder hides its title on them (Day.6). Sent with
+    /// [`ToShell::Shares`]. Written `shared-screens`, then each name after
+    /// a tab.
+    SharedScreens(Vec<String>),
 }
 
 /// What [`ToShell::Day`] asks.
@@ -464,6 +505,11 @@ pub enum DayAsk {
     Untick(String),
     /// Every account read again now.
     Refresh,
+    /// Tests only, and only when the shell's clock reads a time of its own
+    /// (`HOCUS_CLOCK_AT`): the machine slept that many seconds, its wall
+    /// clock moved on while its monotonic clock did not, and it resumed,
+    /// as logind would say it (`PrepareForSleep(false)`).
+    Slept(u64),
     /// The calendar opens (Day.5) on `day` (`2026-11-04`), the event of
     /// that id chosen, as the next meeting's card opens it.
     Calendar {
@@ -1442,6 +1488,21 @@ impl fmt::Display for ToShell {
                 }
             }
             Self::EmojiInserted => f.write_str("emoji-inserted"),
+            Self::Join => f.write_str("join"),
+            Self::SharedScreens(names) => {
+                f.write_str("shared-screens")?;
+                for name in names {
+                    write!(f, "\t{}", screen_name(name))?;
+                }
+                Ok(())
+            }
+            Self::Fullscreen(names) => {
+                f.write_str("fullscreen")?;
+                for name in names {
+                    write!(f, "\t{}", screen_name(name))?;
+                }
+                Ok(())
+            }
             Self::ShareChoose(choose) => choose.write(f),
             Self::ShareChooseEnd(request) => write!(f, "share-choose-end {request}"),
             Self::TrayToken { ask, token } => write!(f, "tray-token {ask} {token}"),
@@ -1463,6 +1524,7 @@ impl fmt::Display for ToShell {
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
                 DayAsk::Untick(id) => write!(f, "day untick {}", one_line(id)),
                 DayAsk::Refresh => f.write_str("day refresh"),
+                DayAsk::Slept(seconds) => write!(f, "day slept {seconds}"),
                 DayAsk::Calendar { day, event } => {
                     write!(f, "day calendar {}", one_line(day))?;
                     match event {
@@ -1520,6 +1582,12 @@ impl FromStr for ToShell {
                     };
                     Self::Day(DayAsk::Calendar { day, event })
                 }),
+                "slept" => text().and_then(|t| {
+                    t.trim()
+                        .parse()
+                        .map(|s| Self::Day(DayAsk::Slept(s)))
+                        .map_err(|e| BadLine(format!("day slept: {e}")))
+                }),
                 other => Err(BadLine(format!("day {other}"))),
             };
         }
@@ -1532,6 +1600,28 @@ impl FromStr for ToShell {
                 .map(ShareShown::read)
                 .collect::<Result<_, BadLine>>()
                 .map(Self::Shares);
+        }
+        if let Some(names) = line.strip_prefix("shared-screens")
+            && (names.is_empty() || names.starts_with('\t'))
+        {
+            return Ok(Self::SharedScreens(
+                names
+                    .split('\t')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ));
+        }
+        if let Some(names) = line.strip_prefix("fullscreen")
+            && (names.is_empty() || names.starts_with('\t'))
+        {
+            return Ok(Self::Fullscreen(
+                names
+                    .split('\t')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ));
         }
         if let Some(names) = line.strip_prefix("screens")
             && (names.is_empty() || names.starts_with('\t'))
@@ -1734,6 +1824,7 @@ impl FromStr for ToShell {
                 })
             }
             Some("emoji-inserted") => Ok(Self::EmojiInserted),
+            Some("join") => Ok(Self::Join),
             Some("tray-token") => {
                 let ask = word(&mut words, "click")?
                     .parse()
@@ -2226,6 +2317,12 @@ mod tests {
             ToShell::Day(DayAsk::Tick("18a2f-3".into())),
             ToShell::Day(DayAsk::Untick("c 2".into())),
             ToShell::Day(DayAsk::Refresh),
+            ToShell::Day(DayAsk::Slept(900)),
+            ToShell::Join,
+            ToShell::Fullscreen(vec!["HDMI-A-1".to_owned(), "eDP-1".to_owned()]),
+            ToShell::Fullscreen(Vec::new()),
+            ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),
+            ToShell::SharedScreens(Vec::new()),
             ToShell::Day(DayAsk::Calendar {
                 day: "2026-11-10".into(),
                 event: Some("e 12".into()),
@@ -2444,6 +2541,9 @@ mod tests {
             "titles",
             "titles eDP-1\t3",
             "titles eDP-1\tthree\tfish",
+            "day slept",
+            "day slept soon",
+            "fullscreenHDMI-A-1",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }
@@ -2460,6 +2560,16 @@ mod tests {
             NAMESPACE,
         ] {
             assert!(!is_bubble(not), "{not}");
+        }
+    }
+
+    #[test]
+    fn a_reminders_namespace_holds_its_number_and_slides_as_a_bubble() {
+        assert_eq!(reminder_namespace(3), "hocus-reminder-3");
+        assert!(is_reminder(&reminder_namespace(12)));
+        assert!(slides_in(&reminder_namespace(1)) && slides_in(&bubble_namespace(1)));
+        for not in ["hocus-reminder-", "hocus-reminder-x", MEETING_NAMESPACE] {
+            assert!(!is_reminder(not) && !slides_in(not), "{not}");
         }
     }
 

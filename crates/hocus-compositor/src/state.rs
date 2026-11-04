@@ -186,6 +186,8 @@ pub struct State {
     pub peek: crate::peek::Peeks,
     /// The notifications' bubbles, and their screen (5.3).
     pub bubbles: crate::bubbles::Bubbles,
+    /// What the meetings' reminders were told (Day.6).
+    pub reminders: crate::reminders::Reminders,
     /// The clipboard's history's copies and pastes (5.6).
     pub clipboard: crate::clipboard::Clipboard,
     /// The emoji picker's insertions, and the text inputs (5.7).
@@ -379,6 +381,7 @@ impl State {
             halo: crate::halo::Halo::default(),
             peek: crate::peek::Peeks::default(),
             bubbles: crate::bubbles::Bubbles::default(),
+            reminders: crate::reminders::Reminders::default(),
             clipboard: crate::clipboard::Clipboard::default(),
             emoji: crate::emoji::Emoji::new(dh),
             capture,

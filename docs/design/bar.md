@@ -3381,7 +3381,8 @@ its row, the mini form's clock opening it on a click only.
   `popover::Effect::OpenCalendar`, carried out after it. The next
   meeting's card and its mini popover's "Voir dans le calendrier" open it
   on today with the meeting chosen (Day.2); Today's lines without a video
-  link on their event, "+ N" on today (Day.3). For tests and tools, the
+  link on their event, "+ N" on today (Day.3); a reminder's Voir on its
+  meeting's day with the meeting chosen (Day.6). For tests and tools, the
   compositor's `day calendar DATE [EVENT]` line asks the same.
 - **At rest** it draws nothing; while open, again as one of today's
   events ends (it greys out) and at midnight (today moves), nothing
@@ -3424,3 +3425,124 @@ its row, the mini form's clock opening it on a click only.
 - **Not built**: "Choisir des agendas…" (Day.1's picker); months outside
   the window asked of the workers; names for screen readers given to
   them (§11, logged until iced has them).
+
+### Day.6, a meeting's reminder (2026-11-04)
+
+What the approved Day.6 mockup shows, variant B (a tab against the bar),
+with the maintainer's spec (issue #430) and its decisions: reminders get
+through do not disturb; on a shared screen the tab hides its title;
+`Super+J` joins; 5 min before by default, and the events' own alarms.
+
+- **When** (`crates/hocus-shell/src/reminder/mod.rs`): for each event that
+  takes a slot of the day (`Event::takes_time`: timed, neither cancelled,
+  declined nor free) of the calendars shown, at its own earliest alarm
+  (`Event::alarms`: Google's popup reminders, a fixture's `alarms`), else
+  `[calendar] remind` minutes before its start (default 5; `0` turns the
+  default off and keeps the events' own; `hocus_day::reminders`). The
+  times are whole minutes, as the meeting card's: the start to the
+  nearest, the clock's minute as it shows it, so that the tab and the card
+  say the same minutes.
+- **Off the loop**: a thread of its own (`reminders`) looks at the day's
+  snapshot (`day::snapshot`, its window 24 h back to 400 days ahead) when
+  the day changes (`day::on_change`), and waits for the next reminder (or
+  a shown tab's next minute, or a meeting's end for the history) on the
+  monotonic clock: the wall clock is read once as the next one is known,
+  and again after a resume (logind, through `day::resumed`), a clock set
+  (a `CLOCK_REALTIME` timer that the kernel cancels when the clock is set,
+  on a thread of its own) or a time zone changed. Nothing wakes the
+  shell's loop until a tab comes, changes or goes: the thread sends the
+  layer-shell actions on a stream of its own, and the tab's `wake`.
+- **A missed one**: a reminder whose time passed (asleep, or the shell
+  started late) shows when the thread looks again, if the meeting has not
+  been running for 10 min ("a commencé il y a 2 min").
+- **The tab** (`reminder/draw.rs`): a surface of its own on each bar
+  (`hocus-reminder-N`, one per tab; on the overlay layer, so that a
+  fullscreen window does not cover it), 8 px left of the bar, its top on
+  the meeting card's (108 px from the screen's top in the full form);
+  in the mini form centred on the next meeting's mark, 8 px left of the
+  mini bar. 340 × 44, radius 12, the bubbles' tint
+  (`rgba(22,27,42,0.96) → rgba(14,17,28,0.97)`, opaque without glass), a
+  1 px `rgba(143,179,255,0.55)` rim; on a GPU its shadow `0 10px 30px
+  rgba(0,0,0,0.40)` and glow `0 0 20px rgba(143,179,255,0.22)` drawn in
+  the room around it (its surface takes the pointer on the tab only), on
+  the CPU the tab alone, its corners cut by the compositor. 12 px in on
+  the left, 6 on the right: the title (Manrope 700, 13 px, cut with "…")
+  over the line (11.5 px `#A9C4FF`): "14:30 · dans 5 min · visio" / "in
+  5 min · video", "dans 1 min", "maintenant" / "now", "a commencé il y a
+  4 min" / "started 4 min ago", the place instead of "visio" without a
+  link. Then its 30 px buttons, radius 8, 6 px apart: **Rejoindre** /
+  **Join** (a 14 px camera, 12.5 px 700 white on `#3F6FD8`, `#4A7BE6`
+  under the pointer) with a link, else **Voir** / **Open**
+  (`rgba(255,255,255,0.06)`, `0.12` under the pointer, in a 1 px
+  `rgba(255,255,255,0.14)` rim); **Later**, a 30 × 30 clock
+  (`rgba(255,255,255,0.06)`, its icon `#C9D0DC`), "Me le redire 1 min
+  avant" / "Remind me 1 min before" until 1 min is left, then "Me le
+  redire à l'heure" / "Remind me when it starts", gone once the meeting
+  started; **✕** "Ignorer ce rappel" / "Dismiss this reminder", 30 × 30,
+  `text.faint`. The icon buttons are lit `0.10` under the pointer and say
+  their names after 500 ms in the tray's tooltip (5.14), under the tab.
+- **Motion**: the compositor moves each tab as a bubble
+  (`hocus_link::slides_in`): 26 px from the bar's side and fading in over
+  220 ms (`cubic-bezier(.2,.8,.2,1)`), out over 170 ms (`ease-in`, the
+  shell saying `closing`, then removing it); a fade only with reduced
+  motion or a shell on the CPU. It draws when what it shows changes (at
+  most once a minute while it shows, for "dans N min") and under the
+  pointer; nothing at rest.
+- **Clicks**: Rejoindre opens the link with the default handler (the
+  launcher's `xdg-open`), the tab goes and the halo's meeting state ends
+  (`meeting::acted_on`); Voir, or a click on the text, opens the calendar
+  (Day.5) on the meeting's day with the meeting chosen, the tab goes and
+  the halo ends; Later takes it away until 1 min before, then until the
+  start, the halo going on; ✕ takes it away for this meeting and ends its
+  halo, so that the 2-min wave does not run. The card stays in each case.
+  Untouched, it stays until 10 min after the start, then goes to the
+  notifications' history, seen, as "Point produit · a commencé à 14:30" /
+  "… · started at 14:30" from "Agenda" / "Calendar", its link its action
+  (and its click) until the meeting ends, then none.
+- **`Super+J`** (`[shortcuts] join`): the compositor tells the shell
+  (`join`), which joins the meeting whose tab shows (the first with a
+  link), else the one with a link starting next within 10 min, its tab
+  not coming after; with none, nothing (said in the log).
+- **Do not disturb** holds the bubbles, never a tab. **A screen shared**
+  (5.11): the compositor says which screens are, by connector
+  (`shared-screens`, with `shares`); on them the title reads "Réunion" /
+  "Meeting". **Full screen**: the compositor says which screens' front
+  window is full screen (`fullscreen`, when it changes); on them the tab
+  shows 8 px from the screen's edge, at the same height.
+- **Several**: a tab each, 6 px apart, the earliest on top. An event
+  changed while its tab shows updates it in place; cancelled, declined or
+  removed, its tab goes; moved, its reminder comes anew.
+- **Names for screen readers** (§11), said once in the log as a tab comes:
+  "Point produit, dans 5 minutes, visio" / "…, in 5 minutes, video call".
+- **Choices made here** (to confirm on the machine): free events get no
+  reminder (as day.md's `takes_time` says, like the card); the tab shows
+  on every bar, as the card does; in the mini form it is centred on the
+  mark; on a shared screen only the title is replaced, its line kept;
+  `Super+J` joins the next meeting again if it was already joined; what
+  was dismissed is kept in memory
+  only (a restart of the shell shows a due tab again).
+- **Measured headless** (`crates/hocus-compositor/tests/reminders.rs`):
+  the real shell on the CPU, in French, a fixture's day, `HOCUS_CLOCK_AT`,
+  its `xdg-open` the test's own: the tab at 14:25 for 14:30, its 340 × 44
+  surface 8 px left of the bar at the card's top, Rejoindre's blue on the
+  screen, its name announced, the halo the card's; at the event's own
+  alarm (15 min); none for a declined, a cancelled or an all-day event;
+  Join opening the link, the tab gone, the halo ended, the card kept;
+  `Super+J` with the tab shown, with none and a meeting within 10 min, and
+  nothing 15 min ahead; resting on ✕, its name under the tab, centred on
+  it, gone with the press; ✕ ending the halo; Later until 1 min before, the
+  halo on; a 32 min sleep (`day slept`) showing the meeting started 2 min
+  ago and not the one that ran 12; do not disturb on (a private bus); the
+  title "Réunion" on a shared screen and back; at the screen's edge with
+  full screen and back; to the history 10 min after the start, its link
+  kept; the mini form's place; at rest, nothing looked at nor drawn
+  until the reminder is due, then one look, and nothing drawn after
+  within its minute. Unit tests for when it comes, stays and goes, a
+  missed one, Later, joined or dismissed, two at once, a change and a
+  cancel, `Super+J`, the words in both languages, the places, the
+  buttons' layout. On the CPU, the screenshots of the pull request
+  (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
+- **Not built**: the tab's keyboard (`Super+B` reaching the bar, then
+  `Tab` through its buttons): the bar has no keyboard entry yet
+  (`Super+B` switches its form); calendars "without reminders" (Day.1's
+  settings); the halo on the CPU.
