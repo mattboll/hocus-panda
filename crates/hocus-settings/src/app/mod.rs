@@ -54,6 +54,9 @@ const SLIDER_REST: Duration = Duration::from_millis(450);
 const TOAST_IN: Duration = Duration::from_millis(160);
 const MENU_IN: Duration = Duration::from_millis(140);
 const KNOB: Duration = Duration::from_millis(160);
+/// How long a closing window waits for the writes it asked before it
+/// goes anyway (a file on a disk that hangs).
+const CLOSE_WAIT: Duration = Duration::from_secs(5);
 /// A found row: lit after 250 ms, held 1 s, gone by 2.4 s.
 const LIGHT_WAIT: Duration = Duration::from_millis(250);
 const LIGHT_HELD: Duration = Duration::from_millis(1250);
@@ -148,6 +151,17 @@ struct Pending {
     change: Option<Change>,
 }
 
+/// Whether the window stays: asked to close, it goes once the writes it
+/// asked are on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Life {
+    Open,
+    /// Waiting for the worker's last writes.
+    Closing,
+    /// Its close asked of iced.
+    Closed,
+}
+
 /// A slider moving, before its value is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Sliding {
@@ -191,6 +205,8 @@ pub enum Message {
     Restore,
     OpenFile,
     Close,
+    /// Closing has waited long enough for the writes.
+    CloseAnyway,
     Drag,
     Frame(Instant),
     Placed(Places),
@@ -235,6 +251,7 @@ pub struct App {
     /// The frame's time, for the motions.
     now: Instant,
     reduced_motion: bool,
+    life: Life,
     /// What the log said last.
     said: String,
     said_places: String,
@@ -292,6 +309,7 @@ impl App {
             places: Places::default(),
             now: Instant::now(),
             reduced_motion: false,
+            life: Life::Open,
             said: String::new(),
             said_places: String::new(),
         };
@@ -329,6 +347,9 @@ impl App {
                     captured: status == event::Status::Captured,
                 }),
                 Event::Window(window::Event::Resized(_)) => Some(Message::Scrolled),
+                // A close the compositor asks: what is pending is written
+                // first, as for ours.
+                Event::Window(window::Event::CloseRequested) => Some(Message::Close),
                 _ => None,
             }),
         ];
@@ -369,6 +390,11 @@ impl App {
             self.light = None;
         }
         self.log();
+        let task = if self.life == Life::Closing && self.pending.is_empty() {
+            Task::batch([task, self.close_now()])
+        } else {
+            task
+        };
         if place {
             Task::batch([task, places()])
         } else {
@@ -474,7 +500,18 @@ impl App {
                 self.open_file();
                 Task::none()
             }
-            Message::Close => self.window.map_or_else(Task::none, window::close),
+            Message::Close => self.close(),
+            Message::CloseAnyway => {
+                if self.life == Life::Closing {
+                    tracing::warn!(
+                        writes = self.pending.len(),
+                        "the file's worker has not written yet: the window closes anyway"
+                    );
+                    self.close_now()
+                } else {
+                    Task::none()
+                }
+            }
             Message::Drag => self.window.map_or_else(Task::none, window::drag),
             Message::Frame(_) | Message::Scrolled | Message::Nothing => Task::none(),
             Message::Placed(places) => self.placed(places),
@@ -693,7 +730,9 @@ impl App {
                 change,
             },
         );
-        self.worker.ask(Ask::Write { slot, raw, id });
+        if !self.worker.ask(Ask::Write { slot, raw, id }) {
+            self.pending.remove(&id);
+        }
     }
 
     fn undo(&mut self) -> Task<Message> {
@@ -753,6 +792,33 @@ impl App {
         Task::perform(tokio::time::sleep(lasts), move |()| {
             Message::ToastGone(serial)
         })
+    }
+
+    /// ✕, `Esc`, `Ctrl+W` or the compositor's close: a slider still moving
+    /// is written now, and the window goes once the worker has written
+    /// what it was asked (never waiting on this thread).
+    fn close(&mut self) -> Task<Message> {
+        if self.life != Life::Open {
+            return Task::none();
+        }
+        if let Some(sliding) = self.sliding.take() {
+            let _ = self.change(sliding.slot, Value::Int(sliding.value));
+        }
+        self.menu = None;
+        if self.pending.is_empty() {
+            return self.close_now();
+        }
+        tracing::info!(
+            writes = self.pending.len(),
+            "closing once the file is written"
+        );
+        self.life = Life::Closing;
+        Task::perform(tokio::time::sleep(CLOSE_WAIT), |()| Message::CloseAnyway)
+    }
+
+    fn close_now(&mut self) -> Task<Message> {
+        self.life = Life::Closed;
+        self.window.map_or_else(iced::exit, window::close)
     }
 
     fn open_file(&self) {
@@ -910,7 +976,7 @@ impl App {
                 return Task::batch([operation::focus(SEARCH), operation::select_all(SEARCH)]);
             }
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("w") => {
-                return self.window.map_or_else(Task::none, window::close);
+                return self.close();
             }
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("z") => {
                 return if modifiers.shift() {
@@ -928,8 +994,13 @@ impl App {
                     self.focus = Focus::Search;
                     return operation::focus(SEARCH);
                 }
-                self.focus = Focus::Nothing;
-                return operation::focus("nothing");
+                // The field that had the keyboard lets it go (iced's own
+                // Esc, captured), then the window closes.
+                if captured || self.focus == Focus::Search {
+                    self.focus = Focus::Nothing;
+                    return operation::focus("nothing");
+                }
+                return self.close();
             }
             _ => {}
         }
