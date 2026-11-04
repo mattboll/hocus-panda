@@ -508,6 +508,13 @@ fn a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar() 
         "the calendar opens",
         &["day=2026-11-04", "focus=Some(Event("],
     )?;
+    // Closed (`Esc`) before the day changes under it.
+    bed.hp.key(common::KEY_ESC, true);
+    bed.hp.key(common::KEY_ESC, false);
+    let closed = bed
+        .hp
+        .dispatch_until(common::WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "the calendar stayed open");
     // "+ N": the calendar on today.
     let mark = bed.mark();
     bed.rewrite(&busy(40))?;
