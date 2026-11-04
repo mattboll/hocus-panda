@@ -1,0 +1,1292 @@
+//! The to-do list's surface (Day.4, bar.md §4 group 5, §5), as the
+//! approved mockup's variant C draws it, at ×1.
+//!
+//! - **The full form's group**, 14 px under the agents' group (or where it
+//!   would be): an 18 px header, "À FAIRE" (Manrope 700, 11.5 px, spaced
+//!   0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, its
+//!   14 px plus `text.dim`, lit `0.06` under the pointer); a 22 px line per
+//!   task, at most 3: its 14 px box (radius 4, a 1.5 px `0.38` border) in
+//!   a 22 × 22 button 4 px past the group's left, lit under the pointer,
+//!   then 4 px and the title (13 px, `text`, cut with an ellipsis; resting
+//!   600 ms on a cut title shows it whole in a tooltip); past 3, a 20 px
+//!   "+ N autres" (12.5 px, `text.faint`), a button opening the tasks'
+//!   popover. No task: "Rien à faire." (13 px, `text.faint`). The field to
+//!   add a task is its first line, 26 px (2 px above and under), radius 7,
+//!   `0.06`, a 1 px `rgba(108,194,135,0.65)` border, 13 px.
+//! - A ticked box fills with `#6CC287` and shows a dark check (`#0b1020`),
+//!   its title `text.faint` and struck through; "Pas enregistré" (12 px,
+//!   `#F7A77A`) takes the title's place for 3 s when the source refused.
+//! - **The mini form's item**, 14 px under the agents' item: 44 × 34,
+//!   radius 10, a 16 px box (`text.dim`) and how many tasks are open
+//!   (Martian Mono 11 px), lit `0.06` under the pointer and `0.08` while
+//!   the popover shows; a 150 ms hover or a click opens it.
+//!
+//! As tall as what it shows, one pixel taking no pointer when nothing
+//! shows (no board set and no local task). While the form switches it
+//! holds both forms, which cross-fade as the other groups do.
+
+use std::{
+    collections::HashMap,
+    sync::{Mutex, PoisonError},
+};
+
+use hocus_link::{EDGE, Form, TASKS_NAMESPACE};
+use iced::{
+    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    widget::{
+        canvas::{self, Frame, Geometry, Path, Stroke},
+        text::Alignment,
+    },
+    window,
+};
+use iced_layershell::reexport::{
+    Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
+};
+
+use super::{At, GROUP_LINES, Key, Lines, Look, Words};
+use crate::{
+    Message,
+    clock::motion::bezier,
+    levels::draw::{
+        DIM, FAINT, HOVER, MANROPE, MANROPE_BOLD, OPEN, TEXT, faded, pointer, rgb, ring,
+    },
+    popover::{self, Item, Pressed, kit},
+};
+
+/// The surfaces' widths: the bar inside its rim.
+const FULL_WIDTH: u32 = 194;
+const MINI_WIDTH: u32 = 54;
+/// Around what it draws: the keyboard's ring, 2 px out and 3 px wide.
+const ROOM: f32 = 5.0;
+/// The group's sides on the surface: the bar's 12 px padding, less its
+/// rim; its width, the bar's inside.
+const SIDE: f32 = 11.0;
+pub const WIDTH: f32 = 172.0;
+
+/// The header: 18 px; its label, spaced 0.1 em.
+const HEADER: f32 = 18.0;
+const LABEL: f32 = 11.5;
+const LABEL_SPACING: f32 = 0.1 * LABEL;
+/// The `+`: 22 × 18, radius 6, 4 px past the group's right; its plus
+/// 14 px.
+const ADD: Size = Size::new(22.0, 18.0);
+const ADD_OUT: f32 = 4.0;
+const ADD_RADIUS: f32 = 6.0;
+const PLUS: f32 = 14.0;
+/// A task's line: 22 px; its box's button 22 × 22, 4 px past the group's
+/// left, radius 6; the box 14 px, radius 4, its border 1.5 px; the title
+/// 4 px after the button, 13 px.
+pub const LINE: f32 = 22.0;
+const BUTTON: f32 = 22.0;
+const BUTTON_OUT: f32 = 4.0;
+const BUTTON_RADIUS: f32 = 6.0;
+pub const BOX: f32 = 14.0;
+const BOX_RADIUS: f32 = 4.0;
+const BOX_BORDER: f32 = 1.5;
+const TITLE_GAP: f32 = 4.0;
+const TITLE: f32 = 13.0;
+/// "Pas enregistré": 12 px, peach.
+const UNSAVED: f32 = 12.0;
+pub const UNSAVED_INK: Color = rgb(0xF7A77A);
+/// "+ N autres": 20 px, 12.5 px, a button 6 px past its text each side.
+const MORE: f32 = 20.0;
+const MORE_TEXT: f32 = 12.5;
+const MORE_OUT: f32 = 6.0;
+/// The field: 26 px, 2 px above and under, radius 7, 8 px in.
+const FIELD: f32 = 26.0;
+const FIELD_MARGIN: f32 = 2.0;
+const FIELD_RADIUS: f32 = 7.0;
+const FIELD_PAD: f32 = 8.0;
+/// The mini item: 44 × 34, radius 10; its box 16 px, 5 px before the
+/// count (Martian Mono 11 px).
+const MINI: Size = Size::new(44.0, 34.0);
+const MINI_RADIUS: f32 = 10.0;
+const MINI_ICON: f32 = 16.0;
+const MINI_GAP: f32 = 5.0;
+const MINI_TEXT: f32 = 11.0;
+const MONO: iced::Font = iced::Font::with_name("Martian Mono");
+
+const BORDER: Color = Color::from_rgba8(255, 255, 255, 0.38);
+pub const TICKED: Color = rgb(0x6CC287);
+const CHECK: Color = rgb(0x0B1020);
+pub const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
+pub const FIELD_BORDER: Color = Color::from_rgba8(108, 194, 135, 0.65);
+/// A title's tooltip, after resting this long on it.
+const TIP: std::time::Duration = std::time::Duration::from_millis(600);
+/// The line's close, `ease-in`.
+const EASE_IN: (f32, f32, f32, f32) = (0.42, 0.0, 1.0, 1.0);
+
+// --- The group laid out ----------------------------------------------------------------
+
+/// A line of the group, laid out from the group's top.
+#[derive(Debug, Clone, PartialEq)]
+struct Row {
+    key: Key,
+    look: Look,
+    /// Its title, and as cut to its room (none: it fits).
+    title: String,
+    cut: Option<String>,
+    top: f32,
+    height: f32,
+    alpha: f32,
+}
+
+/// What the group shows, from its top.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Laid {
+    /// 0: nothing shows.
+    height: f32,
+    field: Option<Rectangle>,
+    rows: Vec<Row>,
+    /// "Rien à faire."'s middle.
+    empty: Option<f32>,
+    more: Option<(String, Rectangle)>,
+    /// The mini item's count (none: no item).
+    mini: Option<usize>,
+}
+
+/// The group's `+`, from the group's top left.
+fn add_rect() -> Rectangle {
+    Rectangle::new(Point::new(WIDTH + ADD_OUT - ADD.width, 0.0), ADD)
+}
+
+/// A line's box's button, its line from `top`.
+fn button_rect(top: f32) -> Rectangle {
+    Rectangle::new(
+        Point::new(-BUTTON_OUT, top + (LINE - BUTTON) / 2.0),
+        Size::new(BUTTON, BUTTON),
+    )
+}
+
+/// Where a line's title starts.
+fn title_x() -> f32 {
+    -BUTTON_OUT + BUTTON + TITLE_GAP
+}
+
+/// `lines` laid out, and the field if open on `bar`'s group, cut with
+/// `width`.
+fn lay_out(
+    lines: &Lines,
+    field: bool,
+    words: Words,
+    mut width: impl FnMut(&str, f32) -> f32,
+) -> Laid {
+    if !lines.shows {
+        return Laid::default();
+    }
+    let mut y = HEADER;
+    let field = field.then(|| {
+        let rect = Rectangle::new(Point::new(0.0, y + FIELD_MARGIN), Size::new(WIDTH, FIELD));
+        y += FIELD + 2.0 * FIELD_MARGIN;
+        rect
+    });
+    let room = WIDTH - title_x();
+    // The lines that stay, at most 3, with those going among them; one
+    // coming in under them fades in as they close.
+    let going: Vec<f32> = lines.lines.iter().filter_map(|l| l.going).collect();
+    let closing = going
+        .iter()
+        .copied()
+        .map(|t| bezier(EASE_IN, t))
+        .fold(0.0_f32, f32::max);
+    let mut rows = Vec::new();
+    let mut staying = 0;
+    for line in &lines.lines {
+        let goes = line.going.is_some();
+        if !goes && staying == GROUP_LINES {
+            continue;
+        }
+        let (height, alpha) = match line.going {
+            Some(t) => {
+                let t = bezier(EASE_IN, t);
+                (LINE * (1.0 - t), 1.0 - t)
+            }
+            None if staying + going.len() >= GROUP_LINES => (LINE, closing.max(0.0)),
+            None => (LINE, 1.0),
+        };
+        // One coming in shows as the others close: fully once they did.
+        let alpha = if going.is_empty() { 1.0 } else { alpha };
+        if !goes {
+            staying += 1;
+        }
+        let cut = (width(&line.title, TITLE) > room)
+            .then(|| kit::elide(&line.title, room, |t| width(t, TITLE)));
+        rows.push(Row {
+            key: line.key.clone(),
+            look: line.look,
+            title: line.title.clone(),
+            cut,
+            top: y,
+            height,
+            alpha,
+        });
+        y += height;
+    }
+    let mut empty = None;
+    if rows.is_empty() && field.is_none() {
+        empty = Some(y + LINE / 2.0);
+        y += LINE;
+    }
+    let rest = lines
+        .lines
+        .iter()
+        .filter(|l| l.going.is_none())
+        .count()
+        .saturating_sub(GROUP_LINES);
+    let more = (rest > 0).then(|| {
+        let said = words.more(rest);
+        let w = width(&said, MORE_TEXT);
+        let rect = Rectangle::new(
+            Point::new(-MORE_OUT, y),
+            Size::new(w + 2.0 * MORE_OUT, MORE),
+        );
+        y += MORE;
+        (said, rect)
+    });
+    Laid {
+        height: y,
+        field,
+        rows,
+        empty,
+        more,
+        mini: Some(lines.open()),
+    }
+}
+
+/// The group's height at rest for `laid`: the lines going count until
+/// they went.
+fn resting_height(laid: &Laid) -> f32 {
+    if laid.height <= 0.0 {
+        return 0.0;
+    }
+    laid.height + laid.rows.iter().map(|r| LINE - r.height).sum::<f32>()
+}
+
+// --- Where the surface goes ------------------------------------------------------------
+
+/// The group's top under the bar's, in the full form: 14 px under the
+/// agents' group, or where it would be. (Today, Day.3, comes between.)
+pub fn full_top() -> f32 {
+    crate::agents::draw::next_top(Form::Full)
+}
+
+/// The mini item's top under the bar's: 14 px under the agents' item.
+pub fn mini_top() -> f32 {
+    crate::agents::draw::next_top(Form::Mini)
+}
+
+/// A layer surface's margins: top, right, bottom, left.
+type Margin = (i32, i32, i32, i32);
+
+#[derive(Debug, Clone, Copy)]
+struct Place {
+    id: window::Id,
+    form: Form,
+    switching: bool,
+    asked: ((u32, u32), Margin),
+    input: Option<bool>,
+    /// What its group last laid out took (its field is its own).
+    heights: Heights,
+}
+
+/// The group's heights as last laid out: the full form's, and whether the
+/// mini item shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Heights {
+    full: f32,
+    mini: bool,
+}
+
+static PLACES: Mutex<Option<HashMap<String, Place>>> = Mutex::new(None);
+/// Each bar's lines as drawn, from the top: what its `Task(slot)` items
+/// are.
+static SLOTS: Mutex<Option<HashMap<String, Vec<Key>>>> = Mutex::new(None);
+
+fn places<T>(with: impl FnOnce(&mut HashMap<String, Place>) -> T) -> T {
+    let mut places = PLACES.lock().unwrap_or_else(PoisonError::into_inner);
+    with(places.get_or_insert_with(HashMap::new))
+}
+
+/// The surface's top under the bar's and its size, in `form`, for a
+/// group `h` tall.
+fn placement(form: Form, switching: bool, h: Heights) -> (f32, (u32, u32)) {
+    let tall = |height: f32| (height + 2.0 * ROOM).ceil() as u32;
+    let full = (full_top(), h.full);
+    let mini = (mini_top(), if h.mini { MINI.height } else { 0.0 });
+    match (switching, form) {
+        (false, Form::Full) if full.1 > 0.0 => (full.0 - ROOM, (FULL_WIDTH, tall(full.1))),
+        (false, Form::Full) => (full.0 - ROOM, (FULL_WIDTH, 1)),
+        (false, Form::Mini) if mini.1 > 0.0 => (mini.0 - ROOM, (MINI_WIDTH, tall(mini.1))),
+        (false, Form::Mini) => (mini.0 - ROOM, (MINI_WIDTH, 1)),
+        (true, _) if full.1 <= 0.0 && mini.1 <= 0.0 => (full.0 - ROOM, (FULL_WIDTH, 1)),
+        (true, _) => {
+            let top = full.0.min(mini.0);
+            let bottom = (full.0 + full.1).max(mini.0 + mini.1);
+            (top - ROOM, (FULL_WIDTH, tall(bottom - top)))
+        }
+    }
+}
+
+fn margin(top: f32) -> Margin {
+    (EDGE + top.round() as i32, EDGE + 1, 0, 0)
+}
+
+/// The to-do list of bar `bar` in `form`, on `output`: its surface's id,
+/// and what opens it.
+pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Message>) {
+    let id = window::Id::unique();
+    let (top, size) = placement(form, false, Heights::default());
+    let margin = margin(top);
+    places(|places| {
+        places.insert(
+            bar.to_owned(),
+            Place {
+                heights: Heights::default(),
+                id,
+                form,
+                switching: false,
+                asked: (size, margin),
+                input: None,
+            },
+        )
+    });
+    let settings = NewLayerShellSettings {
+        size: Some(size),
+        layer: Layer::Top,
+        anchor: Anchor::Right | Anchor::Top,
+        exclusive_zone: Some(0),
+        margin: Some(margin),
+        keyboard_interactivity: KeyboardInteractivity::None,
+        output_option: output,
+        events_transparent: false,
+        namespace: Some(TASKS_NAMESPACE.to_owned()),
+    };
+    (id, vec![Message::NewLayerShell { settings, id }])
+}
+
+/// Its surface on bar `bar`.
+pub fn surface(bar: &str) -> Option<window::Id> {
+    places(|places| places.get(bar).map(|p| p.id))
+}
+
+/// What line `slot` of bar `bar`'s group is.
+pub fn slot(bar: &str, slot: u8) -> Option<Key> {
+    let slots = SLOTS.lock().unwrap_or_else(PoisonError::into_inner);
+    slots.as_ref()?.get(bar)?.get(usize::from(slot)).cloned()
+}
+
+fn refit(place: &mut Place) -> Option<((u32, u32), Margin)> {
+    let (top, size) = placement(place.form, place.switching, place.heights);
+    let margin = margin(top);
+    if place.asked == (size, margin) {
+        return None;
+    }
+    place.asked = (size, margin);
+    Some((size, margin))
+}
+
+/// Bar `bar` is in `form`, switching or not: its surface's new size and
+/// margins, if they change. The field closes as the form changes.
+pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
+    let changed = places(|places| {
+        let place = places.get_mut(bar)?;
+        let changed = place.form != form || place.switching != switching;
+        place.form = form;
+        place.switching = switching;
+        Some((changed, place.id, refit(place)))
+    });
+    let Some((changed, id, fitted)) = changed else {
+        return Vec::new();
+    };
+    if changed {
+        super::close_field_at(&At::Group(bar.to_owned()), "the bar's form changed");
+    }
+    fitted
+        .map(|(size, margin)| {
+            vec![
+                Message::SizeChange { id, size },
+                Message::MarginChange { id, margin },
+            ]
+        })
+        .unwrap_or_default()
+}
+
+/// The groups above moved, or this one's height changed: every bar's
+/// surface to its place.
+pub fn moved() {
+    let effects: Vec<popover::Effect> = places(|places| {
+        places
+            .values_mut()
+            .filter_map(|place| {
+                let (size, margin) = refit(place)?;
+                Some(popover::Effect::Resize {
+                    id: place.id,
+                    size,
+                    margin: Some(margin),
+                })
+            })
+            .collect()
+    });
+    if !effects.is_empty() {
+        popover::send(effects);
+    }
+}
+
+/// Bar `bar` went.
+pub fn forget(bar: &str) {
+    places(|places| places.remove(bar));
+    if let Some(slots) = SLOTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
+    {
+        slots.remove(bar);
+    }
+}
+
+/// Bar `bar`'s surface takes the pointer (`takes`), or lets it through.
+fn takes_pointer(bar: &str, takes: bool) {
+    let id = places(|places| {
+        let place = places.get_mut(bar)?;
+        if place.input == Some(takes) {
+            return None;
+        }
+        place.input = Some(takes);
+        Some(place.id)
+    });
+    if let Some(id) = id {
+        popover::send(vec![popover::Effect::Input { id, takes }]);
+    }
+}
+
+/// The surface's top under the bar's, as last asked for.
+fn top_of(bar: &str) -> f32 {
+    places(|places| {
+        places
+            .get(bar)
+            .map_or(full_top() - ROOM, |p| (p.asked.1.0 - EDGE) as f32)
+    })
+}
+
+// --- Drawing ---------------------------------------------------------------------------
+
+/// A box in its button at `button`: ticked or not, the button lit under
+/// the pointer.
+pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha: f32) {
+    if lit {
+        f.fill(&kit::rounded(button, BUTTON_RADIUS), faded(HOVER, alpha));
+    }
+    let centre = button.center();
+    let rect = Rectangle::new(
+        Point::new(centre.x - BOX / 2.0, centre.y - BOX / 2.0),
+        Size::new(BOX, BOX),
+    );
+    if ticked {
+        f.fill(&kit::rounded(rect, BOX_RADIUS), faded(TICKED, alpha));
+        // The mockup's check, 10 px of its 24-unit box.
+        let unit = 10.0 / 24.0;
+        let at = |x: f32, y: f32| Point::new(centre.x - 5.0 + x * unit, centre.y - 5.0 + y * unit);
+        let check = Path::new(|p| {
+            p.move_to(at(5.0, 12.5));
+            p.line_to(at(10.0, 17.5));
+            p.line_to(at(19.0, 7.5));
+        });
+        f.stroke(
+            &check,
+            Stroke {
+                width: 3.4 * unit,
+                line_cap: canvas::LineCap::Round,
+                line_join: canvas::LineJoin::Round,
+                ..Stroke::default().with_color(faded(CHECK, alpha))
+            },
+        );
+    } else {
+        let inset = BOX_BORDER / 2.0;
+        let border = Rectangle::new(
+            Point::new(rect.x + inset, rect.y + inset),
+            Size::new(BOX - BOX_BORDER, BOX - BOX_BORDER),
+        );
+        f.stroke(
+            &kit::rounded(border, BOX_RADIUS - inset),
+            Stroke::default()
+                .with_color(faded(BORDER, alpha))
+                .with_width(BOX_BORDER),
+        );
+    }
+}
+
+/// The `+` at `rect`, lit under the pointer: a 14 px plus.
+pub fn plus(f: &mut Frame, rect: Rectangle, lit: bool, alpha: f32) {
+    if lit {
+        f.fill(&kit::rounded(rect, ADD_RADIUS), faded(HOVER, alpha));
+    }
+    let c = rect.center();
+    let unit = PLUS / 24.0;
+    let arm = 7.0 * unit;
+    let cross = Path::new(|p| {
+        p.move_to(Point::new(c.x, c.y - arm));
+        p.line_to(Point::new(c.x, c.y + arm));
+        p.move_to(Point::new(c.x - arm, c.y));
+        p.line_to(Point::new(c.x + arm, c.y));
+    });
+    f.stroke(
+        &cross,
+        Stroke {
+            width: 2.2 * unit,
+            line_cap: canvas::LineCap::Round,
+            ..Stroke::default().with_color(faded(DIM, alpha))
+        },
+    );
+}
+
+/// A title at `at` (its line's middle), `size` px: struck through and
+/// faint when ticked.
+pub fn title(f: &mut Frame, said: &str, at: Point, size: f32, ticked: bool, alpha: f32) {
+    let colour = if ticked { FAINT } else { TEXT };
+    f.fill_text(kit::text(
+        said.to_owned(),
+        at,
+        size,
+        faded(colour, alpha),
+        Alignment::Left,
+    ));
+    if ticked {
+        let width = kit::measure(said, size, MANROPE);
+        f.fill_rectangle(
+            Point::new(at.x, (at.y + 0.5).floor()),
+            Size::new(width, 1.0),
+            faded(FAINT, alpha),
+        );
+    }
+}
+
+/// "Pas enregistré" in a title's place.
+pub fn unsaved(f: &mut Frame, words: Words, at: Point, alpha: f32) {
+    f.fill_text(kit::text(
+        words.unsaved().to_owned(),
+        at,
+        UNSAVED,
+        faded(UNSAVED_INK, alpha),
+        Alignment::Left,
+    ));
+}
+
+/// The field at `rect`: what was typed (its end when it is too long) and
+/// the caret while it holds the keyboard, else the placeholder.
+pub fn field(
+    f: &mut Frame,
+    rect: Rectangle,
+    (text, focused): (&str, bool),
+    (size, radius, pad): (f32, f32, f32),
+    words: Words,
+    alpha: f32,
+) {
+    f.fill(&kit::rounded(rect, radius), faded(FIELD_FILL, alpha));
+    let inset = 0.5;
+    let rim = Rectangle::new(
+        Point::new(rect.x + inset, rect.y + inset),
+        Size::new(rect.width - 1.0, rect.height - 1.0),
+    );
+    f.stroke(
+        &kit::rounded(rim, radius - inset),
+        Stroke::default()
+            .with_color(faded(FIELD_BORDER, alpha))
+            .with_width(1.0),
+    );
+    let room = rect.width - 2.0 * pad;
+    let left = rect.x + pad;
+    let middle = rect.center_y();
+    if text.is_empty() {
+        f.fill_text(kit::text(
+            words.placeholder().to_owned(),
+            Point::new(left, middle),
+            size,
+            faded(FAINT, alpha),
+            Alignment::Left,
+        ));
+    }
+    let width = if text.is_empty() {
+        0.0
+    } else {
+        kit::measure(text, size, MANROPE)
+    };
+    // Its end shows: the text slides left past the field's room.
+    let x = left + (room - width - 1.0).min(0.0);
+    let inner = Rectangle::new(Point::new(left, rect.y), Size::new(room, rect.height));
+    f.with_clip(inner, |f| {
+        if !text.is_empty() {
+            f.fill_text(kit::text(
+                text.to_owned(),
+                Point::new(x, middle),
+                size,
+                faded(TEXT, alpha),
+                Alignment::Left,
+            ));
+        }
+        if focused {
+            let caret = size + 1.0;
+            f.fill_rectangle(
+                Point::new(x + width, middle - caret / 2.0),
+                Size::new(1.0, caret),
+                faded(TEXT, alpha),
+            );
+        }
+    });
+}
+
+/// The mini form's box: a 16 px rounded square and its check, `text.dim`.
+fn mini_icon(f: &mut Frame, at: Point, alpha: f32) {
+    let unit = MINI_ICON / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * unit, at.y + y * unit);
+    let stroke = Stroke {
+        width: 2.0 * unit,
+        line_cap: canvas::LineCap::Round,
+        line_join: canvas::LineJoin::Round,
+        ..Stroke::default().with_color(faded(DIM, alpha))
+    };
+    let square = Rectangle::new(p(4.0, 4.0), Size::new(16.0 * unit, 16.0 * unit));
+    f.stroke(&kit::rounded(square, 4.0 * unit), stroke);
+    let check = Path::new(|path| {
+        path.move_to(p(8.5, 12.5));
+        path.line_to(p(11.0, 15.0));
+        path.line_to(p(15.5, 9.5));
+    });
+    f.stroke(&check, stroke);
+}
+
+// --- The surface -----------------------------------------------------------------------
+
+/// The to-do list of one bar.
+#[derive(Debug, Clone)]
+pub struct Group {
+    /// The forms to draw and their opacity (two while the bar switches).
+    pub forms: Vec<(Form, f32)>,
+    /// The bar's width as drawn now.
+    pub bar_width: f32,
+    pub words: Words,
+    /// Without glass: the bar's opaque colour behind.
+    pub backdrop: Option<Color>,
+    pub bar: String,
+}
+
+/// What the pointer is over, besides the items.
+#[derive(Debug, Clone, PartialEq)]
+enum Over {
+    Item(Item),
+    Field,
+    /// A cut title: its whole text, and where it is (the bar's frame).
+    Title(String, Rectangle),
+}
+
+/// What the surface keeps between draws.
+#[derive(Debug, Default)]
+pub struct State {
+    pointer: Option<Point>,
+    hover: Option<Item>,
+    title: Option<String>,
+    last: Option<Point>,
+    lines: Lines,
+    laid: Laid,
+    /// What it last said it shows.
+    said: Option<String>,
+}
+
+impl Group {
+    /// The form that shows alone (not switching): its items take the
+    /// pointer.
+    fn alone(&self) -> Option<Form> {
+        match self.forms.as_slice() {
+            [(form, _)] => Some(*form),
+            _ => None,
+        }
+    }
+
+    /// The group's top left on the surface.
+    fn origin(&self, size: Size) -> Point {
+        let left = size.width + 2.0 - self.bar_width;
+        Point::new(left + SIDE, full_top() - top_of(&self.bar))
+    }
+
+    /// The mini item's top left on the surface, centred in the bar as
+    /// wide as it is drawn.
+    fn mini_origin(&self, size: Size) -> Point {
+        let centre = size.width + 1.0 - self.bar_width / 2.0;
+        Point::new(centre - MINI.width / 2.0, mini_top() - top_of(&self.bar))
+    }
+
+    /// A point of the surface (`size`) in the bar's frame.
+    fn in_bar(&self, at: Point, size: Size) -> Point {
+        Point::new(at.x - size.width - 1.0, top_of(&self.bar) + at.y)
+    }
+
+    fn in_bar_rect(&self, r: Rectangle, size: Size) -> Rectangle {
+        Rectangle::new(self.in_bar(r.position(), size), r.size())
+    }
+
+    /// Its items and where they are on the surface, in a form alone, once
+    /// the surface took its size.
+    fn items(&self, laid: &Laid, size: Size) -> Vec<(Item, Rectangle)> {
+        let Some(form) = self.alone() else {
+            return Vec::new();
+        };
+        if laid.height <= 0.0 {
+            return Vec::new();
+        }
+        if form == Form::Mini {
+            if size.height + 0.5 < MINI.height + 2.0 * ROOM {
+                return Vec::new();
+            }
+            return vec![(Item::Tasks, Rectangle::new(self.mini_origin(size), MINI))];
+        }
+        if size.height + 0.5 < resting_height(laid) + 2.0 * ROOM {
+            return Vec::new();
+        }
+        let o = self.origin(size);
+        let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
+        let mut items = vec![(Item::TaskAdd, at(add_rect()))];
+        let boxes = laid.rows.iter().filter(|r| r.acts());
+        for (slot, row) in (0..=u8::MAX).zip(boxes) {
+            items.push((Item::Task(slot), at(button_rect(row.top))));
+        }
+        if let Some((_, rect)) = &laid.more {
+            items.push((Item::TasksMore, at(*rect)));
+        }
+        items
+    }
+
+    /// What is under `at` on the surface.
+    fn over(&self, laid: &Laid, at: Point, size: Size) -> Option<(Over, Rectangle)> {
+        if let Some((item, rect)) = self
+            .items(laid, size)
+            .into_iter()
+            .find(|(_, r)| r.contains(at))
+        {
+            return Some((Over::Item(item), rect));
+        }
+        if self.alone() != Some(Form::Full) {
+            return None;
+        }
+        let o = self.origin(size);
+        let at_group = Point::new(at.x - o.x, at.y - o.y);
+        if let Some(rect) = laid.field.filter(|r| r.contains(at_group)) {
+            return Some((Over::Field, rect));
+        }
+        laid.rows
+            .iter()
+            .filter(|r| r.cut.is_some())
+            .find_map(|row| {
+                let rect = Rectangle::new(
+                    Point::new(title_x(), row.top),
+                    Size::new(WIDTH - title_x(), row.height),
+                );
+                rect.contains(at_group).then(|| {
+                    let on = Rectangle::new(Point::new(o.x + rect.x, o.y + rect.y), rect.size());
+                    (Over::Title(row.title.clone(), on), on)
+                })
+            })
+    }
+
+    /// What it shows, laid out from `lines`.
+    fn lay(&self, lines: &Lines) -> Laid {
+        let field = super::field().is_some_and(|f| f.at == At::Group(self.bar.clone()));
+        let fonts = iced::advanced::graphics::text::font_system().write();
+        match fonts {
+            Ok(mut system) => lay_out(lines, field, self.words, |t, size| {
+                kit::measure_in(system.raw(), t, size, MANROPE)
+            }),
+            Err(_) => lay_out(lines, field, self.words, |t, size| {
+                t.chars().count() as f32 * size * 0.55
+            }),
+        }
+    }
+
+    /// What it shows changed: said, with its boxes' names, for tests.
+    fn say(&self, state: &mut State) {
+        let form = self.alone();
+        let laid = &state.laid;
+        let rows: Vec<String> = laid
+            .rows
+            .iter()
+            .map(|r| {
+                let name = self.words.tick(&r.title, r.look.ticked());
+                match r.look {
+                    Look::Unsaved { .. } => format!("{name}: {}", self.words.unsaved()),
+                    _ => name,
+                }
+            })
+            .collect();
+        let said = format!(
+            "form={} shows={} add=«{}» rows=[{}] more={} empty={} count={} item=«{}»",
+            form.map_or("switching", Form::name),
+            laid.height > 0.0,
+            self.words.add(),
+            rows.join("; "),
+            laid.more.as_ref().map_or("none", |(m, _)| m.as_str()),
+            laid.empty.is_some(),
+            laid.mini
+                .map_or_else(|| "none".to_owned(), |n| n.to_string()),
+            laid.mini.map(|n| self.words.count(n)).unwrap_or_default(),
+        );
+        if state.said.as_ref() == Some(&said) {
+            return;
+        }
+        tracing::debug!(bar = %self.bar, "the tasks' group shows it: {said}");
+        state.said = Some(said);
+    }
+
+    fn mini(&self, f: &mut Frame, laid: &Laid, o: Point, state: &State, alpha: f32) {
+        let Some(count) = laid.mini else {
+            return;
+        };
+        let rect = Rectangle::new(o, MINI);
+        let (open, focused) = popover::with(|c| {
+            (
+                c.shows(&self.bar, Item::Tasks),
+                c.focused(&self.bar, Item::Tasks),
+            )
+        });
+        let lit = match (open, state.hover == Some(Item::Tasks)) {
+            (true, _) => Some(OPEN),
+            (false, true) => Some(HOVER),
+            (false, false) => None,
+        };
+        if let Some(lit) = lit {
+            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit, alpha));
+        }
+        if focused {
+            ring(f, rect, MINI_RADIUS);
+        }
+        let said = (count > 0).then(|| count.to_string());
+        let text_width = said
+            .as_deref()
+            .map_or(0.0, |s| kit::measure(s, MINI_TEXT, MONO) + MINI_GAP);
+        let left = rect.center_x() - (MINI_ICON + text_width) / 2.0;
+        mini_icon(
+            f,
+            Point::new(left, rect.center_y() - MINI_ICON / 2.0),
+            alpha,
+        );
+        if let Some(said) = said {
+            f.fill_text(kit::text_in(
+                MONO,
+                kit::text(
+                    said,
+                    Point::new(left + MINI_ICON + MINI_GAP, rect.center_y()),
+                    MINI_TEXT,
+                    faded(TEXT, alpha),
+                    Alignment::Left,
+                ),
+            ));
+        }
+    }
+
+    fn group(&self, f: &mut Frame, laid: &Laid, o: Point, state: &State, alpha: f32) {
+        let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
+        let focused = |item| popover::with(|c| c.focused(&self.bar, item));
+        // The header: its label, spaced, and the `+`.
+        let mut x = o.x;
+        for ch in self.words.header().chars() {
+            let ch = ch.to_string();
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                kit::text(
+                    ch.clone(),
+                    Point::new(x, o.y + HEADER / 2.0),
+                    LABEL,
+                    faded(DIM, alpha),
+                    Alignment::Left,
+                ),
+            ));
+            x += kit::measure(&ch, LABEL, MANROPE_BOLD) + LABEL_SPACING;
+        }
+        let add = at(add_rect());
+        plus(f, add, state.hover == Some(Item::TaskAdd), alpha);
+        if focused(Item::TaskAdd) {
+            ring(f, add, ADD_RADIUS);
+        }
+        if let (Some(rect), Some(open)) = (laid.field, super::field()) {
+            field(
+                f,
+                at(rect),
+                (&open.text, open.focused),
+                (TITLE, FIELD_RADIUS, FIELD_PAD),
+                self.words,
+                alpha,
+            );
+        }
+        if let Some(middle) = laid.empty {
+            f.fill_text(kit::text(
+                self.words.nothing().to_owned(),
+                Point::new(o.x, o.y + middle),
+                TITLE,
+                faded(FAINT, alpha),
+                Alignment::Left,
+            ));
+        }
+        // The lines, clipped to each one's height: one closing or coming
+        // in shows as far as it is. (A clip keeps the frame's coordinates.)
+        let mut slot = 0u8;
+        for row in &laid.rows {
+            let a = alpha * row.alpha;
+            let clip = Rectangle::new(
+                Point::new(o.x - BUTTON_OUT - ROOM, o.y + row.top),
+                Size::new(WIDTH + BUTTON_OUT + 2.0 * ROOM, row.height),
+            );
+            f.with_clip(clip, |f| {
+                let button = at(button_rect(row.top));
+                let item = Item::Task(slot);
+                let mine = row.acts();
+                let lit = mine && state.hover == Some(item);
+                tick_box(f, button, row.look.ticked(), lit, a);
+                if mine && popover::with(|c| c.focused(&self.bar, item)) {
+                    ring(f, button, BUTTON_RADIUS);
+                }
+                let middle = Point::new(o.x + title_x(), o.y + row.top + LINE / 2.0);
+                match row.look {
+                    Look::Unsaved { .. } => unsaved(f, self.words, middle, a),
+                    look => title(
+                        f,
+                        row.cut.as_deref().unwrap_or(&row.title),
+                        middle,
+                        TITLE,
+                        look.ticked(),
+                        a,
+                    ),
+                }
+            });
+            if row.acts() {
+                slot = slot.saturating_add(1);
+            }
+        }
+        if let Some((said, rect)) = &laid.more {
+            let rect = at(*rect);
+            let lit = state.hover == Some(Item::TasksMore)
+                || popover::with(|c| c.shows(&self.bar, Item::TasksMore));
+            if lit {
+                f.fill(&kit::rounded(rect, BUTTON_RADIUS), faded(HOVER, alpha));
+            }
+            if focused(Item::TasksMore) {
+                ring(f, rect, BUTTON_RADIUS);
+            }
+            f.fill_text(kit::text(
+                said.clone(),
+                Point::new(rect.x + MORE_OUT, rect.center_y()),
+                MORE_TEXT,
+                faded(FAINT, alpha),
+                Alignment::Left,
+            ));
+        }
+    }
+
+    fn mouse<M>(
+        &self,
+        state: &mut State,
+        event: &mouse::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<M>> {
+        let size = bounds.size();
+        let at = pointer(event, bounds, cursor, state.pointer);
+        state.pointer = at;
+        let over = at.and_then(|at| self.over(&state.laid, at, size));
+        let item = over.as_ref().and_then(|(o, r)| match o {
+            Over::Item(item) => Some((*item, *r)),
+            _ => None,
+        });
+        match event {
+            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
+                let at = at?;
+                let bar_at = self.in_bar(at, size);
+                state.last = Some(bar_at);
+                // A cut title: shown whole after a rest.
+                let title = over.as_ref().and_then(|(o, _)| match o {
+                    Over::Title(text, rect) => Some((text.clone(), *rect)),
+                    _ => None,
+                });
+                match &title {
+                    Some((text, rect)) if state.title.as_ref() != Some(text) => {
+                        crate::tray::tip::hover_text(
+                            &self.bar,
+                            text,
+                            self.in_bar_rect(*rect, size),
+                            TIP,
+                        );
+                    }
+                    None if state.title.is_some() => crate::tray::tip::leave(),
+                    _ => {}
+                }
+                state.title = title.map(|(t, _)| t);
+                let now = item.map(|(i, _)| i);
+                if now == state.hover {
+                    if now.is_none() {
+                        popover::event(popover::Event::Pointer { at: bar_at });
+                    }
+                    return None;
+                }
+                if state.hover.take().is_some() {
+                    popover::event(popover::Event::ItemLeave { at: bar_at });
+                }
+                state.hover = now;
+                if let Some((item, r)) = item {
+                    popover::event(popover::Event::ItemEnter {
+                        bar: self.bar.clone(),
+                        item,
+                        rect: self.in_bar_rect(r, size),
+                    });
+                }
+                Some(canvas::Action::request_redraw())
+            }
+            mouse::Event::CursorLeft => {
+                if state.title.take().is_some() {
+                    crate::tray::tip::leave();
+                }
+                state.hover.take()?;
+                let at = state.last.unwrap_or_default();
+                popover::event(popover::Event::ItemLeave { at });
+                Some(canvas::Action::request_redraw())
+            }
+            mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                if state.title.take().is_some() {
+                    crate::tray::tip::leave();
+                }
+                match over {
+                    Some((Over::Item(item), r)) => {
+                        tracing::debug!(?item, "a press on the tasks' group");
+                        popover::event(popover::Event::ItemPress {
+                            bar: self.bar.clone(),
+                            item,
+                            rect: self.in_bar_rect(r, size),
+                        });
+                    }
+                    // In the field: it takes the keyboard again.
+                    Some((Over::Field, _)) => super::open_field(At::Group(self.bar.clone())),
+                    _ => popover::event(popover::Event::PressElsewhere),
+                }
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Row {
+    /// Whether its box acts: not on its way out (with motion), nor a task
+    /// added whose card is not made yet.
+    fn acts(&self) -> bool {
+        self.height >= LINE && !matches!(self.key, Key::Adding(_))
+    }
+}
+
+impl canvas::Program<Message> for Group {
+    type State = State;
+
+    fn update(
+        &self,
+        state: &mut State,
+        event: &iced::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        match event {
+            iced::Event::Window(window::Event::RedrawRequested(_)) => {
+                let lines = super::lines();
+                let laid = self.lay(&lines);
+                let heights = Heights {
+                    full: resting_height(&laid),
+                    mini: laid.height > 0.0,
+                };
+                // Its surface to the group's height, if it changed.
+                let resized = places(|places| {
+                    let place = places.get_mut(&self.bar)?;
+                    if place.heights == heights {
+                        return None;
+                    }
+                    place.heights = heights;
+                    let (size, margin) = refit(place)?;
+                    Some(popover::Effect::Resize {
+                        id: place.id,
+                        size,
+                        margin: Some(margin),
+                    })
+                });
+                if let Some(resized) = resized {
+                    popover::send(vec![resized]);
+                }
+                takes_pointer(&self.bar, self.alone().is_some() && laid.height > 0.0);
+                let keys: Vec<Key> = laid
+                    .rows
+                    .iter()
+                    .filter(|r| r.acts())
+                    .map(|r| r.key.clone())
+                    .collect();
+                SLOTS
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get_or_insert_with(HashMap::new)
+                    .insert(self.bar.clone(), keys);
+                let moving = lines.moving();
+                state.lines = lines;
+                state.laid = laid;
+                self.say(state);
+                moving.then(canvas::Action::request_redraw)
+            }
+            iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                text,
+                ..
+            }) => {
+                let pressed = Pressed {
+                    key: key.clone(),
+                    modifiers: *modifiers,
+                    text: text.as_deref().map(str::to_owned),
+                };
+                let mine = super::field_key(&At::Group(self.bar.clone()), &pressed)
+                    || popover::key(key, *modifiers, text.as_deref());
+                mine.then(|| canvas::Action::request_redraw().and_capture())
+            }
+            _ => None,
+        }
+    }
+
+    fn draw(
+        &self,
+        state: &State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        if let Some(colour) = self.backdrop {
+            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
+        }
+        let size = bounds.size();
+        let laid = &state.laid;
+        let in_bar: Vec<(Item, Rectangle)> = self
+            .items(laid, size)
+            .into_iter()
+            .map(|(item, r)| (item, self.in_bar_rect(r, size)))
+            .collect();
+        log_items(&in_bar);
+        popover::with(|c| c.set_items(&self.bar, TASKS_NAMESPACE, in_bar));
+        if laid.height <= 0.0 {
+            return vec![frame.into_geometry()];
+        }
+        // The bar's inside, as wide as it is while it switches.
+        let left = (size.width + 2.0 - self.bar_width).max(0.0);
+        let column = Rectangle::new(
+            Point::new(left, 0.0),
+            Size::new((size.width - left).max(0.0), size.height),
+        );
+        frame.with_clip(column, |f| {
+            for &(form, alpha) in &self.forms {
+                match form {
+                    Form::Full => self.group(f, laid, self.origin(size), state, alpha),
+                    Form::Mini => self.mini(f, laid, self.mini_origin(size), state, alpha),
+                }
+            }
+        });
+        vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &State,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if state.hover.is_some() {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+}
+
+/// The items' middles in the bar's frame, logged when they change (for
+/// tests, which click them).
+fn log_items(items: &[(Item, Rectangle)]) {
+    static LAST: Mutex<String> = Mutex::new(String::new());
+    let said: Vec<String> = items
+        .iter()
+        .map(|(item, r)| {
+            let c = r.center();
+            format!("{item:?}@{:.0},{:.0}", c.x, c.y)
+        })
+        .collect();
+    let said = said.join(" ");
+    let mut last = LAST.lock().unwrap_or_else(PoisonError::into_inner);
+    if *last != said {
+        tracing::debug!(items = %said, "the tasks' items");
+        last.clone_from(&said);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tasks::Line;
+    use hocus_day::model::TaskId;
+
+    fn line(id: &str, look: Look) -> Line {
+        Line {
+            key: Key::Task(TaskId::new(id)),
+            title: format!("Task {id}"),
+            look,
+            going: None,
+        }
+    }
+
+    fn laid(lines: Vec<Line>, field: bool) -> Laid {
+        let lines = Lines { shows: true, lines };
+        lay_out(
+            &lines,
+            field,
+            Words::new(crate::clock::time::Lang::French),
+            |t, size| t.chars().count() as f32 * size * 0.5,
+        )
+    }
+
+    #[test]
+    fn the_group_is_18_px_and_22_px_a_task_and_20_px_for_the_rest() {
+        let three: Vec<Line> = (0..3).map(|i| line(&i.to_string(), Look::Open)).collect();
+        assert_eq!(laid(three.clone(), false).height, 18.0 + 3.0 * 22.0);
+        let seven: Vec<Line> = (0..7).map(|i| line(&i.to_string(), Look::Open)).collect();
+        let l = laid(seven, false);
+        assert_eq!(l.rows.len(), 3);
+        assert_eq!(l.height, 18.0 + 3.0 * 22.0 + 20.0);
+        assert_eq!(l.more.as_ref().map(|m| m.0.as_str()), Some("+ 4 autres"));
+        // The field first, 26 px with 2 px above and under.
+        let l = laid(three, true);
+        assert_eq!(l.field.map(|f| (f.y, f.height)), Some((20.0, 26.0)));
+        assert_eq!(l.rows[0].top, 48.0);
+        // Nothing open: the header and "Rien à faire.".
+        let l = laid(Vec::new(), false);
+        assert_eq!(l.height, 18.0 + 22.0);
+        assert!(l.empty.is_some());
+        assert_eq!(l.mini, Some(0));
+        // No source: nothing.
+        let none = lay_out(
+            &Lines::default(),
+            false,
+            Words::new(crate::clock::time::Lang::French),
+            |_, _| 0.0,
+        );
+        assert_eq!(none.height, 0.0);
+    }
+
+    #[test]
+    fn the_add_and_the_boxes_sit_4_px_past_the_groups_sides() {
+        let add = add_rect();
+        assert_eq!(add.x + add.width, WIDTH + 4.0);
+        assert_eq!(add.size(), Size::new(22.0, 18.0));
+        let button = button_rect(18.0);
+        assert_eq!((button.x, button.y, button.width), (-4.0, 18.0, 22.0));
+        // The box centred in it, from the group's left; the title 4 px
+        // after the button.
+        assert_eq!(button.center_x() - BOX / 2.0, 0.0);
+        assert_eq!(title_x(), 22.0);
+    }
+}

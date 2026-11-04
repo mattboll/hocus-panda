@@ -4,6 +4,9 @@
 //! `rgba(14,17,28,0.96)` in a 1 px `rgba(255,255,255,0.12)` rim, the
 //! mockup's. A surface of its own that takes no pointer, gone as the
 //! pointer leaves the icon or presses it.
+//!
+//! The same tooltip shows a text whole (a task's title cut in the bar,
+//! Day.4), after its own delay ([`hover_text`]).
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -35,6 +38,15 @@ const FILL: Color = Color::from_rgba8(14, 17, 28, 0.96);
 const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
 /// What comes between the name and what the item says.
 const BETWEEN: &str = " · ";
+/// The widest a text's tooltip is: past it, cut.
+const WIDEST: f32 = 480.0;
+
+/// What a tooltip says: a tray icon's name and words, or a text.
+#[derive(Debug, Clone, PartialEq)]
+enum Tipped {
+    Tray(u32),
+    Text(String),
+}
 
 #[derive(Debug, Clone, PartialEq)]
 enum Phase {
@@ -43,13 +55,14 @@ enum Phase {
     /// frame), since then.
     Waiting {
         bar: String,
-        key: u32,
+        what: Tipped,
         rect: Rectangle,
         since: Instant,
+        delay: Duration,
     },
     Shown {
         id: window::Id,
-        key: u32,
+        what: Tipped,
     },
 }
 
@@ -62,6 +75,23 @@ fn phase<T>(with: impl FnOnce(&mut Phase) -> T) -> T {
 /// The pointer is on icon `key` of `bar`, at `rect`: its tooltip shows in
 /// 400 ms.
 pub fn hover(bar: &str, key: u32, rect: Rectangle) {
+    wait(bar, Tipped::Tray(key), rect, DELAY);
+}
+
+/// The pointer rests on `text`, cut, at `rect` of `bar`: shown whole in a
+/// tooltip after `delay`. Already waiting or shown for it: as it is.
+pub fn hover_text(bar: &str, text: &str, rect: Rectangle, delay: Duration) {
+    let what = Tipped::Text(text.to_owned());
+    let same = phase(|p| match p {
+        Phase::Waiting { what: w, .. } | Phase::Shown { what: w, .. } => *w == what,
+        Phase::Idle => false,
+    });
+    if !same {
+        wait(bar, what, rect, delay);
+    }
+}
+
+fn wait(bar: &str, what: Tipped, rect: Rectangle, delay: Duration) {
     let gone = phase(|p| {
         let gone = match p {
             Phase::Shown { id, .. } => Some(*id),
@@ -69,9 +99,10 @@ pub fn hover(bar: &str, key: u32, rect: Rectangle) {
         };
         *p = Phase::Waiting {
             bar: bar.to_owned(),
-            key,
+            what,
             rect,
             since: Instant::now(),
+            delay,
         };
         gone
     });
@@ -91,26 +122,40 @@ pub fn leave() {
 /// When the tooltip is due.
 pub fn deadline() -> Option<Instant> {
     phase(|p| match p {
-        Phase::Waiting { since, .. } => Some(*since + DELAY),
+        Phase::Waiting { since, delay, .. } => Some(*since + *delay),
         _ => None,
     })
 }
 
-/// What its icon's tooltip says: its name, and what it says after.
-fn said(key: u32) -> Option<(String, String)> {
-    super::shown()
-        .into_iter()
-        .find(|s| s.key == key)
-        .map(|s| (s.name, s.tip))
+/// What a tooltip says: its icon's name, and what it says after; a text
+/// alone, as what is said after no name.
+fn said(what: &Tipped) -> Option<(String, String)> {
+    match what {
+        Tipped::Tray(key) => super::shown()
+            .into_iter()
+            .find(|s| s.key == *key)
+            .map(|s| (s.name, s.tip)),
+        Tipped::Text(text) => Some((String::new(), text.clone())),
+    }
+}
+
+/// What follows the name: what the item says, after " · " when there is
+/// a name.
+fn after(name: &str, tip: &str) -> String {
+    if name.is_empty() {
+        tip.to_owned()
+    } else {
+        format!("{BETWEEN}{tip}")
+    }
 }
 
 /// The tooltip's size for `name` and `tip`.
 fn size(name: &str, tip: &str) -> (u32, u32) {
     let mut width = kit::measure(name, SIZE, MANROPE_BOLD);
     if !tip.is_empty() {
-        width += kit::measure(&format!("{BETWEEN}{tip}"), SIZE, MANROPE);
+        width += kit::measure(&after(name, tip), SIZE, MANROPE);
     }
-    let w = width + 2.0 * (PAD.width + BORDER);
+    let w = width.min(WIDEST) + 2.0 * (PAD.width + BORDER);
     let h = SIZE * crate::levels::draw::LINE + 2.0 * (PAD.height + BORDER);
     (w.ceil() as u32, h.round() as u32)
 }
@@ -120,16 +165,17 @@ pub fn tick(now: Instant) -> Vec<Effect> {
     let due = phase(|p| match p {
         Phase::Waiting {
             bar,
-            key,
+            what,
             rect,
             since,
-        } if *since + DELAY <= now => Some((bar.clone(), *key, *rect)),
+            delay,
+        } if *since + *delay <= now => Some((bar.clone(), what.clone(), *rect)),
         _ => None,
     });
-    let Some((bar, key, rect)) = due else {
+    let Some((bar, what, rect)) = due else {
         return Vec::new();
     };
-    let Some((name, tip)) = said(key) else {
+    let Some((name, tip)) = said(&what) else {
         phase(|p| *p = Phase::Idle);
         return Vec::new();
     };
@@ -145,7 +191,7 @@ pub fn tick(now: Instant) -> Vec<Effect> {
     let top = (EDGE as f32 + rect.center_y() - h as f32 / 2.0).round() as i32;
     let margin = (top.max(EDGE), EDGE + form.width() + EDGE, 0, 0);
     let id = window::Id::unique();
-    phase(|p| *p = Phase::Shown { id, key });
+    phase(|p| *p = Phase::Shown { id, what });
     tracing::debug!(name, tip, "the tray's tooltip shows");
     vec![
         Effect::Layer {
@@ -171,12 +217,12 @@ pub fn changed() {
 
 /// The tooltip, if its surface is `id`.
 pub fn view<'a>(id: window::Id) -> Option<Element<'a, Message>> {
-    let key = phase(|p| match p {
-        Phase::Shown { id: shown, key } if *shown == id => Some(*key),
+    let what = phase(|p| match p {
+        Phase::Shown { id: shown, what } if *shown == id => Some(what.clone()),
         _ => None,
     })?;
     Some(
-        iced::widget::canvas(Tip { key })
+        iced::widget::canvas(Tip { what })
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
@@ -184,7 +230,7 @@ pub fn view<'a>(id: window::Id) -> Option<Element<'a, Message>> {
 }
 
 struct Tip {
-    key: u32,
+    what: Tipped,
 }
 
 impl canvas::Program<Message> for Tip {
@@ -213,7 +259,7 @@ impl canvas::Program<Message> for Tip {
             ),
             Stroke::default().with_color(RIM).with_width(BORDER),
         );
-        let Some((name, tip)) = said(self.key) else {
+        let Some((name, tip)) = said(&self.what) else {
             return vec![frame.into_geometry()];
         };
         let middle = size.height / 2.0;
@@ -221,11 +267,21 @@ impl canvas::Program<Message> for Tip {
         let name_width = kit::measure(&name, SIZE, MANROPE_BOLD);
         frame.fill_text(kit::text_in(
             MANROPE_BOLD,
-            kit::text(name, Point::new(x, middle), SIZE, TEXT, Alignment::Left),
+            kit::text(
+                name.clone(),
+                Point::new(x, middle),
+                SIZE,
+                TEXT,
+                Alignment::Left,
+            ),
         ));
         if !tip.is_empty() {
+            let room = WIDEST - name_width;
+            let tip = kit::elide(&after(&name, &tip), room, |t| {
+                kit::measure(t, SIZE, MANROPE)
+            });
             frame.fill_text(kit::text(
-                format!("{BETWEEN}{tip}"),
+                tip,
                 Point::new(x + name_width, middle),
                 SIZE,
                 TEXT,

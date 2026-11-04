@@ -49,6 +49,7 @@ pub mod in_use;
 pub mod kit;
 pub mod session;
 pub mod sound;
+pub mod tasks;
 pub mod tray;
 pub mod wifi;
 
@@ -61,7 +62,7 @@ use std::{
 use hocus_link::{
     AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
     Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH,
-    TRAY_NAMESPACE, ToCompositor,
+    TASKS_NAMESPACE, TRAY_NAMESPACE, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -120,6 +121,16 @@ pub enum Item {
     /// A tray icon (5.14), by its item's key: its menu, read before it
     /// opens (a right click, or `Enter` while it holds the keyboard).
     Tray(u32),
+    /// The mini form's to-do item (Day.4): the tasks' popover.
+    Tasks,
+    /// The group's "+ N autres" (Day.4): the same popover, every task.
+    TasksMore,
+    /// The group's `+`: a click, or `Enter` while it holds the keyboard,
+    /// opens the field to add a task.
+    TaskAdd,
+    /// The box of the group's line, from its top: a click, or `Space` or
+    /// `Enter` while it holds the keyboard, ticks it (or unticks it).
+    Task(u8),
 }
 
 impl Item {
@@ -133,6 +144,8 @@ impl Item {
                 | Self::Agent(_)
                 | Self::Menu
                 | Self::Tray(_)
+                | Self::TaskAdd
+                | Self::Task(_)
         )
     }
 
@@ -155,6 +168,7 @@ impl Item {
                 true
             }
             Self::Keyboard | Self::Agent(_) | Self::Menu | Self::Tray(_) => false,
+            Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
             _ => form == Form::Mini,
@@ -171,6 +185,7 @@ impl Item {
             Self::User => session::WIDTH,
             Self::InUse => in_use::WIDTH,
             Self::Tray(_) => tray::WIDTH,
+            Self::Tasks | Self::TasksMore => tasks::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -194,7 +209,13 @@ impl Item {
             Self::User => session::height(),
             Self::InUse => in_use::height(),
             Self::Tray(key) => tray::height(key),
-            Self::Keyboard | Self::Decline | Self::Agent(_) | Self::Menu => 0,
+            Self::Tasks | Self::TasksMore => tasks::height(),
+            Self::Keyboard
+            | Self::Decline
+            | Self::Agent(_)
+            | Self::Menu
+            | Self::TaskAdd
+            | Self::Task(_) => 0,
         }
     }
 
@@ -217,8 +238,9 @@ impl Item {
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
-            Self::Menu | Self::User | Self::InUse => {}
+            Self::Menu | Self::User | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
             Self::Tray(_) => tray::opening(),
+            Self::Tasks | Self::TasksMore => tasks::opening(),
         }
     }
 
@@ -240,7 +262,10 @@ impl Item {
             | Self::User
             | Self::InUse
             | Self::Tray(_)
+            | Self::TaskAdd
+            | Self::Task(_)
             | Self::Clipboard => {}
+            Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
             Self::Notifications => crate::notifications::history_open(false),
@@ -264,6 +289,7 @@ impl Item {
             }
             (Self::InUse, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
+            (Self::Tasks | Self::TasksMore | Self::TaskAdd | Self::Task(_), _) => TASKS_NAMESPACE,
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -283,7 +309,13 @@ impl Item {
     fn on_bottom(self) -> bool {
         !matches!(
             self,
-            Self::Sound | Self::Desktop(_) | Self::Secretary | Self::InUse | Self::Tray(_)
+            Self::Sound
+                | Self::Desktop(_)
+                | Self::Secretary
+                | Self::InUse
+                | Self::Tray(_)
+                | Self::Tasks
+                | Self::TasksMore
         ) && !self.agents()
     }
 
@@ -297,6 +329,7 @@ impl Item {
             FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
             IN_USE_NAMESPACE => place.in_use.unwrap_or(place.levels),
             TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
+            TASKS_NAMESPACE => place.tasks.unwrap_or(place.levels),
             _ => place.connections,
         }
     }
@@ -328,6 +361,8 @@ pub struct Place {
     pub in_use: Option<window::Id>,
     /// The tray's (5.14), while icons show.
     pub tray: Option<window::Id>,
+    /// The to-do list's (Day.4), once the bar has told it.
+    pub tasks: Option<window::Id>,
 }
 
 /// A bar's height until its surface's is known.
@@ -539,6 +574,9 @@ pub enum Effect {
         id: window::Id,
         output: String,
     },
+    /// What the to-do list's group does (Day.4): the field opens, a box
+    /// ticks.
+    Tasks(crate::tasks::Act),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -618,6 +656,7 @@ impl Controller {
         let footer = self.bars.get(bar).and_then(|p| p.footer);
         let in_use = self.bars.get(bar).and_then(|p| p.in_use);
         let tray = self.bars.get(bar).and_then(|p| p.tray);
+        let tasks = self.bars.get(bar).and_then(|p| p.tasks);
         let place = Place {
             form,
             height,
@@ -629,8 +668,16 @@ impl Controller {
             footer,
             in_use,
             tray,
+            tasks,
         };
         self.bars.insert(bar.to_owned(), place);
+    }
+
+    /// Bar `bar`'s to-do list's surface is `tasks`.
+    pub fn set_tasks(&mut self, bar: &str, tasks: window::Id) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.tasks = Some(tasks);
+        }
     }
 
     /// Bar `bar`'s footer's surface is `footer`.
@@ -868,6 +915,7 @@ impl Controller {
                             item.surface(place),
                             KeyboardInteractivity::Exclusive,
                         ));
+                        tracing::debug!(?item, "the keyboard on an item");
                         self.focused = Some((bar, item, from));
                     }
                 }
@@ -952,6 +1000,11 @@ impl Controller {
                 since,
             } if *since + HOVER_OPEN <= now => {
                 let (bar, item, rect) = (bar.clone(), *item, *rect);
+                tracing::debug!(
+                    ?item,
+                    hovered_ms = now.saturating_duration_since(*since).as_millis() as u64,
+                    "hovered long enough"
+                );
                 self.phase = Phase::Closed;
                 self.open(&bar, item, rect, Opened::Hover, &mut effects);
             }
@@ -1205,6 +1258,7 @@ impl Controller {
             effects.push(Effect::Keyboard(to, KeyboardInteractivity::Exclusive));
             effects.push(Effect::Wake(item.namespace(place.form)));
         }
+        tracing::debug!(item = ?next, "the keyboard on an item");
         self.focused = Some((bar, next, rect));
         effects.push(Effect::Wake(next.namespace(place.form)));
     }
@@ -1256,6 +1310,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Agent(id) => Some(Effect::GoToAgent { id, bar, row: rect }),
         Item::Menu => Some(Effect::ToggleLauncher(bar)),
         Item::Tray(key) => Some(Effect::TrayMenu { bar, key, rect }),
+        Item::TaskAdd => Some(Effect::Tasks(crate::tasks::Act::Add { bar })),
+        Item::Task(slot) => Some(Effect::Tasks(crate::tasks::Act::Toggle { bar, slot })),
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1268,7 +1324,9 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Notifications
         | Item::Clipboard
         | Item::User
-        | Item::InUse => None,
+        | Item::InUse
+        | Item::Tasks
+        | Item::TasksMore => None,
     }
 }
 
@@ -1355,6 +1413,15 @@ pub fn with<T>(with: impl FnOnce(&mut Controller) -> T) -> T {
 /// What a surface saw; the effects go to [`effects`]' stream, and so does
 /// a new deadline, which the stream then waits for.
 pub fn event(event: Event) {
+    // The field to add a task, open, sees the presses elsewhere: it
+    // closes when empty, else lets the keyboard go.
+    if matches!(
+        &event,
+        Event::PressElsewhere | Event::Outside | Event::Open { .. }
+    ) || matches!(&event, Event::ItemPress { item, .. } if *item != Item::TaskAdd)
+    {
+        crate::tasks::pressed_elsewhere();
+    }
     let (effects, moved) = with(|c| {
         let before = c.deadline();
         let effects = c.handle(event, Instant::now());
@@ -1572,6 +1639,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                 crate::emoji::deadline(),
                 crate::capture::thumb::deadline(),
                 crate::tray::tip::deadline(),
+                crate::tasks::deadline(),
             ]
             .into_iter()
             .flatten()
@@ -1590,6 +1658,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             due.extend(crate::emoji::tick(now));
                             due.extend(crate::capture::thumb::tick(now));
                             due.extend(crate::tray::tip::tick(now));
+                            due.extend(crate::tasks::tick(now));
                             Some(due)
                         }
                     }
@@ -1841,6 +1910,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }],
         Effect::Tell(message) => {
             tell(message);
+            Vec::new()
+        }
+        Effect::Tasks(act) => {
+            crate::tasks::act(act);
             Vec::new()
         }
         Effect::CaptureBar { id, output, size } => vec![Message::NewLayerShell {
@@ -2327,6 +2400,7 @@ mod tests {
             footer: None,
             in_use: None,
             tray: None,
+            tasks: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -2355,6 +2429,7 @@ mod tests {
             footer: None,
             in_use: None,
             tray: None,
+            tasks: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
         let small = placed(place, item, (280, 332), false);

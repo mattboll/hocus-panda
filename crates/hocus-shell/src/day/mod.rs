@@ -27,10 +27,13 @@ type Waker = Box<dyn FnMut() -> bool + Send>;
 struct Service {
     day: Mutex<Arc<Day>>,
     workers: Mutex<Workers>,
-    waker: Mutex<Option<Waker>>,
 }
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
+/// The views' wakers ([`on_change`]): kept apart from the service, so that
+/// a view registering before the day's thread started it is woken all the
+/// same.
+static WAKERS: Mutex<Vec<Waker>> = Mutex::new(Vec::new());
 
 /// How long the shell, ending, waits for each account's worker to finish
 /// what it was asked (the local list written).
@@ -89,7 +92,6 @@ fn start_workers() -> Option<mpsc::Receiver<Update>> {
     let service = Service {
         day: Mutex::new(Arc::new(day)),
         workers: Mutex::new(workers),
-        waker: Mutex::new(None),
     };
     SERVICE.set(service).is_ok().then_some(snapshots)
 }
@@ -143,23 +145,27 @@ fn publish(update: Update) {
         "the day holds {}",
         self::snapshot().summary(&crate::notifications::wall())
     );
-    let mut waker = service.waker.lock().unwrap_or_else(PoisonError::into_inner);
-    if waker.as_mut().is_some_and(|wake| !wake()) {
-        *waker = None;
-    }
+    wake_views();
+}
+
+/// Each view's waker called, those that return `false` dropped.
+fn wake_views() {
+    WAKERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain_mut(|wake| wake());
 }
 
 /// From now on, a change of the day calls `wake` (until it returns
-/// `false`); it is called once now, for what came before.
-#[expect(
-    dead_code,
-    reason = "the bar's views of the day (Day.2 to Day.4) wake by it"
-)]
+/// `false`), beside the other views' wakers; it is called once now, for
+/// what came before.
 pub fn on_change(wake: impl FnMut() -> bool + Send + 'static) {
-    if let Some(service) = SERVICE.get() {
-        let mut wake: Waker = Box::new(wake);
-        let alive = wake();
-        *service.waker.lock().unwrap_or_else(PoisonError::into_inner) = alive.then_some(wake);
+    let mut wake: Waker = Box::new(wake);
+    if wake() {
+        WAKERS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(wake);
     }
 }
 
