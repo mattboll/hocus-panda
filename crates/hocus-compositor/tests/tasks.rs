@@ -673,8 +673,7 @@ fn enter_adds_the_task_at_the_top_and_esc_or_a_click_elsewhere_closes_the_empty_
 }
 
 #[test]
-fn ctrl_v_pastes_the_clipboards_text_into_the_field_without_its_line_breaks() -> anyhow::Result<()>
-{
+fn ctrl_v_pastes_the_clipboards_text_into_the_field_on_one_line() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start("paste", "1920x1080", WITH_TASKS, SEVEN)? else {
         return Ok(());
     };
@@ -704,9 +703,9 @@ fn ctrl_v_pastes_the_clipboards_text_into_the_field_without_its_line_breaks() ->
         from,
         &["the clipboard's text pasted into the field to add a task"],
     )?;
-    bed.logged_after(from, &["the tasks show", "«a AppelerInès» focused=true"])?;
+    bed.logged_after(from, &["the tasks show", "«a Appeler Inès» focused=true"])?;
     bed.press(KEY_ENTER);
-    bed.logged_after(from, &["the day holds", "«a AppelerInès»; t1"])?;
+    bed.logged_after(from, &["the day holds", "«a Appeler Inès»; t1"])?;
     Ok(())
 }
 

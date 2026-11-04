@@ -320,7 +320,7 @@ fn paste() {
     let Some(n) = n else {
         return;
     };
-    let asked = crate::paste::request(move |text| {
+    let asked = crate::paste::request(crate::paste::Clean::Dropped, move |text| {
         let landed = ui(|ui| {
             if ui.paste != Paste::Awaited(n) {
                 return false;

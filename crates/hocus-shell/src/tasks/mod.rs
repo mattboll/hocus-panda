@@ -782,8 +782,9 @@ fn push(text: &str) -> bool {
     })
 }
 
-/// The clipboard's text at the field's end (3.5b): its line breaks and
-/// other control characters dropped, whole if it fits or not at all; it
+/// The clipboard's text at the field's end on one line (Day.4b): its line
+/// breaks and runs of white space one space, its ends trimmed, whole if it
+/// fits or not at all; it
 /// lands only in the field that asked, open and holding the keyboard.
 fn paste() {
     let (n, at) = match ui(|ui| {
@@ -798,7 +799,7 @@ fn paste() {
         Some(asked) => asked,
         None => return,
     };
-    let asked = crate::paste::request(move |text| {
+    let asked = crate::paste::request(crate::paste::Clean::Spaced, move |text| {
         let awaited = ui(|ui| {
             let awaited =
                 ui.paste == Some(n) && ui.field.as_ref().is_some_and(|f| f.at == at && f.focused);
