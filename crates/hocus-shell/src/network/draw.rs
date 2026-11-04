@@ -496,7 +496,12 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Menu
                             | Item::User
                             | Item::InUse
-                            | Item::Tray(_),
+                            | Item::Tray(_)
+                            | Item::Meeting
+                            | Item::Join
+                            | Item::MeetingMark
+                            | Item::TodayLine(_)
+                            | Item::TodayMore,
                             _,
                         ) => {}
                     }

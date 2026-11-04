@@ -150,6 +150,14 @@ pub const TRAY_NAMESPACE: &str = "hocus-bar-tray";
 /// takes no pointer and no keyboard, and stays over the windows as the
 /// popovers do.
 pub const TIP_NAMESPACE: &str = "hocus-bar-tip";
+/// The namespace of the next meeting (bar.md §4 group 2, §5; Day.2): its
+/// card under the clock in the full form, its mark in the mini. Opened
+/// while a meeting is left today, none without.
+pub const MEETING_NAMESPACE: &str = "hocus-bar-meeting";
+/// The namespace of Today (bar.md §4 group 4; Day.3): today's events after
+/// the next meeting's, under the agents' group, in the full form. Opened
+/// while it lists something, none without.
+pub const TODAY_NAMESPACE: &str = "hocus-bar-today";
 /// The tooltip's corners, logical pixels.
 pub const TIP_RADIUS: f64 = 9.0;
 
@@ -1137,6 +1145,15 @@ pub fn parse_color(text: &str) -> Result<[u8; 3], BadLine> {
     }
 }
 
+/// How near the next meeting is, for the halo (bar.md §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeetingNear {
+    /// In 10 min or less (priority 3).
+    Ten,
+    /// In 2 min or less (priority 1).
+    Two,
+}
+
 /// What the shell tells the compositor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToCompositor {
@@ -1189,6 +1206,11 @@ pub enum ToCompositor {
     /// it never shows through it. Written `briefing open` or `briefing
     /// closed`.
     Briefing { open: bool },
+    /// How near the next meeting is (bar.md §6, Day.2), for the halo: in
+    /// 10 min or less, in 2 min or less, or neither (none, further, in
+    /// progress, or opened by the user). Written `meeting ten`, `meeting
+    /// two` or `meeting none`.
+    Meeting(Option<MeetingNear>),
     /// The clipboard takes `text` (the command the Sources popover shows),
     /// which the compositor offers: the shell's surfaces take no serial to
     /// set it themselves. Written `copy TEXT`, the text on one line.
@@ -1812,6 +1834,11 @@ impl fmt::Display for ToCompositor {
             Self::Briefing { open } => {
                 write!(f, "briefing {}", if *open { "open" } else { "closed" })
             }
+            Self::Meeting(near) => f.write_str(match near {
+                Some(MeetingNear::Ten) => "meeting ten",
+                Some(MeetingNear::Two) => "meeting two",
+                None => "meeting none",
+            }),
             Self::Copy(text) => write!(f, "copy {}", screen_name(text)),
             Self::Raise { pid, app } => {
                 let app = app_word(app);
@@ -1887,6 +1914,12 @@ impl FromStr for ToCompositor {
             Some("briefing") => Ok(Self::Briefing {
                 open: flag(words.next(), "open", "closed")?,
             }),
+            Some("meeting") => match words.next() {
+                Some("ten") => Ok(Self::Meeting(Some(MeetingNear::Ten))),
+                Some("two") => Ok(Self::Meeting(Some(MeetingNear::Two))),
+                Some("none") => Ok(Self::Meeting(None)),
+                _ => Err(BadLine("meeting: ten, two or none".into())),
+            },
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
             Some("next-layout") => Ok(Self::NextLayout),
@@ -2320,6 +2353,9 @@ mod tests {
             ToCompositor::Follow("herdr".into()),
             ToCompositor::Briefing { open: true },
             ToCompositor::Briefing { open: false },
+            ToCompositor::Meeting(Some(MeetingNear::Ten)),
+            ToCompositor::Meeting(Some(MeetingNear::Two)),
+            ToCompositor::Meeting(None),
             ToCompositor::Copy("hocus agent my-agent waiting".into()),
             ToCompositor::Clip {
                 paste: true,

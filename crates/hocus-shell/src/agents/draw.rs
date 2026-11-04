@@ -148,14 +148,14 @@ struct Place {
 type Margin = (i32, i32, i32, i32);
 
 /// The group's top under the bar's in the full form, and the mini item's:
-/// under the sign of what is in use when it shows (5.11), else under the
-/// clock.
+/// under the next meeting's card (Day.2) and the sign of what is in use
+/// (5.11) when they show, else under the clock.
 pub fn full_top() -> f32 {
-    TOP + crate::in_use::room(Form::Full)
+    TOP + crate::meeting::room(Form::Full) + crate::in_use::room(Form::Full)
 }
 
 pub fn mini_top() -> f32 {
-    MINI_TOP + crate::in_use::room(Form::Mini)
+    MINI_TOP + crate::meeting::room(Form::Mini) + crate::in_use::room(Form::Mini)
 }
 
 /// Bar `bar`'s surface's top under the bar's, as last asked for.
@@ -194,6 +194,12 @@ pub fn layout() -> Option<Layout> {
 /// The group's height as laid out (0: it shows nothing).
 fn group_height() -> f32 {
     layout().map_or(0.0, |l| l.height)
+}
+
+/// The full form's group's height as it shows (0: hidden), for Today under
+/// it (Day.3).
+pub fn group_height_shown() -> f32 {
+    group_height()
 }
 
 /// The surface's top under the bar's in `form`: the group's, or the mini
@@ -280,8 +286,8 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Option<crate::network::dr
     })
 }
 
-/// The sign of what is in use came or went (5.11): every bar's surface
-/// moves under it, or back under the clock.
+/// The sign of what is in use (5.11) or the next meeting's card (Day.2)
+/// came or went: every bar's surface moves under them, or back up.
 pub fn moved() {
     let effects: Vec<popover::Effect> = places(|places| {
         places
@@ -297,11 +303,18 @@ pub fn moved() {
     if !effects.is_empty() {
         popover::send(effects);
     }
+    // Today under it follows (Day.3).
+    crate::today::moved();
 }
 
 /// The group was laid out again: every bar's surface to its height.
 pub fn laid_out(layout: Layout) {
-    *LAYOUT.lock().unwrap_or_else(PoisonError::into_inner) = Some(layout);
+    let height = layout.height;
+    let before = LAYOUT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .replace(layout)
+        .map(|l| l.height);
     let effects: Vec<popover::Effect> = places(|places| {
         places
             .values_mut()
@@ -315,6 +328,10 @@ pub fn laid_out(layout: Layout) {
     });
     if !effects.is_empty() {
         popover::send(effects);
+    }
+    // Today, 14 px under the group, follows its height (Day.3).
+    if before != Some(height) {
+        crate::today::moved();
     }
 }
 

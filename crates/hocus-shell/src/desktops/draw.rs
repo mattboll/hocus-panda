@@ -271,7 +271,24 @@ fn resize(placed: Option<crate::network::draw::Placed>) {
             size,
             margin: Some(margin),
         }]);
+        // Today's room ends over the desktops (Day.3).
+        crate::today::moved();
     }
+}
+
+/// How far above bar `bar`'s bottom its desktops' group's top is, in the
+/// full form (Today's room ends 14 px over it, Day.3).
+pub fn top_above_bottom(bar: &str) -> Option<f32> {
+    places(|places| {
+        let place = places.get(bar)?;
+        let (_, bottom) = placement(Form::Full, false, place.tops, place.count);
+        Some(
+            crate::levels::draw::BOTTOM as f32
+                + bottom
+                + ROOM
+                + group_height(Form::Full, place.count),
+        )
+    })
 }
 
 /// Bar `bar` in `form`, switching or not: the surface's new size and

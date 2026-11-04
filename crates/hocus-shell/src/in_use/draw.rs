@@ -165,12 +165,14 @@ pub fn tiles(rect: Rectangle, form: Form, kinds: &[Kind]) -> Vec<Rectangle> {
 }
 
 /// The sign's top under the bar's in `form`: where the agents' group (the
-/// full form) or the agents' item (the mini) was.
+/// full form) or the agents' item (the mini) was, under the next meeting's
+/// card when it shows (Day.2).
 fn top(form: Form) -> f32 {
-    match form {
-        Form::Full => crate::agents::draw::TOP,
-        Form::Mini => crate::agents::MINI_TOP,
-    }
+    crate::meeting::room(form)
+        + match form {
+            Form::Full => crate::agents::draw::TOP,
+            Form::Mini => crate::agents::MINI_TOP,
+        }
 }
 
 /// Its surface's size and its top under the bar's, in `form` (both forms'

@@ -27,7 +27,11 @@ brought in front by the screen's edge (sections 2 and 3; 5.13, issue
 #519), and the tray, the applications' icons over the footer (section 4
 group 11, section 5, section 9; 5.14, issue #531), and the sign under the
 clock of what uses the microphone, the camera or the screen, and its
-popover (5.12, issue #445): see [as built](#as-built).
+popover (5.12, issue #445), and the next meeting's card under the clock,
+its mark in the mini form and the halo's meeting states (section 4 group
+2, section 5, section 6; Day.2, issue #426), and Today, the list of
+today's events after it (section 4 group 4; Day.3, issue #427): see [as
+built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -124,9 +128,9 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | # | Group | Contents | Size |
 |---|---|---|---|
 | 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
-| 2 | Next meeting | Card: 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`. Hidden when nothing remains today | 44 px |
+| 2 | Next meeting | Card (Day.2, variant B): 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`; a click opens the meeting, a button joins its call. Hidden when nothing remains today (as built, Day.2) | 44 px |
 | 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
-| 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
+| 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
 | 5 | To do | Up to 3 open tasks with checkboxes; `+` adds one | 18 px + 22 px a line |
 | 6 | Spacer | Takes what is left | flexible |
 | 7 | Secretary | Moved to the head of group 3 (4.6, variant B) | — |
@@ -298,7 +302,8 @@ secretary, desktops and footer always stay.
 Clicks:
 
 - A tile or line of an agent: go to it (section 8).
-- The meeting card: open the meeting's link, or the calendar on that day.
+- The meeting card: open the meeting (Day.5's calendar on it; its page
+  until Day.5 is built); its button joins the call (Day.2, variant B).
 - A connection tile or a gauge: opens its popover (section 9).
 - A desktop tile: switch to it (§4.4); the wheel over the tiles, to the
   next or the previous one. A task's box: toggles it.
@@ -1999,7 +2004,7 @@ terminal not in front, a herdr agent's row did not bring it.
 
 What the approved 4.4 mockup shows, variant B (a soft green glow for a
 finished agent not seen yet), with the maintainer's spec (§6; issue
-#387). The meetings' states wait for the calendar.
+#387). The meetings' states came with the next meeting's card (Day.2).
 
 - **The compositor draws it**, around and over the bar, as it draws the
   bar's glass under it: the outer glow is outside the shell's surfaces,
@@ -2034,8 +2039,8 @@ finished agent not seen yet), with the maintainer's spec (§6; issue
   (4.0, 4.1): waiting, stuck (`failed`), finished not seen yet (`done`).
   Each agent in one of them is an episode, from the start of its state.
   The halo shows the most important episode the user has not acted on,
-  and the meetings' slots (an internal call, `State::meeting_near`, for
-  the calendar later: in 10 min or less, in 2 min or less).
+  and the meetings' slots (`State::meeting_near`: in 10 min or less, in
+  2 min or less), as the shell says them (`meeting ten|two|none`, Day.2).
 - **It ends when the user acts**: the agent answered (it works again),
   going to it from its row (`go-to-agent`, 4.3), or its own window getting
   the keyboard (as a finished agent is seen, 4.1; herdr's terminal counts
@@ -2074,8 +2079,7 @@ finished agent not seen yet), with the maintainer's spec (§6; issue
   is seen from its row, nothing drawn. Unit tests for the priorities, the
   looks, the waves, the reminder, the fades. On the Intel GPU, the
   screenshots of the pull request.
-- **Not built**: the meetings' states (the calendar, "Your day"); the
-  secretary's ear in the halo's colour (4.6); the peek (4.5); the halo on
+- **Not built**: the in the halo's colour (4.6); the peek (4.5); the halo on
   the CPU; the mini form's agents (4.7).
 
 ### 4.5, the panda peeking out (2026-10-30)
@@ -2263,8 +2267,8 @@ meeting and the notifications wait for the calendar and sprint 5.
 ### 4.7, the mini form's agents (2026-10-30)
 
 What the approved 4.7 mockup shows, variant A (the secretary), with the
-maintainer's spec (§5; issue #390). The meeting's mark waits for the
-calendar.
+maintainer's spec (§5; issue #390). The meeting's mark above her came
+with Day.2.
 
 - **The item** is the agents' group's surface's, in the mini form: 68 px
   under the bar's top (12 px of padding, the clock's two lines of 19 px at
@@ -2357,8 +2361,7 @@ calendar.
   Sources' "Ne rien brancher" (where it is, and when it shows), and the
   `briefing` line read back. On the Intel GPU, the screenshots of the
   pull request.
-- **Not built**: the next meeting's mark above her (the calendar); names
-  for screen readers (§11).
+- **Not built**: names for screen readers (§11).
 
 ### 5.5, the footer (2026-11-02)
 
@@ -2919,3 +2922,204 @@ ring left out), with the maintainer's spec (issue #531).
   rows. On the CPU, the screenshots of the pull request.
 - **Not built**: the amber ring (left out of the approved spec); the
   items' `AttentionMovieName`; names for screen readers (§11).
+
+### Day.2, the next meeting (2026-11-04)
+
+What the approved Day.2 mockup shows, variant B (the card opens the
+meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
+§6; issue #426). Its data is the day's (docs/design/day.md).
+
+- **Which meeting** (`crates/hocus-shell/src/meeting/mod.rs`): the first
+  of today's events of the shown calendars that take time (timed, neither
+  cancelled, declined nor free: `Event::takes_time`) and has not ended.
+  One in progress keeps the card until its end, overlapping or not; then
+  the next. Nothing left today: no card.
+- **When it changes**: the shell asks the day as it changes
+  (`day::on_change`, on the day's thread) and at the clock's minute change
+  (each bar's clock says it, as for the agents' minutes): the card's
+  minutes, its line and its colours change then, and only then. The times
+  are whole minutes: the meeting's start and end to the nearest minute,
+  the clock's minute as it shows it, so that "dans 1 min" lasts until the
+  start ("dans 25 min" is the start's minute less the clock's). A change
+  of the day that the card does not draw (the event after it, which only
+  the mini popover shows) does not draw it.
+- **The card** (`meeting/draw.rs`): a surface of its own on each bar
+  (`hocus-bar-meeting`), opened while a meeting is left today and removed
+  after, right under the clock (100 px under the bar's top in the full
+  form, 68 in the mini), opened after the bar's own surfaces so that it
+  is in front of the bar's. The sign of what is in use (5.12) and the
+  agents' group move under it: 58 px lower (the card and its 14 px) in
+  the full form, 30 (the mark's button and its 14 px) in the mini. 172 ×
+  44, radius 10, its fill and 1 px border by how near the meeting is:
+  `rgba(255,255,255,0.05)` / `0.06`; 10 min or less `rgba(143,179,255,0.12)`
+  / `0.30`; 2 min or less `0.18` / `0.55`; in progress `0.09` / `0.22`. Its
+  stripe (6 × 30, radius 3, the calendar's colour) 7 px in (its border and
+  6 px), its title 8 px after (Manrope 700, 13.5 px, cut with "…"), over
+  its time line 1 px under (12 px `text.dim`: the start in Martian Mono 11
+  px, " · ", then "dans 25 min", "dans 1 h 05", in `#8FB3FF` 600 from 10
+  min, 700 from 2; in progress "fin dans 18 min" alone, blue, 600). In
+  progress, a 2 px `#8FB3FF` line along its bottom, inside its border and
+  cut round at its corners, to the share gone. With a video link, the join
+  button: 30 × 30, radius 8, 6 px from the card's right (inside its
+  border), the mockup's 16 px camera; `rgba(255,255,255,0.09)` and the
+  camera in `text` more than 10 min ahead, `#5B8DEF` and white after.
+  Under the pointer the card is lit `rgba(255,255,255,0.06)` (the button
+  `0.14`, or `#6E9BF2`) and the pointer is a hand. Its colours change over
+  300 ms, at once with reduced motion or on the CPU. It draws only when
+  what it shows changes, under the pointer, and while its colours change.
+- **The mark** (mini form): 30 × 4, radius 2, centred in a 48 × 16 button
+  (lit `0.06` under the pointer, `0.08` while its popover shows):
+  `rgba(143,179,255,0.60)`; 10 min or less `#8FB3FF` with an 8 px glow;
+  in progress `#8FB3FF` from the left to the share gone over
+  `rgba(143,179,255,0.25)`.
+- **Its popover** (`popover/meeting.rs`), as the bar's others (§9): a
+  150 ms hover or a click on the mark, 280 wide, its top on the mark's,
+  14 px in, its parts 10 px apart: "PROCHAINE RÉUNION" / "NEXT MEETING"
+  (or "EN COURS" / "NOW"; 11 px, 700, spaced 0.1 em, `text.faint`); the
+  stripe beside the title (15 px, 700, two lines at most), "14:00 – 14:30
+  · dans 25 min" (12.5 px, the times in Martian Mono 11.5 px), the link's
+  address without its scheme with a 13 px camera, else the place with a
+  pin (12.5 px, `text.faint`); **Rejoindre** / **Join** (34 px, radius 9,
+  `#5B8DEF`, the camera and the word white 13.5 px 700) with a link;
+  **Voir dans le calendrier** / **Show in the calendar** (30 px, radius 8,
+  `rgba(255,255,255,0.06)`, 12.5 px 600 `text.dim`) with a page; a 1 px
+  divider, then "ENSUITE" / "NEXT", the next event's start and its title
+  on one line, when one is left. `Tab` goes through its buttons, `Enter`
+  acts, `Esc` closes; a button acts and closes it.
+- **Clicks**: the card (or `Enter` on it) opens the event's page in its
+  calendar (`page`: Google's `htmlLink`), Day.5's popover not being built;
+  without a page, nothing (said in the log). The join button (and
+  Rejoindre) opens the video link (`video`: the event's conference data,
+  else the first meeting address of its place or description, as its
+  source finds it, day.md). Both through the launcher's `xdg-open`, which
+  the compositor starts. `Tab` reaches the card, then its button, among
+  the bar's items.
+- **The halo** (§6): the shell tells the compositor `meeting ten` (10 min
+  or less, priority 3), `meeting two` (2 min or less, priority 1) or
+  `meeting none` as it changes, and again once linked; the compositor's
+  halo shows it as built in 4.4 (its waves and glows), on every bar, the
+  mini form's too. None once the meeting has started, and none for a
+  meeting the user opened or joined from the card, its button or its
+  popover (§6, "the user acting ends the state"). The compositor forgets
+  it when the shell goes.
+- **Names for screen readers** (§11), said in the log until iced has
+  them: "Prochaine réunion : Point produit, 14:00, dans 25 minutes, visio"
+  / "Next meeting: Point produit, 14:00, in 25 minutes, video call" ("Réunion
+  en cours : … fin dans 18 minutes" in progress; the place instead of
+  "visio" without a link); the button's "Rejoindre la visio" / "Join the
+  video call".
+- **Choices made here** (to confirm on the machine): the time line runs
+  to 2 px from the join button, where the title stops 6 px before it:
+  "14:25 · dans 25 min" is 112 px in these fonts and the title's room 108
+  (the spec's "about 110"), and it would be cut; without a button the
+  room is 144 (the spec's "about 140"). In progress the line is "fin dans
+  18 min" alone, as the mockup draws it. The sign of what is in use goes
+  under the card, the card staying right under the clock. Opening the
+  meeting from the card (its page) ends its halo as joining does. The
+  popover's "Voir dans le calendrier" shows only when the event has a
+  page, its "ENSUITE" only when an event is left after it. The card's
+  minutes count from the clock's minute, the meeting's start and end
+  rounded to the nearest minute.
+- **Measured headless** (`crates/hocus-compositor/tests/meeting.rs`): the
+  real shell on the CPU, in French, its day a fixture's file and its
+  clock `HOCUS_CLOCK_AT`, its `xdg-open` the test's own: the first
+  meeting left takes the card ("14:25 · dans 25 min", its name and its
+  button's), all-day, declined, free, cancelled and ended events skipped;
+  its surface 194 × 54 under the clock, the stripe in the calendar's
+  colour, the card's and the button's fills read on the screen, the
+  agents' group 58 px lower; "dans 1 h 05"; within 10 min the card blue
+  (its fill on the screen), the button `#5B8DEF` and the halo
+  `MeetingSoon`, at the minute's change within 2 min, its fill stronger
+  and the halo `MeetingNow`; in progress "fin dans 18 min", the line blue
+  to 40 % of the card and not past it, no halo; at a meeting's end the
+  next one at the minute's change, drawn once, no button without a link;
+  the last one's end: no card, its surface gone, the agents' group 58 px
+  higher; a click on the card opens its page and ends the halo, on its
+  button the call; in the mini form, the mark's glow and its 54 × 26
+  surface, the agents' item 30 px lower, a hover opening the 280 px
+  popover with what it says, Rejoindre opening the call and ending the
+  halo; at rest nothing drawn for 3 s, the minute's change drawn once, a
+  change of the day the card does not show drawing nothing. Unit tests
+  for which meeting, the overlaps, the whole minutes, the looks and the
+  halo's states, the halo ended once acted on, the words in both
+  languages, the places, the colours, the button and the title's room,
+  the popover's layout, and `Tab` from the card to its button. On the
+  CPU, the screenshots of the pull request
+  (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
+- **Not built**: Day.5's popover (the card opens the event's page until
+  then); the secretary's meeting line in her briefing (4.6); names for
+  screen readers (§11).
+
+### Day.3, Today (2026-11-04)
+
+What the approved Day.3 mockup shows, variant A (plain lines), with the
+maintainer's spec (§4 group 4; issue #427). Its data is the day's
+(docs/design/day.md), the same list as the next meeting's card (Day.2).
+
+- **What it lists** (`crates/hocus-shell/src/today/mod.rs`): today's
+  events that take time (`Event::takes_time`) and have not ended, in order
+  of start, the card's own left out (`meeting::ahead`, skipping the
+  first). All-day events stay in Day.5's calendar; every calendar shown is
+  in it. Nothing after the card: no group. The mini form: nothing.
+- **Where**: a surface of its own on each bar (`hocus-bar-today`),
+  opened while it lists something and removed after, 14 px under the
+  agents' group (where that group starts when it does not show: under
+  the card, or the sign of what is in use). Its room is what the spacer
+  would have: down to 14 px over the desktops' group. When the lines do
+  not fit, the last line that fits says how many more: "+ 5 autres
+  aujourd'hui" / "+ 5 more today", "+ 1 autre aujourd'hui" / "+ 1 more
+  today"; with no room for even one line (18 + 20 px), no group: Today
+  gives way first (§4). It follows the agents' group's height, the card
+  and the sign coming or going, the desktops' rows and the bar's height.
+- **The group** (`today/draw.rs`): its 18 px header "AUJOURD'HUI" /
+  "TODAY" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`), then 20 px
+  lines, 6 px past the group's sides (radius 6, 6 px in): the start in
+  Martian Mono 11 px `text.dim` in a 38 px cell, 7 px, a 7 px dot in the
+  calendar's colour, 7 px, the title (Manrope 13 px, `text`, cut with
+  "…"); "+ N" in 12.5 px `text.faint`. Under the pointer a line is lit
+  `rgba(255,255,255,0.06)` and the pointer is a hand; resting 600 ms on an
+  event shows "15:00–15:45 · Entretien — poste back-end" in the tray's
+  tooltip (5.14), the times in bold, beside the bar on the line.
+- **Time passing**: at each minute change the shell asks whether the
+  card's meeting ended; if so the first line becomes the card: it fades
+  out (200 ms) where it was and the lines under it move up 20 px (240 ms,
+  `cubic-bezier(0.2, 0.9, 0.25, 1)`), a line counted in "+ N" fading in at
+  the bottom; at once with reduced motion or on the CPU. Its lines say no
+  minutes: a minute's change that changes no line draws nothing.
+- **Clicks**: a line with a video link (found by its source, as for the
+  card) opens it in the browser; else the event's page in its calendar
+  (Day.5's popover not being built); with neither, nothing (said in the
+  log). "+ N" will open Day.5's calendar on today: nothing until then
+  (said in the log), lit and a hand all the same. `Tab` goes through the
+  lines and "+ N" among the bar's items, `Enter` or `Space` acts.
+- **Names for screen readers** (§11), said in the log: "15:00, Entretien —
+  poste back-end, visio" / "15:00, Entretien — poste back-end, video
+  call".
+- **Choices made here** (to confirm on the machine): one 14 px gap over
+  the desktops (the spacer then having nothing, its own gap not counted
+  twice); with room for one line only and several events, that line is
+  "+ N" alone, as the rule says; "+ N" opens nothing until Day.5; a line
+  with neither link nor page opens nothing; the tooltip is the tray's
+  (bold times, then the title) rather than a new look.
+- **Measured headless** (`crates/hocus-compositor/tests/today.rs`): the
+  real shell on the CPU, in French, a fixture's day, `HOCUS_CLOCK_AT`, its
+  `xdg-open` the test's own: the three events after the card in order,
+  their names, all-day, declined, free, cancelled and ended skipped, its
+  194 × 88 surface 14 px under where the agents' group starts, each dot in
+  its calendar's colour on the screen; nothing after the card, no group;
+  40 events: the first ones, then "+ N" counting the rest, its bottom 14
+  px or more over the desktops' group and one more line not fitting; on a
+  1920 × 320 screen, no group; at the card's end the first line becomes
+  the card at the minute's change, the group a line shorter; a click on a
+  line with a link opens it, on one without its page, on one with neither
+  nothing, on "+ N" nothing; resting on a line, its tooltip
+  ("15:00–15:45", "Entretien — poste back-end") beside the bar on it, the
+  line lit, gone as the pointer leaves; the mini form, no group; at rest
+  and through a minute's change that changes no line, no commit. Unit
+  tests for what fits and "+ N", the words in both languages, the
+  surface's size, the lines' motion, `Tab` through the lines and "+ N".
+  On the CPU, the screenshots of the pull request
+  (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
+- **Not built**: Day.5's calendar popover (the lines open the event's
+  page until then, "+ N" nothing); To do (Day.4), which will sit under it;
+  names for screen readers (§11).

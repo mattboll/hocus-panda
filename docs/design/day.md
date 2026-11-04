@@ -275,9 +275,11 @@ local list last.
 - `day::snapshot() -> Arc<Day>`: what a view reads, as often as it draws;
   cheap (an `Arc`).
 - `day::on_change(wake)`: `wake` is called (on the day's thread) each time
-  the day changes, until it returns `false`, and once at once. A view
-  wakes its own surface from it, as the connections do; the shell's loop is
-  never woken otherwise.
+  the day changes, until it returns `false`, and once at once; each view
+  has its own, and may ask before the day has started (its wakers are
+  kept apart from the workers). A view wakes its own surface from it, as
+  the connections do; the shell's loop is never woken otherwise. The next
+  meeting (Day.2, `crates/hocus-shell/src/meeting`) is the first.
 - `day::change(Change)`: a change of the bar's tasks, to their account,
   at once. The view keeps its own 1.5 s ticked state (Day.4) and reads the
   outcome in the next snapshots: the task gone from `tasks`, or its change

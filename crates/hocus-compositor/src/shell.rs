@@ -364,6 +364,9 @@ impl State {
             tracing::info!("the shell is gone; its bars' space stays");
         }
         self.peek_shell_gone();
+        // The meeting's halo is the shell's to say: its next one says it
+        // again.
+        self.meeting_near(None);
         if self.shell.software {
             self.shell.software = false;
             self.redraw = true;
@@ -406,6 +409,13 @@ impl State {
                 tracing::warn!(tool, "the shell follows a tool that is not herdr");
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
+            ToCompositor::Meeting(near) => {
+                tracing::debug!(?near, "the next meeting, for the halo");
+                self.meeting_near(near.map(|near| match near {
+                    hocus_link::MeetingNear::Ten => crate::halo::Meeting::InTen,
+                    hocus_link::MeetingNear::Two => crate::halo::Meeting::InTwo,
+                }));
+            }
             ToCompositor::Copy(text) => self.copy_text(text),
             ToCompositor::Clip { paste, clip } => self.clip_asked(paste, clip),
             ToCompositor::Emoji { keep, text } => self.emoji_asked(keep, text),

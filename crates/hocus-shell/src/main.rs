@@ -39,6 +39,7 @@ mod in_use;
 mod launcher;
 mod layouts;
 mod levels;
+mod meeting;
 mod network;
 mod notifications;
 mod outputs;
@@ -47,6 +48,7 @@ mod pointer;
 mod popover;
 mod renderer;
 mod share;
+mod today;
 mod tray;
 mod user;
 
@@ -125,6 +127,8 @@ fn main() -> ExitCode {
     notifications::start(software);
     // After the notifications' wall clock, which the day is read against.
     day::start();
+    meeting::start();
+    today::start();
     // The calendar drawn again as the day changes, while it is open.
     popover::calendar::start();
     // After the notifications' wall clock, which its times read.
@@ -439,6 +443,7 @@ impl Shell {
                 }
                 popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
+                meeting::linked();
                 Task::none()
             }
             Message::FromCompositor(line) => match line.parse::<ToShell>() {
@@ -489,6 +494,8 @@ impl Shell {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
                     self.place_popovers(id);
+                    // Today's room is the bar's height less its groups'.
+                    today::moved();
                 }
                 Task::none()
             }
@@ -545,9 +552,13 @@ impl Shell {
                     agents::peek::forget(&bar.output);
                     footer::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
+                    let card = meeting::forget(&bar.output);
+                    let today = today::forget(&bar.output);
                     let tray = tray::draw::forget(&bar.output);
                     Some(Task::batch([
                         sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
+                        card.map_or_else(Task::none, |c| Task::done(Message::RemoveWindow(c))),
+                        today.map_or_else(Task::none, |t| Task::done(Message::RemoveWindow(t))),
                         Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
                         Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.agents)),
@@ -855,10 +866,15 @@ impl Shell {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(id);
         self.place_popovers(id);
-        // The sign of what is in use, if something is (5.11).
+        // The sign of what is in use, if something is (5.11), and the next
+        // meeting's card, if one is left today (Day.2): opened after the
+        // bar's own, in front of it.
         let output = self.bars.get(&id).map(|b| (b.output.clone(), b.form));
+        let mut after = Vec::new();
         if let Some((output, form)) = output {
-            popover::send(in_use::bar_opened(&output, form));
+            after.extend(in_use::bar_opened(&output, form));
+            after.extend(meeting::bar_opened(&output, form));
+            after.extend(today::bar_opened(&output, form));
         }
         open.chain(open_clock)
             .chain(open_levels)
@@ -866,6 +882,9 @@ impl Shell {
             .chain(open_desktops)
             .chain(open_agents)
             .chain(Task::batch(open_footer.into_iter().map(Task::done)))
+            .chain(Task::batch(
+                popover::messages(after).into_iter().map(Task::done),
+            ))
     }
 
     /// Where bar `id` is, for the popovers.
@@ -971,6 +990,10 @@ impl Shell {
                 .map(Task::done),
         );
         popover::send(in_use::form(&bar.output, bar.form, switching));
+        popover::send(meeting::form(&bar.output, bar.form, switching));
+        let output = bar.output.clone();
+        let form = bar.form;
+        today::form(&output, form, switching);
         Task::batch(tasks)
     }
 
@@ -1176,6 +1199,65 @@ impl Shell {
             backdrop,
             motion: self.look.motion,
             words: in_use::Words::new(clock::time::Lang::of_messages()),
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// The next meeting (Day.2), if its surface is `id`.
+    fn meeting_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = meeting::bar_of(id)?;
+        let bar = self.bars.values().find(|b| b.output == output)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = agents::draw::TOP;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = meeting::draw::View {
+            bar: bar.output.clone(),
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            backdrop,
+            motion: self.look.motion,
+            words: meeting::Words::new(clock::time::Lang::of_messages()),
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// Today (Day.3), if its surface is `id`.
+    fn today_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = today::bar_of(id)?;
+        let bar = self.bars.values().find(|b| b.output == output)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = today::shown(&output).1 + 40.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = today::draw::View {
+            bar: bar.output.clone(),
+            forms: bar.forms(at),
+            backdrop,
+            motion: self.look.motion,
+            words: today::Words::new(clock::time::Lang::of_messages()),
         };
         Some(
             canvas(program)
@@ -1433,6 +1515,14 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::MeetingMark => canvas(popover::meeting::Panel {
+                id,
+                words: meeting::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             popover::Item::User => canvas(popover::session::Panel {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),
@@ -1461,7 +1551,11 @@ impl Shell {
             popover::Item::Keyboard
             | popover::Item::Decline
             | popover::Item::Agent(_)
-            | popover::Item::Menu => {
+            | popover::Item::Menu
+            | popover::Item::Meeting
+            | popover::Item::Join
+            | popover::Item::TodayLine(_)
+            | popover::Item::TodayMore => {
                 return None;
             }
         };
@@ -1491,6 +1585,8 @@ impl Shell {
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.share_view(id))
                 .or_else(|| self.in_use_view(id))
+                .or_else(|| self.meeting_view(id))
+                .or_else(|| self.today_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .unwrap_or_else(|| Space::new().into());
