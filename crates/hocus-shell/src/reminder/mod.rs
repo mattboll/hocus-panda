@@ -986,6 +986,7 @@ impl Shown {
                     self.leaving
                         .push((opened.id, now + BUBBLE_OUT + LEAVE_MARGIN));
                 } else {
+                    draw::forget(opened.id);
                     messages.push(Message::RemoveWindow(opened.id));
                 }
             }
@@ -1049,7 +1050,10 @@ fn remove_left(now: Instant) {
         let (gone, kept): (Vec<_>, Vec<_>) = s.leaving.drain(..).partition(|(_, at)| *at <= now);
         s.leaving = kept;
         gone.into_iter()
-            .map(|(id, _)| Message::RemoveWindow(id))
+            .map(|(id, _)| {
+                draw::forget(id);
+                Message::RemoveWindow(id)
+            })
             .collect()
     });
     out(gone);

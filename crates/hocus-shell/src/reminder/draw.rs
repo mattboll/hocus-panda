@@ -187,6 +187,13 @@ pub struct State {
 /// What each surface last said it shows at rest, for the log.
 static SAID: Mutex<Option<HashMap<window::Id, String>>> = Mutex::new(None);
 
+/// Surface `id` went: what it said goes too.
+pub fn forget(id: window::Id) {
+    if let Some(said) = SAID.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+        said.remove(&id);
+    }
+}
+
 impl canvas::Program<Message> for View {
     type State = State;
 
