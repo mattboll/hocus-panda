@@ -7,7 +7,7 @@ use tokio::signal::unix::{SignalKind, signal};
 
 /// Watches for `SIGTERM` on a thread of its own: once this returns, it
 /// ends the shell after what it keeps is written
-/// ([`crate::notifications::flush`]). Without that thread, it ends the
+/// ([`crate::notifications::flush`], [`crate::day::flush`]). Without that thread, it ends the
 /// shell at once, as by default.
 pub fn start() {
     let (ready, watching) = std::sync::mpsc::channel();
@@ -39,6 +39,7 @@ pub fn start() {
             runtime.block_on(terminate.recv());
             tracing::info!("SIGTERM: the shell ends once what it keeps is written");
             crate::notifications::flush();
+            crate::day::flush();
             std::process::exit(0);
         });
     match started {

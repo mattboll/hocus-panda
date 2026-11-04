@@ -30,6 +30,7 @@ mod bluetooth;
 mod capture;
 mod clipboard;
 mod clock;
+mod day;
 mod desktops;
 mod emoji;
 mod ending;
@@ -99,8 +100,8 @@ const OPAQUE_BOTTOM: Color = rgba(0x0E, 0x11, 0x1C, 1.0);
 const RIM: Color = rgba(255, 255, 255, 0.10);
 
 fn main() -> ExitCode {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,hocuspanda_shell=info".into());
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "warn,hocuspanda_shell=info,hocus_day=info".into());
     // cosmic-text traces the text it shapes, a password shown with the eye
     // too: never, whatever RUST_LOG asks.
     let filter = match "cosmic_text::shape=off".parse() {
@@ -122,6 +123,8 @@ fn main() -> ExitCode {
     launcher::start();
     emoji::start();
     notifications::start(software);
+    // After the notifications' wall clock, which the day is read against.
+    day::start();
     // After the notifications' wall clock, which its times read.
     clipboard::start();
     user::start();
@@ -171,6 +174,7 @@ fn main() -> ExitCode {
     levels::sound::stop();
     bluetooth::stop();
     notifications::flush();
+    day::flush();
     match started {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -675,6 +679,10 @@ impl Shell {
             }
             ToShell::Recorded(recorded) => {
                 capture::recorded(recorded);
+                Task::none()
+            }
+            ToShell::Day(ask) => {
+                day::ask(ask);
                 Task::none()
             }
         }

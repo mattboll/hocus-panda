@@ -200,6 +200,7 @@ impl State {
         let env = programs::Env::of(self);
         let gpu = self.gpu;
         let bus = self.shell.bus.clone();
+        let config = self.config.file.clone();
         let runs = Running::start(&self.shell.running);
         programs::on_a_thread("shell".to_owned(), move || {
             let _runs = runs;
@@ -210,6 +211,11 @@ impl State {
                 Some(bus) => command.env(hocus_link::NOTIFICATIONS_BUS_ENV, bus.word()),
                 None => command.env_remove(hocus_link::NOTIFICATIONS_BUS_ENV),
             };
+            // Empty: no file, never the one the shell would look for.
+            command.env(
+                hocus_link::CONFIG_ENV,
+                config.as_deref().map(Path::as_os_str).unwrap_or_default(),
+            );
             for (name, value) in gpu_env(gpu) {
                 command.env(name, value);
             }
