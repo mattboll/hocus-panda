@@ -443,6 +443,33 @@ impl Bed {
             .ok_or_else(|| anyhow::anyhow!("({x}, {y}) off the screen"))?;
         Ok([p[2], p[1], p[0]])
     }
+
+    /// The pixels at `points` in the first frame drawn where they pass
+    /// `done`, read again at each new frame; the last ones read if none
+    /// does within [`WAIT`].
+    fn pixels_until<const N: usize>(
+        &mut self,
+        points: [(i32, i32); N],
+        done: impl Fn(&[[u8; 3]; N]) -> bool,
+    ) -> anyhow::Result<[[u8; 3]; N]> {
+        let start = Instant::now();
+        loop {
+            let frames = self.hp.frames();
+            let (width, _, bytes) = self.hp.screenshot(0)?;
+            let mut read = [[0; 3]; N];
+            for (pixel, (x, y)) in read.iter_mut().zip(points) {
+                let at = usize::try_from(y * width + x)? * 4;
+                let p = bytes
+                    .get(at..at + 4)
+                    .ok_or_else(|| anyhow::anyhow!("({x}, {y}) off the screen"))?;
+                *pixel = [p[2], p[1], p[0]];
+            }
+            if done(&read) || start.elapsed() >= WAIT {
+                return Ok(read);
+            }
+            self.hp.dispatch_until(WAIT, |hp| hp.frames() != frames)?;
+        }
+    }
 }
 
 /// On the 1920 × 1080 screen, the 5.1 mockup's sizes × 1.5 (#518): the
@@ -816,18 +843,17 @@ fn an_application_without_an_icon_shows_its_letter_on_a_neutral_square() -> anyh
         let (x, _) = tile_middle(column, top);
         (x as i32, (top + 13.5 + 36.0) as i32)
     };
-    let (x, y) = icon_middle(1);
-    let [r, g, b] = bed.pixel(x, y)?;
-    assert!(
-        b > 150 && r < 60 && g < 60,
-        "Chromium's blue icon: {:?}",
-        [r, g, b]
-    );
+    let blue = |[r, g, b]: [u8; 3]| b > 150 && r < 60 && g < 60;
     // The neutral square, grey: near its corner, away from the letter.
-    let (x, y) = icon_middle(0);
-    let [r, g, b] = bed.pixel(x - 27, y - 27)?;
-    let grey = r.abs_diff(g) < 25 && g.abs_diff(b) < 30 && r > 50 && r < 170;
-    assert!(grey, "Calculatrice's neutral square: {:?}", [r, g, b]);
+    let grey = |[r, g, b]: [u8; 3]| r.abs_diff(g) < 25 && g.abs_diff(b) < 30 && r > 50 && r < 170;
+    let (chromium, letter) = (icon_middle(1), icon_middle(0));
+    let corner = (letter.0 - 27, letter.1 - 27);
+    // The shell says what it shows before it draws it: on a loaded
+    // machine, the frame with the icons comes a while after the one at
+    // rest.
+    let [icon, square] = bed.pixels_until([chromium, corner], |[i, s]| blue(*i) && grey(*s))?;
+    assert!(blue(icon), "Chromium's blue icon: {icon:?}");
+    assert!(grey(square), "Calculatrice's neutral square: {square:?}");
     Ok(())
 }
 

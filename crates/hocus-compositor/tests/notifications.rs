@@ -1112,12 +1112,15 @@ fn the_history_survives_a_restart_of_the_shell_without_what_is_older_than_seven_
     bed.click(switch)?;
     bed.logged_since(mark, "do not disturb on=true")?;
     bed.close_history()?;
-    // The shell ends (by its process id, its script's); the compositor
-    // starts it again.
+    // The shell is told to end (SIGTERM, by its process id, its script's)
+    // while busy, as the history it showed is written, seen: it ends once
+    // that is written (#557). The compositor starts it again.
     let pid = std::fs::read_to_string(&bed.pid)?.trim().to_owned();
     let mark = bed.mark();
-    let killed = Command::new("kill").arg(&pid).status()?;
-    assert!(killed.success());
+    bed.hp.hold_shell(true)?;
+    let killed = Command::new("kill").arg(&pid).status();
+    bed.hp.hold_shell(false)?;
+    assert!(killed?.success());
     bed.logged_since(mark, "the history read back kept=2 dnd=true")?;
     let again = std::fs::read_to_string(&bed.pid)?.trim().to_owned();
     assert_ne!(again, pid);
